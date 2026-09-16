@@ -1,0 +1,23 @@
+@* WS-E1 (ar-14-deep-links): the friendly "link expired" page the public /deeplink
+   landing redirects to for an expired / tampered / dark-launch-false token (the flow
+   is a 302 → 200 redirect to this friendly page, not a 410). [AllowAnonymous] so it stays
+   reachable when the razor-components mapping is RequireAuthorization-gated in production
+   AND is bUnit-testable under an anonymous principal. Deliberately renders no stack/error
+   chrome. *@
+@page "/deeplink/expired"
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Authorization
+
+<PageTitle>Link expired</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" Gap="0.5rem" Class="deeplink-expired">
+    <h1>This link has expired</h1>
+    <FluentMessageBar Class="deeplink-expired-bar" Intent="MessageIntent.Warning">
+        This link is no longer valid. Ask your school or your guardian for a fresh
+        link to your assignments.
+    </FluentMessageBar>
+    <p>If you think this is a mistake, please contact your school office for help.</p>
+    <FluentAnchor Appearance="Appearance.Hypertext" Class="deeplink-expired-anchor" Href="/ward">
+        Go to my assignments
+    </FluentAnchor>
+</FluentStack>

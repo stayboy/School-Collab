@@ -315,6 +315,7 @@ but is **superseded** by the two-kind model above.
 | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
 | `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. The global default remains OFF; the migration service additionally seeds a `TenantFeatureFlagOverride` turning the flag ON for the pilot tenant `Hydeson School` only (Phase 6.1 — see below). |
 | `FEATURE:RequireAssignmentApproval` | `false` | Gates the assignment approval workflow (WS-A2 / spec §7 Q2): when on, every assignment requires approval before publish — the publish + schedule command handlers throw `AssignmentApprovalRequiredException` (HTTP 400), and the Admin Assignments Index/Detail UI surfaces Submit-for-approval / Approve / Reject controls. Ships **dark** (default OFF). Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Admin/appsettings.json` + AppHost parameter fan-out. |
+| `FEATURE:EnableDeepLinks` | `false` | Gates the Families public deep-link landing route group (`GET /deeplink/{token}`) for assignment recipients (WS-E1 / `ar-14-deep-links`). Ships **dark** (default OFF): tokens are minted at publish regardless of this flag, and the runtime flag only decides whether the public route validates, stamps `OpenedAt`, signs the guardian into a cookie, and redirects to the ward surface. Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Families/appsettings.json`. |
 
 ### Pilot-tenant override (Phase 6.1)
 
@@ -350,6 +351,7 @@ flags moved to the Config service.
 | `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
 | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
 | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+| `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing), `SchoolCollab.Assignments.Api` (mint at publish), `SchoolCollab.MigrationService` (seed) |
 
 ### Setting a flag
 

@@ -873,3 +873,22 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   tester re-verify **P2-only** → CLOSED. Authoritative: build 0 errors; **2,252/0** (Families 16/0).
   **Residuals:** superseded-load race untested (epoch guard statically sound); `ReportModuleProgressAsync` non-204
   return discarded (v1); captions-ready only (G1); ward OIDC identities (D-6) + token deep links (E1).
+- `ar-14-deep-links` — **CLOSED 2026-09-16, FULL FOUR-AGENT round (Tier 3)**; Phase 4 slice **4a (WS-E1)**
+  (`rounds/round-ar-14-deep-links.md` + `diffs-ar-14-deep-links.patch`; branch `stack/14-ar-14-deep-links` cut from the
+  stack/13 tip `54ac0bea` — #236 left unmerged by owner choice; retarget at PR time). Delivered (E1): contact-scoped
+  `ar-deeplink` DataProtection tokens (payload incl. tenantId) minted at publish into `AssignmentRecipient.DeepLinkToken`/
+  `DeepLinkExpiresAt` (TTL = `LinkValidityDays` ?? 7; additive migration); shared Redis-backed keyring
+  (`Microsoft.AspNetCore.DataProtection.StackExchangeRedis` 10.0.9, `AbortOnConnectFail=false`) in Assignments.Api +
+  Families (shared `SetApplicationName`, guarded by an ArchitectureTests source assertion); the repo's FIRST public
+  token-auth route group — `/deeplink/{token}` landing (cookie sign-in, best-effort ~3s-bounded `OpenedAt` stamp with
+  explicit `x-tenant-id` — the propagation handler now honors an explicit header, redirect → `/ward/{sid}`|`/ward`),
+  `LinkExpired` friendly page (+ CTA); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF (gates routes only);
+  configuration.md §2/§5. 43 files, ~+2,850/−27. Pipeline: orchestrator-plan → worker passes 1–2 (30-min cut-lines) →
+  reviewer attempt TIMED OUT (NuGet/XML-doc spelunking; guardrails re-issued) → reviewer **P1** → rework pass 3 →
+  re-verify **P2-only** → parent-side P2 fixes → UI tester **P1** (stamp latency) → rework pass 4 → tester re-verify
+  **PASS**. Authoritative: build 0 errors; **2,279/0** (Families 30/0, Admin 546/0, Core 84/0, Architecture 21/0).
+  **Residuals:** tenant_name/tenant_type claims absent from the deep-link principal (cosmetic audit "Unknown");
+  deployment-smoke items — prod `[AllowAnonymous]` override, prod service-to-service auth gap on Families' outbound
+  calls (D-6/deployment-auth family), keyring singleton posture.
+  **Next:** the email-provider decision, then 4b E2 channel delivery + NotificationLog + Admin failure surfacing; then
+  4c E3 worker. WS-F3 sign-page relocation now unblocked by E1.

@@ -59,4 +59,14 @@ public static class FeatureFlagKeys
     /// opt in via the /config-flags surface.
     /// </summary>
     public const string RequireAssignmentApproval = "FEATURE:RequireAssignmentApproval";
+
+    /// <summary>
+    /// Dark-launch flag gating the Families public deep-link landing route group
+    /// (WS-E1 / ar-14-deep-links). Default OFF: tokens are minted at publish
+    /// regardless of this flag (cheap, idempotent — no republish needed when the
+    /// flag later flips on), and the runtime flag only decides whether the public
+    /// <c>/deeplink/{token}</c> route validates and redirects. Enabled via the
+    /// /config-flags surface like the other runtime flags.
+    /// </summary>
+    public const string EnableDeepLinks = "FEATURE:EnableDeepLinks";
 }

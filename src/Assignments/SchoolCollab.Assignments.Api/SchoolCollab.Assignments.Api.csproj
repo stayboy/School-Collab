@@ -14,6 +14,9 @@
   <ItemGroup>
     <PackageReference Include="Aspire.RabbitMQ.Client" />
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
+    <!-- WS-E1 (ar-14-deep-links): Redis-persisted DataProtection keyring shared with
+         the Families host so it can unprotect mint-side deep-link tokens. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.OpenApi" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />

@@ -66,6 +66,43 @@ public sealed class FamiliesApiClient(
         return await response.Content.ReadFromJsonAsync<WardAssignmentViewDto>(FamiliesJson.Options, ct);
     }
 
+    /// <summary>WS-E1 (ar-14-deep-links) — idempotent first-visit <c>OpenedAt</c> stamp, invoked
+    /// server-side by the public deep-link landing. The Assignments API marks the recipient
+    /// at most once (Sent → Viewed chain) and returns 404 for an unknown (assignment, contact)
+    /// row; treated as best-effort here so a stamp failure never breaks the landing redirect.
+    /// <paramref name="tenantId"/> is the token's validated payload tenant, sent explicitly as
+    /// the <c>x-tenant-id</c> header on this one call so the tenant-scoped lookup resolves even
+    /// when no dev tenant is selected (see <see cref="SchoolCollab.Core.Auth.TenantPropagationDelegatingHandler"/>).
+    /// Bound to a short per-call deadline (~3s, P1 / ar-14) so a slow-but-reachable API cannot
+    /// stall the public landing's user-visible redirect.</summary>
+    public async Task MarkRecipientOpenedAsync(Guid assignmentId, Guid contactId, Guid tenantId, CancellationToken ct = default)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/{_assignments}/{assignmentId}/recipients/{contactId}/opened");
+        // Carry the payload tenant explicitly: the dev-selection propagation handler only
+        // overwrites x-tenant-id when a dev tenant is selected, so an explicit header here
+        // keeps the stamp tenant-correct in both dev and production.
+        request.Headers.TryAddWithoutValidation("x-tenant-id", tenantId.ToString());
+
+        // P1 (ar-14): bound the stamp to a short per-call deadline via a linked CTS, NOT a
+        // global HttpClient.Timeout. The ward pages share this typed client and their data
+        // calls legitimately need the default 100s window, so a global ~3s timeout would be
+        // wrong for them. When the deadline elapses, SendAsync raises
+        // OperationCanceledException with the CALLER's ct NOT cancelled, which the landing
+        // guard classifies as a best-effort stamp failure (log-and-continue) rather than a
+        // caller cancellation (which must still rethrow). The linked CTS is scoped to THIS
+        // call only and disposed here — no shared/typed-client state is touched.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linked.CancelAfter(TimeSpan.FromSeconds(3));
+
+        // A non-success response (404 unknown recipient row, 401 in prod) is surfaced via
+        // EnsureSuccessStatusCode so the landing's guard logs it as a warning instead of
+        // silently dropping the OpenedAt stamp.
+        var response = await http.SendAsync(request, linked.Token);
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>WS-D1 — report per-module progress (monotonic/idempotent on the API).</summary>
     public async Task<bool> ReportModuleProgressAsync(Guid assignmentId, Guid studentId, Guid moduleId, int percent, CancellationToken ct = default)
     {

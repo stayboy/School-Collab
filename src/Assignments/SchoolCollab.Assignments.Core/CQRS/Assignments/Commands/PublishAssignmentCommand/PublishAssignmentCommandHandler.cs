@@ -22,6 +22,7 @@ public sealed class PublishAssignmentCommandHandler(
     IAssignmentNotificationBroadcaster broadcaster,
     INotificationPolicyResolver policyResolver,
     IFeatureFlagService featureFlags,
+    IDeepLinkTokenMinter minter,
     HybridCache cache,
     ILogger<PublishAssignmentCommandHandler> logger) : ICommandHandler<PublishAssignmentCommand>
 {
@@ -41,13 +42,17 @@ public sealed class PublishAssignmentCommandHandler(
         assignment.Publish(approvalRequired);
 
         var tenantId = tenantProvider.GetTenantContext().TenantId;
-        var recipients = await ResolveRecipientsAndGatesAsync(assignment, tenantId, command.ContactIds, cancellationToken);
+
+        // WS-E1 (ar-14-deep-links): resolve the effective policy BEFORE persisting
+        // recipients so each minted deep-link token can carry the resolved
+        // LinkValidityDays (expiry = mint + LinkValidityDays ?? 7). The policy is
+        // still applied to the broadcast audience after recipient resolution below.
+        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
+        var recipients = await ResolveRecipientsAndGatesAsync(
+            assignment, tenantId, effectivePolicy.LinkValidityDays, command.ContactIds, cancellationToken);
 
         // Effective-policy resolution (notification-delivery-plan.md §3): drop blocked
         // channels, apply preferred-channel order, cap the sendout at MaxNotifications.
-        // Enqueue BEFORE save: the buffering outbox commits the broadcast events
-        // atomically with the publish mutation.
-        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
         var broadcastRecipients = NotificationRecipientFilter.Apply(recipients, effectivePolicy);
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, broadcastRecipients),
@@ -74,7 +79,7 @@ public sealed class PublishAssignmentCommandHandler(
     /// SelectedGroups assignment with zero links cannot be published (FR-23).
     /// </summary>
     private async Task<List<AssignmentRecipient>> ResolveRecipientsAndGatesAsync(
-        Assignment assignment, Guid tenantId, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
+        Assignment assignment, Guid tenantId, int? linkValidityDays, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
     {
         // ── Rev. 6 FR-58: the assignment's subject must be assigned to its target
         //    audience for a period covering the effective date.
@@ -128,11 +133,24 @@ public sealed class PublishAssignmentCommandHandler(
                 var recipient = AssignmentRecipient.Create(
                     tenantId, assignment.Id, s.OwnerType, s.OwnerId, s.StudentId,
                     s.ContactId, s.Channel, s.Role, notifyOnBroadcast: true, subscriptionActive: true);
+                // WS-E1 (ar-14-deep-links): a new recipient ALWAYS mints a deep-link
+                // token at publish, independent of the EnableDeepLinks flag.
+                var fresh = minter.Mint(recipient, linkValidityDays, DateTimeOffset.UtcNow);
+                recipient.AttachDeepLink(fresh.Token, fresh.ExpiresAt);
                 submissionRepository.Add(recipient);
                 recipients.Add(recipient);
             }
             else
             {
+                // WS-E1 (ar-14-deep-links): idempotent republish — reuse an unexpired
+                // token; re-mint when absent or expired.
+                if (string.IsNullOrWhiteSpace(existing.DeepLinkToken) ||
+                    existing.DeepLinkExpiresAt is null ||
+                    existing.DeepLinkExpiresAt <= DateTimeOffset.UtcNow)
+                {
+                    var refreshed = minter.Mint(existing, linkValidityDays, DateTimeOffset.UtcNow);
+                    existing.AttachDeepLink(refreshed.Token, refreshed.ExpiresAt);
+                }
                 existing.MarkSubscribed(true);
                 submissionRepository.Update(existing);
                 recipients.Add(existing);

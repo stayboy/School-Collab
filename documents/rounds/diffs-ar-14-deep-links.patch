@@ -1,0 +1,3403 @@
+diff --git a/Directory.Packages.props b/Directory.Packages.props
+index fcf760c6..ae77a894 100644
+--- a/Directory.Packages.props
++++ b/Directory.Packages.props
+@@ -24,22 +24,28 @@
+     <PackageVersion Include="RabbitMQ.Client" Version="7.2.1" />
+   </ItemGroup>
+   <ItemGroup Label="Microsoft.Extensions">
++    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Abstractions" Version="10.0.9" />
++    <!-- WS-E1 (ar-14-deep-links): concrete DataProtection provider used by the
++         DeepLinkProtectorTests / DeepLinkWiringTests unit projects to mint real
++         keyrings under the shared application name. -->
++    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.9" />
+     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.8" />
+     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
+     <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
+-    <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.8" />
++    <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.9" />
+     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.1.0" />
+-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.8" />
++    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.9" />
+     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
+-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
+-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
++    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
++    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.9" />
+     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
+     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.6.0" />
+   </ItemGroup>
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 1c916177..40925fb7 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -315,6 +315,7 @@ but is **superseded** by the two-kind model above.
+ | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
+ | `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. The global default remains OFF; the migration service additionally seeds a `TenantFeatureFlagOverride` turning the flag ON for the pilot tenant `Hydeson School` only (Phase 6.1 — see below). |
+ | `FEATURE:RequireAssignmentApproval` | `false` | Gates the assignment approval workflow (WS-A2 / spec §7 Q2): when on, every assignment requires approval before publish — the publish + schedule command handlers throw `AssignmentApprovalRequiredException` (HTTP 400), and the Admin Assignments Index/Detail UI surfaces Submit-for-approval / Approve / Reject controls. Ships **dark** (default OFF). Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Admin/appsettings.json` + AppHost parameter fan-out. |
++| `FEATURE:EnableDeepLinks` | `false` | Gates the Families public deep-link landing route group (`GET /deeplink/{token}`) for assignment recipients (WS-E1 / `ar-14-deep-links`). Ships **dark** (default OFF): tokens are minted at publish regardless of this flag, and the runtime flag only decides whether the public route validates, stamps `OpenedAt`, signs the guardian into a cookie, and redirects to the ward surface. Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Families/appsettings.json`. |
+ 
+ ### Pilot-tenant override (Phase 6.1)
+ 
+@@ -350,6 +351,7 @@ flags moved to the Config service.
+ | `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
++| `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing), `SchoolCollab.Assignments.Api` (mint at publish), `SchoolCollab.MigrationService` (seed) |
+ 
+ ### Setting a flag
+ 
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index befd41e6..37f6a434 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -233,6 +233,10 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+ // "true" = TestAuth) — no AppHost flag param needed, mirroring the Admin note.
+ builder.AddProject<Projects.SchoolCollab_Families>("families")
+     .WithReference(assignmentsApi)
++    // WS-E1 (ar-14-deep-links): the Families host resolves the runtime
++    // FEATURE:EnableDeepLinks flag via AddConfigFeatureFlagClient (Settings aggregate),
++    // so it needs the settings-api reference for service discovery.
++    .WithReference(settingsApi)
+     .WithReference(redis)
+     .WaitFor(assignmentsApi);
+ 
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index 137694cf..63324d5a 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -545,6 +545,27 @@ public static class AssignmentRoutes
+             CancellationToken ct) =>
+             Results.Ok(await handler.HandleAsync(new ListAssignmentRecipients(id), ct)));
+ 
++        // WS-E1 (ar-14-deep-links): idempotent first-visit deep-link stamp, invoked
++        // server-side by the Families landing. Marks the recipient OpenedAt at most
++        // once (first visit feeding the Sent → Viewed chain); subsequent landings are
++        // no-ops. 404 when the (assignment, contact) recipient row is unknown.
++        group.MapPost("/{id:guid}/recipients/{contactId:guid}/opened", async (
++            Guid id,
++            Guid contactId,
++            [FromServices] ISubmissionRepository submissionRepository,
++            CancellationToken ct) =>
++        {
++            var recipient = await submissionRepository.GetRecipientAsync(id, contactId, ct);
++            if (recipient is null) return Results.NotFound();
++            if (recipient.OpenedAt is null)
++            {
++                recipient.MarkOpened();
++                submissionRepository.Update(recipient);
++                await submissionRepository.SaveChangesAsync(ct);
++            }
++            return Results.NoContent();
++        });
++
+         // Submissions for an assignment (teacher review/grade queue, spec §12).
+         group.MapGet("/{id:guid}/submissions", async (
+             Guid id,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 6d3b2a92..d6a26e8e 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -1,10 +1,13 @@
+ using System.Text.Json.Serialization;
++using Microsoft.AspNetCore.DataProtection;
++using StackExchange.Redis;
+ using Serilog;
+ using SchoolCollab.Assignments.Api;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core;
+ using SchoolCollab.Settings.Core;
+ using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.DeepLinks;
+ using SchoolCollab.Core.Features;
+ 
+ var builder = WebApplication.CreateBuilder(args);
+@@ -45,6 +48,33 @@ else
+     builder.AddRedisDistributedCache("cache");
+ }
+ 
++// WS-E1 (ar-14-deep-links): DataProtection keyring shared with the Families host on
++// the same Redis resource. Both hosts MUST SetApplicationName the same value or
++// Families cannot unprotect mint-side ciphertext. When no Redis connection string is
++// present (non-Aspire local run / unit wiring tests) fall back to the default
++// in-memory keyring while keeping the shared application name. A dedicated keyring
++// multiplexer isolates the (rare) key-write traffic from the app's Aspire-managed
++// cache connections; keys are cached in memory once loaded.
++var deeplinkKeyring = builder.Services.AddDataProtection();
++if (string.IsNullOrWhiteSpace(cacheConnectionString))
++{
++    deeplinkKeyring.SetApplicationName(DeepLinkConstants.ApplicationName);
++}
++else
++{
++    // Dedicated process-lifetime keyring multiplexer (same lifetime as the host).
++    // ConnectAsync with AbortOnConnectFail=false so an unreachable Redis does not
++    // hard-fail host startup — keyring access retries lazily once Redis returns.
++    var keyringOptions = ConfigurationOptions.Parse(cacheConnectionString);
++    keyringOptions.AbortOnConnectFail = false;
++    var keyringMultiplexer = await ConnectionMultiplexer.ConnectAsync(keyringOptions);
++    deeplinkKeyring
++        .PersistKeysToStackExchangeRedis(keyringMultiplexer)
++        .SetApplicationName(DeepLinkConstants.ApplicationName);
++}
++// Scoped token minter lives in Assignments.Core (IDeepLinkTokenMinter); the
++// purpose-scoped protector is registered there alongside its services.
++
+ builder.Services.AddAssignmentsCore(builder.Configuration);
+ // C3 certificate rendering — the QuestPDF generator lives in the Api layer
+ // (the only runtime that dispatches finalize) and is registered here after
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj b/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj
+index 6656ce04..00e2efb5 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj
++++ b/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj
+@@ -14,6 +14,9 @@
+   <ItemGroup>
+     <PackageReference Include="Aspire.RabbitMQ.Client" />
+     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
++    <!-- WS-E1 (ar-14-deep-links): Redis-persisted DataProtection keyring shared with
++         the Families host so it can unprotect mint-side deep-link tokens. -->
++    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" />
+     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+     <PackageReference Include="Microsoft.OpenApi" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/PublishAssignmentCommand/PublishAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/PublishAssignmentCommand/PublishAssignmentCommandHandler.cs
+index 99134e02..ea16759a 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/PublishAssignmentCommand/PublishAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/PublishAssignmentCommand/PublishAssignmentCommandHandler.cs
+@@ -22,6 +22,7 @@ public sealed class PublishAssignmentCommandHandler(
+     IAssignmentNotificationBroadcaster broadcaster,
+     INotificationPolicyResolver policyResolver,
+     IFeatureFlagService featureFlags,
++    IDeepLinkTokenMinter minter,
+     HybridCache cache,
+     ILogger<PublishAssignmentCommandHandler> logger) : ICommandHandler<PublishAssignmentCommand>
+ {
+@@ -41,13 +42,17 @@ public sealed class PublishAssignmentCommandHandler(
+         assignment.Publish(approvalRequired);
+ 
+         var tenantId = tenantProvider.GetTenantContext().TenantId;
+-        var recipients = await ResolveRecipientsAndGatesAsync(assignment, tenantId, command.ContactIds, cancellationToken);
++
++        // WS-E1 (ar-14-deep-links): resolve the effective policy BEFORE persisting
++        // recipients so each minted deep-link token can carry the resolved
++        // LinkValidityDays (expiry = mint + LinkValidityDays ?? 7). The policy is
++        // still applied to the broadcast audience after recipient resolution below.
++        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
++        var recipients = await ResolveRecipientsAndGatesAsync(
++            assignment, tenantId, effectivePolicy.LinkValidityDays, command.ContactIds, cancellationToken);
+ 
+         // Effective-policy resolution (notification-delivery-plan.md §3): drop blocked
+         // channels, apply preferred-channel order, cap the sendout at MaxNotifications.
+-        // Enqueue BEFORE save: the buffering outbox commits the broadcast events
+-        // atomically with the publish mutation.
+-        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
+         var broadcastRecipients = NotificationRecipientFilter.Apply(recipients, effectivePolicy);
+         await broadcaster.BroadcastPublishedAsync(
+             new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, broadcastRecipients),
+@@ -74,7 +79,7 @@ public sealed class PublishAssignmentCommandHandler(
+     /// SelectedGroups assignment with zero links cannot be published (FR-23).
+     /// </summary>
+     private async Task<List<AssignmentRecipient>> ResolveRecipientsAndGatesAsync(
+-        Assignment assignment, Guid tenantId, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
++        Assignment assignment, Guid tenantId, int? linkValidityDays, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
+     {
+         // ── Rev. 6 FR-58: the assignment's subject must be assigned to its target
+         //    audience for a period covering the effective date.
+@@ -128,11 +133,24 @@ public sealed class PublishAssignmentCommandHandler(
+                 var recipient = AssignmentRecipient.Create(
+                     tenantId, assignment.Id, s.OwnerType, s.OwnerId, s.StudentId,
+                     s.ContactId, s.Channel, s.Role, notifyOnBroadcast: true, subscriptionActive: true);
++                // WS-E1 (ar-14-deep-links): a new recipient ALWAYS mints a deep-link
++                // token at publish, independent of the EnableDeepLinks flag.
++                var fresh = minter.Mint(recipient, linkValidityDays, DateTimeOffset.UtcNow);
++                recipient.AttachDeepLink(fresh.Token, fresh.ExpiresAt);
+                 submissionRepository.Add(recipient);
+                 recipients.Add(recipient);
+             }
+             else
+             {
++                // WS-E1 (ar-14-deep-links): idempotent republish — reuse an unexpired
++                // token; re-mint when absent or expired.
++                if (string.IsNullOrWhiteSpace(existing.DeepLinkToken) ||
++                    existing.DeepLinkExpiresAt is null ||
++                    existing.DeepLinkExpiresAt <= DateTimeOffset.UtcNow)
++                {
++                    var refreshed = minter.Mint(existing, linkValidityDays, DateTimeOffset.UtcNow);
++                    existing.AttachDeepLink(refreshed.Token, refreshed.ExpiresAt);
++                }
+                 existing.MarkSubscribed(true);
+                 submissionRepository.Update(existing);
+                 recipients.Add(existing);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentRecipientConfiguration.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentRecipientConfiguration.cs
+index 65ae59d6..8fe7d8cd 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentRecipientConfiguration.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentRecipientConfiguration.cs
+@@ -27,6 +27,10 @@ internal sealed class AssignmentRecipientConfiguration : TenantEntityTypeConfigu
+         builder.Property(x => x.SubscriptionActive).IsRequired().HasDefaultValue(false);
+         builder.Property(x => x.DeliveredAt);
+         builder.Property(x => x.OpenedAt);
++        // WS-E1 (ar-14-deep-links): protected deep-link token + expiry per recipient.
++        // Length accommodates the DataProtection ciphertext (+ JSON payload overhead).
++        builder.Property(x => x.DeepLinkToken).HasMaxLength(4096);
++        builder.Property(x => x.DeepLinkExpiresAt);
+ 
+         // One recipient row per contact per assignment (spec §4.6 / §5).
+         builder.HasIndex(x => new { x.TenantId, x.AssignmentId, x.ContactId })
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentRecipient.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentRecipient.cs
+index 0b463307..982367d6 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentRecipient.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentRecipient.cs
+@@ -32,6 +32,12 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
+     public DateTimeOffset? DeliveredAt { get; private set; }
+     public DateTimeOffset? OpenedAt { get; private set; }
+ 
++    // WS-E1 (ar-14-deep-links): the contact-scoped deep-link bearer token (protected
++    // ciphertext) minted at publish, plus when it expires. One token per
++    // (assignment, contact) recipient row — re-minted/reused on republish.
++    public string? DeepLinkToken { get; private set; }
++    public DateTimeOffset? DeepLinkExpiresAt { get; private set; }
++
+     public DateTimeOffset CreatedAt { get; private set; }
+     public DateTimeOffset UpdatedAt { get; private set; }
+ 
+@@ -85,4 +91,14 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
+         OpenedAt = DateTimeOffset.UtcNow;
+         UpdatedAt = DateTimeOffset.UtcNow;
+     }
++
++    /// <summary>WS-E1 (ar-14-deep-links) — stamps the deep-link token (minted)
++    /// and its expiry, or refreshes both on a republish re-mint. Additive; touches
++    /// only the deep-link columns plus the audit timestamp.</summary>
++    public void AttachDeepLink(string token, DateTimeOffset expiresAt)
++    {
++        DeepLinkToken = token;
++        DeepLinkExpiresAt = expiresAt;
++        UpdatedAt = DateTimeOffset.UtcNow;
++    }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+index 58d1dc03..db817c0c 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+@@ -55,6 +55,12 @@ public static class Extensions
+         // handlers via constructor injection.
+         services.AddScoped<IScoringEngine, ScoringEngine>();
+ 
++        // WS-E1 (ar-14-deep-links): shared purpose-scoped protector + the publish-time
++        // deep-link token minter. Requires the host to have configured DataProtection
++        // (IDataProtectionProvider) before AddAssignmentsCore; the Assignments API does.
++        services.AddScoped<SchoolCollab.Core.DeepLinks.DeepLinkProtector>();
++        services.AddScoped<IDeepLinkTokenMinter, DeepLinkTokenMinter>();
++
+         services.AddHybridCache(options =>
+         {
+             options.DefaultEntryOptions = new HybridCacheEntryOptions
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260916002926_AddAssignmentRecipientDeepLinks.Designer.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260916002926_AddAssignmentRecipientDeepLinks.Designer.cs
+new file mode 100644
+index 00000000..5ec0fcca
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260916002926_AddAssignmentRecipientDeepLinks.Designer.cs
+@@ -0,0 +1,1253 @@
++﻿// <auto-generated />
++using System;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Migrations;
++using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
++using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
++using SchoolCollab.Assignments.Core.Data;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    [DbContext(typeof(AssignmentsDbContext))]
++    [Migration("20260916002926_AddAssignmentRecipientDeepLinks")]
++    partial class AddAssignmentRecipientDeepLinks
++    {
++        /// <inheritdoc />
++        protected override void BuildTargetModel(ModelBuilder modelBuilder)
++        {
++#pragma warning disable 612, 618
++            modelBuilder
++                .HasAnnotation("ProductVersion", "10.0.8")
++                .HasAnnotation("Relational:MaxIdentifierLength", 63);
++
++            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<string>("AiPromptOverride")
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("ai_prompt_override");
++
++                    b.Property<int?>("ApprovalStatus")
++                        .HasColumnType("integer")
++                        .HasColumnName("approval_status");
++
++                    b.Property<DateTimeOffset?>("ApprovedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("approved_at");
++
++                    b.Property<Guid?>("ApprovedBy")
++                        .HasColumnType("uuid")
++                        .HasColumnName("approved_by");
++
++                    b.Property<int>("ArchiveGraceDays")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(30)
++                        .HasColumnName("archive_grace_days");
++
++                    b.Property<string>("AssignmentNumber")
++                        .HasMaxLength(50)
++                        .HasColumnType("character varying(50)")
++                        .HasColumnName("assignment_number");
++
++                    b.Property<int>("AssignmentType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("assignment_type");
++
++                    b.Property<DateTimeOffset?>("AvailableFromUtc")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("available_from_utc");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("CreatedByTeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("created_by_teacher_id");
++
++                    b.Property<string>("Description")
++                        .HasMaxLength(5000)
++                        .HasColumnType("character varying(5000)")
++                        .HasColumnName("description");
++
++                    b.Property<int?>("DifficultyEasyCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_easy_count");
++
++                    b.Property<int?>("DifficultyHardCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_hard_count");
++
++                    b.Property<int?>("DifficultyMediumCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_medium_count");
++
++                    b.Property<DateTimeOffset?>("DueDate")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("due_date");
++
++                    b.Property<Guid?>("GradeLevelId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("grade_level_id");
++
++                    b.Property<int>("GradingFormat")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("grading_format");
++
++                    b.Property<bool>("MandatoryReview")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("mandatory_review");
++
++                    b.Property<int?>("MaxAttempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("max_attempts");
++
++                    b.Property<decimal?>("MaxScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("max_score");
++
++                    b.Property<decimal?>("PassScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("pass_score");
++
++                    b.Property<DateTimeOffset?>("PublishedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("published_at");
++
++                    b.Property<string>("QuestionsDraftJson")
++                        .HasColumnType("text")
++                        .HasColumnName("questions_draft_json");
++
++                    b.Property<bool>("RequiresSignature")
++                        .HasColumnType("boolean")
++                        .HasColumnName("requires_signature");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("Status")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("status");
++
++                    b.Property<int>("TargetAudienceType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("target_audience_type");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<Guid>("TopicId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("topic_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignments");
++
++                    b.HasIndex("CreatedByTeacherId")
++                        .HasDatabaseName("ix_assignments_teacher_id");
++
++                    b.HasIndex("GradeLevelId")
++                        .HasDatabaseName("ix_assignments_grade_level_id");
++
++                    b.HasIndex("Status")
++                        .HasDatabaseName("ix_assignments_status");
++
++                    b.HasIndex("TopicId")
++                        .HasDatabaseName("ix_assignments_topic_id");
++
++                    b.ToTable("assignments", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("ActivityGroupId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("activity_group_id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_activity_groups");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_activity_groups_assignment_id");
++
++                    b.HasIndex("TenantId", "ActivityGroupId")
++                        .HasDatabaseName("ix_assignment_activity_groups_tenant_group");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ActivityGroupId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_activity_groups_tenant_assignment_group");
++
++                    b.ToTable("assignment_activity_groups", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentRecipient", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<int>("Channel")
++                        .HasColumnType("integer")
++                        .HasColumnName("channel");
++
++                    b.Property<Guid>("ContactId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("contact_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<DateTimeOffset?>("DeepLinkExpiresAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("deep_link_expires_at");
++
++                    b.Property<string>("DeepLinkToken")
++                        .HasMaxLength(4096)
++                        .HasColumnType("character varying(4096)")
++                        .HasColumnName("deep_link_token");
++
++                    b.Property<DateTimeOffset?>("DeliveredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("delivered_at");
++
++                    b.Property<bool>("NotifyOnBroadcast")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("notify_on_broadcast");
++
++                    b.Property<DateTimeOffset?>("OpenedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("opened_at");
++
++                    b.Property<Guid>("OwnerId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("owner_id");
++
++                    b.Property<int>("OwnerType")
++                        .HasColumnType("integer")
++                        .HasColumnName("owner_type");
++
++                    b.Property<int?>("Role")
++                        .HasColumnType("integer")
++                        .HasColumnName("role");
++
++                    b.Property<bool>("SubscriptionActive")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("subscription_active");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<Guid?>("WardStudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("ward_student_id");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_recipients");
++
++                    b.HasIndex("AssignmentId", "OwnerId")
++                        .HasDatabaseName("ix_assignment_recipients_assignment_owner");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ContactId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_recipients_tenant_assignment_contact");
++
++                    b.ToTable("assignment_recipients", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("DisplayName")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("display_name");
++
++                    b.Property<bool>("IncludedInGeneration")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("included_in_generation");
++
++                    b.Property<int>("ResourceKind")
++                        .HasColumnType("integer")
++                        .HasColumnName("resource_kind");
++
++                    b.Property<string>("StoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("storage_path");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("Url")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("url");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_resources");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_resources_assignment_id");
++
++                    b.HasIndex("TenantId", "AssignmentId")
++                        .HasDatabaseName("ix_assignment_resources_tenant_assignment");
++
++                    b.ToTable("assignment_resources", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmission", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("AttemptLimitOverriddenAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("attempt_limit_overridden_at");
++
++                    b.Property<Guid?>("AttemptLimitOverriddenBy")
++                        .HasColumnType("uuid")
++                        .HasColumnName("attempt_limit_overridden_by");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("CurrentSource")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_source");
++
++                    b.Property<int>("CurrentVersionNumber")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_version_number");
++
++                    b.Property<Guid?>("ExpectedSignerGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("expected_signer_guardian_id");
++
++                    b.Property<DateTimeOffset?>("FinalizedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("finalized_at");
++
++                    b.Property<DateTimeOffset>("LastSubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("last_submitted_at");
++
++                    b.Property<int>("ReviewState")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("review_state");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("SignOffState")
++                        .HasColumnType("integer")
++                        .HasColumnName("sign_off_state");
++
++                    b.Property<DateTimeOffset?>("SignedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("signed_at");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid?>("SubmissionGateId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_gate_id");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submissions");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submissions_tenant_assignment_student");
++
++                    b.ToTable("assignment_submissions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Content")
++                        .HasMaxLength(20000)
++                        .HasColumnType("character varying(20000)")
++                        .HasColumnName("content");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<bool?>("Passed")
++                        .HasColumnType("boolean")
++                        .HasColumnName("passed");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<int>("Source")
++                        .HasColumnType("integer")
++                        .HasColumnName("source");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<DateTimeOffset>("SubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<int>("VersionNumber")
++                        .HasColumnType("integer")
++                        .HasColumnName("version_number");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_versions");
++
++                    b.HasIndex("TenantId", "SubmissionId", "VersionNumber")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submission_versions_tenant_submission_version");
++
++                    b.ToTable("assignment_submission_versions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ContentModule", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("DisplayOrder")
++                        .HasColumnType("integer")
++                        .HasColumnName("display_order");
++
++                    b.Property<bool>("IsRequired")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("is_required");
++
++                    b.Property<int>("MinCompletionThresholdPercent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(100)
++                        .HasColumnName("min_completion_threshold_percent");
++
++                    b.Property<int>("ModuleType")
++                        .HasColumnType("integer")
++                        .HasColumnName("module_type");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<string>("StoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("storage_path");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("Url")
++                        .IsRequired()
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("url");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_content_modules");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_content_modules_assignment_id");
++
++                    b.HasIndex("TenantId", "AssignmentId")
++                        .HasDatabaseName("ix_assignment_content_modules_tenant_assignment");
++
++                    b.ToTable("assignment_content_modules", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.GuardianSubmissionGate", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("ReviewComment")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("review_comment");
++
++                    b.Property<DateTimeOffset?>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<Guid?>("ReviewedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("reviewed_by_guardian_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<bool>("SubmissionEnabledForStudent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("submission_enabled_for_student");
++
++                    b.Property<DateTimeOffset?>("SubmittedByGuardianAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_by_guardian_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_guardian_submission_gates");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_guardian_submission_gates_tenant_assignment_student");
++
++                    b.ToTable("guardian_submission_gates", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("CompletedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("completed_at");
++
++                    b.Property<Guid>("ContentModuleId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("content_module_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("PercentComplete")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("percent_complete");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_module_progress");
++
++                    b.HasIndex("ContentModuleId")
++                        .HasDatabaseName("ix_assignment_module_progress_content_module_id");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId", "ContentModuleId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_module_progress_tenant_assignment_student_module");
++
++                    b.ToTable("assignment_module_progress", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SignatureEvent", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("CertificateStoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("certificate_storage_path");
++
++                    b.Property<string>("ConsentTextShown")
++                        .IsRequired()
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("consent_text_shown");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("IpAddress")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("character varying(100)")
++                        .HasColumnName("ip_address");
++
++                    b.Property<int>("SignatureType")
++                        .HasColumnType("integer")
++                        .HasColumnName("signature_type");
++
++                    b.Property<DateTimeOffset>("SignedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("signed_at");
++
++                    b.Property<Guid>("SignerGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("signer_guardian_id");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("TypedSignature")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("typed_signature");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("UserAgent")
++                        .IsRequired()
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("user_agent");
++
++                    b.HasKey("Id")
++                        .HasName("pk_signature_events");
++
++                    b.HasIndex("AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("ix_signature_events_assignment_student");
++
++                    b.ToTable("signature_events", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("QuestionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("question_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid?>("SelectedOptionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("selected_option_id");
++
++                    b.Property<Guid>("SubmissionVersionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_version_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("TextAnswer")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("text_answer");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_answers");
++
++                    b.HasIndex("SubmissionVersionId")
++                        .HasDatabaseName("ix_assignment_submission_answers_submission_version_id");
++
++                    b.HasIndex("TenantId", "SubmissionVersionId")
++                        .HasDatabaseName("ix_assignment_submission_answers_tenant_version");
++
++                    b.ToTable("assignment_submission_answers", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionReview", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Comments")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("comments");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("Grade")
++                        .HasMaxLength(20)
++                        .HasColumnType("character varying(20)")
++                        .HasColumnName("grade");
++
++                    b.Property<DateTimeOffset>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<Guid>("TeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("teacher_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_submission_reviews");
++
++                    b.HasIndex("TenantId", "SubmissionId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_submission_reviews_tenant_submission");
++
++                    b.ToTable("submission_reviews", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Core.Messaging.OutboxMessage", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<int>("Attempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("attempts");
++
++                    b.Property<DateTimeOffset?>("DispatchedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("dispatched_at");
++
++                    b.Property<string>("LastError")
++                        .HasColumnType("text")
++                        .HasColumnName("last_error");
++
++                    b.Property<DateTimeOffset>("OccurredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("occurred_at");
++
++                    b.Property<string>("Payload")
++                        .IsRequired()
++                        .HasColumnType("text")
++                        .HasColumnName("payload");
++
++                    b.Property<Guid?>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("type");
++
++                    b.HasKey("Id")
++                        .HasName("pk_outbox_messages");
++
++                    b.HasIndex("OccurredAt")
++                        .HasDatabaseName("ix_outbox_messages_pending")
++                        .HasFilter("dispatched_at IS NULL");
++
++                    b.HasIndex("TenantId")
++                        .HasDatabaseName("ix_outbox_messages_tenant_id");
++
++                    b.ToTable("outbox_messages", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentAttachment", "Attachments", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("ContentType")
++                                .IsRequired()
++                                .HasMaxLength(100)
++                                .HasColumnType("character varying(100)")
++                                .HasColumnName("content_type");
++
++                            b1.Property<string>("FileName")
++                                .IsRequired()
++                                .HasMaxLength(255)
++                                .HasColumnType("character varying(255)")
++                                .HasColumnName("file_name");
++
++                            b1.Property<long>("FileSize")
++                                .HasColumnType("bigint")
++                                .HasColumnName("file_size");
++
++                            b1.Property<string>("StoragePath")
++                                .IsRequired()
++                                .HasMaxLength(500)
++                                .HasColumnType("character varying(500)")
++                                .HasColumnName("storage_path");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_attachments");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_attachments_assignment_id");
++
++                            b1.ToTable("assignment_attachments", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_attachments_assignments_assignment_id");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentQuestion", "Questions", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<Guid?>("CorrectOptionId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("correct_option_id");
++
++                            b1.Property<int>("DisplayOrder")
++                                .HasColumnType("integer")
++                                .HasColumnName("display_order");
++
++                            b1.Property<string>("ModelAnswer")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("model_answer");
++
++                            b1.Property<string>("QuestionText")
++                                .IsRequired()
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("question_text");
++
++                            b1.Property<int>("QuestionType")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("integer")
++                                .HasDefaultValue(0)
++                                .HasColumnName("question_type");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_questions");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_questions_assignment_id");
++
++                            b1.ToTable("assignment_questions", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_questions_assignments_assignment_id");
++
++                            b1.OwnsMany("SchoolCollab.Assignments.Core.Domain.QuestionOption", "Options", b2 =>
++                                {
++                                    b2.Property<Guid>("Id")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("id");
++
++                                    b2.Property<bool>("IsCorrect")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("boolean")
++                                        .HasDefaultValue(false)
++                                        .HasColumnName("is_correct");
++
++                                    b2.Property<string>("OptionText")
++                                        .IsRequired()
++                                        .HasMaxLength(500)
++                                        .HasColumnType("character varying(500)")
++                                        .HasColumnName("option_text");
++
++                                    b2.Property<Guid>("QuestionId")
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("question_id");
++
++                                    b2.HasKey("Id")
++                                        .HasName("pk_question_options");
++
++                                    b2.HasIndex("QuestionId")
++                                        .HasDatabaseName("ix_question_options_question_id");
++
++                                    b2.ToTable("question_options", (string)null);
++
++                                    b2.WithOwner()
++                                        .HasForeignKey("QuestionId")
++                                        .HasConstraintName("fk_question_options_assignment_questions_question_id");
++                                });
++
++                            b1.Navigation("Options");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentReview", "Reviews", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("Comments")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("comments");
++
++                            b1.Property<DateTimeOffset>("ReviewDate")
++                                .HasColumnType("timestamp with time zone")
++                                .HasColumnName("review_date");
++
++                            b1.Property<decimal?>("Score")
++                                .HasPrecision(5, 2)
++                                .HasColumnType("numeric(5,2)")
++                                .HasColumnName("score");
++
++                            b1.Property<Guid>("TeacherId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("teacher_id");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_reviews");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_reviews_assignment_id");
++
++                            b1.ToTable("assignment_reviews", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_reviews_assignments_assignment_id");
++                        });
++
++                    b.Navigation("Attachments");
++
++                    b.Navigation("Questions");
++
++                    b.Navigation("Reviews");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany()
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_activity_groups_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany("Resources")
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_resources_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ContentModule", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany("Modules")
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_content_modules_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.ContentModule", null)
++                        .WithMany()
++                        .HasForeignKey("ContentModuleId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_module_progress_assignment_content_modules_conte");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", null)
++                        .WithMany()
++                        .HasForeignKey("SubmissionVersionId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_submission_answers_assignment_submission_version");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Navigation("Modules");
++
++                    b.Navigation("Resources");
++                });
++#pragma warning restore 612, 618
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260916002926_AddAssignmentRecipientDeepLinks.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260916002926_AddAssignmentRecipientDeepLinks.cs
+new file mode 100644
+index 00000000..8e591dbd
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260916002926_AddAssignmentRecipientDeepLinks.cs
+@@ -0,0 +1,40 @@
++﻿using System;
++using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    /// <inheritdoc />
++    public partial class AddAssignmentRecipientDeepLinks : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.AddColumn<DateTimeOffset>(
++                name: "deep_link_expires_at",
++                table: "assignment_recipients",
++                type: "timestamp with time zone",
++                nullable: true);
++
++            migrationBuilder.AddColumn<string>(
++                name: "deep_link_token",
++                table: "assignment_recipients",
++                type: "character varying(4096)",
++                maxLength: 4096,
++                nullable: true);
++        }
++
++        /// <inheritdoc />
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.DropColumn(
++                name: "deep_link_expires_at",
++                table: "assignment_recipients");
++
++            migrationBuilder.DropColumn(
++                name: "deep_link_token",
++                table: "assignment_recipients");
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+index 7d429f6c..cabd90d2 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+@@ -255,6 +255,15 @@ namespace SchoolCollab.Assignments.Core.Migrations
+                         .HasColumnType("timestamp with time zone")
+                         .HasColumnName("created_at");
+ 
++                    b.Property<DateTimeOffset?>("DeepLinkExpiresAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("deep_link_expires_at");
++
++                    b.Property<string>("DeepLinkToken")
++                        .HasMaxLength(4096)
++                        .HasColumnType("character varying(4096)")
++                        .HasColumnName("deep_link_token");
++
+                     b.Property<DateTimeOffset?>("DeliveredAt")
+                         .HasColumnType("timestamp with time zone")
+                         .HasColumnName("delivered_at");
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/DeepLinkTokenMinter.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/DeepLinkTokenMinter.cs
+new file mode 100644
+index 00000000..6e704e69
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/DeepLinkTokenMinter.cs
+@@ -0,0 +1,30 @@
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.DeepLinks;
++
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// Default <see cref="IDeepLinkTokenMinter"/>: builds the contact-scoped
++/// <see cref="DeepLinkTokenPayload"/> (carrying the recipient's tenant, assignment,
++/// contact, owner-type/role ints, and optional ward) and protects it via the shared
++/// <see cref="DeepLinkProtector"/>. Expiry = mint time + policy <c>LinkValidityDays</c>
++/// (falling back to <see cref="DeepLinkConstants.DefaultValidityDays"/>).
++/// </summary>
++public sealed class DeepLinkTokenMinter(DeepLinkProtector protector) : IDeepLinkTokenMinter
++{
++    /// <inheritdoc />
++    public DeepLinkMintedToken Mint(AssignmentRecipient recipient, int? linkValidityDays, DateTimeOffset now)
++    {
++        var days = linkValidityDays ?? DeepLinkConstants.DefaultValidityDays;
++        var expiresAt = now.AddDays(days);
++        var payload = new DeepLinkTokenPayload(
++            TenantId: recipient.TenantId,
++            AssignmentId: recipient.AssignmentId,
++            ContactId: recipient.ContactId,
++            OwnerType: (int)recipient.OwnerType,
++            Role: (int?)recipient.Role,
++            WardStudentId: recipient.WardStudentId,
++            ExpiresAt: expiresAt);
++        return new DeepLinkMintedToken(protector.Protect(payload), expiresAt);
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/IDeepLinkTokenMinter.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/IDeepLinkTokenMinter.cs
+new file mode 100644
+index 00000000..cf997ff3
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/IDeepLinkTokenMinter.cs
+@@ -0,0 +1,23 @@
++using SchoolCollab.Assignments.Core.Domain;
++
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>Result of minting a contact-scoped deep-link token: the protected bearer
++/// token string plus the moment it expires.</summary>
++public sealed record DeepLinkMintedToken(string Token, DateTimeOffset ExpiresAt);
++
++/// <summary>
++/// Mint point for the contact-scoped deep-link tokens (WS-E1 / ar-14-deep-links).
++/// The publish flow calls <see cref="Mint"/> when it persists a recipient (new mint)
++/// or re-mints an expired/absent token on republish. Minting is deliberately
++/// independent of the <c>FEATURE:EnableDeepLinks</c> runtime flag — tokens are always
++/// minted at publish (cheap, idempotent) so no republish is needed once the public
++/// landing is dark-launched on.
++/// </summary>
++public interface IDeepLinkTokenMinter
++{
++    /// <summary>Mints a token for <paramref name="recipient"/> with expiry
++    /// <paramref name="now"/> + <paramref name="linkValidityDays"/> (falling back to
++    /// <see cref="DeepLinkConstants.DefaultValidityDays"/> when null).</summary>
++    DeepLinkMintedToken Mint(AssignmentRecipient recipient, int? linkValidityDays, DateTimeOffset now);
++}
+diff --git a/src/SchoolCollab.Core/Auth/TenantPropagationDelegatingHandler.cs b/src/SchoolCollab.Core/Auth/TenantPropagationDelegatingHandler.cs
+index 30b7d626..ee5bcb78 100644
+--- a/src/SchoolCollab.Core/Auth/TenantPropagationDelegatingHandler.cs
++++ b/src/SchoolCollab.Core/Auth/TenantPropagationDelegatingHandler.cs
+@@ -28,6 +28,10 @@ namespace SchoolCollab.Core.Auth;
+ /// <para>The API's <see cref="TestAuthHandler"/> honours this header (dev/TestAuth
+ /// mode only), so it cannot be spoofed in production OIDC where
+ /// <see cref="TestAuthHandler"/> is not registered.</para>
++/// <para>If the request already carries an explicit <c>x-tenant-id</c> header (e.g. the
++/// deep-link landing stamps the token's validated payload tenant), the handler leaves it
++/// untouched rather than overwriting it with the dev selection — an explicit tenant is
++/// authoritative.</para>
+ /// </remarks>
+ public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
+ {
+@@ -68,9 +72,11 @@ public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
+                 request.Method, request.RequestUri);
+         }
+ 
+-        if (selected is { } tenantId && tenantId != Guid.Empty)
++        if (selected is { } tenantId && tenantId != Guid.Empty && !request.Headers.Contains("x-tenant-id"))
+         {
+-            request.Headers.Remove("x-tenant-id");
++            // Skip when the caller already set x-tenant-id explicitly (e.g. the deep-link
++            // landing stamps the token's validated payload tenant) so that explicit tenant
++            // is authoritative instead of being overwritten by the dev selection.
+             request.Headers.Add("x-tenant-id", tenantId.ToString());
+         }
+ 
+diff --git a/src/SchoolCollab.Core/DeepLinks/DeepLinkConstants.cs b/src/SchoolCollab.Core/DeepLinks/DeepLinkConstants.cs
+new file mode 100644
+index 00000000..faaad444
+--- /dev/null
++++ b/src/SchoolCollab.Core/DeepLinks/DeepLinkConstants.cs
+@@ -0,0 +1,23 @@
++namespace SchoolCollab.Core.DeepLinks;
++
++/// <summary>
++/// Shared constants for the contact-scoped deep-link tokens (ar-14-deep-links).
++/// The Assignments API mints tokens and the Families host validates them, so both
++/// hosts must agree on the DataProtection application name, the purpose string,
++/// and the built-in validity window. Because both hosts persist their DataProtection
++/// keyring to the same Redis resource, sharing <see cref="ApplicationName"/> is what
++/// lets the Families host unprotect ciphertext minted by the Assignments API.
++/// </summary>
++public static class DeepLinkConstants
++{
++    /// <summary>The shared <c>SetApplicationName</c> value both hosts must use.</summary>
++    public const string ApplicationName = "school-collab-deeplinks";
++
++    /// <summary>The DataProtection purpose scoping all deep-link tokens (isolation
++    /// from every other use of the shared keyring).</summary>
++    public const string Purpose = "ar-deeplink";
++
++    /// <summary>Built-in link validity (days) when the effective notification
++    /// policy has no <c>LinkValidityDays</c> configured.</summary>
++    public const int DefaultValidityDays = 7;
++}
+diff --git a/src/SchoolCollab.Core/DeepLinks/DeepLinkProtector.cs b/src/SchoolCollab.Core/DeepLinks/DeepLinkProtector.cs
+new file mode 100644
+index 00000000..e7cdcb03
+--- /dev/null
++++ b/src/SchoolCollab.Core/DeepLinks/DeepLinkProtector.cs
+@@ -0,0 +1,40 @@
++using System.Security.Cryptography;
++using System.Text.Json;
++using Microsoft.AspNetCore.DataProtection;
++
++namespace SchoolCollab.Core.DeepLinks;
++
++/// <summary>
++/// Thin wrapper over a purpose-scoped <see cref="IDataProtector"/> for the contact
++/// deep-link tokens (ar-14-deep-links). <see cref="Protect"/> mints opaque bearer
++/// ciphertext from the <see cref="DeepLinkTokenPayload"/>; <see cref="TryUnprotect"/>
++/// reverses it and returns <c>null</c> when the token is tampered with, malformed, or
++/// produced under a different purpose — never throwing out of the wrapper, so the
++/// public landing can treat any bad token as an expired link.
++/// </summary>
++public sealed class DeepLinkProtector(IDataProtectionProvider provider)
++{
++    private readonly IDataProtector _protector = provider.CreateProtector(DeepLinkConstants.Purpose);
++
++    /// <summary>Serialises and protects a payload into the opaque bearer token string.</summary>
++    public string Protect(DeepLinkTokenPayload payload)
++    {
++        var json = JsonSerializer.Serialize(payload);
++        return _protector.Protect(json);
++    }
++
++    /// <summary>Unprotects a token back to its payload, or <c>null</c> when the token is
++    /// invalid, tampered with, or created under a different purpose.</summary>
++    public DeepLinkTokenPayload? TryUnprotect(string token)
++    {
++        try
++        {
++            var json = _protector.Unprotect(token);
++            return JsonSerializer.Deserialize<DeepLinkTokenPayload>(json);
++        }
++        catch (Exception ex) when (ex is CryptographicException or FormatException or JsonException)
++        {
++            return null;
++        }
++    }
++}
+diff --git a/src/SchoolCollab.Core/DeepLinks/DeepLinkTokenPayload.cs b/src/SchoolCollab.Core/DeepLinks/DeepLinkTokenPayload.cs
+new file mode 100644
+index 00000000..8494185f
+--- /dev/null
++++ b/src/SchoolCollab.Core/DeepLinks/DeepLinkTokenPayload.cs
+@@ -0,0 +1,20 @@
++namespace SchoolCollab.Core.DeepLinks;
++
++/// <summary>
++/// The protected payload inside a contact-scoped deep-link token (ar-14-deep-links).
++/// Serialised to JSON and wrapped by <see cref="DeepLinkProtector"/> with the shared
++/// <see cref="DeepLinkConstants.Purpose"/> purpose. The minting host (Assignments API)
++/// and the validating host (Families) exchange this exact shape.
++/// <para><see cref="OwnerType"/> and <see cref="Role"/> are carried as raw ints so the
++/// Core contract (which may not reference <c>Students.Core</c>) can model them without
++/// a type dependency; the Families landing maps them to the Students enums at the edge.
++/// </para>
++/// </summary>
++public sealed record DeepLinkTokenPayload(
++    Guid TenantId,
++    Guid AssignmentId,
++    Guid ContactId,
++    int OwnerType,
++    int? Role,
++    Guid? WardStudentId,
++    DateTimeOffset ExpiresAt);
+diff --git a/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs b/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs
+index 491f7b55..1e0b9a7a 100644
+--- a/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs
++++ b/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs
+@@ -59,4 +59,14 @@ public static class FeatureFlagKeys
+     /// opt in via the /config-flags surface.
+     /// </summary>
+     public const string RequireAssignmentApproval = "FEATURE:RequireAssignmentApproval";
++
++    /// <summary>
++    /// Dark-launch flag gating the Families public deep-link landing route group
++    /// (WS-E1 / ar-14-deep-links). Default OFF: tokens are minted at publish
++    /// regardless of this flag (cheap, idempotent — no republish needed when the
++    /// flag later flips on), and the runtime flag only decides whether the public
++    /// <c>/deeplink/{token}</c> route validates and redirects. Enabled via the
++    /// /config-flags surface like the other runtime flags.
++    /// </summary>
++    public const string EnableDeepLinks = "FEATURE:EnableDeepLinks";
+ }
+diff --git a/src/SchoolCollab.Core/SchoolCollab.Core.csproj b/src/SchoolCollab.Core/SchoolCollab.Core.csproj
+index b7605b23..1586991b 100644
+--- a/src/SchoolCollab.Core/SchoolCollab.Core.csproj
++++ b/src/SchoolCollab.Core/SchoolCollab.Core.csproj
+@@ -7,6 +7,7 @@
+   <ItemGroup>
+     <PackageReference Include="Microsoft.AspNetCore.Authentication.Cookies" />
+     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
++    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Abstractions" />
+     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+diff --git a/src/SchoolCollab.Families/Components/Pages/DeepLink/LinkExpired.razor b/src/SchoolCollab.Families/Components/Pages/DeepLink/LinkExpired.razor
+new file mode 100644
+index 00000000..6da7ae5e
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/DeepLink/LinkExpired.razor
+@@ -0,0 +1,23 @@
++@* WS-E1 (ar-14-deep-links): the friendly "link expired" page the public /deeplink
++   landing redirects to for an expired / tampered / dark-launch-false token (the flow
++   is a 302 → 200 redirect to this friendly page, not a 410). [AllowAnonymous] so it stays
++   reachable when the razor-components mapping is RequireAuthorization-gated in production
++   AND is bUnit-testable under an anonymous principal. Deliberately renders no stack/error
++   chrome. *@
++@page "/deeplink/expired"
++@attribute [AllowAnonymous]
++@using Microsoft.AspNetCore.Authorization
++
++<PageTitle>Link expired</PageTitle>
++
++<FluentStack Orientation="Orientation.Vertical" Gap="0.5rem" Class="deeplink-expired">
++    <h1>This link has expired</h1>
++    <FluentMessageBar Class="deeplink-expired-bar" Intent="MessageIntent.Warning">
++        This link is no longer valid. Ask your school or your guardian for a fresh
++        link to your assignments.
++    </FluentMessageBar>
++    <p>If you think this is a mistake, please contact your school office for help.</p>
++    <FluentAnchor Appearance="Appearance.Hypertext" Class="deeplink-expired-anchor" Href="/ward">
++        Go to my assignments
++    </FluentAnchor>
++</FluentStack>
+diff --git a/src/SchoolCollab.Families/Components/Pages/DeepLink/LinkExpired.razor.css b/src/SchoolCollab.Families/Components/Pages/DeepLink/LinkExpired.razor.css
+new file mode 100644
+index 00000000..64940403
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/DeepLink/LinkExpired.razor.css
+@@ -0,0 +1,12 @@
++.deeplink-expired {
++    max-width: 40rem;
++    margin: 2rem auto;
++}
++
++.deeplink-expired-bar {
++    width: 100%;
++}
++
++.deeplink-expired-anchor {
++    margin-top: 0.25rem;
++}
+diff --git a/src/SchoolCollab.Families/DeepLinks/DeepLinkEndpoints.cs b/src/SchoolCollab.Families/DeepLinks/DeepLinkEndpoints.cs
+new file mode 100644
+index 00000000..fa1b2812
+--- /dev/null
++++ b/src/SchoolCollab.Families/DeepLinks/DeepLinkEndpoints.cs
+@@ -0,0 +1,72 @@
++using System.Security.Claims;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
++
++namespace SchoolCollab.Families.DeepLinks;
++
++/// <summary>
++/// WS-E1 (ar-14-deep-links) — the repository's FIRST public token-auth route
++/// group (decision (c)). Mapped OUTSIDE <c>MapRazorComponents</c> (which is
++/// <c>RequireAuthorization</c>'d when OIDC is on) and with NO
++/// <c>RequireAuthorization</c>: the bearer token in the URL is itself the
++/// credential. A valid link (flag on) signs the guardian into a cookie principal
++/// carrying <c>tenant_id</c> (bridged to <see cref="SchoolCollab.Core.Tenancy.ITenantProvider"/>
++/// by <see cref="SchoolCollab.Core.Auth.TenantClaimsTransformation"/>) and redirects to the
++/// ward surface; an expired / tampered / dark-launch-false link redirects to the
++/// friendly <c>LinkExpired</c> page (the flow emits a 302 → 200 redirect to that page) —
++/// never a raw error.
++/// </summary>
++public static class DeepLinkEndpoints
++{
++    /// <summary>Maps the public <c>/deeplink/{token}</c> landing route.</summary>
++    public static WebApplication MapDeepLinkEndpoints(this WebApplication app)
++    {
++        var group = app.MapGroup("/deeplink");
++
++        group.MapGet("/{token}", async (
++            string token,
++            HttpContext httpContext,
++            DeepLinkLandingService landing,
++            ILogger<DeepLinkLandingService> logger,
++            CancellationToken ct) =>
++        {
++            var result = await landing.HandleAsync(token, ct: ct);
++            if (result.Outcome != DeepLinkLandingOutcome.Success)
++            {
++                // Expired / tampered / flag-off — friendly expired page, no sign-in.
++                return Results.Redirect("/deeplink/expired");
++            }
++
++            await SignInAsync(httpContext, result);
++            logger.LogInformation(
++                "Deep-link landing succeeded for tenant {TenantId}, redirecting to {Target}",
++                result.TenantId, result.RedirectUrl);
++            return Results.Redirect(result.RedirectUrl!);
++        });
++
++        return app;
++    }
++
++    private static async Task SignInAsync(HttpContext httpContext, DeepLinkLandingResult result)
++    {
++        if (result.TenantId is not { } tenantId)
++        {
++            return;
++        }
++
++        var contactId = result.ContactId ?? Guid.Empty;
++
++        var identity = new ClaimsIdentity(
++            new[]
++            {
++                new Claim(ClaimTypes.Name, contactId.ToString()),
++                new Claim("contact_id", contactId.ToString()),
++                new Claim("tenant_id", tenantId.ToString())
++            },
++            CookieAuthenticationDefaults.AuthenticationScheme);
++
++        await httpContext.SignInAsync(
++            CookieAuthenticationDefaults.AuthenticationScheme,
++            new ClaimsPrincipal(identity));
++    }
++}
+diff --git a/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs b/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs
+new file mode 100644
+index 00000000..c209990f
+--- /dev/null
++++ b/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs
+@@ -0,0 +1,124 @@
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.DeepLinks;
++
++/// <summary>Outcome of a deep-link landing attempt (WS-E1 / ar-14-deep-links).</summary>
++public enum DeepLinkLandingOutcome
++{
++    /// <summary>Token valid + the tenant's <c>EnableDeepLinks</c> flag is on → redirect.</summary>
++    Success,
++    /// <summary>Token expired, tampered, malformed, or tenant-mismatched → the friendly expired page.</summary>
++    Expired,
++    /// <summary>Token structurally valid but the runtime flag is off (dark launch) → expired page, no sign-in.</summary>
++    Dark
++}
++
++/// <summary>The public landing's decision for a deep-link token.</summary>
++public sealed record DeepLinkLandingResult(
++    DeepLinkLandingOutcome Outcome,
++    string? RedirectUrl,
++    Guid? TenantId = null,
++    Guid? ContactId = null);
++
++/// <summary>
++/// Pure validate → flag → redirect logic for the public deep-link landing
++/// (WS-E1 / ar-14-deep-links, decision (c)). Unprotects the bearer token, rejects
++/// expired / tampered / tenant-mismatched links, establishes the payload's tenant
++/// context explicitly (<see cref="ITenantContextAccessor.RunWithExplicitTenantAsync{T}"/>),
++/// honours the tenant's <c>FEATURE:EnableDeepLinks</c> dark-launch flag, stamps the
++/// recipient's <c>OpenedAt</c> server-side via <see cref="FamiliesApiClient"/>, and
++/// resolves the ward redirect target (decision (g)). Never throws for a bad token —
++/// any invalid link becomes <see cref="DeepLinkLandingOutcome.Expired"/>.
++/// </summary>
++public sealed class DeepLinkLandingService(
++    DeepLinkProtector protector,
++    ITenantContextAccessor tenantAccessor,
++    IFeatureFlagService featureFlags,
++    FamiliesApiClient familiesApi,
++    ILogger<DeepLinkLandingService> logger)
++{
++    /// <summary>Validates <paramref name="token"/> and resolves the landing outcome.</summary>
++    /// <param name="token">The protected bearer token from the public <c>/deeplink</c> URL.</param>
++    /// <param name="expectedTenantId">Optional tenant the token must match. When null
++    /// (the normal landing path) the payload's minted tenant is authoritative and the
++    /// tenant context is established from it.</param>
++    /// <param name="ct">Cancellation token.</param>
++    /// <returns>A <see cref="DeepLinkLandingResult"/>: <see cref="DeepLinkLandingOutcome.Success"/>
++    /// with the ward redirect URL, or <c>Expired</c> / <c>Dark</c> with no redirect.</returns>
++    public async Task<DeepLinkLandingResult> HandleAsync(
++        string token,
++        Guid? expectedTenantId = null,
++        CancellationToken ct = default)
++    {
++        var payload = protector.TryUnprotect(token);
++        if (payload is null || payload.ExpiresAt <= DateTimeOffset.UtcNow)
++        {
++            logger.LogInformation("Deep-link landing rejected: missing, malformed, or expired token");
++            return new(DeepLinkLandingOutcome.Expired, null);
++        }
++
++        // Tenant-mismatch guard: a token minted for another tenant must never be
++        // honoured when the caller requires a specific tenant.
++        if (expectedTenantId is { } expected && payload.TenantId != expected)
++        {
++            logger.LogInformation(
++                "Deep-link landing rejected: payload tenant {TenantId} differs from expected {Expected}",
++                payload.TenantId, expected);
++            return new(DeepLinkLandingOutcome.Expired, null);
++        }
++
++        // Establish tenant context explicitly from the payload (the ar-5 sweep
++        // precedent) so the runtime flag resolution and the OpenedAt stamp are
++        // tenant-correct even though this public route has no pre-existing auth.
++        return await tenantAccessor.RunWithExplicitTenantAsync(
++            payload.TenantId,
++            async _ =>
++            {
++                if (!await featureFlags.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, ct))
++                {
++                    logger.LogInformation(
++                        "Deep-link landing: EnableDeepLinks is OFF for tenant {TenantId}", payload.TenantId);
++                    return new DeepLinkLandingResult(DeepLinkLandingOutcome.Dark, null);
++                }
++
++                // Idempotent first-visit stamp on the Assignments API (no-op when OpenedAt
++                // already set). Best-effort: a stamp failure must not break the redirect, so
++                // the call is guarded — a transport/API fault is logged and swallowed.
++                // Classification (P1 / ar-14): FamiliesApiClient bounds the stamp to a ~3s
++                // per-call deadline via a linked CTS, so a timed-out stamp surfaces as
++                // OperationCanceledException with the CALLER's ct NOT cancelled. The filter
++                // here therefore only rethrows when the CALLER cancelled — a timeout
++                // cancellation falls through to the generic catch below and degrades to the
++                // logged warning, letting the redirect proceed promptly.
++                try
++                {
++                    await familiesApi.MarkRecipientOpenedAsync(
++                        payload.AssignmentId, payload.ContactId, payload.TenantId, ct);
++                }
++                catch (OperationCanceledException) when (ct.IsCancellationRequested)
++                {
++                    throw;
++                }
++                catch (Exception ex)
++                {
++                    logger.LogWarning(ex,
++                        "Deep-link landing: OpenedAt stamp failed for assignment {AssignmentId}/contact {ContactId}; " +
++                        "continuing with the redirect", payload.AssignmentId, payload.ContactId);
++                }
++
++                // Redirect rule (decision (g)): single-ward (WardStudentId set) lands on
++                // that ward's list; multi-ward guardian (no WardStudentId) lands on /ward.
++                var redirectUrl = payload.WardStudentId is { } wardStudentId
++                    ? $"/ward/{wardStudentId}"
++                    : "/ward";
++
++                return new DeepLinkLandingResult(
++                    DeepLinkLandingOutcome.Success, redirectUrl, payload.TenantId, payload.ContactId);
++            },
++            ct);
++    }
++}
+diff --git a/src/SchoolCollab.Families/Program.cs b/src/SchoolCollab.Families/Program.cs
+index 476addc5..77c54304 100644
+--- a/src/SchoolCollab.Families/Program.cs
++++ b/src/SchoolCollab.Families/Program.cs
+@@ -1,8 +1,13 @@
+ using Microsoft.FluentUI.AspNetCore.Components;
++using Microsoft.AspNetCore.DataProtection;
++using StackExchange.Redis;
+ using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.DeepLinks;
+ using SchoolCollab.Core.Features;
+ using SchoolCollab.Families.Components;
++using SchoolCollab.Families.DeepLinks;
+ using SchoolCollab.Families.Services;
++using SchoolCollab.Settings.Core;
+ 
+ var builder = WebApplication.CreateBuilder(args);
+ 
+@@ -16,6 +21,15 @@ builder.AddServiceDefaults();
+ // auth schemes are registered once at process start.
+ builder.Services.AddAuthAndTenancy(builder.Configuration);
+ 
++// WS-E1 (ar-14-deep-links): AddAuthAndTenancy registers .AddCookie() only in the OIDC
++// branch. In dev (TestAuth) the landing signs the guardian into a cookie principal, so
++// Families registers the cookie handler itself — guarded by the same startup switch to
++// avoid the duplicate-scheme throw when OIDC is on.
++if (IsFlagEnabled(builder.Configuration, FeatureFlagKeys.DisableOIDCAuth))
++{
++    builder.Services.AddAuthentication().AddCookie();
++}
++
+ // Redis distributed cache backs IDevTenantSelection (TestAuth mode) and mirrors
+ // the Admin host. Falls back to an in-memory cache when no "cache" connection
+ // string is resolved (e.g. non-Aspire local run or tests).
+@@ -31,6 +45,28 @@ else
+     builder.AddRedisDistributedCache("cache");
+ }
+ 
++// WS-E1 (ar-14-deep-links): DataProtection keyring shared with the Assignments API on
++// the same Redis resource so mint-side ciphertext can be unprotected here. Both hosts
++// MUST SetApplicationName the same value. Falls back to the default in-memory keyring
++// (still sharing the application name) when no Redis connection string is present.
++var deeplinkKeyring = builder.Services.AddDataProtection();
++if (string.IsNullOrWhiteSpace(cacheConnectionString))
++{
++    deeplinkKeyring.SetApplicationName(DeepLinkConstants.ApplicationName);
++}
++else
++{
++    // Dedicated process-lifetime keyring multiplexer (same lifetime as the host).
++    // ConnectAsync with AbortOnConnectFail=false so an unreachable Redis does not
++    // hard-fail host startup — keyring access retries lazily once Redis returns.
++    var keyringOptions = ConfigurationOptions.Parse(cacheConnectionString);
++    keyringOptions.AbortOnConnectFail = false;
++    var keyringMultiplexer = await ConnectionMultiplexer.ConnectAsync(keyringOptions);
++    deeplinkKeyring
++        .PersistKeysToStackExchangeRedis(keyringMultiplexer)
++        .SetApplicationName(DeepLinkConstants.ApplicationName);
++}
++
+ builder.Services.AddRazorComponents()
+     .AddInteractiveServerComponents();
+ 
+@@ -39,13 +75,26 @@ builder.Services.AddFluentUIComponents();
+ // F1 — the Families Http client against the Assignments API (service discovery).
+ builder.Services.AddFamiliesModule();
+ 
++// WS-E1 (ar-14-deep-links): cached, DB-backed runtime feature-flag client (resolves
++// FEATURE:EnableDeepLinks tenant-isolated from the Settings FeatureFlag aggregate with
++// an IConfiguration fallback). Replaces the config-only IFeatureFlagService installed by
++// AddAuthAndTenancy — mirroring the Admin host's AddConfigFeatureFlagClient pattern.
++builder.Services.AddConfigFeatureFlagClient(builder.Configuration);
++
++// WS-E1 (ar-14-deep-links): the purpose-scoped protector the landing uses to
++// validate deep-link tokens (unprotect side of the mint/validate contract).
++builder.Services.AddScoped<SchoolCollab.Core.DeepLinks.DeepLinkProtector>();
++
++// WS-E1 (ar-14-deep-links): the pure validate→flag→redirect logic backing the public
++// /deeplink landing (unprotect → tenant flag → OpenedAt stamp → redirect target).
++builder.Services.AddScoped<SchoolCollab.Families.DeepLinks.DeepLinkLandingService>();
++
+ var app = builder.Build();
+ 
+ // Startup auth-mode decision (mirrors Admin): read DisableOIDCAuth directly from
+ // IConfiguration, NOT via IFeatureFlagService (which is the runtime Config client
+ // and does not carry this startup-only flag).
+-var disableOIDC = bool.TryParse(
+-    builder.Configuration[$"FeatureFlags:{FeatureFlagKeys.DisableOIDCAuth}"], out var d) && d;
++var disableOIDC = IsFlagEnabled(builder.Configuration, FeatureFlagKeys.DisableOIDCAuth);
+ 
+ if (!app.Environment.IsDevelopment())
+ {
+@@ -78,4 +127,22 @@ if (!disableOIDC)
+     razorComponents.RequireAuthorization();
+ }
+ 
++// WS-E1 (ar-14-deep-links): the repo's first public token-auth route group — mapped
++// OUTSIDE the razor-components mapping (which is RequireAuthorization-gated when OIDC
++// is on) so the /deeplink landing is reachable without a pre-existing identity.
++app.MapDeepLinkEndpoints();
++
+ app.Run();
++
++/// <summary>Startup auth-mode switch read directly from IConfiguration (mirrors the
++/// Admin host): whether FEATURE:DisableOIDCAuth is set. Used to register the dev-only
++/// cookie handler before the app builds. Matches <c>AuthTenancyExtensions</c>' two-key
++/// resolution — <c>FeatureFlags:{key}</c> first, then the bare <c>{key}</c> — so a
++/// deployment setting only the bare key still enables TestAuth.</summary>
++static bool IsFlagEnabled(IConfiguration configuration, string featureKey)
++{
++    var value = configuration[$"FeatureFlags:{featureKey}"]
++             ?? configuration[featureKey];
++
++    return bool.TryParse(value, out var enabled) && enabled;
++}
+diff --git a/src/SchoolCollab.Families/SchoolCollab.Families.csproj b/src/SchoolCollab.Families/SchoolCollab.Families.csproj
+index fd9b1fed..3df5e012 100644
+--- a/src/SchoolCollab.Families/SchoolCollab.Families.csproj
++++ b/src/SchoolCollab.Families/SchoolCollab.Families.csproj
+@@ -9,10 +9,17 @@
+     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
+     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
+     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
++    <!-- WS-E1 (ar-14-deep-links): Redis-persisted DataProtection keyring shared with
++         the Assignments API so it can unprotect mint-side deep-link tokens. -->
++    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
+     <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
++    <!-- WS-E1 (ar-14-deep-links): Settings.Core provides the cached, DB-backed
++         AddConfigFeatureFlagClient used to resolve the runtime EnableDeepLinks flag
++         (mirrors the Admin host's config feature-flag client pattern). -->
++    <ProjectReference Include="..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
+     <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+   </ItemGroup>
+ </Project>
+diff --git a/src/SchoolCollab.Families/Services/FamiliesApiClient.cs b/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
+index c9ce3bab..98aefa9b 100644
+--- a/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
++++ b/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
+@@ -66,6 +66,43 @@ public sealed class FamiliesApiClient(
+         return await response.Content.ReadFromJsonAsync<WardAssignmentViewDto>(FamiliesJson.Options, ct);
+     }
+ 
++    /// <summary>WS-E1 (ar-14-deep-links) — idempotent first-visit <c>OpenedAt</c> stamp, invoked
++    /// server-side by the public deep-link landing. The Assignments API marks the recipient
++    /// at most once (Sent → Viewed chain) and returns 404 for an unknown (assignment, contact)
++    /// row; treated as best-effort here so a stamp failure never breaks the landing redirect.
++    /// <paramref name="tenantId"/> is the token's validated payload tenant, sent explicitly as
++    /// the <c>x-tenant-id</c> header on this one call so the tenant-scoped lookup resolves even
++    /// when no dev tenant is selected (see <see cref="SchoolCollab.Core.Auth.TenantPropagationDelegatingHandler"/>).
++    /// Bound to a short per-call deadline (~3s, P1 / ar-14) so a slow-but-reachable API cannot
++    /// stall the public landing's user-visible redirect.</summary>
++    public async Task MarkRecipientOpenedAsync(Guid assignmentId, Guid contactId, Guid tenantId, CancellationToken ct = default)
++    {
++        var request = new HttpRequestMessage(
++            HttpMethod.Post,
++            $"/{_assignments}/{assignmentId}/recipients/{contactId}/opened");
++        // Carry the payload tenant explicitly: the dev-selection propagation handler only
++        // overwrites x-tenant-id when a dev tenant is selected, so an explicit header here
++        // keeps the stamp tenant-correct in both dev and production.
++        request.Headers.TryAddWithoutValidation("x-tenant-id", tenantId.ToString());
++
++        // P1 (ar-14): bound the stamp to a short per-call deadline via a linked CTS, NOT a
++        // global HttpClient.Timeout. The ward pages share this typed client and their data
++        // calls legitimately need the default 100s window, so a global ~3s timeout would be
++        // wrong for them. When the deadline elapses, SendAsync raises
++        // OperationCanceledException with the CALLER's ct NOT cancelled, which the landing
++        // guard classifies as a best-effort stamp failure (log-and-continue) rather than a
++        // caller cancellation (which must still rethrow). The linked CTS is scoped to THIS
++        // call only and disposed here — no shared/typed-client state is touched.
++        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
++        linked.CancelAfter(TimeSpan.FromSeconds(3));
++
++        // A non-success response (404 unknown recipient row, 401 in prod) is surfaced via
++        // EnsureSuccessStatusCode so the landing's guard logs it as a warning instead of
++        // silently dropping the OpenedAt stamp.
++        var response = await http.SendAsync(request, linked.Token);
++        response.EnsureSuccessStatusCode();
++    }
++
+     /// <summary>WS-D1 — report per-module progress (monotonic/idempotent on the API).</summary>
+     public async Task<bool> ReportModuleProgressAsync(Guid assignmentId, Guid studentId, Guid moduleId, int percent, CancellationToken ct = default)
+     {
+diff --git a/src/SchoolCollab.Families/appsettings.json b/src/SchoolCollab.Families/appsettings.json
+index 5af984c6..2c6b3b47 100644
+--- a/src/SchoolCollab.Families/appsettings.json
++++ b/src/SchoolCollab.Families/appsettings.json
+@@ -12,7 +12,11 @@
+   // runs TestAuth; production overrides via FeatureFlags__FEATURE__DisableOIDCAuth.
+   "FeatureFlags": {
+     "FEATURE": {
+-      "DisableOIDCAuth": "true"
++      "DisableOIDCAuth": "true",
++      // WS-E1 (ar-14-deep-links): cold-start dev fallback for the runtime public
++      // deep-link landing flag (the DB-backed /config-flags row is authoritative; this
++      // only covers the case where the Settings API is unreachable). Default OFF.
++      "EnableDeepLinks": "false"
+     }
+   }
+ }
+diff --git a/src/SchoolCollab.MigrationService/Program.cs b/src/SchoolCollab.MigrationService/Program.cs
+index 1439dde0..9c4b5f5f 100644
+--- a/src/SchoolCollab.MigrationService/Program.cs
++++ b/src/SchoolCollab.MigrationService/Program.cs
+@@ -97,6 +97,7 @@ try
+             await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
+             await SeedEnableActivityGroupsAsync(settingsDb, logger);
+             await SeedRequireAssignmentApprovalAsync(settingsDb, logger);
++            await SeedEnableDeepLinksAsync(settingsDb, logger);
+ 
+             // Seed the default EntityCodeRule blueprints (student/staff/assignment
+             // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
+@@ -393,3 +394,42 @@ static async Task SeedRequireAssignmentApprovalAsync(SettingsDbContext db, Micro
+     await db.SaveChangesAsync();
+     logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+ }
++
++// WS-E1 / ar-14-deep-links: gates the Families public deep-link landing route
++// group. Default OFF — the flag ships dark (tokens are minted at publish regardless;
++// the runtime flag only decides whether the /deeplink/{token} route validates and
++// redirects). Idempotent on the normalised key, mirroring SeedRequireAssignmentApprovalAsync.
++static async Task SeedEnableDeepLinksAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
++{
++    const string actorId = "system:migrator";
++    const string actorName = "Migration Service";
++
++    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableDeepLinks);
++
++    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
++    if (exists)
++    {
++        logger.LogInformation("Seed flag {Key} already present; skipping", key);
++        return;
++    }
++
++    var flag = FeatureFlag.Create(
++        key,
++        "Enable contact-scoped deep-link landing for published assignments",
++        null,
++        isEnabled: false);
++    db.FeatureFlags.Add(flag);
++    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
++        tenantId: null,
++        featureFlagId: flag.Id,
++        featureFlagKey: flag.Key,
++        changeKind: FlagChangeKind.Created,
++        previousIsEnabled: null,
++        newIsEnabled: flag.IsEnabled,
++        reason: "Initial seed by migration service",
++        actorId: actorId,
++        actorDisplayName: actorName));
++
++    await db.SaveChangesAsync();
++    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
++}
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/TenantPropagationDelegatingHandlerTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/TenantPropagationDelegatingHandlerTests.cs
+index 69216890..cd550bba 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/TenantPropagationDelegatingHandlerTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/TenantPropagationDelegatingHandlerTests.cs
+@@ -70,6 +70,22 @@ public class TenantPropagationDelegatingHandlerTests
+         request.Headers.Contains("x-tenant-id").Should().BeFalse("empty tenant -> no header");
+     }
+ 
++    [TestMethod]
++    public async Task Explicit_x_tenant_id_Header_Wins_Over_Selection()
++    {
++        var selected = Guid.NewGuid();
++        var explicitTenant = Guid.NewGuid();
++        using var client = BuildClient(selected);
++
++        var request = new HttpRequestMessage(HttpMethod.Get, "http://x/students");
++        request.Headers.TryAddWithoutValidation("x-tenant-id", explicitTenant.ToString());
++        await client.SendAsync(request, CancellationToken.None);
++
++        request.Headers.GetValues("x-tenant-id").Should().ContainSingle()
++            .Which.Should().Be(explicitTenant.ToString(),
++                "an explicitly set x-tenant-id must win over the dev selection (the deep-link stamp carries the token's validated tenant)");
++    }
++
+     // ── Fault isolation (EnrollStudentDialog regression): a cache read failure
+     // inside SendAsync (e.g. Redis down) must NOT fail the dialog's API call —
+     // the request proceeds without the header and the receiver falls back to
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/DotNetBestPracticesArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/DotNetBestPracticesArchitectureTests.cs
+index b052f2c0..d728bd95 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/DotNetBestPracticesArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/DotNetBestPracticesArchitectureTests.cs
+@@ -201,4 +201,37 @@ public class DotNetBestPracticesArchitectureTests
+             "UpdateStudentAsync or live per-row link/unlink/contact calls (dto-form-model-mapping.md). Found: " +
+             string.Join(", ", failures));
+     }
++
++    /// <summary>
++    /// WS-E1 (ar-14-deep-links): both deep-link hosts must persist their DataProtection
++    /// keyring under the SAME <see cref="SchoolCollab.Core.DeepLinks.DeepLinkConstants.ApplicationName"/>
++    /// or Families cannot unprotect mint-side ciphertext. Guard the actual host entry points
++    /// (source shape) so a host forgetting <c>SetApplicationName(DeepLinkConstants.ApplicationName)</c>
++    /// fails here even when the wiring tests in <c>SchoolCollab.Families.Tests.Unit</c> build
++    /// their own providers (which could mask a dropped call in the real host).
++    /// </summary>
++    [TestMethod]
++    public void DeepLinkHosts_SetSharedKeyringApplicationName()
++    {
++        var deeplinkPrograms = new[]
++        {
++            Path.Combine(SrcRoot, "Assignments", "SchoolCollab.Assignments.Api", "Program.cs"),
++            Path.Combine(SrcRoot, "SchoolCollab.Families", "Program.cs"),
++        };
++
++        var missing = deeplinkPrograms.Where(p => !File.Exists(p)).ToList();
++        missing.Should().BeEmpty("expected deep-link host Program.cs files to exist: " + string.Join(", ", missing));
++
++        var failures = deeplinkPrograms
++            .Where(File.Exists)
++            .Where(p => !File.ReadAllText(p).Contains(
++                "SetApplicationName(DeepLinkConstants.ApplicationName)", StringComparison.Ordinal))
++            .Select(Relative)
++            .ToList();
++
++        failures.Should().BeEmpty(
++            "both deep-link hosts must call " +
++            "SetApplicationName(DeepLinkConstants.ApplicationName) on their keyring " +
++            "(shared DataProtection contract, ar-14-deep-links). Files:\n" + string.Join("\n", failures));
++    }
+ }
+\ No newline at end of file
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs
+index 10675b51..eb6ceecb 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs
+@@ -60,6 +60,7 @@ public class AssignmentActivityGroupTests
+                broadcaster,
+                new FakeNotificationPolicyResolver(),
+                new FakeFeatureFlagService(),
++               new FakeDeepLinkTokenMinter(),
+                new FakeHybridCache(),
+                NullLogger<PublishAssignmentCommandHandler>.Instance);
+ 
+@@ -120,6 +121,7 @@ public class AssignmentActivityGroupTests
+             new FakeBroadcaster(),
+             new FakeNotificationPolicyResolver(),
+             new FakeFeatureFlagService(),
++            new FakeDeepLinkTokenMinter(),
+             new FakeHybridCache(),
+             NullLogger<PublishAssignmentCommandHandler>.Instance);
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/FakeDeepLinkTokenMinter.cs b/tests/SchoolCollab.Assignments.Tests.Unit/FakeDeepLinkTokenMinter.cs
+new file mode 100644
+index 00000000..4d1612a7
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/FakeDeepLinkTokenMinter.cs
+@@ -0,0 +1,21 @@
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>Test double for <see cref="IDeepLinkTokenMinter"/> used by existing
++/// handler tests that must keep compiling after the publish handler gained the
++/// minter dependency but do not assert on token values. Returns the configured
++/// <see cref="Token"/> and an expiry = <paramref name="now"/> + validity (or the
++/// configured default) so downstream assertions on expiry deltas still hold.</summary>
++public sealed class FakeDeepLinkTokenMinter : IDeepLinkTokenMinter
++{
++    /// <summary>The token string returned by every mint (defaults to a sentinel).</summary>
++    public string Token { get; set; } = "fake-token";
++
++    /// <summary>Fallback validity days when <c>linkValidityDays</c> is null.</summary>
++    public int DefaultValidityDays { get; set; } = 7;
++
++    public DeepLinkMintedToken Mint(AssignmentRecipient recipient, int? linkValidityDays, DateTimeOffset now)
++        => new(Token, now.AddDays(linkValidityDays ?? DefaultValidityDays));
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/FakeNotificationPolicyResolver.cs b/tests/SchoolCollab.Assignments.Tests.Unit/FakeNotificationPolicyResolver.cs
+index 9b654bdc..c70f0469 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/FakeNotificationPolicyResolver.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/FakeNotificationPolicyResolver.cs
+@@ -16,7 +16,16 @@ internal sealed class FakeNotificationPolicyResolver : INotificationPolicyResolv
+         ReminderIntervalHoursFromOverride: false, LinkValidityDaysFromOverride: false,
+         SendoutTimeOfDayFromOverride: false, SendoutIntervalMinutesFromOverride: false);
+ 
++    private readonly int? _linkValidityDays;
++
++    /// <summary>Resolves the empty policy with an optional LinkValidityDays so
++    /// deep-link expiry tests can control the resolved value.</summary>
++    public FakeNotificationPolicyResolver(int? linkValidityDays = null)
++        => _linkValidityDays = linkValidityDays;
++
+     public Task<EffectiveNotificationPolicy> ResolveEffectiveAsync(
+         Guid tenantId, Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
+-        Task.FromResult(Empty);
++        Task.FromResult(_linkValidityDays is null
++            ? Empty
++            : Empty with { LinkValidityDays = _linkValidityDays });
+ }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentApprovalGateTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentApprovalGateTests.cs
+index bf2dde20..b3369765 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentApprovalGateTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentApprovalGateTests.cs
+@@ -57,7 +57,7 @@ public class PublishAssignmentApprovalGateTests
+         return new PublishAssignmentCommandHandler(
+             assignmentRepo, submissionRepo, contactResolver, linkRepo, groupLookup,
+             topicLookup, tenantProvider, broadcaster, policyResolver,
+-            featureFlags, cache,
++            featureFlags, new FakeDeepLinkTokenMinter(), cache,
+             NullLogger<PublishAssignmentCommandHandler>.Instance);
+     }
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentCommandHandlerDeepLinkTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentCommandHandlerDeepLinkTests.cs
+new file mode 100644
+index 00000000..918bd203
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/PublishAssignmentCommandHandlerDeepLinkTests.cs
+@@ -0,0 +1,302 @@
++using FluentAssertions;
++using Microsoft.AspNetCore.DataProtection;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Notifications;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E1 (ar-14-deep-links) — deep-link minting at the publish handler seam.
++/// Verifies:
++/// <list type="bullet">
++///   <item>a NEW recipient always mints (expiry = mint + policy LinkValidityDays, or +7 when null);</item>
++///   <item>republish REUSES an unexpired token (same string, no re-mint);</item>
++///   <item>republish RE-MINTS when the token is absent or expired;</item>
++///   <item>minting is independent of the FEATURE:EnableDeepLinks flag (OFF still mints).</item>
++/// </list>
++/// Uses the real <see cref="DeepLinkTokenMinter"/> (with a passthrough protector) for
++/// expiry assertions and a counting <see cref="IDeepLinkTokenMinter"/> for reuse/re-mint.
++/// </summary>
++[TestClass]
++public class PublishAssignmentCommandHandlerDeepLinkTests
++{
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
++    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-000000000020");
++    private static readonly Guid ContactStudent = Guid.Parse("00000000-0000-0000-0000-000000000030");
++
++    private static readonly SubscriberInfo Subscriber =
++        new(ContactStudent, ContactOwnerType.Student, StudentId, StudentId, ContactChannel.Email, null);
++
++    private static Assignment NewAssignment() =>
++        Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
++            .WithTenant(TenantId);
++
++    private static PublishAssignmentCommandHandler NewHandler(
++        FakeSubmissionRepository submissionRepo,
++        FakeNotificationPolicyResolver policyResolver,
++        IDeepLinkTokenMinter minter,
++        IFeatureFlagService? flags = null)
++    {
++        var assignment = NewAssignment();
++        var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
++        var contactResolver = new FakeContactResolver([Subscriber]);
++        var linkRepo = new FakeLinkRepository();
++        var groupLookup = new FakeActivityGroupLookup();
++        var topicLookup = new FakeTopicAssignmentLookup();
++        var tenantProvider = new FakeTenantProvider(TenantId);
++        var broadcaster = new FakeBroadcaster();
++        var cache = new FakeHybridCache();
++
++        return new PublishAssignmentCommandHandler(
++            assignmentRepo, submissionRepo, contactResolver, linkRepo, groupLookup,
++            topicLookup, tenantProvider, broadcaster, policyResolver,
++            flags ?? new FakeFeatureFlagService(), minter, cache,
++            NullLogger<PublishAssignmentCommandHandler>.Instance);
++    }
++
++    [TestMethod]
++    public void NewRecipient_MintsToken_ExpiryUsesPolicyValidity()
++    {
++        var submissionRepo = new FakeSubmissionRepository();
++        var policy = new FakeNotificationPolicyResolver(linkValidityDays: 5);
++        var minter = new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider()));
++        var handler = NewHandler(submissionRepo, policy, minter);
++        var before = DateTimeOffset.UtcNow;
++
++        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
++
++        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
++        recipient.DeepLinkToken.Should().NotBeNullOrWhiteSpace();
++        recipient.DeepLinkExpiresAt.Should().NotBeNull();
++        // expiry ≈ mint-time + 5 days (allow processing latency).
++        recipient.DeepLinkExpiresAt.Should().BeCloseTo(before.AddDays(5), TimeSpan.FromMinutes(2));
++    }
++
++    [TestMethod]
++    public void NewRecipient_MintsToken_NullValidityDefaultsToSevenDays()
++    {
++        var submissionRepo = new FakeSubmissionRepository();
++        var policy = new FakeNotificationPolicyResolver(linkValidityDays: null);
++        var minter = new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider()));
++        var handler = NewHandler(submissionRepo, policy, minter);
++        var before = DateTimeOffset.UtcNow;
++
++        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
++
++        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
++        recipient.DeepLinkExpiresAt.Should().BeCloseTo(before.AddDays(DeepLinkConstants.DefaultValidityDays), TimeSpan.FromMinutes(2));
++    }
++
++    [TestMethod]
++    public void Minting_IsIndependentOfEnableDeepLinksFlag_OffStillMints()
++    {
++        var submissionRepo = new FakeSubmissionRepository();
++        var policy = new FakeNotificationPolicyResolver();
++        var flags = new FakeFeatureFlagService(); // EnableDeepLinks OFF
++        var minter = new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider()));
++        var handler = NewHandler(submissionRepo, policy, minter, flags);
++
++        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
++
++        submissionRepo.Added.Should().ContainSingle().Subject.DeepLinkToken.Should().NotBeNullOrWhiteSpace();
++    }
++
++    [TestMethod]
++    public void Republish_ReusesUnexpiredToken_SameStringNoReMint()
++    {
++        var existing = AssignmentRecipient.Create(TenantId, NewAssignment().Id, ContactOwnerType.Student,
++            StudentId, StudentId, ContactStudent, ContactChannel.Email, null, true, true);
++        existing.AttachDeepLink("unexpired-token", DateTimeOffset.UtcNow.AddDays(3));
++        var seeding = new FakeSubmissionRepository();
++        seeding.Seed(existing);
++
++        var recording = new RecordingMinter();
++        var handler = NewHandler(seeding, new FakeNotificationPolicyResolver(), recording);
++        var originalToken = existing.DeepLinkToken;
++
++        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
++
++        recording.CallCount.Should().Be(0, "an unexpired token must not be re-minted on republish");
++        existing.DeepLinkToken.Should().Be(originalToken);
++    }
++
++    [TestMethod]
++    public void Republish_Remints_WhenExpired()
++    {
++        var existing = AssignmentRecipient.Create(TenantId, NewAssignment().Id, ContactOwnerType.Student,
++            StudentId, StudentId, ContactStudent, ContactChannel.Email, null, true, true);
++        existing.AttachDeepLink("expired-token", DateTimeOffset.UtcNow.AddDays(-1));
++        var seeding = new FakeSubmissionRepository();
++        seeding.Seed(existing);
++
++        var recording = new RecordingMinter();
++        var handler = NewHandler(seeding, new FakeNotificationPolicyResolver(), recording);
++
++        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
++
++        recording.CallCount.Should().Be(1);
++        existing.DeepLinkToken.Should().Be("token-1");
++        existing.DeepLinkExpiresAt.Should().BeAfter(DateTimeOffset.UtcNow);
++    }
++
++    [TestMethod]
++    public void Republish_Remints_WhenTokenAbsent()
++    {
++        var existing = AssignmentRecipient.Create(TenantId, NewAssignment().Id, ContactOwnerType.Student,
++            StudentId, StudentId, ContactStudent, ContactChannel.Email, null, true, true);
++        // no DeepLinkToken attached (absent)
++        var seeding = new FakeSubmissionRepository();
++        seeding.Seed(existing);
++
++        var recording = new RecordingMinter();
++        var handler = NewHandler(seeding, new FakeNotificationPolicyResolver(), recording);
++
++        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
++
++        recording.CallCount.Should().Be(1);
++        existing.DeepLinkToken.Should().Be("token-1");
++        existing.DeepLinkExpiresAt.Should().NotBeNull();
++    }
++
++    // ── Fakes (handler construction) ─────────────────────────────────────────
++
++    private sealed class RecordingMinter : IDeepLinkTokenMinter
++    {
++        public int CallCount { get; private set; }
++        public DeepLinkMintedToken Mint(AssignmentRecipient recipient, int? linkValidityDays, DateTimeOffset now)
++        {
++            CallCount++;
++            return new DeepLinkMintedToken($"token-{CallCount}", now.AddDays(linkValidityDays ?? 7));
++        }
++    }
++
++    private sealed class FakeSubmissionRepository : ISubmissionRepository
++    {
++        public List<AssignmentRecipient> Added { get; } = new();
++        private AssignmentRecipient? _existing;
++
++        public void Seed(AssignmentRecipient recipient) => _existing = recipient;
++
++        public Task<AssignmentRecipient?> GetRecipientAsync(Guid assignmentId, Guid contactId, CancellationToken ct = default)
++            => Task.FromResult(_existing);
++        public void Add(AssignmentRecipient r) => Added.Add(r);
++        public void Update(AssignmentRecipient r) { }
++
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
++        public Task<GuardianSubmissionGate?> GetGateAsync(Guid id, CancellationToken ct = default) => Task.FromResult<GuardianSubmissionGate?>(null);
++        public Task<GuardianSubmissionGate?> GetGateByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<GuardianSubmissionGate?>(null);
++        public void Add(GuardianSubmissionGate g) { }
++        public void Update(GuardianSubmissionGate g) { }
++        public Task<List<GuardianSubmissionGate>> ListGatesForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(new List<GuardianSubmissionGate>());
++        public Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(0);
++        public Task<AssignmentSubmission?> GetSubmissionAsync(Guid id, CancellationToken ct = default) => Task.FromResult<AssignmentSubmission?>(null);
++        public Task<AssignmentSubmission?> GetSubmissionByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<AssignmentSubmission?>(null);
++        public void Add(AssignmentSubmission s) { }
++        public void Update(AssignmentSubmission s) { }
++        public void Add(AssignmentSubmissionVersion v) { }
++        public void Add(SubmissionReview r) { }
++        public void Add(SubmissionAnswer a) { }
++        public void Add(SignatureEvent e) { }
++        public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<SignatureEvent?>(null);
++        public Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmission>());
++        public Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(new List<AssignmentRecipient>());
++        public Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmissionVersion>());
++        public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid t, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
++        public Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
++        public Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(Array.Empty<AssignmentRecipientDto>());
++        public Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<SubmissionDetailDto?>(null);
++        public Task<GuardianGateDto?> GetGuardianGateAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<GuardianGateDto?>(null);
++    }
++
++    private sealed class FakeTenantProvider : ITenantProvider
++    {
++        private readonly TenantContext _ctx;
++        public FakeTenantProvider(Guid tenantId) => _ctx = new TenantContext(tenantId, tenantId.ToString(), TenantType.School);
++        public TenantContext GetTenantContext() => _ctx;
++    }
++
++    private sealed class FakeContactResolver : IContactResolver
++    {
++        private readonly IReadOnlyList<SubscriberInfo> _subscribers;
++        public FakeContactResolver(IReadOnlyList<SubscriberInfo> subscribers) => _subscribers = subscribers;
++        public Task<IReadOnlyList<SubscriberInfo>> ResolveSubscribersAsync(ResolveSubscribersRequest request, CancellationToken ct = default)
++            => Task.FromResult(_subscribers);
++    }
++
++    private sealed class FakeBroadcaster : IAssignmentNotificationBroadcaster
++    {
++        public Task BroadcastPublishedAsync(AssignmentPublishedContext context, CancellationToken ct = default) => Task.CompletedTask;
++    }
++
++    private sealed class FakeActivityGroupLookup : IActivityGroupLookup
++    {
++        public Task<ActivityGroupRefDto[]> GetByIdsAsync(IReadOnlyList<Guid> activityGroupIds, CancellationToken ct = default) => Task.FromResult(Array.Empty<ActivityGroupRefDto>());
++        public Task<Guid[]> GetActiveMemberIdsAsync(IReadOnlyList<Guid> activityGroupIds, CancellationToken ct = default) => Task.FromResult(Array.Empty<Guid>());
++    }
++
++    private sealed class FakeTopicAssignmentLookup : ITopicAssignmentLookup
++    {
++        public Task<bool> IsTopicAssignedAsync(Guid? gradeLevelId, IReadOnlyList<Guid> activityGroupIds, Guid topicId, DateOnly effectiveDate, CancellationToken ct = default)
++            => Task.FromResult(true);
++    }
++
++    private sealed class FakeLinkRepository : IAssignmentActivityGroupRepository
++    {
++        public Task<Guid[]> GetGroupIdsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(Array.Empty<Guid>());
++        public Task ReplaceForAssignmentAsync(Guid assignmentId, Guid tenantId, IReadOnlyList<Guid> activityGroupIds, CancellationToken ct = default) => Task.CompletedTask;
++        public Task<Guid[]> GetAssignmentIdsByGroupAsync(Guid activityGroupId, CancellationToken ct = default) => Task.FromResult(Array.Empty<Guid>());
++        public Task<AssignmentGroupSummaryDto[]> GetAssignmentsByGroupAsync(Guid activityGroupId, CancellationToken ct = default) => Task.FromResult(Array.Empty<AssignmentGroupSummaryDto>());
++    }
++
++    private sealed class FakeAssignmentRepository : IAssignmentRepository
++    {
++        public Assignment? Assignment;
++        public Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Assignment);
++        public Task AddAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task UpdateAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { }
++        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++    }
++
++    private sealed class FakeHybridCache : HybridCache
++    {
++        public override ValueTask<T> GetOrCreateAsync<TState, T>(string key, TState state, Func<TState, CancellationToken, ValueTask<T>> factory, HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null, CancellationToken cancellationToken = default)
++            => factory(state, cancellationToken);
++        public override ValueTask SetAsync<T>(string key, T value, HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null, CancellationToken cancellationToken = default)
++            => ValueTask.CompletedTask;
++        public override ValueTask RemoveAsync(string key, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
++        public override ValueTask RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
++    }
++
++    // ── Passthrough DataProtection (lets the real minter compute expiry without a real keyring) ──
++
++    private sealed class PassthroughProvider : IDataProtectionProvider
++    {
++        public IDataProtector CreateProtector(string purpose) => new PassthroughProtector();
++    }
++
++    private sealed class PassthroughProtector : IDataProtector
++    {
++        public IDataProtector CreateProtector(string purpose) => this;
++        public byte[] Protect(byte[] plaintext) => plaintext;
++        public byte[] Unprotect(byte[] protectedData) => protectedData;
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+index 5d294e63..80c48dc0 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+@@ -162,7 +162,7 @@ public class SubmissionEngineTests
+             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+             new FakeTopicAssignmentLookup(),
+-            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
++            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+ 
+@@ -191,7 +191,7 @@ public class SubmissionEngineTests
+             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+             new FakeTopicAssignmentLookup(),
+-            TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
++            TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+ 
+@@ -322,7 +322,7 @@ public class SubmissionEngineTests
+             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+             new FakeTopicAssignmentLookup(),
+-            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
++            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+ 
+@@ -417,7 +417,7 @@ public class SubmissionEngineTests
+             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+             new FakeTopicAssignmentLookup(),
+-            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
++            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+ 
+         // Select only the guardian contact (spec §8).
+         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id, new[] { ContactGuardian }));
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/DeepLinks/DeepLinkProtectorTests.cs b/tests/SchoolCollab.Core.Tests.Unit/DeepLinks/DeepLinkProtectorTests.cs
+new file mode 100644
+index 00000000..6494662d
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/DeepLinks/DeepLinkProtectorTests.cs
+@@ -0,0 +1,110 @@
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.DataProtection;
++using SchoolCollab.Core.DeepLinks;
++
++namespace SchoolCollab.Core.Tests.Unit.DeepLinks;
++
++/// <summary>
++/// WS-E1 (ar-14-deep-links) — token crypto coverage: the purpose-scoped
++/// <see cref="DeepLinkProtector"/> must round-trip the exact <see cref="DeepLinkTokenPayload"/>
++/// (incl. the tenant id), reject tampered ciphertext without throwing, and be isolated
++/// from a different purpose or a different application name. Expiry and tenant-mismatch
++/// rejection live in the Families landing logic (<see cref="DeepLinkLandingServiceTests"/>);
++/// here we assert the crypto preserves the fields (expiry + tenant inclusive) that logic
++/// later checks.
++/// </summary>
++[TestClass]
++public class DeepLinkProtectorTests
++{
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid AssignmentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid WardStudentId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++
++    private static DeepLinkProtector CreateProtector(string applicationName = DeepLinkConstants.ApplicationName)
++        => new(DataProtectionProvider.Create(applicationName));
++
++    private static DeepLinkTokenPayload Payload(DateTimeOffset expiresAt)
++        => new(
++            TenantId,
++            AssignmentId,
++            ContactId,
++            OwnerType: 1, // Guardian
++            Role: 0,      // Primary
++            WardStudentId,
++            expiresAt);
++
++    [TestMethod]
++    public void RoundTrip_ReturnsIdenticalPayload_WithTenantAndExpiry()
++    {
++        var protector = CreateProtector();
++        var expiresAt = DateTimeOffset.UtcNow.AddDays(7);
++        var payload = Payload(expiresAt);
++
++        var token = protector.Protect(payload);
++        var result = protector.TryUnprotect(token);
++
++        result.Should().BeEquivalentTo(payload);
++        result!.TenantId.Should().Be(TenantId);
++        result.ExpiresAt.Should().Be(expiresAt);
++    }
++
++    [TestMethod]
++    public void ExpiredPayload_RoundTripsFaithfully_TheLandingRejectsIt()
++    {
++        // The protector faithfully preserves an already-expired ExpiresAt; the landing
++        // uses  Now < ExpiresAt  to reject it (covered in DeepLinkLandingServiceTests).
++        var protector = CreateProtector();
++        var pastExpiry = DateTimeOffset.UtcNow.AddDays(-1);
++
++        var token = protector.Protect(Payload(pastExpiry));
++        var result = protector.TryUnprotect(token);
++
++        result.Should().NotBeNull();
++        result!.ExpiresAt.Should().Be(pastExpiry);
++    }
++
++    [TestMethod]
++    public void TamperedToken_ReturnsNull_WithoutThrowing()
++    {
++        var protector = CreateProtector();
++        var token = protector.Protect(Payload(DateTimeOffset.UtcNow.AddDays(7)));
++
++        var flipped = token.Length > 8
++            ? token[..8] + (token[8] == 'A' ? 'B' : 'A') + token[9..]
++            : token + "XX";
++        var tampered = flipped + (flipped.Length == token.Length ? "!" : "");
++
++        var result = protector.TryUnprotect(tampered);
++
++        result.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void WrongPurpose_CannotUnprotect()
++    {
++        var protector = CreateProtector();
++        var payload = Payload(DateTimeOffset.UtcNow.AddDays(7));
++
++        // Protect the same payload under a different purpose on the same keyring.
++        var otherPurposeProtector = new EphemeralDataProtectionProvider().CreateProtector("some-other-purpose");
++        var foreignToken = otherPurposeProtector.Protect(JsonSerializer.Serialize(payload));
++
++        protector.TryUnprotect(foreignToken).Should().BeNull();
++    }
++
++    [TestMethod]
++    public void DifferentApplicationName_CannotUnprotect()
++    {
++        // A host forgetting SetApplicationName would drift its application name and
++        // therefore be unable to unprotect mint-side ciphertext — the wiring-level
++        // symptom DeepLinkWiringTests guards against at the constant/round-trip level.
++        var mintSide = CreateProtector("school-collab-deeplinks");
++        var driftedSide = CreateProtector("school-collab-deeplinks-typo");
++
++        var token = mintSide.Protect(Payload(DateTimeOffset.UtcNow.AddDays(7)));
++
++        driftedSide.TryUnprotect(token).Should().BeNull();
++    }
++}
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj b/tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj
+index 0224017c..bf0fdff1 100644
+--- a/tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj
++++ b/tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj
+@@ -18,6 +18,7 @@
+     <PackageReference Include="Microsoft.Extensions.Configuration" />
+     <PackageReference Include="Microsoft.Extensions.Logging" />
+     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
++    <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
+   </ItemGroup>
+ 
+   <ItemGroup>
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs b/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs
+new file mode 100644
+index 00000000..009fdf6d
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs
+@@ -0,0 +1,261 @@
++using System.Net;
++using FluentAssertions;
++using Microsoft.AspNetCore.DataProtection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Moq;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Families.DeepLinks;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-E1 (ar-14-deep-links) — the public landing's validate → flag → redirect logic
++/// (decision (c)/(g)). Covers: valid token + flag on → correct ward redirect; flag off
++/// (dark launch) → no sign-in / expired page; expired / garbage → expired outcome; the
++/// <c>OpenedAt</c> stamp invoked exactly once and only on a successful, flag-enabled
++/// landing; and a tenant-mismatched token rejected.
++/// </summary>
++[TestClass]
++public class DeepLinkLandingServiceTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaa1111-aaaa-1111-aaaa-111111111111");
++    private static readonly Guid AssignmentId = Guid.Parse("bbbb2222-bbbb-2222-bbbb-222222222222");
++    private static readonly Guid ContactId = Guid.Parse("cccc3333-cccc-3333-cccc-333333333333");
++    private static readonly Guid WardStudentId = Guid.Parse("dddd4444-dddd-4444-dddd-444444444444");
++
++    private sealed class RecordingHandler(List<HttpRequestMessage> log) : HttpMessageHandler
++    {
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            log.Add(request);
++            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
++        }
++    }
++
++    /// <summary>Handler that throws on any request — models a stamp transport failure.</summary>
++    private sealed class TransportFaultHandler : HttpMessageHandler
++    {
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++            => throw new System.Net.Http.HttpRequestException("simulated stamp transport failure");
++    }
++
++    /// <summary>Handler whose response never completes — models a slow-but-reachable stamp
++    /// that exceeds the <see cref="FamiliesApiClient.MarkRecipientOpenedAsync"/> ~3s per-call
++    /// deadline (P1 / ar-14). It honors the request cancellation token (as a real HTTP
++    /// handler does) — so when the linked-CTS deadline fires the await is cancelled with
++    /// <see cref="OperationCanceledException"/> — but it never returns a successful response,
++    /// so the only way out is the deadline.</summary>
++    private sealed class HangingHandler : HttpMessageHandler
++    {
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            var tcs = new TaskCompletionSource<HttpResponseMessage>(
++                TaskCreationOptions.RunContinuationsAsynchronously);
++            cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
++            return tcs.Task;
++        }
++    }
++
++    /// <summary>Builds a landing service over a real protector + tenant accessor and a
++    /// recording HTTP client (so the stamp call count is observable). Returns the
++    /// <see cref="DeepLinkProtector"/> the service owns so tests mint with the SAME
++    /// instance (a single <see cref="EphemeralDataProtectionProvider"/> key set).</summary>
++    private static (DeepLinkLandingService Service, List<HttpRequestMessage> Requests, Mock<IFeatureFlagService> Flag, DeepLinkProtector Protector)
++        Build(MockBehavior flagBehavior = MockBehavior.Strict)
++    {
++        var log = new List<HttpRequestMessage>();
++        var http = new HttpClient(new RecordingHandler(log))
++        {
++            BaseAddress = new Uri("http://localhost")
++        };
++        return BuildCore(http, log, flagBehavior);
++    }
++
++    /// <summary>Like <see cref="Build"/> but over a caller-provided primary handler, returning
++    /// only what the fault/tenant-header tests need (no recording log).</summary>
++    private static (DeepLinkLandingService Service, Mock<IFeatureFlagService> Flag, DeepLinkProtector Protector)
++        BuildOverHandler(HttpMessageHandler handler, MockBehavior flagBehavior = MockBehavior.Strict)
++    {
++        var http = new HttpClient(handler)
++        {
++            BaseAddress = new Uri("http://localhost")
++        };
++        var (service, _, flag, protector) = BuildCore(http, new List<HttpRequestMessage>(), flagBehavior);
++        return (service, flag, protector);
++    }
++
++    private static (DeepLinkLandingService Service, List<HttpRequestMessage> Requests, Mock<IFeatureFlagService> Flag, DeepLinkProtector Protector)
++        BuildCore(HttpClient http, List<HttpRequestMessage> log, MockBehavior flagBehavior)
++    {
++        var protector = new DeepLinkProtector(new EphemeralDataProtectionProvider());
++        var tenantProvider = new TenantProvider();
++        var tenantAccessor = new TenantContextAccessor(tenantProvider);
++
++        var api = new FamiliesApiClient(http, NullLogger<FamiliesApiClient>.Instance);
++
++        var flag = new Mock<IFeatureFlagService>(flagBehavior);
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(false);
++
++        var service = new DeepLinkLandingService(protector, tenantAccessor, flag.Object, api, NullLogger<DeepLinkLandingService>.Instance);
++        return (service, log, flag, protector);
++    }
++
++    private static string MintToken(DeepLinkProtector protector, Guid? wardStudentId, DateTimeOffset expiresAt)
++        => protector.Protect(new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, OwnerType: 1, Role: 0, wardStudentId, expiresAt));
++
++    private static bool IsStamp(HttpRequestMessage r) =>
++        r.RequestUri?.PathAndQuery.Contains("/recipients/", StringComparison.OrdinalIgnoreCase) == true
++        && r.RequestUri!.PathAndQuery.EndsWith("/opened", StringComparison.OrdinalIgnoreCase);
++
++    [TestMethod]
++    public async Task ValidToken_FlagOn_RedirectsToWardList_AndStampsExactlyOnce()
++    {
++        var (service, requests, flag, protector) = Build();
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7));
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
++        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++        result.TenantId.Should().Be(TenantId);
++        result.ContactId.Should().Be(ContactId);
++        requests.Count(IsStamp).Should().Be(1);
++    }
++
++    [TestMethod]
++    public async Task StampTransportFailure_DoesNotBreakLandingRedirect()
++    {
++        // Best-effort contract: a stamp request that throws must NOT escape HandleAsync as
++        // an unhandled exception (P1) — the landing must still succeed and redirect.
++        var (service, flag, protector) = BuildOverHandler(new TransportFaultHandler());
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7));
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
++        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++        result.TenantId.Should().Be(TenantId);
++        result.ContactId.Should().Be(ContactId);
++    }
++
++    [TestMethod]
++    public async Task StampExceedsPerCallDeadline_DoesNotBreakLandingRedirect()
++    {
++        // P1 (ar-14): the stamp is bounded to a ~3s per-call deadline. A slow-but-reachable
++        // API that never returns must NOT stall the landing — the deadline raises
++        // OperationCanceledException with the CALLER's ct NOT cancelled, which the guard
++        // classifies as a best-effort stamp failure and continues with the redirect. We
++        // assert the outcome, not wall-clock.
++        var (service, flag, protector) = BuildOverHandler(new HangingHandler());
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7));
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
++        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++        result.TenantId.Should().Be(TenantId);
++        result.ContactId.Should().Be(ContactId);
++    }
++
++    [TestMethod]
++    public async Task Stamp_CarriesPayloadTenant_Header()
++    {
++        // P2: the stamp must carry the token's validated payload tenant (x-tenant-id) so a
++        // dev selection that differs does not 404 the tenant-scoped lookup.
++        var (service, requests, flag, protector) = Build();
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7));
++
++        await service.HandleAsync(token);
++
++        var stamp = requests.Single(IsStamp);
++        stamp.Headers.TryGetValues("x-tenant-id", out var values).Should().BeTrue("stamp must carry x-tenant-id");
++        values!.Should().ContainSingle().Which.Should().Be(TenantId.ToString());
++    }
++
++    [TestMethod]
++    public async Task ValidToken_NoWardStudent_RedirectsToWardList()
++    {
++        var (service, _, flag, protector) = Build();
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, wardStudentId: null, DateTimeOffset.UtcNow.AddDays(7));
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
++        result.RedirectUrl.Should().Be("/ward");
++    }
++
++    [TestMethod]
++    public async Task ExpiredToken_ReturnsExpired_AndDoesNotStamp()
++    {
++        var (service, requests, flag, protector) = Build();
++        flag.Setup(f => f.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(-1));
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Expired);
++        result.RedirectUrl.Should().BeNull();
++        requests.Count(IsStamp).Should().Be(0);
++    }
++
++    [TestMethod]
++    public async Task GarbageToken_ReturnsExpired_AndDoesNotStamp()
++    {
++        var (service, requests, flag, _) = Build();
++        flag.Setup(f => f.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++
++        var result = await service.HandleAsync("not-a-valid-token");
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Expired);
++        result.RedirectUrl.Should().BeNull();
++        requests.Count(IsStamp).Should().Be(0);
++    }
++
++    [TestMethod]
++    public async Task FlagOff_ReturnsDark_AndDoesNotStamp_NoSignIn()
++    {
++        var (service, requests, _, protector) = Build();
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7));
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Dark);
++        result.RedirectUrl.Should().BeNull();
++        requests.Count(IsStamp).Should().Be(0);
++    }
++
++    [TestMethod]
++    public async Task TenantMismatch_ReturnsExpired_AndDoesNotStamp()
++    {
++        var (service, requests, flag, protector) = Build();
++        flag.Setup(f => f.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7));
++        var otherTenant = Guid.Parse("99999999-9999-9999-9999-999999999999");
++
++        var result = await service.HandleAsync(token, expectedTenantId: otherTenant);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Expired);
++        result.RedirectUrl.Should().BeNull();
++        requests.Count(IsStamp).Should().Be(0);
++    }
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/DeepLinkWiringTests.cs b/tests/SchoolCollab.Families.Tests.Unit/DeepLinkWiringTests.cs
+new file mode 100644
+index 00000000..ab8b53d0
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/DeepLinkWiringTests.cs
+@@ -0,0 +1,76 @@
++using FluentAssertions;
++using Microsoft.AspNetCore.DataProtection;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Core.DeepLinks;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-E1 (ar-14-deep-links) — wiring of the DataProtection contract shared by the
++/// Assignments API (mint) and the Families host (validate). Both hosts must persist
++/// their keyring under the SAME <see cref="DeepLinkConstants.ApplicationName"/> and
++/// protect with the SAME <see cref="DeepLinkConstants.Purpose"/> or the Families host
++/// cannot unprotect mint-side ciphertext. This guarantees the shared constants are
++/// stable and that two wrapper sides built under the shared application name round-trip,
++/// while a drifted application name fails — the exact symptom a host forgetting
++/// <c>SetApplicationName(DeepLinkConstants.ApplicationName)</c> would produce.
++/// </summary>
++[TestClass]
++public class DeepLinkWiringTests
++{
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid AssignmentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid WardStudentId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++
++    private static DeepLinkTokenPayload Payload() => new(
++        TenantId, AssignmentId, ContactId, OwnerType: 1, Role: 0, WardStudentId,
++        DateTimeOffset.UtcNow.AddDays(7));
++
++    [TestMethod]
++    public void SharedConstants_AreStable()
++    {
++        DeepLinkConstants.ApplicationName.Should().Be("school-collab-deeplinks");
++        DeepLinkConstants.Purpose.Should().Be("ar-deeplink");
++    }
++
++    [TestMethod]
++    public void MintAndValidateSides_RoundTrip_UnderSharedApplicationName()
++    {
++        // Both hosts share the key material (the Redis-persisted keyring — modelled here
++        // by ONE EphemeralDataProtectionProvider) and use the same purpose constant, so a
++        // token minted on the Assignments side unprotects on the Families side.
++        var provider = new EphemeralDataProtectionProvider();
++        var mintSide = new DeepLinkProtector(provider);
++        var validateSide = new DeepLinkProtector(provider);
++
++        var expected = Payload();
++        var token = mintSide.Protect(expected);
++        var result = validateSide.TryUnprotect(token);
++
++        result.Should().BeEquivalentTo(expected);
++    }
++
++    [TestMethod]
++    public void DriftedApplicationName_FailsCrossUnprotect()
++    {
++        // A host that set SetApplicationName to anything other than the shared constant
++        // can no longer read mint-side ciphertext — the drift the wiring must prevent.
++        // Each AddDataProtection() container gets its own ephemeral keyring + app name,
++        // so cross-unprotect can only succeed when both share the same app name + keys.
++        var mintSide = CreateSide(DeepLinkConstants.ApplicationName);
++        var driftedSide = CreateSide("a-different-application-name");
++
++        var token = mintSide.Protect(Payload());
++
++        driftedSide.TryUnprotect(token).Should().BeNull();
++    }
++
++    private static DeepLinkProtector CreateSide(string applicationName)
++    {
++        var services = new ServiceCollection();
++        services.AddDataProtection().SetApplicationName(applicationName);
++        var provider = services.BuildServiceProvider().GetRequiredService<IDataProtectionProvider>();
++        return new DeepLinkProtector(provider);
++    }
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/LinkExpiredBunitTests.cs b/tests/SchoolCollab.Families.Tests.Unit/LinkExpiredBunitTests.cs
+new file mode 100644
+index 00000000..35371477
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/LinkExpiredBunitTests.cs
+@@ -0,0 +1,48 @@
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.FluentUI.AspNetCore.Components;
++using SchoolCollab.Families.Components.Pages.DeepLink;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-E1 (ar-14-deep-links) — the friendly "link expired" page that the public /deeplink
++/// landing redirects to for an expired / tampered / dark-launch-false token (the flow is a
++/// 302 → 200 redirect to this page, not a 410). Renders under an anonymous principal (the
++/// default bUnit principal) and shows plain, actionable copy — no stack / error chrome.
++/// </summary>
++[TestClass]
++public class LinkExpiredBunitTests : BunitContext
++{
++    public LinkExpiredBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++    }
++
++    [TestMethod]
++    public void Renders_FriendlyExpiredMessage()
++    {
++        var cut = Render<LinkExpired>();
++
++        cut.Markup.Should().Contain("This link has expired");
++        cut.Markup.Should().Contain("Ask your school or your guardian for a fresh");
++        cut.Markup.Should().Contain("contact your school office");
++        // The expired-link page must not leak stack/error chrome.
++        cut.Markup.Should().NotContain("Stack Trace");
++        cut.Markup.Should().NotContain("Exception");
++    }
++
++    [TestMethod]
++    public void Renders_GoToAssignments_Anchor_ToFamiliesRoot()
++    {
++        // P2 (ar-14): the expired page must offer a navigation affordance back to the
++        // Families root, not trap the visitor on dead-end copy.
++        var cut = Render<LinkExpired>();
++
++        var anchor = cut.Find("[class*='deeplink-expired-anchor']");
++        anchor.TextContent.Trim().Should().Be("Go to my assignments");
++        anchor.GetAttribute("href").Should().Be("/ward");
++    }
++}

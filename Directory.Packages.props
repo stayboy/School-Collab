@@ -24,22 +24,28 @@
     <PackageVersion Include="RabbitMQ.Client" Version="7.2.1" />
   </ItemGroup>
   <ItemGroup Label="Microsoft.Extensions">
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Abstractions" Version="10.0.9" />
+    <!-- WS-E1 (ar-14-deep-links): concrete DataProtection provider used by the
+         DeepLinkProtectorTests / DeepLinkWiringTests unit projects to mint real
+         keyrings under the shared application name. -->
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.9" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.8" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
     <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
-    <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.1.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.9" />
     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.6.0" />
   </ItemGroup>
