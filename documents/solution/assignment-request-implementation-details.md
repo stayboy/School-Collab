@@ -798,8 +798,7 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   deep links (route + command unchanged); auto-finalize-on-sign + Primary-guardian-priority enforcement recorded
   backlog.
 - `ar-10-ai-extensions` — **CLOSED 2026-09-15** (`rounds/round-ar-10-ai-extensions.md` +
-  `diffs-ar-10-ai-extensions.patch`; commit `a5f49efd` on `stack/10-ar-10-ai-extensions` → **PR #232**, open
-  awaiting Build & Test CI at log time). Delivered (WS-B2): three nullable difficulty columns threaded
+  `diffs-ar-10-ai-extensions.patch`; commit `a5f49efd` on `stack/10-ar-10-ai-extensions` → **PR #232**, **merged 2026-09-15**). Delivered (WS-B2): three nullable difficulty columns threaded
   create/update/read-back/duplicate (the `AssignmentSummary`/`AssignmentRepository` intermediate projection) +
   wizard `QuestionGenerationSection` difficulty fields (persist without Generate — the rework R7 fix); org-level
   `TenantAssignmentAiPrompt` (Settings entity + CQRS + `/assignment-ai-prompt` Admin page +
@@ -820,8 +819,7 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   plan `rounds/round-ar-11-c3-certificates.md`, authored 2026-09-15; fires after #232 merges).
 - `ar-11-c3-certificates` — **CLOSED 2026-09-15, LIGHT round (Tiers 1–2; UI tester skipped by owner choice)**
   (`rounds/round-ar-11-c3-certificates.md` + `diffs-ar-11-c3-certificates.patch`; branch `stack/11-ar-11-c3-certificates`
-  cut from stack/10 tip `a5f49efd` — NOT main, #232 left unmerged by owner instruction; commit pending owner
-  authorization). Delivered (C3): QuestPDF **2026.8.0** CPM entry + certificate pipeline — `IAssignmentCertificateGenerator`
+  cut from the stack/10 tip — **merged 2026-09-15 as PR #233** (squash `d2169aef`)). Delivered (C3): QuestPDF **2026.8.0** CPM entry + certificate pipeline — `IAssignmentCertificateGenerator`
   (Core/Services) + `AssignmentCertificateContent` + `AssignmentCertificateException` (→ 502, ar-2 precedent);
   renderer in the **API** layer (plan amendment **A-1**: decision (a)'s Application placement could never resolve —
   the API host references only Core, `AddAssignmentsCore` is its sole wiring, Application is an Admin-only RCL);
@@ -840,11 +838,10 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   WS-G); names degrade to raw ids on directory miss. ar-10's CI-flake diagnostic on `AssignmentCreateBunitTests`
   rides this commit set (run 34938835437 rerun green — the flake proved ~1-in-55, unreproducible in ~53
   container-controlled Linux runs).
-  **Next:** Phase 2 ward experience is the largest remaining gap after C3 (spec §3.2 D1); then Phase 4 WS-E;
-  D-6 identity before Phase 5. #232 (ar-10) still open/unmerged — merge order: #232 then stack/11 PR.
+  **Next:** Phase 2 ward experience (then Phase 4 WS-E; D-6 identity before Phase 5). *(Record refresh 2026-09-16: #232 + #233 both merged 2026-09-15.)*
 - `ar-12-ward-gating-core` — **CLOSED 2026-09-15, LIGHT round (Tiers 1–2)**; Phase 2 slice **2a**
   (`rounds/round-ar-12-ward-gating-core.md` + `diffs-ar-12-ward-gating-core.patch`; branch
-  `stack/12-ar-12-ward-gating-core` cut from `main` @ `d2169aef`; commit pending owner authorization).
+  `stack/12-ar-12-ward-gating-core` cut from `main` @ `d2169aef`; **merged 2026-09-15 as PR #235** (squash `f023d3ac`)).
   Delivered (WS-D1 core + WS-A5, **no UI**): `ModuleProgress` entity (per ward × module, `PercentComplete`
   0–100, `CompletedAt` stamped once at the module's `MinCompletionThresholdPercent`) + ONE additive migration;
   idempotent **monotonic** `Record` (replays/out-of-order heartbeats safe, never regresses or re-stamps);
@@ -862,5 +859,17 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   **Residuals:** ward-list N+1 (v1); recipient-link-only targeting (grade/group → 2b); read-then-write race on
   concurrent identical first reports (rare; unique index protects integrity); ward routes keep the teacher/admin
   OIDC posture until F1.
-  **Next:** slice **2b** — F1 host/auth decision + D2 ward player UI (binds `QuestionsUnlocked`/`PercentComplete`)
-  + the ar-12 carried P2s; then 2c (F2 ward experience), Phase 4 WS-E, D-6, Phase 5 WS-G.
+  **Next:** **Phase 4 WS-E delivery** (E1 token deep links first — unblocks WS-F3; E2 needs a provider decision;
+  then E3 worker); D-6 identity before Phase 5 WS-G.
+- `ar-13-families-ward-surface` — **CLOSED 2026-09-15/16, FULL FOUR-AGENT round (Tier 3)**; Phase 2 slice **2b**
+  (`rounds/round-ar-13-families-ward-surface.md` + `diffs-ar-13-families-ward-surface.patch`; branch
+  `stack/13-ar-13-families-ward-surface`, rebased onto `main` @ `f023d3ac` after #235 merged; commit `0037edf` → **PR #236**).
+  Delivered (F1 + F2 + D2): new `SchoolCollab.Families` surface host (Admin-mirror auth startup switch, dev TestAuth,
+  AppHost registration, host-local `Error.razor`, no admin route leakage); ward list `/ward` (+ `/ward/{sid}`) and
+  D2 ward player `/ward/{sid}/assignments/{id}` binding the ar-12 ward DTOs (module sequence video→guide→questions,
+  `QuestionsUnlocked` gate, mark-read, submit + scored result, monotonic video heartbeat via `wardPlayer.js`);
+  cohesion (ar-12 carried P2) — ward-list read moved to `IWardAssignmentProjectionRepository`. 39 files, +3,981/−52.
+  Pipeline: worker passes 1–5 → reviewer **P2-only** → cleanup pass 6 → UI tester **P2-only** → cleanup pass 7 →
+  tester re-verify **P2-only** → CLOSED. Authoritative: build 0 errors; **2,252/0** (Families 16/0).
+  **Residuals:** superseded-load race untested (epoch guard statically sound); `ReportModuleProgressAsync` non-204
+  return discarded (v1); captions-ready only (G1); ward OIDC identities (D-6) + token deep links (E1).

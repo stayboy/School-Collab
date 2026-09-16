@@ -55,7 +55,6 @@ public class RecordModuleProgressCommandHandlerTests
         public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
             => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
         public void Add(ModuleProgress p) => Rows.Add(p);
-        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
         public Task<int> SaveChangesAsync(CancellationToken ct = default) { SaveCalls++; return Task.FromResult(1); }
     }
 

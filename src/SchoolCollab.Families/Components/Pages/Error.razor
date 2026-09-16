@@ -1,0 +1,33 @@
+@* Host-local error surface for the Families host's UseExceptionHandler("/Error")
+   (Program.cs). The Admin host's Error.razor lives in SchoolCollab.Admin.Shared,
+   which Families deliberately does not reference (it would register every admin
+   @page route). This minimal FluentUI-only page keeps Families dependency-clean
+   while giving the exception handler a target route that mirrors the Admin
+   startup posture. *@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" Gap="0.5rem">
+    <h1>Error</h1>
+    <FluentMessageBar Intent="MessageIntent.Error">
+        An error occurred while processing your request.
+    </FluentMessageBar>
+
+    @if (ShowRequestId)
+    {
+        <p><strong>Request ID:</strong> <code>@RequestId</code></p>
+    }
+</FluentStack>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

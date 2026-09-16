@@ -29,6 +29,11 @@
 > **Asset inventory refreshed 2026-09-15** after rounds ar-1…ar-10 — state markers updated
 > to match shipped code, with round attributions in the cells. Remaining ❌/🟡 rows are
 > the open lanes (Phase 2 ward experience, C3 certificates/ar-11, Phase 4/5).
+>
+> **Close-out note 2026-09-16 (ar-13):** the Phase 2 ward experience landed —
+> `SchoolCollab.Families` host (F1) + ward list (F2) + D2 ward player (ar-13);
+> C3 certificates landed (ar-11). The remaining open lanes are Phase 4/5 plus the
+> E1 deep-link tokens and D-6 ward identities.
 
 ### §3.1 Google Classroom core
 
@@ -60,7 +65,7 @@
 | Spec feature | State | Reusable asset / gap |
 |---|---|---|
 | Modules (video → guide → questions) | ✅ | `ContentModule` entity + aggregate `AddModule` + `MinCompletionThresholdPercent` validation + wizard Resources UI shipped (ar-4). |
-| Gating (unlock questions after module complete) | 🟡 | **Server half landed (ar-12)**: per-(ward, module) `ModuleProgress` (monotonic, idempotent, `CompletedAt` stamped at `MinCompletionThresholdPercent`) + `RequiredModuleIncompleteException` → 409 on submission + ward queries exposing `QuestionsUnlocked`/`HasLockedModules`. **Remaining:** the player UI lock affordances + progress heartbeats (slice 2b). |
+| Gating (unlock questions after module complete) | 🟡 | **Server half landed (ar-12)**: per-(ward, module) `ModuleProgress` (monotonic, idempotent, `CompletedAt` stamped at `MinCompletionThresholdPercent`) + `RequiredModuleIncompleteException` → 409 on submission + ward queries exposing `QuestionsUnlocked`/`HasLockedModules`. **Player half landed (ar-13)**: `SchoolCollab.Families` D2 player — module sequence, `QuestionsUnlocked` lock affordance, monotonic video progress heartbeat (`wardPlayer.js` on `<video>`) + mark-read → `POST …/modules/{moduleId}/progress`. |
 | Question types | ✅ | `QuestionType` (MultipleChoice/TrueFalse/ShortAnswer) + `AssignmentQuestion`/`QuestionOption` with `CorrectOptionId`, wired into create/update + AI generation + wizard editor (ar-1…ar-3). |
 | Pass threshold + retries | ✅ | `IScoringEngine` + `PassScore` + `MaxAttempts` + per-question structured answers + teacher attempt-override shipped (ar-6). |
 | Immediate vs held feedback | ✅ | `InstantGraded` returns the per-question feedback envelope at submit; `AutoGraded`/`TeacherGraded` hold feedback (ar-6). |
@@ -94,7 +99,7 @@
 |---|---|---|
 | Approval step (Approver persona) | ✅ | `FEATURE:RequireAssignmentApproval` + `ApprovalStatus` (Pending/Approved/Rejected) + submit-for-approval/approve/reject flows shipped (ar-5). Approver = teacher (`Guid.Empty` placeholder per D-6 until the identity round). |
 | Archive after grace period, exportable | 🟡 | `Archived` state + `ArchiveGraceDays` + archive sweep shipped (ar-5); export still net-new. |
-| **Ward / guardian-facing app** | ❌ | **The largest remaining structural gap.** The guardian e-sign page ships hosted inside the Assignments Application with an acting-guardian self-select (ar-9 v1 posture); no ward experience, no `SchoolCollab.Families` host, no token-auth deep links (Phase 2 F1/F2 + Phase 4 E1 relocate it). |
+| **Ward / guardian-facing app** | 🟡 | **F1 host + F2 list + D2 player landed (ar-13)**: `SchoolCollab.Families` Blazor host (mirrors the Admin auth startup switch; dev TestAuth), ward list `/ward`, ward player `/ward/{sid}/assignments/{id}` binding the ar-12 ward DTOs. **Remaining:** token-auth deep links (E1) + ward OIDC identities (D-6); the guardian e-sign page still ships inside Assignments with the acting-guardian self-select (ar-9 v1 posture). |
 
 ### Cross-cutting assets that carry most of the design
 
@@ -224,10 +229,11 @@ within a phase.
   duplicates it; lifecycle demo Draft→Scheduled→Published→Closed→Archived with approval
   gate on; `dotnet build`/`dotnet test` green; architecture tests green.
 
-### Phase 2 — Ward completion experience (WS-A5, WS-D, WS-F1/F2) — **in progress** (ar-12 landed the WS-D1 core + WS-A5 queries; player UI + F1 open)
+### Phase 2 — Ward completion experience (WS-A5, WS-D, WS-F1/F2) — **landed** (ar-12 WS-D1 core + A5 queries; ar-13 F1 host + F2 list + D2 player)
 - [x] **D1 core + A5 (ar-12, 2026-09-15)**: `ModuleProgress` entity + additive migration, idempotent monotonic `Record`, server-side required-module gate on submission (409, `GuardianSubmissionGate` untouched), `POST /{id}/students/{sid}/modules/{moduleId}/progress`, ward view `GET /{id}/students/{sid}/modules` (`QuestionsUnlocked`), ward list `GET /students/{sid}/assignments` (`HasLockedModules`). 26 files, 1,691/0. Round: `rounds/round-ar-12-ward-gating-core.md`.
-- [ ] F1 host + auth modes; D2 ward player UI (binds `QuestionsUnlocked`/`PercentComplete`); F2 ward list experience.
-  **Carried from ar-12:** ward-list read lives on `IModuleProgressRepository` (cohesion P2 — migrate in 2b); ward-list targeting is recipient-link only (grade/group cross-context resolution → 2b); ward-list N+1 enrichment acceptable for v1.
+- [x] **F1 host + F2 list + D2 player (ar-13, 2026-09-15/16)**: new `SchoolCollab.Families` surface host (Admin-mirror auth startup switch, dev TestAuth), ward list `/ward` (+ `/ward/{sid}`), D2 ward player `/ward/{sid}/assignments/{id}` (module sequence video→guide→questions, `QuestionsUnlocked` lock affordance, monotonic video heartbeat via `wardPlayer.js`, mark-read, submit + scored result), AppHost registration, `configuration.md` §2/§5. 36 files, 2,252/0. Round: `rounds/round-ar-13-families-ward-surface.md`.
+  **Carried from ar-12 (resolved by ar-13):** ward-list read migrated off `IModuleProgressRepository` to `IWardAssignmentProjectionRepository`.
+  **Still open:** token-auth deep links (E1) + ward OIDC identities (D-6); ward-list targeting is recipient-link only (grade/group cross-context resolution); ward-list N+1 enrichment acceptable for v1; discarded `ReportModuleProgressAsync` non-204 return (declared v1).
 - **Accept:** a ward (authenticated in-app) opens a published AR, completes modules in
   order, questions unlock per thresholds, submits answers, gets auto-scored result with
   retry per policy; unit + bUnit coverage for gating engine and player states.
@@ -243,7 +249,7 @@ within a phase.
 - [x] C3 certificate (D-1 local `IFileStore` + D-3 QuestPDF 2026.8.0) — **landed ar-11 (2026-09-15, light
       round; plan amendment A-1: renderer in the Api layer)**. Transactional finalize generation +
       `AttachCertificate` + download route + JS-interop download on both UI surfaces. `rounds/round-ar-11-c3-certificates.md`
-      CLOSED; commit pending owner authorization on `stack/11-ar-11-c3-certificates` (stack/10 #232 unmerged).
+      CLOSED; **merged 2026-09-15 as PR #233** (squash `d2169aef`).
 - [ ] WS-F3 partial: relocate the sign page behind real auth + E1 deep links
       (route + command unchanged) — blocked on Phase 2's F1 host + Phase 4's E1.
 - **Accept:** guardian reviews ward's completed work, signs with consent text, submission
@@ -281,11 +287,10 @@ within a phase.
 ## 6. Immediate next actions
 
 1. ~~Stakeholder pass on decisions~~ — done (Phase 0 complete).
-2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10,
-   light round (Tiers 1–2) for ar-11; round slicing + per-round log in
+2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
+   light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-15):** merge the open train — #232 (ar-10) then #233 (ar-11), each
-   on owner instruction — then fire the **Phase 2 ward experience** round
-   (WS-A5/D1/D2/F1/F2 — the largest remaining spec gap) under a fresh execution-mode
-   menu. After that: Phase 4 WS-E delivery, D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-16):** the train is drained (#232, #233, #235 merged) and Phase 2 is **landed**
+   (ar-12 + ar-13 = PR #236). Next: **Phase 4 WS-E delivery** (E1 token deep links first — unblocks
+   WS-F3; E2 needs a provider decision; then E3 worker), D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).

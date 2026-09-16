@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "SchoolCollab.Families": {
+      "commandName": "Project",
+      "applicationUrl": "https://localhost:7400;http://localhost:5400",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

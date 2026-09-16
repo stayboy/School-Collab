@@ -1,0 +1,30 @@
+@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Sections
+
+<FluentDesignTheme StorageName="families-theme" />
+
+<FluentToastProvider />
+<FluentDialogProvider />
+<FluentMessageBarProvider />
+<FluentTooltipProvider />
+
+<FluentLayout>
+    <FluentHeader Height="50">
+        <FluentStack Orientation="Orientation.Horizontal"
+                     VerticalAlignment="VerticalAlignment.Center"
+                     HorizontalGap="12">
+            <span class="families-brand">School Collab — My Assignments</span>
+        </FluentStack>
+    </FluentHeader>
+    <div class="families-body">
+        <div class="families-content">
+            @Body
+        </div>
+    </div>
+</FluentLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">&#10060;</span>
+</div>

@@ -1,0 +1,2009 @@
+diff --git a/.pi/skills/orchestrator-worker-reviewer/references/models.md b/.pi/skills/orchestrator-worker-reviewer/references/models.md
+index 8139d1fc..5f70093d 100644
+--- a/.pi/skills/orchestrator-worker-reviewer/references/models.md
++++ b/.pi/skills/orchestrator-worker-reviewer/references/models.md
+@@ -9,13 +9,31 @@ the catalog.
+ Model ids come from `subagent({ action: "models" })` — copy exact `provider/id`
+ strings; bare ids resolve only when unique.
+ 
+-| Role | pi default |
++**Registry refresh (2026-09-15): the `ollama` provider's id set drifted — verify
++ids against `~/.pi/agent/models-store.json` before dispatching.** The `ollama-cloud`
++provider now hosts the modern ids. Current resolvable defaults:
++
++| Role | pi default (2026-09-15) |
+ |---|---|
+-| Orchestrator | `ollama/glm-5.3-flash:cloud` |
++| Orchestrator | `ollama-cloud/glm-5.3-flash` |
+ | Worker | `ollama/deepseek-v4-flash:0731-cloud` |
+-| Reviewer | `ollama/kimi-k2.7-code:cloud` |
++| Reviewer | `ollama-cloud/deepseek-v4.1-flash` (owner override 2026-09-15, replacing `ollama/kimi-k2.7-code:cloud`) |
+ | UI Tester | `ollama/minimax-m3:cloud` |
+ 
++Historical (pre-2026-09-15, may no longer resolve): orchestrator
++`ollama/glm-5.3-flash:cloud` (this is the one that drifted). The
++`ollama` provider still carries `kimi-k2.7-code:cloud`, `glm-5.3:cloud`,
++`deepseek-v4-flash:0731-cloud`, and `minimax-m3:cloud`.
++
++## Escalation ladder (build-escalation pattern, SKILL.md step 3)
++
++When a worker pass times out / stalls / hangs: the escalation EXECUTOR is the
++reviewer model (currently `ollama-cloud/deepseek-v4.1-flash` under the owner
++override), dispatched through a write-capable shell (`worker`/`delegate` — never
++the read-only `reviewer` shell), and the escalated work is then statically
++re-verified by the HIGHER model `ollama/glm-5.3:cloud` (verified resolvable).
++One escalation per blocked pass; record provenance in the round doc.
++
+ ## Cline profile — switch to `clinepass` first
+ 
+ Cline cannot resolve pi's `ollama/<id>:cloud` ids. Before starting a round,
+diff --git a/SchoolCollab.sln b/SchoolCollab.sln
+index e5b7c218..71a1db17 100644
+--- a/SchoolCollab.sln
++++ b/SchoolCollab.sln
+@@ -89,6 +89,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.AI.Tools.Coded
+ EndProject
+ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Students.Tests.Playwright", "tests\SchoolCollab.Students.Tests.Playwright\SchoolCollab.Students.Tests.Playwright.csproj", "{50968D56-EFB5-4A05-A084-34C4610173E1}"
+ EndProject
++Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Families", "src\SchoolCollab.Families\SchoolCollab.Families.csproj", "{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}"
++EndProject
++Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Families.Tests.Unit", "tests\SchoolCollab.Families.Tests.Unit\SchoolCollab.Families.Tests.Unit.csproj", "{D47A8981-5722-45F4-912F-2A4D17750C47}"
++EndProject
+ Global
+ 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+ 		Debug|Any CPU = Debug|Any CPU
+@@ -519,6 +523,30 @@ Global
+ 		{50968D56-EFB5-4A05-A084-34C4610173E1}.Release|x64.Build.0 = Release|Any CPU
+ 		{50968D56-EFB5-4A05-A084-34C4610173E1}.Release|x86.ActiveCfg = Release|Any CPU
+ 		{50968D56-EFB5-4A05-A084-34C4610173E1}.Release|x86.Build.0 = Release|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Debug|x64.ActiveCfg = Debug|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Debug|x64.Build.0 = Debug|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Debug|x86.ActiveCfg = Debug|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Debug|x86.Build.0 = Debug|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Release|Any CPU.Build.0 = Release|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Release|x64.ActiveCfg = Release|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Release|x64.Build.0 = Release|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Release|x86.ActiveCfg = Release|Any CPU
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A}.Release|x86.Build.0 = Release|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Debug|x64.ActiveCfg = Debug|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Debug|x64.Build.0 = Debug|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Debug|x86.ActiveCfg = Debug|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Debug|x86.Build.0 = Debug|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Release|Any CPU.Build.0 = Release|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Release|x64.ActiveCfg = Release|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Release|x64.Build.0 = Release|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Release|x86.ActiveCfg = Release|Any CPU
++		{D47A8981-5722-45F4-912F-2A4D17750C47}.Release|x86.Build.0 = Release|Any CPU
+ 	EndGlobalSection
+ 	GlobalSection(SolutionProperties) = preSolution
+ 		HideSolutionNode = FALSE
+@@ -565,5 +593,7 @@ Global
+ 		{416605D5-7B81-4E71-9E8A-6466B1F4E318} = {CFD63E05-48D8-407A-82A1-E29B3941AC86}
+ 		{F9D61C81-3F26-4C34-BCE3-6FF6110E1968} = {CFD63E05-48D8-407A-82A1-E29B3941AC86}
+ 		{50968D56-EFB5-4A05-A084-34C4610173E1} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
++		{D5E9E265-1DD4-45B9-8A3B-154998C80C2A} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
++		{D47A8981-5722-45F4-912F-2A4D17750C47} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+ 	EndGlobalSection
+ EndGlobal
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 8386d92e..1c916177 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -124,7 +124,7 @@ files only carry values that genuinely belong to that single service
+ | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
+ | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
+ | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
+-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
++| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). See §5. |
+ | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
+ | `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
+ | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
+@@ -347,7 +347,7 @@ flags moved to the Config service.
+ 
+ | Flag | Default | Consumers |
+ | :--- | :--- | :--- |
+-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
++| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ 
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 1d16e031..befd41e6 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -226,4 +226,14 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+     .WaitFor(assignmentsApi)
+     .WaitFor(studentsApi);
+ 
++// F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
++// Option B, a separate host rather than routes on Admin). Depends on the
++// Assignments API for its ward-facing endpoints. Its auth-mode switch
++// (FEATURE:DisableOIDCAuth) is read from its own appsettings.json (dev default
++// "true" = TestAuth) — no AppHost flag param needed, mirroring the Admin note.
++builder.AddProject<Projects.SchoolCollab_Families>("families")
++    .WithReference(assignmentsApi)
++    .WithReference(redis)
++    .WaitFor(assignmentsApi);
++
+ builder.Build().Run();
+diff --git a/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj b/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
+index 5808b514..3470ff56 100644
+--- a/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
++++ b/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
+@@ -27,5 +27,6 @@
+     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" IsAspireProjectResource="false" />
+     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
+     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Worker\SchoolCollab.Students.Worker.csproj" />
++    <ProjectReference Include="..\..\SchoolCollab.Families\SchoolCollab.Families.csproj" />
+   </ItemGroup>
+ </Project>
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs
+index 8631772f..3c5215f8 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs
+@@ -8,15 +8,18 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
+ /// <summary>
+ /// WS-A5 — projects the ward assignment list. The candidate set (visible
+ /// status + recipient-link targeting) comes from
+-/// <see cref="IAssignmentRepository.ListWardAssignmentsAsync"/>; each row is
+-/// enriched with its required-module lock state (per-module progress) and
+-/// submission state (None → InProgress → Completed via FinalizedAt), the
+-/// ar-9 per-ward projection precedent. N+1 over the candidate set is accepted
+-/// for v1 (the 2b list UI is low-volume per ward) — recorded in the round doc.
++/// <see cref="IWardAssignmentProjectionRepository.ListWardAssignmentsAsync"/>
++/// (ar-13 A-1 cohesion fix: a dedicated ward-aggregation read, split out of the
++/// module-progress repository); each row is enriched with its required-module
++/// lock state (per-module progress) and submission state (None → InProgress →
++/// Completed via FinalizedAt), the ar-9 per-ward projection precedent. N+1 over
++/// the candidate set is accepted for v1 (the 2b list UI is low-volume per ward)
++/// — recorded in the round doc.
+ /// </summary>
+ public sealed class ListWardAssignmentsHandler(
+     IAssignmentRepository assignmentRepository,
+     ISubmissionRepository submissionRepository,
++    IWardAssignmentProjectionRepository wardAssignmentProjectionRepository,
+     IModuleProgressRepository moduleProgressRepository,
+     ILogger<ListWardAssignmentsHandler> logger) : IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>
+ {
+@@ -24,7 +27,7 @@ public sealed class ListWardAssignmentsHandler(
+     {
+         logger.LogDebug("Handling ListWardAssignments for student {StudentId}", query.StudentId);
+ 
+-        var summaries = await moduleProgressRepository.ListWardAssignmentsAsync(query.StudentId, DateTimeOffset.UtcNow, cancellationToken);
++        var summaries = await wardAssignmentProjectionRepository.ListWardAssignmentsAsync(query.StudentId, DateTimeOffset.UtcNow, cancellationToken);
+ 
+         var result = new List<WardAssignmentListItemDto>(summaries.Count);
+         foreach (var summary in summaries)
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs
+index dcf5f8b3..69a425e5 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs
+@@ -1,5 +1,4 @@
+ using SchoolCollab.Assignments.Core.Domain;
+-using SchoolCollab.Assignments.Core.DTOs;
+ 
+ namespace SchoolCollab.Assignments.Core.Data.Repositories;
+ 
+@@ -8,8 +7,7 @@ namespace SchoolCollab.Assignments.Core.Data.Repositories;
+ /// <see cref="ModuleProgress"/> rows keyed by (assignment, student,
+ /// module). Entity reads are tracked (the upsert path mutates + saves);
+ /// progress is queried per assignment+student by the submission gate and
+-/// the ward-view query handler. Also surfaces the WS-A5 ward assignment
+-/// candidate set (the ward-facing read aggregation).
++/// the ward-view query handler.
+ /// </summary>
+ public interface IModuleProgressRepository
+ {
+@@ -22,14 +20,6 @@ public interface IModuleProgressRepository
+     /// gate and the ward view project against these.</summary>
+     Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);
+ 
+-    /// <summary>WS-A5 — the ward's visible assignment candidate set: Published
+-    /// (or Scheduled-active per the existing visibility rule) assignments the
+-    /// student is already a linked recipient of (recipient-link targeting;
+-    /// grade/group targeting resolution is cross-context and lands in slice
+-    /// 2b). Returns <see cref="AssignmentSummary"/> rows the ward-list handler
+-    /// enriches with module-lock + submission state.</summary>
+-    Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default);
+-
+     void Add(ModuleProgress progress);
+ 
+     Task<int> SaveChangesAsync(CancellationToken ct = default);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IWardAssignmentProjectionRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IWardAssignmentProjectionRepository.cs
+new file mode 100644
+index 00000000..1cf13618
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IWardAssignmentProjectionRepository.cs
+@@ -0,0 +1,21 @@
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Core.Data.Repositories;
++
++/// <summary>
++/// WS-A5 — dedicated ward-facing aggregation read over the assignment +
++/// recipient candidate set. Split out of <see cref="IModuleProgressRepository"/>
++/// in slice 2b (ar-13 A-1 cohesion note): this is an assignment/recipient
++/// projection, not module progress, and is consumed only by
++/// <see cref="ListWardAssignmentsHandler"/>.
++/// </summary>
++public interface IWardAssignmentProjectionRepository
++{
++    /// <summary>The ward's visible assignment candidate set: Published (or
++    /// Scheduled-active per the existing visibility rule) assignments the
++    /// student is already a linked recipient of (recipient-link targeting;
++    /// grade/group targeting resolution is cross-context and lands in slice
++    /// 2b). Returns <see cref="AssignmentSummary"/> rows the ward-list handler
++    /// enriches with module-lock + submission state.</summary>
++    Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs
+index ed86a026..0e6da9f8 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs
+@@ -1,30 +1,10 @@
+ using Microsoft.EntityFrameworkCore;
+ using SchoolCollab.Assignments.Core.Domain;
+-using SchoolCollab.Assignments.Core.DTOs;
+ 
+ namespace SchoolCollab.Assignments.Core.Data.Repositories;
+ 
+ internal sealed class ModuleProgressRepository(AssignmentsDbContext db) : IModuleProgressRepository
+ {
+-    public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
+-    {
+-        return db.Assignments.AsNoTracking()
+-            .Where(a =>
+-                (a.Status == AssignmentStatus.Published
+-                 || (a.Status == AssignmentStatus.Scheduled && a.AvailableFromUtc != null && a.AvailableFromUtc <= nowUtc))
+-                && db.AssignmentRecipients.Any(r => r.WardStudentId == studentId && r.AssignmentId == a.Id))
+-            .OrderByDescending(a => a.DueDate ?? DateTimeOffset.MaxValue)
+-            .Select(a => new AssignmentSummary(
+-                a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
+-                a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
+-                a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
+-                a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
+-                a.PassScore, a.MaxAttempts,
+-                a.RequiresSignature,
+-                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
+-            .ToListAsync(ct);
+-    }
+-
+     public Task<ModuleProgress?> GetAsync(Guid assignmentId, Guid studentId, Guid contentModuleId, CancellationToken ct = default) =>
+         db.ModuleProgress.FirstOrDefaultAsync(
+             p => p.AssignmentId == assignmentId
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs
+new file mode 100644
+index 00000000..18de7fd0
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs
+@@ -0,0 +1,33 @@
++using Microsoft.EntityFrameworkCore;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Core.Data.Repositories;
++
++/// <summary>
++/// WS-A5 — the ward assignment candidate-set projection (the read-only
++/// aggregation behind <see cref="ListWardAssignmentsHandler"/>). Moved here from
++/// the module-progress repository in slice 2b (ar-13 A-1 cohesion fix) so
++/// module-progress persistence is no longer also the ward-list read surface.
++/// </summary>
++internal sealed class WardAssignmentProjectionRepository(AssignmentsDbContext db) : IWardAssignmentProjectionRepository
++{
++    public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
++    {
++        return db.Assignments.AsNoTracking()
++            .Where(a =>
++                (a.Status == AssignmentStatus.Published
++                 || (a.Status == AssignmentStatus.Scheduled && a.AvailableFromUtc != null && a.AvailableFromUtc <= nowUtc))
++                && db.AssignmentRecipients.Any(r => r.WardStudentId == studentId && r.AssignmentId == a.Id))
++            .OrderByDescending(a => a.DueDate ?? DateTimeOffset.MaxValue)
++            .Select(a => new AssignmentSummary(
++                a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
++                a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
++                a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
++                a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
++                a.PassScore, a.MaxAttempts,
++                a.RequiresSignature,
++                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
++            .ToListAsync(ct);
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+index 91b2eb84..58d1dc03 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+@@ -46,6 +46,7 @@ public static class Extensions
+         services.AddScoped<IAssignmentRepository, AssignmentRepository>();
+         services.AddScoped<ISubmissionRepository, SubmissionRepository>();
+         services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
++        services.AddScoped<IWardAssignmentProjectionRepository, WardAssignmentProjectionRepository>();
+         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
+         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
+         // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /
+diff --git a/src/SchoolCollab.Families/Components/App.razor b/src/SchoolCollab.Families/Components/App.razor
+new file mode 100644
+index 00000000..9a3d035e
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/App.razor
+@@ -0,0 +1,22 @@
++<!DOCTYPE html>
++<html lang="en">
++
++<head>
++    <meta charset="utf-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <base href="/" />
++    <link rel="stylesheet" href="@Assets["css/app.css"]" />
++    @* Host (SchoolCollab.Families) scoped-CSS bundle — see the Admin host
++       convention: the host's own *.razor.css files compile into
++       SchoolCollab.Families.styles.css and must be linked here. *@
++    <link rel="stylesheet" href="@Assets["SchoolCollab.Families.styles.css"]" />
++    <ImportMap />
++    <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
++</head>
++
++<body>
++    <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
++    <script src="_framework/blazor.web.js"></script>
++</body>
++
++</html>
+diff --git a/src/SchoolCollab.Families/Components/Layout/MainLayout.razor b/src/SchoolCollab.Families/Components/Layout/MainLayout.razor
+new file mode 100644
+index 00000000..aa1a9b06
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Layout/MainLayout.razor
+@@ -0,0 +1,30 @@
++@inherits LayoutComponentBase
++@using Microsoft.AspNetCore.Components.Sections
++
++<FluentDesignTheme StorageName="families-theme" />
++
++<FluentToastProvider />
++<FluentDialogProvider />
++<FluentMessageBarProvider />
++<FluentTooltipProvider />
++
++<FluentLayout>
++    <FluentHeader Height="50">
++        <FluentStack Orientation="Orientation.Horizontal"
++                     VerticalAlignment="VerticalAlignment.Center"
++                     HorizontalGap="12">
++            <span class="families-brand">School Collab — My Assignments</span>
++        </FluentStack>
++    </FluentHeader>
++    <div class="families-body">
++        <div class="families-content">
++            @Body
++        </div>
++    </div>
++</FluentLayout>
++
++<div id="blazor-error-ui" data-nosnippet>
++    An unhandled error has occurred.
++    <a href="." class="reload">Reload</a>
++    <span class="dismiss">&#10060;</span>
++</div>
+diff --git a/src/SchoolCollab.Families/Components/Layout/MainLayout.razor.css b/src/SchoolCollab.Families/Components/Layout/MainLayout.razor.css
+new file mode 100644
+index 00000000..3c3dcd6f
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Layout/MainLayout.razor.css
+@@ -0,0 +1,32 @@
++.families-brand {
++    font-weight: 600;
++    font-size: 1rem;
++}
++
++.families-body {
++    padding: 0.75rem;
++}
++
++.families-content {
++    max-width: 1000px;
++    margin: 0 auto;
++}
++
++#blazor-error-ui {
++    background: lightyellow;
++    bottom: 0;
++    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
++    display: none;
++    left: 0;
++    padding: 0.6rem 1.25rem;
++    position: fixed;
++    width: 100%;
++    z-index: 1000;
++}
++
++#blazor-error-ui .dismiss {
++    cursor: pointer;
++    position: absolute;
++    right: 0.75rem;
++    top: 0.5rem;
++}
+diff --git a/src/SchoolCollab.Families/Components/Pages/Error.razor b/src/SchoolCollab.Families/Components/Pages/Error.razor
+new file mode 100644
+index 00000000..1141f82f
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/Error.razor
+@@ -0,0 +1,33 @@
++@* Host-local error surface for the Families host's UseExceptionHandler("/Error")
++   (Program.cs). The Admin host's Error.razor lives in SchoolCollab.Admin.Shared,
++   which Families deliberately does not reference (it would register every admin
++   @page route). This minimal FluentUI-only page keeps Families dependency-clean
++   while giving the exception handler a target route that mirrors the Admin
++   startup posture. *@
++@page "/Error"
++@using System.Diagnostics
++
++<PageTitle>Error</PageTitle>
++
++<FluentStack Orientation="Orientation.Vertical" Gap="0.5rem">
++    <h1>Error</h1>
++    <FluentMessageBar Intent="MessageIntent.Error">
++        An error occurred while processing your request.
++    </FluentMessageBar>
++
++    @if (ShowRequestId)
++    {
++        <p><strong>Request ID:</strong> <code>@RequestId</code></p>
++    }
++</FluentStack>
++
++@code {
++    [CascadingParameter]
++    private HttpContext? HttpContext { get; set; }
++
++    private string? RequestId { get; set; }
++    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
++
++    protected override void OnInitialized() =>
++        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
++}
+diff --git a/src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor b/src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor
+new file mode 100644
+index 00000000..2523c799
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor
+@@ -0,0 +1,440 @@
++@page "/ward/{StudentId:guid}/assignments/{AssignmentId:guid}"
++@implements IAsyncDisposable
++@inject FamiliesApiClient Api
++@inject IJSRuntime JS
++@inject NavigationManager Nav
++@inject ILogger<Assignment> Logger
++@using Microsoft.AspNetCore.WebUtilities
++@using SchoolCollab.Assignments.Contracts
++
++<ErrorBoundary>
++    <ChildContent>
++        @if (_studentId != Guid.Empty)
++        {
++            <FluentAnchor Appearance="Appearance.Hypertext" class="ward-back"
++                          Href="@($"/ward/{_studentId}")">
++                Back to ward
++            </FluentAnchor>
++        }
++
++        <h1>@(_view?.Title ?? "Assignment")</h1>
++
++        @if (_view is null)
++        {
++            @if (_error is not null)
++            {
++                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++            }
++            else
++            {
++                <FluentProgressRing />
++            }
++        }
++        else
++        {
++    <div class="ward-player">
++        @foreach (var module in _view.Modules)
++        {
++            <FluentCard @key="module.ModuleId" class="ward-module">
++                <h2>@(string.IsNullOrWhiteSpace(module.Title) ? $"Module {module.DisplayOrder}" : module.Title)</h2>
++                @if (module.ModuleType == ModuleTypeDto.Video)
++                {
++                    @* v1 captions-ready: a <track> slot renders when a captions asset is
++                        provided by the module (none today — full WCAG is WS-G1/Phase 5). *@
++                    <video controls data-module-id="@module.ModuleId" class="ward-video">
++                        @if (!string.IsNullOrWhiteSpace(module.Url))
++                        {
++                            <source src="@module.Url" type="video/mp4" />
++                        }
++                    </video>
++                    <div class="ward-module-progress">
++                        Progress: <strong>@module.PercentComplete%</strong>
++                        @if (module.CompletedAt is not null)
++                        {
++                            <text> — completed</text>
++                        }
++                    </div>
++                }
++                else
++                {
++                    <p class="ward-guide">
++                        @if (!string.IsNullOrWhiteSpace(module.Url))
++                        {
++                            <a href="@module.Url" target="_blank" rel="noopener noreferrer">Open guide</a>
++                            <text> — read before answering questions.</text>
++                        }
++                        else
++                        {
++                            <text>Guide content</text>
++                        }
++                    </p>
++                    <div class="ward-module-progress">
++                        Progress: <strong>@module.PercentComplete%</strong>
++                        @if (module.CompletedAt is not null)
++                        {
++                            <text> — completed</text>
++                        }
++                    </div>
++                }
++
++                @if (module.CompletedAt is null)
++                {
++                    <FluentButton Appearance="Appearance.Accent"
++                                  Disabled="@_busy"
++                                  OnClick="@(() => MarkModuleReadAsync(module.ModuleId))">
++                        Mark @(module.ModuleType == ModuleTypeDto.Video ? "watched" : "read")
++                    </FluentButton>
++                }
++            </FluentCard>
++        }
++
++        <FluentCard class="ward-questions">
++            @if (_view.QuestionsUnlocked)
++            {
++                <p>Questions are unlocked. Write your answers below, then submit.</p>
++                <FluentTextArea Label="Your answer" Rows="4" @bind-Value="_content" />
++                <FluentButton Appearance="Appearance.Accent"
++                              Disabled="@_busy"
++                              OnClick="@SubmitAsync">
++                    @(_busy ? "Submitting…" : "Submit answers")
++                </FluentButton>
++            }
++            else
++            {
++                <FluentMessageBar Intent="MessageIntent.Info">
++                    Complete all required modules above to unlock the questions.
++                </FluentMessageBar>
++            }
++        </FluentCard>
++
++        @if (_submissionScore is not null || _submissionPassed is not null)
++        {
++            <FluentCard class="ward-result">
++                <h2>Result</h2>
++                @if (_submissionScore is not null)
++                {
++                    <p>Score: <strong>@_submissionScore.Value.ToString("0.##")</strong></p>
++                }
++                @if (_submissionPassed is not null)
++                {
++                    <FluentMessageBar Intent="@(_submissionPassed == true ? MessageIntent.Success : MessageIntent.Warning)">
++                        @(_submissionPassed == true ? "Passed" : "Not passed — you may retry.")
++                    </FluentMessageBar>
++                }
++                <FluentButton OnClick="@RefreshResultAsync">Refresh result</FluentButton>
++            </FluentCard>
++        }
++    </div>
++
++        @if (_error is not null)
++        {
++            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++        }
++        }
++    </ChildContent>
++    <ErrorContent Context="ex">
++        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
++    </ErrorContent>
++</ErrorBoundary>
++
++@code {
++    private CancellationTokenSource? _loadCts;
++    // Mutations (submit / mark-read / refresh) use their own CTS, never _loadCts
++    // (which is recreated + disposed per load — see blazor-components.md).
++    private CancellationTokenSource? _mutationCts;
++    private volatile bool _disposed;
++    private Guid _studentId;
++    private (Guid AssignmentId, Guid StudentId)? _loadedFor;
++    private WardAssignmentViewDto? _view;
++    private decimal? _submissionScore;
++    private bool? _submissionPassed;
++    private string? _content;
++    private bool _busy;
++    private string? _error;
++    private IJSObjectReference? _playerModule;
++    private DotNetObjectReference<Assignment>? _dotNetRef;
++    private bool _heartbeatsAttached;
++    private int _loadEpoch;
++
++    [Parameter] public Guid AssignmentId { get; set; }
++
++    [Parameter] public Guid StudentId { get; set; }
++
++    protected override void OnParametersSet()
++    {
++        _studentId = StudentId;
++    }
++
++    // The load lives in OnParametersSetAsync (which runs AFTER OnParametersSet —
++    // OnInitializedAsync would run before the parameter is resolved, leaving _studentId
++    // default and the page stuck on the loading ring forever). Guarded by _loadedFor so an
++    // unchanged re-render does not re-fetch.
++    protected override async Task OnParametersSetAsync()
++    {
++        if (AssignmentId == Guid.Empty || StudentId == Guid.Empty)
++        {
++            _error = "Missing assignment or ward identifier for this session.";
++            return;
++        }
++        if (_loadedFor == (AssignmentId, StudentId)) return;
++        _loadedFor = (AssignmentId, StudentId);
++        // Bump the load epoch BEFORE resetting state: an in-flight load that started
++        // under the old key must not commit over this newer parameter change.
++        _loadEpoch++;
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = new CancellationTokenSource();
++        // Reset the loaded view + result + the one-shot heartbeat flag so a
++        // parameter change (different ward/assignment) never shows stale state.
++        _view = null;
++        _submissionScore = null;
++        _submissionPassed = null;
++        _heartbeatsAttached = false;
++        // A load-key change can swap to a different video/guide view: detach the previous
++        // module's heartbeat listeners (registry cleanup) so a re-attach on the new view
++        // never accumulates stale entries for removed <video> elements.
++        await DetachVideoHeartbeatsAsync();
++        await LoadAsync();
++    }
++
++    protected override async Task OnAfterRenderAsync(bool firstRender)
++    {
++        // Gate the heartbeat attach on a one-shot flag, NOT firstRender: the first
++        // render always happens before the awaited load completes, so _view is null on
++        // the true first render. We attach on whichever render first has a video
++        // module, exactly once. bUnit-safety: under loose JSInterop the import
++        // resolves to null, and AttachVideoHeartbeatsAsync swallows that, so the
++        // render never depends on a JS round-trip.
++        if (!_heartbeatsAttached && !OperatingSystem.IsBrowser() && JS is not null
++            && _studentId != Guid.Empty && _view?.Modules.Any(m => m.ModuleType == ModuleTypeDto.Video) == true)
++        {
++            _heartbeatsAttached = true;   // one-shot gate: prevents a concurrent double-attach
++            if (!await AttachVideoHeartbeatsAsync())
++            {
++                // Attach failed (already logged inside) — reset so a later render retries.
++                // The heartbeat is non-fatal and "Mark watched" still works; no hard error
++                // surface. Retrying on the next render is the fix.
++                _heartbeatsAttached = false;
++            }
++        }
++    }
++
++    private async Task LoadAsync()
++    {
++        _error = null;
++        // Capture the epoch this load started under. A parameter change while this is in
++        // flight bumps _loadEpoch, so the stale completion must not overwrite the newer
++        // ward/assignment view. A mutation refresh captures the current epoch naturally
++        // and still commits.
++        var epoch = _loadEpoch;
++        try
++        {
++            // Load the ward view and the submission result in parallel (independent GETs),
++            // never serially. TryLoadResultAsync swallows its own errors, so WhenAll only
++            // propagates a view-load fault — preserving the null/error semantics below.
++            var viewTask = Api.GetWardAssignmentViewAsync(AssignmentId, _studentId, _loadCts!.Token);
++            var resultTask = TryLoadResultAsync(_loadCts.Token, epoch);
++            await Task.WhenAll(viewTask, resultTask);
++            if (epoch != _loadEpoch || _disposed) return;
++            _view = await viewTask;
++            // No StateHasChanged: OnInitializedAsync's completion triggers the normal
++            // lifecycle re-render. StateHasChanged is reserved for user-driven handlers.
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (!_disposed) _error = ex.Message;
++        }
++    }
++
++    private async Task TryLoadResultAsync(CancellationToken ct, int epoch)
++    {
++        try
++        {
++            var detail = await Api.GetSubmissionAsync(AssignmentId, _studentId, ct);
++            // Guard both branches against a superseded load: a stale result must never
++            // overwrite the newer ward/assignment's submission state.
++            if (epoch != _loadEpoch || _disposed) return;
++            if (detail is null)
++            {
++                _submissionScore = null;
++                _submissionPassed = null;
++                return;
++            }
++            if (epoch != _loadEpoch || _disposed) return;
++            var current = detail.Versions.FirstOrDefault(v => v.VersionNumber == detail.CurrentVersionNumber);
++            _submissionScore = current?.Score;
++            _submissionPassed = current?.Passed;
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            Logger.LogDebug(ex, "No submission result yet for assignment {AssignmentId}", AssignmentId);
++        }
++    }
++
++    /// <summary>Attaches the wardPlayer heartbeat watchers to the rendered video modules.
++    /// Returns <see langword="true"/> on success and on the benign
++    /// <see cref="JSDisconnectedException"/> (disposed circuit — nothing to attach to);
++    /// returns <see langword="false"/> when another exception was caught and logged so the
++    /// caller can retry the attach on a later render.</summary>
++    private async Task<bool> AttachVideoHeartbeatsAsync()
++    {
++        try
++        {
++            // The host app serves its own wwwroot at the app root (MapStaticAssets Root
++            // mode), so the module is imported at the root-relative path; App.razor sets
++            // <base href="/">, which makes "./js/wardPlayer.js" resolve correctly even on
++            // this deep page route.
++            _playerModule ??= await JS.InvokeAsync<IJSObjectReference>(
++                "import", "./js/wardPlayer.js");
++            _dotNetRef ??= DotNetObjectReference.Create(this);
++            if (_playerModule is not null)
++            {
++                await _playerModule.InvokeVoidAsync("attachVideoHeartbeats", _dotNetRef);
++            }
++            return true;
++        }
++        catch (JSDisconnectedException) { return true; }
++        catch (Exception ex)
++        {
++            Logger.LogWarning(ex, "Video heartbeat attach failed for assignment {AssignmentId}", AssignmentId);
++            return false;
++        }
++    }
++
++    /// <summary>
++    /// Tears down the wardPlayer heartbeat listeners (registry cleanup). No-op when no
++    /// module has been created yet or the circuit is already gone. Called on every load-key
++    /// change and on disposal so listeners never leak on live or stale &lt;video&gt; nodes.
++    /// </summary>
++    private async Task DetachVideoHeartbeatsAsync()
++    {
++        if (_playerModule is null) return;
++        try { await _playerModule.InvokeVoidAsync("detachVideoHeartbeats"); }
++        catch (JSDisconnectedException) { }
++    }
++
++    /// <summary>Invoked by <c>wardPlayer.js</c> on a throttled video timeupdate.</summary>
++    [JSInvokable("onVideoTick")]
++    public async Task OnVideoTickAsync(Guid moduleId, int percent)
++    {
++        if (_disposed || _studentId == Guid.Empty) return;
++        try
++        {
++            await Api.ReportModuleProgressAsync(AssignmentId, _studentId, moduleId, percent, CancellationToken.None);
++            if (_view is not null)
++            {
++                _view = _view with
++                {
++                    Modules = _view.Modules
++                        .Select(m => m.ModuleId == moduleId ? m with { PercentComplete = Math.Max(m.PercentComplete, percent) } : m)
++                        .ToList()
++                };
++                StateHasChanged();
++            }
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (!_disposed) _error = ex.Message;
++        }
++    }
++
++    private async Task MarkModuleReadAsync(Guid moduleId)
++    {
++        _busy = true;
++        _error = null;
++        // Mutations never reuse _loadCts (recreated + disposed per load): a dedicated
++        // per-mutation CTS is created here and disposed in finally.
++        _mutationCts?.Dispose();
++        _mutationCts = new CancellationTokenSource();
++        try
++        {
++            await Api.ReportModuleProgressAsync(AssignmentId, _studentId, moduleId, 100, _mutationCts.Token);
++            // Mirror the OnParametersSetAsync reset: drop the stale view before the refetch
++            // so the user sees the loading state instead of the old PercentComplete.
++            _view = null;
++            await LoadAsync();
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (!_disposed) _error = ex.Message;
++        }
++        finally
++        {
++            _busy = false;
++            _mutationCts?.Dispose();
++            _mutationCts = null;
++            StateHasChanged();
++        }
++    }
++
++    private async Task SubmitAsync()
++    {
++        if (_studentId == Guid.Empty) return;
++        _busy = true;
++        _error = null;
++        // Mutation CTS (see MarkModuleReadAsync) — never _loadCts.
++        _mutationCts?.Dispose();
++        _mutationCts = new CancellationTokenSource();
++        try
++        {
++            await Api.SubmitAsync(AssignmentId, _studentId, _content, null, _mutationCts.Token);
++            await TryLoadResultAsync(_mutationCts.Token, _loadEpoch);
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (!_disposed) _error = ex.Message;
++        }
++        finally
++        {
++            _busy = false;
++            _mutationCts?.Dispose();
++            _mutationCts = null;
++            StateHasChanged();
++        }
++    }
++
++    private async Task RefreshResultAsync()
++    {
++        _busy = true;
++        _error = null;
++        // Mutation CTS (see MarkModuleReadAsync) — never _loadCts.
++        _mutationCts?.Dispose();
++        _mutationCts = new CancellationTokenSource();
++        try
++        {
++            await TryLoadResultAsync(_mutationCts.Token, _loadEpoch);
++        }
++        finally
++        {
++            _busy = false;
++            _mutationCts?.Dispose();
++            _mutationCts = null;
++            StateHasChanged();
++        }
++    }
++
++    public async ValueTask DisposeAsync()
++    {
++        _disposed = true;
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = null;
++        _mutationCts?.Cancel();
++        _mutationCts?.Dispose();
++        _mutationCts = null;
++        if (_playerModule is not null)
++        {
++            await DetachVideoHeartbeatsAsync();
++            try { await _playerModule.DisposeAsync(); }
++            catch (JSDisconnectedException) { }
++            _playerModule = null;
++        }
++        _dotNetRef?.Dispose();
++        _dotNetRef = null;
++    }
++}
+diff --git a/src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor.css b/src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor.css
+new file mode 100644
+index 00000000..f07400b2
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/Ward/Assignment.razor.css
+@@ -0,0 +1,24 @@
++.ward-back {
++    margin-bottom: 1rem;
++}
++
++.ward-module {
++    margin-bottom: 1rem;
++}
++
++.ward-video {
++    width: 100%;
++    max-height: 360px;
++    background: #000;
++    border-radius: 4px;
++    margin-bottom: 0.5rem;
++}
++
++.ward-module-progress {
++    margin-bottom: 0.5rem;
++}
++
++.ward-questions,
++.ward-result {
++    margin-bottom: 1rem;
++}
+diff --git a/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor b/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor
+new file mode 100644
+index 00000000..b2f1172e
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor
+@@ -0,0 +1,132 @@
++@page "/ward"
++@page "/ward/{StudentId:guid}"
++@implements IDisposable
++@inject FamiliesApiClient Api
++@inject NavigationManager Nav
++@using Microsoft.AspNetCore.WebUtilities
++@using SchoolCollab.Assignments.Contracts
++
++@* F1 (slice 2b): in-app ward surface (Option B). Host-level authorization
++   (Program.cs RequireAuthorization when OIDC is on) gates these pages; no
++   per-page AuthorizeView — matches the Admin posture. *@
++
++<ErrorBoundary>
++    <ChildContent>
++        <h1>My Assignments</h1>
++
++        @if (!_studentId.HasValue)
++{
++    <FluentMessageBar Intent="MessageIntent.Warning">No ward selected for this session.</FluentMessageBar>
++}
++else if (_items is null)
++{
++    @if (_error is not null)
++    {
++        @* The load failed: show the error instead of a perpetual spinner. *@
++        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++    }
++    else
++    {
++        <FluentProgressRing />
++    }
++}
++else if (_items.Length == 0)
++{
++    <FluentMessageBar>No assignments for this ward yet.</FluentMessageBar>
++}
++else
++{
++    <FluentDataGrid Items="_items.AsQueryable()" TItem="WardAssignmentListItemDto" GridTemplateColumns="1fr 140px 160px 120px 90px" Resizable="true">
++        <PropertyColumn Title="Assignment" Property="@(a => a.Title)" />
++        <PropertyColumn Title="Due" Property="@(a => a.DueDate)" Format="{0:g}" />
++        <PropertyColumn Title="Status" Property="@(a => a.State)" />
++        <TemplateColumn Title="Modules">
++            @if (context.HasLockedModules)
++            {
++                <FluentBadge Color="Color.Red">Locked</FluentBadge>
++            }
++            else
++            {
++                <FluentBadge Color="Color.Green">Ready</FluentBadge>
++            }
++        </TemplateColumn>
++        <TemplateColumn Title="">
++            <FluentButton Appearance="Appearance.Accent"
++                          OnClick="@(() => Nav.NavigateTo($"/ward/{_studentId}/assignments/{context.Id}"))">Open</FluentButton>
++        </TemplateColumn>
++    </FluentDataGrid>
++}
++
++        @if (_error is not null && _items is not null)
++        {
++            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++        }
++    </ChildContent>
++    <ErrorContent Context="ex">
++        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
++    </ErrorContent>
++</ErrorBoundary>
++
++@code {
++    private CancellationTokenSource? _loadCts;
++    private volatile bool _disposed;
++    private Guid? _studentId;
++    private Guid? _loadedForStudentId;
++    private int _loadEpoch;
++    private WardAssignmentListItemDto[]? _items;
++    private string? _error;
++
++    [Parameter] public Guid? StudentId { get; set; }
++
++    protected override void OnParametersSet()
++    {
++        if (StudentId is not null && StudentId != Guid.Empty)
++        {
++            _studentId = StudentId;
++        }
++        else
++        {
++            var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
++            _studentId = q.TryGetValue("studentId", out var vals) && Guid.TryParse(vals.FirstOrDefault(), out var g) ? g : null;
++        }
++    }
++
++    // The load lives in OnParametersSetAsync (which runs AFTER OnParametersSet —
++    // OnInitializedAsync would run before the parameter is resolved, leaving _studentId
++    // null and the page stuck on the loading ring forever). Guarded by _loadedForStudentId
++    // so an unchanged re-render does not re-fetch.
++    protected override async Task OnParametersSetAsync()
++    {
++        if (_studentId is not { } sid || sid == Guid.Empty) return;
++        if (_loadedForStudentId == sid) return;
++        _loadedForStudentId = sid;
++        // Bump the epoch before any await: an in-flight load for the old student must not
++        // commit over this newer parameter change (stale-commit race guard).
++        _loadEpoch++;
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = new CancellationTokenSource();
++        _items = null;
++        _error = null;
++        try
++        {
++            var epoch = _loadEpoch;
++            var items = await Api.ListWardAssignmentsAsync(sid, _loadCts.Token);
++            if (epoch != _loadEpoch || _disposed) return;
++            _items = items;
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (!_disposed) _error = ex.Message;
++        }
++    }
++
++    public void Dispose()
++    {
++        _disposed = true;
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = null;
++    }
++}
+diff --git a/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor.css b/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor.css
+new file mode 100644
+index 00000000..99167975
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor.css
+@@ -0,0 +1,7 @@
++/* WS-A5 (slice 2b) — ward assignment-list surface. Minimal real styles for the
++   grid page; FluentUI supplies the component chrome. CSS isolation scoped to
++   Ward/Index.razor via the b-<hash> attribute Blazor appends automatically. */
++
++h1 {
++    margin-bottom: 1rem;
++}
+diff --git a/src/SchoolCollab.Families/Components/Routes.razor b/src/SchoolCollab.Families/Components/Routes.razor
+new file mode 100644
+index 00000000..0cc0326c
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Routes.razor
+@@ -0,0 +1,6 @@
++<Router AppAssembly="typeof(global::Program).Assembly">
++    <Found Context="routeData">
++        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
++        <FocusOnNavigate RouteData="routeData" Selector="h1" />
++    </Found>
++</Router>
+diff --git a/src/SchoolCollab.Families/Components/_Imports.razor b/src/SchoolCollab.Families/Components/_Imports.razor
+new file mode 100644
+index 00000000..c2b74ec6
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/_Imports.razor
+@@ -0,0 +1,18 @@
++@using System.Net.Http
++@using System.Net.Http.Json
++@using Microsoft.AspNetCore.Components.Forms
++@using Microsoft.AspNetCore.Components.Routing
++@using Microsoft.AspNetCore.Components.Web
++@using Microsoft.AspNetCore.Components.Sections
++@using static Microsoft.AspNetCore.Components.Web.RenderMode
++@using Microsoft.AspNetCore.Components.Web.Virtualization
++@using Microsoft.AspNetCore.Components.Authorization
++@using Microsoft.JSInterop
++@using Microsoft.Extensions.Logging
++@using Microsoft.FluentUI.AspNetCore.Components
++@using SchoolCollab.Families
++@using SchoolCollab.Families.Components
++@using SchoolCollab.Families.Components.Layout
++@using SchoolCollab.Families.Components.Pages
++@using SchoolCollab.Families.Components.Pages.Ward
++@using SchoolCollab.Families.Services
+diff --git a/src/SchoolCollab.Families/Program.cs b/src/SchoolCollab.Families/Program.cs
+new file mode 100644
+index 00000000..476addc5
+--- /dev/null
++++ b/src/SchoolCollab.Families/Program.cs
+@@ -0,0 +1,81 @@
++using Microsoft.FluentUI.AspNetCore.Components;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Families.Components;
++using SchoolCollab.Families.Services;
++
++var builder = WebApplication.CreateBuilder(args);
++
++builder.AddServiceDefaults();
++
++// F1 (slice 2b) — the Families host is a ward/guardian surface app (owner
++// decision: Option B). Auth + tenancy mirrors the Admin host exactly: OIDC via
++// Keycloak in production, TestAuth fallback when FEATURE:DisableOIDCAuth is set
++// (dev default). Note: DisableOIDCAuth is a *startup* auth-mode switch read from
++// IConfiguration directly (below), NOT a runtime feature flag — as with Admin,
++// auth schemes are registered once at process start.
++builder.Services.AddAuthAndTenancy(builder.Configuration);
++
++// Redis distributed cache backs IDevTenantSelection (TestAuth mode) and mirrors
++// the Admin host. Falls back to an in-memory cache when no "cache" connection
++// string is resolved (e.g. non-Aspire local run or tests).
++var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
++    ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];
++
++if (string.IsNullOrWhiteSpace(cacheConnectionString))
++{
++    builder.Services.AddDistributedMemoryCache();
++}
++else
++{
++    builder.AddRedisDistributedCache("cache");
++}
++
++builder.Services.AddRazorComponents()
++    .AddInteractiveServerComponents();
++
++builder.Services.AddFluentUIComponents();
++
++// F1 — the Families Http client against the Assignments API (service discovery).
++builder.Services.AddFamiliesModule();
++
++var app = builder.Build();
++
++// Startup auth-mode decision (mirrors Admin): read DisableOIDCAuth directly from
++// IConfiguration, NOT via IFeatureFlagService (which is the runtime Config client
++// and does not carry this startup-only flag).
++var disableOIDC = bool.TryParse(
++    builder.Configuration[$"FeatureFlags:{FeatureFlagKeys.DisableOIDCAuth}"], out var d) && d;
++
++if (!app.Environment.IsDevelopment())
++{
++    app.UseExceptionHandler("/Error", createScopeForErrors: true);
++    app.UseHsts();
++}
++
++app.UseHttpsRedirection();
++
++// Authentication is always on (TestAuth in dev, OIDC in prod); authorization is
++// applied only when OIDC is enabled (the TestAuth path leaves routes open, matching
++// the dev posture of the Admin host).
++app.UseAuthentication();
++
++if (!disableOIDC)
++{
++    app.UseAuthorization();
++}
++
++app.UseAntiforgery();
++
++app.MapStaticAssets();
++app.MapDefaultEndpoints();
++
++var razorComponents = app.MapRazorComponents<App>()
++    .AddInteractiveServerRenderMode();
++
++if (!disableOIDC)
++{
++    razorComponents.RequireAuthorization();
++}
++
++app.Run();
+diff --git a/src/SchoolCollab.Families/Properties/launchSettings.json b/src/SchoolCollab.Families/Properties/launchSettings.json
+new file mode 100644
+index 00000000..58d310b9
+--- /dev/null
++++ b/src/SchoolCollab.Families/Properties/launchSettings.json
+@@ -0,0 +1,11 @@
++{
++  "profiles": {
++    "SchoolCollab.Families": {
++      "commandName": "Project",
++      "applicationUrl": "https://localhost:7400;http://localhost:5400",
++      "environmentVariables": {
++        "ASPNETCORE_ENVIRONMENT": "Development"
++      }
++    }
++  }
++}
+diff --git a/src/SchoolCollab.Families/SchoolCollab.Families.csproj b/src/SchoolCollab.Families/SchoolCollab.Families.csproj
+new file mode 100644
+index 00000000..fd9b1fed
+--- /dev/null
++++ b/src/SchoolCollab.Families/SchoolCollab.Families.csproj
+@@ -0,0 +1,18 @@
++<Project Sdk="Microsoft.NET.Sdk.Web">
++  <PropertyGroup>
++    <TargetFramework>net10.0</TargetFramework>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <NoWarn>CS0436</NoWarn>
++  </PropertyGroup>
++  <ItemGroup>
++    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
++    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
++    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
++  </ItemGroup>
++  <ItemGroup>
++    <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
++    <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
++    <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
++  </ItemGroup>
++</Project>
+diff --git a/src/SchoolCollab.Families/Services/FamiliesApiClient.cs b/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
+new file mode 100644
+index 00000000..c9ce3bab
+--- /dev/null
++++ b/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
+@@ -0,0 +1,111 @@
++using System.Net.Http.Json;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Families.Services;
++
++/// <summary>Json serialization options shared by the Families client — web defaults
++/// plus string-encoded enums, mirroring the Assignments API's
++/// <c>ConfigureHttpJsonOptions</c> (round-trip the ward DTO enums as names, not
++/// numbers).</summary>
++internal static class FamiliesJson
++{
++    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
++    {
++        Converters =
++        {
++            new JsonStringEnumConverter()
++        }
++    };
++}
++
++/// <summary>
++/// F1 (slice 2b) — the Families surface's thin typed client over the Assignments
++/// API's ward-facing endpoints (the ar-12 seams). Option B: the Families host
++/// references only <c>Assignments.Contracts</c> (the cross-context boundary), so
++/// this client carries the exact six calls the ward pages bind to. No admin
++/// <c>Assignments.Application</c> reference, so no admin route leakage.
++/// </summary>
++public sealed class FamiliesApiClient(
++    HttpClient http,
++    ILogger<FamiliesApiClient> logger)
++{
++    private readonly string _assignments = "assignments";
++
++    /// <summary>WS-A5 — the ward's assignment list.</summary>
++    public async Task<WardAssignmentListItemDto[]?> ListWardAssignmentsAsync(Guid studentId, CancellationToken ct = default)
++    {
++        try
++        {
++            var response = await http.GetAsync($"/students/{studentId}/assignments", ct);
++            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
++            {
++                return [];
++            }
++            response.EnsureSuccessStatusCode();
++            return await response.Content.ReadFromJsonAsync<WardAssignmentListItemDto[]>(FamiliesJson.Options, ct);
++        }
++        catch (HttpRequestException ex)
++        {
++            logger.LogWarning(ex, "Ward assignment-list fetch failed for student {StudentId}", studentId);
++            throw;
++        }
++    }
++
++    /// <summary>WS-D1/WS-A5 — the ward's per-assignment view (modules + gate flag).</summary>
++    public async Task<WardAssignmentViewDto?> GetWardAssignmentViewAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
++    {
++        var response = await http.GetAsync($"/{_assignments}/{assignmentId}/students/{studentId}/modules", ct);
++        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
++        {
++            return null;
++        }
++        response.EnsureSuccessStatusCode();
++        return await response.Content.ReadFromJsonAsync<WardAssignmentViewDto>(FamiliesJson.Options, ct);
++    }
++
++    /// <summary>WS-D1 — report per-module progress (monotonic/idempotent on the API).</summary>
++    public async Task<bool> ReportModuleProgressAsync(Guid assignmentId, Guid studentId, Guid moduleId, int percent, CancellationToken ct = default)
++    {
++        var response = await http.PostAsJsonAsync(
++            $"/{_assignments}/{assignmentId}/students/{studentId}/modules/{moduleId}/progress",
++            new RecordModuleProgressRequest(percent), FamiliesJson.Options, ct);
++        return response.StatusCode == System.Net.HttpStatusCode.NoContent;
++    }
++
++    /// <summary>WS-A3 — submit the ward's answers (free-text content + structured answers).</summary>
++    public async Task<SubmissionFeedbackDto?> SubmitAsync(Guid assignmentId, Guid studentId, string? content, IReadOnlyList<SubmissionAnswerDto>? answers, CancellationToken ct = default)
++    {
++        var response = await http.PostAsJsonAsync(
++            $"/{_assignments}/{assignmentId}/students/{studentId}/submission",
++            new CreateStudentSubmissionRequest(content, answers), FamiliesJson.Options, ct);
++        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
++        {
++            return null;
++        }
++        if (response.StatusCode == System.Net.HttpStatusCode.Conflict ||
++            response.StatusCode == System.Net.HttpStatusCode.BadRequest)
++        {
++            var error = await response.Content.ReadAsStringAsync(ct);
++            logger.LogWarning("Submission rejected {Status} for assignment {Id}/student {StudentId}: {Body}",
++                (int)response.StatusCode, assignmentId, studentId, error);
++            return null;
++        }
++        response.EnsureSuccessStatusCode();
++        return await response.Content.ReadFromJsonAsync<SubmissionFeedbackDto>(FamiliesJson.Options, ct);
++    }
++
++    /// <summary>WS-A3 — the submission detail (result score/pass/retry state).</summary>
++    public async Task<SubmissionDetailDto?> GetSubmissionAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
++    {
++        var response = await http.GetAsync($"/{_assignments}/{assignmentId}/students/{studentId}/submission", ct);
++        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
++        {
++            return null;
++        }
++        response.EnsureSuccessStatusCode();
++        return await response.Content.ReadFromJsonAsync<SubmissionDetailDto>(FamiliesJson.Options, ct);
++    }
++}
+diff --git a/src/SchoolCollab.Families/Services/FamiliesModuleServices.cs b/src/SchoolCollab.Families/Services/FamiliesModuleServices.cs
+new file mode 100644
+index 00000000..082c655f
+--- /dev/null
++++ b/src/SchoolCollab.Families/Services/FamiliesModuleServices.cs
+@@ -0,0 +1,20 @@
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Core.Http;
++
++namespace SchoolCollab.Families.Services;
++
++/// <summary>
++/// F1 (slice 2b) — wires the Families surface's HTTP client against the
++/// Assignments API via Aspire service discovery (<c>https+http://assignments-api</c>),
++/// with the same cross-module resilience reference pattern used by the Admin host
++/// (retry handler + tenant propagation + long handler lifetime).
++/// </summary>
++public static class ModuleServices
++{
++    /// <summary>Registers <see cref="FamiliesApiClient"/> for the Families host.</summary>
++    public static IServiceCollection AddFamiliesModule(this IServiceCollection services)
++    {
++        services.AddCrossModuleHttpClient<FamiliesApiClient>("https+http://assignments-api", propagateTenant: true);
++        return services;
++    }
++}
+diff --git a/src/SchoolCollab.Families/appsettings.json b/src/SchoolCollab.Families/appsettings.json
+new file mode 100644
+index 00000000..5af984c6
+--- /dev/null
++++ b/src/SchoolCollab.Families/appsettings.json
+@@ -0,0 +1,18 @@
++{
++  "Logging": {
++    "LogLevel": {
++      "Default": "Information",
++      "Microsoft.AspNetCore": "Warning"
++    }
++  },
++  "AllowedHosts": "*",
++  // F1 (slice 2b) — the Families host mirrors Admin's startup auth-mode switch:
++  // FEATURE:DisableOIDCAuth is a *startup* switch (auth schemes are registered
++  // once at process start and cannot be flipped at runtime). Dev default "true"
++  // runs TestAuth; production overrides via FeatureFlags__FEATURE__DisableOIDCAuth.
++  "FeatureFlags": {
++    "FEATURE": {
++      "DisableOIDCAuth": "true"
++    }
++  }
++}
+diff --git a/src/SchoolCollab.Families/wwwroot/css/app.css b/src/SchoolCollab.Families/wwwroot/css/app.css
+new file mode 100644
+index 00000000..029e5859
+--- /dev/null
++++ b/src/SchoolCollab.Families/wwwroot/css/app.css
+@@ -0,0 +1,4 @@
++/* Families host base stylesheet — linked from App.razor as css/app.css. */
++html {
++    font-family: 'Segoe UI', system-ui, sans-serif;
++}
+diff --git a/src/SchoolCollab.Families/wwwroot/js/wardPlayer.js b/src/SchoolCollab.Families/wwwroot/js/wardPlayer.js
+new file mode 100644
+index 00000000..c012ad97
+--- /dev/null
++++ b/src/SchoolCollab.Families/wwwroot/js/wardPlayer.js
+@@ -0,0 +1,49 @@
++// F1 (slice 2b) — ward-player video progress heartbeat. The app's second JS
++// interop module (after fileDownload.js, ar-11), following the same
++// use-js-interop pattern: loaded via dynamic import(), the module reference is
++// cached and disposed by the consuming component (Ward/Assignment.razor), and
++// every await is JSDisconnectedException-safe.
++//
++// attachVideoHeartbeats(dotNetRef) finds the rendered <video data-module-id>
++// elements, registers a throttled ~1 tick/10s timeupdate listener on each, and
++// reports the nearest 10% via the .NET [JSInvokable] "onVideoTick". Blazor
++// Server has no real DOM media events of its own, so the raw <video> element
++// is used (a plain element, not a FluentUI web component, for video).
++//
++// detachVideoHeartbeats() removes every registered listener and clears the
++// registry, so the consuming component's DisposeAsync can tear the watchers
++// down (and the module reference disposed) without leaking listeners on the
++// live <video> elements.
++
++const heartbeatEntries = new Map(); // video element -> { handler, lastReported }
++
++export function attachVideoHeartbeats(dotNetRef) {
++    const videos = document.querySelectorAll('video.ward-video');
++
++    videos.forEach((video) => {
++        const moduleId = video.dataset.moduleId;
++        if (!moduleId || heartbeatEntries.has(video)) return;
++
++        const entry = { lastReported: -1, handler: null };
++        entry.handler = () => {
++            if (video.duration === 0 || Number.isNaN(video.duration)) return;
++            const percent = Math.min(100, Math.round((video.currentTime / video.duration) * 100));
++            // Report at 10% granularity; throttled by construction — a tick only
++            // fires when the 10% bucket advances (~each tenth of the video).
++            const bucket = Math.floor(percent / 10) * 10;
++            if (bucket <= entry.lastReported) return;
++            entry.lastReported = bucket;
++            dotNetRef.invokeMethodAsync('onVideoTick', moduleId, bucket)
++                .catch((err) => console.warn('wardPlayer heartbeat failed', err));
++        };
++        video.addEventListener('timeupdate', entry.handler);
++        heartbeatEntries.set(video, entry);
++    });
++}
++
++export function detachVideoHeartbeats() {
++    heartbeatEntries.forEach((entry, video) => {
++        video.removeEventListener('timeupdate', entry.handler);
++    });
++    heartbeatEntries.clear();
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs
+index 6ac08af4..58340a78 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs
+@@ -111,8 +111,6 @@ public class CreateStudentSubmissionScoringHandlerTests
+         public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
+             => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
+         public void Add(ModuleProgress p) => Rows.Add(p);
+-        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
+-            => Task.FromResult(new List<AssignmentSummary>());
+         public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
+     }
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs
+index 3fb1db54..99c23255 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs
+@@ -55,7 +55,6 @@ public class RecordModuleProgressCommandHandlerTests
+         public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
+             => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
+         public void Add(ModuleProgress p) => Rows.Add(p);
+-        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
+         public Task<int> SaveChangesAsync(CancellationToken ct = default) { SaveCalls++; return Task.FromResult(1); }
+     }
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+index de90b850..5d294e63 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+@@ -59,8 +59,6 @@ public class SubmissionEngineTests
+         public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
+             => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
+         public void Add(ModuleProgress p) => Rows.Add(p);
+-        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
+-            => Task.FromResult(new List<AssignmentSummary>());
+         public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
+     }
+ 
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/FamiliesModuleWiringTests.cs b/tests/SchoolCollab.Families.Tests.Unit/FamiliesModuleWiringTests.cs
+new file mode 100644
+index 00000000..79f8e775
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/FamiliesModuleWiringTests.cs
+@@ -0,0 +1,36 @@
++using System;
++using System.Net.Http;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Http;
++using Moq;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// F1 (slice 2b) — module wiring. The Families host's HTTP client must target the
++/// Assignments API through Aspire service discovery. JS never runs here — this is a
++/// pure DI/base-address assert against the registered typed client.
++/// </summary>
++[TestClass]
++public class FamiliesModuleWiringTests
++{
++    [TestMethod]
++    public void AddFamiliesModule_ConfiguresAssignmentsApiBaseAddress()
++    {
++        var services = new ServiceCollection();
++        services.AddSingleton(Mock.Of<IDevTenantSelection>());
++        services.AddFamiliesModule();
++
++        using var provider = services.BuildServiceProvider();
++        var factory = provider.GetRequiredService<IHttpClientFactory>();
++        // A typed client is registered via AddHttpClient<TClient>, whose underlying
++        // named client is keyed by typeof(TClient).Name (not FullName). Use Name so this
++        // stays correct now that FamiliesApiClient lives in a namespace.
++        var client = factory.CreateClient(typeof(FamiliesApiClient).Name!);
++
++        client.BaseAddress.Should().Be(new Uri("https+http://assignments-api"));
++    }
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/SchoolCollab.Families.Tests.Unit.csproj b/tests/SchoolCollab.Families.Tests.Unit/SchoolCollab.Families.Tests.Unit.csproj
+new file mode 100644
+index 00000000..006091c2
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/SchoolCollab.Families.Tests.Unit.csproj
+@@ -0,0 +1,23 @@
++<Project Sdk="Microsoft.NET.Sdk.Razor">
++  <PropertyGroup>
++    <OutputType>Exe</OutputType>
++    <EnableMSTestRunner>true</EnableMSTestRunner>
++    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
++    <TargetFramework>net10.0</TargetFramework>
++    <IsPackable>false</IsPackable>
++    <IsTestProject>true</IsTestProject>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++  </PropertyGroup>
++  <ItemGroup>
++    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
++    <ProjectReference Include="..\..\src\SchoolCollab.Families\SchoolCollab.Families.csproj" />
++  </ItemGroup>
++  <ItemGroup>
++    <PackageReference Include="MSTest" />
++    <PackageReference Include="Moq" />
++    <PackageReference Include="FluentAssertions" />
++    <PackageReference Include="bunit" />
++    <PackageReference Include="RichardSzalay.MockHttp" />
++  </ItemGroup>
++</Project>
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs b/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs
+new file mode 100644
+index 00000000..379251f4
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs
+@@ -0,0 +1,282 @@
++using System;
++using System.Linq;
++using System.Net;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using System.Threading.Tasks;
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-D2 (slice 2b) — the ward assignment player. Binding coverage:
++/// <list type="bullet">
++///   <item><c>Modules_Render_InOrder</c> — module sequence renders in DisplayOrder.</item>
++///   <item><c>QuestionsLocked_Shows_GateHint</c> — when <c>QuestionsUnlocked == false</c> the player
++///       shows the gate hint plus a per-module mark-read control.</item>
++///   <item><c>QuestionsUnlocked_Shows_Submit</c> — when unlocked the submit area is present.</item>
++///   <item><c>Submit_Triggers_ClientCall</c> — submitting invokes the client's submit endpoint.</item>
++/// </list>
++/// The video heartbeat JS itself is not executed under bUnit (JSInterop loose mode);
++/// binding-level wiring is exercised instead.
++/// </summary>
++[TestClass]
++public class WardAssignmentPlayerBunitTests : BunitContext
++{
++    private readonly MockHttpMessageHandler _mockHttp;
++    private static readonly Guid AssignmentId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid StudentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid Module1 = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid Module2 = Guid.Parse("22222222-2222-2222-2222-222222222222");
++
++    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
++    {
++        Converters =
++        {
++            new JsonStringEnumConverter<ModuleTypeDto>(),
++            new JsonStringEnumConverter<WardSubmissionStateDto>()
++        }
++    };
++
++    // The host serves its own wwwroot at the app root (MapStaticAssets Root mode);
++    // App.razor sets <base href="/"> so this root-relative path resolves on the deep
++    // player route.
++    private const string WardPlayerModulePath = "./js/wardPlayer.js";
++
++    // The client deserializes with string-encoded enums (FamiliesJson.Options), so
++    // submissions must be serialized with the same convention for a faithful round-trip.
++    private static readonly JsonSerializerOptions JsonSubmission = new(JsonSerializerDefaults.Web)
++    {
++        Converters = { new JsonStringEnumConverter() }
++    };
++
++    public WardAssignmentPlayerBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++        _mockHttp = new MockHttpMessageHandler();
++        var http = _mockHttp.ToHttpClient();
++        http.BaseAddress = new Uri("http://localhost");
++        Services.AddSingleton(http);
++        Services.AddSingleton<FamiliesApiClient>();
++        Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
++    }
++
++    private static WardAssignmentViewDto LockedView(string title = "Algebra") =>
++        new(AssignmentId, title, null, QuestionsUnlocked: false,
++            Modules: new[]
++            {
++                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 0, null),
++                new WardModuleViewDto(Module2, ModuleTypeDto.Video, "Video 1", "https://example.com/v1", 2, 100, true, 0, null)
++            });
++
++    private static WardAssignmentViewDto UnlockedView(string title = "Algebra") =>
++        new(AssignmentId, title, null, QuestionsUnlocked: true,
++            Modules: new[]
++            {
++                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 100, null),
++                new WardModuleViewDto(Module2, ModuleTypeDto.Video, "Video 1", "https://example.com/v1", 2, 100, true, 100, null)
++            });
++
++    [TestMethod]
++    public async Task Modules_Render_InOrder()
++    {
++        SetupView(LockedView());
++        SetupResultNotFound();
++
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Guide 1"));
++        // DisplayOrder 1 (Guide) precedes DisplayOrder 2 (Video) in the markup.
++        cut.Markup.IndexOf("Guide 1", StringComparison.Ordinal)
++            .Should().BeLessThan(cut.Markup.IndexOf("Video 1", StringComparison.Ordinal));
++    }
++
++    [TestMethod]
++    public void QuestionsLocked_Shows_GateHint()
++    {
++        SetupView(LockedView());
++        SetupResultNotFound();
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("unlock the questions"));
++    }
++
++    [TestMethod]
++    public void QuestionsUnlocked_Shows_Submit()
++    {
++        SetupView(UnlockedView());
++        SetupResultNotFound();
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Submit answers"));
++    }
++
++    [TestMethod]
++    public async Task Submit_Triggers_ClientCall()
++    {
++        SetupView(UnlockedView());
++        SetupResultNotFound();
++        var hit = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/submission")
++            .Respond(HttpStatusCode.NoContent)
++            .With(req => { hit.TrySetResult(true); return true; });
++
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Submit answers"));
++        cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Submit", StringComparison.OrdinalIgnoreCase)).Click();
++
++        var posted = await hit.Task.WaitAsync(TimeSpan.FromSeconds(5));
++        posted.Should().BeTrue("submitting should call the assignment submission endpoint");
++    }
++
++    [TestMethod]
++    public void VideoModule_RecordsHeartbeatImport_ForVideoModule()
++    {
++        // The component attaches the watchers once a view with a video module
++        // renders. JS itself is not executed (loose mode): what we verify is the
++        // meaningful binding — the wardPlayer module import is requested.
++        SetupView(UnlockedView());
++        SetupResultNotFound();
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Video 1"));
++
++        cut.WaitForAssertion(() => JSInterop.Invocations.Should().Contain(i =>
++            i.Identifier == "import" &&
++            i.Arguments.Any(a => (string?)a == WardPlayerModulePath)));
++    }
++
++    [TestMethod]
++    public void NoVideoModule_DoesNotRecordHeartbeatImport()
++    {
++        // A view with only guide modules must not request the wardPlayer module —
++        // the heartbeat attach is gated on a video module being present.
++        var guideOnly = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
++            Modules: new[]
++            {
++                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 100, null)
++            });
++        SetupView(guideOnly);
++        SetupResultNotFound();
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Guide 1"));
++
++        JSInterop.Invocations.Should().NotContain(i =>
++            i.Identifier == "import" &&
++            i.Arguments.Any(a => (string?)a == WardPlayerModulePath));
++    }
++
++    [TestMethod]
++    public void ResultView_Binds_ScoreAndPassState()
++    {
++        SetupView(UnlockedView());
++        SetupResult(new SubmissionDetailDto(
++            SubmissionId: Guid.NewGuid(),
++            AssignmentId: AssignmentId,
++            StudentId: StudentId,
++            CurrentVersionNumber: 1,
++            ReviewState: ReviewStateDto.Graded,
++            LastSubmittedAt: DateTimeOffset.UtcNow,
++            Versions: new[]
++            {
++                new SubmissionVersionDto(
++                    Id: Guid.NewGuid(), VersionNumber: 1, Source: SubmissionSourceDto.Student,
++                    Content: "ans", SubmittedByGuardianId: null, SubmittedAt: DateTimeOffset.UtcNow,
++                    Score: 0.85m, Passed: true)
++            },
++            Review: null));
++
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Result"));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("0.85"));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Passed"));
++    }
++
++    [TestMethod]
++    public void LoadFailure_SurfacesError_NoPerpetualSpinner()
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/modules")
++            .Respond(HttpStatusCode.InternalServerError, "application/json", "boom");
++
++        var cut = RenderAssignment();
++        // The failure surfaces the client's error message and the loading spinner is
++        // not left spinning forever (an error bar replaces it rather than a perpetual ring).
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Internal Server Error"));
++        cut.Markup.Should().NotContain("fluent-progress-ring");
++    }
++
++    [TestMethod]
++    public void SubmitFailure_RestoresIdleButton_ShowsError()
++    {
++        SetupView(UnlockedView());
++        SetupResultNotFound();
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/submission")
++            .Respond(HttpStatusCode.InternalServerError, "application/json", "boom");
++
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Submit answers"));
++        cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Submit", StringComparison.OrdinalIgnoreCase)).Click();
++
++        // ar-9 fix class: a failed mutation must not leave the button stuck on
++        // "Submitting…" — the busy state restores to idle and an error surface is shown.
++        cut.WaitForAssertion(() => cut.Markup.Should().NotContain("Submitting"));
++        cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Submit", StringComparison.OrdinalIgnoreCase))
++            .TextContent.Trim().Should().Be("Submit answers");
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Internal Server Error"));
++    }
++
++    [TestMethod]
++    public void MissingIdentifiers_ShowsError_NoPerpetualSpinner()
++    {
++        // Route params resolve to Guid.Empty (no student/assignment identifier): the
++        // page must surface a user-visible error instead of a perpetual spinner.
++        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Assignment>();
++        cut.Markup.Should().Contain("Missing assignment or ward identifier");
++        cut.Markup.Should().NotContain("fluent-progress-ring");
++    }
++
++    [TestMethod]
++    public void BackNavigation_PointsAtWardList()
++    {
++        // The player renders an in-page back-navigation link to the ward list route
++        // (/ward/{StudentId}) so the user is never stranded on the deep player route.
++        SetupView(UnlockedView());
++        SetupResultNotFound();
++        var cut = RenderAssignment();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Video 1"));
++
++        cut.FindAll("fluent-anchor")
++            .Any(a => a.GetAttribute("href") == $"/ward/{StudentId}")
++            .Should().BeTrue("the player must render a back link targeting the ward list");
++    }
++
++    private void SetupResult(SubmissionDetailDto detail)
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/submission")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, JsonSubmission));
++    }
++
++    private void SetupView(WardAssignmentViewDto view)
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/modules")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(view, Json));
++    }
++
++    private void SetupResultNotFound()
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/submission")
++            .Respond(HttpStatusCode.NotFound);
++    }
++
++    private IRenderedComponent<SchoolCollab.Families.Components.Pages.Ward.Assignment> RenderAssignment() =>
++        Render<SchoolCollab.Families.Components.Pages.Ward.Assignment>(parameters =>
++        {
++            parameters.Add(a => a.AssignmentId, AssignmentId);
++            parameters.Add(a => a.StudentId, StudentId);
++        });
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs b/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs
+new file mode 100644
+index 00000000..5ff5ab70
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs
+@@ -0,0 +1,112 @@
++using System;
++using System.Net;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-A5 (slice 2b) — the ward assignment-list surface. Binding coverage:
++/// <list type="bullet">
++///   <item><c>RendersRows_FromWardList</c> — the grid renders each assignment row.</item>
++///   <item><c>HasLockedModules_Badge_Truth</c> — the Locked/Ready badge tracks the flag.</item>
++///   <item><c>EmptyState_Shows_Message</c> — an empty list renders the empty message bar.</item>
++///   <item><c>NoStudentId_Shows_Warning</c> — a missing ward id renders a warning.</item>
++/// </list>
++/// </summary>
++[TestClass]
++public class WardIndexBunitTests : BunitContext
++{
++    private readonly MockHttpMessageHandler _mockHttp;
++    private static readonly Guid StudentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid AssignmentA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid AssignmentB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++
++    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
++    {
++        Converters = { new JsonStringEnumConverter<WardSubmissionStateDto>(), new JsonStringEnumConverter<ModuleTypeDto>() }
++    };
++
++    public WardIndexBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++        _mockHttp = new MockHttpMessageHandler();
++        var http = _mockHttp.ToHttpClient();
++        http.BaseAddress = new Uri("http://localhost");
++        Services.AddSingleton(http);
++        Services.AddSingleton<FamiliesApiClient>();
++        Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
++    }
++
++    [TestMethod]
++    public void RendersRows_FromWardList()
++    {
++        SetupList(new[]
++        {
++            new WardAssignmentListItemDto(AssignmentA, "Algebra", DateTimeOffset.UtcNow, WardSubmissionStateDto.InProgress, HasLockedModules: true),
++            new WardAssignmentListItemDto(AssignmentB, "History", null, WardSubmissionStateDto.NotStarted, HasLockedModules: false)
++        });
++
++        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("History"));
++    }
++
++    [TestMethod]
++    public void HasLockedModules_Badge_Truth()
++    {
++        SetupList(new[]
++        {
++            new WardAssignmentListItemDto(AssignmentA, "Assignment A", null, WardSubmissionStateDto.NotStarted, HasLockedModules: true),
++            new WardAssignmentListItemDto(AssignmentB, "Assignment B", null, WardSubmissionStateDto.NotStarted, HasLockedModules: false)
++        });
++
++        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
++        cut.WaitForAssertion(() => cut.FindAll("fluent-badge").Count.Should().Be(2));
++
++        // Map badge text to a boolean, keyed by each row's Assignment (title) so the
++        // assertion is real: the row for the assignment with HasLockedModules=true must
++        // show the Locked badge, and the other row Ready. The grid renders rows in item
++        // order, so the Locked badge sits between Assignment A's title and Assignment B's
++        // title; a per-row positional check catches an INVERTED mapping, which a plain
++        // "the set contains both words" check would miss.
++        var idxA = cut.Markup.IndexOf("Assignment A", StringComparison.Ordinal);
++        var idxLocked = cut.Markup.IndexOf("Locked", StringComparison.Ordinal);
++        var idxB = cut.Markup.IndexOf("Assignment B", StringComparison.Ordinal);
++        var idxReady = cut.Markup.IndexOf("Ready", StringComparison.Ordinal);
++
++        idxLocked.Should().BeInRange(idxA, idxB);   // Locked belongs to Assignment A's row
++        idxReady.Should().BeGreaterThan(idxB);      // Ready belongs to Assignment B's row
++    }
++
++    [TestMethod]
++    public void EmptyState_Shows_Message()
++    {
++        SetupList(System.Array.Empty<WardAssignmentListItemDto>());
++        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No assignments for this ward yet"));
++    }
++
++    [TestMethod]
++    public void NoStudentId_Shows_Warning()
++    {
++        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No ward selected for this session"));
++    }
++
++    private void SetupList(WardAssignmentListItemDto[] items)
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/students/{StudentId}/assignments")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(items, Json));
++    }
++}

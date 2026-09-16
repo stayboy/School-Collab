@@ -226,4 +226,14 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WaitFor(assignmentsApi)
     .WaitFor(studentsApi);
 
+// F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
+// Option B, a separate host rather than routes on Admin). Depends on the
+// Assignments API for its ward-facing endpoints. Its auth-mode switch
+// (FEATURE:DisableOIDCAuth) is read from its own appsettings.json (dev default
+// "true" = TestAuth) — no AppHost flag param needed, mirroring the Admin note.
+builder.AddProject<Projects.SchoolCollab_Families>("families")
+    .WithReference(assignmentsApi)
+    .WithReference(redis)
+    .WaitFor(assignmentsApi);
+
 builder.Build().Run();

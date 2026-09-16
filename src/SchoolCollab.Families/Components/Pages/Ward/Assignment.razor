@@ -1,0 +1,440 @@
+@page "/ward/{StudentId:guid}/assignments/{AssignmentId:guid}"
+@implements IAsyncDisposable
+@inject FamiliesApiClient Api
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject ILogger<Assignment> Logger
+@using Microsoft.AspNetCore.WebUtilities
+@using SchoolCollab.Assignments.Contracts
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_studentId != Guid.Empty)
+        {
+            <FluentAnchor Appearance="Appearance.Hypertext" class="ward-back"
+                          Href="@($"/ward/{_studentId}")">
+                Back to ward
+            </FluentAnchor>
+        }
+
+        <h1>@(_view?.Title ?? "Assignment")</h1>
+
+        @if (_view is null)
+        {
+            @if (_error is not null)
+            {
+                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+            }
+            else
+            {
+                <FluentProgressRing />
+            }
+        }
+        else
+        {
+    <div class="ward-player">
+        @foreach (var module in _view.Modules)
+        {
+            <FluentCard @key="module.ModuleId" class="ward-module">
+                <h2>@(string.IsNullOrWhiteSpace(module.Title) ? $"Module {module.DisplayOrder}" : module.Title)</h2>
+                @if (module.ModuleType == ModuleTypeDto.Video)
+                {
+                    @* v1 captions-ready: a <track> slot renders when a captions asset is
+                        provided by the module (none today — full WCAG is WS-G1/Phase 5). *@
+                    <video controls data-module-id="@module.ModuleId" class="ward-video">
+                        @if (!string.IsNullOrWhiteSpace(module.Url))
+                        {
+                            <source src="@module.Url" type="video/mp4" />
+                        }
+                    </video>
+                    <div class="ward-module-progress">
+                        Progress: <strong>@module.PercentComplete%</strong>
+                        @if (module.CompletedAt is not null)
+                        {
+                            <text> — completed</text>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p class="ward-guide">
+                        @if (!string.IsNullOrWhiteSpace(module.Url))
+                        {
+                            <a href="@module.Url" target="_blank" rel="noopener noreferrer">Open guide</a>
+                            <text> — read before answering questions.</text>
+                        }
+                        else
+                        {
+                            <text>Guide content</text>
+                        }
+                    </p>
+                    <div class="ward-module-progress">
+                        Progress: <strong>@module.PercentComplete%</strong>
+                        @if (module.CompletedAt is not null)
+                        {
+                            <text> — completed</text>
+                        }
+                    </div>
+                }
+
+                @if (module.CompletedAt is null)
+                {
+                    <FluentButton Appearance="Appearance.Accent"
+                                  Disabled="@_busy"
+                                  OnClick="@(() => MarkModuleReadAsync(module.ModuleId))">
+                        Mark @(module.ModuleType == ModuleTypeDto.Video ? "watched" : "read")
+                    </FluentButton>
+                }
+            </FluentCard>
+        }
+
+        <FluentCard class="ward-questions">
+            @if (_view.QuestionsUnlocked)
+            {
+                <p>Questions are unlocked. Write your answers below, then submit.</p>
+                <FluentTextArea Label="Your answer" Rows="4" @bind-Value="_content" />
+                <FluentButton Appearance="Appearance.Accent"
+                              Disabled="@_busy"
+                              OnClick="@SubmitAsync">
+                    @(_busy ? "Submitting…" : "Submit answers")
+                </FluentButton>
+            }
+            else
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">
+                    Complete all required modules above to unlock the questions.
+                </FluentMessageBar>
+            }
+        </FluentCard>
+
+        @if (_submissionScore is not null || _submissionPassed is not null)
+        {
+            <FluentCard class="ward-result">
+                <h2>Result</h2>
+                @if (_submissionScore is not null)
+                {
+                    <p>Score: <strong>@_submissionScore.Value.ToString("0.##")</strong></p>
+                }
+                @if (_submissionPassed is not null)
+                {
+                    <FluentMessageBar Intent="@(_submissionPassed == true ? MessageIntent.Success : MessageIntent.Warning)">
+                        @(_submissionPassed == true ? "Passed" : "Not passed — you may retry.")
+                    </FluentMessageBar>
+                }
+                <FluentButton OnClick="@RefreshResultAsync">Refresh result</FluentButton>
+            </FluentCard>
+        }
+    </div>
+
+        @if (_error is not null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        }
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private CancellationTokenSource? _loadCts;
+    // Mutations (submit / mark-read / refresh) use their own CTS, never _loadCts
+    // (which is recreated + disposed per load — see blazor-components.md).
+    private CancellationTokenSource? _mutationCts;
+    private volatile bool _disposed;
+    private Guid _studentId;
+    private (Guid AssignmentId, Guid StudentId)? _loadedFor;
+    private WardAssignmentViewDto? _view;
+    private decimal? _submissionScore;
+    private bool? _submissionPassed;
+    private string? _content;
+    private bool _busy;
+    private string? _error;
+    private IJSObjectReference? _playerModule;
+    private DotNetObjectReference<Assignment>? _dotNetRef;
+    private bool _heartbeatsAttached;
+    private int _loadEpoch;
+
+    [Parameter] public Guid AssignmentId { get; set; }
+
+    [Parameter] public Guid StudentId { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        _studentId = StudentId;
+    }
+
+    // The load lives in OnParametersSetAsync (which runs AFTER OnParametersSet —
+    // OnInitializedAsync would run before the parameter is resolved, leaving _studentId
+    // default and the page stuck on the loading ring forever). Guarded by _loadedFor so an
+    // unchanged re-render does not re-fetch.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AssignmentId == Guid.Empty || StudentId == Guid.Empty)
+        {
+            _error = "Missing assignment or ward identifier for this session.";
+            return;
+        }
+        if (_loadedFor == (AssignmentId, StudentId)) return;
+        _loadedFor = (AssignmentId, StudentId);
+        // Bump the load epoch BEFORE resetting state: an in-flight load that started
+        // under the old key must not commit over this newer parameter change.
+        _loadEpoch++;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        // Reset the loaded view + result + the one-shot heartbeat flag so a
+        // parameter change (different ward/assignment) never shows stale state.
+        _view = null;
+        _submissionScore = null;
+        _submissionPassed = null;
+        _heartbeatsAttached = false;
+        // A load-key change can swap to a different video/guide view: detach the previous
+        // module's heartbeat listeners (registry cleanup) so a re-attach on the new view
+        // never accumulates stale entries for removed <video> elements.
+        await DetachVideoHeartbeatsAsync();
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Gate the heartbeat attach on a one-shot flag, NOT firstRender: the first
+        // render always happens before the awaited load completes, so _view is null on
+        // the true first render. We attach on whichever render first has a video
+        // module, exactly once. bUnit-safety: under loose JSInterop the import
+        // resolves to null, and AttachVideoHeartbeatsAsync swallows that, so the
+        // render never depends on a JS round-trip.
+        if (!_heartbeatsAttached && !OperatingSystem.IsBrowser() && JS is not null
+            && _studentId != Guid.Empty && _view?.Modules.Any(m => m.ModuleType == ModuleTypeDto.Video) == true)
+        {
+            _heartbeatsAttached = true;   // one-shot gate: prevents a concurrent double-attach
+            if (!await AttachVideoHeartbeatsAsync())
+            {
+                // Attach failed (already logged inside) — reset so a later render retries.
+                // The heartbeat is non-fatal and "Mark watched" still works; no hard error
+                // surface. Retrying on the next render is the fix.
+                _heartbeatsAttached = false;
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        // Capture the epoch this load started under. A parameter change while this is in
+        // flight bumps _loadEpoch, so the stale completion must not overwrite the newer
+        // ward/assignment view. A mutation refresh captures the current epoch naturally
+        // and still commits.
+        var epoch = _loadEpoch;
+        try
+        {
+            // Load the ward view and the submission result in parallel (independent GETs),
+            // never serially. TryLoadResultAsync swallows its own errors, so WhenAll only
+            // propagates a view-load fault — preserving the null/error semantics below.
+            var viewTask = Api.GetWardAssignmentViewAsync(AssignmentId, _studentId, _loadCts!.Token);
+            var resultTask = TryLoadResultAsync(_loadCts.Token, epoch);
+            await Task.WhenAll(viewTask, resultTask);
+            if (epoch != _loadEpoch || _disposed) return;
+            _view = await viewTask;
+            // No StateHasChanged: OnInitializedAsync's completion triggers the normal
+            // lifecycle re-render. StateHasChanged is reserved for user-driven handlers.
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed) _error = ex.Message;
+        }
+    }
+
+    private async Task TryLoadResultAsync(CancellationToken ct, int epoch)
+    {
+        try
+        {
+            var detail = await Api.GetSubmissionAsync(AssignmentId, _studentId, ct);
+            // Guard both branches against a superseded load: a stale result must never
+            // overwrite the newer ward/assignment's submission state.
+            if (epoch != _loadEpoch || _disposed) return;
+            if (detail is null)
+            {
+                _submissionScore = null;
+                _submissionPassed = null;
+                return;
+            }
+            if (epoch != _loadEpoch || _disposed) return;
+            var current = detail.Versions.FirstOrDefault(v => v.VersionNumber == detail.CurrentVersionNumber);
+            _submissionScore = current?.Score;
+            _submissionPassed = current?.Passed;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "No submission result yet for assignment {AssignmentId}", AssignmentId);
+        }
+    }
+
+    /// <summary>Attaches the wardPlayer heartbeat watchers to the rendered video modules.
+    /// Returns <see langword="true"/> on success and on the benign
+    /// <see cref="JSDisconnectedException"/> (disposed circuit — nothing to attach to);
+    /// returns <see langword="false"/> when another exception was caught and logged so the
+    /// caller can retry the attach on a later render.</summary>
+    private async Task<bool> AttachVideoHeartbeatsAsync()
+    {
+        try
+        {
+            // The host app serves its own wwwroot at the app root (MapStaticAssets Root
+            // mode), so the module is imported at the root-relative path; App.razor sets
+            // <base href="/">, which makes "./js/wardPlayer.js" resolve correctly even on
+            // this deep page route.
+            _playerModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./js/wardPlayer.js");
+            _dotNetRef ??= DotNetObjectReference.Create(this);
+            if (_playerModule is not null)
+            {
+                await _playerModule.InvokeVoidAsync("attachVideoHeartbeats", _dotNetRef);
+            }
+            return true;
+        }
+        catch (JSDisconnectedException) { return true; }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Video heartbeat attach failed for assignment {AssignmentId}", AssignmentId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Tears down the wardPlayer heartbeat listeners (registry cleanup). No-op when no
+    /// module has been created yet or the circuit is already gone. Called on every load-key
+    /// change and on disposal so listeners never leak on live or stale &lt;video&gt; nodes.
+    /// </summary>
+    private async Task DetachVideoHeartbeatsAsync()
+    {
+        if (_playerModule is null) return;
+        try { await _playerModule.InvokeVoidAsync("detachVideoHeartbeats"); }
+        catch (JSDisconnectedException) { }
+    }
+
+    /// <summary>Invoked by <c>wardPlayer.js</c> on a throttled video timeupdate.</summary>
+    [JSInvokable("onVideoTick")]
+    public async Task OnVideoTickAsync(Guid moduleId, int percent)
+    {
+        if (_disposed || _studentId == Guid.Empty) return;
+        try
+        {
+            await Api.ReportModuleProgressAsync(AssignmentId, _studentId, moduleId, percent, CancellationToken.None);
+            if (_view is not null)
+            {
+                _view = _view with
+                {
+                    Modules = _view.Modules
+                        .Select(m => m.ModuleId == moduleId ? m with { PercentComplete = Math.Max(m.PercentComplete, percent) } : m)
+                        .ToList()
+                };
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed) _error = ex.Message;
+        }
+    }
+
+    private async Task MarkModuleReadAsync(Guid moduleId)
+    {
+        _busy = true;
+        _error = null;
+        // Mutations never reuse _loadCts (recreated + disposed per load): a dedicated
+        // per-mutation CTS is created here and disposed in finally.
+        _mutationCts?.Dispose();
+        _mutationCts = new CancellationTokenSource();
+        try
+        {
+            await Api.ReportModuleProgressAsync(AssignmentId, _studentId, moduleId, 100, _mutationCts.Token);
+            // Mirror the OnParametersSetAsync reset: drop the stale view before the refetch
+            // so the user sees the loading state instead of the old PercentComplete.
+            _view = null;
+            await LoadAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed) _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            _mutationCts?.Dispose();
+            _mutationCts = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_studentId == Guid.Empty) return;
+        _busy = true;
+        _error = null;
+        // Mutation CTS (see MarkModuleReadAsync) — never _loadCts.
+        _mutationCts?.Dispose();
+        _mutationCts = new CancellationTokenSource();
+        try
+        {
+            await Api.SubmitAsync(AssignmentId, _studentId, _content, null, _mutationCts.Token);
+            await TryLoadResultAsync(_mutationCts.Token, _loadEpoch);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed) _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            _mutationCts?.Dispose();
+            _mutationCts = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshResultAsync()
+    {
+        _busy = true;
+        _error = null;
+        // Mutation CTS (see MarkModuleReadAsync) — never _loadCts.
+        _mutationCts?.Dispose();
+        _mutationCts = new CancellationTokenSource();
+        try
+        {
+            await TryLoadResultAsync(_mutationCts.Token, _loadEpoch);
+        }
+        finally
+        {
+            _busy = false;
+            _mutationCts?.Dispose();
+            _mutationCts = null;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
+        if (_playerModule is not null)
+        {
+            await DetachVideoHeartbeatsAsync();
+            try { await _playerModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+            _playerModule = null;
+        }
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+}
