@@ -302,3 +302,7 @@ within a phase.
    `documents/solution/assignment-request-implementation-details.md` §3.
 3. **Current (2026-09-16):** Phase 2 landed (ar-12 + ar-13 = PR #236) and **E1 deep links landed (ar-14 = PR #237, stacked on #236)**. **Email-provider decision MADE:** school SMTP relay via MailKit, MailPit dev container + null-sender fallback, deployment-level from-address, first secret AppHost parameter. Next: **WS-F3 sign-page relocation LANDED (ar-15, 2026-09-16** — public token-validated guardian route group at the API extending the E1 protector, Families-hosted sign page, commands unchanged; 2,311/0), then **4b E2 channel delivery** (unblocked), then 4c E3 worker; D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).
+4. **Follow-up candidate (deferred — not scheduled):** Teachers & Ward Portal as a
+   Python **Prefab UI** second surface — spike-only proposal, zero backend change;
+   spec pointer: `documents/specs/assignment-request-feature-spec.md` §8; plan:
+   `documents/specs/teachers-ward-portal-prefab-plan.md`.
