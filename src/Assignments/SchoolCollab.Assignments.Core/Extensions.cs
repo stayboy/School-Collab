@@ -55,6 +55,12 @@ public static class Extensions
         // handlers via constructor injection.
         services.AddScoped<IScoringEngine, ScoringEngine>();
 
+        // WS-E1 (ar-14-deep-links): shared purpose-scoped protector + the publish-time
+        // deep-link token minter. Requires the host to have configured DataProtection
+        // (IDataProtectionProvider) before AddAssignmentsCore; the Assignments API does.
+        services.AddScoped<SchoolCollab.Core.DeepLinks.DeepLinkProtector>();
+        services.AddScoped<IDeepLinkTokenMinter, DeepLinkTokenMinter>();
+
         services.AddHybridCache(options =>
         {
             options.DefaultEntryOptions = new HybridCacheEntryOptions

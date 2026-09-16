@@ -16,7 +16,16 @@ internal sealed class FakeNotificationPolicyResolver : INotificationPolicyResolv
         ReminderIntervalHoursFromOverride: false, LinkValidityDaysFromOverride: false,
         SendoutTimeOfDayFromOverride: false, SendoutIntervalMinutesFromOverride: false);
 
+    private readonly int? _linkValidityDays;
+
+    /// <summary>Resolves the empty policy with an optional LinkValidityDays so
+    /// deep-link expiry tests can control the resolved value.</summary>
+    public FakeNotificationPolicyResolver(int? linkValidityDays = null)
+        => _linkValidityDays = linkValidityDays;
+
     public Task<EffectiveNotificationPolicy> ResolveEffectiveAsync(
         Guid tenantId, Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Empty);
+        Task.FromResult(_linkValidityDays is null
+            ? Empty
+            : Empty with { LinkValidityDays = _linkValidityDays });
 }

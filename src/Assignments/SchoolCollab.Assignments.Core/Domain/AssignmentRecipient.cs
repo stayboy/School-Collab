@@ -32,6 +32,12 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
     public DateTimeOffset? DeliveredAt { get; private set; }
     public DateTimeOffset? OpenedAt { get; private set; }
 
+    // WS-E1 (ar-14-deep-links): the contact-scoped deep-link bearer token (protected
+    // ciphertext) minted at publish, plus when it expires. One token per
+    // (assignment, contact) recipient row — re-minted/reused on republish.
+    public string? DeepLinkToken { get; private set; }
+    public DateTimeOffset? DeepLinkExpiresAt { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -83,6 +89,16 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
     public void MarkOpened()
     {
         OpenedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>WS-E1 (ar-14-deep-links) — stamps the deep-link token (minted)
+    /// and its expiry, or refreshes both on a republish re-mint. Additive; touches
+    /// only the deep-link columns plus the audit timestamp.</summary>
+    public void AttachDeepLink(string token, DateTimeOffset expiresAt)
+    {
+        DeepLinkToken = token;
+        DeepLinkExpiresAt = expiresAt;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 }

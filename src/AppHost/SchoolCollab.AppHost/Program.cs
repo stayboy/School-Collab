@@ -233,6 +233,10 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
 // "true" = TestAuth) — no AppHost flag param needed, mirroring the Admin note.
 builder.AddProject<Projects.SchoolCollab_Families>("families")
     .WithReference(assignmentsApi)
+    // WS-E1 (ar-14-deep-links): the Families host resolves the runtime
+    // FEATURE:EnableDeepLinks flag via AddConfigFeatureFlagClient (Settings aggregate),
+    // so it needs the settings-api reference for service discovery.
+    .WithReference(settingsApi)
     .WithReference(redis)
     .WaitFor(assignmentsApi);
 

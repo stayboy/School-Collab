@@ -60,6 +60,7 @@ public class AssignmentActivityGroupTests
                broadcaster,
                new FakeNotificationPolicyResolver(),
                new FakeFeatureFlagService(),
+               new FakeDeepLinkTokenMinter(),
                new FakeHybridCache(),
                NullLogger<PublishAssignmentCommandHandler>.Instance);
 
@@ -120,6 +121,7 @@ public class AssignmentActivityGroupTests
             new FakeBroadcaster(),
             new FakeNotificationPolicyResolver(),
             new FakeFeatureFlagService(),
+            new FakeDeepLinkTokenMinter(),
             new FakeHybridCache(),
             NullLogger<PublishAssignmentCommandHandler>.Instance);
 

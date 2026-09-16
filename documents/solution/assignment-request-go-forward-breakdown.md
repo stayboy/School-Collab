@@ -89,7 +89,7 @@
 | Policy (blocked/preferred/cap) | ✅ | `TenantNotificationPolicy` + `GradeNotificationPolicy` + `EffectiveNotificationPolicyResolver` + `NotificationRecipientFilter` applied in `PublishAssignmentCommandHandler`. |
 | Broadcast trigger on publish | ✅ | `IAssignmentNotificationBroadcaster` → outbox → `AssignmentPublishedIntegrationEvent`. |
 | Actual delivery (email/SMS/WhatsApp) | ❌ | No provider infra repo-wide (no SMTP/SendGrid/Twilio). The deferred "§18" of `notification-delivery-plan.md`. |
-| Deep links with secure token (no login) | ❌ | `LinkValidityDays` stored only. Net-new token auth + public routes. |
+| Deep links with secure token (no login) | ✅ | **Landed (ar-14, Phase 4 E1)**: contact-scoped `ar-deeplink` DataProtection tokens (payload incl. tenantId) minted at publish into `AssignmentRecipient.DeepLinkToken`/`DeepLinkExpiresAt` (TTL = `LinkValidityDays` ?? 7), shared Redis-backed keyring (Assignments.Api mints, Families validates), public `/deeplink/{token}` landing → cookie sign-in → ward list/player, `LinkExpired` friendly page, `FEATURE:EnableDeepLinks` dark-launch flag (default OFF, gates routes only). Residuals: prod service-to-service auth gap (deployment-auth family), tenant_name/type claims (cosmetic). |
 | `NotificationLog` + retries + failure surfacing | ❌ | Net-new entity + worker + admin surfacing. |
 | Reminder worker | ❌ | Net-new scheduled worker (`students-worker` is the repo precedent for a worker project). |
 
@@ -257,8 +257,9 @@ within a phase.
   records identity/time; delegation to another guardian works; a new AR pre-fills
   `RequiresSignature` from the grade default and the author can override it.
 
-### Phase 4 — Delivery & deep links (WS-E)
-- [ ] E1 token deep links (expiry honored); E2 channel delivery + NotificationLog + failure surfacing; E3 reminder/overdue/archive worker.
+### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2/E3 open)
+- [x] **E1 token deep links (ar-14, 2026-09-16)**: contact-scoped DataProtection tokens minted at publish (additive recipient columns; TTL `LinkValidityDays` ?? 7); shared Redis-backed keyring in Assignments.Api + Families; the repo's FIRST public token-auth route group (`/deeplink/{token}` landing → cookie sign-in → `/ward/{sid}`|`/ward`, best-effort bounded 3s `OpenedAt` stamp, `LinkExpired` page); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF; configuration.md §2/§5. 43 files, 2,279/0. Round: `rounds/round-ar-14-deep-links.md` (CLOSED, Tier 3). **Unblocks WS-F3.**
+- [ ] E2 channel delivery + NotificationLog + failure surfacing (**needs the email-provider decision first** — no SMTP/SendGrid/Twilio infra repo-wide); E3 reminder/overdue/archive worker (`Assignments.Worker`; archive sweep already ships in Assignments.Api).
 - **Accept:** publish → notifications only to verified+subscribed valid contacts through
   policy-filtered channels; deep link opens the right ward/guardian page without login
   and expires; unsigned reminder fires per cadence; bounced/failed sends surface on the
@@ -290,7 +291,5 @@ within a phase.
 2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
    light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-16):** the train is drained (#232, #233, #235 merged) and Phase 2 is **landed**
-   (ar-12 + ar-13 = PR #236). Next: **Phase 4 WS-E delivery** (E1 token deep links first — unblocks
-   WS-F3; E2 needs a provider decision; then E3 worker), D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-16):** Phase 2 landed (ar-12 + ar-13 = PR #236) and **E1 deep links landed (ar-14, working tree on `stack/14` — commit/PR pending owner instruction; retarget onto merged `main` after #236 merges).** Next: the **email-provider decision**, then **4b E2 channel delivery + NotificationLog + Admin failure surfacing**; then 4c E3 worker; WS-F3 sign-page relocation is now unblocked by E1; D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).

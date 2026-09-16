@@ -201,4 +201,37 @@ public class DotNetBestPracticesArchitectureTests
             "UpdateStudentAsync or live per-row link/unlink/contact calls (dto-form-model-mapping.md). Found: " +
             string.Join(", ", failures));
     }
+
+    /// <summary>
+    /// WS-E1 (ar-14-deep-links): both deep-link hosts must persist their DataProtection
+    /// keyring under the SAME <see cref="SchoolCollab.Core.DeepLinks.DeepLinkConstants.ApplicationName"/>
+    /// or Families cannot unprotect mint-side ciphertext. Guard the actual host entry points
+    /// (source shape) so a host forgetting <c>SetApplicationName(DeepLinkConstants.ApplicationName)</c>
+    /// fails here even when the wiring tests in <c>SchoolCollab.Families.Tests.Unit</c> build
+    /// their own providers (which could mask a dropped call in the real host).
+    /// </summary>
+    [TestMethod]
+    public void DeepLinkHosts_SetSharedKeyringApplicationName()
+    {
+        var deeplinkPrograms = new[]
+        {
+            Path.Combine(SrcRoot, "Assignments", "SchoolCollab.Assignments.Api", "Program.cs"),
+            Path.Combine(SrcRoot, "SchoolCollab.Families", "Program.cs"),
+        };
+
+        var missing = deeplinkPrograms.Where(p => !File.Exists(p)).ToList();
+        missing.Should().BeEmpty("expected deep-link host Program.cs files to exist: " + string.Join(", ", missing));
+
+        var failures = deeplinkPrograms
+            .Where(File.Exists)
+            .Where(p => !File.ReadAllText(p).Contains(
+                "SetApplicationName(DeepLinkConstants.ApplicationName)", StringComparison.Ordinal))
+            .Select(Relative)
+            .ToList();
+
+        failures.Should().BeEmpty(
+            "both deep-link hosts must call " +
+            "SetApplicationName(DeepLinkConstants.ApplicationName) on their keyring " +
+            "(shared DataProtection contract, ar-14-deep-links). Files:\n" + string.Join("\n", failures));
+    }
 }

@@ -545,6 +545,27 @@ public static class AssignmentRoutes
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListAssignmentRecipients(id), ct)));
 
+        // WS-E1 (ar-14-deep-links): idempotent first-visit deep-link stamp, invoked
+        // server-side by the Families landing. Marks the recipient OpenedAt at most
+        // once (first visit feeding the Sent → Viewed chain); subsequent landings are
+        // no-ops. 404 when the (assignment, contact) recipient row is unknown.
+        group.MapPost("/{id:guid}/recipients/{contactId:guid}/opened", async (
+            Guid id,
+            Guid contactId,
+            [FromServices] ISubmissionRepository submissionRepository,
+            CancellationToken ct) =>
+        {
+            var recipient = await submissionRepository.GetRecipientAsync(id, contactId, ct);
+            if (recipient is null) return Results.NotFound();
+            if (recipient.OpenedAt is null)
+            {
+                recipient.MarkOpened();
+                submissionRepository.Update(recipient);
+                await submissionRepository.SaveChangesAsync(ct);
+            }
+            return Results.NoContent();
+        });
+
         // Submissions for an assignment (teacher review/grade queue, spec §12).
         group.MapGet("/{id:guid}/submissions", async (
             Guid id,

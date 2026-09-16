@@ -28,6 +28,10 @@ namespace SchoolCollab.Core.Auth;
 /// <para>The API's <see cref="TestAuthHandler"/> honours this header (dev/TestAuth
 /// mode only), so it cannot be spoofed in production OIDC where
 /// <see cref="TestAuthHandler"/> is not registered.</para>
+/// <para>If the request already carries an explicit <c>x-tenant-id</c> header (e.g. the
+/// deep-link landing stamps the token's validated payload tenant), the handler leaves it
+/// untouched rather than overwriting it with the dev selection — an explicit tenant is
+/// authoritative.</para>
 /// </remarks>
 public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
 {
@@ -68,9 +72,11 @@ public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
                 request.Method, request.RequestUri);
         }
 
-        if (selected is { } tenantId && tenantId != Guid.Empty)
+        if (selected is { } tenantId && tenantId != Guid.Empty && !request.Headers.Contains("x-tenant-id"))
         {
-            request.Headers.Remove("x-tenant-id");
+            // Skip when the caller already set x-tenant-id explicitly (e.g. the deep-link
+            // landing stamps the token's validated payload tenant) so that explicit tenant
+            // is authoritative instead of being overwritten by the dev selection.
             request.Headers.Add("x-tenant-id", tenantId.ToString());
         }
 

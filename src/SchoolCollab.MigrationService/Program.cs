@@ -97,6 +97,7 @@ try
             await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
             await SeedEnableActivityGroupsAsync(settingsDb, logger);
             await SeedRequireAssignmentApprovalAsync(settingsDb, logger);
+            await SeedEnableDeepLinksAsync(settingsDb, logger);
 
             // Seed the default EntityCodeRule blueprints (student/staff/assignment
             // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
@@ -376,6 +377,45 @@ static async Task SeedRequireAssignmentApprovalAsync(SettingsDbContext db, Micro
     var flag = FeatureFlag.Create(
         key,
         "Require approval before assignment publish",
+        null,
+        isEnabled: false);
+    db.FeatureFlags.Add(flag);
+    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
+        tenantId: null,
+        featureFlagId: flag.Id,
+        featureFlagKey: flag.Key,
+        changeKind: FlagChangeKind.Created,
+        previousIsEnabled: null,
+        newIsEnabled: flag.IsEnabled,
+        reason: "Initial seed by migration service",
+        actorId: actorId,
+        actorDisplayName: actorName));
+
+    await db.SaveChangesAsync();
+    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+}
+
+// WS-E1 / ar-14-deep-links: gates the Families public deep-link landing route
+// group. Default OFF — the flag ships dark (tokens are minted at publish regardless;
+// the runtime flag only decides whether the /deeplink/{token} route validates and
+// redirects). Idempotent on the normalised key, mirroring SeedRequireAssignmentApprovalAsync.
+static async Task SeedEnableDeepLinksAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+{
+    const string actorId = "system:migrator";
+    const string actorName = "Migration Service";
+
+    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableDeepLinks);
+
+    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
+    if (exists)
+    {
+        logger.LogInformation("Seed flag {Key} already present; skipping", key);
+        return;
+    }
+
+    var flag = FeatureFlag.Create(
+        key,
+        "Enable contact-scoped deep-link landing for published assignments",
         null,
         isEnabled: false);
     db.FeatureFlags.Add(flag);

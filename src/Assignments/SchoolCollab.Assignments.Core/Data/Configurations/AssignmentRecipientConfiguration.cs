@@ -27,6 +27,10 @@ internal sealed class AssignmentRecipientConfiguration : TenantEntityTypeConfigu
         builder.Property(x => x.SubscriptionActive).IsRequired().HasDefaultValue(false);
         builder.Property(x => x.DeliveredAt);
         builder.Property(x => x.OpenedAt);
+        // WS-E1 (ar-14-deep-links): protected deep-link token + expiry per recipient.
+        // Length accommodates the DataProtection ciphertext (+ JSON payload overhead).
+        builder.Property(x => x.DeepLinkToken).HasMaxLength(4096);
+        builder.Property(x => x.DeepLinkExpiresAt);
 
         // One recipient row per contact per assignment (spec §4.6 / §5).
         builder.HasIndex(x => new { x.TenantId, x.AssignmentId, x.ContactId })

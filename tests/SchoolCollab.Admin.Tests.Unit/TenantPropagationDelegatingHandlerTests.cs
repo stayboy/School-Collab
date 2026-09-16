@@ -70,6 +70,22 @@ public class TenantPropagationDelegatingHandlerTests
         request.Headers.Contains("x-tenant-id").Should().BeFalse("empty tenant -> no header");
     }
 
+    [TestMethod]
+    public async Task Explicit_x_tenant_id_Header_Wins_Over_Selection()
+    {
+        var selected = Guid.NewGuid();
+        var explicitTenant = Guid.NewGuid();
+        using var client = BuildClient(selected);
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "http://x/students");
+        request.Headers.TryAddWithoutValidation("x-tenant-id", explicitTenant.ToString());
+        await client.SendAsync(request, CancellationToken.None);
+
+        request.Headers.GetValues("x-tenant-id").Should().ContainSingle()
+            .Which.Should().Be(explicitTenant.ToString(),
+                "an explicitly set x-tenant-id must win over the dev selection (the deep-link stamp carries the token's validated tenant)");
+    }
+
     // ── Fault isolation (EnrollStudentDialog regression): a cache read failure
     // inside SendAsync (e.g. Redis down) must NOT fail the dialog's API call —
     // the request proceeds without the header and the receiver falls back to

@@ -1,10 +1,13 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.DataProtection;
+using StackExchange.Redis;
 using Serilog;
 using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.DeepLinks;
 using SchoolCollab.Core.Features;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,6 +47,33 @@ else
 {
     builder.AddRedisDistributedCache("cache");
 }
+
+// WS-E1 (ar-14-deep-links): DataProtection keyring shared with the Families host on
+// the same Redis resource. Both hosts MUST SetApplicationName the same value or
+// Families cannot unprotect mint-side ciphertext. When no Redis connection string is
+// present (non-Aspire local run / unit wiring tests) fall back to the default
+// in-memory keyring while keeping the shared application name. A dedicated keyring
+// multiplexer isolates the (rare) key-write traffic from the app's Aspire-managed
+// cache connections; keys are cached in memory once loaded.
+var deeplinkKeyring = builder.Services.AddDataProtection();
+if (string.IsNullOrWhiteSpace(cacheConnectionString))
+{
+    deeplinkKeyring.SetApplicationName(DeepLinkConstants.ApplicationName);
+}
+else
+{
+    // Dedicated process-lifetime keyring multiplexer (same lifetime as the host).
+    // ConnectAsync with AbortOnConnectFail=false so an unreachable Redis does not
+    // hard-fail host startup — keyring access retries lazily once Redis returns.
+    var keyringOptions = ConfigurationOptions.Parse(cacheConnectionString);
+    keyringOptions.AbortOnConnectFail = false;
+    var keyringMultiplexer = await ConnectionMultiplexer.ConnectAsync(keyringOptions);
+    deeplinkKeyring
+        .PersistKeysToStackExchangeRedis(keyringMultiplexer)
+        .SetApplicationName(DeepLinkConstants.ApplicationName);
+}
+// Scoped token minter lives in Assignments.Core (IDeepLinkTokenMinter); the
+// purpose-scoped protector is registered there alongside its services.
 
 builder.Services.AddAssignmentsCore(builder.Configuration);
 // C3 certificate rendering — the QuestPDF generator lives in the Api layer

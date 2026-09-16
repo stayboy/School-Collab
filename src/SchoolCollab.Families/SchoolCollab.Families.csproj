@@ -9,10 +9,17 @@
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
+    <!-- WS-E1 (ar-14-deep-links): Redis-persisted DataProtection keyring shared with
+         the Assignments API so it can unprotect mint-side deep-link tokens. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
+    <!-- WS-E1 (ar-14-deep-links): Settings.Core provides the cached, DB-backed
+         AddConfigFeatureFlagClient used to resolve the runtime EnableDeepLinks flag
+         (mirrors the Admin host's config feature-flag client pattern). -->
+    <ProjectReference Include="..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
     <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
 </Project>
