@@ -615,3 +615,24 @@ public record GuardianSignOffSubmissionRequest(
 
 /// <summary>Teacher reassign-signer request body (WS-C1, Q5).</summary>
 public record ReassignSignOffRequest(Guid NewGuardianId);
+
+/// <summary>Notification kind (mirrors Assignments.Core NotificationKind).</summary>
+public enum NotificationKindDto
+{
+    [Description("Publish")] Publish = 0,
+    [Description("Reminder")] Reminder = 1,
+    [Description("Completion")] Completion = 2,
+    [Description("Overdue")] Overdue = 3
+}
+
+/// <summary>A failed notification row for an assignment (WS-E2 / ar-16). Read by the
+/// ar-17 Admin failure surface via GET /assignments/{id}/notification-failures;
+/// <see cref="NextRetryAt"/> is null once the retry cap made the failure terminal.</summary>
+public record NotificationFailureDto(
+    Guid RecipientId,
+    Guid ContactId,
+    ContactChannelDto Channel,
+    NotificationKindDto Kind,
+    int Attempt,
+    string? FailureReason,
+    DateTimeOffset? NextRetryAt);

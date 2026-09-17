@@ -926,3 +926,33 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   follow-up, not an ar-15 change (the Admin surface is zero-diff for this round).
   **Next:** 4b E2 channel delivery + NotificationLog + Admin failure surfacing (MailKit CPM entry, MailPit dev container,
   `smtp-password` secret AppHost parameter); then 4c E3 worker; D-6 identity before Phase 5 WS-G.
+- `ar-16-channel-delivery` — **CLOSED 2026-09-17, Tier 2 LIGHT round**; Phase 4 slice **E2-core (WS-E)**
+  (`rounds/round-ar-16-channel-delivery.md` + `diffs-ar-16-channel-delivery.patch`; branch
+  `stack/16-ar-16-channel-delivery` off `main` @ `1479ed32` → **PR #240**, single-layer stack). **Owner scope decision
+  (Option A):** light mode carries no UI round (the skill's UI trigger sends any `.razor`/`.js` change to Tier 3), so this
+  round delivered the **delivery core** and the **Admin/author failure-surfacing UI moved to ar-17 (Tier 3)** — the
+  read-side endpoint it needs shipped here. Delivered: provider abstraction (`IEmailSender`/`ISmsSender`) with a **MailKit
+  SMTP** sender (**CPM 4.18.0**; 4.14.0 rejected on NU1902) + `NullEmailSender` fallback chosen by a pure
+  `EmailSenderSelection` when `Smtp:Host` is blank (reports success — an unconfigured host never fills the failure list) +
+  `LogAndSkipSmsSender` stub; tenant **`NotificationLog`** (audited tenant entity; rendered payload persisted at queue
+  time so retries are idempotent; `Queued/Sent/Failed/Skipped`; `Attempt`/`NextRetryAt`) + fluent config + index +
+  migration in `Core/Migrations/`; **publisher v1.1** — one consolidated row per **policy-filtered** recipient carrying
+  that recipient's `/deeplink/{token}`, `Skipped` when the token is absent/expired **or** the address is unresolvable,
+  with the v1 outbox enqueue unchanged; pure `NotificationRetrySchedule` (1m/5m/15m/60m, cap 5) +`NotificationDispatchService`
+  (cross-tenant candidate read via `IgnoreQueryFilters(["Tenant"])` then per-row `RunWithExplicitTenantAsync` — the
+  `ArchiveSweeper` precedent) + Api `NotificationDispatchSweepService` `BackgroundService`; tenant-scoped
+  `GetNotificationFailures` query + `GET /assignments/{id}/notification-failures`; MailPit dev container + 5 `smtp-*`
+  parameters with **`smtp-password` as the repo's first `AddParameter(secret: true)`**; `configuration.md` §2/§11 (incl.
+  the STARTTLS-only TLS limitation). 42 files, +3,364/−12. Pipeline: parent plan → worker pass 1 on
+  `ollama-cloud/deepseek-v4.1-flash` (an earlier clinepass dispatch was paused and superseded by the owner's
+  provider-profile switch) → reviewer `ollama-cloud/glm-5.3-flash` **P1** (patch-capture defect: the freeze filter
+  omitted the root-level `Directory.Packages.props` so the patch would not build standalone under CPM) + 3 P2 (TLS options;
+  cancellation swallowed into a terminal `Skipped` row; no uniqueness guard) → parent fixes (re-freeze to 42 files; both
+  `OperationCanceledException` rethrow sites + a new non-vacuous test; §11 doc note; uniqueness guard recorded as an E3
+  residual) → re-verification **PASS** (no P1/P2/regressions). Authoritative: build 0 errors; **2,337/0**
+  (Assignments **623/0**, Architecture 21/0).
+  **Residuals:** no live MailPit/SMTP send yet (transport is a thin MailKit call over a fully-tested pure
+  `BuildMimeMessage`); `StudentsContactAddressResolver`'s HTTP path untested; the new route is compile-verified only;
+  `(TenantId, AssignmentId, RecipientId, Kind)` unique index → E3; implicit-TLS `SslOnConnect`/port-465 unsupported.
+  **Next:** **ar-17 (Tier 3)** — Admin/author failure-surfacing UI over the delivered endpoint; then **E3**
+  (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.

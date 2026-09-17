@@ -79,27 +79,92 @@ a light tier through. Record escalations in the round doc.
 
 ## Models and per-tier strategy
 
-Exact id tables (pi + clinepass), substitution rules, and the traceability
-format live in `references/models.md`. Summary:
+Exact id tables, substitution rules, and the traceability format live in
+`references/models.md`. Summary:
 
-| Role | pi default | clinepass | Tiers |
+**Provider is a per-round choice, not a fixed setting.** Pick ONE profile for
+the whole round, record it on round-doc line 1, and never mix providers
+mid-round. Both profiles below are supported options; resolve the exact ids at
+dispatch time with `subagent({ action: "models" })` and copy `provider/id`
+verbatim (the `ollama*` ids have drifted historically — verify, don't assume).
+
+| Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) | Tiers |
 |---|---|---|---|
-| Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` | 3 only |
+| Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` | 3 only |
 | Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 1–3 |
-| Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` | 2–3 |
+| Reviewer | `ollama-cloud/deepseek-v4.1-flash` (owner override 2026-09-15) | `cline-pass/deepseek-v4.1-flash` | 2–3 |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
+| Escalator (blocked-pass rework) | the round's reviewer model | the round's reviewer model | on block |
+| Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | on escalation |
+
+From pi, opt into the clinepass profile for a round by passing
+`clinepass/cline-pass/<id>` (e.g. `clinepass/cline-pass/deepseek-v4.1-flash`) in
+every role's `runs.run` — and record that choice in the round doc header.
+
+**Per-mode model sets (owner overrides 2026-09-16):**
+
+| Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
+|---|---|---|---|---|
+| **Solo** | the single agent does plan + implement + check itself | — | — | ask the user first (see the solo rule) |
+| **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `glm-5.3-flash` | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model |
+| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `deepseek-v4.1-flash` (owner override 2026-09-15) | full ladder + UI tester `minimax-m3` |
+
+**Solo rule:** a solo round is ONE agent doing everything (planner, implementer
+and its own acceptance check) — the same shape as a light round's worker. Before
+running solo, **always ask the user whether to use the current session model**;
+use the session model only on their yes, otherwise fall back to the skill's solo
+default **`glm-5.3-flash`**. Record the choice (session model or default) on
+round-doc line 1.
+
+**Defaults and overrides — precedence, highest first:**
+
+1. **A per-role model the user names** for this round (e.g. “reviewer = X”) —
+   that role only; every other role keeps the profile defaults.
+2. **A provider the user names** for this round (“use clinepass”) — that
+   profile's defaults for every role the user did not name individually.
+3. **The profile already recorded in the round doc** (resumed or continuing
+   rounds — the earlier decision carries forward).
+4. **The skill default: the pi `ollama` profile** in the table above, per tier —
+   subject to the **per-mode model sets** below it (solo / light / Tier 3), which
+   the owner overrode on 2026-09-16. In light mode the worker runs
+   `deepseek-v4.1-flash` while the orchestrator and reviewer run `glm-5.3-flash`
+   — deliberately different models, so the verifier never shares the
+   implementer's model. Escalating to Tier 3 restores the standard ladder
+   (`glm-5.3-flash` orchestrator, `deepseek-v4-flash-0731` worker).
+5. **Cline is the exception, not an override** — Cline cannot resolve `ollama`
+   ids, so it always uses the `clinepass` profile.
+
+Rules: an override governs the **whole round**, not a single dispatch — apply it
+to every dispatch that has not yet started and never run two providers in one
+round. **Exception:** a per-role model override that the user names explicitly
+(precedence item 1) MAY sit on a different provider than the round's profile —
+that is the one sanctioned way a round spans providers. Record it as an explicit
+per-role override on round-doc line 1, and keep every role the user did not name
+on the profile default. Record the effective choice on round-doc line 1; if the
+override arrives
+mid-round, also log it in the execution log with the reason. Roles already
+dispatched keep the model they actually ran on (traceability). A user-named
+**escalation** or **higher-model re-verify** model wins over the profile default
+for that step. If an id is unavailable, substitute within the same tier and
+record the substitute. **Never omit the `model` field** — an omitted field is
+NOT the skill default: the child then inherits the current session model (one
+id, on whatever provider the session is using), collapsing every role onto it.
+Treat an omitted `model` as a dispatch error to fix, not a fallback.
 
 ## Provider profiles
 
 - **pi (default):** run all phases as ONE `workflowScript` call with
   `async: true` using `await runs.run(...)`. Never combine structured
-  single-child execution (`agent`+`task`) with `workflowScript`. Model ids come
-  from `subagent({ action: "models" })` — copy exact `provider/id` strings.
+  single-child execution (`agent`+`task`) with `workflowScript`. Resolve the
+  round's provider ids with `subagent({ action: "models" })` and copy exact
+  `provider/id` strings — the `ollama*` ladder is the long-standing default, and
+  the **`clinepass` profile is an available option** (`clinepass/cline-pass/<id>`
+  for every role in the round).
 - **Cline:** spawn teammates named `orchestrator`, `worker`, `reviewer`,
   `ui-tester` with the compact contracts from `references/role-contracts.md`.
   **Spawn once per session and reuse them across rounds** — do not re-spawn
-  per round. Switch the session's provider to `clinepass` before starting
-  (pi's `ollama/<id>:cloud` ids do not resolve in Cline). If teammate dispatch
+  per round. The session provider is `clinepass`; `ollama/<id>:cloud` ids do
+  not resolve there. If teammate dispatch
   returns `Unauthorized: ... re-authenticate your Cline account`, stop and
   re-authenticate before rerunning — a round must not proceed on a dead
   session.
@@ -137,7 +202,8 @@ the tester never derives or expands its own scope.
    (`git rev-parse HEAD`; if the tree is dirty at round start, also record
    `git diff --name-only` so the round diff can be isolated).
 1. **Setup (once per session).** Resolve model ids (pi:
-   `subagent({ action: "models" })`; Cline: switch to `clinepass`). Cline:
+   `subagent({ action: "models" })` — choose the round's provider profile there).
+   Cline:
    spawn the four teammates once and reuse them across rounds.
 2. **Plan.** Tiers 1–2: the parent writes the `## Plan` section (goal, scope,
    expected files, acceptance criteria; Tier 2 adds the reviewer's acceptance
@@ -152,14 +218,16 @@ the tester never derives or expands its own scope.
    out, stalls, or hangs mid-round (30-min cap, runaway shell command, repeated
    build failures it cannot recover from), the parent interrupts it and
    re-dispatches the SAME pass scope as an ESCALATION PASS on
-   `ollama/kimi-k2.7-code:cloud` — the reviewer model IS the escalation
+   the round's reviewer model — the reviewer model IS the escalation
    executor — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
    agent; the `reviewer` agent shell is read-only by design and cannot
    execute passes) — which reconciles the on-disk state first, then
    completes the blocked pass. Subsequent worker passes revert to the worker
    model. **Escalated work is reviewed by the HIGHER model: the static
    re-verification of any pass completed via escalation runs on
-   `ollama/glm-5.3:cloud`** (user-set default 2026-09-08; the escalator never
+   the round's provider's higher model (`ollama/glm-5.3:cloud` on the ollama
+   profile, `clinepass/cline-pass/glm-5.3` on clinepass)** (user-set default
+   2026-09-08; the escalator never
    re-verifies its own pass). One escalation per blocked pass; record
    the provenance in the round doc (e.g. "pass 3 completed via escalation").
    Do not steer or revive a run whose bash has been open past a plausible
@@ -204,6 +272,30 @@ the tester never derives or expands its own scope.
 ## Pitfalls
 
 - **Never combine structured single-child execution with `workflowScript`.**
+- **Test-output starvation kills worker passes.** Two worker timeouts in
+  round ar-15 were self-reported as *"I cannot clearly see pass/fail due to
+  tooling"* — the worker burned its 30-minute cap fighting truncated MSTest
+  output, not the code. Treat the output rule as a hard gate in every worker
+  task spec: exactly one `dotnet test tests/<X> 2>&1 | grep -E "^\s*failed
+  |total:|failed:" | head -40`; no ad-hoc pipelines, no `zz*.log` debug
+  files; at most 2 attempts per result read; if output is truncated, redirect
+  to a file once and read the tail. A worker that starts narrating tooling
+  problems instead of failures is on the timeout path — interrupt early.
+- **A MockHttp matcher without an explicit HTTP method shadows later
+  method-specific matchers** (first match wins). In ar-15 the context mock's
+  method-agnostic `When(url)` swallowed the sign **POST**, so the bUnit test
+  named for that POST never exercised it and failed on a 2 s
+  `WaitForAssertion`. Always pass `HttpMethod.Get`/`HttpMethod.Post`; when the
+  same URL answers before *and* after a mutation, use a counter-based
+  `.Respond(_ => …)` sequence, not two same-URL matchers.
+- **FluentUI web components cannot be driven with generic bUnit events.**
+  `TriggerEvent("oncheckedchange", new ChangeEventArgs{…})` throws inside the
+  page's `ErrorBoundary` (`ChangeEventArgs` cannot convert to
+  `CheckboxChangeEventArgs`), which reads as a page defect when it is a test
+  defect. Drive the bound callback instead:
+  `cut.InvokeAsync(() => cut.FindComponent<FluentCheckbox>().Instance.ValueChanged.InvokeAsync(true))`
+  (the `InvokeAsync` wrapper is required — invoking off the renderer thread
+  raises *"not associated with the Dispatcher"*).
 - **`workflowScript` continuation may not persist across detached children** —
   if the workflow errors `unsupported-continuation`, recover each child via
   `subagent({ action: "status", id, view: "transcript" })`. All durable round

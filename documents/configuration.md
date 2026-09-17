@@ -131,6 +131,11 @@ files only carry values that genuinely belong to that single service
 | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
 | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
 | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
+| `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
+| `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
+| `smtp-user` | Aspire parameter | _none_ | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. |
+| `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied for a relay that requires auth_ | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. Never commit it — set it via user-secrets / env-var like the other secrets below. |
+| `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
 
 **Where to set them:**
 
@@ -149,14 +154,15 @@ for non-secret defaults — open it, change the value, re-run the AppHost:
 ```
 
 For secrets (`postgres-password`, `rabbitmq-password`,
-`openrouter-api-key`) — do **not** commit them to source control. Use
-the AppHost's user-secrets store (preferred for local dev):
+`openrouter-api-key`, `smtp-password`) — do **not** commit them to source
+control. Use the AppHost's user-secrets store (preferred for local dev):
 
 ```bash
 cd src/AppHost/SchoolCollab.AppHost
 dotnet user-secrets set "Parameters:postgres-password" "postgres"
 dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
 dotnet user-secrets set "Parameters:openrouter-api-key" "<your-key>"
+dotnet user-secrets set "Parameters:smtp-password" "<relay-password>"
 ```
 
 Or via env-vars (preferred for CI):
@@ -165,6 +171,7 @@ Or via env-vars (preferred for CI):
 export Parameters__postgres-password=postgres
 export Parameters__rabbitmq-password=rabbit
 export Parameters__openrouter-api-key=<your-key>
+export Parameters__smtp_password=<relay-password>
 ```
 
 Aspire's `AddParameter(name, secret: true)` flags secrets so that they are
@@ -688,11 +695,30 @@ matching env-var form:
 | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
 | `Parameters:assignment-upload-max-total-bytes` | `Parameters__assignment_upload_max_total_bytes` |
 | `Parameters:assignment-upload-allowed-extensions` | `Parameters__assignment_upload_allowed_extensions` |
+| `Parameters:smtp-host` | `Parameters__smtp_host` |
+| `Parameters:smtp-port` | `Parameters__smtp_port` |
+| `Parameters:smtp-user` | `Parameters__smtp_user` |
+| `Parameters:smtp-password` | `Parameters__smtp_password` |
+| `Parameters:smtp-from-address` | `Parameters__smtp_from_address` |
 | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
 | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
 | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
 | `Assignments:AttachmentUpload:MaxTotalSizeBytes` | `Assignments__AttachmentUpload__MaxTotalSizeBytes` |
 | `Assignments:AttachmentUpload:AllowedExtensions` | `Assignments__AttachmentUpload__AllowedExtensions` |
+| `Smtp:Host` | `Smtp__Host` |
+| `Smtp:Port` | `Smtp__Port` |
+| `Smtp:User` | `Smtp__User` |
+| `Smtp:Password` | `Smtp__Password` |
+| `Smtp:FromAddress` | `Smtp__FromAddress` |
+| `Smtp:UseStartTls` | `Smtp__UseStartTls` |
+
+> **TLS limitation (ar-16):** only STARTTLS (`UseStartTls = true`) and plaintext
+> (`false`) are supported. **Implicit TLS on connect — i.e. the port-465
+> "SMTPS" convention — is NOT available to the MailKit sender in this round.**
+> A relay that only accepts port-465 implicit TLS (or a `SslOnConnect`
+> requirement) needs a follow-up change to add the `SslOnConnect` option to
+> `SmtpOptions` + `MailKitEmailSender`. Use port 587 (STARTTLS) or 1025 (MailPit
+> dev) as-is.
 | `Assignments:AttachmentUpload:StagingRetentionHours` | `Assignments__AttachmentUpload__StagingRetentionHours` |
 | `Assignments:AttachmentUpload:SweepIntervalHours` | `Assignments__AttachmentUpload__SweepIntervalHours` |
 | `Outbox:ExchangeName` | `Outbox__ExchangeName` |

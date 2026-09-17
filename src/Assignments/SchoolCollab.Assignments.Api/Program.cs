@@ -156,6 +156,11 @@ builder.Services.AddStagedFileSweep();
 // services here, Add{Layer}() extension in the api assembly.
 builder.Services.AddAssignmentLifecycleSweeps();
 
+// WS-E2 (ar-16): the notification delivery drain (hosted BackgroundService) +
+// the Students-API contact-address resolver. Same hosted-service seam; the
+// dedicated Assignments worker project is E3's deliverable.
+builder.Services.AddNotificationDispatchSweep();
+
 // Auth + tenancy (OIDC via Keycloak)
 builder.Services.AddAuthAndTenancy(builder.Configuration);
 

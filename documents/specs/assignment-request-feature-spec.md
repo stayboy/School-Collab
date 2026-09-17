@@ -140,3 +140,21 @@ Resolved 2026-09-03. Workstream impact and design details:
    notified; the Primary may delegate signing to another authorized guardian.
 6. **Retention/export:** archives and signed certificates are retained
    indefinitely; manual export (PDF/CSV) only; no SIS integration.
+
+---
+
+## 8. Follow-up Feature Candidates (deferred — not in this spec's scope)
+
+Adjacent ideas deliberately held out of the AR feature set. Recorded here so the
+intent stays discoverable from the spec itself, not only from a plan doc.
+
+- **Teachers & Ward Portal — Prefab UI (Python) second surface.** A plan to
+  evaluate `prefab-ui` (PyPI) as an alternative frontend for the Teachers and
+  Ward portals *alongside* the existing Blazor hosts (`src/SchoolCollab.Admin`,
+  `src/SchoolCollab.Families`) — a separate root-level `portals/` app launched by
+  the Aspire AppHost and consuming the same bounded-context REST APIs, with
+  **zero backend change**. Scoped to a **Phase-0 spike** (AppHost + prefab + one
+  live API call in the Aspire dashboard) with an explicit re-decide before any
+  MVP commitment; the Ward portal precedes teacher review. Plan, findings and
+  the locked Q1–Q6 decisions: `documents/specs/teachers-ward-portal-prefab-plan.md`
+  (source grill session: `brainstorms/prefab-ui-portals.md`).
