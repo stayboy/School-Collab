@@ -64,9 +64,13 @@ the ids rather than assuming them.
    not an override.
 
 An override governs the **whole round**, not one dispatch: apply it to every
-dispatch not yet started, never mix two providers in a round, and record the
-effective choice on round-doc line 1 (plus the execution log, with the reason,
-if it arrived mid-round). Already-dispatched roles keep the model they ran on.
+dispatch not yet started, never mix two providers in a round **except** where the
+user explicitly names a per-role model on a different provider (precedence item
+1) — that named role is the one sanctioned cross-provider override; every
+unnamed role stays on the round's profile default, and both go on round-doc line
+1. Record the effective choice on round-doc line 1 (plus the execution log, with
+the reason, if it arrived mid-round). Already-dispatched roles keep the model
+they ran on.
 A user-named escalation or higher-model re-verify model wins over the profile
 default for that step; an unavailable id is substituted within the same tier and
 the substitute is recorded. **Never omit the `model` field** — an omitted field

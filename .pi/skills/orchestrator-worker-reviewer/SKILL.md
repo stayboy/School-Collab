@@ -136,7 +136,12 @@ round-doc line 1.
 
 Rules: an override governs the **whole round**, not a single dispatch — apply it
 to every dispatch that has not yet started and never run two providers in one
-round. Record the effective choice on round-doc line 1; if the override arrives
+round. **Exception:** a per-role model override that the user names explicitly
+(precedence item 1) MAY sit on a different provider than the round's profile —
+that is the one sanctioned way a round spans providers. Record it as an explicit
+per-role override on round-doc line 1, and keep every role the user did not name
+on the profile default. Record the effective choice on round-doc line 1; if the
+override arrives
 mid-round, also log it in the execution log with the reason. Roles already
 dispatched keep the model they actually ran on (traceability). A user-named
 **escalation** or **higher-model re-verify** model wins over the profile default
