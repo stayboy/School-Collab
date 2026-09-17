@@ -22,6 +22,25 @@ role's `runs.run` `model` field for that round (e.g.
 `clinepass/cline-pass/deepseek-v4-flash-0731`), and record it in the round-doc
 header. **Pick one provider per round; never mix providers mid-round.**
 
+### Per-mode model sets (owner overrides 2026-09-16)
+
+| Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
+|---|---|---|---|---|
+| **Solo** | the single agent plans + implements + checks its own work | — | — | ask the user first (solo rule below) |
+| **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `glm-5.3-flash` | the reviewer/orchestrator **must differ** from the worker's model |
+| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `deepseek-v4.1-flash` (owner override 2026-09-15) | full ladder + UI tester `minimax-m3` |
+
+Clinepass equivalents: light worker `cline-pass/deepseek-v4.1-flash`, light
+orchestrator/reviewer `cline-pass/glm-5.3-flash` (ollama profile:
+`ollama-cloud/deepseek-v4.1-flash` and `ollama-cloud/glm-5.3-flash`).
+
+**Solo rule:** a solo round is ONE agent doing everything — planner, implementer,
+and its own acceptance check — the same single-agent shape as a light round's
+worker. Before running solo, **always ask the user whether to use the current
+session model**; use it only on their yes, otherwise fall back to the skill's
+solo default **`glm-5.3-flash`**. Record which one was used on round-doc line 1.
+Solo never dispatches an orchestrator or reviewer of its own.
+
 Resolve ids at dispatch time with `subagent({ action: "models" })` and copy exact
 `provider/id` strings; bare ids resolve only when unique. The `ollama*` ladder has
 drifted historically (the `ollama-cloud` provider hosts the modern ids) — verify
@@ -34,7 +53,13 @@ the ids rather than assuming them.
 2. **A provider the user names** for this round — that profile's defaults for
    every role not individually named.
 3. **The profile already recorded in the round doc** (resumed/continuing rounds).
-4. **The skill default: the pi `ollama` profile**, per tier.
+4. **The skill default: the pi `ollama` profile**, per tier — subject to the
+   **per-mode model sets** above (solo / light / Tier 3), owner-overridden
+   2026-09-16. Light mode: worker `deepseek-v4.1-flash`, orchestrator and
+   reviewer `glm-5.3-flash` — deliberately different models so the verifier never
+   shares the implementer's model. Tier 3 keeps the standard ladder
+   (`glm-5.3-flash` orchestrator, `deepseek-v4-flash-0731` worker,
+   `deepseek-v4.1-flash` reviewer).
 5. **Cline**: always `clinepass` (cannot resolve `ollama` ids) — an exception,
    not an override.
 
