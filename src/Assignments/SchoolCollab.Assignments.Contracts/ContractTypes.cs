@@ -133,7 +133,13 @@ public record AssignmentSummaryDto(
     /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
     int? DifficultyMediumCount = null,
     /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
-    int? DifficultyHardCount = null);
+    int? DifficultyHardCount = null,
+    /// <summary>WS-E2b / ar-17: the UTC moment the assignment was most recently published;
+    /// null when it has never been published (re-stamped by a later publish, so it means
+    /// "at least one publish happened"). The failure-surfacing UI gates on this rather
+    /// than on <see cref="Status"/>, because <c>Unpublish</c> returns an assignment to
+    /// <c>Draft</c> while its delivery history survives.</summary>
+    DateTimeOffset? PublishedAt = null);
 
 public record CreateAssignmentRequest(
     string Title,

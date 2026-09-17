@@ -46,4 +46,10 @@ public record AssignmentSummary(
     /// Projected so summaries never silently reset the AI difficulty mix.</summary>
     int? DifficultyEasyCount = null,
     int? DifficultyMediumCount = null,
-    int? DifficultyHardCount = null);
+    int? DifficultyHardCount = null,
+    /// <summary>WS-E2b / ar-17: the UTC moment the assignment was most recently published;
+    /// null when it has never been published (re-stamped by a later publish). Projected so
+    /// the failure-surfacing gate can ask "has this ever been published" rather than testing
+    /// the current status — <c>Unpublish</c> returns an assignment to <c>Draft</c> while its
+    /// <c>NotificationLog</c> rows survive.</summary>
+    DateTimeOffset? PublishedAt = null);

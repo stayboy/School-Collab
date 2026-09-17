@@ -1,0 +1,1066 @@
+diff --git a/documents/solution/assignment-request-go-forward-breakdown.md b/documents/solution/assignment-request-go-forward-breakdown.md
+index 71ccef96..2c637422 100644
+--- a/documents/solution/assignment-request-go-forward-breakdown.md
++++ b/documents/solution/assignment-request-go-forward-breakdown.md
+@@ -266,7 +266,7 @@ within a phase.
+   records identity/time; delegation to another guardian works; a new AR pre-fills
+   `RequiresSignature` from the grade default and the author can override it.
+ 
+-### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2-core landed ar-16; E2b UI → ar-17; E3 open)
++### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2-core landed ar-16; E2b UI landed ar-17; E3 open)
+ - [x] **E1 token deep links (ar-14, 2026-09-16)**: contact-scoped DataProtection tokens minted at publish (additive recipient columns; TTL `LinkValidityDays` ?? 7); shared Redis-backed keyring in Assignments.Api + Families; the repo's FIRST public token-auth route group (`/deeplink/{token}` landing → cookie sign-in → `/ward/{sid}`|`/ward`, best-effort bounded 3s `OpenedAt` stamp, `LinkExpired` page); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF; configuration.md §2/§5. 43 files, 2,279/0. Round: `rounds/round-ar-14-deep-links.md` (CLOSED, Tier 3). **Unblocks WS-F3.**
+ - [x] **E2-core channel delivery + NotificationLog (ar-16, 2026-09-17)**: provider abstraction
+       (`IEmailSender`/`ISmsSender`) with a **MailKit SMTP** sender (CPM 4.18.0) + `NullEmailSender`
+@@ -280,7 +280,20 @@ within a phase.
+       MailPit dev container + 5 `smtp-*` parameters incl. **`smtp-password` = the repo's first
+       `AddParameter(secret: true)`**; configuration.md §2/§11. 42 files, 2,337/0. Round:
+       `rounds/round-ar-16-channel-delivery.md` (CLOSED, Tier 2 light).
+-- [ ] **E2b — Admin/author failure-surfacing UI** (renders the delivered failures endpoint): **ar-17, Tier 3** (UI round).
++- [x] **E2b — author/admin failure-surfacing UI (ar-17, 2026-09-17)**: read-only `Notifications` tab on the
++      assignment Detail page (gate: Published/Scheduled/Closed/Archived) rendering ar-16's
++      `GET /assignments/{id}/notification-failures` — 6-column flat table (Recipient · Channel · Kind ·
++      Attempt · Reason · Retry), terminal vs retry-scheduled badges, Info empty state, Error bar; recipient
++      labels enriched client-side from the Publish-dialog contact universe with a marked `#short-id`
++      fallback; new `AssignmentsApiClient.GetNotificationFailuresAsync` + read-side
++      `JsonStringEnumConverter<NotificationKindDto>` tolerance. The gate is **`PublishedAt is not null`**
++      ("has ever been published"), not a status test — `Unpublish()` returns an assignment to `Draft` while its
++      `NotificationLog` rows survive, so a status gate hid that history; `PublishedAt` is threaded through the
++      Core DTO, the repository projection and both query handlers (owner-approved option A).
++      13 code/test files, 2,349/0. Round: `rounds/round-ar-17-notification-failures-ui.md` (CLOSED, Tier 3
++      full four-agent).
++      **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums (the
++      client converter is tolerance only); no `Failures (N)` tab count; the live HTTP path is untested end-to-end.
+ - [ ] E3 reminder/overdue/completion worker (`Assignments.Worker`; archive sweep already ships in
+       Assignments.Api) — consumes the unchanged `AssignmentPublishedIntegrationEvent` and carries the
+       `(TenantId, AssignmentId, RecipientId, Kind)` unique-index residual from ar-16.
+@@ -315,7 +328,7 @@ within a phase.
+ 2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
+    light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
+    `documents/solution/assignment-request-implementation-details.md` §3.
+-3. **Current (2026-09-17):** the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. Next: **ar-17 (Tier 3)** — the Admin/author failure-surfacing UI over the delivered endpoint; then **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
++3. **Current (2026-09-17):** the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. **E2b failure-surfacing UI LANDED (ar-17, 2026-09-17 — Tier 3 full four-agent, branch `stack/17-ar-17-notification-failures-ui` cut at `c7c5b4ac` = the `stack/16` ar-16 tip because the read side it renders is absent from `main`; 2,349/0):** the read-only `Notifications` tab on the assignment Detail page over the ar-16 failures endpoint (flat 6-column table, terminal-vs-retry badges, Info empty vs Error states, marked `#short-id` recipient fallback), with all four verification stages plus a repo pre-flight review run — **no P1** — and **four P2 defect classes found and fixed across the chain** — a duplicate row `@key` that threw on re-render, an unfiltered cancellation catch that rendered a **false "No failed notifications."** on a transport timeout, and the `Archived` gate omission, plus the **unpublish→Draft gate hole** (found by the parent — neither the static reviewers nor the UI tester caught it; closed in-round under owner option A). PR pending the owner's base decision (rebase onto `main` once #240 merges, or keep the stack). Next: **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
+    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).
+ 4. **Follow-up candidate (deferred — not scheduled):** Teachers & Ward Portal as a
+    Python **Prefab UI** second surface — spike-only proposal, zero backend change;
+diff --git a/documents/solution/assignment-request-implementation-details.md b/documents/solution/assignment-request-implementation-details.md
+index 622ad3e8..45584923 100644
+--- a/documents/solution/assignment-request-implementation-details.md
++++ b/documents/solution/assignment-request-implementation-details.md
+@@ -954,5 +954,28 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
+   **Residuals:** no live MailPit/SMTP send yet (transport is a thin MailKit call over a fully-tested pure
+   `BuildMimeMessage`); `StudentsContactAddressResolver`'s HTTP path untested; the new route is compile-verified only;
+   `(TenantId, AssignmentId, RecipientId, Kind)` unique index → E3; implicit-TLS `SslOnConnect`/port-465 unsupported.
+-  **Next:** **ar-17 (Tier 3)** — Admin/author failure-surfacing UI over the delivered endpoint; then **E3**
+-  (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.
+\ No newline at end of file
++  **Next:** ar-17 (E2b UI) — landed as the entry below.
++- `ar-17-notification-failures-ui` — **CLOSED 2026-09-17, Tier 3 FULL FOUR-AGENT**; Phase 4 slice **E2b (WS-E)**
++  (`rounds/round-ar-17-notification-failures-ui.md` + `diffs-ar-17-notification-failures-ui.patch`; branch
++  `stack/17-ar-17-notification-failures-ui` cut at `c7c5b4ac` = the `stack/16` ar-16 tip, because the read side it
++  renders does not exist on `main`; 15 files (13 code/test), **+870/−16**). Read-only `Notifications` tab on the assignment Detail
++  page (gate: Published/Scheduled/Closed/Archived) over ar-16's failures endpoint: 6-column flat table, terminal-vs-
++  retry-scheduled badges, Info empty vs Error bar, recipient labels enriched from the Publish-dialog contact
++  universe with a marked `#short-id` fallback; new `AssignmentsApiClient.GetNotificationFailuresAsync` plus
++  read-side `JsonStringEnumConverter<NotificationKindDto>` tolerance. Chain: orchestrator plan → worker → static
++  reviewer (ACCEPT, 3 P2) → **post-fix re-verify (ACCEPT, 0 P1/P2)** → UI tester (ACCEPT, 1 P2 + 2 P3) → parent
++  fixes. **Defects caught and fixed across the chain:** duplicate row `@key` throwing a framework
++  `InvalidOperationException` on re-render, an unfiltered cancellation catch rendering a **false "No failed
++  notifications."** on a transport timeout (both proven discriminating by temporary revert), the `Archived` gate
++  omission, a false "missing enum converter" premise (the live wire is numeric), a blank Recipient cell, and the
++  **unpublish→Draft gate hole** (found by the parent — neither the static reviewers nor the UI tester saw it).
++  Authoritative: build 0 errors; **2,349/0** (Assignments **635/0**, Architecture 21/0). A repo pre-flight review of the complete
++  patch returned **CLEAR FOR PR (no P1)**; its single P2 — the `PublishedAt` layer threading had no test coverage, the
++  exact silent-drop class — was fixed with two discriminating in-memory tests over both construction sites.
++  **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums; no
++  `Failures (N)` tab count; live HTTP path untested end-to-end.
++  **Residual CLOSED in-round (owner option A):** the unpublish→Draft gate hole — `Unpublish()` returns an
++  assignment to Draft while nothing deletes `NotificationLog` rows, so the gate is now **`PublishedAt is not null`**
++  with `PublishedAt` threaded through `AssignmentSummary`, `AssignmentRepository.ListAsync` and both query
++  handlers (each layer would otherwise have silently dropped it).
++  **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor
+index a7936a0a..37fb3e91 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor
+@@ -327,6 +327,22 @@
+                             <SignOffSection AssignmentId="@Id" RequiresSignature="true" />
+                         </FluentTab>
+                     }
++
++                    @* WS-E2 / ar-17 — failed-notification surface. The gate is "has ever been
++                       published" (PublishedAt is not null), NOT a status test: NotificationLog
++                       rows exist only after a publish, and Unpublish returns the assignment to
++                       Draft while those rows survive — a status gate would hide that history.
++                       It is deliberately a DATA test rather than a status enumeration: Close()
++                       has no published precondition, so a never-published Draft that was Closed
++                       reports PublishedAt == null and correctly shows no tab. The section
++                       self-loads (no Detail-side failure fetch, mirroring SignOffSection); it
++                       renders an Info empty state when the endpoint returns zero rows. *@
++                    @if (_item.PublishedAt is not null)
++                    {
++                        <FluentTab Label="Notifications">
++                            <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true" />
++                        </FluentTab>
++                    }
+                 </FluentTabs>
+             </div>
+         }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor
+new file mode 100644
+index 00000000..4726c0cb
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor
+@@ -0,0 +1,187 @@
++@using SchoolCollab.Assignments.Contracts
++@using SchoolCollab.Assignments.Application.Helpers
++@using SchoolCollab.Students.Application.Services
++@using SchoolCollab.Students.Core.Domain
++@using SchoolCollab.Students.Core.DTOs
++@using Microsoft.FluentUI.AspNetCore.Components
++@inject AssignmentsApiClient Api
++@inject StudentsApiClient StudentsApi
++@inject ILogger<NotificationFailuresSection> Logger
++@implements IDisposable
++
++@* WS-E2 / ar-17 — the author/admin failure surface on the Assignments Detail page.
++   Read-only: it renders the tenant-scoped GET /assignments/{id}/notification-failures
++   rows (failed notifications only). No retry / requeue / resend / acknowledge
++   affordance of any kind — requeue is E3's deliverable. The section self-loads its own
++   data (mirrors SignOffSection): Detail passes only the assignment id + the gate flag.
++   Decision (b): contact ids are enriched client-side from the same guardian contact
++   list the Publish dialog offers (ListSubscribedContactsAsync); unmatched ids fall
++   back to a short id. *@
++
++@if (CanHaveFailures)
++{
++    @if (_busy)
++    {
++        <FluentProgressRing />
++    }
++    else if (!string.IsNullOrEmpty(_error))
++    {
++        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++    }
++    else if (_failures is null || _failures.Count == 0)
++    {
++        <FluentMessageBar Intent="MessageIntent.Info">No failed notifications.</FluentMessageBar>
++    }
++    else
++    {
++        <table class="notification-failures-table mt-3">
++            <thead>
++                <tr>
++                    <th>Recipient</th>
++                    <th>Channel</th>
++                    <th>Kind</th>
++                    <th>Attempt</th>
++                    <th>Reason</th>
++                    <th>Retry</th>
++                </tr>
++            </thead>
++            <tbody>
++                @for (var i = 0; i < _failures.Count; i++)
++                {
++                    var row = _failures[i];
++                    var recipient = ContactLabel(row);
++                    <tr @key="i">
++                        <td class="failures-recipient" title="@recipient">@recipient</td>
++                        <td>@EnumHelper.GetDescription(row.Channel)</td>
++                        <td>@EnumHelper.GetDescription(row.Kind)</td>
++                        <td>@row.Attempt</td>
++                        <td class="failures-reason" title="@(row.FailureReason ?? "—")">@(row.FailureReason ?? "—")</td>
++                        <td>
++                            @if (row.NextRetryAt is null)
++                            {
++                                <FluentBadge Appearance="Appearance.Neutral">Failed — no more retries</FluentBadge>
++                            }
++                            else
++                            {
++                                <FluentBadge Appearance="Appearance.Lightweight">
++                                    Retry scheduled @row.NextRetryAt.Value.ToLocalTime().ToString("g")
++                                </FluentBadge>
++                            }
++                        </td>
++                    </tr>
++                }
++            </tbody>
++        </table>
++    }
++}
++
++@code {
++    [Parameter] public Guid AssignmentId { get; set; }
++
++    /// <summary>Render/load gate — the hosting page passes <see langword="true"/> only
++    /// when the assignment has ever been published (the hosting page tests
++    /// <c>AssignmentSummaryDto.PublishedAt is not null</c>, ar-17 option A), mirroring
++    /// SignOffSection's <c>RequiresSignature</c> posture. A status enumeration is wrong
++    /// here: <c>Unpublish</c> returns an assignment to Draft while its
++    /// <c>NotificationLog</c> rows survive.</summary>
++    [Parameter] public bool CanHaveFailures { get; set; }
++
++    private List<NotificationFailureDto>? _failures;
++    private Dictionary<Guid, string> _contactLabels = new();
++    private bool _busy = true;
++    private string? _error;
++    private CancellationTokenSource? _loadCts;
++    private volatile bool _disposed;
++
++    protected override async Task OnInitializedAsync()
++    {
++        _loadCts = new CancellationTokenSource();
++        await LoadAsync();
++    }
++
++    private async Task LoadAsync()
++    {
++        if (_disposed || !CanHaveFailures) return;
++        _busy = true;
++        _error = null;
++        var ct = _loadCts?.Token ?? CancellationToken.None;
++        try
++        {
++            // WS-E2 / decision (b): the failures rows are the primary read; the guardian
++            // contact list only supplies recipient display labels. They load in parallel
++            // (blazor-components §Parallel data loading), but the label read is wrapped so
++            // that a Students API failure degrades to short ids instead of hiding an
++            // otherwise readable failures list — the labels are a nicety, the list is the
++            // feature.
++            var failuresTask = Api.GetNotificationFailuresAsync(AssignmentId, ct);
++            var contactsTask = TryLoadContactLabelsAsync(ct);
++            await Task.WhenAll(failuresTask, contactsTask);
++            if (_disposed) return;
++
++            _failures = [.. failuresTask.Result];
++            _contactLabels = contactsTask.Result;
++        }
++        catch (OperationCanceledException) when (ct.IsCancellationRequested)
++        {
++            // Our own cancellation (dispose) — the component is going away. A transport
++            // timeout/abort also surfaces as OperationCanceledException but leaves the
++            // token uncancelled, so it must fall through to the error bar below: a failed
++            // load must never masquerade as the "No failed notifications." empty state.
++        }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogWarning(ex, "Failed to load notification failures for assignment {AssignmentId}", AssignmentId);
++            _error = ex.Message;
++        }
++        finally
++        {
++            if (!_disposed) { _busy = false; StateHasChanged(); }
++        }
++    }
++
++    /// <summary>Decision (b): a matched <see cref="SubscribedContactDto"/> renders its
++    /// contact value (the Publish-dialog universe — the publish recipients were chosen
++    /// from it); an unmatched id renders a short id (never a path/URL-shaped string).</summary>
++    private string ContactLabel(NotificationFailureDto row) =>
++        _contactLabels.TryGetValue(row.ContactId, out var label) && !string.IsNullOrWhiteSpace(label)
++            ? label
++            : ShortId(row.ContactId);
++
++    /// <summary>Fallback label for an unmatched — or present-but-blank — contact value.
++    /// The "#" prefix marks it as an identifier so it cannot be mistaken for a person's
++    /// name, and the id is shortened so no full GUID ever reaches the page.</summary>
++    private static string ShortId(Guid id) => $"#{id.ToString("N")[..8]}";
++
++    /// <summary>Best-effort recipient-label lookup (decision (b)). Never fails the
++    /// section for a non-cancellation reason: rendering degrades to <see cref="ShortId"/>
++    /// labels when the contact list is unavailable.</summary>
++    private async Task<Dictionary<Guid, string>> TryLoadContactLabelsAsync(CancellationToken ct)
++    {
++        try
++        {
++            var contacts = await StudentsApi.ListSubscribedContactsAsync(
++                ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct);
++            return (contacts ?? []).ToDictionary(c => c.Id, c => c.Value);
++        }
++        catch (OperationCanceledException) when (ct.IsCancellationRequested)
++        {
++            throw;
++        }
++        catch (Exception ex)
++        {
++            Logger.LogWarning(ex,
++                "Failed to load guardian contact labels for assignment {AssignmentId}; falling back to short ids",
++                AssignmentId);
++            return [];
++        }
++    }
++
++    public void Dispose()
++    {
++        _disposed = true;
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = null;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor.css b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor.css
+new file mode 100644
+index 00000000..2bc3e53e
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor.css
+@@ -0,0 +1,34 @@
++/* WS-E2 / ar-17 — NotificationFailuresSection (.razor.css scoped to that component). */
++
++.notification-failures-table {
++    width: 100%;
++    border-collapse: collapse;
++}
++
++.notification-failures-table th,
++.notification-failures-table td {
++    padding: 0.5rem 0.75rem;
++    text-align: left;
++    vertical-align: middle;
++    border-bottom: 1px solid var(--neutralStrokeDividerRest);
++}
++
++/* Decision (d): the Reason cell truncates visually with the full text in the
++   cell title attribute (the <td> carries title="<full reason>"). */
++.failures-reason {
++    max-width: 22rem;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++}
++
++/* UI-tester P3(b): bound the Recipient column too. Without a width it is unbounded,
++   so a long contact value (a full email address) dominates the table on a narrow
++   viewport and crushes the other five columns. The <td> carries the full label in its
++   title, mirroring the Reason cell. */
++.failures-recipient {
++    max-width: 18rem;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+index 95ffa70d..43012cc7 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+@@ -28,6 +28,14 @@ public sealed class AssignmentsApiClient
+                 new JsonStringEnumConverter<ReviewStateDto>(),
+                 new JsonStringEnumConverter<ContactOwnerTypeDto>(),
+                 new JsonStringEnumConverter<ContactChannelDto>(),
++                // WS-E2 / ar-17: tolerant read-side converter for the delivery enums.
++                // NOTE (review F3): the Assignments API registers ten sibling enums as
++                // strings but does NOT register NotificationKindDto / ContactChannelDto,
++                // so the live wire form is currently NUMERIC and would deserialize
++                // without this converter. It is kept as read-side tolerance (correct
++                // either way) pending the API being aligned with its siblings — recorded
++                // as a residual; the API-side registration is the real inconsistency.
++                new JsonStringEnumConverter<NotificationKindDto>(),
+                 new JsonStringEnumConverter<GuardianRoleDto>(),
+                 new JsonStringEnumConverter<SubmissionSourceDto>(),
+                 new JsonStringEnumConverter<QuestionTypeDto>(),
+@@ -291,6 +299,21 @@ public sealed class AssignmentsApiClient
+         return await response.Content.ReadFromJsonAsync<IReadOnlyList<SignOffStatusDto>>(_jsonOptions, ct);
+     }
+ 
++    /// <summary>Reads the failed-delivery rows for an assignment (WS-E2 / ar-17).
++    /// The tenant-scoped endpoint always returns 200 with a (possibly empty)
++    /// <see cref="NotificationFailureDto"/> array; a null response is mapped to an
++    /// empty array so the caller can treat it as "no failures". The rows are read-
++    /// only — no retry / requeue affordance exists here (those are E3's concern).</summary>
++    public async Task<NotificationFailureDto[]> GetNotificationFailuresAsync(Guid id, CancellationToken ct = default)
++    {
++        _logger.LogDebug("Getting notification failures for assignment {AssignmentId}", id);
++        var result = await _http.GetFromJsonAsync<NotificationFailureDto[]>(
++            $"/assignments/{id}/notification-failures", _jsonOptions, ct);
++        _logger.LogInformation(
++            "Loaded {Count} notification failures for assignment {AssignmentId}", result?.Length ?? 0, id);
++        return result ?? [];
++    }
++
+     /// <summary>The aggregate the guardian sign page consumes (WS-C2) — one call.</summary>
+     public async Task<SignOffContextDto?> GetSignOffContextAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
+     {
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index 0c15ae23..0f6c3e09 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -133,7 +133,13 @@ public record AssignmentSummaryDto(
+     /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
+     int? DifficultyMediumCount = null,
+     /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
+-    int? DifficultyHardCount = null);
++    int? DifficultyHardCount = null,
++    /// <summary>WS-E2b / ar-17: the UTC moment the assignment was most recently published;
++    /// null when it has never been published (re-stamped by a later publish, so it means
++    /// "at least one publish happened"). The failure-surfacing UI gates on this rather
++    /// than on <see cref="Status"/>, because <c>Unpublish</c> returns an assignment to
++    /// <c>Draft</c> while its delivery history survives.</summary>
++    DateTimeOffset? PublishedAt = null);
+ 
+ public record CreateAssignmentRequest(
+     string Title,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs
+index 342d7854..3814d4de 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs
+@@ -74,7 +74,9 @@ public sealed class GetAssignmentByIdQueryHandler(
+                     // mapped or every detail read resets them to null.
+                     assignment.DifficultyEasyCount,
+                     assignment.DifficultyMediumCount,
+-                    assignment.DifficultyHardCount);
++                    assignment.DifficultyHardCount,
++                    // WS-E2b / ar-17: "has ever been published" for the failure surface.
++                    PublishedAt: assignment.PublishedAt);
+             },
+             CacheOptions,
+             tags: ["assignments"],
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs
+index 9f7ec1ca..bda7f2d3 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs
+@@ -71,7 +71,9 @@ public sealed class ListAssignmentsQueryHandler(
+                     // mapped or every list read resets them to null.
+                     s.DifficultyEasyCount,
+                     s.DifficultyMediumCount,
+-                    s.DifficultyHardCount)).ToArray();
++                    s.DifficultyHardCount,
++                    // WS-E2b / ar-17: "has ever been published" for the failure surface.
++                    PublishedAt: s.PublishedAt)).ToArray();
+             },
+             CacheOptions,
+             tags: ["assignments"],
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/DTOs/AssignmentSummary.cs b/src/Assignments/SchoolCollab.Assignments.Core/DTOs/AssignmentSummary.cs
+index 65482f27..d78bfd47 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/DTOs/AssignmentSummary.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/DTOs/AssignmentSummary.cs
+@@ -46,4 +46,10 @@ public record AssignmentSummary(
+     /// Projected so summaries never silently reset the AI difficulty mix.</summary>
+     int? DifficultyEasyCount = null,
+     int? DifficultyMediumCount = null,
+-    int? DifficultyHardCount = null);
+\ No newline at end of file
++    int? DifficultyHardCount = null,
++    /// <summary>WS-E2b / ar-17: the UTC moment the assignment was most recently published;
++    /// null when it has never been published (re-stamped by a later publish). Projected so
++    /// the failure-surfacing gate can ask "has this ever been published" rather than testing
++    /// the current status — <c>Unpublish</c> returns an assignment to <c>Draft</c> while its
++    /// <c>NotificationLog</c> rows survive.</summary>
++    DateTimeOffset? PublishedAt = null);
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs
+index 8bc750f1..9b384731 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs
+@@ -30,7 +30,10 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
+                 // WS-C1 (spec §7 Q1): guardian-signature snapshot.
+                 a.RequiresSignature,
+                 // WS-B2 (spec §3.4 line 70): per-difficulty counts.
+-                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
++                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount,
++                // WS-E2b / ar-17: must be projected or every published assignment reports
++                // never-published and silently loses its failure surface.
++                a.PublishedAt))
+             .ToListAsync(ct);
+     }
+ 
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs
+index 18de7fd0..f78698c5 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/WardAssignmentProjectionRepository.cs
+@@ -27,7 +27,12 @@ internal sealed class WardAssignmentProjectionRepository(AssignmentsDbContext db
+                 a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
+                 a.PassScore, a.MaxAttempts,
+                 a.RequiresSignature,
+-                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
++                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount,
++                // WS-E2b / ar-17: projected for consistency. This path serves the ward
++                // (guardian) list, which has no failure surface today, but leaving it
++                // unprojected would silently report every published assignment as
++                // never-published — the exact trap the summary contract warns about.
++                a.PublishedAt))
+             .ToListAsync(ct);
+     }
+ }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
+index 3c06942c..5fe200b9 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
+@@ -117,9 +117,18 @@ public class AssignmentDetailBunitTests : BunitContext
+         // SignOffSectionBunitTests).
+         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/sign-off-statuses")
+             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<SignOffStatusDto>(), _apiJsonOptions));
+-    }
+-
+-    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false) =>
++        // WS-E2 / ar-17: Published/Scheduled/Closed assignments render the
++        // self-loading NotificationFailuresSection, which reads the failures
++        // endpoint + the guardian contact list. Empty by default so the tab-gate
++        // is the only observable here (the section's row/empty/error behaviour
++        // is covered by NotificationFailuresSectionBunitTests).
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/notification-failures")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<NotificationFailureDto>(), _apiJsonOptions));
++        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed?ownerType=Guardian&scope=AllAssignments")
++            .Respond(HttpStatusCode.OK, "application/json", "[]");
++    }
++
++    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null) =>
+         new(
+             Id: Guid.NewGuid(),
+             Title: "Math HW",
+@@ -141,7 +150,17 @@ public class AssignmentDetailBunitTests : BunitContext
+             AvailableFromUtc: availableFromUtc,
+             ArchiveGraceDays: archiveGraceDays,
+             ApprovalStatus: approvalStatus,
+-            RequiresSignature: requiresSignature);
++            RequiresSignature: requiresSignature,
++            // WS-E2b / ar-17: the failures-tab gate is "has ever been published", not a
++            // status test. An assignment in a post-publish status was necessarily published
++            // at some point; a Draft was not — unless the test supplies one (the unpublish
++            // case, where Unpublish() returns it to Draft with its history intact).
++            PublishedAt: publishedAt ?? (status is AssignmentStatusDto.Published
++                or AssignmentStatusDto.Scheduled
++                or AssignmentStatusDto.Closed
++                or AssignmentStatusDto.Archived
++                    ? DateTimeOffset.UtcNow.AddDays(-1)
++                    : null));
+ 
+     [TestMethod]
+     public void Detail_Scheduled_RendersScheduledBadgeAndActions()
+@@ -772,7 +791,63 @@ public class AssignmentDetailBunitTests : BunitContext
+         });
+     }
+ 
+-    /// <summary>WS-C1 decision (g) render gate: the "Guardian Sign-off" tab (and
++    /// <summary>WS-E2 / ar-17 decision-gate: the "Notifications" tab (and the
++    /// self-loading <c>NotificationFailuresSection</c>) renders for assignments that have
++    /// EVER been published — gated on <c>PublishedAt is not null</c>, not on the current
++    /// status. The distinction matters because <c>Unpublish</c> returns an assignment to
++    /// <c>Draft</c> while its <c>NotificationLog</c> rows survive (residual 7); a status
++    /// test would hide a never-published Draft's (empty) tab but also lose an unpublished
++    /// assignment's real failure history.</summary>
++    [TestMethod]
++    public void NotificationFailuresTab_Visibility_ByStatus()
++    {
++        var draft = MakeDto(AssignmentStatusDto.Draft);
++        SetupGetAssignment(draft);
++
++        var draftCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, draft.Id));
++        draftCut.WaitForAssertion(() => draftCut.Markup.Should().Contain("Math HW"));
++        draftCut.Markup.Should().NotContain("Notifications",
++            "a Draft that has NEVER been published must not render the failures tab");
++
++        var published = MakeDto(AssignmentStatusDto.Published);
++        SetupGetAssignment(published);
++
++        var pubCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, published.Id));
++        pubCut.WaitForAssertion(() => pubCut.Markup.Should().Contain("Notifications",
++            "a Published assignment renders the failures tab"));
++
++        var archived = MakeDto(AssignmentStatusDto.Archived);
++        SetupGetAssignment(archived);
++
++        var archCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, archived.Id));
++        archCut.WaitForAssertion(() => archCut.Markup.Should().Contain("Notifications",
++            "an Archived assignment keeps its failure history (read-only retention, spec §7 Q6) — review finding F6"));
++
++        // UI-tester coverage gap: Scheduled and Closed are part of the declared gate but
++        // were exercised only by the `is` pattern, never asserted per status.
++        foreach (var status in new[] { AssignmentStatusDto.Scheduled, AssignmentStatusDto.Closed })
++        {
++            var dto = MakeDto(status);
++            SetupGetAssignment(dto);
++
++            var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
++            cut.WaitForAssertion(() => cut.Markup.Should().Contain("Notifications",
++                $"{status} is part of the failures-tab gate"));
++        }
++
++        // Residual (7), fixed: Unpublish() returns an assignment to Draft while its
++        // NotificationLog rows survive, so the gate must be "has ever been published"
++        // (PublishedAt) rather than a status test — otherwise a teacher who unpublishes to
++        // fix a typo silently loses the failure history for that publish.
++        var unpublished = MakeDto(AssignmentStatusDto.Draft, publishedAt: DateTimeOffset.UtcNow.AddDays(-2));
++        SetupGetAssignment(unpublished);
++
++        var unpubCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, unpublished.Id));
++        unpubCut.WaitForAssertion(() => unpubCut.Markup.Should().Contain("Notifications",
++            "an assignment returned to Draft by Unpublish keeps its failure history — the old status test hid it"));
++    }
++
++    /// <summary> ── WS-C1 decision (g) render gate: the "Guardian Sign-off" tab (and
+     /// the self-loading <c>SignOffSection</c> inside it) is present only when the
+     /// assignment snapshotted <see cref="AssignmentSummaryDto.RequiresSignature"/>;
+     /// an ordinary assignment renders no trace of the card.</summary>
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentSummaryPublishedAtTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentSummaryPublishedAtTests.cs
+new file mode 100644
+index 00000000..20d04133
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentSummaryPublishedAtTests.cs
+@@ -0,0 +1,108 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2b / ar-17 (pre-PR review finding: missing layer coverage) — the
++/// failure-surface gate is <c>PublishedAt is not null</c>, and that value has to
++/// survive three layers (entity → Core <c>AssignmentSummary</c> → contract
++/// <c>AssignmentSummaryDto</c>).
++/// <para>
++/// A layer that forgets to project it does <em>not</em> fail to compile — the
++/// record parameter is optional — it silently reports "never published", and the
++/// ar-17 notification-failures tab disappears. These tests pin the projection at
++/// each repository read so that silent-drop class is caught here instead of by a
++/// UI assertion, and they also pin the premise the whole gate rests on:
++/// <see cref="Assignment.Publish"/> stamps <c>PublishedAt</c>.
++/// </para>
++/// </summary>
++[TestClass]
++public class AssignmentSummaryPublishedAtTests
++{
++    private static readonly Guid TenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000002");
++    private static readonly Guid WardStudentId = Guid.Parse("00000000-0000-0000-0000-000000000003");
++    private static readonly Guid ContactId = Guid.Parse("00000000-0000-0000-0000-000000000004");
++
++    private static (AssignmentsDbContext db, AssignmentRepository repo, IWardAssignmentProjectionRepository wardRepo) Build(string database)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        var tenants = (TenantProvider)provider.GetRequiredService<ITenantProvider>();
++        tenants.SetTenant(new TenantContext(TenantA, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++
++        return (db, new AssignmentRepository(db), new WardAssignmentProjectionRepository(db));
++    }
++
++    private static Assignment NewAssignment(Guid tenantId) =>
++        Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
++            .WithTenant(tenantId);
++
++    [TestMethod]
++    public async Task ListAsync_ProjectsPublishedAt_AndReportsNullWhenNeverPublished()
++    {
++        var (db, repo, _) = Build(nameof(ListAsync_ProjectsPublishedAt_AndReportsNullWhenNeverPublished));
++        using var _db = db;
++
++        var draft = NewAssignment(TenantA);
++
++        var published = NewAssignment(TenantA);
++        published.Publish(approvalRequired: false);
++        // The gate rests on Publish() stamping this — assert the premise, not just the plumbing.
++        published.PublishedAt.Should().NotBeNull("Assignment.Publish must stamp PublishedAt");
++        var publishedAt = published.PublishedAt!.Value;
++
++        db.Assignments.AddRange(draft, published);
++        await db.SaveChangesAsync();
++
++        var summaries = await repo.ListAsync(null);
++
++        summaries.Single(s => s.Id == published.Id).PublishedAt.Should().Be(publishedAt,
++            "AssignmentRepository.ListAsync must project PublishedAt — an unprojected read reports every " +
++            "published assignment as never-published, which silently hides the ar-17 failure surface");
++
++        summaries.Single(s => s.Id == draft.Id).PublishedAt.Should().BeNull(
++            "a never-published assignment reports null, which is what keeps its (empty) failures tab hidden");
++    }
++
++    [TestMethod]
++    public async Task ListWardAssignmentsAsync_ProjectsPublishedAt()
++    {
++        var (db, _, wardRepo) = Build(nameof(ListWardAssignmentsAsync_ProjectsPublishedAt));
++        using var _db = db;
++
++        var published = NewAssignment(TenantA);
++        published.Publish(approvalRequired: false);
++        var publishedAt = published.PublishedAt!.Value;
++
++        db.Assignments.Add(published);
++        db.AssignmentRecipients.Add(AssignmentRecipient.Create(
++            TenantA, published.Id, ContactOwnerType.Guardian, WardStudentId, WardStudentId,
++            ContactId, ContactChannel.Email, role: null,
++            notifyOnBroadcast: true, subscriptionActive: true));
++        await db.SaveChangesAsync();
++
++        var rows = await wardRepo.ListWardAssignmentsAsync(WardStudentId, DateTimeOffset.UtcNow);
++
++        rows.Should().ContainSingle();
++        rows[0].PublishedAt.Should().Be(publishedAt,
++            "WardAssignmentProjectionRepository is a SECOND construction site of the same summary DTO and " +
++            "must project PublishedAt too — it was initially missed, and because the parameter is optional " +
++            "the omission compiled silently");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs
+new file mode 100644
+index 00000000..27adeaaa
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs
+@@ -0,0 +1,353 @@
++using System.Net;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++using SchoolCollab.Assignments.Application.Helpers;
++using SchoolCollab.Assignments.Application.Services;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Students.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2 / ar-17 — the <c>NotificationFailuresSection</c> card on the Assignments
++/// Detail page. Covers the round-doc binding list:
++/// <list type="bullet">
++///   <item><c>Rows_Render_WithFutureRetryBadge</c> — row rendering (channel/kind/attempt/reason + retry badge).</item>
++///   <item><c>Empty_ShowsInfoBar_NoTable</c> — the Info empty state.</item>
++///   <item><c>Terminal_Vs_Retrying_Badges</c> — <c>NextRetryAt == null</c> → Neutral "Failed — no more retries"; future → Lightweight "Retry scheduled …".</item>
++///   <item><c>Error_ShowsErrorBar_NoTable_NotEmpty</c> — a throwing backend renders the Error bar, never the empty state.</item>
++///   <item><c>ClientPath_HitsFailuresEndpoint_DeserializesStringKinds</c> — the request hits GET /assignments/{id}/notification-failures and <c>NotificationKindDto</c> round-trips from its string form (pins read-side tolerance; see the test comment — the live API emits these delivery enums numerically).</item>
++///   <item><c>NoLeakage_ShortIdFallback_ContactLabel</c> — no path-shaped strings / full guids; matched contacts render their value, unmatched fall back to a short id.</item>
++/// </list>
++/// Same Blazor + MockHttp + bUnit pattern as <c>SignOffSectionBunitTests</c>; the
++/// section self-loads over the tenant-scoped failures endpoint and enriches recipient
++/// labels from the guardian contact list (<c>StudentsApiClient</c>) — decision (b).
++/// </summary>
++[TestClass]
++public class NotificationFailuresSectionBunitTests : BunitContext
++{
++    private static readonly Guid AssignmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid ContactId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid UnmatchedContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++
++    private readonly MockHttpMessageHandler _mockHttp;
++    private readonly JsonSerializerOptions _apiJsonOptions;
++    private int _failuresGetCount;
++
++    public NotificationFailuresSectionBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++
++        _apiJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
++        {
++            Converters =
++            {
++                new JsonStringEnumConverter<ContactChannelDto>(),
++                new JsonStringEnumConverter<NotificationKindDto>(),
++            }
++        };
++
++        _mockHttp = new MockHttpMessageHandler();
++        var httpClient = _mockHttp.ToHttpClient();
++        httpClient.BaseAddress = new Uri("http://localhost");
++
++        Services.AddSingleton(httpClient);
++        Services.AddSingleton<AssignmentsApiClient>();
++        Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
++        Services.AddSingleton(Mock.Of<ILogger<NotificationFailuresSection>>());
++        // Decision (b): the section enriches recipient labels from the guardian
++        // contact list via StudentsApiClient (the Publish-dialog universe).
++        Services.AddSingleton<SchoolCollab.Students.Application.Services.StudentsApiClient>();
++        Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
++        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Students.Application.Services.StudentsApiClient>>());
++    }
++
++    private static NotificationFailureDto Row(
++        ContactChannelDto channel,
++        NotificationKindDto kind,
++        int attempt = 3,
++        string? reason = "Provider replied: 550 permanent failure",
++        DateTimeOffset? nextRetry = null,
++        Guid? contactId = null,
++        Guid? recipientId = null) =>
++        new(
++            RecipientId: recipientId ?? Guid.NewGuid(),
++            ContactId: contactId ?? ContactId,
++            Channel: channel,
++            Kind: kind,
++            Attempt: attempt,
++            FailureReason: reason,
++            NextRetryAt: nextRetry);
++
++    private void SetupFailures(params NotificationFailureDto[] rows)
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/notification-failures")
++            .Respond(_ =>
++            {
++                _failuresGetCount++;
++                return new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(
++                        JsonSerializer.Serialize(rows, _apiJsonOptions),
++                        System.Text.Encoding.UTF8, "application/json")
++                };
++            });
++    }
++
++    private void SetupContacts(params SubscribedContactDto[] contacts)
++    {
++        // StudentsApiClient reads with the BCL Web-default options (enum-as-number),
++        // not the Assignments string-converter set — plain Web serialization matches.
++        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed?ownerType=Guardian&scope=AllAssignments")
++            .Respond(HttpStatusCode.OK, "application/json",
++                JsonSerializer.Serialize(contacts, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
++    }
++
++    [TestMethod]
++    public void Rows_Render_WithFutureRetryBadge()
++    {
++        var future = DateTimeOffset.UtcNow.AddHours(2);
++        SetupFailures(
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish, attempt: 2, reason: "SMTP transient", nextRetry: future),
++            Row(ContactChannelDto.SMS, NotificationKindDto.Reminder, attempt: 5, reason: "Carrier rejected"));
++        SetupContacts();
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.FindAll("table tbody tr").Should().HaveCount(2);
++            cut.Markup.Should().Contain(EnumHelper.GetDescription(ContactChannelDto.Email));
++            cut.Markup.Should().Contain(EnumHelper.GetDescription(NotificationKindDto.Publish));
++            cut.Markup.Should().Contain(EnumHelper.GetDescription(NotificationKindDto.Reminder));
++            cut.Markup.Should().Contain("SMTP transient");
++            cut.Markup.Should().Contain("Carrier rejected");
++            cut.Markup.Should().Contain("Retry scheduled");
++        });
++    }
++
++    [TestMethod]
++    public void Empty_ShowsInfoBar_NoTable()
++    {
++        SetupFailures();
++        SetupContacts();
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("No failed notifications.");
++            cut.Markup.Should().Contain("fluent-messagebar");
++            cut.Markup.Should().Contain("intent-info",
++                "the empty state is Information, not Success (zero rows is legitimate — null sender / unconfigured SMTP)");
++            cut.Markup.Should().NotContain("notification-failures-table",
++                "an empty result must never render the table");
++        });
++    }
++
++    [TestMethod]
++    public void Terminal_Vs_Retrying_Badges()
++    {
++        var future = DateTimeOffset.UtcNow.AddHours(1);
++        // Decision (c): terminal row (NextRetryAt null) + retrying row (future time).
++        var terminalId = Guid.NewGuid();
++        var retryingId = Guid.NewGuid();
++        SetupFailures(
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish, attempt: 5, nextRetry: null, contactId: terminalId),
++            Row(ContactChannelDto.SMS, NotificationKindDto.Overdue, attempt: 2, nextRetry: future, contactId: retryingId));
++        SetupContacts();
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Failed \u2014 no more retries",
++                "a null NextRetryAt renders the terminal 'no more retries' badge");
++            cut.Markup.Should().Contain("appearance=\"neutral\"",
++                "the terminal badge uses the render-safe Neutral appearance (decision (c))");
++            cut.Markup.Should().Contain("Retry scheduled",
++                "a future NextRetryAt renders the retry-scheduled badge");
++            cut.Markup.Should().Contain("appearance=\"lightweight\"",
++                "the retrying badge uses the render-safe Lightweight appearance (decision (c))");
++        });
++    }
++
++    [TestMethod]
++    public void Error_ShowsErrorBar_NoTable_NotEmpty()
++    {
++        // Decision (e): the handler throws → the Error bar renders, never the empty
++        // state. Scripted 500 (EnsureSuccessStatusCode surfaces HttpRequestException).
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/notification-failures")
++            .Respond(HttpStatusCode.InternalServerError);
++        SetupContacts();
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("fluent-messagebar");
++            cut.Markup.Should().Contain("intent-error",
++                "the load failure must render the Error message bar, not the empty state");
++            cut.Markup.Should().MatchRegex("500|Internal Server Error",
++                "the error bar surfaces the exception message");
++            cut.Markup.Should().NotContain("No failed notifications.",
++                "an error must never silently render as the empty state");
++            cut.Markup.Should().NotContain("notification-failures-table",
++                "an error must never render the table");
++        });
++    }
++
++    [TestMethod]
++    public void TransportCancellation_ShowsErrorBar_NotEmptyState()
++    {
++        // Review finding F2: a transport timeout/abort surfaces as an
++        // OperationCanceledException (TaskCanceledException) with the CALLER's token
++        // uncancelled. The original unfiltered `catch (OperationCanceledException) { }`
++        // swallowed it and fell through to the Info "No failed notifications." bar —
++        // precisely the state decision (e) forbids. The catch is now filtered on
++        // ct.IsCancellationRequested, so only a dispose-cancel is swallowed.
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/notification-failures")
++            .Throw(new TaskCanceledException("The request timed out."));
++        SetupContacts();
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("intent-error",
++                "a transport cancellation (token NOT cancelled) must surface as the error bar");
++            cut.Markup.Should().NotContain("No failed notifications.",
++                "it must never masquerade as the empty state (decision (e) / finding F2)");
++        });
++    }
++
++    [TestMethod]
++    public void ClientPath_HitsFailuresEndpoint_DeserializesStringKinds()
++    {
++        // Item 6: the client must hit GET /assignments/{id}/notification-failures and
++        // deserialize NotificationKindDto from its STRING form. The payload is scripted
++        // with string converters. Review finding F3: the live API registers ten sibling
++        // enums as strings but NOT NotificationKindDto / ContactChannelDto, so the real
++        // wire form for these two is numeric — this test therefore pins read-side
++        // tolerance (and would fail if the tolerance were removed), not the live shape.
++        // The API-side registration gap is recorded as a residual.
++        SetupFailures(Row(ContactChannelDto.Email, NotificationKindDto.Publish, reason: "bounce"));
++        SetupContacts();
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            _failuresGetCount.Should().BeGreaterThanOrEqualTo(1,
++                "the section must request GET /assignments/{id}/notification-failures");
++            cut.Markup.Should().Contain(EnumHelper.GetDescription(NotificationKindDto.Publish),
++                "the Kind description renders — the enum deserialized from its string form");
++            cut.Markup.Should().Contain(EnumHelper.GetDescription(ContactChannelDto.Email),
++                "the Channel description renders");
++        });
++    }
++
++    [TestMethod]
++    public void NoLeakage_ShortIdFallback_ContactLabel()
++    {
++        // Item 7: matched contacts render their value label; unmatched fall back to a
++        // short id; no full path/URL-shaped or non-truncated id leaks into markup.
++        SetupFailures(
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish, contactId: ContactId),
++            Row(ContactChannelDto.WhatsApp, NotificationKindDto.Completion, contactId: UnmatchedContactId));
++        SetupContacts(new SubscribedContactDto(ContactId, ContactChannel.Email, "guardian@example.com", Role: null));
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("guardian@example.com",
++                "the enriched recipient label renders for a matched contact (decision (b))");
++            cut.Markup.Should().NotContain(UnmatchedContactId.ToString(),
++                "an unmatched contact must not render its full GUID");
++            cut.Markup.Should().NotContain(@"C:\", "no Windows path leakage");
++            cut.Markup.Should().NotContain("/var/", "no Unix path leakage");
++            cut.Markup.Should().NotContain("/home/", "no home-dir path leakage");
++            cut.Markup.Should().NotContain("StoragePath", "no storage-path-shaped string");
++            cut.Markup.Should().NotMatch("http://|https://", "no URL-shaped string leaks");
++        });
++    }
++
++    [TestMethod]
++    public void SameContact_MultipleKinds_RendersDistinctRows_AndSurvivesReRender()
++    {
++        // Regression (parent pre-review fix + review finding F1). Two distinct row
++        // shapes must both render and survive a re-render over the materialised keyed
++        // table, because a derived row key is NOT guaranteed unique:
++        //   (1) one contact with several kinds — the (RecipientId, Kind) cardinality;
++        //   (2) the F1 republish case — PublishAssignmentCommandHandler calls Publish()
++        //       (which early-returns when already Published) and then STILL re-broadcasts
++        //       over the reused recipients, so two rows can share RecipientId + ContactId
++        //       + Kind + Attempt exactly. Row 3/4 below are byte-identical for that reason.
++        // Duplicate keys are not rejected on first materialisation
++        // (Rows_Render_WithFutureRetryBadge proves that), so the re-render is the
++        // discriminating assertion; with any derived key the framework throws
++        // "More than one sibling of element 'tr' has the same key value".
++        var sharedRecipient = Guid.NewGuid();
++        SetupFailures(
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish, attempt: 1, contactId: ContactId),
++            Row(ContactChannelDto.Email, NotificationKindDto.Reminder, attempt: 3, contactId: ContactId),
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish, attempt: 1, contactId: ContactId, recipientId: sharedRecipient),
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish, attempt: 1, contactId: ContactId, recipientId: sharedRecipient));
++        SetupContacts(new SubscribedContactDto(ContactId, ContactChannel.Email, "guardian@example.com", Role: null));
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() => cut.FindAll("table tbody tr").Should().HaveCount(4));
++
++        // Force a second render pass over the already-materialised keyed table.
++        cut.Render();
++
++        cut.FindAll("table tbody tr").Should().HaveCount(4,
++            "all four rows survive a re-render — index keys keep the F1 duplicate-row case renderable");
++        cut.Markup.Should().Contain(EnumHelper.GetDescription(NotificationKindDto.Publish));
++        cut.Markup.Should().Contain(EnumHelper.GetDescription(NotificationKindDto.Reminder));
++    }
++
++    [TestMethod]
++    public void BlankContactValue_FallsBackToMarkedShortId_NotAnEmptyCell()
++    {
++        // UI-tester P2: SubscribedContactDto.Value is a non-nullable string with no
++        // content guarantee and ContactLabel had no IsNullOrWhiteSpace guard, so a
++        // present-but-blank contact value rendered a visibly EMPTY Recipient cell on an
++        // alerting surface — a hole that reads as a rendering bug. It must fall back to
++        // the marked short id, exactly like an unmatched id.
++        SetupFailures(Row(ContactChannelDto.Email, NotificationKindDto.Publish, contactId: ContactId));
++        SetupContacts(new SubscribedContactDto(ContactId, ContactChannel.Email, "   ", Role: null));
++
++        var cut = Render<NotificationFailuresSection>(p =>
++            p.Add(x => x.AssignmentId, AssignmentId).Add(x => x.CanHaveFailures, true));
++
++        cut.WaitForAssertion(() =>
++        {
++            var cell = cut.Find("table tbody tr td");
++            cell.TextContent.Trim().Should().NotBeEmpty(
++                "a blank contact value must never render an empty Recipient cell");
++            cell.TextContent.Trim().Should().Be("#" + ContactId.ToString("N")[..8],
++                "a blank value falls back to the marked short id");
++        });
++    }
++}

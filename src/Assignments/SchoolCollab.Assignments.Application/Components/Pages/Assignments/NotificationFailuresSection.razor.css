@@ -1,0 +1,34 @@
+/* WS-E2 / ar-17 — NotificationFailuresSection (.razor.css scoped to that component). */
+
+.notification-failures-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.notification-failures-table th,
+.notification-failures-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--neutralStrokeDividerRest);
+}
+
+/* Decision (d): the Reason cell truncates visually with the full text in the
+   cell title attribute (the <td> carries title="<full reason>"). */
+.failures-reason {
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* UI-tester P3(b): bound the Recipient column too. Without a width it is unbounded,
+   so a long contact value (a full email address) dominates the table on a narrow
+   viewport and crushes the other five columns. The <td> carries the full label in its
+   title, mirroring the Reason cell. */
+.failures-recipient {
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

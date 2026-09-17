@@ -266,7 +266,7 @@ within a phase.
   records identity/time; delegation to another guardian works; a new AR pre-fills
   `RequiresSignature` from the grade default and the author can override it.
 
-### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2-core landed ar-16; E2b UI → ar-17; E3 open)
+### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2-core landed ar-16; E2b UI landed ar-17; E3 open)
 - [x] **E1 token deep links (ar-14, 2026-09-16)**: contact-scoped DataProtection tokens minted at publish (additive recipient columns; TTL `LinkValidityDays` ?? 7); shared Redis-backed keyring in Assignments.Api + Families; the repo's FIRST public token-auth route group (`/deeplink/{token}` landing → cookie sign-in → `/ward/{sid}`|`/ward`, best-effort bounded 3s `OpenedAt` stamp, `LinkExpired` page); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF; configuration.md §2/§5. 43 files, 2,279/0. Round: `rounds/round-ar-14-deep-links.md` (CLOSED, Tier 3). **Unblocks WS-F3.**
 - [x] **E2-core channel delivery + NotificationLog (ar-16, 2026-09-17)**: provider abstraction
       (`IEmailSender`/`ISmsSender`) with a **MailKit SMTP** sender (CPM 4.18.0) + `NullEmailSender`
@@ -280,7 +280,20 @@ within a phase.
       MailPit dev container + 5 `smtp-*` parameters incl. **`smtp-password` = the repo's first
       `AddParameter(secret: true)`**; configuration.md §2/§11. 42 files, 2,337/0. Round:
       `rounds/round-ar-16-channel-delivery.md` (CLOSED, Tier 2 light).
-- [ ] **E2b — Admin/author failure-surfacing UI** (renders the delivered failures endpoint): **ar-17, Tier 3** (UI round).
+- [x] **E2b — author/admin failure-surfacing UI (ar-17, 2026-09-17)**: read-only `Notifications` tab on the
+      assignment Detail page (gate: Published/Scheduled/Closed/Archived) rendering ar-16's
+      `GET /assignments/{id}/notification-failures` — 6-column flat table (Recipient · Channel · Kind ·
+      Attempt · Reason · Retry), terminal vs retry-scheduled badges, Info empty state, Error bar; recipient
+      labels enriched client-side from the Publish-dialog contact universe with a marked `#short-id`
+      fallback; new `AssignmentsApiClient.GetNotificationFailuresAsync` + read-side
+      `JsonStringEnumConverter<NotificationKindDto>` tolerance. The gate is **`PublishedAt is not null`**
+      ("has ever been published"), not a status test — `Unpublish()` returns an assignment to `Draft` while its
+      `NotificationLog` rows survive, so a status gate hid that history; `PublishedAt` is threaded through the
+      Core DTO, the repository projection and both query handlers (owner-approved option A).
+      13 code/test files, 2,349/0. Round: `rounds/round-ar-17-notification-failures-ui.md` (CLOSED, Tier 3
+      full four-agent).
+      **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums (the
+      client converter is tolerance only); no `Failures (N)` tab count; the live HTTP path is untested end-to-end.
 - [ ] E3 reminder/overdue/completion worker (`Assignments.Worker`; archive sweep already ships in
       Assignments.Api) — consumes the unchanged `AssignmentPublishedIntegrationEvent` and carries the
       `(TenantId, AssignmentId, RecipientId, Kind)` unique-index residual from ar-16.
@@ -315,7 +328,7 @@ within a phase.
 2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
    light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-17):** the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. Next: **ar-17 (Tier 3)** — the Admin/author failure-surfacing UI over the delivered endpoint; then **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-17):** the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. **E2b failure-surfacing UI LANDED (ar-17, 2026-09-17 — Tier 3 full four-agent, branch `stack/17-ar-17-notification-failures-ui` cut at `c7c5b4ac` = the `stack/16` ar-16 tip because the read side it renders is absent from `main`; 2,349/0):** the read-only `Notifications` tab on the assignment Detail page over the ar-16 failures endpoint (flat 6-column table, terminal-vs-retry badges, Info empty vs Error states, marked `#short-id` recipient fallback), with all four verification stages plus a repo pre-flight review run — **no P1** — and **four P2 defect classes found and fixed across the chain** — a duplicate row `@key` that threw on re-render, an unfiltered cancellation catch that rendered a **false "No failed notifications."** on a transport timeout, and the `Archived` gate omission, plus the **unpublish→Draft gate hole** (found by the parent — neither the static reviewers nor the UI tester caught it; closed in-round under owner option A). PR pending the owner's base decision (rebase onto `main` once #240 merges, or keep the stack). Next: **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).
 4. **Follow-up candidate (deferred — not scheduled):** Teachers & Ward Portal as a
    Python **Prefab UI** second surface — spike-only proposal, zero backend change;
