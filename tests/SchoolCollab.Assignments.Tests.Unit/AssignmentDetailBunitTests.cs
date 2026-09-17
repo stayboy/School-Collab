@@ -54,6 +54,10 @@ public class AssignmentDetailBunitTests : BunitContext
                 new JsonStringEnumConverter<TargetAudienceTypeDto>(),
                 new JsonStringEnumConverter<ApprovalStatusDto>(),
                 new JsonStringEnumConverter<SignOffStateDto>(),
+                // ar-18: the failures endpoint now emits these two as names (the host
+                // registers them), so the fixtures encode them the same way.
+                new JsonStringEnumConverter<NotificationKindDto>(),
+                new JsonStringEnumConverter<ContactChannelDto>(),
             }
         };
 
@@ -95,7 +99,7 @@ public class AssignmentDetailBunitTests : BunitContext
     /// coverage list.</summary>
     private int _assignmentGetCount;
 
-    private void SetupGetAssignment(AssignmentSummaryDto dto)
+    private void SetupGetAssignment(AssignmentSummaryDto dto, params NotificationFailureDto[] failures)
     {
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
             .Respond(_ =>
@@ -123,7 +127,7 @@ public class AssignmentDetailBunitTests : BunitContext
         // is the only observable here (the section's row/empty/error behaviour
         // is covered by NotificationFailuresSectionBunitTests).
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/notification-failures")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<NotificationFailureDto>(), _apiJsonOptions));
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(failures, _apiJsonOptions));
         _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed?ownerType=Guardian&scope=AllAssignments")
             .Respond(HttpStatusCode.OK, "application/json", "[]");
     }
@@ -789,6 +793,25 @@ public class AssignmentDetailBunitTests : BunitContext
             cells[4].TextContent.Trim().Should().Be("\u2014", "null Passed renders the em-dash placeholder");
             cut.Markup.Should().NotContain("Failed", "no Failed value label when Passed is null");
         });
+    }
+
+    /// <summary>WS-E2b / ar-18 (ar-17 follow-up F5): the failures tab badges the row count
+    /// that <c>NotificationFailuresSection</c> reports from its own load — Detail issues no
+    /// extra fetch for it.</summary>
+    [TestMethod]
+    public void NotificationFailuresTab_BadgesRowCount()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto,
+            new NotificationFailureDto(Guid.NewGuid(), Guid.NewGuid(), ContactChannelDto.Email,
+                NotificationKindDto.Publish, 3, "Provider replied: 550 permanent failure", null),
+            new NotificationFailureDto(Guid.NewGuid(), Guid.NewGuid(), ContactChannelDto.SMS,
+                NotificationKindDto.Reminder, 1, "Carrier rejected", null));
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Notifications (2)",
+            "the label badges the count the section reported (F5)"));
     }
 
     /// <summary>WS-E2 / ar-17 decision-gate: the "Notifications" tab (and the

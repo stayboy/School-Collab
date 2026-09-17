@@ -76,7 +76,7 @@
 }
 
 @code {
-    [Parameter] public Guid AssignmentId { get; set; }
+    [Parameter, EditorRequired] public Guid AssignmentId { get; set; }
 
     /// <summary>Render/load gate — the hosting page passes <see langword="true"/> only
     /// when the assignment has ever been published (the hosting page tests
@@ -84,7 +84,13 @@
     /// SignOffSection's <c>RequiresSignature</c> posture. A status enumeration is wrong
     /// here: <c>Unpublish</c> returns an assignment to Draft while its
     /// <c>NotificationLog</c> rows survive.</summary>
-    [Parameter] public bool CanHaveFailures { get; set; }
+    [Parameter, EditorRequired] public bool CanHaveFailures { get; set; }
+
+    /// <summary>WS-E2b / ar-18 (ar-17 follow-up F5): raised once per successful load with
+    /// the number of failed-notification rows (including zero) so the hosting page can
+    /// badge its tab label. Deliberately NOT raised when the load fails — the label must
+    /// never advertise a count for a list the surface could not read.</summary>
+    [Parameter] public EventCallback<int> OnFailureCountLoaded { get; set; }
 
     private List<NotificationFailureDto>? _failures;
     private Dictionary<Guid, string> _contactLabels = new();
@@ -120,6 +126,8 @@
 
             _failures = [.. failuresTask.Result];
             _contactLabels = contactsTask.Result;
+            // ar-18: report the count on the success path only (see the parameter doc).
+            await OnFailureCountLoaded.InvokeAsync(_failures.Count);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
