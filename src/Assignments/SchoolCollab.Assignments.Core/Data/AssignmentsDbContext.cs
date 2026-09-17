@@ -33,6 +33,10 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     // guide scroll-complete) — the gating seam for required modules. Standalone
     // tenant entity (ar-4 pattern); FK declared from ContentModuleConfiguration side.
     public DbSet<ModuleProgress> ModuleProgress => Set<ModuleProgress>();
+    // WS-E2 (ar-16): per-recipient notification delivery rows (rendered payload +
+    // retry state). Standalone tenant entity; the drain and the ar-17 failure query
+    // read it, both tenant-scoped.
+    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -68,6 +72,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         modelBuilder.ApplyConfiguration(new SignatureEventConfiguration(() => CurrentTenantId));
         // WS-D1: per-ward module progress. Same explicit configuration pattern.
         modelBuilder.ApplyConfiguration(new ModuleProgressConfiguration(() => CurrentTenantId));
+        // WS-E2: notification delivery log. Same explicit configuration pattern.
+        modelBuilder.ApplyConfiguration(new NotificationLogConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

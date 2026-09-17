@@ -31,6 +31,14 @@ var settingsDb = postgres.AddDatabase("settings-db");
 
 var redis = builder.AddRedis("cache");
 
+// WS-E2 (ar-16): MailPit dev mail server — SMTP on 1025, web inbox UI on 8025.
+// assignments-api reaches it through the smtp-* parameters below (NOT through
+// Aspire's connection-string injection) so the same `Smtp:*` configuration path is
+// exercised in dev as in a real SMTP deployment.
+var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
+    .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp")
+    .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "http");
+
 // Per-bounded-context outbox exchange names. Centralised in the AppHost's
 // appsettings.json under Parameters:outbox-exchange-* and fanned out to the
 // matching API/Worker via WithEnvironment("Outbox__ExchangeName", param), so
@@ -74,6 +82,19 @@ var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allo
 // parameter is the IConfiguration cold-start value; the Settings
 // Config-service row is the runtime authority (tenant-overridable).
 var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assignment-approval");
+
+// WS-E2 (ar-16): SMTP transport for the MailKit email sender, fanned out onto
+// assignments-api as Smtp__Host/Port/User/Password/FromAddress. `smtp-host` blank =
+// the log-and-skip NullEmailSender (dev/standalone default; never a failure row).
+// `smtp-user` / `smtp-password` have NO committed default: MailPit accepts anonymous
+// mail, and a real relay's credentials come from user-secrets
+// (Parameters:smtp-password) or the Parameters__smtp_password env var — the same
+// posture as Parameters:openrouter-api-key. See documents/configuration.md §2/§11.
+var smtpHost        = builder.AddParameter("smtp-host");
+var smtpPort        = builder.AddParameter("smtp-port");
+var smtpUser        = builder.AddParameter("smtp-user");
+var smtpPassword    = builder.AddParameter("smtp-password", secret: true);
+var smtpFromAddress = builder.AddParameter("smtp-from-address");
 
 // AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
@@ -184,6 +205,11 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithEnvironment("Assignments__AttachmentUpload__MaxTotalSizeBytes", assignmentUploadMaxTotalBytes)
     .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
+    .WithEnvironment("Smtp__Host", smtpHost)
+    .WithEnvironment("Smtp__Port", smtpPort)
+    .WithEnvironment("Smtp__User", smtpUser)
+    .WithEnvironment("Smtp__Password", smtpPassword)
+    .WithEnvironment("Smtp__FromAddress", smtpFromAddress)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);

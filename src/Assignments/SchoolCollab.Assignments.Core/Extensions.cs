@@ -48,6 +48,9 @@ public static class Extensions
         services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
         services.AddScoped<IWardAssignmentProjectionRepository, WardAssignmentProjectionRepository>();
         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
+        // WS-E2 (ar-16): delivery channel senders (MailKit when Smtp:Host is set, null
+        // sender otherwise) + the store-driven dispatch drain.
+        services.AddAssignmentNotificationDelivery(configuration);
         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
         // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /
         // InstantGraded submissions. Handler seam — the engine itself is

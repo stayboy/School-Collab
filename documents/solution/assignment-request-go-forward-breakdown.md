@@ -266,9 +266,24 @@ within a phase.
   records identity/time; delegation to another guardian works; a new AR pre-fills
   `RequiresSignature` from the grade default and the author can override it.
 
-### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2/E3 open)
+### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2-core landed ar-16; E2b UI → ar-17; E3 open)
 - [x] **E1 token deep links (ar-14, 2026-09-16)**: contact-scoped DataProtection tokens minted at publish (additive recipient columns; TTL `LinkValidityDays` ?? 7); shared Redis-backed keyring in Assignments.Api + Families; the repo's FIRST public token-auth route group (`/deeplink/{token}` landing → cookie sign-in → `/ward/{sid}`|`/ward`, best-effort bounded 3s `OpenedAt` stamp, `LinkExpired` page); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF; configuration.md §2/§5. 43 files, 2,279/0. Round: `rounds/round-ar-14-deep-links.md` (CLOSED, Tier 3). **Unblocks WS-F3.**
-- [ ] E2 channel delivery + NotificationLog + failure surfacing — **email-provider decision MADE 2026-09-16** (school SMTP relay via MailKit; MailPit dev container + null-sender fallback; deployment-level from-address; first secret AppHost parameter) — the round is unblocked; E3 reminder/overdue/archive worker (`Assignments.Worker`; archive sweep already ships in Assignments.Api).
+- [x] **E2-core channel delivery + NotificationLog (ar-16, 2026-09-17)**: provider abstraction
+      (`IEmailSender`/`ISmsSender`) with a **MailKit SMTP** sender (CPM 4.18.0) + `NullEmailSender`
+      dev/standalone fallback (selected when `Smtp:Host` is blank — reports success, so an unconfigured
+      host never fills the failure list) + SMS log-and-skip stub; tenant **`NotificationLog`** entity
+      (rendered payload persisted at queue time so retries are idempotent; `Queued/Sent/Failed/Skipped`;
+      `Attempt`/`NextRetryAt`) + EF config + migration; **publisher v1.1** queues one consolidated row per
+      **policy-filtered** recipient carrying that recipient's `/deeplink/{token}`; pure retry schedule
+      (1m/5m/15m/60m, cap 5) + store-driven drain (`NotificationDispatchService` + Api `BackgroundService`
+      mirroring `ArchiveSweepService`); tenant-scoped `GET /assignments/{id}/notification-failures`;
+      MailPit dev container + 5 `smtp-*` parameters incl. **`smtp-password` = the repo's first
+      `AddParameter(secret: true)`**; configuration.md §2/§11. 42 files, 2,337/0. Round:
+      `rounds/round-ar-16-channel-delivery.md` (CLOSED, Tier 2 light).
+- [ ] **E2b — Admin/author failure-surfacing UI** (renders the delivered failures endpoint): **ar-17, Tier 3** (UI round).
+- [ ] E3 reminder/overdue/completion worker (`Assignments.Worker`; archive sweep already ships in
+      Assignments.Api) — consumes the unchanged `AssignmentPublishedIntegrationEvent` and carries the
+      `(TenantId, AssignmentId, RecipientId, Kind)` unique-index residual from ar-16.
 - **Accept:** publish → notifications only to verified+subscribed valid contacts through
   policy-filtered channels; deep link opens the right ward/guardian page without login
   and expires; unsigned reminder fires per cadence; bounced/failed sends surface on the
@@ -300,7 +315,7 @@ within a phase.
 2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
    light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-16):** Phase 2 landed (ar-12 + ar-13 = PR #236) and **E1 deep links landed (ar-14 = PR #237, stacked on #236)**. **Email-provider decision MADE:** school SMTP relay via MailKit, MailPit dev container + null-sender fallback, deployment-level from-address, first secret AppHost parameter. Next: **WS-F3 sign-page relocation LANDED (ar-15, 2026-09-16** — public token-validated guardian route group at the API extending the E1 protector, Families-hosted sign page, commands unchanged; 2,311/0), then **4b E2 channel delivery** (unblocked), then 4c E3 worker; D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-17):** the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. Next: **ar-17 (Tier 3)** — the Admin/author failure-surfacing UI over the delivered endpoint; then **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).
 4. **Follow-up candidate (deferred — not scheduled):** Teachers & Ward Portal as a
    Python **Prefab UI** second surface — spike-only proposal, zero backend change;

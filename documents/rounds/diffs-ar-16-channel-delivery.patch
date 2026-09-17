@@ -1,0 +1,3825 @@
+diff --git a/Directory.Packages.props b/Directory.Packages.props
+index ae77a894..6253871d 100644
+--- a/Directory.Packages.props
++++ b/Directory.Packages.props
+@@ -23,6 +23,11 @@
+     <PackageVersion Include="Aspire.RabbitMQ.Client" Version="13.4.5" />
+     <PackageVersion Include="RabbitMQ.Client" Version="7.2.1" />
+   </ItemGroup>
++  <ItemGroup Label="Notifications">
++    <!-- WS-E2 (ar-16-channel-delivery): SMTP transport for the MailKit email sender.
++         Consumed by SchoolCollab.Assignments.Core (no Version on the PackageReference — CPM). -->
++    <PackageVersion Include="MailKit" Version="4.18.0" />
++  </ItemGroup>
+   <ItemGroup Label="Microsoft.Extensions">
+     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Abstractions" Version="10.0.9" />
+     <!-- WS-E1 (ar-14-deep-links): concrete DataProtection provider used by the
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 49928bd5..e3af16f7 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -131,6 +131,11 @@ files only carry values that genuinely belong to that single service
+ | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
+ | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
+ | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
++| `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
++| `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
++| `smtp-user` | Aspire parameter | _none_ | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. |
++| `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied for a relay that requires auth_ | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. Never commit it — set it via user-secrets / env-var like the other secrets below. |
++| `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
+ 
+ **Where to set them:**
+ 
+@@ -149,14 +154,15 @@ for non-secret defaults — open it, change the value, re-run the AppHost:
+ ```
+ 
+ For secrets (`postgres-password`, `rabbitmq-password`,
+-`openrouter-api-key`) — do **not** commit them to source control. Use
+-the AppHost's user-secrets store (preferred for local dev):
++`openrouter-api-key`, `smtp-password`) — do **not** commit them to source
++control. Use the AppHost's user-secrets store (preferred for local dev):
+ 
+ ```bash
+ cd src/AppHost/SchoolCollab.AppHost
+ dotnet user-secrets set "Parameters:postgres-password" "postgres"
+ dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
+ dotnet user-secrets set "Parameters:openrouter-api-key" "<your-key>"
++dotnet user-secrets set "Parameters:smtp-password" "<relay-password>"
+ ```
+ 
+ Or via env-vars (preferred for CI):
+@@ -165,6 +171,7 @@ Or via env-vars (preferred for CI):
+ export Parameters__postgres-password=postgres
+ export Parameters__rabbitmq-password=rabbit
+ export Parameters__openrouter-api-key=<your-key>
++export Parameters__smtp_password=<relay-password>
+ ```
+ 
+ Aspire's `AddParameter(name, secret: true)` flags secrets so that they are
+@@ -688,11 +695,30 @@ matching env-var form:
+ | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
+ | `Parameters:assignment-upload-max-total-bytes` | `Parameters__assignment_upload_max_total_bytes` |
+ | `Parameters:assignment-upload-allowed-extensions` | `Parameters__assignment_upload_allowed_extensions` |
++| `Parameters:smtp-host` | `Parameters__smtp_host` |
++| `Parameters:smtp-port` | `Parameters__smtp_port` |
++| `Parameters:smtp-user` | `Parameters__smtp_user` |
++| `Parameters:smtp-password` | `Parameters__smtp_password` |
++| `Parameters:smtp-from-address` | `Parameters__smtp_from_address` |
+ | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+ | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+ | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+ | `Assignments:AttachmentUpload:MaxTotalSizeBytes` | `Assignments__AttachmentUpload__MaxTotalSizeBytes` |
+ | `Assignments:AttachmentUpload:AllowedExtensions` | `Assignments__AttachmentUpload__AllowedExtensions` |
++| `Smtp:Host` | `Smtp__Host` |
++| `Smtp:Port` | `Smtp__Port` |
++| `Smtp:User` | `Smtp__User` |
++| `Smtp:Password` | `Smtp__Password` |
++| `Smtp:FromAddress` | `Smtp__FromAddress` |
++| `Smtp:UseStartTls` | `Smtp__UseStartTls` |
++
++> **TLS limitation (ar-16):** only STARTTLS (`UseStartTls = true`) and plaintext
++> (`false`) are supported. **Implicit TLS on connect — i.e. the port-465
++> "SMTPS" convention — is NOT available to the MailKit sender in this round.**
++> A relay that only accepts port-465 implicit TLS (or a `SslOnConnect`
++> requirement) needs a follow-up change to add the `SslOnConnect` option to
++> `SmtpOptions` + `MailKitEmailSender`. Use port 587 (STARTTLS) or 1025 (MailPit
++> dev) as-is.
+ | `Assignments:AttachmentUpload:StagingRetentionHours` | `Assignments__AttachmentUpload__StagingRetentionHours` |
+ | `Assignments:AttachmentUpload:SweepIntervalHours` | `Assignments__AttachmentUpload__SweepIntervalHours` |
+ | `Outbox:ExchangeName` | `Outbox__ExchangeName` |
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 37f6a434..ba6cd2e4 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -31,6 +31,14 @@ var settingsDb = postgres.AddDatabase("settings-db");
+ 
+ var redis = builder.AddRedis("cache");
+ 
++// WS-E2 (ar-16): MailPit dev mail server — SMTP on 1025, web inbox UI on 8025.
++// assignments-api reaches it through the smtp-* parameters below (NOT through
++// Aspire's connection-string injection) so the same `Smtp:*` configuration path is
++// exercised in dev as in a real SMTP deployment.
++var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
++    .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp")
++    .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "http");
++
+ // Per-bounded-context outbox exchange names. Centralised in the AppHost's
+ // appsettings.json under Parameters:outbox-exchange-* and fanned out to the
+ // matching API/Worker via WithEnvironment("Outbox__ExchangeName", param), so
+@@ -75,6 +83,19 @@ var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allo
+ // Config-service row is the runtime authority (tenant-overridable).
+ var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assignment-approval");
+ 
++// WS-E2 (ar-16): SMTP transport for the MailKit email sender, fanned out onto
++// assignments-api as Smtp__Host/Port/User/Password/FromAddress. `smtp-host` blank =
++// the log-and-skip NullEmailSender (dev/standalone default; never a failure row).
++// `smtp-user` / `smtp-password` have NO committed default: MailPit accepts anonymous
++// mail, and a real relay's credentials come from user-secrets
++// (Parameters:smtp-password) or the Parameters__smtp_password env var — the same
++// posture as Parameters:openrouter-api-key. See documents/configuration.md §2/§11.
++var smtpHost        = builder.AddParameter("smtp-host");
++var smtpPort        = builder.AddParameter("smtp-port");
++var smtpUser        = builder.AddParameter("smtp-user");
++var smtpPassword    = builder.AddParameter("smtp-password", secret: true);
++var smtpFromAddress = builder.AddParameter("smtp-from-address");
++
+ // AI provider configuration that the `settings-ai` host reads at startup.
+ // Centralised here so an operator (or another developer on first clone) can
+ // see every knob they may need to set in exactly one place — the AppHost's
+@@ -184,6 +205,11 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
+     .WithEnvironment("Assignments__AttachmentUpload__MaxTotalSizeBytes", assignmentUploadMaxTotalBytes)
+     .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
+     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
++    .WithEnvironment("Smtp__Host", smtpHost)
++    .WithEnvironment("Smtp__Port", smtpPort)
++    .WithEnvironment("Smtp__User", smtpUser)
++    .WithEnvironment("Smtp__Password", smtpPassword)
++    .WithEnvironment("Smtp__FromAddress", smtpFromAddress)
+     .WaitFor(rabbit)
+     .WaitFor(redis)
+     .WaitForCompletion(migrator);
+diff --git a/src/AppHost/SchoolCollab.AppHost/appsettings.json b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+index 3504739b..02a49102 100644
+--- a/src/AppHost/SchoolCollab.AppHost/appsettings.json
++++ b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+@@ -21,6 +21,9 @@
+     "assignment-upload-max-file-bytes": "26214400",
+     "assignment-upload-max-total-bytes": "104857600",
+     "assignment-upload-allowed-extensions": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv",
+-    "feature-flag-require-assignment-approval": "false"
++    "feature-flag-require-assignment-approval": "false",
++    "smtp-host": "localhost",
++    "smtp-port": "1025",
++    "smtp-from-address": "no-reply@schoolcollab.local"
+   }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index 63324d5a..a2229b81 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -23,6 +23,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionsDraft;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.QuestionsDraft;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetNotificationFailures;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsForReview;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
+@@ -545,6 +546,15 @@ public static class AssignmentRoutes
+             CancellationToken ct) =>
+             Results.Ok(await handler.HandleAsync(new ListAssignmentRecipients(id), ct)));
+ 
++        // WS-E2 (ar-16): failed notification deliveries for an assignment — the
++        // read side the ar-17 Admin failure surface renders. Failed rows only and
++        // tenant-scoped by the context's global query filter.
++        group.MapGet("/{id:guid}/notification-failures", async (
++            Guid id,
++            [FromServices] IQueryHandler<GetNotificationFailures, NotificationFailureDto[]> handler,
++            CancellationToken ct) =>
++            Results.Ok(await handler.HandleAsync(new GetNotificationFailures(id), ct)));
++
+         // WS-E1 (ar-14-deep-links): idempotent first-visit deep-link stamp, invoked
+         // server-side by the Families landing. Marks the recipient OpenedAt at most
+         // once (first visit feeding the Sent → Viewed chain); subsequent landings are
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/NotificationDeliveryExtensions.cs b/src/Assignments/SchoolCollab.Assignments.Api/NotificationDeliveryExtensions.cs
+new file mode 100644
+index 00000000..eceb82ec
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/NotificationDeliveryExtensions.cs
+@@ -0,0 +1,23 @@
++using SchoolCollab.Assignments.Api.Services;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++
++namespace SchoolCollab.Assignments.Api;
++
++/// <summary>
++/// DI registration for the WS-E2 (ar-16) notification delivery drain and its
++/// cross-context address resolver. The <c>Add{Layer}()</c> rule forbids inline
++/// <c>services.Add*()</c> in <c>Program.cs</c>, so the call site is
++/// <c>builder.Services.AddNotificationDispatchSweep()</c> in
++/// <see cref="SchoolCollab.Assignments.Api.Program"/> (the same seam as
++/// <c>AddAssignmentLifecycleSweeps</c>).
++/// </summary>
++public static class NotificationDeliveryExtensions
++{
++    /// <summary>Registers the notification drain hosted service + the Students-API address resolver.</summary>
++    public static IServiceCollection AddNotificationDispatchSweep(this IServiceCollection services)
++    {
++        services.AddScoped<IContactAddressResolver, StudentsContactAddressResolver>();
++        services.AddHostedService<NotificationDispatchSweepService>();
++        return services;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 2c568794..7cae82a4 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -156,6 +156,11 @@ builder.Services.AddStagedFileSweep();
+ // services here, Add{Layer}() extension in the api assembly.
+ builder.Services.AddAssignmentLifecycleSweeps();
+ 
++// WS-E2 (ar-16): the notification delivery drain (hosted BackgroundService) +
++// the Students-API contact-address resolver. Same hosted-service seam; the
++// dedicated Assignments worker project is E3's deliverable.
++builder.Services.AddNotificationDispatchSweep();
++
+ // Auth + tenancy (OIDC via Keycloak)
+ builder.Services.AddAuthAndTenancy(builder.Configuration);
+ 
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/NotificationDispatchSweepService.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/NotificationDispatchSweepService.cs
+new file mode 100644
+index 00000000..28e82e41
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/NotificationDispatchSweepService.cs
+@@ -0,0 +1,58 @@
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Hosting;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// BackgroundService that drives the WS-E2 (ar-16) notification delivery drain. Loops
++/// every <see cref="Interval"/> and delegates to
++/// <see cref="NotificationDispatchService.DispatchPendingAsync"/> in its own DI scope.
++/// Mirrors <see cref="ArchiveSweepService"/> exactly (first pass immediately;
++/// per-candidate error isolation inside the Core service; cancellation-aware shutdown).
++/// Decision (a): the drain lives in the API host for E2 — the Assignments worker project
++/// is E3's deliverable, so this moves with <see cref="ArchiveSweepService"/> then.
++/// </summary>
++public sealed class NotificationDispatchSweepService(
++    IServiceScopeFactory scopeFactory,
++    ILogger<NotificationDispatchSweepService> logger) : BackgroundService
++{
++    /// <summary>The drain interval. Short: retry timing comes from the stored
++    /// <c>NextRetryAt</c>, so the loop only decides how promptly a due row is picked up.</summary>
++    public static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
++
++    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
++    {
++        logger.LogInformation(
++            "Notification dispatch drain starting — interval {IntervalMinutes}m",
++            Interval.TotalMinutes);
++
++        while (!stoppingToken.IsCancellationRequested)
++        {
++            try
++            {
++                using var scope = scopeFactory.CreateScope();
++                var dispatcher = scope.ServiceProvider.GetRequiredService<NotificationDispatchService>();
++                var sent = await dispatcher.DispatchPendingAsync(stoppingToken);
++                if (sent > 0)
++                {
++                    logger.LogInformation("Notification dispatch drain: {Sent} row(s) sent", sent);
++                }
++            }
++            catch (Exception ex)
++            {
++                logger.LogError(ex, "Notification dispatch drain failed");
++            }
++
++            try
++            {
++                await Task.Delay(Interval, stoppingToken);
++            }
++            catch (TaskCanceledException)
++            {
++                break; // shutting down
++            }
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/StudentsContactAddressResolver.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/StudentsContactAddressResolver.cs
+new file mode 100644
+index 00000000..acbad878
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/StudentsContactAddressResolver.cs
+@@ -0,0 +1,50 @@
++using System.Net.Http.Json;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Students.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// HTTP-backed <see cref="IContactAddressResolver"/> (WS-E2 / ar-16). Reads the contact
++/// owner's contacts from the Students API (<c>GET /contacts?ownerType=..&amp;ownerId=..</c>,
++/// whose <see cref="ContactDto.Value"/> is the email address / phone number) and returns
++/// the value of the requested contact id. The named <c>students-api</c> client resolves
++/// through Aspire service discovery — the same split that keeps HTTP out of Core as
++/// <see cref="StudentsContactResolver"/> and <see cref="NotificationPolicyResolver"/>.
++/// A fetch failure returns null: the broadcast records the recipient as
++/// <c>Skipped</c> rather than blocking the publish.
++/// </summary>
++public sealed class StudentsContactAddressResolver(
++    IHttpClientFactory httpClientFactory,
++    ILogger<StudentsContactAddressResolver> logger) : IContactAddressResolver
++{
++    /// <inheritdoc />
++    public async Task<string?> ResolveAddressAsync(
++        Guid contactId,
++        ContactOwnerType ownerType,
++        Guid ownerId,
++        CancellationToken cancellationToken = default)
++    {
++        var client = httpClientFactory.CreateClient("students-api");
++        try
++        {
++            var contacts = await client.GetFromJsonAsync<ContactDto[]>(
++                $"contacts?ownerType={(int)ownerType}&ownerId={ownerId}", cancellationToken) ?? [];
++
++            return contacts.FirstOrDefault(c => c.Id == contactId)?.Value;
++        }
++        // Genuine cancellation propagates (the caller aborts the broadcast and queues nothing);
++        // a transport timeout or a fetch failure degrades to null → the recipient is Skipped.
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            throw;
++        }
++        catch (HttpRequestException ex)
++        {
++            logger.LogWarning(ex, "Failed to resolve the address for contact {ContactId}", contactId);
++            return null;
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index 535596e1..0c15ae23 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -614,4 +614,25 @@ public record GuardianSignOffSubmissionRequest(
+     string? TypedSignature = null);
+ 
+ /// <summary>Teacher reassign-signer request body (WS-C1, Q5).</summary>
+-public record ReassignSignOffRequest(Guid NewGuardianId);
+\ No newline at end of file
++public record ReassignSignOffRequest(Guid NewGuardianId);
++
++/// <summary>Notification kind (mirrors Assignments.Core NotificationKind).</summary>
++public enum NotificationKindDto
++{
++    [Description("Publish")] Publish = 0,
++    [Description("Reminder")] Reminder = 1,
++    [Description("Completion")] Completion = 2,
++    [Description("Overdue")] Overdue = 3
++}
++
++/// <summary>A failed notification row for an assignment (WS-E2 / ar-16). Read by the
++/// ar-17 Admin failure surface via GET /assignments/{id}/notification-failures;
++/// <see cref="NextRetryAt"/> is null once the retry cap made the failure terminal.</summary>
++public record NotificationFailureDto(
++    Guid RecipientId,
++    Guid ContactId,
++    ContactChannelDto Channel,
++    NotificationKindDto Kind,
++    int Attempt,
++    string? FailureReason,
++    DateTimeOffset? NextRetryAt);
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetNotificationFailures/GetNotificationFailures.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetNotificationFailures/GetNotificationFailures.cs
+new file mode 100644
+index 00000000..01e45c2c
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetNotificationFailures/GetNotificationFailures.cs
+@@ -0,0 +1,47 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetNotificationFailures;
++
++/// <summary>
++/// Failed notification rows for an assignment (WS-E2 / ar-16) — the read side the
++/// ar-17 Admin failure-surface renders. Failed rows only: <c>Skipped</c> is an expected
++/// policy outcome and <c>Sent</c> needs no attention. Tenant-scoped by the context's
++/// global query filter, so another tenant's rows are invisible.
++/// </summary>
++public sealed record GetNotificationFailures(Guid AssignmentId) : IQuery<NotificationFailureDto[]>;
++
++/// <summary>Handles <see cref="GetNotificationFailures"/>.</summary>
++public sealed class GetNotificationFailuresHandler(
++    AssignmentsDbContext db,
++    ILogger<GetNotificationFailuresHandler> logger)
++    : IQueryHandler<GetNotificationFailures, NotificationFailureDto[]>
++{
++    /// <inheritdoc />
++    public async Task<NotificationFailureDto[]> HandleAsync(
++        GetNotificationFailures query,
++        CancellationToken cancellationToken = default)
++    {
++        logger.LogDebug("Handling GetNotificationFailures for assignment {AssignmentId}", query.AssignmentId);
++
++        return await db.NotificationLogs
++            .AsNoTracking()
++            .Where(x => x.AssignmentId == query.AssignmentId
++                && x.DeliveryStatus == NotificationDeliveryStatus.Failed)
++            .OrderBy(x => x.RecipientId)
++            .ThenBy(x => x.Attempt)
++            .Select(x => new NotificationFailureDto(
++                x.RecipientId,
++                x.ContactId,
++                (ContactChannelDto)(int)x.Channel,
++                (NotificationKindDto)(int)x.Kind,
++                x.Attempt,
++                x.FailureReason,
++                x.NextRetryAt))
++            .ToArrayAsync(cancellationToken);
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs
+index 637b0d3e..1a7abc42 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs
+@@ -33,6 +33,10 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext>
+     // guide scroll-complete) — the gating seam for required modules. Standalone
+     // tenant entity (ar-4 pattern); FK declared from ContentModuleConfiguration side.
+     public DbSet<ModuleProgress> ModuleProgress => Set<ModuleProgress>();
++    // WS-E2 (ar-16): per-recipient notification delivery rows (rendered payload +
++    // retry state). Standalone tenant entity; the drain and the ar-17 failure query
++    // read it, both tenant-scoped.
++    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
+     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+ 
+     /// <summary>
+@@ -68,6 +72,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext>
+         modelBuilder.ApplyConfiguration(new SignatureEventConfiguration(() => CurrentTenantId));
+         // WS-D1: per-ward module progress. Same explicit configuration pattern.
+         modelBuilder.ApplyConfiguration(new ModuleProgressConfiguration(() => CurrentTenantId));
++        // WS-E2: notification delivery log. Same explicit configuration pattern.
++        modelBuilder.ApplyConfiguration(new NotificationLogConfiguration(() => CurrentTenantId));
+         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
+ 
+         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/NotificationLogConfiguration.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/NotificationLogConfiguration.cs
+new file mode 100644
+index 00000000..88992a84
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/NotificationLogConfiguration.cs
+@@ -0,0 +1,51 @@
++using System.Linq.Expressions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Metadata.Builders;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.Data;
++
++namespace SchoolCollab.Assignments.Core.Data.Configurations;
++
++/// <summary>
++/// WS-E2 (ar-16): strict tenant entity for per-recipient notification delivery rows.
++/// The row stores its own rendered payload (decision (b)) and carries no navigation:
++/// the recipient / assignment ids are denormalized so the drain and the ar-17 failure
++/// query are single-context and tenant-scoped. The
++/// <c>(TenantId, DeliveryStatus, NextRetryAt)</c> index is the drain's read path.
++/// </summary>
++internal sealed class NotificationLogConfiguration : TenantEntityTypeConfigurationBase<NotificationLog>
++{
++    public NotificationLogConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
++
++    protected override void ConfigureTenantEntity(EntityTypeBuilder<NotificationLog> builder)
++    {
++        builder.ToTable("notification_logs");
++
++        builder.ConfigureAuditProperties();
++
++        builder.Property(x => x.AssignmentId).IsRequired();
++        builder.Property(x => x.RecipientId).IsRequired();
++        builder.Property(x => x.ContactId).IsRequired();
++        builder.Property(x => x.Channel).IsRequired();
++        builder.Property(x => x.Kind).IsRequired();
++        builder.Property(x => x.Attempt).IsRequired().HasDefaultValue(0);
++        builder.Property(x => x.DeliveryStatus).IsRequired();
++        builder.Property(x => x.SentAt);
++        builder.Property(x => x.FailureReason).HasMaxLength(2048);
++        builder.Property(x => x.NextRetryAt);
++
++        // Decision (b): the rendered payload travels with the row so a retry
++        // re-sends exactly what was queued.
++        builder.Property(x => x.ToAddress).IsRequired().HasMaxLength(512);
++        builder.Property(x => x.Subject).IsRequired().HasMaxLength(512);
++        builder.Property(x => x.BodyHtml).IsRequired();
++
++        // The drain's read path: due rows for a tenant, ordered by retry time.
++        builder.HasIndex(x => new { x.TenantId, x.DeliveryStatus, x.NextRetryAt })
++            .HasDatabaseName("ix_notification_logs_tenant_status_next_retry");
++
++        // Read path for GET /assignments/{id}/notification-failures.
++        builder.HasIndex(x => new { x.AssignmentId, x.DeliveryStatus })
++            .HasDatabaseName("ix_notification_logs_assignment_status");
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/DeliveryServiceCollectionExtensions.cs b/src/Assignments/SchoolCollab.Assignments.Core/DeliveryServiceCollectionExtensions.cs
+new file mode 100644
+index 00000000..0311a613
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/DeliveryServiceCollectionExtensions.cs
+@@ -0,0 +1,49 @@
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.DependencyInjection.Extensions;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++
++namespace SchoolCollab.Assignments.Core;
++
++/// <summary>
++/// DI wiring for the WS-E2 (ar-16) notification delivery seam. Kept out of
++/// <c>AddAssignmentsCore</c>'s body so the provider-selection branches are small,
++/// explicit, and unit-testable on their own (decision: deterministic, pure choice).
++/// </summary>
++public static class DeliveryServiceCollectionExtensions
++{
++    /// <summary>
++    /// Binds <see cref="SmtpOptions"/> and registers the channel senders: MailKit when
++    /// <c>Smtp:Host</c> is configured, otherwise the log-and-skip null sender
++    /// (<see cref="EmailSenderSelection"/>), plus the SMS stub and the delivery drain.
++    /// </summary>
++    public static IServiceCollection AddAssignmentNotificationDelivery(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services.Configure<SmtpOptions>(configuration.GetSection(SmtpOptions.SectionName));
++
++        var smtpOptions = configuration.GetSection(SmtpOptions.SectionName).Get<SmtpOptions>() ?? new SmtpOptions();
++        if (EmailSenderSelection.Select(smtpOptions) == EmailProviderKind.MailKit)
++        {
++            services.AddScoped<IEmailSender, MailKitEmailSender>();
++        }
++        else
++        {
++            services.AddScoped<IEmailSender, NullEmailSender>();
++        }
++
++        // D-2: no SMS/WhatsApp provider in v1 — log-and-skip reports success so a queued
++        // SMS row reaches Sent instead of filling the failure surface.
++        services.AddScoped<ISmsSender, LogAndSkipSmsSender>();
++
++        services.TryAddSingleton(TimeProvider.System);
++        services.AddScoped<NotificationDispatchService>();
++
++        return services;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/EmailDeliveryException.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/EmailDeliveryException.cs
+new file mode 100644
+index 00000000..21d14ae6
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/EmailDeliveryException.cs
+@@ -0,0 +1,17 @@
++namespace SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++/// <summary>
++/// Raised when an email cannot be delivered through SMTP (connect / authenticate /
++/// send failure). Typed so the dispatcher can record a durable failure reason and
++/// schedule a retry — never a bare <see cref="Exception"/> (dotnet-best-practices:
++/// typed domain exceptions only, no <see cref="InvalidOperationException"/> from new code).
++/// </summary>
++public sealed class EmailDeliveryException : Exception
++{
++    /// <summary>Creates the exception with a human-readable reason.</summary>
++    public EmailDeliveryException(string message) : base(message) { }
++
++    /// <summary>Creates the exception, preserving the transport-level cause.</summary>
++    public EmailDeliveryException(string message, Exception innerException)
++        : base(message, innerException) { }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationDeliveryStatus.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationDeliveryStatus.cs
+new file mode 100644
+index 00000000..f4b392b2
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationDeliveryStatus.cs
+@@ -0,0 +1,22 @@
++namespace SchoolCollab.Assignments.Core.Domain;
++
++/// <summary>
++/// Lifecycle of a <see cref="NotificationLog"/> row.
++/// <see cref="Sent"/>, <see cref="Failed"/> and <see cref="Skipped"/> are terminal;
++/// <see cref="Failed"/> with a <c>NextRetryAt</c> is retryable until the attempt cap
++/// (<see cref="Services.NotificationRetrySchedule.MaxAttempts"/>).
++/// </summary>
++public enum NotificationDeliveryStatus
++{
++    /// <summary>Queued for the next drain (or waiting for its <c>NextRetryAt</c>).</summary>
++    Queued = 0,
++
++    /// <summary>Delivered (or handed to a log-and-skip sender that reports success).</summary>
++    Sent = 1,
++
++    /// <summary>Delivery failed; retryable until the attempt cap, then terminal.</summary>
++    Failed = 2,
++
++    /// <summary>Deliberately not sent (no deep-link token / expired / no address). Never delivered.</summary>
++    Skipped = 3,
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationKind.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationKind.cs
+new file mode 100644
+index 00000000..88e3d757
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationKind.cs
+@@ -0,0 +1,21 @@
++namespace SchoolCollab.Assignments.Core.Domain;
++
++/// <summary>
++/// Why a notification was raised (spec §4 <c>NotificationLog</c>). v1.1 emits only
++/// <see cref="Publish"/>; the reminder / completion / overdue kinds are the E3 sweep's
++/// contract and exist now so the log schema does not change again for them.
++/// </summary>
++public enum NotificationKind
++{
++    /// <summary>Assignment published to the recipient.</summary>
++    Publish = 0,
++
++    /// <summary>Reminder for an approaching due date (E3).</summary>
++    Reminder = 1,
++
++    /// <summary>Submission / sign-off completed (E3).</summary>
++    Completion = 2,
++
++    /// <summary>Overdue notification (E3).</summary>
++    Overdue = 3,
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationLog.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationLog.cs
+new file mode 100644
+index 00000000..15c054d5
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/NotificationLog.cs
+@@ -0,0 +1,130 @@
++using SchoolCollab.Core.Notifications;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Core.Domain;
++
++/// <summary>
++/// WS-E2 (ar-16) — one row per notification handed to a delivery channel for a
++/// policy-filtered recipient (spec §4 <c>NotificationLog</c>). Standalone tenant
++/// entity: the payload is <b>rendered and persisted at queue time</b> (decision (b)),
++/// so a retry re-sends exactly the same <see cref="ToAddress"/> /
++/// <see cref="Subject"/> / <see cref="BodyHtml"/> with no cross-context lookup and no
++/// chance of the message changing under the recipient. State transitions are
++/// intention-revealing methods — there are no public setters.
++/// </summary>
++public sealed class NotificationLog : BaseTenantEntityWithAudit
++{
++    private NotificationLog() { }
++
++    private NotificationLog(Guid tenantId) : base(tenantId) { }
++
++    /// <summary>The recipient row (<c>AssignmentRecipient</c>) this notification is for.</summary>
++    public Guid RecipientId { get; private set; }
++
++    /// <summary>The assignment the notification concerns.</summary>
++    public Guid AssignmentId { get; private set; }
++
++    /// <summary>The notified contact (Students bounded context id).</summary>
++    public Guid ContactId { get; private set; }
++
++    /// <summary>The channel this row is delivered on.</summary>
++    public NotificationChannel Channel { get; private set; }
++
++    /// <summary>Why the notification was raised.</summary>
++    public NotificationKind Kind { get; private set; }
++
++    /// <summary>Delivery attempts made so far (successful or failed).</summary>
++    public int Attempt { get; private set; }
++
++    /// <summary>Current lifecycle status.</summary>
++    public NotificationDeliveryStatus DeliveryStatus { get; private set; }
++
++    /// <summary>When the message was handed to the channel successfully.</summary>
++    public DateTimeOffset? SentAt { get; private set; }
++
++    /// <summary>Why the last attempt failed, or why the row was skipped.</summary>
++    public string? FailureReason { get; private set; }
++
++    /// <summary>When the next retry is due; null = no retry scheduled (terminal).</summary>
++    public DateTimeOffset? NextRetryAt { get; private set; }
++
++    /// <summary>Rendered destination address (email address / phone number) at queue time.</summary>
++    public string ToAddress { get; private set; } = string.Empty;
++
++    /// <summary>Rendered subject at queue time.</summary>
++    public string Subject { get; private set; } = string.Empty;
++
++    /// <summary>Rendered body at queue time (HTML for email, plain text for SMS).</summary>
++    public string BodyHtml { get; private set; } = string.Empty;
++
++    /// <summary>
++    /// Queues a notification with its already-rendered payload. The row starts
++    /// <see cref="NotificationDeliveryStatus.Queued"/> with <c>Attempt = 0</c> and is
++    /// immediately due (<paramref name="now"/>).
++    /// </summary>
++    public static NotificationLog Queue(
++        Guid tenantId,
++        Guid assignmentId,
++        Guid recipientId,
++        Guid contactId,
++        NotificationChannel channel,
++        NotificationKind kind,
++        string toAddress,
++        string subject,
++        string bodyHtml,
++        DateTimeOffset now)
++    {
++        var log = new NotificationLog(tenantId)
++        {
++            AssignmentId = assignmentId,
++            RecipientId = recipientId,
++            ContactId = contactId,
++            Channel = channel,
++            Kind = kind,
++            Attempt = 0,
++            DeliveryStatus = NotificationDeliveryStatus.Queued,
++            NextRetryAt = now,
++            ToAddress = toAddress,
++            Subject = subject,
++            BodyHtml = bodyHtml,
++        };
++        return log;
++    }
++
++    /// <summary>Records a successful delivery attempt. Terminal.</summary>
++    public void MarkSent(DateTimeOffset now)
++    {
++        Attempt++;
++        DeliveryStatus = NotificationDeliveryStatus.Sent;
++        SentAt = now;
++        FailureReason = null;
++        NextRetryAt = null;
++        UpdatedAt = now;
++    }
++
++    /// <summary>
++    /// Records a failed delivery attempt. <paramref name="nextRetryAt"/> null makes the
++    /// failure terminal (the attempt cap was reached).
++    /// </summary>
++    public void MarkFailed(string reason, DateTimeOffset? nextRetryAt, DateTimeOffset now)
++    {
++        Attempt++;
++        DeliveryStatus = NotificationDeliveryStatus.Failed;
++        FailureReason = reason;
++        NextRetryAt = nextRetryAt;
++        UpdatedAt = now;
++    }
++
++    /// <summary>
++    /// Records that the notification is deliberately not sent (no deep-link token, an
++    /// expired token, or no resolvable address). Terminal, and never a failure —
++    /// skips are expected policy outcomes (decision (c)).
++    /// </summary>
++    public void MarkSkipped(string reason, DateTimeOffset now)
++    {
++        DeliveryStatus = NotificationDeliveryStatus.Skipped;
++        FailureReason = reason;
++        NextRetryAt = null;
++        UpdatedAt = now;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+index db817c0c..2269a473 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+@@ -48,6 +48,9 @@ public static class Extensions
+         services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
+         services.AddScoped<IWardAssignmentProjectionRepository, WardAssignmentProjectionRepository>();
+         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
++        // WS-E2 (ar-16): delivery channel senders (MailKit when Smtp:Host is set, null
++        // sender otherwise) + the store-driven dispatch drain.
++        services.AddAssignmentNotificationDelivery(configuration);
+         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
+         // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /
+         // InstantGraded submissions. Handler seam — the engine itself is
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260917071656_AddNotificationLog.Designer.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260917071656_AddNotificationLog.Designer.cs
+new file mode 100644
+index 00000000..4a7492cd
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260917071656_AddNotificationLog.Designer.cs
+@@ -0,0 +1,1351 @@
++﻿// <auto-generated />
++using System;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Migrations;
++using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
++using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
++using SchoolCollab.Assignments.Core.Data;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    [DbContext(typeof(AssignmentsDbContext))]
++    [Migration("20260917071656_AddNotificationLog")]
++    partial class AddNotificationLog
++    {
++        /// <inheritdoc />
++        protected override void BuildTargetModel(ModelBuilder modelBuilder)
++        {
++#pragma warning disable 612, 618
++            modelBuilder
++                .HasAnnotation("ProductVersion", "10.0.8")
++                .HasAnnotation("Relational:MaxIdentifierLength", 63);
++
++            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<string>("AiPromptOverride")
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("ai_prompt_override");
++
++                    b.Property<int?>("ApprovalStatus")
++                        .HasColumnType("integer")
++                        .HasColumnName("approval_status");
++
++                    b.Property<DateTimeOffset?>("ApprovedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("approved_at");
++
++                    b.Property<Guid?>("ApprovedBy")
++                        .HasColumnType("uuid")
++                        .HasColumnName("approved_by");
++
++                    b.Property<int>("ArchiveGraceDays")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(30)
++                        .HasColumnName("archive_grace_days");
++
++                    b.Property<string>("AssignmentNumber")
++                        .HasMaxLength(50)
++                        .HasColumnType("character varying(50)")
++                        .HasColumnName("assignment_number");
++
++                    b.Property<int>("AssignmentType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("assignment_type");
++
++                    b.Property<DateTimeOffset?>("AvailableFromUtc")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("available_from_utc");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("CreatedByTeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("created_by_teacher_id");
++
++                    b.Property<string>("Description")
++                        .HasMaxLength(5000)
++                        .HasColumnType("character varying(5000)")
++                        .HasColumnName("description");
++
++                    b.Property<int?>("DifficultyEasyCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_easy_count");
++
++                    b.Property<int?>("DifficultyHardCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_hard_count");
++
++                    b.Property<int?>("DifficultyMediumCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_medium_count");
++
++                    b.Property<DateTimeOffset?>("DueDate")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("due_date");
++
++                    b.Property<Guid?>("GradeLevelId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("grade_level_id");
++
++                    b.Property<int>("GradingFormat")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("grading_format");
++
++                    b.Property<bool>("MandatoryReview")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("mandatory_review");
++
++                    b.Property<int?>("MaxAttempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("max_attempts");
++
++                    b.Property<decimal?>("MaxScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("max_score");
++
++                    b.Property<decimal?>("PassScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("pass_score");
++
++                    b.Property<DateTimeOffset?>("PublishedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("published_at");
++
++                    b.Property<string>("QuestionsDraftJson")
++                        .HasColumnType("text")
++                        .HasColumnName("questions_draft_json");
++
++                    b.Property<bool>("RequiresSignature")
++                        .HasColumnType("boolean")
++                        .HasColumnName("requires_signature");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("Status")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("status");
++
++                    b.Property<int>("TargetAudienceType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("target_audience_type");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<Guid>("TopicId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("topic_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignments");
++
++                    b.HasIndex("CreatedByTeacherId")
++                        .HasDatabaseName("ix_assignments_teacher_id");
++
++                    b.HasIndex("GradeLevelId")
++                        .HasDatabaseName("ix_assignments_grade_level_id");
++
++                    b.HasIndex("Status")
++                        .HasDatabaseName("ix_assignments_status");
++
++                    b.HasIndex("TopicId")
++                        .HasDatabaseName("ix_assignments_topic_id");
++
++                    b.ToTable("assignments", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("ActivityGroupId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("activity_group_id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_activity_groups");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_activity_groups_assignment_id");
++
++                    b.HasIndex("TenantId", "ActivityGroupId")
++                        .HasDatabaseName("ix_assignment_activity_groups_tenant_group");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ActivityGroupId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_activity_groups_tenant_assignment_group");
++
++                    b.ToTable("assignment_activity_groups", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentRecipient", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<int>("Channel")
++                        .HasColumnType("integer")
++                        .HasColumnName("channel");
++
++                    b.Property<Guid>("ContactId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("contact_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<DateTimeOffset?>("DeepLinkExpiresAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("deep_link_expires_at");
++
++                    b.Property<string>("DeepLinkToken")
++                        .HasMaxLength(4096)
++                        .HasColumnType("character varying(4096)")
++                        .HasColumnName("deep_link_token");
++
++                    b.Property<DateTimeOffset?>("DeliveredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("delivered_at");
++
++                    b.Property<bool>("NotifyOnBroadcast")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("notify_on_broadcast");
++
++                    b.Property<DateTimeOffset?>("OpenedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("opened_at");
++
++                    b.Property<Guid>("OwnerId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("owner_id");
++
++                    b.Property<int>("OwnerType")
++                        .HasColumnType("integer")
++                        .HasColumnName("owner_type");
++
++                    b.Property<int?>("Role")
++                        .HasColumnType("integer")
++                        .HasColumnName("role");
++
++                    b.Property<bool>("SubscriptionActive")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("subscription_active");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<Guid?>("WardStudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("ward_student_id");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_recipients");
++
++                    b.HasIndex("AssignmentId", "OwnerId")
++                        .HasDatabaseName("ix_assignment_recipients_assignment_owner");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ContactId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_recipients_tenant_assignment_contact");
++
++                    b.ToTable("assignment_recipients", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("DisplayName")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("display_name");
++
++                    b.Property<bool>("IncludedInGeneration")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("included_in_generation");
++
++                    b.Property<int>("ResourceKind")
++                        .HasColumnType("integer")
++                        .HasColumnName("resource_kind");
++
++                    b.Property<string>("StoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("storage_path");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("Url")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("url");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_resources");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_resources_assignment_id");
++
++                    b.HasIndex("TenantId", "AssignmentId")
++                        .HasDatabaseName("ix_assignment_resources_tenant_assignment");
++
++                    b.ToTable("assignment_resources", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmission", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("AttemptLimitOverriddenAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("attempt_limit_overridden_at");
++
++                    b.Property<Guid?>("AttemptLimitOverriddenBy")
++                        .HasColumnType("uuid")
++                        .HasColumnName("attempt_limit_overridden_by");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("CurrentSource")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_source");
++
++                    b.Property<int>("CurrentVersionNumber")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_version_number");
++
++                    b.Property<Guid?>("ExpectedSignerGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("expected_signer_guardian_id");
++
++                    b.Property<DateTimeOffset?>("FinalizedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("finalized_at");
++
++                    b.Property<DateTimeOffset>("LastSubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("last_submitted_at");
++
++                    b.Property<int>("ReviewState")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("review_state");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("SignOffState")
++                        .HasColumnType("integer")
++                        .HasColumnName("sign_off_state");
++
++                    b.Property<DateTimeOffset?>("SignedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("signed_at");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid?>("SubmissionGateId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_gate_id");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submissions");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submissions_tenant_assignment_student");
++
++                    b.ToTable("assignment_submissions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Content")
++                        .HasMaxLength(20000)
++                        .HasColumnType("character varying(20000)")
++                        .HasColumnName("content");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<bool?>("Passed")
++                        .HasColumnType("boolean")
++                        .HasColumnName("passed");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<int>("Source")
++                        .HasColumnType("integer")
++                        .HasColumnName("source");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<DateTimeOffset>("SubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<int>("VersionNumber")
++                        .HasColumnType("integer")
++                        .HasColumnName("version_number");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_versions");
++
++                    b.HasIndex("TenantId", "SubmissionId", "VersionNumber")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submission_versions_tenant_submission_version");
++
++                    b.ToTable("assignment_submission_versions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ContentModule", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("DisplayOrder")
++                        .HasColumnType("integer")
++                        .HasColumnName("display_order");
++
++                    b.Property<bool>("IsRequired")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("is_required");
++
++                    b.Property<int>("MinCompletionThresholdPercent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(100)
++                        .HasColumnName("min_completion_threshold_percent");
++
++                    b.Property<int>("ModuleType")
++                        .HasColumnType("integer")
++                        .HasColumnName("module_type");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<string>("StoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("storage_path");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("Url")
++                        .IsRequired()
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("url");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_content_modules");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_content_modules_assignment_id");
++
++                    b.HasIndex("TenantId", "AssignmentId")
++                        .HasDatabaseName("ix_assignment_content_modules_tenant_assignment");
++
++                    b.ToTable("assignment_content_modules", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.GuardianSubmissionGate", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("ReviewComment")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("review_comment");
++
++                    b.Property<DateTimeOffset?>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<Guid?>("ReviewedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("reviewed_by_guardian_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<bool>("SubmissionEnabledForStudent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("submission_enabled_for_student");
++
++                    b.Property<DateTimeOffset?>("SubmittedByGuardianAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_by_guardian_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_guardian_submission_gates");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_guardian_submission_gates_tenant_assignment_student");
++
++                    b.ToTable("guardian_submission_gates", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("CompletedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("completed_at");
++
++                    b.Property<Guid>("ContentModuleId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("content_module_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("PercentComplete")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("percent_complete");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_module_progress");
++
++                    b.HasIndex("ContentModuleId")
++                        .HasDatabaseName("ix_assignment_module_progress_content_module_id");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId", "ContentModuleId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_module_progress_tenant_assignment_student_module");
++
++                    b.ToTable("assignment_module_progress", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.NotificationLog", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<int>("Attempt")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("attempt");
++
++                    b.Property<string>("BodyHtml")
++                        .IsRequired()
++                        .HasColumnType("text")
++                        .HasColumnName("body_html");
++
++                    b.Property<int>("Channel")
++                        .HasColumnType("integer")
++                        .HasColumnName("channel");
++
++                    b.Property<Guid>("ContactId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("contact_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<DateTimeOffset?>("DeletedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("deleted_at");
++
++                    b.Property<int>("DeliveryStatus")
++                        .HasColumnType("integer")
++                        .HasColumnName("delivery_status");
++
++                    b.Property<string>("FailureReason")
++                        .HasMaxLength(2048)
++                        .HasColumnType("character varying(2048)")
++                        .HasColumnName("failure_reason");
++
++                    b.Property<bool>("IsDeleted")
++                        .HasColumnType("boolean")
++                        .HasColumnName("is_deleted");
++
++                    b.Property<int>("Kind")
++                        .HasColumnType("integer")
++                        .HasColumnName("kind");
++
++                    b.Property<DateTimeOffset?>("NextRetryAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("next_retry_at");
++
++                    b.Property<Guid>("RecipientId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("recipient_id");
++
++                    b.Property<DateTimeOffset?>("SentAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("sent_at");
++
++                    b.Property<string>("Subject")
++                        .IsRequired()
++                        .HasMaxLength(512)
++                        .HasColumnType("character varying(512)")
++                        .HasColumnName("subject");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("ToAddress")
++                        .IsRequired()
++                        .HasMaxLength(512)
++                        .HasColumnType("character varying(512)")
++                        .HasColumnName("to_address");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_notification_logs");
++
++                    b.HasIndex("AssignmentId", "DeliveryStatus")
++                        .HasDatabaseName("ix_notification_logs_assignment_status");
++
++                    b.HasIndex("TenantId", "DeliveryStatus", "NextRetryAt")
++                        .HasDatabaseName("ix_notification_logs_tenant_status_next_retry");
++
++                    b.ToTable("notification_logs", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SignatureEvent", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("CertificateStoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("certificate_storage_path");
++
++                    b.Property<string>("ConsentTextShown")
++                        .IsRequired()
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("consent_text_shown");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("IpAddress")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("character varying(100)")
++                        .HasColumnName("ip_address");
++
++                    b.Property<int>("SignatureType")
++                        .HasColumnType("integer")
++                        .HasColumnName("signature_type");
++
++                    b.Property<DateTimeOffset>("SignedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("signed_at");
++
++                    b.Property<Guid>("SignerGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("signer_guardian_id");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("TypedSignature")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("typed_signature");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("UserAgent")
++                        .IsRequired()
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("user_agent");
++
++                    b.HasKey("Id")
++                        .HasName("pk_signature_events");
++
++                    b.HasIndex("AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("ix_signature_events_assignment_student");
++
++                    b.ToTable("signature_events", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("QuestionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("question_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid?>("SelectedOptionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("selected_option_id");
++
++                    b.Property<Guid>("SubmissionVersionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_version_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("TextAnswer")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("text_answer");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_answers");
++
++                    b.HasIndex("SubmissionVersionId")
++                        .HasDatabaseName("ix_assignment_submission_answers_submission_version_id");
++
++                    b.HasIndex("TenantId", "SubmissionVersionId")
++                        .HasDatabaseName("ix_assignment_submission_answers_tenant_version");
++
++                    b.ToTable("assignment_submission_answers", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionReview", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Comments")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("comments");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("Grade")
++                        .HasMaxLength(20)
++                        .HasColumnType("character varying(20)")
++                        .HasColumnName("grade");
++
++                    b.Property<DateTimeOffset>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<Guid>("TeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("teacher_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_submission_reviews");
++
++                    b.HasIndex("TenantId", "SubmissionId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_submission_reviews_tenant_submission");
++
++                    b.ToTable("submission_reviews", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Core.Messaging.OutboxMessage", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<int>("Attempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("attempts");
++
++                    b.Property<DateTimeOffset?>("DispatchedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("dispatched_at");
++
++                    b.Property<string>("LastError")
++                        .HasColumnType("text")
++                        .HasColumnName("last_error");
++
++                    b.Property<DateTimeOffset>("OccurredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("occurred_at");
++
++                    b.Property<string>("Payload")
++                        .IsRequired()
++                        .HasColumnType("text")
++                        .HasColumnName("payload");
++
++                    b.Property<Guid?>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("type");
++
++                    b.HasKey("Id")
++                        .HasName("pk_outbox_messages");
++
++                    b.HasIndex("OccurredAt")
++                        .HasDatabaseName("ix_outbox_messages_pending")
++                        .HasFilter("dispatched_at IS NULL");
++
++                    b.HasIndex("TenantId")
++                        .HasDatabaseName("ix_outbox_messages_tenant_id");
++
++                    b.ToTable("outbox_messages", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentAttachment", "Attachments", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("ContentType")
++                                .IsRequired()
++                                .HasMaxLength(100)
++                                .HasColumnType("character varying(100)")
++                                .HasColumnName("content_type");
++
++                            b1.Property<string>("FileName")
++                                .IsRequired()
++                                .HasMaxLength(255)
++                                .HasColumnType("character varying(255)")
++                                .HasColumnName("file_name");
++
++                            b1.Property<long>("FileSize")
++                                .HasColumnType("bigint")
++                                .HasColumnName("file_size");
++
++                            b1.Property<string>("StoragePath")
++                                .IsRequired()
++                                .HasMaxLength(500)
++                                .HasColumnType("character varying(500)")
++                                .HasColumnName("storage_path");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_attachments");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_attachments_assignment_id");
++
++                            b1.ToTable("assignment_attachments", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_attachments_assignments_assignment_id");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentQuestion", "Questions", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<Guid?>("CorrectOptionId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("correct_option_id");
++
++                            b1.Property<int>("DisplayOrder")
++                                .HasColumnType("integer")
++                                .HasColumnName("display_order");
++
++                            b1.Property<string>("ModelAnswer")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("model_answer");
++
++                            b1.Property<string>("QuestionText")
++                                .IsRequired()
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("question_text");
++
++                            b1.Property<int>("QuestionType")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("integer")
++                                .HasDefaultValue(0)
++                                .HasColumnName("question_type");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_questions");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_questions_assignment_id");
++
++                            b1.ToTable("assignment_questions", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_questions_assignments_assignment_id");
++
++                            b1.OwnsMany("SchoolCollab.Assignments.Core.Domain.QuestionOption", "Options", b2 =>
++                                {
++                                    b2.Property<Guid>("Id")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("id");
++
++                                    b2.Property<bool>("IsCorrect")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("boolean")
++                                        .HasDefaultValue(false)
++                                        .HasColumnName("is_correct");
++
++                                    b2.Property<string>("OptionText")
++                                        .IsRequired()
++                                        .HasMaxLength(500)
++                                        .HasColumnType("character varying(500)")
++                                        .HasColumnName("option_text");
++
++                                    b2.Property<Guid>("QuestionId")
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("question_id");
++
++                                    b2.HasKey("Id")
++                                        .HasName("pk_question_options");
++
++                                    b2.HasIndex("QuestionId")
++                                        .HasDatabaseName("ix_question_options_question_id");
++
++                                    b2.ToTable("question_options", (string)null);
++
++                                    b2.WithOwner()
++                                        .HasForeignKey("QuestionId")
++                                        .HasConstraintName("fk_question_options_assignment_questions_question_id");
++                                });
++
++                            b1.Navigation("Options");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentReview", "Reviews", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("Comments")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("comments");
++
++                            b1.Property<DateTimeOffset>("ReviewDate")
++                                .HasColumnType("timestamp with time zone")
++                                .HasColumnName("review_date");
++
++                            b1.Property<decimal?>("Score")
++                                .HasPrecision(5, 2)
++                                .HasColumnType("numeric(5,2)")
++                                .HasColumnName("score");
++
++                            b1.Property<Guid>("TeacherId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("teacher_id");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_reviews");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_reviews_assignment_id");
++
++                            b1.ToTable("assignment_reviews", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_reviews_assignments_assignment_id");
++                        });
++
++                    b.Navigation("Attachments");
++
++                    b.Navigation("Questions");
++
++                    b.Navigation("Reviews");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany()
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_activity_groups_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany("Resources")
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_resources_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ContentModule", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany("Modules")
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_content_modules_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.ContentModule", null)
++                        .WithMany()
++                        .HasForeignKey("ContentModuleId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_module_progress_assignment_content_modules_conte");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", null)
++                        .WithMany()
++                        .HasForeignKey("SubmissionVersionId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_submission_answers_assignment_submission_version");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Navigation("Modules");
++
++                    b.Navigation("Resources");
++                });
++#pragma warning restore 612, 618
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260917071656_AddNotificationLog.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260917071656_AddNotificationLog.cs
+new file mode 100644
+index 00000000..03724afc
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260917071656_AddNotificationLog.cs
+@@ -0,0 +1,61 @@
++﻿using System;
++using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    /// <inheritdoc />
++    public partial class AddNotificationLog : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.CreateTable(
++                name: "notification_logs",
++                columns: table => new
++                {
++                    id = table.Column<Guid>(type: "uuid", nullable: false),
++                    recipient_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    assignment_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    contact_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    channel = table.Column<int>(type: "integer", nullable: false),
++                    kind = table.Column<int>(type: "integer", nullable: false),
++                    attempt = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
++                    delivery_status = table.Column<int>(type: "integer", nullable: false),
++                    sent_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
++                    failure_reason = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: true),
++                    next_retry_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
++                    to_address = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
++                    subject = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
++                    body_html = table.Column<string>(type: "text", nullable: false),
++                    tenant_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
++                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
++                    is_deleted = table.Column<bool>(type: "boolean", nullable: false),
++                    deleted_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
++                },
++                constraints: table =>
++                {
++                    table.PrimaryKey("pk_notification_logs", x => x.id);
++                });
++
++            migrationBuilder.CreateIndex(
++                name: "ix_notification_logs_assignment_status",
++                table: "notification_logs",
++                columns: new[] { "assignment_id", "delivery_status" });
++
++            migrationBuilder.CreateIndex(
++                name: "ix_notification_logs_tenant_status_next_retry",
++                table: "notification_logs",
++                columns: new[] { "tenant_id", "delivery_status", "next_retry_at" });
++        }
++
++        /// <inheritdoc />
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.DropTable(
++                name: "notification_logs");
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+index cabd90d2..d79cfdb0 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+@@ -756,6 +756,104 @@ namespace SchoolCollab.Assignments.Core.Migrations
+                     b.ToTable("assignment_module_progress", (string)null);
+                 });
+ 
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.NotificationLog", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<int>("Attempt")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("attempt");
++
++                    b.Property<string>("BodyHtml")
++                        .IsRequired()
++                        .HasColumnType("text")
++                        .HasColumnName("body_html");
++
++                    b.Property<int>("Channel")
++                        .HasColumnType("integer")
++                        .HasColumnName("channel");
++
++                    b.Property<Guid>("ContactId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("contact_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<DateTimeOffset?>("DeletedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("deleted_at");
++
++                    b.Property<int>("DeliveryStatus")
++                        .HasColumnType("integer")
++                        .HasColumnName("delivery_status");
++
++                    b.Property<string>("FailureReason")
++                        .HasMaxLength(2048)
++                        .HasColumnType("character varying(2048)")
++                        .HasColumnName("failure_reason");
++
++                    b.Property<bool>("IsDeleted")
++                        .HasColumnType("boolean")
++                        .HasColumnName("is_deleted");
++
++                    b.Property<int>("Kind")
++                        .HasColumnType("integer")
++                        .HasColumnName("kind");
++
++                    b.Property<DateTimeOffset?>("NextRetryAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("next_retry_at");
++
++                    b.Property<Guid>("RecipientId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("recipient_id");
++
++                    b.Property<DateTimeOffset?>("SentAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("sent_at");
++
++                    b.Property<string>("Subject")
++                        .IsRequired()
++                        .HasMaxLength(512)
++                        .HasColumnType("character varying(512)")
++                        .HasColumnName("subject");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("ToAddress")
++                        .IsRequired()
++                        .HasMaxLength(512)
++                        .HasColumnType("character varying(512)")
++                        .HasColumnName("to_address");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_notification_logs");
++
++                    b.HasIndex("AssignmentId", "DeliveryStatus")
++                        .HasDatabaseName("ix_notification_logs_assignment_status");
++
++                    b.HasIndex("TenantId", "DeliveryStatus", "NextRetryAt")
++                        .HasDatabaseName("ix_notification_logs_tenant_status_next_retry");
++
++                    b.ToTable("notification_logs", (string)null);
++                });
++
+             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SignatureEvent", b =>
+                 {
+                     b.Property<Guid>("Id")
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj b/src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj
+index b638e614..f9374660 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj
++++ b/src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj
+@@ -15,6 +15,7 @@
+   </ItemGroup>
+   <ItemGroup>
+     <PackageReference Include="EFCore.NamingConventions" />
++    <PackageReference Include="MailKit" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentNotificationBroadcaster.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentNotificationBroadcaster.cs
+index 6afe0a3b..ef553322 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentNotificationBroadcaster.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentNotificationBroadcaster.cs
+@@ -1,28 +1,143 @@
+ using Microsoft.Extensions.Logging;
+ using SchoolCollab.Assignments.Contracts.Events;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services.Delivery;
+ using SchoolCollab.Core.Messaging;
++using SchoolCollab.Core.Notifications;
+ 
+ namespace SchoolCollab.Assignments.Core.Services;
+ 
+ /// <summary>
+-/// Default <see cref="IAssignmentNotificationBroadcaster"/>. v1 enqueues a single
+-/// <see cref="AssignmentPublishedIntegrationEvent"/> via the shared outbox; the
+-/// recipient set is already persisted (deduped by contact). v1.1 will emit one
+-/// consolidated per-contact notification (listing wards) to the delivery channels
+-/// (§18) — that enrichment plugs in behind this interface without touching the
+-/// publish handler.
++/// Default <see cref="IAssignmentNotificationBroadcaster"/>. Keeps the v1 outbox enqueue
++/// (<see cref="AssignmentPublishedIntegrationEvent"/> — E3's future consumer) and adds
++/// v1.1 delivery: for each <b>policy-filtered</b> recipient handed to it (the publish
++/// handler applies <see cref="NotificationRecipientFilter"/> before this call) it
++/// resolves the destination address, renders the consolidated per-contact message
++/// carrying that recipient's <c>/deeplink/{token}</c>, and queues one
++/// <see cref="NotificationLog"/> row (decision (e): one message per contact, not per
++/// ward and not per channel duplicate).
++///
++/// <para>Recipients without an unexpired deep-link token — or with no resolvable
++/// address — are recorded <see cref="NotificationDeliveryStatus.Skipped"/> with a
++/// reason and are never sent (decision (c)).</para>
+ /// </summary>
+ public sealed class AssignmentNotificationBroadcaster(
++    AssignmentsDbContext db,
++    IContactAddressResolver addressResolver,
+     IIntegrationEventPublisher publisher,
++    TimeProvider timeProvider,
+     ILogger<AssignmentNotificationBroadcaster> logger) : IAssignmentNotificationBroadcaster
+ {
++    /// <inheritdoc />
+     public async Task BroadcastPublishedAsync(AssignmentPublishedContext context, CancellationToken cancellationToken = default)
+     {
++        ArgumentNullException.ThrowIfNull(context);
++
+         await publisher.EnqueueAsync(
+             new AssignmentPublishedIntegrationEvent(context.AssignmentId, context.Title, context.PublishedAt),
+             cancellationToken);
+ 
+-        logger.LogInformation("Broadcast published notification for assignment {AssignmentId} to {Count} recipient(s)",
++        var now = timeProvider.GetUtcNow();
++        foreach (var recipient in context.Recipients)
++        {
++            db.NotificationLogs.Add(await QueueForRecipientAsync(context, recipient, now, cancellationToken));
++        }
++
++        if (context.Recipients.Count > 0)
++        {
++            await db.SaveChangesAsync(cancellationToken);
++        }
++
++        logger.LogInformation(
++            "Broadcast published notification for assignment {AssignmentId} to {Count} recipient(s)",
+             context.AssignmentId, context.Recipients.Count);
+     }
+-}
+\ No newline at end of file
++
++    private async Task<NotificationLog> QueueForRecipientAsync(
++        AssignmentPublishedContext context,
++        AssignmentRecipient recipient,
++        DateTimeOffset now,
++        CancellationToken cancellationToken)
++    {
++        var token = recipient.DeepLinkToken;
++        var hasUnexpiredToken = !string.IsNullOrWhiteSpace(token)
++            && recipient.DeepLinkExpiresAt is not null
++            && recipient.DeepLinkExpiresAt > now;
++
++        if (!hasUnexpiredToken)
++        {
++            return Skipped(context, recipient, string.Empty, string.Empty,
++                "recipient has no unexpired deep-link token", now);
++        }
++
++        string? address;
++        try
++        {
++            address = await addressResolver.ResolveAddressAsync(
++                recipient.ContactId, recipient.OwnerType, recipient.OwnerId, cancellationToken);
++        }
++        // Genuine cancellation (client disconnect / shutdown) must NOT be converted into a
++        // terminal Skipped row — the notification would be lost. Let it propagate so the
++        // publish aborts and the row is never queued. A transport timeout (token not
++        // cancelled) still falls through to Skipped below, which is non-aborting.
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            throw;
++        }
++        catch (Exception ex)
++        {
++            logger.LogWarning(ex, "Failed to resolve the delivery address for contact {ContactId}", recipient.ContactId);
++            address = null;
++        }
++
++        if (string.IsNullOrWhiteSpace(address))
++        {
++            return Skipped(context, recipient, string.Empty,
++                NotificationMessageBuilder.BuildPublishSubject(context.Title),
++                "no delivery address resolved", now);
++        }
++
++        if (recipient.Channel == Students.Core.Domain.ContactChannel.Email)
++        {
++            var message = NotificationMessageBuilder.BuildPublishEmail(address, context.Title, token!);
++            return Queue(context, recipient, message.To, message.Subject, message.BodyHtml, now);
++        }
++
++        // SMS / WhatsApp share one text body (no provider in v1 — LogAndSkipSmsSender).
++        var sms = NotificationMessageBuilder.BuildPublishSms(address, context.Title, token!);
++        return Queue(context, recipient, sms.To, NotificationMessageBuilder.BuildPublishSubject(context.Title), sms.Body, now);
++    }
++
++    private static NotificationLog Queue(
++        AssignmentPublishedContext context,
++        AssignmentRecipient recipient,
++        string toAddress,
++        string subject,
++        string bodyHtml,
++        DateTimeOffset now) =>
++        NotificationLog.Queue(
++            recipient.TenantId,
++            context.AssignmentId,
++            recipient.Id,
++            recipient.ContactId,
++            (NotificationChannel)(int)recipient.Channel,
++            NotificationKind.Publish,
++            toAddress,
++            subject,
++            bodyHtml,
++            now);
++
++    private static NotificationLog Skipped(
++        AssignmentPublishedContext context,
++        AssignmentRecipient recipient,
++        string toAddress,
++        string subject,
++        string reason,
++        DateTimeOffset now)
++    {
++        var log = Queue(context, recipient, toAddress, subject, string.Empty, now);
++        log.MarkSkipped(reason, now);
++        return log;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/EmailMessage.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/EmailMessage.cs
+new file mode 100644
+index 00000000..f158965b
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/EmailMessage.cs
+@@ -0,0 +1,11 @@
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// A fully-rendered outbound email. <see cref="From"/> is optional: when null the
++/// sender falls back to its configured <c>Smtp:FromAddress</c>.
++/// </summary>
++public sealed record EmailMessage(
++    string To,
++    string Subject,
++    string BodyHtml,
++    string? From = null);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/EmailSenderSelection.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/EmailSenderSelection.cs
+new file mode 100644
+index 00000000..533f831c
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/EmailSenderSelection.cs
+@@ -0,0 +1,34 @@
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>The concrete email provider chosen for the current configuration.</summary>
++public enum EmailProviderKind
++{
++    /// <summary>No SMTP host configured — log-and-skip (successful) sender.</summary>
++    Null = 0,
++
++    /// <summary>SMTP host configured — real MailKit delivery.</summary>
++    MailKit = 1,
++}
++
++/// <summary>
++/// Deterministic email-provider selection. Pure and static so both branches are
++/// unit-testable without any transport, and so the DI registration in
++/// <see cref="DeliveryServiceCollectionExtensions"/> performs the exact same choice.
++///
++/// <para>Rule: <c>Smtp:Host</c> set (non-blank) ⇒ <see cref="EmailProviderKind.MailKit"/>;
++/// unset/blank ⇒ <see cref="EmailProviderKind.Null"/>. The null provider reports
++/// <b>success</b> (decision (d)) — an unconfigured host must never fill the ar-17
++/// failure surface.</para>
++/// </summary>
++public static class EmailSenderSelection
++{
++    /// <summary>Chooses the provider for the supplied options.</summary>
++    public static EmailProviderKind Select(SmtpOptions options)
++    {
++        ArgumentNullException.ThrowIfNull(options);
++
++        return string.IsNullOrWhiteSpace(options.Host)
++            ? EmailProviderKind.Null
++            : EmailProviderKind.MailKit;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/IContactAddressResolver.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/IContactAddressResolver.cs
+new file mode 100644
+index 00000000..cd64cefe
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/IContactAddressResolver.cs
+@@ -0,0 +1,23 @@
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// Resolves the delivery address (email address / phone number) of a contact by id.
++/// The interface lives in Assignments.Core; the HTTP implementation (Students API
++/// <c>GET /contacts?ownerType=..&amp;ownerId=..</c>, whose <c>ContactDto.Value</c> is the
++/// address) lives in Assignments.Api — the same cross-context resolver split used by
++/// <see cref="IContactResolver"/> and <see cref="INotificationPolicyResolver"/>.
++///
++/// <para>Resolution happens once, at queue time: the rendered address is persisted on
++/// the <c>NotificationLog</c> row so a retry never re-resolves.</para>
++/// </summary>
++public interface IContactAddressResolver
++{
++    /// <summary>Returns the contact's address value, or null when it cannot be resolved.</summary>
++    Task<string?> ResolveAddressAsync(
++        Guid contactId,
++        ContactOwnerType ownerType,
++        Guid ownerId,
++        CancellationToken cancellationToken = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/IEmailSender.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/IEmailSender.cs
+new file mode 100644
+index 00000000..5fb7277f
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/IEmailSender.cs
+@@ -0,0 +1,13 @@
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// Sends a rendered <see cref="EmailMessage"/>. Implementations MUST throw a typed
++/// <see cref="Domain.Exceptions.EmailDeliveryException"/> on a delivery failure so the
++/// dispatcher can record a durable failure reason and retry (never a bare
++/// <see cref="Exception"/>).
++/// </summary>
++public interface IEmailSender
++{
++    /// <summary>Delivers the message, or throws <see cref="Domain.Exceptions.EmailDeliveryException"/>.</summary>
++    Task SendAsync(EmailMessage message, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/ISmsSender.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/ISmsSender.cs
+new file mode 100644
+index 00000000..9cec7c9d
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/ISmsSender.cs
+@@ -0,0 +1,12 @@
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// Sends a rendered <see cref="SmsMessage"/>. v1 has only the log-and-skip stub
++/// (D-2 decision — no SMS/WhatsApp provider yet); the seam exists so a provider can
++/// plug in without touching the dispatcher.
++/// </summary>
++public interface ISmsSender
++{
++    /// <summary>Delivers the message, or throws a typed delivery exception.</summary>
++    Task SendAsync(SmsMessage message, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/LogAndSkipSmsSender.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/LogAndSkipSmsSender.cs
+new file mode 100644
+index 00000000..bd2a8c79
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/LogAndSkipSmsSender.cs
+@@ -0,0 +1,23 @@
++using Microsoft.Extensions.Logging;
++
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// SMS / WhatsApp stub (D-2 decision: log-and-skip, no provider in v1). Reports
++/// <b>success</b> so a queued SMS row reaches <c>Sent</c> rather than filling the
++/// failure surface while no gateway exists. The policy <c>BlockedChannels</c> set is
++/// what actually suppresses unwanted channels at publish time.
++/// </summary>
++public sealed class LogAndSkipSmsSender(ILogger<LogAndSkipSmsSender> logger) : ISmsSender
++{
++    /// <inheritdoc />
++    public Task SendAsync(SmsMessage message, CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(message);
++
++        logger.LogInformation(
++            "No SMS provider configured — skipping message to {To}", message.To);
++
++        return Task.CompletedTask;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/MailKitEmailSender.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/MailKitEmailSender.cs
+new file mode 100644
+index 00000000..afe3193a
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/MailKitEmailSender.cs
+@@ -0,0 +1,76 @@
++using MailKit.Net.Smtp;
++using MailKit.Security;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using MimeKit;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// MailKit-backed <see cref="IEmailSender"/>. Selected only when <c>Smtp:Host</c> is
++/// configured (<see cref="EmailSenderSelection"/>). All transport faults are wrapped in
++/// <see cref="EmailDeliveryException"/> so the dispatcher records a reason and retries.
++/// </summary>
++public sealed class MailKitEmailSender(
++    IOptions<SmtpOptions> options,
++    ILogger<MailKitEmailSender> logger) : IEmailSender
++{
++    /// <inheritdoc />
++    public async Task SendAsync(EmailMessage message, CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(message);
++
++        var smtp = options.Value;
++        var mime = BuildMimeMessage(message, smtp);
++
++        try
++        {
++            using var client = new SmtpClient();
++            await client.ConnectAsync(
++                smtp.Host,
++                smtp.Port,
++                smtp.UseStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.None,
++                cancellationToken);
++
++            if (!string.IsNullOrWhiteSpace(smtp.User))
++                await client.AuthenticateAsync(smtp.User, smtp.Password, cancellationToken);
++
++            await client.SendAsync(mime, cancellationToken);
++            await client.DisconnectAsync(quit: true, cancellationToken);
++
++            logger.LogInformation("Delivered notification email to {To} via {Host}", message.To, smtp.Host);
++        }
++        catch (EmailDeliveryException)
++        {
++            throw;
++        }
++        catch (Exception ex)
++        {
++            throw new EmailDeliveryException(
++                $"SMTP delivery to '{message.To}' failed via {smtp.Host}:{smtp.Port}: {ex.Message}", ex);
++        }
++    }
++
++    /// <summary>
++    /// Pure message build (no transport, no clock) so To / From / Subject / HTML body
++    /// are unit-testable. A message without its own <see cref="EmailMessage.From"/> falls
++    /// back to <see cref="SmtpOptions.FromAddress"/>.
++    /// </summary>
++    public static MimeMessage BuildMimeMessage(EmailMessage message, SmtpOptions smtp)
++    {
++        ArgumentNullException.ThrowIfNull(message);
++        ArgumentNullException.ThrowIfNull(smtp);
++
++        var from = string.IsNullOrWhiteSpace(message.From) ? smtp.FromAddress : message.From;
++
++        var mime = new MimeMessage
++        {
++            Subject = message.Subject,
++            Body = new TextPart("html") { Text = message.BodyHtml },
++        };
++        mime.From.Add(MailboxAddress.Parse(from));
++        mime.To.Add(MailboxAddress.Parse(message.To));
++        return mime;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/NullEmailSender.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/NullEmailSender.cs
+new file mode 100644
+index 00000000..5a04a604
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/NullEmailSender.cs
+@@ -0,0 +1,24 @@
++using Microsoft.Extensions.Logging;
++
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// Dev / standalone default email sender: logs the message and reports <b>success</b>
++/// without touching SMTP (decision (d)). An unconfigured <c>Smtp:Host</c> therefore
++/// produces <c>Sent</c> notification rows, never failures — the Admin failure surface
++/// (ar-17) stays meaningful on a host with no mail server.
++/// </summary>
++public sealed class NullEmailSender(ILogger<NullEmailSender> logger) : IEmailSender
++{
++    /// <inheritdoc />
++    public Task SendAsync(EmailMessage message, CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(message);
++
++        logger.LogInformation(
++            "SMTP not configured — skipping email to {To} (subject: {Subject})",
++            message.To, message.Subject);
++
++        return Task.CompletedTask;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/SmsMessage.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/SmsMessage.cs
+new file mode 100644
+index 00000000..e6d0ed71
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/SmsMessage.cs
+@@ -0,0 +1,9 @@
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// A fully-rendered outbound SMS / WhatsApp message. The channel is carried by the
++/// <c>NotificationLog</c> row, not the message, so one shape serves both.
++/// </summary>
++public sealed record SmsMessage(
++    string To,
++    string Body);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/SmtpOptions.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/SmtpOptions.cs
+new file mode 100644
+index 00000000..be7f4ec9
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/Delivery/SmtpOptions.cs
+@@ -0,0 +1,34 @@
++namespace SchoolCollab.Assignments.Core.Services.Delivery;
++
++/// <summary>
++/// SMTP transport settings bound from the <c>Smtp</c> configuration section
++/// (AppHost <c>Parameters:</c> block → <c>Smtp__*</c> env vars on assignments-api;
++/// see documents/configuration.md §2/§11).
++///
++/// <para><b>Presence of <see cref="Host"/> is the provider switch.</b> Blank/unset →
++/// the null sender (dev/standalone default; nothing blows up without a mail server).
++/// See <see cref="EmailSenderSelection"/>.</para>
++/// </summary>
++public sealed class SmtpOptions
++{
++    /// <summary>The configuration section this binds to.</summary>
++    public const string SectionName = "Smtp";
++
++    /// <summary>SMTP host. Blank ⇒ <c>NullEmailSender</c>.</summary>
++    public string Host { get; set; } = string.Empty;
++
++    /// <summary>SMTP port (MailPit dev container default: 1025).</summary>
++    public int Port { get; set; } = 1025;
++
++    /// <summary>Optional SMTP user. Blank ⇒ anonymous.</summary>
++    public string User { get; set; } = string.Empty;
++
++    /// <summary>Optional SMTP password (the AppHost <c>smtp-password</c> secret parameter).</summary>
++    public string Password { get; set; } = string.Empty;
++
++    /// <summary>The From address stamped on messages that do not carry their own.</summary>
++    public string FromAddress { get; set; } = "no-reply@schoolcollab.local";
++
++    /// <summary>Whether to negotiate STARTTLS (dev MailPit: false).</summary>
++    public bool UseStartTls { get; set; }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationDispatchService.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationDispatchService.cs
+new file mode 100644
+index 00000000..4e38f31a
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationDispatchService.cs
+@@ -0,0 +1,135 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Notifications;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// WS-E2 (ar-16) — store-driven delivery drain. Loads a bounded batch of due
++/// (<see cref="NotificationDeliveryStatus.Queued"/>, or retryable
++/// <see cref="NotificationDeliveryStatus.Failed"/> with <c>NextRetryAt &lt;= now</c>)
++/// rows across tenants, then sends each one inside its own tenant context (the
++/// sanctioned sweep pattern — mirror of <c>ArchiveSweeper</c>), stamping
++/// <c>Sent</c> or <c>Failed</c> + <c>NextRetryAt</c> from the pure
++/// <see cref="NotificationRetrySchedule"/>. Reaching the attempt cap makes the failure
++/// terminal (no further retry), which is what the ar-17 failure surface lists.
++/// </summary>
++public sealed class NotificationDispatchService(
++    AssignmentsDbContext db,
++    ITenantContextAccessor tenantContextAccessor,
++    IEmailSender emailSender,
++    ISmsSender smsSender,
++    TimeProvider timeProvider,
++    ILogger<NotificationDispatchService> logger)
++{
++    /// <summary>Maximum rows dispatched per drain pass (bounded batch).</summary>
++    public const int MaxBatchSize = 50;
++
++    /// <summary>Dispatches every due notification in the current batch; returns the sent count.</summary>
++    public async Task<int> DispatchPendingAsync(CancellationToken cancellationToken = default)
++    {
++        var now = timeProvider.GetUtcNow();
++
++        // Candidates are read across tenants (the drain runs in the API host, outside any
++        // tenant context) and each one is dispatched under its own tenant — the same
++        // sanctioned cross-tenant candidate read the archive/scheduled-publish sweeps use.
++        var candidates = await db.NotificationLogs
++            .IgnoreQueryFilters(["Tenant"])
++            .AsNoTracking()
++            .Where(x => x.NextRetryAt != null
++                && x.NextRetryAt <= now
++                && (x.DeliveryStatus == NotificationDeliveryStatus.Queued
++                    || x.DeliveryStatus == NotificationDeliveryStatus.Failed))
++            .OrderBy(x => x.NextRetryAt)
++            .Take(MaxBatchSize)
++            .Select(x => new NotificationDispatchCandidate(x.Id, x.TenantId))
++            .ToListAsync(cancellationToken);
++
++        if (candidates.Count == 0)
++        {
++            return 0;
++        }
++
++        logger.LogInformation("Notification drain: {Count} due row(s)", candidates.Count);
++
++        var sent = 0;
++        foreach (var candidate in candidates)
++        {
++            if (cancellationToken.IsCancellationRequested)
++            {
++                break;
++            }
++
++            try
++            {
++                var delivered = await tenantContextAccessor.RunWithExplicitTenantAsync(
++                    candidate.TenantId,
++                    ct => DispatchOneAsync(candidate.NotificationLogId, ct),
++                    cancellationToken);
++
++                if (delivered)
++                {
++                    sent++;
++                }
++            }
++            catch (Exception ex)
++            {
++                // Per-candidate isolation: one bad row must not abort the batch.
++                logger.LogError(ex, "Notification dispatch failed for log {NotificationLogId}", candidate.NotificationLogId);
++            }
++        }
++
++        return sent;
++    }
++
++    private async Task<bool> DispatchOneAsync(Guid notificationLogId, CancellationToken cancellationToken)
++    {
++        var log = await db.NotificationLogs.FirstOrDefaultAsync(x => x.Id == notificationLogId, cancellationToken);
++        if (log is null)
++        {
++            return false;
++        }
++
++        var now = timeProvider.GetUtcNow();
++        try
++        {
++            if (log.Channel == NotificationChannel.Email)
++            {
++                await emailSender.SendAsync(new EmailMessage(log.ToAddress, log.Subject, log.BodyHtml), cancellationToken);
++            }
++            else
++            {
++                await smsSender.SendAsync(new SmsMessage(log.ToAddress, log.BodyHtml), cancellationToken);
++            }
++
++            log.MarkSent(now);
++            await db.SaveChangesAsync(cancellationToken);
++            return true;
++        }
++        catch (OperationCanceledException)
++        {
++            throw;
++        }
++        catch (Exception ex)
++        {
++            // attemptsMade = the attempt being recorded by MarkFailed below.
++            var attemptsMade = log.Attempt + 1;
++            var nextRetryAt = NotificationRetrySchedule.NextRetryAt(attemptsMade, now);
++            log.MarkFailed(ex.Message, nextRetryAt, now);
++            await db.SaveChangesAsync(cancellationToken);
++
++            logger.LogWarning(
++                "Notification {NotificationLogId} failed on attempt {Attempt} (next retry: {NextRetryAt})",
++                log.Id, attemptsMade, nextRetryAt);
++
++            return false;
++        }
++    }
++}
++
++/// <summary>A due notification row identified for dispatch (id + owning tenant).</summary>
++public sealed record NotificationDispatchCandidate(Guid NotificationLogId, Guid TenantId);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationMessageBuilder.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationMessageBuilder.cs
+new file mode 100644
+index 00000000..d5121fdf
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationMessageBuilder.cs
+@@ -0,0 +1,43 @@
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// Pure renderer for notification payloads. Kept static and transport-free so the
++/// rendered subject / body / deep link are unit-testable, and so the broadcaster
++/// persists exactly what the dispatcher later sends (decision (b)).
++/// </summary>
++public static class NotificationMessageBuilder
++{
++    /// <summary>The contact-scoped deep-link path embedded in every published message.</summary>
++    public const string DeepLinkPathPrefix = "/deeplink/";
++
++    /// <summary>Renders the consolidated per-contact publish email.</summary>
++    public static EmailMessage BuildPublishEmail(string toAddress, string assignmentTitle, string deepLinkToken)
++    {
++        ArgumentException.ThrowIfNullOrWhiteSpace(toAddress);
++        ArgumentException.ThrowIfNullOrWhiteSpace(deepLinkToken);
++
++        return new EmailMessage(toAddress, BuildPublishSubject(assignmentTitle), BuildPublishHtml(assignmentTitle, deepLinkToken));
++    }
++
++    /// <summary>Renders the publish SMS / WhatsApp body (plain text).</summary>
++    public static SmsMessage BuildPublishSms(string toAddress, string assignmentTitle, string deepLinkToken)
++    {
++        ArgumentException.ThrowIfNullOrWhiteSpace(toAddress);
++        ArgumentException.ThrowIfNullOrWhiteSpace(deepLinkToken);
++
++        return new SmsMessage(
++            toAddress,
++            $"{BuildPublishSubject(assignmentTitle)} Open: {DeepLinkPathPrefix}{deepLinkToken}");
++    }
++
++    /// <summary>The published-notification subject line.</summary>
++    public static string BuildPublishSubject(string assignmentTitle) => $"New assignment: {assignmentTitle}";
++
++    /// <summary>The published-notification HTML body carrying this contact's deep link.</summary>
++    public static string BuildPublishHtml(string assignmentTitle, string deepLinkToken) =>
++        $"<p>A new assignment <strong>{assignmentTitle}</strong> has been published.</p>" +
++        $"<p><a href=\"{DeepLinkPathPrefix}{deepLinkToken}\">View the assignment</a></p>";
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationRetrySchedule.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationRetrySchedule.cs
+new file mode 100644
+index 00000000..cee0ff35
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/NotificationRetrySchedule.cs
+@@ -0,0 +1,38 @@
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// Pure retry-backoff schedule for notification delivery. Deterministic and static so
++/// the sequence and the cap are unit-testable without a database or a clock.
++///
++/// <para>Delays after failure attempt <c>n</c>: 1m, 5m, 15m, 60m. After
++/// <see cref="MaxAttempts"/> failed attempts the row is terminal (no
++/// <c>NextRetryAt</c>) and surfaces on the ar-17 failure list.</para>
++/// </summary>
++public static class NotificationRetrySchedule
++{
++    /// <summary>Failed attempts after which delivery stops and the row is terminal.</summary>
++    public const int MaxAttempts = 5;
++
++    /// <summary>
++    /// The delay to wait after failed attempt <paramref name="attempt"/>; null once the
++    /// attempt cap is reached (terminal failure).
++    /// </summary>
++    public static TimeSpan? Next(int attempt) => attempt switch
++    {
++        1 => TimeSpan.FromMinutes(1),
++        2 => TimeSpan.FromMinutes(5),
++        3 => TimeSpan.FromMinutes(15),
++        4 => TimeSpan.FromMinutes(60),
++        _ => null, // attempt <= 0 is not a real attempt; >= MaxAttempts is the cap.
++    };
++
++    /// <summary>
++    /// The absolute retry time after failed attempt <paramref name="attempt"/>, or null
++    /// when the cap is reached.
++    /// </summary>
++    public static DateTimeOffset? NextRetryAt(int attempt, DateTimeOffset now)
++    {
++        var delay = Next(attempt);
++        return delay is null ? null : now + delay.Value;
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentNotificationBroadcasterTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentNotificationBroadcasterTests.cs
+new file mode 100644
+index 00000000..bc40f0f2
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentNotificationBroadcasterTests.cs
+@@ -0,0 +1,262 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++using SchoolCollab.Core.Messaging;
++using SchoolCollab.Core.Notifications;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2 (ar-16) — binding case 6: publisher v1.1 queues exactly one
++/// <see cref="NotificationLog"/> per <b>policy-filtered</b> recipient, each carrying
++/// that recipient's deep link, skips recipients with no unexpired token, and never
++/// creates rows for recipients the effective policy blocked or capped.
++/// </summary>
++[TestClass]
++public class AssignmentNotificationBroadcasterTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid AssignmentId = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-0000000000dd");
++
++    private sealed class StubAddressResolver(Dictionary<Guid, string> addresses) : IContactAddressResolver
++    {
++        public Task<string?> ResolveAddressAsync(
++            Guid contactId, ContactOwnerType ownerType, Guid ownerId, CancellationToken cancellationToken = default) =>
++            Task.FromResult<string?>(addresses.TryGetValue(contactId, out var address) ? address : null);
++    }
++
++    /// <summary>Address resolver that reports cancellation — models a client disconnect or
++    /// host shutdown while the publish is resolving addresses (review P2, ar-16).</summary>
++    private sealed class CancellingAddressResolver : IContactAddressResolver
++    {
++        public Task<string?> ResolveAddressAsync(
++            Guid contactId, ContactOwnerType ownerType, Guid ownerId, CancellationToken cancellationToken = default) =>
++            Task.FromException<string?>(new OperationCanceledException(cancellationToken));
++    }
++
++    private sealed class RecordingPublisher : IIntegrationEventPublisher
++    {
++        public int Enqueued { get; private set; }
++
++        public Task EnqueueAsync<T>(T message, CancellationToken cancellationToken = default) where T : class
++        {
++            Enqueued++;
++            return Task.CompletedTask;
++        }
++
++        public Task EnqueueAsync<T>(T message, Guid? tenantStamp, CancellationToken cancellationToken = default) where T : class
++        {
++            Enqueued++;
++            return Task.CompletedTask;
++        }
++    }
++
++    private static (AssignmentsDbContext db, AssignmentNotificationBroadcaster broadcaster, RecordingPublisher publisher) Build(
++        string database, Dictionary<Guid, string> addresses)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        var tenants = (TenantProvider)provider.GetRequiredService<ITenantProvider>();
++        tenants.SetTenant(new TenantContext(TenantId, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++
++        var publisher = new RecordingPublisher();
++        var broadcaster = new AssignmentNotificationBroadcaster(
++            db, new StubAddressResolver(addresses), publisher, TimeProvider.System,
++            NullLogger<AssignmentNotificationBroadcaster>.Instance);
++
++        return (db, broadcaster, publisher);
++    }
++
++    private static AssignmentRecipient Recipient(Guid contactId, ContactChannel channel, string? token, DateTimeOffset? expiresAt = null)
++    {
++        var recipient = AssignmentRecipient.Create(
++            TenantId, AssignmentId, ContactOwnerType.Guardian, Guid.NewGuid(), StudentId,
++            contactId, channel, GuardianRole.Primary, notifyOnBroadcast: true, subscriptionActive: true);
++
++        if (token is not null)
++        {
++            recipient.AttachDeepLink(token, expiresAt ?? DateTimeOffset.UtcNow.AddDays(7));
++        }
++
++        return recipient;
++    }
++
++    private static EffectiveNotificationPolicy Policy(
++        NotificationChannel[]? blocked = null, int? maxNotifications = null) =>
++        new([], blocked ?? [], maxNotifications, null, null, null, null, null,
++            PreferredChannelOrderFromOverride: false, BlockedChannelsFromOverride: false, MaxNotificationsFromOverride: false,
++            MaxRemindersFromOverride: false, ReminderIntervalHoursFromOverride: false, LinkValidityDaysFromOverride: false,
++            SendoutTimeOfDayFromOverride: false, SendoutIntervalMinutesFromOverride: false);
++
++    [TestMethod]
++    public async Task OneQueuedRowPerFilteredRecipient_WithThatRecipientsDeepLink()
++    {
++        var contactEmail = Guid.NewGuid();
++        var contactSms = Guid.NewGuid();
++        var contactBlocked = Guid.NewGuid();
++        var (db, broadcaster, publisher) = Build(nameof(OneQueuedRowPerFilteredRecipient_WithThatRecipientsDeepLink),
++            new Dictionary<Guid, string>
++            {
++                [contactEmail] = "guardian@example.com",
++                [contactSms] = "+27123456789",
++                [contactBlocked] = "+27999999999",
++            });
++
++        var recipients = new[]
++        {
++            Recipient(contactEmail, ContactChannel.Email, "tok-email"),
++            Recipient(contactSms, ContactChannel.SMS, "tok-sms"),
++            Recipient(contactBlocked, ContactChannel.WhatsApp, "tok-whatsapp"),
++        };
++
++        // The publish handler applies the effective policy before broadcasting; the
++        // broadcaster must therefore only see (and log) the surviving set.
++        var filtered = NotificationRecipientFilter.Apply(recipients, Policy(blocked: [NotificationChannel.WhatsApp]));
++
++        await broadcaster.BroadcastPublishedAsync(
++            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, filtered));
++
++        var rows = await db.NotificationLogs.ToListAsync();
++        rows.Should().HaveCount(2);
++        publisher.Enqueued.Should().Be(1, "the E3 outbox enqueue stays in place");
++
++        var emailRow = rows.Single(r => r.ContactId == contactEmail);
++        emailRow.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
++        emailRow.Kind.Should().Be(NotificationKind.Publish);
++        emailRow.Attempt.Should().Be(0);
++        emailRow.RecipientId.Should().NotBeEmpty();
++        emailRow.ToAddress.Should().Be("guardian@example.com");
++        emailRow.BodyHtml.Should().Contain("/deeplink/tok-email");
++
++        var smsRow = rows.Single(r => r.ContactId == contactSms);
++        smsRow.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
++        smsRow.ToAddress.Should().Be("+27123456789");
++        smsRow.BodyHtml.Should().Contain("/deeplink/tok-sms");
++
++        rows.Should().NotContain(r => r.ContactId == contactBlocked,
++            "the policy-filtered recipient must not produce a log row at all");
++    }
++
++    [TestMethod]
++    public async Task CappedRecipients_AreAbsentFromTheLog()
++    {
++        var first = Guid.NewGuid();
++        var second = Guid.NewGuid();
++        var (db, broadcaster, _) = Build(nameof(CappedRecipients_AreAbsentFromTheLog),
++            new Dictionary<Guid, string> { [first] = "a@example.com", [second] = "b@example.com" });
++
++        var recipients = new[]
++        {
++            Recipient(first, ContactChannel.Email, "tok-1"),
++            Recipient(second, ContactChannel.Email, "tok-2"),
++        };
++
++        var filtered = NotificationRecipientFilter.Apply(recipients, Policy(maxNotifications: 1));
++
++        await broadcaster.BroadcastPublishedAsync(
++            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, filtered));
++
++        var rows = await db.NotificationLogs.ToListAsync();
++        rows.Should().ContainSingle();
++        rows[0].ContactId.Should().Be(first);
++    }
++
++    [TestMethod]
++    public async Task RecipientWithoutToken_IsSkippedWithReason()
++    {
++        var contactNoToken = Guid.NewGuid();
++        var (db, broadcaster, _) = Build(nameof(RecipientWithoutToken_IsSkippedWithReason),
++            new Dictionary<Guid, string> { [contactNoToken] = "guardian@example.com" });
++
++        var recipients = new[] { Recipient(contactNoToken, ContactChannel.Email, token: null) };
++
++        await broadcaster.BroadcastPublishedAsync(
++            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients));
++
++        var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
++        row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
++        row.FailureReason.Should().Contain("deep-link token");
++        row.NextRetryAt.Should().BeNull();
++        row.Attempt.Should().Be(0);
++    }
++
++    [TestMethod]
++    public async Task ExpiredToken_IsSkippedWithReason()
++    {
++        var contactExpired = Guid.NewGuid();
++        var (db, broadcaster, _) = Build(nameof(ExpiredToken_IsSkippedWithReason),
++            new Dictionary<Guid, string> { [contactExpired] = "guardian@example.com" });
++
++        var recipients = new[]
++        {
++            Recipient(contactExpired, ContactChannel.Email, "tok-expired", DateTimeOffset.UtcNow.AddMinutes(-5)),
++        };
++
++        await broadcaster.BroadcastPublishedAsync(
++            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients));
++
++        var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
++        row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
++        row.FailureReason.Should().Contain("deep-link token");
++        row.BodyHtml.Should().BeEmpty("a skipped row is never sent");
++    }
++
++    [TestMethod]
++    public async Task UnresolvableAddress_IsSkippedNotQueued()
++    {
++        var contactUnknown = Guid.NewGuid();
++        var (db, broadcaster, _) = Build(nameof(UnresolvableAddress_IsSkippedNotQueued), []);
++
++        var recipients = new[] { Recipient(contactUnknown, ContactChannel.Email, "tok-unknown") };
++
++        await broadcaster.BroadcastPublishedAsync(
++            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients));
++
++        var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
++        row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
++        row.FailureReason.Should().Contain("address");
++    }
++
++    [TestMethod]
++    public async Task CancellationDuringAddressResolution_Propagates_AndPersistsNoRow()
++    {
++        var contact = Guid.NewGuid();
++        using var cts = new CancellationTokenSource();
++        cts.Cancel();
++
++        var (db, _, _) = Build(nameof(CancellationDuringAddressResolution_Propagates_AndPersistsNoRow),
++            new Dictionary<Guid, string> { [contact] = "guardian@example.com" });
++
++        var broadcaster = new AssignmentNotificationBroadcaster(
++            db, new CancellingAddressResolver(), new RecordingPublisher(), TimeProvider.System,
++            NullLogger<AssignmentNotificationBroadcaster>.Instance);
++
++        var recipients = new[] { Recipient(contact, ContactChannel.Email, "tok-cancel") };
++
++        // A genuine cancellation must NOT be converted into a terminal Skipped row — that would
++        // silently lose the notification. It propagates, and nothing is persisted (review P2).
++        await FluentActions
++            .Awaiting(() => broadcaster.BroadcastPublishedAsync(
++                new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients),
++                cts.Token))
++            .Should().ThrowAsync<OperationCanceledException>();
++
++        (await db.NotificationLogs.ToListAsync()).Should().BeEmpty(
++            "a cancelled publish must not persist a Skipped row");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/GetNotificationFailuresQueryHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/GetNotificationFailuresQueryHandlerTests.cs
+new file mode 100644
+index 00000000..62d5be7a
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/GetNotificationFailuresQueryHandlerTests.cs
+@@ -0,0 +1,111 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetNotificationFailures;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.Notifications;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2 (ar-16) — binding case 7: the ar-17 read side. Failed rows only, and
++/// tenant-scoped: a second tenant's failures for the same assignment are invisible.
++/// </summary>
++[TestClass]
++public class GetNotificationFailuresQueryHandlerTests
++{
++    private static readonly Guid TenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid TenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++    private static readonly Guid AssignmentId = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid ContactId = Guid.Parse("00000000-0000-0000-0000-0000000000cc");
++
++    private static (AssignmentsDbContext db, TenantProvider tenants) Build(string database)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        var tenants = (TenantProvider)provider.GetRequiredService<ITenantProvider>();
++        tenants.SetTenant(new TenantContext(TenantA, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++        return (db, tenants);
++    }
++
++    private static NotificationLog Row(Guid tenantId, Guid contactId, NotificationDeliveryStatus status)
++    {
++        var now = DateTimeOffset.UtcNow;
++        var log = NotificationLog.Queue(
++            tenantId, AssignmentId, Guid.NewGuid(), contactId,
++            NotificationChannel.Email, NotificationKind.Publish,
++            "guardian@example.com", "New assignment", "<p>body</p>", now);
++
++        switch (status)
++        {
++            case NotificationDeliveryStatus.Sent:
++                log.MarkSent(now);
++                break;
++            case NotificationDeliveryStatus.Failed:
++                log.MarkFailed("SMTP is unreachable", now.AddMinutes(1), now);
++                break;
++            case NotificationDeliveryStatus.Skipped:
++                log.MarkSkipped("no deep-link token", now);
++                break;
++        }
++
++        return log;
++    }
++
++    [TestMethod]
++    public async Task ReturnsFailedRowsOnly_ForTheCurrentTenant()
++    {
++        var (db, tenants) = Build(nameof(ReturnsFailedRowsOnly_ForTheCurrentTenant));
++
++        var failedContact = Guid.NewGuid();
++        var sentContact = Guid.NewGuid();
++        var skippedContact = Guid.NewGuid();
++        db.NotificationLogs.AddRange(
++            Row(TenantA, failedContact, NotificationDeliveryStatus.Failed),
++            Row(TenantA, sentContact, NotificationDeliveryStatus.Sent),
++            Row(TenantA, skippedContact, NotificationDeliveryStatus.Skipped));
++        await db.SaveChangesAsync();
++
++        // A different tenant's failure on the SAME assignment.
++        tenants.SetTenant(new TenantContext(TenantB, "SchoolB", TenantType.School));
++        db.NotificationLogs.Add(Row(TenantB, Guid.NewGuid(), NotificationDeliveryStatus.Failed));
++        await db.SaveChangesAsync();
++
++        tenants.SetTenant(new TenantContext(TenantA, "SchoolA", TenantType.School));
++        var handler = new GetNotificationFailuresHandler(db, NullLogger<GetNotificationFailuresHandler>.Instance);
++
++        var result = await handler.HandleAsync(new GetNotificationFailures(AssignmentId));
++
++        var failure = result.Should().ContainSingle().Subject;
++        failure.ContactId.Should().Be(failedContact);
++        failure.Channel.Should().Be(ContactChannelDto.Email);
++        failure.Kind.Should().Be(NotificationKindDto.Publish);
++        failure.Attempt.Should().Be(1);
++        failure.FailureReason.Should().Contain("SMTP is unreachable");
++        failure.NextRetryAt.Should().NotBeNull();
++    }
++
++    [TestMethod]
++    public async Task UnknownAssignment_ReturnsEmpty()
++    {
++        var (db, _) = Build(nameof(UnknownAssignment_ReturnsEmpty));
++        db.NotificationLogs.Add(Row(TenantA, ContactId, NotificationDeliveryStatus.Failed));
++        await db.SaveChangesAsync();
++
++        var handler = new GetNotificationFailuresHandler(db, NullLogger<GetNotificationFailuresHandler>.Instance);
++
++        var result = await handler.HandleAsync(new GetNotificationFailures(Guid.NewGuid()));
++
++        result.Should().BeEmpty();
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/NotificationDeliveryProviderTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationDeliveryProviderTests.cs
+new file mode 100644
+index 00000000..3ce21d84
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationDeliveryProviderTests.cs
+@@ -0,0 +1,146 @@
++using FluentAssertions;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2 (ar-16) — binding cases 1–3: deterministic provider selection (both
++/// branches, pure + through DI), the null/SMS stub success posture (decision (d)),
++/// and the pure <c>MimeMessage</c>/payload rendering.
++/// </summary>
++[TestClass]
++public class NotificationDeliveryProviderTests
++{
++    private const string Token = "tok-abc";
++    private const string Title = "Math homework";
++
++    private static ServiceProvider BuildProvider(string? smtpHost)
++    {
++        var settings = new Dictionary<string, string?>();
++        if (smtpHost is not null)
++        {
++            settings["Smtp:Host"] = smtpHost;
++            settings["Smtp:Port"] = "1025";
++        }
++
++        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
++        var services = new ServiceCollection();
++        services.AddLogging();
++        services.AddAssignmentNotificationDelivery(configuration);
++        return services.BuildServiceProvider();
++    }
++
++    [TestMethod]
++    public void Select_ConfiguredHost_ChoosesMailKit()
++    {
++        EmailSenderSelection.Select(new SmtpOptions { Host = "localhost" })
++            .Should().Be(EmailProviderKind.MailKit);
++    }
++
++    [TestMethod]
++    public void Select_UnsetHost_ChoosesNull()
++    {
++        EmailSenderSelection.Select(new SmtpOptions { Host = string.Empty })
++            .Should().Be(EmailProviderKind.Null);
++    }
++
++    [TestMethod]
++    public void Select_BlankHost_ChoosesNull()
++    {
++        EmailSenderSelection.Select(new SmtpOptions { Host = "   " })
++            .Should().Be(EmailProviderKind.Null);
++    }
++
++    [TestMethod]
++    public void AddDelivery_ConfiguredHost_RegistersMailKitSender()
++    {
++        using var provider = BuildProvider("localhost");
++
++        provider.GetRequiredService<IEmailSender>().Should().BeOfType<MailKitEmailSender>();
++    }
++
++    [TestMethod]
++    public void AddDelivery_NoHostConfigured_RegistersNullSender()
++    {
++        using var provider = BuildProvider(smtpHost: null);
++
++        provider.GetRequiredService<IEmailSender>().Should().BeOfType<NullEmailSender>();
++    }
++
++    [TestMethod]
++    public async Task NullEmailSender_ReportsSuccessWithoutSmtp()
++    {
++        var sender = new NullEmailSender(NullLogger<NullEmailSender>.Instance);
++
++        var task = sender.SendAsync(new EmailMessage("guardian@example.com", "subject", "<p>body</p>"));
++
++        // Completed synchronously ⇒ no transport was contacted, and no exception ⇒ success.
++        task.IsCompleted.Should().BeTrue();
++        await task;
++    }
++
++    [TestMethod]
++    public async Task LogAndSkipSmsSender_ReportsSuccess()
++    {
++        var sender = new LogAndSkipSmsSender(NullLogger<LogAndSkipSmsSender>.Instance);
++
++        var task = sender.SendAsync(new SmsMessage("+27123456789", "New assignment"));
++
++        task.IsCompleted.Should().BeTrue();
++        await task;
++    }
++
++    [TestMethod]
++    public void BuildMimeMessage_MapsToFromSubjectAndHtmlBody()
++    {
++        var message = new EmailMessage("guardian@example.com", "New assignment: Math homework", "<p>hello</p>");
++
++        var mime = MailKitEmailSender.BuildMimeMessage(
++            message, new SmtpOptions { FromAddress = "no-reply@schoolcollab.local" });
++
++        mime.To.Mailboxes.Should().ContainSingle()
++            .Which.Address.Should().Be("guardian@example.com");
++        mime.From.Mailboxes.Should().ContainSingle()
++            .Which.Address.Should().Be("no-reply@schoolcollab.local");
++        mime.Subject.Should().Be("New assignment: Math homework");
++        mime.HtmlBody.Should().Be("<p>hello</p>");
++    }
++
++    [TestMethod]
++    public void BuildMimeMessage_ExplicitFrom_Wins()
++    {
++        var message = new EmailMessage("guardian@example.com", "subject", "<p>hello</p>", From: "teacher@school.test");
++
++        var mime = MailKitEmailSender.BuildMimeMessage(
++            message, new SmtpOptions { FromAddress = "no-reply@schoolcollab.local" });
++
++        mime.From.Mailboxes.Single().Address.Should().Be("teacher@school.test");
++    }
++
++    [TestMethod]
++    public void BuildPublishEmail_CarriesRecipientDeepLink()
++    {
++        var message = NotificationMessageBuilder.BuildPublishEmail("guardian@example.com", Title, Token);
++
++        message.To.Should().Be("guardian@example.com");
++        message.Subject.Should().Be($"New assignment: {Title}");
++        message.BodyHtml.Should().Contain(
++            $"{NotificationMessageBuilder.DeepLinkPathPrefix}{Token}");
++    }
++
++    [TestMethod]
++    public void BuildPublishSms_CarriesRecipientDeepLink()
++    {
++        var message = NotificationMessageBuilder.BuildPublishSms("+27123456789", Title, Token);
++
++        message.To.Should().Be("+27123456789");
++        message.Body.Should().Contain($"{NotificationMessageBuilder.DeepLinkPathPrefix}{Token}");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/NotificationDispatchServiceTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationDispatchServiceTests.cs
+new file mode 100644
+index 00000000..bb8d7d6d
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationDispatchServiceTests.cs
+@@ -0,0 +1,181 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Assignments.Core.Services.Delivery;
++using SchoolCollab.Core.Notifications;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2 (ar-16) — binding case 5: the store-driven dispatch drain.
++/// <list type="bullet">
++///   <item>a due <c>Queued</c> row is sent and becomes <c>Sent</c> + <c>SentAt</c>;</item>
++///   <item>a send failure records <c>Attempt++</c>, the reason and <c>NextRetryAt</c> (now + backoff);</item>
++///   <item>at the attempt cap the failure becomes terminal (no <c>NextRetryAt</c>).</item>
++/// </list>
++/// The retry re-sends the payload persisted on the row (decision (b)) — asserted
++/// against what the sender actually received.
++/// </summary>
++[TestClass]
++public class NotificationDispatchServiceTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid AssignmentId = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid RecipientId = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++    private static readonly Guid ContactId = Guid.Parse("00000000-0000-0000-0000-0000000000cc");
++
++    private sealed class ScriptedEmailSender : IEmailSender
++    {
++        public List<EmailMessage> Sent { get; } = [];
++        public string? FailureReason { get; set; }
++
++        public Task SendAsync(EmailMessage message, CancellationToken cancellationToken = default)
++        {
++            if (FailureReason is not null)
++            {
++                throw new Core.Domain.Exceptions.EmailDeliveryException(FailureReason);
++            }
++
++            Sent.Add(message);
++            return Task.CompletedTask;
++        }
++    }
++
++    private static (AssignmentsDbContext db, NotificationDispatchService dispatcher, ScriptedEmailSender sender) Build(string database)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        var tenants = (TenantProvider)provider.GetRequiredService<ITenantProvider>();
++        tenants.SetTenant(new TenantContext(TenantId, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++
++        var sender = new ScriptedEmailSender();
++        var dispatcher = new NotificationDispatchService(
++            db,
++            provider.GetRequiredService<ITenantContextAccessor>(),
++            sender,
++            new LogAndSkipSmsSender(NullLogger<LogAndSkipSmsSender>.Instance),
++            TimeProvider.System,
++            NullLogger<NotificationDispatchService>.Instance);
++
++        return (db, dispatcher, sender);
++    }
++
++    private static NotificationLog QueuedEmail(DateTimeOffset dueAt) =>
++        NotificationLog.Queue(
++            TenantId, AssignmentId, RecipientId, ContactId,
++            NotificationChannel.Email, NotificationKind.Publish,
++            "guardian@example.com",
++            NotificationMessageBuilder.BuildPublishSubject("Math homework"),
++            NotificationMessageBuilder.BuildPublishHtml("Math homework", "tok-1"),
++            dueAt);
++
++    [TestMethod]
++    public async Task DueQueuedRow_IsSentAndMarkedSentWithTimestamp()
++    {
++        var (db, dispatcher, sender) = Build(nameof(DueQueuedRow_IsSentAndMarkedSentWithTimestamp));
++        var log = QueuedEmail(DateTimeOffset.UtcNow.AddMinutes(-1));
++        db.NotificationLogs.Add(log);
++        await db.SaveChangesAsync();
++
++        var sentCount = await dispatcher.DispatchPendingAsync();
++
++        sentCount.Should().Be(1);
++        log.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Sent);
++        log.SentAt.Should().NotBeNull();
++        log.Attempt.Should().Be(1);
++        log.NextRetryAt.Should().BeNull();
++        // The retry/re-send path uses exactly the payload persisted on the row.
++        sender.Sent.Should().ContainSingle();
++        sender.Sent[0].To.Should().Be(log.ToAddress);
++        sender.Sent[0].Subject.Should().Be(log.Subject);
++        sender.Sent[0].BodyHtml.Should().Be(log.BodyHtml);
++    }
++
++    [TestMethod]
++    public async Task SendFailure_RecordsAttemptReasonAndNextRetry()
++    {
++        var (db, dispatcher, sender) = Build(nameof(SendFailure_RecordsAttemptReasonAndNextRetry));
++        sender.FailureReason = "SMTP is unreachable";
++        var log = QueuedEmail(DateTimeOffset.UtcNow.AddMinutes(-1));
++        db.NotificationLogs.Add(log);
++        await db.SaveChangesAsync();
++        var before = DateTimeOffset.UtcNow;
++
++        var sentCount = await dispatcher.DispatchPendingAsync();
++
++        sentCount.Should().Be(0);
++        log.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Failed);
++        log.Attempt.Should().Be(1);
++        log.FailureReason.Should().Contain("SMTP is unreachable");
++        log.NextRetryAt.Should().NotBeNull();
++        log.NextRetryAt!.Value.Should().BeCloseTo(before.AddMinutes(1), TimeSpan.FromMinutes(1));
++    }
++
++    [TestMethod]
++    public async Task RepeatedFailureAtCap_BecomesTerminalWithNoNextRetry()
++    {
++        var (db, dispatcher, sender) = Build(nameof(RepeatedFailureAtCap_BecomesTerminalWithNoNextRetry));
++        sender.FailureReason = "SMTP is unreachable";
++        var log = QueuedEmail(DateTimeOffset.UtcNow.AddMinutes(-1));
++        db.NotificationLogs.Add(log);
++        await db.SaveChangesAsync();
++
++        // Four failed attempts already recorded, the row is due again.
++        for (var attempt = 0; attempt < NotificationRetrySchedule.MaxAttempts - 1; attempt++)
++        {
++            log.MarkFailed("previous failure", DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow);
++        }
++
++        await db.SaveChangesAsync();
++        log.Attempt.Should().Be(NotificationRetrySchedule.MaxAttempts - 1);
++
++        await dispatcher.DispatchPendingAsync();
++
++        log.Attempt.Should().Be(NotificationRetrySchedule.MaxAttempts);
++        log.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Failed);
++        log.NextRetryAt.Should().BeNull();
++    }
++
++    [TestMethod]
++    public async Task NotYetDueAndSettledRows_AreNotDispatched()
++    {
++        var (db, dispatcher, sender) = Build(nameof(NotYetDueAndSettledRows_AreNotDispatched));
++        // Not due: retry scheduled in the future.
++        var future = QueuedEmail(DateTimeOffset.UtcNow.AddMinutes(30));
++        future.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
++        db.NotificationLogs.Add(future);
++
++        // Terminal failure with no retry time.
++        var terminal = QueuedEmail(DateTimeOffset.UtcNow.AddMinutes(-1));
++        for (var attempt = 0; attempt < NotificationRetrySchedule.MaxAttempts; attempt++)
++        {
++            terminal.MarkFailed("gave up", null, DateTimeOffset.UtcNow);
++        }
++        db.NotificationLogs.Add(terminal);
++
++        // Skipped rows are never sent.
++        var skipped = QueuedEmail(DateTimeOffset.UtcNow.AddMinutes(-1));
++        skipped.MarkSkipped("no deep-link token", DateTimeOffset.UtcNow);
++        db.NotificationLogs.Add(skipped);
++
++        await db.SaveChangesAsync();
++
++        var sentCount = await dispatcher.DispatchPendingAsync();
++
++        sentCount.Should().Be(0);
++        sender.Sent.Should().BeEmpty();
++        future.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/NotificationRetryScheduleTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationRetryScheduleTests.cs
+new file mode 100644
+index 00000000..ded930a4
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationRetryScheduleTests.cs
+@@ -0,0 +1,42 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-E2 (ar-16) — binding case 4: the pure retry-backoff schedule (deterministic
++/// sequence + the named attempt cap that makes a failure terminal).
++/// </summary>
++[TestClass]
++public class NotificationRetryScheduleTests
++{
++    [TestMethod]
++    public void Next_FollowsFixedBackoffSequence()
++    {
++        NotificationRetrySchedule.Next(1).Should().Be(TimeSpan.FromMinutes(1));
++        NotificationRetrySchedule.Next(2).Should().Be(TimeSpan.FromMinutes(5));
++        NotificationRetrySchedule.Next(3).Should().Be(TimeSpan.FromMinutes(15));
++        NotificationRetrySchedule.Next(4).Should().Be(TimeSpan.FromMinutes(60));
++    }
++
++    [TestMethod]
++    public void Next_AtCapAndBeyond_ReturnsNull()
++    {
++        NotificationRetrySchedule.MaxAttempts.Should().Be(5);
++
++        NotificationRetrySchedule.Next(NotificationRetrySchedule.MaxAttempts).Should().BeNull();
++        NotificationRetrySchedule.Next(NotificationRetrySchedule.MaxAttempts + 3).Should().BeNull();
++        NotificationRetrySchedule.Next(0).Should().BeNull();
++    }
++
++    [TestMethod]
++    public void NextRetryAt_AddsTheScheduledDelay()
++    {
++        var now = new DateTimeOffset(2026, 9, 17, 8, 0, 0, TimeSpan.Zero);
++
++        NotificationRetrySchedule.NextRetryAt(1, now).Should().Be(now.AddMinutes(1));
++        NotificationRetrySchedule.NextRetryAt(4, now).Should().Be(now.AddMinutes(60));
++        NotificationRetrySchedule.NextRetryAt(NotificationRetrySchedule.MaxAttempts, now).Should().BeNull();
++    }
++}

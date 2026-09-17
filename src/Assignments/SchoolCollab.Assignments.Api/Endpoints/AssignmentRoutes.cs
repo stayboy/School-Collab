@@ -23,6 +23,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetNotificationFailures;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsForReview;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
@@ -544,6 +545,15 @@ public static class AssignmentRoutes
             [FromServices] IQueryHandler<ListAssignmentRecipients, AssignmentRecipientDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListAssignmentRecipients(id), ct)));
+
+        // WS-E2 (ar-16): failed notification deliveries for an assignment — the
+        // read side the ar-17 Admin failure surface renders. Failed rows only and
+        // tenant-scoped by the context's global query filter.
+        group.MapGet("/{id:guid}/notification-failures", async (
+            Guid id,
+            [FromServices] IQueryHandler<GetNotificationFailures, NotificationFailureDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new GetNotificationFailures(id), ct)));
 
         // WS-E1 (ar-14-deep-links): idempotent first-visit deep-link stamp, invoked
         // server-side by the Families landing. Marks the recipient OpenedAt at most
