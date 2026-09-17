@@ -27,7 +27,12 @@ internal sealed class WardAssignmentProjectionRepository(AssignmentsDbContext db
                 a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
                 a.PassScore, a.MaxAttempts,
                 a.RequiresSignature,
-                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
+                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount,
+                // WS-E2b / ar-17: projected for consistency. This path serves the ward
+                // (guardian) list, which has no failure surface today, but leaving it
+                // unprojected would silently report every published assignment as
+                // never-published — the exact trap the summary contract warns about.
+                a.PublishedAt))
             .ToListAsync(ct);
     }
 }

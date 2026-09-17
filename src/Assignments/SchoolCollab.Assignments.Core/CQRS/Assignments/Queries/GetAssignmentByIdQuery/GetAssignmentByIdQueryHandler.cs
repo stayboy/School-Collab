@@ -74,7 +74,9 @@ public sealed class GetAssignmentByIdQueryHandler(
                     // mapped or every detail read resets them to null.
                     assignment.DifficultyEasyCount,
                     assignment.DifficultyMediumCount,
-                    assignment.DifficultyHardCount);
+                    assignment.DifficultyHardCount,
+                    // WS-E2b / ar-17: "has ever been published" for the failure surface.
+                    PublishedAt: assignment.PublishedAt);
             },
             CacheOptions,
             tags: ["assignments"],

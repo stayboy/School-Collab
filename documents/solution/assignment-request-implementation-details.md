@@ -954,5 +954,28 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   **Residuals:** no live MailPit/SMTP send yet (transport is a thin MailKit call over a fully-tested pure
   `BuildMimeMessage`); `StudentsContactAddressResolver`'s HTTP path untested; the new route is compile-verified only;
   `(TenantId, AssignmentId, RecipientId, Kind)` unique index → E3; implicit-TLS `SslOnConnect`/port-465 unsupported.
-  **Next:** **ar-17 (Tier 3)** — Admin/author failure-surfacing UI over the delivered endpoint; then **E3**
-  (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.
+  **Next:** ar-17 (E2b UI) — landed as the entry below.
+- `ar-17-notification-failures-ui` — **CLOSED 2026-09-17, Tier 3 FULL FOUR-AGENT**; Phase 4 slice **E2b (WS-E)**
+  (`rounds/round-ar-17-notification-failures-ui.md` + `diffs-ar-17-notification-failures-ui.patch`; branch
+  `stack/17-ar-17-notification-failures-ui` cut at `c7c5b4ac` = the `stack/16` ar-16 tip, because the read side it
+  renders does not exist on `main`; 15 files (13 code/test), **+870/−16**). Read-only `Notifications` tab on the assignment Detail
+  page (gate: Published/Scheduled/Closed/Archived) over ar-16's failures endpoint: 6-column flat table, terminal-vs-
+  retry-scheduled badges, Info empty vs Error bar, recipient labels enriched from the Publish-dialog contact
+  universe with a marked `#short-id` fallback; new `AssignmentsApiClient.GetNotificationFailuresAsync` plus
+  read-side `JsonStringEnumConverter<NotificationKindDto>` tolerance. Chain: orchestrator plan → worker → static
+  reviewer (ACCEPT, 3 P2) → **post-fix re-verify (ACCEPT, 0 P1/P2)** → UI tester (ACCEPT, 1 P2 + 2 P3) → parent
+  fixes. **Defects caught and fixed across the chain:** duplicate row `@key` throwing a framework
+  `InvalidOperationException` on re-render, an unfiltered cancellation catch rendering a **false "No failed
+  notifications."** on a transport timeout (both proven discriminating by temporary revert), the `Archived` gate
+  omission, a false "missing enum converter" premise (the live wire is numeric), a blank Recipient cell, and the
+  **unpublish→Draft gate hole** (found by the parent — neither the static reviewers nor the UI tester saw it).
+  Authoritative: build 0 errors; **2,349/0** (Assignments **635/0**, Architecture 21/0). A repo pre-flight review of the complete
+  patch returned **CLEAR FOR PR (no P1)**; its single P2 — the `PublishedAt` layer threading had no test coverage, the
+  exact silent-drop class — was fixed with two discriminating in-memory tests over both construction sites.
+  **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums; no
+  `Failures (N)` tab count; live HTTP path untested end-to-end.
+  **Residual CLOSED in-round (owner option A):** the unpublish→Draft gate hole — `Unpublish()` returns an
+  assignment to Draft while nothing deletes `NotificationLog` rows, so the gate is now **`PublishedAt is not null`**
+  with `PublishedAt` threaded through `AssignmentSummary`, `AssignmentRepository.ListAsync` and both query
+  handlers (each layer would otherwise have silently dropped it).
+  **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.

@@ -117,9 +117,18 @@ public class AssignmentDetailBunitTests : BunitContext
         // SignOffSectionBunitTests).
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/sign-off-statuses")
             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<SignOffStatusDto>(), _apiJsonOptions));
+        // WS-E2 / ar-17: Published/Scheduled/Closed assignments render the
+        // self-loading NotificationFailuresSection, which reads the failures
+        // endpoint + the guardian contact list. Empty by default so the tab-gate
+        // is the only observable here (the section's row/empty/error behaviour
+        // is covered by NotificationFailuresSectionBunitTests).
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/notification-failures")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<NotificationFailureDto>(), _apiJsonOptions));
+        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed?ownerType=Guardian&scope=AllAssignments")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
     }
 
-    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false) =>
+    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null) =>
         new(
             Id: Guid.NewGuid(),
             Title: "Math HW",
@@ -141,7 +150,17 @@ public class AssignmentDetailBunitTests : BunitContext
             AvailableFromUtc: availableFromUtc,
             ArchiveGraceDays: archiveGraceDays,
             ApprovalStatus: approvalStatus,
-            RequiresSignature: requiresSignature);
+            RequiresSignature: requiresSignature,
+            // WS-E2b / ar-17: the failures-tab gate is "has ever been published", not a
+            // status test. An assignment in a post-publish status was necessarily published
+            // at some point; a Draft was not — unless the test supplies one (the unpublish
+            // case, where Unpublish() returns it to Draft with its history intact).
+            PublishedAt: publishedAt ?? (status is AssignmentStatusDto.Published
+                or AssignmentStatusDto.Scheduled
+                or AssignmentStatusDto.Closed
+                or AssignmentStatusDto.Archived
+                    ? DateTimeOffset.UtcNow.AddDays(-1)
+                    : null));
 
     [TestMethod]
     public void Detail_Scheduled_RendersScheduledBadgeAndActions()
@@ -772,7 +791,63 @@ public class AssignmentDetailBunitTests : BunitContext
         });
     }
 
-    /// <summary>WS-C1 decision (g) render gate: the "Guardian Sign-off" tab (and
+    /// <summary>WS-E2 / ar-17 decision-gate: the "Notifications" tab (and the
+    /// self-loading <c>NotificationFailuresSection</c>) renders for assignments that have
+    /// EVER been published — gated on <c>PublishedAt is not null</c>, not on the current
+    /// status. The distinction matters because <c>Unpublish</c> returns an assignment to
+    /// <c>Draft</c> while its <c>NotificationLog</c> rows survive (residual 7); a status
+    /// test would hide a never-published Draft's (empty) tab but also lose an unpublished
+    /// assignment's real failure history.</summary>
+    [TestMethod]
+    public void NotificationFailuresTab_Visibility_ByStatus()
+    {
+        var draft = MakeDto(AssignmentStatusDto.Draft);
+        SetupGetAssignment(draft);
+
+        var draftCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, draft.Id));
+        draftCut.WaitForAssertion(() => draftCut.Markup.Should().Contain("Math HW"));
+        draftCut.Markup.Should().NotContain("Notifications",
+            "a Draft that has NEVER been published must not render the failures tab");
+
+        var published = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(published);
+
+        var pubCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, published.Id));
+        pubCut.WaitForAssertion(() => pubCut.Markup.Should().Contain("Notifications",
+            "a Published assignment renders the failures tab"));
+
+        var archived = MakeDto(AssignmentStatusDto.Archived);
+        SetupGetAssignment(archived);
+
+        var archCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, archived.Id));
+        archCut.WaitForAssertion(() => archCut.Markup.Should().Contain("Notifications",
+            "an Archived assignment keeps its failure history (read-only retention, spec §7 Q6) — review finding F6"));
+
+        // UI-tester coverage gap: Scheduled and Closed are part of the declared gate but
+        // were exercised only by the `is` pattern, never asserted per status.
+        foreach (var status in new[] { AssignmentStatusDto.Scheduled, AssignmentStatusDto.Closed })
+        {
+            var dto = MakeDto(status);
+            SetupGetAssignment(dto);
+
+            var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+            cut.WaitForAssertion(() => cut.Markup.Should().Contain("Notifications",
+                $"{status} is part of the failures-tab gate"));
+        }
+
+        // Residual (7), fixed: Unpublish() returns an assignment to Draft while its
+        // NotificationLog rows survive, so the gate must be "has ever been published"
+        // (PublishedAt) rather than a status test — otherwise a teacher who unpublishes to
+        // fix a typo silently loses the failure history for that publish.
+        var unpublished = MakeDto(AssignmentStatusDto.Draft, publishedAt: DateTimeOffset.UtcNow.AddDays(-2));
+        SetupGetAssignment(unpublished);
+
+        var unpubCut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, unpublished.Id));
+        unpubCut.WaitForAssertion(() => unpubCut.Markup.Should().Contain("Notifications",
+            "an assignment returned to Draft by Unpublish keeps its failure history — the old status test hid it"));
+    }
+
+    /// <summary> ── WS-C1 decision (g) render gate: the "Guardian Sign-off" tab (and
     /// the self-loading <c>SignOffSection</c> inside it) is present only when the
     /// assignment snapshotted <see cref="AssignmentSummaryDto.RequiresSignature"/>;
     /// an ordinary assignment renders no trace of the card.</summary>

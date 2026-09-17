@@ -1,0 +1,187 @@
+@using SchoolCollab.Assignments.Contracts
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject AssignmentsApiClient Api
+@inject StudentsApiClient StudentsApi
+@inject ILogger<NotificationFailuresSection> Logger
+@implements IDisposable
+
+@* WS-E2 / ar-17 — the author/admin failure surface on the Assignments Detail page.
+   Read-only: it renders the tenant-scoped GET /assignments/{id}/notification-failures
+   rows (failed notifications only). No retry / requeue / resend / acknowledge
+   affordance of any kind — requeue is E3's deliverable. The section self-loads its own
+   data (mirrors SignOffSection): Detail passes only the assignment id + the gate flag.
+   Decision (b): contact ids are enriched client-side from the same guardian contact
+   list the Publish dialog offers (ListSubscribedContactsAsync); unmatched ids fall
+   back to a short id. *@
+
+@if (CanHaveFailures)
+{
+    @if (_busy)
+    {
+        <FluentProgressRing />
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else if (_failures is null || _failures.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">No failed notifications.</FluentMessageBar>
+    }
+    else
+    {
+        <table class="notification-failures-table mt-3">
+            <thead>
+                <tr>
+                    <th>Recipient</th>
+                    <th>Channel</th>
+                    <th>Kind</th>
+                    <th>Attempt</th>
+                    <th>Reason</th>
+                    <th>Retry</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var i = 0; i < _failures.Count; i++)
+                {
+                    var row = _failures[i];
+                    var recipient = ContactLabel(row);
+                    <tr @key="i">
+                        <td class="failures-recipient" title="@recipient">@recipient</td>
+                        <td>@EnumHelper.GetDescription(row.Channel)</td>
+                        <td>@EnumHelper.GetDescription(row.Kind)</td>
+                        <td>@row.Attempt</td>
+                        <td class="failures-reason" title="@(row.FailureReason ?? "—")">@(row.FailureReason ?? "—")</td>
+                        <td>
+                            @if (row.NextRetryAt is null)
+                            {
+                                <FluentBadge Appearance="Appearance.Neutral">Failed — no more retries</FluentBadge>
+                            }
+                            else
+                            {
+                                <FluentBadge Appearance="Appearance.Lightweight">
+                                    Retry scheduled @row.NextRetryAt.Value.ToLocalTime().ToString("g")
+                                </FluentBadge>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter] public Guid AssignmentId { get; set; }
+
+    /// <summary>Render/load gate — the hosting page passes <see langword="true"/> only
+    /// when the assignment has ever been published (the hosting page tests
+    /// <c>AssignmentSummaryDto.PublishedAt is not null</c>, ar-17 option A), mirroring
+    /// SignOffSection's <c>RequiresSignature</c> posture. A status enumeration is wrong
+    /// here: <c>Unpublish</c> returns an assignment to Draft while its
+    /// <c>NotificationLog</c> rows survive.</summary>
+    [Parameter] public bool CanHaveFailures { get; set; }
+
+    private List<NotificationFailureDto>? _failures;
+    private Dictionary<Guid, string> _contactLabels = new();
+    private bool _busy = true;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_disposed || !CanHaveFailures) return;
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            // WS-E2 / decision (b): the failures rows are the primary read; the guardian
+            // contact list only supplies recipient display labels. They load in parallel
+            // (blazor-components §Parallel data loading), but the label read is wrapped so
+            // that a Students API failure degrades to short ids instead of hiding an
+            // otherwise readable failures list — the labels are a nicety, the list is the
+            // feature.
+            var failuresTask = Api.GetNotificationFailuresAsync(AssignmentId, ct);
+            var contactsTask = TryLoadContactLabelsAsync(ct);
+            await Task.WhenAll(failuresTask, contactsTask);
+            if (_disposed) return;
+
+            _failures = [.. failuresTask.Result];
+            _contactLabels = contactsTask.Result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Our own cancellation (dispose) — the component is going away. A transport
+            // timeout/abort also surfaces as OperationCanceledException but leaves the
+            // token uncancelled, so it must fall through to the error bar below: a failed
+            // load must never masquerade as the "No failed notifications." empty state.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load notification failures for assignment {AssignmentId}", AssignmentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) { _busy = false; StateHasChanged(); }
+        }
+    }
+
+    /// <summary>Decision (b): a matched <see cref="SubscribedContactDto"/> renders its
+    /// contact value (the Publish-dialog universe — the publish recipients were chosen
+    /// from it); an unmatched id renders a short id (never a path/URL-shaped string).</summary>
+    private string ContactLabel(NotificationFailureDto row) =>
+        _contactLabels.TryGetValue(row.ContactId, out var label) && !string.IsNullOrWhiteSpace(label)
+            ? label
+            : ShortId(row.ContactId);
+
+    /// <summary>Fallback label for an unmatched — or present-but-blank — contact value.
+    /// The "#" prefix marks it as an identifier so it cannot be mistaken for a person's
+    /// name, and the id is shortened so no full GUID ever reaches the page.</summary>
+    private static string ShortId(Guid id) => $"#{id.ToString("N")[..8]}";
+
+    /// <summary>Best-effort recipient-label lookup (decision (b)). Never fails the
+    /// section for a non-cancellation reason: rendering degrades to <see cref="ShortId"/>
+    /// labels when the contact list is unavailable.</summary>
+    private async Task<Dictionary<Guid, string>> TryLoadContactLabelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var contacts = await StudentsApi.ListSubscribedContactsAsync(
+                ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct);
+            return (contacts ?? []).ToDictionary(c => c.Id, c => c.Value);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex,
+                "Failed to load guardian contact labels for assignment {AssignmentId}; falling back to short ids",
+                AssignmentId);
+            return [];
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

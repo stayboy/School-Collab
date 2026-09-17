@@ -71,7 +71,9 @@ public sealed class ListAssignmentsQueryHandler(
                     // mapped or every list read resets them to null.
                     s.DifficultyEasyCount,
                     s.DifficultyMediumCount,
-                    s.DifficultyHardCount)).ToArray();
+                    s.DifficultyHardCount,
+                    // WS-E2b / ar-17: "has ever been published" for the failure surface.
+                    PublishedAt: s.PublishedAt)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],

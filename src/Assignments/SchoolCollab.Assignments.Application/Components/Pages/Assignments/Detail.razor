@@ -327,6 +327,22 @@
                             <SignOffSection AssignmentId="@Id" RequiresSignature="true" />
                         </FluentTab>
                     }
+
+                    @* WS-E2 / ar-17 — failed-notification surface. The gate is "has ever been
+                       published" (PublishedAt is not null), NOT a status test: NotificationLog
+                       rows exist only after a publish, and Unpublish returns the assignment to
+                       Draft while those rows survive — a status gate would hide that history.
+                       It is deliberately a DATA test rather than a status enumeration: Close()
+                       has no published precondition, so a never-published Draft that was Closed
+                       reports PublishedAt == null and correctly shows no tab. The section
+                       self-loads (no Detail-side failure fetch, mirroring SignOffSection); it
+                       renders an Info empty state when the endpoint returns zero rows. *@
+                    @if (_item.PublishedAt is not null)
+                    {
+                        <FluentTab Label="Notifications">
+                            <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true" />
+                        </FluentTab>
+                    }
                 </FluentTabs>
             </div>
         }

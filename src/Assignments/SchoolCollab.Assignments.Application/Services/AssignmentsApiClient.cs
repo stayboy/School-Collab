@@ -28,6 +28,14 @@ public sealed class AssignmentsApiClient
                 new JsonStringEnumConverter<ReviewStateDto>(),
                 new JsonStringEnumConverter<ContactOwnerTypeDto>(),
                 new JsonStringEnumConverter<ContactChannelDto>(),
+                // WS-E2 / ar-17: tolerant read-side converter for the delivery enums.
+                // NOTE (review F3): the Assignments API registers ten sibling enums as
+                // strings but does NOT register NotificationKindDto / ContactChannelDto,
+                // so the live wire form is currently NUMERIC and would deserialize
+                // without this converter. It is kept as read-side tolerance (correct
+                // either way) pending the API being aligned with its siblings — recorded
+                // as a residual; the API-side registration is the real inconsistency.
+                new JsonStringEnumConverter<NotificationKindDto>(),
                 new JsonStringEnumConverter<GuardianRoleDto>(),
                 new JsonStringEnumConverter<SubmissionSourceDto>(),
                 new JsonStringEnumConverter<QuestionTypeDto>(),
@@ -289,6 +297,21 @@ public sealed class AssignmentsApiClient
             return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<IReadOnlyList<SignOffStatusDto>>(_jsonOptions, ct);
+    }
+
+    /// <summary>Reads the failed-delivery rows for an assignment (WS-E2 / ar-17).
+    /// The tenant-scoped endpoint always returns 200 with a (possibly empty)
+    /// <see cref="NotificationFailureDto"/> array; a null response is mapped to an
+    /// empty array so the caller can treat it as "no failures". The rows are read-
+    /// only — no retry / requeue affordance exists here (those are E3's concern).</summary>
+    public async Task<NotificationFailureDto[]> GetNotificationFailuresAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting notification failures for assignment {AssignmentId}", id);
+        var result = await _http.GetFromJsonAsync<NotificationFailureDto[]>(
+            $"/assignments/{id}/notification-failures", _jsonOptions, ct);
+        _logger.LogInformation(
+            "Loaded {Count} notification failures for assignment {AssignmentId}", result?.Length ?? 0, id);
+        return result ?? [];
     }
 
     /// <summary>The aggregate the guardian sign page consumes (WS-C2) — one call.</summary>

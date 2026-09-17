@@ -30,7 +30,10 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 // WS-C1 (spec §7 Q1): guardian-signature snapshot.
                 a.RequiresSignature,
                 // WS-B2 (spec §3.4 line 70): per-difficulty counts.
-                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
+                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount,
+                // WS-E2b / ar-17: must be projected or every published assignment reports
+                // never-published and silently loses its failure surface.
+                a.PublishedAt))
             .ToListAsync(ct);
     }
 
