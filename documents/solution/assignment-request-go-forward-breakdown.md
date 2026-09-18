@@ -294,9 +294,27 @@ within a phase.
       full four-agent).
       **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums (the
       client converter is tolerance only); no `Failures (N)` tab count; the live HTTP path is untested end-to-end.
-- [ ] E3 reminder/overdue/completion worker (`Assignments.Worker`; archive sweep already ships in
-      Assignments.Api) — consumes the unchanged `AssignmentPublishedIntegrationEvent` and carries the
-      `(TenantId, AssignmentId, RecipientId, Kind)` unique-index residual from ar-16.
+- [x] E3 reminder/overdue/completion worker (ar-19, 2026-09-17, Tier 3 LEAN — branch
+      `stack/19-ar-19-assignments-worker` cut at `c8c0b077`): new `Assignments.Worker`
+      (Students.Worker shape) hosting `ReminderSweepService` @15m (reminders per stored
+      cadence with the later-of publish/awaiting-signature anchor + `MaxReminders` cap,
+      plus completion-to-guardian nudges) and `OverdueSweepService` @60m, consuming the
+      unchanged `AssignmentPublishedIntegrationEvent`; archive sweep + delivery drain
+      stay in Api (single drain); `DedupeNotificationLogPublishRows` migration dedupes
+      keep-latest-activity then creates the PARTIAL unique index (`WHERE "kind" = 0` —
+      full-kind uniqueness would outlaw legitimate multi-Reminder cadence rows); the
+      broadcaster republish is upsert-in-place (index = backstop, idempotency at the
+      insert path); ward-state gating inline in all three candidate reads (NOT-complete:
+      signed OR passing excluded; no-submission/unsigned included; null-ward excluded);
+      `Skipped` rows are terminal coverage; semaphore overlap guard; in-process kick vs
+      timer serialized. 39 files, +3855/−37; matrix 2,371/0 (new Testcontainers
+      `Assignments.Tests.Integration` suite: dedupe + index-violation + Postgres
+      translation/gating proofs). Round: `rounds/round-ar-19-assignments-worker.md`
+      (CLOSED, Tier 3 lean — 8-defect ledger incl. an EF-expression-tree helper that
+      the in-memory provider silently swallowed; caught only by a real-Postgres test
+      now guarding the class). Residuals: republish-Skip-over-Sent history note (owner),
+      duplicated worker-side address resolver, sendout-time/day-of-due-date fields
+      un-enforced (owner decision (a)), single-instance sweeps.
 - **Accept:** publish → notifications only to verified+subscribed valid contacts through
   policy-filtered channels; deep link opens the right ward/guardian page without login
   and expires; unsigned reminder fires per cadence; bounced/failed sends surface on the

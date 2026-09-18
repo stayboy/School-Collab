@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj" />
+    <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Worker\SchoolCollab.Assignments.Worker.csproj" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Contracts\SchoolCollab.Students.Contracts.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />

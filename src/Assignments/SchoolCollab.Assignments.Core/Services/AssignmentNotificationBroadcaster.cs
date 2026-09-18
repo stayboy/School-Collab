@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data;
@@ -41,7 +42,25 @@ public sealed class AssignmentNotificationBroadcaster(
         var now = timeProvider.GetUtcNow();
         foreach (var recipient in context.Recipients)
         {
-            db.NotificationLogs.Add(await QueueForRecipientAsync(context, recipient, now, cancellationToken));
+            // E3 (ar-19): republish upsert-in-place. If a Publish row already exists
+            // for this (tenant, assignment, recipient) key with the freshest rendered
+            // payload, re-queue it (reset Attempt + re-stamp payload + due now) rather
+            // than inserting a second Publish row — the partial unique index below is
+            // the data-layer backstop, idempotency belongs here at the source.
+            var existing = await db.NotificationLogs
+                .FirstOrDefaultAsync(x => x.TenantId == recipient.TenantId
+                    && x.AssignmentId == context.AssignmentId
+                    && x.RecipientId == recipient.Id
+                    && x.Kind == NotificationKind.Publish,
+                    cancellationToken);
+
+            var log = await QueueForRecipientAsync(existing, context, recipient, now, cancellationToken);
+            // An existing Publish row is already tracked (upserted in place above); only
+            // brand-new rows are added — re-`Add`-ing a tracked row would force a second insert.
+            if (db.Entry(log).State == EntityState.Detached)
+            {
+                db.NotificationLogs.Add(log);
+            }
         }
 
         if (context.Recipients.Count > 0)
@@ -55,6 +74,7 @@ public sealed class AssignmentNotificationBroadcaster(
     }
 
     private async Task<NotificationLog> QueueForRecipientAsync(
+        NotificationLog? existing,
         AssignmentPublishedContext context,
         AssignmentRecipient recipient,
         DateTimeOffset now,
@@ -67,7 +87,7 @@ public sealed class AssignmentNotificationBroadcaster(
 
         if (!hasUnexpiredToken)
         {
-            return Skipped(context, recipient, string.Empty, string.Empty,
+            return Skip(existing, context, recipient, string.Empty, string.Empty,
                 "recipient has no unexpired deep-link token", now);
         }
 
@@ -93,7 +113,7 @@ public sealed class AssignmentNotificationBroadcaster(
 
         if (string.IsNullOrWhiteSpace(address))
         {
-            return Skipped(context, recipient, string.Empty,
+            return Skip(existing, context, recipient, string.Empty,
                 NotificationMessageBuilder.BuildPublishSubject(context.Title),
                 "no delivery address resolved", now);
         }
@@ -101,22 +121,68 @@ public sealed class AssignmentNotificationBroadcaster(
         if (recipient.Channel == Students.Core.Domain.ContactChannel.Email)
         {
             var message = NotificationMessageBuilder.BuildPublishEmail(address, context.Title, token!);
-            return Queue(context, recipient, message.To, message.Subject, message.BodyHtml, now);
+            return QueueOrUpdate(existing, context, recipient, message.To, message.Subject, message.BodyHtml, now);
         }
 
         // SMS / WhatsApp share one text body (no provider in v1 — LogAndSkipSmsSender).
         var sms = NotificationMessageBuilder.BuildPublishSms(address, context.Title, token!);
-        return Queue(context, recipient, sms.To, NotificationMessageBuilder.BuildPublishSubject(context.Title), sms.Body, now);
+        return QueueOrUpdate(existing, context, recipient, sms.To,
+            NotificationMessageBuilder.BuildPublishSubject(context.Title), sms.Body, now);
     }
 
-    private static NotificationLog Queue(
+    private static NotificationLog QueueOrUpdate(
+        NotificationLog? existing,
         AssignmentPublishedContext context,
         AssignmentRecipient recipient,
         string toAddress,
         string subject,
         string bodyHtml,
-        DateTimeOffset now) =>
-        NotificationLog.Queue(
+        DateTimeOffset now)
+    {
+        // E3 (ar-19): existing Publish row → re-queue in place (freshest deep-link
+        // payload wins); none → insert the standard Queued row. Single path — only
+        // re-queue an already-existing row, otherwise the fresh row stands.
+        var log = ExistingOrNew(existing, context, recipient, toAddress, subject, bodyHtml, now);
+        if (existing is not null)
+        {
+            log.Requeue(toAddress, subject, bodyHtml, now);
+        }
+        return log;
+    }
+
+    private static NotificationLog Skip(
+        NotificationLog? existing,
+        AssignmentPublishedContext context,
+        AssignmentRecipient recipient,
+        string toAddress,
+        string subject,
+        string reason,
+        DateTimeOffset now)
+    {
+        // Skipped rows never carry a rendered body — pass string.Empty so the persisted
+        // row stays empty; `reason` is recorded on FailureReason, not the body.
+        var log = ExistingOrNew(existing, context, recipient, toAddress, subject, string.Empty, now);
+        // Existing or new, a skip re-stamps the same outcome (re-broadcast that is still
+        // unroutable reuses the row, never a fresh insert).
+        log.MarkSkipped(reason, now);
+        return log;
+    }
+
+    private static NotificationLog ExistingOrNew(
+        NotificationLog? existing,
+        AssignmentPublishedContext context,
+        AssignmentRecipient recipient,
+        string toAddress,
+        string subject,
+        string bodyHtml,
+        DateTimeOffset now)
+    {
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var log = NotificationLog.Queue(
             recipient.TenantId,
             context.AssignmentId,
             recipient.Id,
@@ -127,17 +193,6 @@ public sealed class AssignmentNotificationBroadcaster(
             subject,
             bodyHtml,
             now);
-
-    private static NotificationLog Skipped(
-        AssignmentPublishedContext context,
-        AssignmentRecipient recipient,
-        string toAddress,
-        string subject,
-        string reason,
-        DateTimeOffset now)
-    {
-        var log = Queue(context, recipient, toAddress, subject, string.Empty, now);
-        log.MarkSkipped(reason, now);
         return log;
     }
 }

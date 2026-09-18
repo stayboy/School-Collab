@@ -104,9 +104,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolv
 
 // Effective-policy resolver (notification-delivery-plan.md §3): reads the tenant
 // default (Settings API) + grade override (Students API), merges at publish time.
+// E3 (ar-19): relocated into Assignments.Core (Services/NotificationPolicyResolver.cs)
+// so both the API and the Assignments.Worker sweeps resolve the same policy.
 builder.Services.AddHttpClient("settings-api");
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationPolicyResolver,
-    SchoolCollab.Assignments.Api.Services.NotificationPolicyResolver>();
+    SchoolCollab.Assignments.Core.Services.NotificationPolicyResolver>();
 // Guardian-signature default resolver (WS-C1 / spec §7 Q1): reads the tenant
 // default (Settings API) + grade override (Students API), resolves effective
 // for the create-wizard pre-fill. Same named clients as the notification resolver.

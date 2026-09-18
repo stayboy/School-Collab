@@ -225,6 +225,21 @@ studentsApi = studentsApi.WithReference(assignmentsApi);
 // via service discovery. CrossModuleWiringTests enforces this reference.
 settingsApi = settingsApi.WithReference(studentsApi);
 
+// E3 (ar-19): Assignments.Worker — reminder / completion-to-guardian / overdue sweeps
+// that queue NotificationLog rows (the Assignments.Api drain sends them), plus the
+// AssignmentPublishedIntegrationEvent subscription that kicks the reminder sweep.
+// Mirrors the students-worker shape: waits for rabbit + the migrator and subscribes to
+// the assignments exchange. No new Parameters: entries — the existing
+// outbox-exchange-assignments is reused.
+var assignmentsWorker = builder.AddProject<Projects.SchoolCollab_Assignments_Worker>("assignments-worker")
+    .WithReference(assignmentsDb)
+    .WithReference(rabbit)
+    .WithReference(settingsApi)
+    .WithReference(studentsApi)
+    .WithEnvironment("RabbitMq__Subscriber__ExchangeName", assignmentsOutboxExchange)
+    .WaitFor(rabbit)
+    .WaitForCompletion(migrator);
+
 var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
     .WithReference(studentsDb)
     .WithReference(rabbit)

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
+    <PackageReference Include="Aspire.RabbitMQ.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The Worker uses Microsoft.NET.Sdk (not Microsoft.NET.Sdk.Web), so
+      appsettings*.json are NOT auto-copied to the output directory. Without
+      this Content element, the RabbitMq:Subscriber:ExchangeName configuration
+      silently disappears at runtime, producing OptionsValidationException at
+      startup in any deployment shape where the content root is the published
+      bin/ directory rather than the source tree (Students.Worker csproj
+      precedent). AppContext.BaseDirectory is re-anchored in Program.cs.
+    -->
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="appsettings.*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

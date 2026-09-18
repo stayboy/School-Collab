@@ -979,3 +979,25 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   with `PublishedAt` threaded through `AssignmentSummary`, `AssignmentRepository.ListAsync` and both query
   handlers (each layer would otherwise have silently dropped it).
   **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.
+- `ar-19-assignments-worker` — **CLOSED 2026-09-17, Tier 3 LEAN** (no UI tester; parent-transcribed acceptance);
+  Phase 4 slice **E3 (WS-E)** (`rounds/round-ar-19-assignments-worker.md` + `diffs-ar-19-assignments-worker.patch`;
+  branch `stack/19-ar-19-assignments-worker` cut at `c8c0b077`). **Delivered:** new `Assignments.Worker`
+  (Students.Worker host precedent; AppHost `assignments-worker` with db/rabbit/settings/students refs) hosting
+  `ReminderSweepService` @15m (cadence from `ReminderIntervalHours`/`MaxReminders` via the relocated
+  `NotificationPolicyResolver`, anchor = **later-of** publish/awaiting-signature) + `OverdueSweepService` @60m;
+  completion-to-guardian is sweep-driven (no submission event exists — the Published event only kicks the first
+  reminder pass); archive sweep + delivery drain stay in Api (single drain — sweeps only queue rows);
+  `DedupeNotificationLogPublishRows` migration: dedupe keep-latest-activity (`updated_at DESC, attempt DESC, id`)
+  THEN the **partial** unique index `ux_notification_logs_publish_uniqueness … WHERE "kind" = 0` (full-kind
+  uniqueness would outlaw legitimate multi-Reminder cadence rows); broadcaster republish is **upsert-in-place**
+  (index = backstop; idempotency at the insert path); all three candidate reads gate inline on ward state
+  (NOT-complete: signed OR passing excluded; no-submission/unsigned included; null-ward excluded);
+  `Skipped` rows are terminal coverage; `SemaphoreSlim` overlap guards serialize kick vs timer. **39 files,
+  +3855/−37; matrix 2,371/0** (new Testcontainers `Assignments.Tests.Integration`: dedupe + index-violation +
+  Postgres translation/gating). **8-defect ledger** — the headline: an EF-expression-tree helper method that the
+  in-memory provider silently swallowed (production would have thrown at every sweep pass), now permanently
+  guarded by a real-Postgres translation test; plus the inverted no-submission gate, the `??`-vs-later-of anchor,
+  the reviewer's P1-1 (no ward gating) and P1-2 (Skipped not terminal → unbounded duplicate rows). Residuals:
+  republish-Skip-over-`Sent` history note (owner accept/reject owed), duplicated worker-side address resolver,
+  sendout-time/day-of-due-date un-enforced (owner (a)), single-instance sweeps, per-candidate ≈3 HTTP calls/pass.
+  **Next:** D-6 identity before Phase 5 WS-G; program post-Phase-4 cleanup.
