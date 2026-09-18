@@ -1,0 +1,370 @@
+diff --git a/documents/solution/assignment-request-go-forward-breakdown.md b/documents/solution/assignment-request-go-forward-breakdown.md
+index 2c637422..26e028c1 100644
+--- a/documents/solution/assignment-request-go-forward-breakdown.md
++++ b/documents/solution/assignment-request-go-forward-breakdown.md
+@@ -294,6 +294,13 @@ within a phase.
+       full four-agent).
+       **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums (the
+       client converter is tolerance only); no `Failures (N)` tab count; the live HTTP path is untested end-to-end.
++      → **Both first two residuals CLOSED by ar-18 (2026-09-17, Tier 2 light round):** the API now registers
++      `JsonStringEnumConverter<NotificationKindDto>` + `<ContactChannelDto>` (delivery enums wire as PascalCase
++      strings like their 10 siblings; pinned by a revert-proven discriminator), the tab label counts via an
++      `EventCallback<int>` (`Notifications (N)` when N > 0, success-path-only reporting, zero-vs-never pinned),
++      and both section parameters carry `[EditorRequired]`. 6 files, +209/−6; 639/0 · 80/0 · 21/0 · 84/0.
++      Round: `rounds/round-ar-18-light-residuals.md` (CLOSED, Tier 2 — owner explicitly took the light tier
++      despite the UI trigger; the only UI surface is the tab label, bUnit-covered).
+ - [ ] E3 reminder/overdue/completion worker (`Assignments.Worker`; archive sweep already ships in
+       Assignments.Api) — consumes the unchanged `AssignmentPublishedIntegrationEvent` and carries the
+       `(TenantId, AssignmentId, RecipientId, Kind)` unique-index residual from ar-16.
+diff --git a/documents/solution/assignment-request-implementation-details.md b/documents/solution/assignment-request-implementation-details.md
+index 45584923..381e097a 100644
+--- a/documents/solution/assignment-request-implementation-details.md
++++ b/documents/solution/assignment-request-implementation-details.md
+@@ -978,4 +978,19 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
+   assignment to Draft while nothing deletes `NotificationLog` rows, so the gate is now **`PublishedAt is not null`**
+   with `PublishedAt` threaded through `AssignmentSummary`, `AssignmentRepository.ListAsync` and both query
+   handlers (each layer would otherwise have silently dropped it).
+-  **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.
+\ No newline at end of file
++- `ar-18-light-residuals` — **CLOSED 2026-09-17, Tier 2 LIGHT ROUND**; Phase 4 E2 cleanup before E3
++  (`rounds/round-ar-18-light-residuals.md` + `diffs-ar-18-light-residuals.patch`; branch `stack/18-ar-18-light-residuals`
++  cut at `c8c0b077` = merged ar-17). L1: the API now registers `JsonStringEnumConverter<NotificationKindDto>` and
++  `<ContactChannelDto>` alongside its ten siblings, so the two delivery enums wire as **PascalCase strings**
++  (`"kind":"Publish"`, camelCase properties) instead of numbers — pinned by a revert-proven source-scan
++  discriminator plus a wire-shape test (the only harness that can observe `Program.cs`'s options, since every
++  existing host test builds its own `TestServer` and registers converters itself, which is exactly how the gap
++  hid). L2: F5 landed — the section raises `OnFailureCountLoaded` (`EventCallback<int>`) once per **successful**
++  load with the row count (zero reported, error never-raised), and Detail renders `Notifications (N)` when N > 0
++  via a `NotificationsTabLabel` computed property; no Detail-side fetch. L3: `[EditorRequired]` on both section
++  parameters. Worker `deepseek-v4.1-flash`, reviewer `glm-5.3-flash` (light-mode set); reviewer ACCEPT 0 P1
++  (2 P2 accepted: delimiter-brittle block slice that errs safe; pre-existing `AssignmentId` doc gap). 6 files,
++  +209/−6. Authoritative: build 0 errors; **639/0 · 80/0 · 21/0 · 84/0**.
++  **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive — carrying the
++  `(TenantId, AssignmentId, RecipientId, Kind)` unique index + F1 duplicate-row class); D-6 identity before
++  Phase 5 WS-G.
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 7cae82a4..39a02efa 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -45,6 +45,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
+     // assignment enums, so both the guardian and pre-existing teacher sign surfaces bind.
+     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignatureTypeDto>());
+     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignOffStateDto>());
++    // WS-E2b / ar-18: the two delivery enums on the failures read side
++    // (NotificationFailureDto.Channel / .Kind) were the only pair of the assignment
++    // enums missing here, so the real host emitted them as NUMBERS while the client's
++    // read-side converter masked it. Same lesson as the ar-15 block above: a converter
++    // registered only in a test host hides the live gap.
++    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationKindDto>());
++    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ContactChannelDto>());
+ });
+ 
+ var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor
+index 37fb3e91..f76bbcfc 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Detail.razor
+@@ -339,8 +339,9 @@
+                        renders an Info empty state when the endpoint returns zero rows. *@
+                     @if (_item.PublishedAt is not null)
+                     {
+-                        <FluentTab Label="Notifications">
+-                            <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true" />
++                        <FluentTab Label="@NotificationsTabLabel">
++                            <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true"
++                                                          OnFailureCountLoaded="@OnFailureCountLoaded" />
+                         </FluentTab>
+                     }
+                 </FluentTabs>
+@@ -358,6 +359,9 @@
+     private AssignmentSummaryDto? _item;
+     private bool _loading = true;
+     private string? _error;
++    // WS-E2b / ar-18 (ar-17 follow-up F5): reported by the failures section's own load —
++    // Detail never fetches the failure list itself just to count it.
++    private int _notificationFailureCount;
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+ 
+@@ -449,6 +453,13 @@
+         }
+     }
+ 
++    /// <summary>WS-E2b / ar-18: the failures tab badges its row count (F5).
++    /// Zero reads as the plain label — an empty list is not worth a "(0)".</summary>
++    private string NotificationsTabLabel =>
++        _notificationFailureCount > 0 ? $"Notifications ({_notificationFailureCount})" : "Notifications";
++
++    private void OnFailureCountLoaded(int count) => _notificationFailureCount = count;
++
+     private string AudienceSummary()
+     {
+         var audience = _item is not null ? EnumHelper.GetDescription(_item.TargetAudienceType) : "All students";
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor
+index 4726c0cb..1f120390 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/NotificationFailuresSection.razor
+@@ -76,7 +76,7 @@
+ }
+ 
+ @code {
+-    [Parameter] public Guid AssignmentId { get; set; }
++    [Parameter, EditorRequired] public Guid AssignmentId { get; set; }
+ 
+     /// <summary>Render/load gate — the hosting page passes <see langword="true"/> only
+     /// when the assignment has ever been published (the hosting page tests
+@@ -84,7 +84,13 @@
+     /// SignOffSection's <c>RequiresSignature</c> posture. A status enumeration is wrong
+     /// here: <c>Unpublish</c> returns an assignment to Draft while its
+     /// <c>NotificationLog</c> rows survive.</summary>
+-    [Parameter] public bool CanHaveFailures { get; set; }
++    [Parameter, EditorRequired] public bool CanHaveFailures { get; set; }
++
++    /// <summary>WS-E2b / ar-18 (ar-17 follow-up F5): raised once per successful load with
++    /// the number of failed-notification rows (including zero) so the hosting page can
++    /// badge its tab label. Deliberately NOT raised when the load fails — the label must
++    /// never advertise a count for a list the surface could not read.</summary>
++    [Parameter] public EventCallback<int> OnFailureCountLoaded { get; set; }
+ 
+     private List<NotificationFailureDto>? _failures;
+     private Dictionary<Guid, string> _contactLabels = new();
+@@ -120,6 +126,8 @@
+ 
+             _failures = [.. failuresTask.Result];
+             _contactLabels = contactsTask.Result;
++            // ar-18: report the count on the success path only (see the parameter doc).
++            await OnFailureCountLoaded.InvokeAsync(_failures.Count);
+         }
+         catch (OperationCanceledException) when (ct.IsCancellationRequested)
+         {
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/ProgramJsonEnumConverterTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/ProgramJsonEnumConverterTests.cs
+new file mode 100644
+index 00000000..7bf2dec0
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/ProgramJsonEnumConverterTests.cs
+@@ -0,0 +1,96 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// WS-E2b / ar-18 — guards the REAL host's JSON enum registrations for the two delivery
++/// enums on the failures read side (<see cref="NotificationKindDto"/> /
++/// <see cref="ContactChannelDto"/>), which were the only pair of the assignment enums
++/// missing from Program.cs.
++///
++/// Why the first test is a source scan: every other test in this project builds its own
++/// minimal TestServer and registers the enum converters itself
++/// (<c>SignOffRoutesTests</c> / <c>GuardianTokenEndpointFilterTests</c> /
++/// <c>WardRoutesTests</c>), so none of those hosts can observe Program.cs at all — which
++/// is exactly how the ar-15 gap hid until its converters were moved into Program.cs. No
++/// harness boots the real host here either: Program.cs resolves Postgres, RabbitMQ, Redis
++/// and the Settings overlay, none of which exist in unit-test CI. The scan is therefore
++/// the discriminating half — it fails if either registration leaves the host's
++/// <c>ConfigureHttpJsonOptions</c> block — while the second test pins the resulting wire
++/// shape (enum NAMES, not numbers).
++/// </summary>
++[TestClass]
++public class ProgramJsonEnumConverterTests
++{
++    /// <summary>Same repo-root discovery as <c>SchoolCollab.ArchitectureTests.Unit</c>:
++    /// <c>tests/&lt;Project&gt;/bin/&lt;Configuration&gt;/&lt;Tfm&gt;</c> sits five levels below the
++    /// repository root.</summary>
++    private static string ProgramSourcePath()
++    {
++        var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
++        var repositoryRoot = Path.GetFullPath(Path.Combine(
++            assemblyDirectory, "..", "..", "..", "..", ".."));
++        return Path.Combine(
++            repositoryRoot, "src", "Assignments", "SchoolCollab.Assignments.Api", "Program.cs");
++    }
++
++    [TestMethod]
++    public void HostOptions_RegisterBothDeliveryEnumsAsStrings()
++    {
++        var programPath = ProgramSourcePath();
++        File.Exists(programPath).Should().BeTrue(
++            $"the host source must be locatable from the test assembly (looked for {programPath})");
++
++        var source = File.ReadAllText(programPath);
++        var blockStart = source.IndexOf("ConfigureHttpJsonOptions(", StringComparison.Ordinal);
++        blockStart.Should().BeGreaterThan(-1, "Program.cs must configure the HTTP JSON options");
++        var blockEnd = source.IndexOf("\n});", blockStart, StringComparison.Ordinal);
++        blockEnd.Should().BeGreaterThan(blockStart, "the options block must be terminated");
++        var optionsBlock = source[blockStart..blockEnd];
++
++        optionsBlock.Should().Contain("JsonStringEnumConverter<NotificationKindDto>",
++            "the failures read side serializes NotificationKindDto — without this registration the live wire form is a number");
++        optionsBlock.Should().Contain("JsonStringEnumConverter<ContactChannelDto>",
++            "the failures read side serializes ContactChannelDto — without this registration the live wire form is a number");
++    }
++
++    [TestMethod]
++    public void HostOptions_SerializeDeliveryEnumsAsNames_NotNumbers()
++    {
++        // Mirrors the host's options for the two delivery enums (Web defaults + both
++        // converters), so this pins the wire form the live host now produces.
++        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
++        {
++            Converters =
++            {
++                new JsonStringEnumConverter<NotificationKindDto>(),
++                new JsonStringEnumConverter<ContactChannelDto>(),
++            }
++        };
++
++        var json = JsonSerializer.Serialize(
++            new NotificationFailureDto(
++                RecipientId: Guid.Parse("44444444-4444-4444-4444-444444444444"),
++                ContactId: Guid.Parse("55555555-5555-5555-5555-555555555555"),
++                Channel: ContactChannelDto.Email,
++                Kind: NotificationKindDto.Publish,
++                Attempt: 3,
++                FailureReason: "Provider replied: 550 permanent failure",
++                NextRetryAt: null),
++            options);
++
++        json.Should().Contain("\"kind\":\"Publish\"", "the kind travels as its enum name");
++        json.Should().Contain("\"channel\":\"Email\"", "the channel travels as its enum name");
++        json.Should().NotMatchRegex("\"kind\":\\s*\\d",
++            "a numeric kind is the pre-ar-18 live shape");
++        json.Should().NotMatchRegex("\"channel\":\\s*\\d",
++            "a numeric channel is the pre-ar-18 live shape");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
+index 5fe200b9..a026b365 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
+@@ -54,6 +54,10 @@ public class AssignmentDetailBunitTests : BunitContext
+                 new JsonStringEnumConverter<TargetAudienceTypeDto>(),
+                 new JsonStringEnumConverter<ApprovalStatusDto>(),
+                 new JsonStringEnumConverter<SignOffStateDto>(),
++                // ar-18: the failures endpoint now emits these two as names (the host
++                // registers them), so the fixtures encode them the same way.
++                new JsonStringEnumConverter<NotificationKindDto>(),
++                new JsonStringEnumConverter<ContactChannelDto>(),
+             }
+         };
+ 
+@@ -95,7 +99,7 @@ public class AssignmentDetailBunitTests : BunitContext
+     /// coverage list.</summary>
+     private int _assignmentGetCount;
+ 
+-    private void SetupGetAssignment(AssignmentSummaryDto dto)
++    private void SetupGetAssignment(AssignmentSummaryDto dto, params NotificationFailureDto[] failures)
+     {
+         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
+             .Respond(_ =>
+@@ -123,7 +127,7 @@ public class AssignmentDetailBunitTests : BunitContext
+         // is the only observable here (the section's row/empty/error behaviour
+         // is covered by NotificationFailuresSectionBunitTests).
+         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/notification-failures")
+-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<NotificationFailureDto>(), _apiJsonOptions));
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(failures, _apiJsonOptions));
+         _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed?ownerType=Guardian&scope=AllAssignments")
+             .Respond(HttpStatusCode.OK, "application/json", "[]");
+     }
+@@ -791,6 +795,25 @@ public class AssignmentDetailBunitTests : BunitContext
+         });
+     }
+ 
++    /// <summary>WS-E2b / ar-18 (ar-17 follow-up F5): the failures tab badges the row count
++    /// that <c>NotificationFailuresSection</c> reports from its own load — Detail issues no
++    /// extra fetch for it.</summary>
++    [TestMethod]
++    public void NotificationFailuresTab_BadgesRowCount()
++    {
++        var dto = MakeDto(AssignmentStatusDto.Published);
++        SetupGetAssignment(dto,
++            new NotificationFailureDto(Guid.NewGuid(), Guid.NewGuid(), ContactChannelDto.Email,
++                NotificationKindDto.Publish, 3, "Provider replied: 550 permanent failure", null),
++            new NotificationFailureDto(Guid.NewGuid(), Guid.NewGuid(), ContactChannelDto.SMS,
++                NotificationKindDto.Reminder, 1, "Carrier rejected", null));
++
++        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Notifications (2)",
++            "the label badges the count the section reported (F5)"));
++    }
++
+     /// <summary>WS-E2 / ar-17 decision-gate: the "Notifications" tab (and the
+     /// self-loading <c>NotificationFailuresSection</c>) renders for assignments that have
+     /// EVER been published — gated on <c>PublishedAt is not null</c>, not on the current
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs
+index 27adeaaa..763caf5f 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/NotificationFailuresSectionBunitTests.cs
+@@ -327,6 +327,64 @@ public class NotificationFailuresSectionBunitTests : BunitContext
+         cut.Markup.Should().Contain(EnumHelper.GetDescription(NotificationKindDto.Reminder));
+     }
+ 
++    [TestMethod]
++    public void FailureCountCallback_RaisedWithRowCount()
++    {
++        // WS-E2b / ar-18 (ar-17 follow-up F5): Detail badges its tab label from this
++        // callback, so the section must report the row count on its own load.
++        SetupFailures(
++            Row(ContactChannelDto.Email, NotificationKindDto.Publish),
++            Row(ContactChannelDto.SMS, NotificationKindDto.Reminder));
++        SetupContacts();
++
++        int? reported = null;
++        var cut = Render<NotificationFailuresSection>(p => p
++            .Add(x => x.AssignmentId, AssignmentId)
++            .Add(x => x.CanHaveFailures, true)
++            .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
++
++        cut.WaitForAssertion(() => reported.Should().Be(2,
++            "the count callback feeds the Detail tab badge"));
++    }
++
++    [TestMethod]
++    public void FailureCountCallback_ZeroOnEmptyList()
++    {
++        // Zero is still reported (the badge renders the plain label for it) — the
++        // distinction that matters is reported-0 versus never-reported.
++        SetupFailures();
++        SetupContacts();
++
++        int? reported = null;
++        var cut = Render<NotificationFailuresSection>(p => p
++            .Add(x => x.AssignmentId, AssignmentId)
++            .Add(x => x.CanHaveFailures, true)
++            .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
++
++        cut.WaitForAssertion(() => reported.Should().Be(0,
++            "an empty list reports 0 so the tab badge stays plain"));
++    }
++
++    [TestMethod]
++    public void FailureCountCallback_NotRaised_WhenLoadFails()
++    {
++        // The label must never advertise a count for a list the surface could not read
++        // (ar-18 parameter contract).
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/notification-failures")
++            .Respond(HttpStatusCode.InternalServerError);
++        SetupContacts();
++
++        int? reported = null;
++        var cut = Render<NotificationFailuresSection>(p => p
++            .Add(x => x.AssignmentId, AssignmentId)
++            .Add(x => x.CanHaveFailures, true)
++            .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("intent-error"));
++        reported.Should().BeNull(
++            "a failed load must not report a count — the error bar is the only signal");
++    }
++
+     [TestMethod]
+     public void BlankContactValue_FallsBackToMarkedShortId_NotAnEmptyCell()
+     {

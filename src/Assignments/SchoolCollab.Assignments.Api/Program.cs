@@ -45,6 +45,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // assignment enums, so both the guardian and pre-existing teacher sign surfaces bind.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignatureTypeDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignOffStateDto>());
+    // WS-E2b / ar-18: the two delivery enums on the failures read side
+    // (NotificationFailureDto.Channel / .Kind) were the only pair of the assignment
+    // enums missing here, so the real host emitted them as NUMBERS while the client's
+    // read-side converter masked it. Same lesson as the ar-15 block above: a converter
+    // registered only in a test host hides the live gap.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationKindDto>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ContactChannelDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
