@@ -1,0 +1,325 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 9f6e93fe..67f932de 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -280,10 +280,28 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
+ 
+ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
+ (used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
+-that imports the committed `src/AppHost/SchoolCollab.AppHost/realm-school-collab.json` realm
++that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
+ (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
+ `settings-api`, and `admin`.
+ 
++The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
++`dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
++`dev-only-school-collab-client-secret`. **Neither value may ever be reused in a real
++(production/demo) realm.** The `tenant_id` / `teacher_id` protocol-mapper values pin the
++FIXED ids seeded by the MigrationService `DevIdentitySeeder` (Dev School `…0002`, Dev
++Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
++
++**Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
++management endpoint (targetPort 9000) and binds an HTTP readiness health check
++(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
++`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
++OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
++does not fully start until the import completes).
++
++**Re-import on every recreate (ar-21).** No keycloak data volume is declared, so the realm
++file re-imports on every container recreate — edit the realm and recreate the container to
++pick it up; no `docker volume rm` is needed.
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 37a71fe3..c2007312 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -41,44 +41,66 @@ var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
+     .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp")
+     .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "http");
+ 
+-// ── Keycloak dev IdP (ar-20) ───────────────────────────────────────────────────
+-// Ships a Keycloak dev container with the committed realm-school-collab.json import
++// ── Keycloak dev IdP (ar-20 / ar-21) ──────────────────────────────────────────────
++// Ships a Keycloak dev container with the committed school-collab-realm.json import
+ // (realm `school-collab`, direct-access-grants client school-collab-client, seeded
+-// dev-teacher user + tenant/teacher protocol mappers). Mirrors the mailpit block.
+-// Secrets: `keycloak-admin-password` (Keycloak bootstrap admin) gets NO committed default
+-// (operator supplies via Parameters__keycloak_admin_password / user-secrets).
+-// `keycloak-client-secret` has a DEV-ONLY value matching the realm file's dev client
+-// secret (labelled dev-only there) supplied via user-secrets/Parameters — see
+-// documents/configuration.md §2/§4.
++// dev-teacher user + tenant/teacher protocol mappers). The realm import is
++// DEV-ONLY — CREDENTIALS IN THE FILE ARE FOR LOCAL/DEV USE ONLY:
++//   * dev-teacher login    : dev-teacher / dev-only-password
++//   * school-collab-client : secret dev-only-school-collab-client-secret
++// Neither value may ever be reused in a real (production/demo) realm. The tenant_id /
++// teacher_id protocol-mapper values pin the FIXED ids seeded by the MigrationService
++// DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003), so a dev login
++// resolves to real backing rows on first boot. Secrets: `keycloak-admin-password`
++// (Keycloak bootstrap admin) gets NO committed default (operator supplies via
++// Parameters__keycloak_admin_password / user-secrets). `keycloak-client-secret` has a
++// DEV-ONLY value matching the realm file's dev client secret supplied via
++// user-secrets/Parameters — see documents/configuration.md §2/§4.
++// The container enables Keycloak's built-in readiness health signal
++// (KC_HEALTH_ENABLED) on the management interface, and a health check is bound to it
++// so the four Auth:Keycloak hosts below `.WaitFor(keycloak)` on real readiness — the
++// server does not fully start until the realm import completes.
+ var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-collab-client");
+ var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
+ var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
+ 
+ // Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
+ // bind mount path is stable regardless of the launch working directory.
+-var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "realm-school-collab.json");
++var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "school-collab-realm.json");
+ 
+ var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
+     .WithArgs("start-dev", "--import-realm")
+-    // Realm import is one-shot on empty state; a persistent volume may skip re-import
+-    // after realm edits — remove the keycloak data volume (docker volume rm ...) to
+-    // re-import a changed realm file (noted in the ar-20 worker report).
+-    .WithBindMount(keycloakRealmPath, "/opt/keycloak/data/import/realm-school-collab.json")
++    // No keycloak data volume is declared, so the realm file re-imports on every
++    // container recreate (the dev-correct behaviour — edit the realm and recreate the
++    // container to pick it up; no `docker volume rm` is needed).
++    .WithBindMount(keycloakRealmPath, "/opt/keycloak/data/import/school-collab-realm.json")
++    .WithEnvironment("KC_HEALTH_ENABLED", "true")
+     .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
+     .WithEnvironment("KC_BOOTSTRAP_ADMIN_PASSWORD", keycloakAdminPassword)
+-    .WithHttpEndpoint(name: "http");
++    // Management endpoint (targetPort 9000) carries the readiness health check;
++    // no host port is pinned — Aspire assigns an ephemeral host port (proxy-exposed).
++    .WithHttpEndpoint(targetPort: 9000, name: "management")
++    .WithHttpHealthCheck(path: "/health/ready", endpointName: "management")
++    // Main HTTP endpoint: explicit targetPort 8080, host port deliberately left to
++    // Aspire's ephemeral assignment (the Authority is an endpoint-reference expression,
++    // so no stable host port is needed).
++    .WithHttpEndpoint(targetPort: 8080, name: "http");
+ 
+ // Fan the Auth:Keycloak settings onto a consuming host (assignments-api, students-api,
+ // settings-api, admin). The Authority is the Keycloak HTTP endpoint-reference expression
+ // (Aspire resolves it at runtime); ClientId/ClientSecret come from the AppHost parameters.
+ // No named-client service discovery is wired (the hosts read Auth:Keycloak:* directly).
++// Each consuming host `.WaitFor(keycloak)`s so it starts only after the container's
++// readiness health check is healthy (Keycloak does not fully start until the realm
++// import completes — see the container block above).
+ static void WireKeycloakAuth(
+     IResourceBuilder<ProjectResource> host, IResourceBuilder<ContainerResource> keycloak,
+     IResourceBuilder<ParameterResource> clientId, IResourceBuilder<ParameterResource> clientSecret)
+     => host
+         .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
+         .WithEnvironment("Auth__Keycloak__ClientId", clientId)
+-        .WithEnvironment("Auth__Keycloak__ClientSecret", clientSecret);
++        .WithEnvironment("Auth__Keycloak__ClientSecret", clientSecret)
++        .WaitFor(keycloak);
+ 
+ // Per-bounded-context outbox exchange names. Centralised in the AppHost's
+ // appsettings.json under Parameters:outbox-exchange-* and fanned out to the
+@@ -316,9 +338,12 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+     .WaitFor(studentsApi)
+     // ar-20: the Admin Blazor shell's existing OIDC code-flow (unchanged) now has real
+     // Keycloak wiring via the dev container; its UI/auth code is untouched this round.
++    // ar-21: admin is gated on keycloak readiness like the three APIs above (it also
++    // receives Auth:Keycloak:*).
+     .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
+     .WithEnvironment("Auth__Keycloak__ClientId", keycloakClientId)
+-    .WithEnvironment("Auth__Keycloak__ClientSecret", keycloakClientSecret);
++    .WithEnvironment("Auth__Keycloak__ClientSecret", keycloakClientSecret)
++    .WaitFor(keycloak);
+ 
+ // F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
+ // Option B, a separate host rather than routes on Admin). Depends on the
+diff --git a/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj b/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
+index 35471d44..09c64bae 100644
+--- a/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
++++ b/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
+@@ -14,10 +14,13 @@
+     <PackageReference Include="Aspire.Hosting.Redis" />
+   </ItemGroup>
+   <ItemGroup>
+-    <!-- ar-20: Ship the committed Keycloak realm import next to the AppHost dll so the
++    <!-- ar-21: Ship the committed Keycloak realm import next to the AppHost dll so the
+          container bind mount resolves it at launch (Program.cs WithBindMount). The file
+-         is DEV-ONLY (see its top comment). -->
+-    <None Include="realm-school-collab.json" CopyToOutputDirectory="PreserveNewest" />
++         is DEV-ONLY (see the AppHost Keycloak block comment + configuration.md §4 for the
++         dev credential warning). Named <realm>-realm.json per Keycloak's convention — the
++         AppHostRealmImportArchitectureTests guard asserts this name agrees with the
++         keycloakRealmPath variable and the bind-mount target. -->
++    <None Include="school-collab-realm.json" CopyToOutputDirectory="PreserveNewest" />
+   </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Contracts\SchoolCollab.Settings.Contracts.csproj" IsAspireProjectResource="false" />
+diff --git a/src/AppHost/SchoolCollab.AppHost/realm-school-collab.json b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+similarity index 84%
+rename from src/AppHost/SchoolCollab.AppHost/realm-school-collab.json
+rename to src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+index 86f15747..3a962299 100644
+--- a/src/AppHost/SchoolCollab.AppHost/realm-school-collab.json
++++ b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+@@ -1,12 +1,4 @@
+ {
+-  // DEV-ONLY realm import for the Keycloak dev container (ar-20).
+-  // CREDENTIALS IN THIS FILE ARE FOR LOCAL/DEV USE ONLY:
+-  //   * dev-teacher login     : dev-teacher / dev-only-password
+-  //   * school-collab-client  : secret dev-only-school-collab-client-secret
+-  // NEITHER value may ever be reused in a real (production/demo) realm.
+-  // The tenant_id / teacher_id protocol-mapper values below are the FIXED ids seeded
+-  // by MigrationService DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003),
+-  // so a dev login resolves to real backing rows on first boot.
+   "realm": "school-collab",
+   "enabled": true,
+   "sslRequired": "external",
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+new file mode 100644
+index 00000000..540096e4
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+@@ -0,0 +1,144 @@
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Guards the Keycloak dev-IdP realm import artifact (ar-21): the realm file
++/// must be strict JSON (the parser rejects comments — no substring scan), named
++/// <c>&lt;realm&gt;-realm.json</c> where <c>realm</c> is read from the file's
++/// OWN <c>realm</c> property (not a hardcoded literal, so a renamed realm
++/// cannot pass vacuously), and every filename-agreement site must agree with
++/// that derived name — the AppHost <c>keycloakRealmPath</c>, the csproj copy
++/// item, and the container bind-mount target (which must also live under
++/// <c>/opt/keycloak/data/import/</c>). A stale site otherwise surfaces only at
++/// the manual AC#4 keycloak run. The discovery helper follows the
++/// <c>SeedCsvArchitectureTests</c> precedent (walk-up from
++/// <c>AppContext.BaseDirectory</c>) and THROWS on zero or multiple realm
++/// candidates so a renamed file cannot pass by silently finding nothing.
++/// </summary>
++[TestClass]
++public class AppHostRealmImportArchitectureTests
++{
++    private static readonly string RealmFile = FindRealmFile();
++
++    [TestMethod]
++    public void RealmImportFile_IsStrictJson_NoComments()
++    {
++        var raw = File.ReadAllText(RealmFile);
++
++        // Parse with comments DISALLOWED — the same rule Keycloak applies
++        // (ALLOW_COMMENTS is not enabled). A `//`-substring scan was removed in
++        // review: it false-fails on any legitimate URL value while not actually
++        // proving the file parses.
++        Action strictParse = () => JsonDocument.Parse(raw, new JsonDocumentOptions
++        {
++            CommentHandling = JsonCommentHandling.Disallow,
++        }).Dispose();
++
++        strictParse.Should().NotThrow(
++            "the realm import file must be strict JSON — Keycloak rejects non-standard comments, so the dev-IdP import must not depend on them (ar-21).");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_FilenameIsDerivedFromItsOwnRealmProperty()
++    {
++        var realm = ReadRealmProperty(RealmFile);
++        var expected = $"{realm}-realm.json";
++        Path.GetFileName(RealmFile).Should().Be(expected,
++            "Keycloak requires realm import files to be named <realm>-realm.json; the name must derive from the file's own `realm` property, not a hardcoded literal.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_KeycloakRealmPathVariableAgreesWithDerivedName()
++    {
++        var derived = DerivedRealmFilename();
++        var program = ReadAppHostFile("Program.cs");
++        program.Should().Contain($"keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, \"{derived}\")",
++            "the keycloakRealmPath variable must point at the derived realm filename.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_CsprojCopyItemAgreesWithDerivedName()
++    {
++        var derived = DerivedRealmFilename();
++        var csproj = ReadAppHostFile("SchoolCollab.AppHost.csproj");
++        csproj.Should().Contain($"<None Include=\"{derived}\"",
++            "the csproj copy item must ship the derived realm filename.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_BindMountTargetAgreesWithDerivedName_UnderImportDir()
++    {
++        var derived = DerivedRealmFilename();
++        var target = $"/opt/keycloak/data/import/{derived}";
++        var program = ReadAppHostFile("Program.cs");
++        // The import-dir prefix is carried by `target` itself, so THIS Contain
++        // assertion is what enforces it. The extra StartWith probe on a
++        // locally-built literal was a tautology and was removed in review.
++        program.Should().Contain($"WithBindMount(keycloakRealmPath, \"{target}\")",
++            "the bind-mount target must point at the derived realm filename under /opt/keycloak/data/import/ (the only dir --import-realm scans).");
++    }
++
++    // ── Helpers ─────────────────────────────────────────────────────────
++
++    /// <summary>Resolves the single realm candidate anywhere in the AppHost dir
++    /// (any <c>*-realm.json</c> file). THROWS on zero or multiple candidates so
++    /// a renamed realm cannot pass by silently finding nothing.</summary>
++    private static string FindRealmFile()
++    {
++        var appHostDir = FindAppHostDir();
++        var candidates = Directory.EnumerateFiles(appHostDir, "*-realm.json")
++            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
++            .ToList();
++
++        if (candidates.Count == 0)
++        {
++            throw new InvalidOperationException(
++                $"No keycloak realm candidate found under {appHostDir} (expected exactly one *-realm.json).");
++        }
++
++        if (candidates.Count > 1)
++        {
++            throw new InvalidOperationException(
++                $"Multiple keycloak realm candidates found under {appHostDir}: {string.Join(", ", candidates.Select(Path.GetFileName))}");
++        }
++
++        return candidates[0];
++    }
++
++    private static string DerivedRealmFilename()
++        => $"{ReadRealmProperty(RealmFile)}-realm.json";
++
++    private static string ReadRealmProperty(string path)
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(path));
++        if (!doc.RootElement.TryGetProperty("realm", out var realm) || realm.ValueKind != JsonValueKind.String)
++        {
++            throw new InvalidOperationException($"Realm file {path} has no string 'realm' property.");
++        }
++
++        return realm.GetString()!;
++    }
++
++    private static string ReadAppHostFile(string name)
++        => File.ReadAllText(Path.Combine(FindAppHostDir(), name));
++
++    private static string FindAppHostDir()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        if (dir is null)
++        {
++            throw new InvalidOperationException(
++                "Could not locate src/AppHost/SchoolCollab.AppHost from " + AppContext.BaseDirectory);
++        }
++
++        return Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost");
++    }
++}

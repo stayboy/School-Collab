@@ -266,7 +266,7 @@ within a phase.
   records identity/time; delegation to another guardian works; a new AR pre-fills
   `RequiresSignature` from the grade default and the author can override it.
 
-### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2-core landed ar-16; E2b UI landed ar-17; E3 open)
+### Phase 4 — Delivery & deep links (WS-E) — **COMPLETE** (E1 ar-14; E2-core ar-16; E2b UI ar-17; E3 ar-19; D-6 identity ar-20)
 - [x] **E1 token deep links (ar-14, 2026-09-16)**: contact-scoped DataProtection tokens minted at publish (additive recipient columns; TTL `LinkValidityDays` ?? 7); shared Redis-backed keyring in Assignments.Api + Families; the repo's FIRST public token-auth route group (`/deeplink/{token}` landing → cookie sign-in → `/ward/{sid}`|`/ward`, best-effort bounded 3s `OpenedAt` stamp, `LinkExpired` page); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF; configuration.md §2/§5. 43 files, 2,279/0. Round: `rounds/round-ar-14-deep-links.md` (CLOSED, Tier 3). **Unblocks WS-F3.**
 - [x] **E2-core channel delivery + NotificationLog (ar-16, 2026-09-17)**: provider abstraction
       (`IEmailSender`/`ISmsSender`) with a **MailKit SMTP** sender (CPM 4.18.0) + `NullEmailSender`
@@ -322,6 +322,30 @@ within a phase.
       now guarding the class). Residuals: republish-Skip-over-Sent history note (owner),
       duplicated worker-side address resolver, sendout-time/day-of-due-date fields
       un-enforced (owner decision (a)), single-instance sweeps.
+- [x] **D-6 identity + working Keycloak auth (ar-20, 2026-09-18, Tier 3 full four-agent — the first round under
+      the mandatory plan-review gate)**: real bearer/OIDC auth on the shared `AddAuthAndTenancy` (`Bearer` scheme
+      via `AddJwtBearer` in the OIDC branch only), `ICurrentUser`, the `ITeacherDirectory` port +
+      `TeacherDirectoryHttpClient`, principal-wins attribution threaded through the five assignment handlers
+      (403 `MissingTeacherPrincipalException` / 409 `UnknownTeacherException`), the Development-gated
+      `DevIdentitySeeder` with fixed ids, the AppHost Keycloak dev container + 3 parameters, the committed realm
+      import, and configuration.md §2/§4/§5/§11. Owner decisions: API-first (no UI change); `DisableOIDCAuth=true`
+      stays the dev/CI default (container-free CI); `teacher_id` via a realm protocol mapper + server-side
+      validation. 38 files, +1342/−55; matrix **2,391/0**; security posture verified positively (the wire
+      `TeacherId`/`ApproverId` cannot be honoured under real auth; tenant is server-authoritative). Round:
+      `rounds/round-ar-20-identity.md` (**CLOSED 2026-09-18 — MERGED**; branch `stack/20-ar-20-identity` cut at
+      `11cc37e1`, **squash-merged as `74a42da1` via PR #244 on 2026-09-18**). **Gate ledger:** plan review REWORK 7 P1 → diff review
+      REWORK 1 P1 (a `CancellationToken` bound as a SQL parameter in the seeder → migrator exit 1 → every host's
+      migrator wait blocked) + 8 P2 → re-verify ACCEPT → parent fixes pass (whose new wiring test caught the
+      `FEATURE:DisableOIDCAuth` flag-key split). **Residual:** AC#4 (the real end-to-end Keycloak run)
+      **deferred to ar-21** — prerequisite-blocked by the AppHost Keycloak block, not merely unrun.
+- [x] **ar-21 Keycloak / AppHost dev-IdP hardening + AC#4 — CLOSED 2026-09-18, Tier 3 lean** (branch `stack/21-ar-21-keycloak-apphost-hardening` cut at `74a42da1`; patch 5 files, +210/−28): readiness gate (`KC_HEALTH_ENABLED` + management endpoint 9000 + `/health/ready` health check + `.WaitFor(keycloak)` on all four consumers), explicit `targetPort: 8080`, the realm file renamed to the conventional `school-collab-realm.json` with its `//` comments stripped (it is **not strict JSON** today — proven), a new revert-proven `AppHostRealmImportArchitectureTests` guard, and the real AC#4 evidence: the artifact imports, `/health/ready` returns **200 UP**, the issuer matches, and a live `dev-teacher` token yields a full claim set + `GET /assignments` = **200** vs **401** without one. Gate ledger: plan-review REWORK 2 P1 → ACCEPT; diff review **P2-only**. **Residual:** AC9's *orchestrated* cold start (the AppHost stalls on this machine in three reproducible attempts). Round: `rounds/round-ar-21-keycloak-apphost-hardening.md`.
+      (health check + `WaitFor`, or adopt the first-party `Aspire.Hosting.Keycloak` integration), explicit
+      `targetPort` on the Keycloak endpoint, the realm file renamed to the required `<realm>-realm.json`, its
+      `//` comments stripped (the file is **not strict JSON** today — proven), a repo guard test, and the real
+      AC#4 run. Blocked on owner decisions **D1–D3** (hardening shape → tier; client-secret dev default; data
+      volume). Round: `rounds/round-ar-21-keycloak-apphost-hardening.md`. The other ar-20 identity residuals
+      (submission-review threading, `DisableOIDCAuth` split-brain, cross-tenant `teacher_id` validation,
+      service-to-service token forwarding) are out of scope → candidate for a later identity-hardening round.
 - **Accept:** publish → notifications only to verified+subscribed valid contacts through
   policy-filtered channels; deep link opens the right ward/guardian page without login
   and expires; unsigned reminder fires per cadence; bounced/failed sends surface on the
@@ -353,7 +377,14 @@ within a phase.
 2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
    light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-17):** the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. **E2b failure-surfacing UI LANDED (ar-17, 2026-09-17 — Tier 3 full four-agent, branch `stack/17-ar-17-notification-failures-ui` cut at `c7c5b4ac` = the `stack/16` ar-16 tip because the read side it renders is absent from `main`; 2,349/0):** the read-only `Notifications` tab on the assignment Detail page over the ar-16 failures endpoint (flat 6-column table, terminal-vs-retry badges, Info empty vs Error states, marked `#short-id` recipient fallback), with all four verification stages plus a repo pre-flight review run — **no P1** — and **four P2 defect classes found and fixed across the chain** — a duplicate row `@key` that threw on re-render, an unfiltered cancellation catch that rendered a **false "No failed notifications."** on a transport timeout, and the `Archived` gate omission, plus the **unpublish→Draft gate hole** (found by the parent — neither the static reviewers nor the UI tester caught it; closed in-round under owner option A). PR pending the owner's base decision (rebase onto `main` once #240 merges, or keep the stack). Next: **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-18):** Phase 4 is **COMPLETE.** The train is merged to `main` through ar-19
+   (`11cc37e1`; #236 `0d99854a`, #237 `c8319002`, #239 `1479ed32`, #240 `5dcb7e96`, #241 `c8c0b077`,
+   #242 `9af0bb5f`, #243 `11cc37e1`); **ar-20 (D-6 identity) is CLOSED and MERGED** (`74a42da1` via **PR #244**,
+   squash-merged 2026-09-18 — matrix 2,391/0); and **ar-21 (Keycloak/AppHost hardening + the real AC#4 run) is
+   SCOPED — branch `stack/21-ar-21-keycloak-apphost-hardening` cut at `74a42da1` — awaiting owner decisions
+   D1–D3** (`rounds/round-ar-21-keycloak-apphost-hardening.md`). Then **Phase 5 (WS-G)**: accessibility/captions,
+   audit/retention/legal, flag-mapping docs, and the deferred niceties. *Historical detail (2026-09-17):*
+   the whole AR train is **merged to `main`** — #236 (ar-12/ar-13) `0d99854a`, #237 (ar-14, E1 deep links) `c8319002`, #239 (ar-15, WS-F3 sign-page relocation) `1479ed32`. **E2-core channel delivery LANDED (ar-16, 2026-09-17 — PR #240, Tier 2 light round; 2,337/0):** MailKit SMTP provider + null-sender fallback, tenant `NotificationLog` + migration, publisher v1.1 carrying per-contact deep links, store-driven retry/backoff drain, a tenant-scoped failures endpoint, the MailPit dev container, and **`smtp-password` as the repo's first secret AppHost parameter** — i.e. the email-provider decision is now implemented. **E2b failure-surfacing UI LANDED (ar-17, 2026-09-17 — Tier 3 full four-agent, branch `stack/17-ar-17-notification-failures-ui` cut at `c7c5b4ac` = the `stack/16` ar-16 tip because the read side it renders is absent from `main`; 2,349/0):** the read-only `Notifications` tab on the assignment Detail page over the ar-16 failures endpoint (flat 6-column table, terminal-vs-retry badges, Info empty vs Error states, marked `#short-id` recipient fallback), with all four verification stages plus a repo pre-flight review run — **no P1** — and **four P2 defect classes found and fixed across the chain** — a duplicate row `@key` that threw on re-render, an unfiltered cancellation catch that rendered a **false "No failed notifications."** on a transport timeout, and the `Archived` gate omission, plus the **unpublish→Draft gate hole** (found by the parent — neither the static reviewers nor the UI tester caught it; closed in-round under owner option A). PR pending the owner's base decision (rebase onto `main` once #240 merges, or keep the stack). Next: **E3** (`Assignments.Worker`: reminders/overdue/completion/archive, carrying ar-16's uniqueness-index residual); D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).
 4. **Follow-up candidate (deferred — not scheduled):** Teachers & Ward Portal as a
    Python **Prefab UI** second surface — spike-only proposal, zero backend change;

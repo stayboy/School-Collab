@@ -1,12 +1,4 @@
 {
-  // DEV-ONLY realm import for the Keycloak dev container (ar-20).
-  // CREDENTIALS IN THIS FILE ARE FOR LOCAL/DEV USE ONLY:
-  //   * dev-teacher login     : dev-teacher / dev-only-password
-  //   * school-collab-client  : secret dev-only-school-collab-client-secret
-  // NEITHER value may ever be reused in a real (production/demo) realm.
-  // The tenant_id / teacher_id protocol-mapper values below are the FIXED ids seeded
-  // by MigrationService DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003),
-  // so a dev login resolves to real backing rows on first boot.
   "realm": "school-collab",
   "enabled": true,
   "sslRequired": "external",

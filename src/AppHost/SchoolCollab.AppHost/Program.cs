@@ -41,44 +41,66 @@ var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
     .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp")
     .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "http");
 
-// ── Keycloak dev IdP (ar-20) ───────────────────────────────────────────────────
-// Ships a Keycloak dev container with the committed realm-school-collab.json import
+// ── Keycloak dev IdP (ar-20 / ar-21) ──────────────────────────────────────────────
+// Ships a Keycloak dev container with the committed school-collab-realm.json import
 // (realm `school-collab`, direct-access-grants client school-collab-client, seeded
-// dev-teacher user + tenant/teacher protocol mappers). Mirrors the mailpit block.
-// Secrets: `keycloak-admin-password` (Keycloak bootstrap admin) gets NO committed default
-// (operator supplies via Parameters__keycloak_admin_password / user-secrets).
-// `keycloak-client-secret` has a DEV-ONLY value matching the realm file's dev client
-// secret (labelled dev-only there) supplied via user-secrets/Parameters — see
-// documents/configuration.md §2/§4.
+// dev-teacher user + tenant/teacher protocol mappers). The realm import is
+// DEV-ONLY — CREDENTIALS IN THE FILE ARE FOR LOCAL/DEV USE ONLY:
+//   * dev-teacher login    : dev-teacher / dev-only-password
+//   * school-collab-client : secret dev-only-school-collab-client-secret
+// Neither value may ever be reused in a real (production/demo) realm. The tenant_id /
+// teacher_id protocol-mapper values pin the FIXED ids seeded by the MigrationService
+// DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003), so a dev login
+// resolves to real backing rows on first boot. Secrets: `keycloak-admin-password`
+// (Keycloak bootstrap admin) gets NO committed default (operator supplies via
+// Parameters__keycloak_admin_password / user-secrets). `keycloak-client-secret` has a
+// DEV-ONLY value matching the realm file's dev client secret supplied via
+// user-secrets/Parameters — see documents/configuration.md §2/§4.
+// The container enables Keycloak's built-in readiness health signal
+// (KC_HEALTH_ENABLED) on the management interface, and a health check is bound to it
+// so the four Auth:Keycloak hosts below `.WaitFor(keycloak)` on real readiness — the
+// server does not fully start until the realm import completes.
 var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-collab-client");
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
 var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
 
 // Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
 // bind mount path is stable regardless of the launch working directory.
-var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "realm-school-collab.json");
+var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "school-collab-realm.json");
 
 var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
     .WithArgs("start-dev", "--import-realm")
-    // Realm import is one-shot on empty state; a persistent volume may skip re-import
-    // after realm edits — remove the keycloak data volume (docker volume rm ...) to
-    // re-import a changed realm file (noted in the ar-20 worker report).
-    .WithBindMount(keycloakRealmPath, "/opt/keycloak/data/import/realm-school-collab.json")
+    // No keycloak data volume is declared, so the realm file re-imports on every
+    // container recreate (the dev-correct behaviour — edit the realm and recreate the
+    // container to pick it up; no `docker volume rm` is needed).
+    .WithBindMount(keycloakRealmPath, "/opt/keycloak/data/import/school-collab-realm.json")
+    .WithEnvironment("KC_HEALTH_ENABLED", "true")
     .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
     .WithEnvironment("KC_BOOTSTRAP_ADMIN_PASSWORD", keycloakAdminPassword)
-    .WithHttpEndpoint(name: "http");
+    // Management endpoint (targetPort 9000) carries the readiness health check;
+    // no host port is pinned — Aspire assigns an ephemeral host port (proxy-exposed).
+    .WithHttpEndpoint(targetPort: 9000, name: "management")
+    .WithHttpHealthCheck(path: "/health/ready", endpointName: "management")
+    // Main HTTP endpoint: explicit targetPort 8080, host port deliberately left to
+    // Aspire's ephemeral assignment (the Authority is an endpoint-reference expression,
+    // so no stable host port is needed).
+    .WithHttpEndpoint(targetPort: 8080, name: "http");
 
 // Fan the Auth:Keycloak settings onto a consuming host (assignments-api, students-api,
 // settings-api, admin). The Authority is the Keycloak HTTP endpoint-reference expression
 // (Aspire resolves it at runtime); ClientId/ClientSecret come from the AppHost parameters.
 // No named-client service discovery is wired (the hosts read Auth:Keycloak:* directly).
+// Each consuming host `.WaitFor(keycloak)`s so it starts only after the container's
+// readiness health check is healthy (Keycloak does not fully start until the realm
+// import completes — see the container block above).
 static void WireKeycloakAuth(
     IResourceBuilder<ProjectResource> host, IResourceBuilder<ContainerResource> keycloak,
     IResourceBuilder<ParameterResource> clientId, IResourceBuilder<ParameterResource> clientSecret)
     => host
         .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
         .WithEnvironment("Auth__Keycloak__ClientId", clientId)
-        .WithEnvironment("Auth__Keycloak__ClientSecret", clientSecret);
+        .WithEnvironment("Auth__Keycloak__ClientSecret", clientSecret)
+        .WaitFor(keycloak);
 
 // Per-bounded-context outbox exchange names. Centralised in the AppHost's
 // appsettings.json under Parameters:outbox-exchange-* and fanned out to the
@@ -316,9 +338,12 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WaitFor(studentsApi)
     // ar-20: the Admin Blazor shell's existing OIDC code-flow (unchanged) now has real
     // Keycloak wiring via the dev container; its UI/auth code is untouched this round.
+    // ar-21: admin is gated on keycloak readiness like the three APIs above (it also
+    // receives Auth:Keycloak:*).
     .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
     .WithEnvironment("Auth__Keycloak__ClientId", keycloakClientId)
-    .WithEnvironment("Auth__Keycloak__ClientSecret", keycloakClientSecret);
+    .WithEnvironment("Auth__Keycloak__ClientSecret", keycloakClientSecret)
+    .WaitFor(keycloak);
 
 // F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
 // Option B, a separate host rather than routes on Admin). Depends on the
