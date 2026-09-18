@@ -111,10 +111,12 @@ the user wants to choose explicitly:
    parent plans and accepts; one worker run, plus a static diff-only reviewer for
    Tier 2. Small-to-medium behavioural fixes.
 3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
-   round doc, worker implements, reviewer statically verifies, orchestrator accepts
-   and hands over UI-tester scope, UI tester bug-hunts delivered UI. No-UI rounds
-   run **lean** (skill § "Tier 3 lean"): the parent transcribes acceptance and no
-   UI tester is dispatched — the orchestrator plan pass is never skipped.
+   round doc, **the plan is independently reviewed before implementation** (skill
+   step 2b — on full rounds by `glm-5.3:cloud`), worker implements, reviewer
+   statically verifies, orchestrator accepts and hands over UI-tester scope, UI
+   tester bug-hunts delivered UI. No-UI rounds run **lean** (skill § "Tier 3
+   lean"): the parent transcribes acceptance and no UI tester is dispatched — the
+   orchestrator plan pass and its review are never skipped.
 
 Each round produces a single `round-<slug>.md` (+ `diffs-<slug>.patch`) in
 `documents/rounds/` — see "Repository docs layout" below.
