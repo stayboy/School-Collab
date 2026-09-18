@@ -280,9 +280,27 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
 
 Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
 (used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
-that imports the committed `src/AppHost/SchoolCollab.AppHost/realm-school-collab.json` realm
+that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
 (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
 `settings-api`, and `admin`.
+
+The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
+`dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
+`dev-only-school-collab-client-secret`. **Neither value may ever be reused in a real
+(production/demo) realm.** The `tenant_id` / `teacher_id` protocol-mapper values pin the
+FIXED ids seeded by the MigrationService `DevIdentitySeeder` (Dev School `…0002`, Dev
+Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
+
+**Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
+management endpoint (targetPort 9000) and binds an HTTP readiness health check
+(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
+`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
+OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
+does not fully start until the import completes).
+
+**Re-import on every recreate (ar-21).** No keycloak data volume is declared, so the realm
+file re-imports on every container recreate — edit the realm and recreate the container to
+pick it up; no `docker volume rm` is needed.
 
 | Key | Default | Description |
 | :--- | :--- | :--- |

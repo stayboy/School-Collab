@@ -1013,3 +1013,45 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   republish-Skip-over-`Sent` history note (owner accept/reject owed), duplicated worker-side address resolver,
   sendout-time/day-of-due-date un-enforced (owner (a)), single-instance sweeps, per-candidate ≈3 HTTP calls/pass.
   **Next:** D-6 identity before Phase 5 WS-G; program post-Phase-4 cleanup.
+- `ar-20-identity` — **CLOSED and MERGED 2026-09-18** (`74a42da1`, PR #244), Tier 3 FULL FOUR-AGENT (first round under the new mandatory plan-review gate);
+  Phase 4 slice **D-6 identity** (`rounds/round-ar-20-identity.md` + `diffs-ar-20-identity.patch`; branch
+  `stack/20-ar-20-identity` cut at `11cc37e1` = merged ar-19; **squash-merged to `main` as `74a42da1` via PR #244, 2026-09-18**). **Owner decisions:** API-first (no UI file changes);
+  dev/CI default stays `FEATURE:DisableOIDCAuth=true` (TestAuth, container-free CI) with a documented flip; `sub` →
+  `Teacher` via a realm protocol mapper emitting `teacher_id` + server-side validation. **Delivered:** `Bearer`
+  scheme via `AddJwtBearer` in the OIDC branch of the shared `AddAuthAndTenancy` (Core), `ICurrentUser`/`CurrentUser`,
+  `ITeacherDirectory` port + `TeacherDirectoryHttpClient`, principal-wins attribution threaded through the five
+  assignment handlers (typed `MissingTeacherPrincipalException` → 403, `UnknownTeacherException` → 409), MigrationService
+  `DevIdentitySeeder` (Development-gated, raw-SQL fixed ids `…0002`/`…0003`, `ON CONFLICT`), AppHost Keycloak dev
+  container + 3 parameters + `Auth:Keycloak:*` fan-out, committed realm import, `configuration.md` §2/§4/§5/§11.
+  **Gate ledger:** plan review REWORK 7 P1 (incl. a security hole in a pinned decision — fallback keyed on claim
+  *absence* instead of auth mode; and an audience-map gap that would have failed token validation) → diff review
+  REWORK 1 P1 (a `CancellationToken` bound as a **SQL parameter value** in the seeder → migrator exit 1 → every host's
+  `WaitForCompletion(migrator)` blocked) + 8 P2 → re-verify ACCEPT (0 P1, 5 P2) → parent fixes pass, whose new wiring
+  test immediately caught the `FeatureFlags:DisableOIDCAuth` vs canonical `FeatureFlags:FEATURE:DisableOIDCAuth`
+  split. **38 files, +1342/−55; matrix 2,391/0** (Core 92, Assignments 663, Api 80, Integration 4, Families 42,
+  Students 422, Students.Api 1, Settings 519, Settings.Api 1, Admin 546, Architecture 21). Security posture verified
+  positively: under real auth the wire `TeacherId`/`ApproverId` cannot be honoured; tenant is server-authoritative.
+  **Residuals:** AC#4 not run (**deferred to ar-21**, below — it was prerequisite-blocked by the AppHost Keycloak
+  block, not merely unrun); submission-review path not identity-threaded; `DisableOIDCAuth` split-brain risk
+  (per-request flag read vs startup-fixed scheme); no cross-tenant `teacher_id` validation on approve/reject/review/
+  override; ward `/students` + Admin UI bearer-only after a flip; dev `staff_number` NULL; one partly-vacuous shape
+  test; no route-level 403/409 test.
+- `ar-21-keycloak-apphost-hardening` — **CLOSED 2026-09-18, Tier 3 LEAN** (`rounds/round-ar-21-keycloak-apphost-hardening.md` + `diffs-ar-21-keycloak-apphost-hardening.patch`; branch `stack/21-ar-21-keycloak-apphost-hardening` cut at `74a42da1` = the ar-20 merge commit;
+  patch written at execution). Carries ar-20's AC#4. **Findings (code-grounded):** (F1) no readiness gate — the Keycloak
+  container declares no health signal and no consuming host `.WaitFor(keycloak)`s it, while Keycloak does not fully start
+  until the realm import completes (cold-start race on all four hosts); (F2) `WithHttpEndpoint(name: "http")` omits
+  `targetPort` where the mailpit precedent passes it; (F3) realm file violates Keycloak's `<realm>-realm.json` naming
+  convention; (F4) **the realm file is not strict JSON** — 8 `//` comment lines inside the object (proven: node
+  `JSON.parse` fails at line 2 col 3); (F5) the first-party **`Aspire.Hosting.Keycloak`** integration exists and supplies
+  precisely what F1/F2 lack (management endpoint 9000, `KC_HEALTH_ENABLED=true`, `/health/ready` health check,
+  run/publish mode args, `WithRealmImport`, `WithDataVolume`, OTLP) — its client counterpart carries the same
+  `RequireHttpsMetadata` caveat we already documented, and its realm import is dev-time only; (F6) a comment instructs
+  removing a Keycloak data volume that is never declared; (F7) secret-default inconsistency vs the committed realm
+  literal; (F8) no repo guard for the realm artifact (new `AppHostRealmImportArchitectureTests`,
+  `SeedCsvArchitectureTests` precedent). **Accepted for verification:** the real AC#4 run (password-grant `dev-teacher`
+  → `GET /assignments` → `Dev School` tenant), with the known create-leg deviation (409 `UnknownTeacher` without
+  service-to-service forwarding). **Open owner decisions blocking the start:** D1 hardening shape — minimal raw-container
+  fixes (**Tier 2 light**) vs adopting `Aspire.Hosting.Keycloak` (**Tier 3 lean**) vs that plus a production realm-import
+  story; D2 client-secret dev default; D3 declare a data volume or document re-import-on-recreate. Out of scope: all
+  other ar-20 identity residuals (candidates for a later identity-hardening round) and the Phase 5 WS-G deploy/retention items.
+  **Reviewed 2026-09-18 by `glm-5.3:cloud` (`219ddbed`, read-only scope review of the doc, pre-D1): REWORK 2 P1 + 5 P2 + 6 nits,** all landed in one pass — the P1s were a plan-review **model** misstatement (lean uses the reviewer model; `glm-5.3:cloud` is full-Tier-3 only) and F5 being presented as in-repo fact when the `Aspire.Hosting.Keycloak` claim has **zero in-repo substantiation** (the reviewer flagged the circular provenance: the only in-repo mentions were these very registry notes). P2s added realm **semantic** preservation to AC1 (AC2 guarded validity/naming but not the mapper config), a vacuously-satisfiable hardcoded filename in AC2, the AC3/AC4 honesty gap, the missing `TestAuthShape_…` residual, and an AC6 contingency with no owning file. **Delivered:** a real, importable Keycloak dev IdP with a readiness gate. `Program.cs`: `KC_HEALTH_ENABLED=true`, a management endpoint (`targetPort: 9000`), an HTTP readiness health check bound to it (`path: "/health/ready", endpointName: "management"`), an explicit `targetPort: 8080` on the http endpoint, `.WaitFor(keycloak)` on **all four** `Auth:Keycloak:*` consumers (settings/students/assignments **and** the inline admin block), the realm file renamed to the conventional `school-collab-realm.json` with its eight `//` comment lines moved into the AppHost comment, and the misleading data-volume comment corrected (D3: no volume). New `AppHostRealmImportArchitectureTests` guard (strict JSON via `JsonCommentHandling.Disallow`; filename **derived from the file's own `realm` property**; all three agreement sites asserted individually; discovery **throws** on zero/multiple candidates). `configuration.md` §4. **5 files, +210/−28** (realm recorded as a **rename**). **Gate ledger:** plan review REWORK 2 P1 + 6 P2 (AC6 was simultaneously in scope and forbidden; AC2's derived-name clause had no discriminating probe) → re-read ACCEPT; diff review **P2-only, 0 P1** → the parent fixed all three guard-test P2s (a `//`-substring probe that false-failed on any legitimate URL, a tautological `StartWith`, redundant usings) and **re-proved discrimination** (a re-introduced comment breaks five guard tests; the file was restored byte-identically). Parent authoritative pass: build **0 errors**, ArchitectureTests **26/0**, Core.Tests.Unit **92/0**. **Runtime evidence (decomposed — the AppHost cannot start on this machine: three reproducible attempts stall right after model validation with 8/8 port allocations failing, including untouched resources):** the renamed realm file **imports** (`Realm 'school-collab' imported`); `/health/ready` → **200 `{"status":"UP"}`** on the management port (so the pre-authorised fallback was not needed); the issuer matches the realm path; a live `dev-teacher` ROPC token → **200** carrying `aud=school-collab-client`, `tenant_id=…0002`, `tenant_name=Dev School`, `teacher_id=…0003`; and against a standalone `assignments-api`, `GET /assignments` → **200 `[]`** vs **401** with no/bogus token. **Negative probe:** the pre-fix commented realm file **fails the import outright** (`ALLOW_COMMENTS` not enabled) → ar-20's AC#4 could never have passed, so the comment strip is load-bearing. **Residuals:** AC9's *orchestrated* cold start (headline); AC5's data-visibility limit (`[]` because the dev DB holds zero assignment rows); D1-deferred `Aspire.Hosting.Keycloak` + the production realm-import story → Phase 5 WS-G.
