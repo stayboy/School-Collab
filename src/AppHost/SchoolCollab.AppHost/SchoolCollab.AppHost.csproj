@@ -14,6 +14,12 @@
     <PackageReference Include="Aspire.Hosting.Redis" />
   </ItemGroup>
   <ItemGroup>
+    <!-- ar-20: Ship the committed Keycloak realm import next to the AppHost dll so the
+         container bind mount resolves it at launch (Program.cs WithBindMount). The file
+         is DEV-ONLY (see its top comment). -->
+    <None Include="realm-school-collab.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Contracts\SchoolCollab.Settings.Contracts.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />

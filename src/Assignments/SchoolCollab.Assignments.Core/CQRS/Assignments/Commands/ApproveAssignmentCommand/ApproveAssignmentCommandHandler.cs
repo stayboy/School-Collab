@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 
@@ -14,6 +16,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ApproveAssignm
 public sealed class ApproveAssignmentCommandHandler(
     IAssignmentRepository repository,
     HybridCache cache,
+    ICurrentUser currentUser,
+    IFeatureFlagService featureFlags,
     ILogger<ApproveAssignmentCommandHandler> logger) : ICommandHandler<ApproveAssignmentCommand>
 {
     public async Task HandleAsync(ApproveAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -23,13 +27,23 @@ public sealed class ApproveAssignmentCommandHandler(
         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.AssignmentId);
 
-        assignment.Approve(command.ApproverId);
+        // ar-20 P1-6 principal-wins keyed on AUTH MODE: a teacher_id claim on the principal
+        // overrides the wire ApproverId; in real-auth (OIDC/bearer) a missing claim is
+        // REJECTED (never honor the wire field); in TestAuth/dev the request field is honored.
+        var approverId = currentUser.TeacherId
+            ?? (await IsRealAuthAsync(cancellationToken)
+                ? throw new MissingTeacherPrincipalException(nameof(ApproveAssignmentCommand))
+                : command.ApproverId);
+        assignment.Approve(approverId);
 
         await repository.UpdateAsync(assignment, cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);
 
         assignment.ClearDomainEvents();
 
-        logger.LogInformation("Assignment {Id} approved by {ApproverId}", assignment.Id, command.ApproverId);
+        logger.LogInformation("Assignment {Id} approved by {ApproverId}", assignment.Id, approverId);
     }
+
+    private async Task<bool> IsRealAuthAsync(CancellationToken ct)
+        => !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, ct);
 }

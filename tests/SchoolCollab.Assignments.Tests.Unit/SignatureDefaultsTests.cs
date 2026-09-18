@@ -158,6 +158,9 @@ public class SignatureDefaultsTests
             cache,
             tenants,
             Options.Create(new AttachmentUploadOptions()),
+            new FakeCurrentUser(),
+            new FakeTeacherDirectory(),
+            new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<CreateAssignmentCommandHandler>.Instance);
     }
 }

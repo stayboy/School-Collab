@@ -60,6 +60,9 @@ public class CreateAssignmentCommandHandlerEntityCodeTests
                cache,
                tenants,
                Options.Create(new AttachmentUploadOptions()),
+               new FakeCurrentUser(),
+               new FakeTeacherDirectory(),
+               new FakeFeatureFlagService { IsEnabledValue = true },
                NullLogger<CreateAssignmentCommandHandler>.Instance);
 
     private static CreateAssignmentCommand SampleCommand() =>

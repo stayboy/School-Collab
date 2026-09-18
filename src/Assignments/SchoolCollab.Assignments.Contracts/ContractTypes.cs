@@ -218,13 +218,17 @@ public record UpdateAssignmentRequest(
 /// publish command when <see cref="AvailableFromUtc"/> arrives.</summary>
 public record ScheduleAssignmentRequest(DateTimeOffset AvailableFromUtc);
 
-/// <summary>Approve a pending assignment (spec §7 Q2). The
-/// <see cref="ApproverId"/> is a placeholder until identity wiring
-/// lands (the <c>ReviewAssignmentRequest.TeacherId</c> posture).</summary>
+/// <summary>Approve a pending assignment (spec §7 Q2).
+/// <see cref="ApproverId"/> is <b>server-ignored when the principal carries a
+/// <c>teacher_id</c> claim</b> (ar-20 — the principal wins); it is honored only under
+/// TestAuth/dev when no claim is present. Kept on the wire for the dev/TestAuth fallback;
+/// no shape change.</summary>
 public record ApproveAssignmentRequest(Guid ApproverId);
 
 /// <summary>Reject a pending assignment (spec §7 Q2). See
-/// <see cref="ApproveAssignmentRequest"/> for the identity posture.</summary>
+/// <see cref="ApproveAssignmentRequest"/> for the identity posture —
+/// <see cref="RejectAssignmentRequest.ApproverId"/> is server-ignored when a
+/// <c>teacher_id</c> claim is present (ar-20).</summary>
 public record RejectAssignmentRequest(Guid ApproverId);
 
 /// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
@@ -363,6 +367,11 @@ public record StagedAttachmentDto(
 public record PublishAssignmentRequest(IReadOnlyList<Guid>? ContactIds);
 
 public record ReviewAssignmentRequest(
+    /// <summary>
+    /// Teacher attribution for the review. From ar-20 this field is <b>server-ignored
+    /// when the principal carries a <c>teacher_id</c> claim</b> (the principal wins); the
+    /// request field is honored only under TestAuth/dev when no claim is present. Kept on
+    /// the wire to preserve the contract shape (no change).</summary>
     Guid TeacherId,
     decimal? Score,
     string? Comments);
@@ -410,6 +419,13 @@ public record SubmitAssignmentOnBehalfRequest(
     IReadOnlyList<SubmissionAnswerDto>? Answers = null);
 
 public record ReviewSubmissionRequest(
+    /// <summary>
+    /// Teacher attribution for the submission review. <b>Not yet identity-threaded</b> —
+    /// this path (route → <c>ReviewSubmissionCommandHandler</c>) still reads the request
+    /// field for both attribution and its ownership check, unlike the assignment-level
+    /// create/approve/reject/review/override handlers. Threading <c>ICurrentUser</c> here
+    /// and mapping <c>MissingTeacherPrincipalException</c> → 403 on that route is an
+    /// explicit D-6 follow-up. Kept on the wire to preserve the contract shape.</summary>
     Guid TeacherId,
     decimal? Score,
     string? Grade,
@@ -452,11 +468,9 @@ public record SubmissionFeedbackDto(
     decimal Score,
     bool? Passed);
 
-/// <summary>WS-A3 (spec §7 Q4) — request body for the
-/// <c>POST /assignments/{id}/students/{studentId}/override-attempts</c>
-/// teacher override route. <see cref="TeacherId"/> is the identity
-/// placeholder until identity wiring lands (D-6, the
-/// <c>ReviewAssignmentRequest.TeacherId</c> posture).</summary>
+/// <summary>WS-A3 / ar-20: <see cref="TeacherId"/> is <b>server-ignored when the principal
+/// carries a <c>teacher_id</c> claim</b> (the principal wins); honored only under
+/// TestAuth/dev when no claim is present. Kept on the wire to preserve the contract shape.</summary>
 public record OverrideStudentSubmissionAttemptsRequest(Guid TeacherId);
 
 // ── Phase 7: publish recipients + submission detail (spec §8/§12) ────────────
@@ -519,7 +533,10 @@ public record SubmissionVersionDto(
     /// <c>PassScore</c> is absent or scoring did not run.</summary>
     bool? Passed = null);
 
-/// <summary>Teacher review/grade attached to a submission (spec §4.13).</summary>
+/// <summary>Teacher review/grade attached to a submission (spec §4.13).
+/// <see cref="TeacherId"/> is a <b>response</b> value carrying whatever the
+/// submission-review path recorded — currently the request-supplied id (that path is not
+/// yet identity-threaded; D-6 follow-up) rather than a principal-derived one.</summary>
 public record SubmissionReviewDto(
     Guid Id,
     Guid SubmissionId,

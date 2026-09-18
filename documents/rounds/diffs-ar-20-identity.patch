@@ -1,0 +1,2095 @@
+diff --git a/Directory.Packages.props b/Directory.Packages.props
+index 6253871d..58694aa2 100644
+--- a/Directory.Packages.props
++++ b/Directory.Packages.props
+@@ -6,6 +6,7 @@
+     <PackageVersion Include="Aspire.Hosting.Redis" Version="13.4.5" />
+     <PackageVersion Include="Aspire.StackExchange.Redis.DistributedCaching" Version="13.4.5" />
+     <PackageVersion Include="Microsoft.AspNetCore.Authentication.Cookies" Version="2.3.11" />
++    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
+     <PackageVersion Include="System.Threading.RateLimiting" Version="8.0.0" />
+     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.12.0" />
+diff --git a/documents/configuration.md b/documents/configuration.md
+index d89632f7..9f6e93fe 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -136,6 +136,9 @@ files only carry values that genuinely belong to that single service
+ | `smtp-user` | Aspire parameter | _none_ | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. |
+ | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied for a relay that requires auth_ | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. Never commit it — set it via user-secrets / env-var like the other secrets below. |
+ | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
++| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
++| `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied_ | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. **No committed default** — supply via user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, mirroring `postgres-password`. This is one of the two parameters AC#4 needs; see §4. |
++| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied_ | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. **No committed default** — dev supplies the pinned dev-only literal `dev-only-school-collab-client-secret` (the realm file's client `secret`) via user-secrets / env-var; production supplies a real secret store value. This is the other of the two parameters AC#4 needs; see §4. |
+ 
+ **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
+ 
+@@ -167,7 +170,8 @@ for non-secret defaults — open it, change the value, re-run the AppHost:
+ ```
+ 
+ For secrets (`postgres-password`, `rabbitmq-password`,
+-`openrouter-api-key`, `smtp-password`) — do **not** commit them to source
++`openrouter-api-key`, `smtp-password`, `keycloak-admin-password`,
++`keycloak-client-secret`) — do **not** commit them to source
+ control. Use the AppHost's user-secrets store (preferred for local dev):
+ 
+ ```bash
+@@ -176,6 +180,9 @@ dotnet user-secrets set "Parameters:postgres-password" "postgres"
+ dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
+ dotnet user-secrets set "Parameters:openrouter-api-key" "<your-key>"
+ dotnet user-secrets set "Parameters:smtp-password" "<relay-password>"
++# ar-20 Keycloak dev container (both secrets, see §4)
++dotnet user-secrets set "Parameters:keycloak-admin-password" "<bootstrap-admin-password>"
++dotnet user-secrets set "Parameters:keycloak-client-secret" "dev-only-school-collab-client-secret"
+ ```
+ 
+ Or via env-vars (preferred for CI):
+@@ -185,6 +192,8 @@ export Parameters__postgres-password=postgres
+ export Parameters__rabbitmq-password=rabbit
+ export Parameters__openrouter-api-key=<your-key>
+ export Parameters__smtp_password=<relay-password>
++export Parameters__keycloak_admin_password=<bootstrap-admin-password>
++export Parameters__keycloak_client_secret=dev-only-school-collab-client-secret
+ ```
+ 
+ Aspire's `AddParameter(name, secret: true)` flags secrets so that they are
+@@ -270,13 +279,74 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
+ ## 4. `Auth:Keycloak` — OIDC authentication
+ 
+ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
+-(used by every API + Admin).
++(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
++that imports the committed `src/AppHost/SchoolCollab.AppHost/realm-school-collab.json` realm
++(`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
++`settings-api`, and `admin`.
+ 
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+-| `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). |
+-| `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID. |
+-| `Auth:Keycloak:ClientSecret` | `secret` | OpenID Connect client secret. **Override in production.** |
++| `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
++| `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
++| `Auth:Keycloak:ClientSecret` | _(none committed — parameter required)_ | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the pinned dev-only literal `dev-only-school-collab-client-secret` (matching the realm file's client `secret`), supplied via `Parameters:keycloak-client-secret`; **production** MUST substitute a real secret-store value. |
++
++> 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
++> sensitive values here. Use one of:
++> - `dotnet user-secrets set "Parameters:keycloak-admin-password" "..."` and
++>   `dotnet user-secrets set "Parameters:keycloak-client-secret" "dev-only-school-collab-client-secret"` (local dev)
++> - Aspire `AddParameter(..., secret: true)` + reference (CI) — no committed default (see §2)
++> - Azure Key Vault / your platform's secret manager (production)
++
++### Dev-only `RequireHttpsMetadata = false`
++
++The Keycloak dev container exposes an **HTTP** authority (`http://<host>:<port>`, realm
++`school-collab`), so the OIDC + JwtBearer handlers are wired with
++`RequireHttpsMetadata = false`. **Today that value is set unconditionally** — it is *not*
++environment-gated (see the commented lines in `AuthTenancyExtensions`), so a Production
++deployment must point `Auth:Keycloak:Authority` at an **https** URL. Relaxing HTTPS metadata
++validation outside the dev container is unsafe; gating this value on the host environment is
++a recorded follow-up.
++
++### Minting a bearer token with username/password (dev, ROPC)
++
++The dev client `school-collab-client` has **direct access grants enabled**, so you can mint a
++token with the seeded `dev-teacher` user via the password grant against Keycloak's token endpoint:
++
++```bash
++REALM_URL="http://localhost:<keycloak-http-port>/realms/school-collab"
++curl -s -X POST "$REALM_URL/protocol/openid-connect/token" \
++  -H "Content-Type: application/x-www-form-urlencoded" \
++  -d "grant_type=password" \
++  -d "client_id=school-collab-client" \
++  -d "client_secret=dev-only-school-collab-client-secret" \
++  --data-urlencode "username=dev-teacher" \
++  --data-urlencode "password=dev-only-password"
++```
++
++The response `access_token` carries `tenant_id=…0002`, `tenant_name="Dev School"`, `tenant_type="School"`,
++`teacher_id=…0003` (the fixed ids seeded by the MigrationService `DevIdentitySeeder`), plus `aud=school-collab-client`
++(the oidc-audience-mapper). Use it as `Authorization: Bearer <access_token>` against the bearer endpoint groups
++(e.g. `GET /assignments`). Mint the token from the **same host form as `Auth:Keycloak:Authority`** (IDX10205 caveat above).
++
++> ⚠️ **ROPC is deprecated (OAuth 2.1).** The password grant above is for local dev / simple clients
++> only. **Production stays on the authorization-code flow with PKCE** (the `AddOpenIdConnect` code
++> flow + `ResponseType = "code"` — the browser/cookie path) — never use the password grant in a
++> real deployment.
++
++### The two parameters AC#4 needs
++
++Acceptance criterion #4 can only be exercised once these are supplied (no committed defaults):
++
++| Parameter | Purpose |
++| --- | --- |
++| `Parameters__keycloak_admin_password` (user-secrets `Parameters:keycloak-admin-password`) | Keycloak bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`). |
++| `Parameters__keycloak_client_secret` (user-secrets `Parameters:keycloak-client-secret`) | Dev client secret — set to the pinned dev-only literal `dev-only-school-collab-client-secret`. |
++
++### Real vs TestAuth modes
++
++When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-configuration-service)),
++the OIDC + JwtBearer registration is replaced with `TestAuthHandler`, which auto-authenticates
++every request as a test user without Keycloak — intended for local development / CI only.
+ 
+ **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
+ 
+@@ -292,16 +362,6 @@ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfig
+ }
+ ```
+ 
+-> 🔐 **Secrets.** `ClientSecret` is the most sensitive value in the
+-> configuration tree. Use one of:
+-> - `dotnet user-secrets set "Auth:Keycloak:ClientSecret" "..."` (local dev)
+-> - Aspire `AddParameter(..., secret: true)` + reference (CI)
+-> - Azure Key Vault / your platform's secret manager (production)
+-
+-When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-configuration-service)),
+-the OIDC registration is replaced with `TestAuthHandler`, which auto-authenticates
+-every request as a test user — intended for local development only.
+-
+ ---
+ 
+ ## 5. `FeatureFlags` — central configuration service
+@@ -713,6 +773,9 @@ matching env-var form:
+ | `Parameters:smtp-user` | `Parameters__smtp_user` |
+ | `Parameters:smtp-password` | `Parameters__smtp_password` |
+ | `Parameters:smtp-from-address` | `Parameters__smtp_from_address` |
++| `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
++| `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
++| `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
+ | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+ | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+ | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 2eeb19ff..37a71fe3 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -1,3 +1,5 @@
++using Aspire.Hosting.ApplicationModel;
++
+ var builder = DistributedApplication.CreateBuilder(args);
+ 
+ // Pin the postgres superuser password so it stays stable across AppHost
+@@ -39,6 +41,45 @@ var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
+     .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp")
+     .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "http");
+ 
++// ── Keycloak dev IdP (ar-20) ───────────────────────────────────────────────────
++// Ships a Keycloak dev container with the committed realm-school-collab.json import
++// (realm `school-collab`, direct-access-grants client school-collab-client, seeded
++// dev-teacher user + tenant/teacher protocol mappers). Mirrors the mailpit block.
++// Secrets: `keycloak-admin-password` (Keycloak bootstrap admin) gets NO committed default
++// (operator supplies via Parameters__keycloak_admin_password / user-secrets).
++// `keycloak-client-secret` has a DEV-ONLY value matching the realm file's dev client
++// secret (labelled dev-only there) supplied via user-secrets/Parameters — see
++// documents/configuration.md §2/§4.
++var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-collab-client");
++var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
++var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
++
++// Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
++// bind mount path is stable regardless of the launch working directory.
++var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "realm-school-collab.json");
++
++var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
++    .WithArgs("start-dev", "--import-realm")
++    // Realm import is one-shot on empty state; a persistent volume may skip re-import
++    // after realm edits — remove the keycloak data volume (docker volume rm ...) to
++    // re-import a changed realm file (noted in the ar-20 worker report).
++    .WithBindMount(keycloakRealmPath, "/opt/keycloak/data/import/realm-school-collab.json")
++    .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
++    .WithEnvironment("KC_BOOTSTRAP_ADMIN_PASSWORD", keycloakAdminPassword)
++    .WithHttpEndpoint(name: "http");
++
++// Fan the Auth:Keycloak settings onto a consuming host (assignments-api, students-api,
++// settings-api, admin). The Authority is the Keycloak HTTP endpoint-reference expression
++// (Aspire resolves it at runtime); ClientId/ClientSecret come from the AppHost parameters.
++// No named-client service discovery is wired (the hosts read Auth:Keycloak:* directly).
++static void WireKeycloakAuth(
++    IResourceBuilder<ProjectResource> host, IResourceBuilder<ContainerResource> keycloak,
++    IResourceBuilder<ParameterResource> clientId, IResourceBuilder<ParameterResource> clientSecret)
++    => host
++        .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
++        .WithEnvironment("Auth__Keycloak__ClientId", clientId)
++        .WithEnvironment("Auth__Keycloak__ClientSecret", clientSecret);
++
+ // Per-bounded-context outbox exchange names. Centralised in the AppHost's
+ // appsettings.json under Parameters:outbox-exchange-* and fanned out to the
+ // matching API/Worker via WithEnvironment("Outbox__ExchangeName", param), so
+@@ -153,6 +194,8 @@ var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settin
+     .WaitFor(rabbit)
+     .WaitFor(redis)
+     .WaitForCompletion(migrator);
++// ar-20: real bearer/OIDC auth from the Keycloak dev container.
++WireKeycloakAuth(settingsApi, keycloak, keycloakClientId, keycloakClientSecret);
+ 
+ // Defensive: migrator references SchoolCollab.Settings.Core which exposes
+ // AddConfigFeatureFlagClient (URL "https+http://settings-api"). Migrator does
+@@ -188,6 +231,9 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
+     .WaitFor(rabbit)
+     .WaitFor(redis)
+     .WaitForCompletion(migrator);
++// ar-20: real auth wiring for students-api (its endpoint-group bearer posture is a
++// cheap follow-up per decision 3; the shared AddAuthAndTenancy registration applies here).
++WireKeycloakAuth(studentsApi, keycloak, keycloakClientId, keycloakClientSecret);
+ // NOTE: every cross-module HttpClient base address in src/** must have a matching
+ // .WithReference(<resource>) on the calling project here. CrossModuleWiringTests
+ // (Core.Tests.Unit/Architecture) enforces this — a missing reference surfaces at
+@@ -213,6 +259,8 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
+     .WaitFor(rabbit)
+     .WaitFor(redis)
+     .WaitForCompletion(migrator);
++// ar-20: wire the assignment endpoint groups to the Bearer scheme in the OIDC branch.
++WireKeycloakAuth(assignmentsApi, keycloak, keycloakClientId, keycloakClientSecret);
+ 
+ // Activity-group delete-guard hop (Phase 2, FR-6); 404 = "no references".
+ // Added after assignmentsApi is declared so the studentsApi block above stays in
+@@ -265,7 +313,12 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+     .WaitFor(settingsApi)
+     .WaitFor(settingsAi)
+     .WaitFor(assignmentsApi)
+-    .WaitFor(studentsApi);
++    .WaitFor(studentsApi)
++    // ar-20: the Admin Blazor shell's existing OIDC code-flow (unchanged) now has real
++    // Keycloak wiring via the dev container; its UI/auth code is untouched this round.
++    .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
++    .WithEnvironment("Auth__Keycloak__ClientId", keycloakClientId)
++    .WithEnvironment("Auth__Keycloak__ClientSecret", keycloakClientSecret);
+ 
+ // F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
+ // Option B, a separate host rather than routes on Admin). Depends on the
+diff --git a/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj b/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
+index 44e61303..35471d44 100644
+--- a/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
++++ b/src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj
+@@ -13,6 +13,12 @@
+     <PackageReference Include="Aspire.Hosting.RabbitMQ" />
+     <PackageReference Include="Aspire.Hosting.Redis" />
+   </ItemGroup>
++  <ItemGroup>
++    <!-- ar-20: Ship the committed Keycloak realm import next to the AppHost dll so the
++         container bind mount resolves it at launch (Program.cs WithBindMount). The file
++         is DEV-ONLY (see its top comment). -->
++    <None Include="realm-school-collab.json" CopyToOutputDirectory="PreserveNewest" />
++  </ItemGroup>
+   <ItemGroup>
+     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Contracts\SchoolCollab.Settings.Contracts.csproj" IsAspireProjectResource="false" />
+     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" IsAspireProjectResource="false" />
+diff --git a/src/AppHost/SchoolCollab.AppHost/appsettings.json b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+index 02a49102..74cfe7f2 100644
+--- a/src/AppHost/SchoolCollab.AppHost/appsettings.json
++++ b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+@@ -24,6 +24,7 @@
+     "feature-flag-require-assignment-approval": "false",
+     "smtp-host": "localhost",
+     "smtp-port": "1025",
+-    "smtp-from-address": "no-reply@schoolcollab.local"
++    "smtp-from-address": "no-reply@schoolcollab.local",
++    "keycloak-client-id": "school-collab-client"
+   }
+ }
+diff --git a/src/AppHost/SchoolCollab.AppHost/realm-school-collab.json b/src/AppHost/SchoolCollab.AppHost/realm-school-collab.json
+new file mode 100644
+index 00000000..86f15747
+--- /dev/null
++++ b/src/AppHost/SchoolCollab.AppHost/realm-school-collab.json
+@@ -0,0 +1,114 @@
++{
++  // DEV-ONLY realm import for the Keycloak dev container (ar-20).
++  // CREDENTIALS IN THIS FILE ARE FOR LOCAL/DEV USE ONLY:
++  //   * dev-teacher login     : dev-teacher / dev-only-password
++  //   * school-collab-client  : secret dev-only-school-collab-client-secret
++  // NEITHER value may ever be reused in a real (production/demo) realm.
++  // The tenant_id / teacher_id protocol-mapper values below are the FIXED ids seeded
++  // by MigrationService DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003),
++  // so a dev login resolves to real backing rows on first boot.
++  "realm": "school-collab",
++  "enabled": true,
++  "sslRequired": "external",
++  "registrationAllowed": false,
++  "loginWithEmailAllowed": false,
++  "clients": [
++    {
++      "clientId": "school-collab-client",
++      "name": "School Collab",
++      "enabled": true,
++      "publicClient": false,
++      "standardFlowEnabled": true,
++      "directAccessGrantsEnabled": true,
++      "protocol": "openid-connect",
++      "secret": "dev-only-school-collab-client-secret",
++      "protocolMappers": [
++        {
++          "name": "tenant-id",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-attribute-mapper",
++          "config": {
++            "user.attribute": "tenant_id",
++            "claim.name": "tenant_id",
++            "access.token.claim": true,
++            "id.token.claim": true,
++            "userinfo.token.claim": true,
++            "jsonType.label": "String"
++          }
++        },
++        {
++          "name": "tenant-name",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-attribute-mapper",
++          "config": {
++            "user.attribute": "tenant_name",
++            "claim.name": "tenant_name",
++            "access.token.claim": true,
++            "id.token.claim": true,
++            "userinfo.token.claim": true,
++            "jsonType.label": "String"
++          }
++        },
++        {
++          "name": "tenant-type",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-attribute-mapper",
++          "config": {
++            "user.attribute": "tenant_type",
++            "claim.name": "tenant_type",
++            "access.token.claim": true,
++            "id.token.claim": true,
++            "userinfo.token.claim": true,
++            "jsonType.label": "String"
++          }
++        },
++        {
++          "name": "teacher-id",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-attribute-mapper",
++          "config": {
++            "user.attribute": "teacher_id",
++            "claim.name": "teacher_id",
++            "access.token.claim": true,
++            "id.token.claim": true,
++            "userinfo.token.claim": true,
++            "jsonType.label": "String"
++          }
++        },
++        {
++          "name": "audience-school-collab-client",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-audience-mapper",
++          "config": {
++            "included.client.audience": "school-collab-client",
++            "access.token.claim": true,
++            "id.token.claim": true
++          }
++        }
++      ]
++    }
++  ],
++  "users": [
++    {
++      "username": "dev-teacher",
++      "enabled": true,
++      "email": "dev-teacher@schoolcollab.local",
++      "emailVerified": true,
++      "firstName": "Dev",
++      "lastName": "Teacher",
++      "credentials": [
++        {
++          "type": "password",
++          "value": "dev-only-password",
++          "temporary": false
++        }
++      ],
++      "attributes": {
++        "tenant_id": ["00000000-0000-0000-0000-000000000002"],
++        "tenant_name": ["Dev School"],
++        "tenant_type": ["School"],
++        "teacher_id": ["00000000-0000-0000-0000-000000000003"]
++      }
++    }
++  ]
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+index b0997656..7498dcb8 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+@@ -1,4 +1,6 @@
++using Microsoft.AspNetCore.Authorization;
+ using SchoolCollab.Assignments.Api.Endpoints;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.Features;
+ 
+ namespace SchoolCollab.Assignments.Api;
+@@ -12,7 +14,12 @@ public static class AssignmentEndpoints
+ 
+         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+         {
+-            group.RequireAuthorization();
++            // ar-20 real-auth mode: assignments API groups authenticate via the bearer JWT
++            // scheme (Keycloak access tokens). DefaultScheme stays Cookie for the Admin/
++            // Families browser flows; this group opts into Bearer explicitly (decision 2/3).
++            group.RequireAuthorization(policy => policy
++                .RequireAuthenticatedUser()
++                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
+         }
+ 
+         group.MapAssignmentRoutes();
+@@ -23,7 +30,9 @@ public static class AssignmentEndpoints
+         var wardGroup = app.MapGroup("/students");
+         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+         {
+-            wardGroup.RequireAuthorization();
++            wardGroup.RequireAuthorization(policy => policy
++                .RequireAuthenticatedUser()
++                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
+         }
+         wardGroup.MapWardAssignmentRoutes();
+ 
+@@ -37,7 +46,9 @@ public static class AssignmentEndpoints
+             var activityGroupsGroup = app.MapGroup("");
+             if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+             {
+-                activityGroupsGroup.RequireAuthorization();
++                activityGroupsGroup.RequireAuthorization(policy => policy
++                    .RequireAuthenticatedUser()
++                    .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
+             }
+             activityGroupsGroup.MapActivityGroupLinkRoutes();
+         }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index a2229b81..112cd62e 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -243,6 +243,16 @@ public static class AssignmentRoutes
+             {
+                 return Results.BadRequest(new { ex.Message });
+             }
++            // ar-20: real-auth rejections map distinctly (never a 500). A principal with no
++            // usable teacher_id claim in real-auth mode → 403; an unknown teacher → 409.
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
++            catch (UnknownTeacherException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
++            }
+         });
+ 
+         group.MapPut("/{id:guid}", async (
+@@ -431,6 +441,11 @@ public static class AssignmentRoutes
+             {
+                 return Results.BadRequest(new { ex.Message });
+             }
++            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
+         });
+ 
+         // WS-A2 / spec §7 Q2: reject a pending assignment.
+@@ -457,6 +472,11 @@ public static class AssignmentRoutes
+             {
+                 return Results.BadRequest(new { ex.Message });
+             }
++            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
+         });
+ 
+         group.MapPost("/{id:guid}/unpublish", async (
+@@ -535,6 +555,11 @@ public static class AssignmentRoutes
+             {
+                 return Results.NotFound();
+             }
++            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
+         });
+ 
+         // ── Phase 7: recipients + review-gate + submission (spec §8/§9) ────────
+@@ -746,6 +771,11 @@ public static class AssignmentRoutes
+             {
+                 return Results.BadRequest(new { ex.Message });
+             }
++            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
+         });
+ 
+         // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 1bf11907..b5218c9f 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -138,6 +138,12 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAiPromptPolic
+ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IStudentDirectory,
+     SchoolCollab.Assignments.Api.Services.StudentDirectoryHttpClient>();
+ 
++// Teacher directory port (ar-20): validates a teacher_id claim against a real teacher row
++// via the students-api HTTP port (no cross-context reference). Reuses the existing
++// "students-api" named client registered above.
++builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherDirectory,
++    SchoolCollab.Assignments.Api.Services.TeacherDirectoryHttpClient>();
++
+ // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
+ // port (Assignments → Students) for the link command and SelectedGroups publish.
+ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherDirectoryHttpClient.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherDirectoryHttpClient.cs
+new file mode 100644
+index 00000000..694064a1
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherDirectoryHttpClient.cs
+@@ -0,0 +1,36 @@
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// HTTP-backed <see cref="ITeacherDirectory"/> (ar-20). Calls the existing
++/// <c>GET /teachers/{id:guid}</c> Students route via the <c>students-api</c> named client
++/// (Aspire service discovery). Fail-closed: any 404 or <see cref="HttpRequestException"/> /
++/// non-success status returns <see langword="false"/> so an unknown or unreachable teacher
++/// never passes the create-attribution gate. Mirrors <see cref="StudentDirectoryHttpClient"/>.
++/// </summary>
++public sealed class TeacherDirectoryHttpClient(
++    IHttpClientFactory httpClientFactory,
++    ILogger<TeacherDirectoryHttpClient> logger) : ITeacherDirectory
++{
++    public async Task<bool> ExistsAsync(Guid teacherId, CancellationToken cancellationToken = default)
++    {
++        if (teacherId == Guid.Empty)
++        {
++            return false;
++        }
++
++        var students = httpClientFactory.CreateClient("students-api");
++        try
++        {
++            var response = await students.GetAsync($"teachers/{teacherId}", cancellationToken);
++            return response.IsSuccessStatusCode;
++        }
++        catch (HttpRequestException ex)
++        {
++            logger.LogWarning(ex, "Failed to verify teacher {TeacherId} existence via students-api", teacherId);
++            return false;
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index 0f6c3e09..8630c671 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -218,13 +218,17 @@ public record UpdateAssignmentRequest(
+ /// publish command when <see cref="AvailableFromUtc"/> arrives.</summary>
+ public record ScheduleAssignmentRequest(DateTimeOffset AvailableFromUtc);
+ 
+-/// <summary>Approve a pending assignment (spec §7 Q2). The
+-/// <see cref="ApproverId"/> is a placeholder until identity wiring
+-/// lands (the <c>ReviewAssignmentRequest.TeacherId</c> posture).</summary>
++/// <summary>Approve a pending assignment (spec §7 Q2).
++/// <see cref="ApproverId"/> is <b>server-ignored when the principal carries a
++/// <c>teacher_id</c> claim</b> (ar-20 — the principal wins); it is honored only under
++/// TestAuth/dev when no claim is present. Kept on the wire for the dev/TestAuth fallback;
++/// no shape change.</summary>
+ public record ApproveAssignmentRequest(Guid ApproverId);
+ 
+ /// <summary>Reject a pending assignment (spec §7 Q2). See
+-/// <see cref="ApproveAssignmentRequest"/> for the identity posture.</summary>
++/// <see cref="ApproveAssignmentRequest"/> for the identity posture —
++/// <see cref="RejectAssignmentRequest.ApproverId"/> is server-ignored when a
++/// <c>teacher_id</c> claim is present (ar-20).</summary>
+ public record RejectAssignmentRequest(Guid ApproverId);
+ 
+ /// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
+@@ -363,6 +367,11 @@ public record StagedAttachmentDto(
+ public record PublishAssignmentRequest(IReadOnlyList<Guid>? ContactIds);
+ 
+ public record ReviewAssignmentRequest(
++    /// <summary>
++    /// Teacher attribution for the review. From ar-20 this field is <b>server-ignored
++    /// when the principal carries a <c>teacher_id</c> claim</b> (the principal wins); the
++    /// request field is honored only under TestAuth/dev when no claim is present. Kept on
++    /// the wire to preserve the contract shape (no change).</summary>
+     Guid TeacherId,
+     decimal? Score,
+     string? Comments);
+@@ -410,6 +419,13 @@ public record SubmitAssignmentOnBehalfRequest(
+     IReadOnlyList<SubmissionAnswerDto>? Answers = null);
+ 
+ public record ReviewSubmissionRequest(
++    /// <summary>
++    /// Teacher attribution for the submission review. <b>Not yet identity-threaded</b> —
++    /// this path (route → <c>ReviewSubmissionCommandHandler</c>) still reads the request
++    /// field for both attribution and its ownership check, unlike the assignment-level
++    /// create/approve/reject/review/override handlers. Threading <c>ICurrentUser</c> here
++    /// and mapping <c>MissingTeacherPrincipalException</c> → 403 on that route is an
++    /// explicit D-6 follow-up. Kept on the wire to preserve the contract shape.</summary>
+     Guid TeacherId,
+     decimal? Score,
+     string? Grade,
+@@ -452,11 +468,9 @@ public record SubmissionFeedbackDto(
+     decimal Score,
+     bool? Passed);
+ 
+-/// <summary>WS-A3 (spec §7 Q4) — request body for the
+-/// <c>POST /assignments/{id}/students/{studentId}/override-attempts</c>
+-/// teacher override route. <see cref="TeacherId"/> is the identity
+-/// placeholder until identity wiring lands (D-6, the
+-/// <c>ReviewAssignmentRequest.TeacherId</c> posture).</summary>
++/// <summary>WS-A3 / ar-20: <see cref="TeacherId"/> is <b>server-ignored when the principal
++/// carries a <c>teacher_id</c> claim</b> (the principal wins); honored only under
++/// TestAuth/dev when no claim is present. Kept on the wire to preserve the contract shape.</summary>
+ public record OverrideStudentSubmissionAttemptsRequest(Guid TeacherId);
+ 
+ // ── Phase 7: publish recipients + submission detail (spec §8/§12) ────────────
+@@ -519,7 +533,10 @@ public record SubmissionVersionDto(
+     /// <c>PassScore</c> is absent or scoring did not run.</summary>
+     bool? Passed = null);
+ 
+-/// <summary>Teacher review/grade attached to a submission (spec §4.13).</summary>
++/// <summary>Teacher review/grade attached to a submission (spec §4.13).
++/// <see cref="TeacherId"/> is a <b>response</b> value carrying whatever the
++/// submission-review path recorded — currently the request-supplied id (that path is not
++/// yet identity-threaded; D-6 follow-up) rather than a principal-derived one.</summary>
+ public record SubmissionReviewDto(
+     Guid Id,
+     Guid SubmissionId,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ApproveAssignmentCommand/ApproveAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ApproveAssignmentCommand/ApproveAssignmentCommandHandler.cs
+index b0b1ed70..03948e54 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ApproveAssignmentCommand/ApproveAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ApproveAssignmentCommand/ApproveAssignmentCommandHandler.cs
+@@ -1,6 +1,8 @@
+ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ 
+@@ -14,6 +16,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ApproveAssignm
+ public sealed class ApproveAssignmentCommandHandler(
+     IAssignmentRepository repository,
+     HybridCache cache,
++    ICurrentUser currentUser,
++    IFeatureFlagService featureFlags,
+     ILogger<ApproveAssignmentCommandHandler> logger) : ICommandHandler<ApproveAssignmentCommand>
+ {
+     public async Task HandleAsync(ApproveAssignmentCommand command, CancellationToken cancellationToken = default)
+@@ -23,13 +27,23 @@ public sealed class ApproveAssignmentCommandHandler(
+         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
+             ?? throw new AssignmentNotFoundException(command.AssignmentId);
+ 
+-        assignment.Approve(command.ApproverId);
++        // ar-20 P1-6 principal-wins keyed on AUTH MODE: a teacher_id claim on the principal
++        // overrides the wire ApproverId; in real-auth (OIDC/bearer) a missing claim is
++        // REJECTED (never honor the wire field); in TestAuth/dev the request field is honored.
++        var approverId = currentUser.TeacherId
++            ?? (await IsRealAuthAsync(cancellationToken)
++                ? throw new MissingTeacherPrincipalException(nameof(ApproveAssignmentCommand))
++                : command.ApproverId);
++        assignment.Approve(approverId);
+ 
+         await repository.UpdateAsync(assignment, cancellationToken);
+         await cache.RemoveByTagAsync("assignments", cancellationToken);
+ 
+         assignment.ClearDomainEvents();
+ 
+-        logger.LogInformation("Assignment {Id} approved by {ApproverId}", assignment.Id, command.ApproverId);
++        logger.LogInformation("Assignment {Id} approved by {ApproverId}", assignment.Id, approverId);
+     }
++
++    private async Task<bool> IsRealAuthAsync(CancellationToken ct)
++        => !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, ct);
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs
+index 3a0acf9d..760558ce 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs
+@@ -1,12 +1,15 @@
+ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
+ using Microsoft.Extensions.Options;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Core.EntityCodes;
++using SchoolCollab.Core.Features;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Contracts.Events;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ using SchoolCollab.Assignments.Core.Services;
+ using SchoolCollab.Core.Messaging;
+ using SchoolCollab.Core.Tenancy;
+@@ -20,6 +23,9 @@ public sealed class CreateAssignmentCommandHandler(
+     HybridCache cache,
+     ITenantProvider tenantProvider,
+     IOptions<AttachmentUploadOptions> uploadOptions,
++    ICurrentUser currentUser,
++    ITeacherDirectory teacherDirectory,
++    IFeatureFlagService featureFlags,
+     ILogger<CreateAssignmentCommandHandler> logger) : ICommandHandler<CreateAssignmentCommand, Guid>
+ {
+     public async Task<Guid> HandleAsync(CreateAssignmentCommand command, CancellationToken cancellationToken = default)
+@@ -28,6 +34,32 @@ public sealed class CreateAssignmentCommandHandler(
+ 
+         var tenantContext = tenantProvider.GetTenantContext();
+ 
++        // ar-20 P1-6 server-authoritative attribution, keyed on AUTH MODE (not claim
++        // absence): in real-auth (OIDC/bearer) a missing teacher_id is REJECTED — the wire
++        // has no teacher field, so there is nothing to fall back to. In TestAuth/dev the
++        // claim (if any) wins, else Guid.Empty (preserves today's posture). A present claim
++        // is always validated against the teacher directory (UnknownTeacher on miss).
++        var realAuth = !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, cancellationToken);
++        var teacherClaim = currentUser.TeacherId;
++        Guid createdByTeacherId;
++        if (teacherClaim.HasValue)
++        {
++            createdByTeacherId = teacherClaim.Value;
++            var teacherExists = await teacherDirectory.ExistsAsync(createdByTeacherId, cancellationToken);
++            if (!teacherExists)
++            {
++                throw new UnknownTeacherException(createdByTeacherId);
++            }
++        }
++        else if (realAuth)
++        {
++            throw new MissingTeacherPrincipalException(nameof(CreateAssignmentCommand));
++        }
++        else
++        {
++            createdByTeacherId = Guid.Empty;
++        }
++
+         // Spec §4.5: auto-generate the assignment code before constructing the entity.
+         var assignmentNumber = await entityCodeGenerator.GenerateAsync("ASSIGNMENT_CODE", cancellationToken);
+ 
+@@ -53,7 +85,7 @@ public sealed class CreateAssignmentCommandHandler(
+             command.GradeLevelId,
+             command.DueDate,
+             command.MaxScore,
+-            createdByTeacherId: Guid.Empty, // TODO: wire up authenticated teacher ID
++            createdByTeacherId: createdByTeacherId,
+             mandatoryReview: command.MandatoryReview,
+             assignmentNumber: assignmentNumber,
+             aiPromptOverride: command.AiPromptOverride,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/OverrideStudentSubmissionAttempts/OverrideStudentSubmissionAttemptsCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/OverrideStudentSubmissionAttempts/OverrideStudentSubmissionAttemptsCommandHandler.cs
+index 144dc41f..9e0149d2 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/OverrideStudentSubmissionAttempts/OverrideStudentSubmissionAttemptsCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/OverrideStudentSubmissionAttempts/OverrideStudentSubmissionAttemptsCommandHandler.cs
+@@ -1,6 +1,8 @@
+ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ 
+@@ -18,6 +20,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.OverrideStuden
+ public sealed class OverrideStudentSubmissionAttemptsCommandHandler(
+     ISubmissionRepository submissionRepository,
+     HybridCache cache,
++    ICurrentUser currentUser,
++    IFeatureFlagService featureFlags,
+     ILogger<OverrideStudentSubmissionAttemptsCommandHandler> logger) : ICommandHandler<OverrideStudentSubmissionAttemptsCommand>
+ {
+     public async Task HandleAsync(OverrideStudentSubmissionAttemptsCommand command, CancellationToken cancellationToken = default)
+@@ -27,12 +31,20 @@ public sealed class OverrideStudentSubmissionAttemptsCommandHandler(
+         var submission = await submissionRepository.GetSubmissionAsync(command.SubmissionId, cancellationToken)
+             ?? throw new SubmissionNotFoundException(command.SubmissionId);
+ 
+-        submission.OverrideAttemptLimit(command.TeacherId);
++        // ar-20 P1-6 principal-wins keyed on AUTH MODE (see ApproveAssignmentCommandHandler).
++        var teacherId = currentUser.TeacherId
++            ?? (await IsRealAuthAsync(cancellationToken)
++                ? throw new MissingTeacherPrincipalException(nameof(OverrideStudentSubmissionAttemptsCommand))
++                : command.TeacherId);
++        submission.OverrideAttemptLimit(teacherId);
+         submissionRepository.Update(submission);
+         await submissionRepository.SaveChangesAsync(cancellationToken);
+         await cache.RemoveByTagAsync("assignments", cancellationToken);
+ 
+         logger.LogInformation("Teacher {TeacherId} overrode the attempt cap on submission {SubmissionId}",
+-            command.TeacherId, command.SubmissionId);
++            teacherId, command.SubmissionId);
+     }
++
++    private async Task<bool> IsRealAuthAsync(CancellationToken ct)
++        => !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, ct);
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RejectAssignmentCommand/RejectAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RejectAssignmentCommand/RejectAssignmentCommandHandler.cs
+index 2967ad38..13474535 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RejectAssignmentCommand/RejectAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RejectAssignmentCommand/RejectAssignmentCommandHandler.cs
+@@ -1,6 +1,8 @@
+ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ 
+@@ -13,6 +15,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RejectAssignme
+ public sealed class RejectAssignmentCommandHandler(
+     IAssignmentRepository repository,
+     HybridCache cache,
++    ICurrentUser currentUser,
++    IFeatureFlagService featureFlags,
+     ILogger<RejectAssignmentCommandHandler> logger) : ICommandHandler<RejectAssignmentCommand>
+ {
+     public async Task HandleAsync(RejectAssignmentCommand command, CancellationToken cancellationToken = default)
+@@ -22,13 +26,21 @@ public sealed class RejectAssignmentCommandHandler(
+         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
+             ?? throw new AssignmentNotFoundException(command.AssignmentId);
+ 
+-        assignment.Reject(command.ApproverId);
++        // ar-20 P1-6 principal-wins keyed on AUTH MODE (see ApproveAssignmentCommandHandler).
++        var approverId = currentUser.TeacherId
++            ?? (await IsRealAuthAsync(cancellationToken)
++                ? throw new MissingTeacherPrincipalException(nameof(RejectAssignmentCommand))
++                : command.ApproverId);
++        assignment.Reject(approverId);
+ 
+         await repository.UpdateAsync(assignment, cancellationToken);
+         await cache.RemoveByTagAsync("assignments", cancellationToken);
+ 
+         assignment.ClearDomainEvents();
+ 
+-        logger.LogInformation("Assignment {Id} rejected by {ApproverId}", assignment.Id, command.ApproverId);
++        logger.LogInformation("Assignment {Id} rejected by {ApproverId}", assignment.Id, approverId);
+     }
++
++    private async Task<bool> IsRealAuthAsync(CancellationToken ct)
++        => !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, ct);
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ReviewAssignmentCommand/ReviewAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ReviewAssignmentCommand/ReviewAssignmentCommandHandler.cs
+index 34580305..2767a6ef 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ReviewAssignmentCommand/ReviewAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/ReviewAssignmentCommand/ReviewAssignmentCommandHandler.cs
+@@ -1,6 +1,8 @@
+ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ 
+@@ -9,6 +11,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewAssignme
+ public sealed class ReviewAssignmentCommandHandler(
+     IAssignmentRepository repository,
+     HybridCache cache,
++    ICurrentUser currentUser,
++    IFeatureFlagService featureFlags,
+     ILogger<ReviewAssignmentCommandHandler> logger) : ICommandHandler<ReviewAssignmentCommand>
+ {
+     public async Task HandleAsync(ReviewAssignmentCommand command, CancellationToken cancellationToken = default)
+@@ -18,10 +22,18 @@ public sealed class ReviewAssignmentCommandHandler(
+         var assignment = await repository.GetAsync(command.Id, cancellationToken)
+             ?? throw new AssignmentNotFoundException(command.Id);
+ 
+-        assignment.AddReview(command.TeacherId, command.Score, command.Comments);
++        // ar-20 P1-6 principal-wins keyed on AUTH MODE (see ApproveAssignmentCommandHandler).
++        var teacherId = currentUser.TeacherId
++            ?? (await IsRealAuthAsync(cancellationToken)
++                ? throw new MissingTeacherPrincipalException(nameof(ReviewAssignmentCommand))
++                : command.TeacherId);
++        assignment.AddReview(teacherId, command.Score, command.Comments);
+         await repository.UpdateAsync(assignment, cancellationToken);
+         await cache.RemoveByTagAsync("assignments", cancellationToken);
+ 
+-        logger.LogInformation("Review added to Assignment {Id} by teacher {TeacherId}", assignment.Id, command.TeacherId);
++        logger.LogInformation("Review added to Assignment {Id} by teacher {TeacherId}", assignment.Id, teacherId);
+     }
++
++    private async Task<bool> IsRealAuthAsync(CancellationToken ct)
++        => !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, ct);
+ }
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/MissingTeacherPrincipalException.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/MissingTeacherPrincipalException.cs
+new file mode 100644
+index 00000000..2ee01452
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/MissingTeacherPrincipalException.cs
+@@ -0,0 +1,14 @@
++namespace SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++/// <summary>
++/// Thrown (ar-20, P1-6) when a write reaches a handler in real-auth mode (OIDC/bearer
++/// active — <c>FEATURE:DisableOIDCAuth=false</c>) but the authenticated principal carries
++/// no <c>teacher_id</c> claim, so attribution cannot be resolved server-authoritatively.
++/// In real-auth the wire identity field is NEVER honored; the operation is rejected with
++/// this typed exception instead of a bare <see cref="InvalidOperationException"/>.
++/// </summary>
++public sealed class MissingTeacherPrincipalException : Exception
++{
++    public MissingTeacherPrincipalException(string operation)
++        : base($"The authenticated principal did not provide a teacher_id claim required for server-authoritative attribution of '{operation}'.") { }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/UnknownTeacherException.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/UnknownTeacherException.cs
+new file mode 100644
+index 00000000..ccdff411
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/UnknownTeacherException.cs
+@@ -0,0 +1,12 @@
++namespace SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++/// <summary>
++/// Thrown (ar-20) when a create-assignment write carries a <c>teacher_id</c> claim whose
++/// teacher does not exist in the teacher directory (students-api). Typed — never a bare
++/// <see cref="InvalidOperationException"/> — so the API boundary can map it distinctly.
++/// </summary>
++public sealed class UnknownTeacherException : Exception
++{
++    public UnknownTeacherException(Guid teacherId)
++        : base($"Teacher with ID '{teacherId}' could not be resolved in the teacher directory.") { }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/ITeacherDirectory.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/ITeacherDirectory.cs
+new file mode 100644
+index 00000000..2d724c82
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/ITeacherDirectory.cs
+@@ -0,0 +1,21 @@
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// Cross-bounded-context directory port (Assignments → Students, ar-20): answers
++/// "does a teacher with this id exist?" so assignment write handlers can validate the
++/// <c>teacher_id</c> claim against a real Students-boundary teacher row. The interface
++/// lives in Assignments.Core; the HTTP implementation (<c>TeacherDirectoryHttpClient</c>)
++/// calls the <c>students-api</c> named client's <c>GET /teachers/{id}</c> route and is
++/// registered in Assignments.Api — mirroring <see cref="IStudentDirectory"/>. No direct
++/// cross-context project references; teacher existence goes through the students-api port.
++///
++/// <para>Failure posture: fail-<b>closed</b> on the existence check — a network failure
++/// or HTTP error returns <see langword="false"/> (unknown teacher), so a directory outage
++/// blocks create-attribution rather than accepting an unverifiable <c>teacher_id</c>.</para>
++/// </summary>
++public interface ITeacherDirectory
++{
++    /// <summary>Whether a teacher with <paramref name="teacherId"/> exists in its tenant.
++    /// Always <see langword="false"/> on 404 or network/HTTP failure (fail-closed).</summary>
++    Task<bool> ExistsAsync(Guid teacherId, CancellationToken cancellationToken = default);
++}
+diff --git a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+index 563cc49e..b6d3ed74 100644
+--- a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
++++ b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+@@ -1,5 +1,6 @@
+ using Microsoft.AspNetCore.Authentication;
+ using Microsoft.AspNetCore.Authentication.Cookies;
++using Microsoft.AspNetCore.Authentication.JwtBearer;
+ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+ using Microsoft.Extensions.Configuration;
+ using Microsoft.Extensions.DependencyInjection;
+@@ -14,6 +15,14 @@ namespace SchoolCollab.Core.Auth;
+ /// </summary>
+ public static class AuthTenancyExtensions
+ {
++    /// <summary>
++    /// The JWT bearer authentication scheme name used by API endpoint groups that need
++    /// real bearer-token auth (ar-20). Registered only when OIDC is enabled
++    /// (<c>FEATURE:DisableOIDCAuth=false</c>); in TestAuth mode API groups use the
++    /// default <see cref="AuthenticationOptions.DefaultScheme"/> instead.
++    /// </summary>
++    public const string BearerScheme = "Bearer";
++
+     /// <summary>
+     /// Adds cookie + OpenID Connect authentication using Keycloak and wires the current tenant
+     /// from token claims into <see cref="ITenantProvider"/> via <see cref="TenantClaimsTransformation"/>.
+@@ -36,6 +45,10 @@ public static class AuthTenancyExtensions
+         // Bridge from ClaimsPrincipal -> TenantContext
+         services.AddScoped<IClaimsTransformation, TenantClaimsTransformation>();
+ 
++        // Server-authoritative current-user resolution (ar-20): teacher id + tenant from
++        // the ClaimsPrincipal across OIDC cookie, bearer JWT, and TestAuth.
++        services.AddScoped<ICurrentUser, CurrentUser>();
++
+         // Dev tenant switcher store (auth-disabled / TestAuth mode only). Backed by
+         // the shared IDistributedCache (Redis in dev) so the selection made in the
+         // admin shell propagates to every API host's TestAuthHandler. Only consulted
+@@ -56,6 +69,11 @@ public static class AuthTenancyExtensions
+         }
+         else
+         {
++            var keycloakAuthority = configuration["Auth:Keycloak:Authority"]
++                ?? "https://keycloak.local/realms/school-collab";
++            var keycloakClientId = configuration["Auth:Keycloak:ClientId"]
++                ?? "school-collab-client";
++
+             // Authentication + authorization
+             services
+                 .AddAuthentication(options =>
+@@ -66,17 +84,44 @@ public static class AuthTenancyExtensions
+                 .AddCookie()
+                 .AddOpenIdConnect(options =>
+                 {
+-                    options.Authority = configuration["Auth:Keycloak:Authority"]
+-                        ?? "https://keycloak.local/realms/school-collab";
+-                    options.ClientId = configuration["Auth:Keycloak:ClientId"]
+-                        ?? "school-collab-client";
++                    options.Authority = keycloakAuthority;
++                    options.ClientId = keycloakClientId;
+                     options.ClientSecret = configuration["Auth:Keycloak:ClientSecret"]
+                         ?? "secret";
+                     options.ResponseType = "code";
+                     options.SaveTokens = true;
+ 
+-                    // TODO: configure ClaimActions here once the Keycloak claim mapping is finalised
+-                    // e.g. options.ClaimActions.MapJsonKey("tenant_id", "tenant_id");
++                    // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
++                    // an http:// authority is rejected unless metadata HTTPS is relaxed.
++                    // Production MUST keep this true (default) — gate on the dev flag.
++                    options.RequireHttpsMetadata = false;
++
++                    // The tenant/teacher values reach the cookie identity via the KEYCLOAK ID
++                    // TOKEN, not via ClaimActions. The realm's protocol mappers enable
++                    // id.token.claim=true, and the OIDC handler copies every id_token claim onto
++                    // the ClaimsPrincipal by default. ClaimActions would only shape the userinfo
++                    // payload, and GetClaimsFromUserInfoEndpoint defaults to false — so the four
++                    // MapJsonKey calls would be inert. We deliberately do NOT enable the userinfo
++                    // fetch: it would add a network round-trip for data the id_token already carries.
++                    options.GetClaimsFromUserInfoEndpoint = false;
++                })
++                .AddJwtBearer(options =>
++                {
++                    options.Authority = keycloakAuthority;
++                    // P1-1: Audience sets TokenValidationParameters audience validation; the
++                    // realm's oidc-audience-mapper emits aud=clientId on the access token.
++                    options.Audience = keycloakClientId;
++
++                    // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority) —
++                    // production MUST keep this false (default). Same dev-gating note as the
++                    // OIDC branch above.
++                    options.RequireHttpsMetadata = false;
++
++                    // NOTE (P1-2): the bearer path does NOT use ClaimActions — the JwtBearer
++                    // handler copies every claim from the access-token JWT payload by default
++                    // (incl. tenant_id/tenant_name/tenant_type/teacher_id, emitted by the realm
++                    // mappers with access.token.claim=true), so ICurrentUser reads the same
++                    // claim shape from a bearer token as from the OIDC cookie. No mapping here.
+                 });
+         }
+ 
+diff --git a/src/SchoolCollab.Core/Auth/CurrentUser.cs b/src/SchoolCollab.Core/Auth/CurrentUser.cs
+new file mode 100644
+index 00000000..ed6d3f64
+--- /dev/null
++++ b/src/SchoolCollab.Core/Auth/CurrentUser.cs
+@@ -0,0 +1,41 @@
++using System.Security.Claims;
++using Microsoft.AspNetCore.Http;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Core.Auth;
++
++/// <summary>
++/// Default <see cref="ICurrentUser"/> implementation backed by <see cref="IHttpContextAccessor"/>
++/// (the authenticated <c>ClaimsPrincipal</c>) and <see cref="ITenantProvider"/>. The teacher id is
++/// read from the <c>teacher_id</c> claim the same way for OIDC cookie, bearer JWT, and TestAuth
++/// principals; the tenant comes from the provider's post-transformation context. No
++/// <see cref="InvalidOperationException"/> is thrown from here — a missing/malformed claim simply
++/// yields a null/absent result.
++/// </summary>
++public sealed class CurrentUser(
++    IHttpContextAccessor httpContextAccessor,
++    ITenantProvider tenantProvider) : ICurrentUser
++{
++    private ClaimsPrincipal? Principal =>
++        httpContextAccessor.HttpContext?.User;
++
++    public bool IsAuthenticated =>
++        Principal?.Identity?.IsAuthenticated == true;
++
++    public Guid? TeacherId
++    {
++        get
++        {
++            var principal = Principal;
++            if (principal?.Identity?.IsAuthenticated != true)
++            {
++                return null;
++            }
++
++            var claim = principal.FindFirst("teacher_id")?.Value;
++            return Guid.TryParse(claim, out var teacherId) ? teacherId : null;
++        }
++    }
++
++    public TenantContext CurrentTenant => tenantProvider.GetTenantContext();
++}
+diff --git a/src/SchoolCollab.Core/Auth/ICurrentUser.cs b/src/SchoolCollab.Core/Auth/ICurrentUser.cs
+new file mode 100644
+index 00000000..6fad93e0
+--- /dev/null
++++ b/src/SchoolCollab.Core/Auth/ICurrentUser.cs
+@@ -0,0 +1,34 @@
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Core.Auth;
++
++/// <summary>
++/// Server-authoritative view of the authenticated principal (ar-20). Resolves the
++/// acting teacher id and tenant from the <see cref="System.Security.Claims.ClaimsPrincipal"/>
++/// regardless of which authentication scheme produced it — OIDC cookie, bearer JWT, or
++/// TestAuth. Consumption sites (assignment attribution handlers) use this instead of
++/// trusting the wire-request identity fields, so write attribution can no longer be
++/// spoofed by the client. When no teacher claim is present (TestAuth/dev default), the
++/// handlers fall back to the request's identity field.
++/// </summary>
++public interface ICurrentUser
++{
++    /// <summary>
++    /// Whether the current request carries an authenticated principal.
++    /// </summary>
++    bool IsAuthenticated { get; }
++
++    /// <summary>
++    /// The acting teacher id, resolved from the <c>teacher_id</c> claim. Null when the
++    /// principal carries no <c>teacher_id</c> claim (e.g. the TestAuth default posture),
++    /// or when the current request is unauthenticated. Never throws on a malformed claim.
++    /// </summary>
++    Guid? TeacherId { get; }
++
++    /// <summary>
++    /// The resolved tenant context for the current request (post
++    /// <see cref="TenantClaimsTransformation"/>, falling back to the principal's
++    /// <c>tenant_id</c> claim). Returns the default System context when no tenant is in scope.
++    /// </summary>
++    TenantContext CurrentTenant { get; }
++}
+diff --git a/src/SchoolCollab.Core/Auth/TestAuthHandler.cs b/src/SchoolCollab.Core/Auth/TestAuthHandler.cs
+index fe11ae52..6151a0b0 100644
+--- a/src/SchoolCollab.Core/Auth/TestAuthHandler.cs
++++ b/src/SchoolCollab.Core/Auth/TestAuthHandler.cs
+@@ -24,6 +24,14 @@ public class TestAuthHandlerOptions : AuthenticationSchemeOptions
+     /// override this to simulate a specific tenant context.
+     /// </summary>
+     public Guid TenantId { get; set; } = Guid.Empty;
++
++    /// <summary>
++    /// The teacher id to stamp as a <c>teacher_id</c> claim on the TestAuth principal.
++    /// Defaults to <see cref="Guid.Empty"/> so NO <c>teacher_id</c> claim is emitted —
++    /// preserving the pre-ar-20 dev/CI posture where attribution falls back to the wire
++    /// request field. Tests set this to simulate a real Keycloak identity with a
++    /// <c>teacher_id</c> claim.</summary>
++    public Guid TeacherId { get; set; } = Guid.Empty;
+ }
+ 
+ public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
+@@ -89,7 +97,13 @@ public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptio
+             new Claim("tenant_type", "School"),
+         };
+ 
+-        var identity = new ClaimsIdentity(claims, Scheme.Name);
++        var claimsList = claims.ToList();
++        if (Options.TeacherId != Guid.Empty)
++        {
++            claimsList.Add(new Claim("teacher_id", Options.TeacherId.ToString()));
++        }
++
++        var identity = new ClaimsIdentity(claimsList, Scheme.Name);
+         var principal = new ClaimsPrincipal(identity);
+         var ticket = new AuthenticationTicket(principal, Scheme.Name);
+ 
+diff --git a/src/SchoolCollab.Core/SchoolCollab.Core.csproj b/src/SchoolCollab.Core/SchoolCollab.Core.csproj
+index 1586991b..f37d35f1 100644
+--- a/src/SchoolCollab.Core/SchoolCollab.Core.csproj
++++ b/src/SchoolCollab.Core/SchoolCollab.Core.csproj
+@@ -6,6 +6,7 @@
+   </PropertyGroup>
+   <ItemGroup>
+     <PackageReference Include="Microsoft.AspNetCore.Authentication.Cookies" />
++    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Abstractions" />
+     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" />
+diff --git a/src/SchoolCollab.MigrationService/Program.cs b/src/SchoolCollab.MigrationService/Program.cs
+index 9c4b5f5f..5279fc4a 100644
+--- a/src/SchoolCollab.MigrationService/Program.cs
++++ b/src/SchoolCollab.MigrationService/Program.cs
+@@ -68,6 +68,9 @@ builder.Services.AddScoped<CodedValueSeeder>();
+ builder.Services.AddScoped<TenantSeeder>();
+ builder.Services.AddScoped<EntityCodeRuleSeeder>();
+ builder.Services.AddScoped<PilotActivityGroupFlagOverrideSeeder>();
++// ar-20: dev-only identity seed ("Dev School" tenant + "Dev Teacher") backing the
++// committed Keycloak realm's fixed claim values. Idempotent; dev/test only.
++builder.Services.AddScoped<DevIdentitySeeder>();
+ 
+ using var host = builder.Build();
+ var logger = host.Services.GetRequiredService<ILogger<Program>>();
+@@ -152,6 +155,21 @@ try
+             exitCode = 1;
+         }
+ 
++        // ── Dev identity seed (ar-20) ────────────────────────────────────────
++        // Seeds the fixed "Dev School" tenant (Settings) + "Dev Teacher" row (Students)
++        // that back the Keycloak realm's tenant_id/teacher_id mappers. Runs AFTER both
++        // migrations so the tenants + teachers tables exist. Idempotent; dev/test only.
++        try
++        {
++            var devIdentitySeeder = scope.ServiceProvider.GetRequiredService<DevIdentitySeeder>();
++            await devIdentitySeeder.SeedAsync();
++        }
++        catch (Exception ex)
++        {
++            logger.LogError(ex, "Dev identity seed failed");
++            exitCode = 1;
++        }
++
+         // ── Assignment backfill (PR 4) ─────────────────────────────────────────
+         // Removed: AssignmentBackfillService was a one-time legacy migration that
+         // created standalone Subjects from Assignments coded-value IDs. Under the
+diff --git a/src/SchoolCollab.MigrationService/Seeding/DevIdentitySeeder.cs b/src/SchoolCollab.MigrationService/Seeding/DevIdentitySeeder.cs
+new file mode 100644
+index 00000000..dd772bdb
+--- /dev/null
++++ b/src/SchoolCollab.MigrationService/Seeding/DevIdentitySeeder.cs
+@@ -0,0 +1,100 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Hosting;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Settings.Core.Data;
++using SchoolCollab.Students.Core.Data;
++
++namespace SchoolCollab.MigrationService.Seeding;
++
++/// <summary>
++/// Dev-only identity seed (ar-20): guarantees a fixed well-known "Dev School" tenant and
++/// "Dev Teacher" row that back the committed Keycloak realm file's <c>tenant_id</c> /
++/// <c>teacher_id</c> protocol-mapper values. A real Keycloak dev login therefore resolves
++/// to a real tenant + teacher id on first boot (no manual row creation).
++/// </summary>
++/// <remarks>
++/// <para>Fixed well-known Guids follow the <see cref="TenantSeeder.SystemTenantId"/> (…0001)
++/// precedent: …0002 = "Dev School" tenant, …0003 = "Dev Teacher". The realm file's protocol
++/// mappers emit EXACTLY these two values, so the mapper value always matches a seeded row.
++/// Random-guid sample tenants ('Hydeson School' etc.) are untouched.</para>
++/// <para>Both rows are inserted idempotently via raw SQL <c>INSERT … ON CONFLICT DO NOTHING</c>
++/// (the tenant keyed on its natural key <c>name</c>, the teacher on <c>id</c>) — the same
++/// fixed-guid mechanism the <c>AddSystemTenant</c> Settings migration uses
++/// (<c>migrationBuilder.Sql</c>). This sidesteps the domain factories' <c>Guid.NewGuid()</c>
++/// identity (both <see cref="Tenant.Create"/> and <see cref="Teacher.Create"/> assign a fresh id
++/// with a private setter) so a known id can be forced without a migration. The xmin row-version
++/// column is auto-valued by PostgreSQL, so it is absent from the insert column list.</para>
++/// <para><b>Dev-only gate:</b> the "Dev Teacher" password lives in the committed realm file and is
++/// labelled dev-only there; no production path authenticates against these fixed ids. This seeder
++/// is <b>gated on <see cref="IHostEnvironment.IsDevelopment"/></b> — the rows are inserted only in
++/// a Development host environment, never in Production. This prevents dev rows from leaking into a
++/// production MigrationService run.</para>
++/// </remarks>
++public sealed class DevIdentitySeeder(
++    SettingsDbContext settingsDb,
++    StudentsDbContext studentsDb,
++    IHostEnvironment environment,
++    ILogger<DevIdentitySeeder> logger)
++{
++    /// <summary>The fixed "Dev School" tenant id (…0002, after <see cref="TenantSeeder.SystemTenantId"/> …0001).</summary>
++    public static readonly Guid DevSchoolTenantId =
++        Guid.Parse("00000000-0000-0000-0000-000000000002");
++
++    /// <summary>The fixed "Dev Teacher" row id (…0003) inside <see cref="DevSchoolTenantId"/>.</summary>
++    public static readonly Guid DevTeacherId =
++        Guid.Parse("00000000-0000-0000-0000-000000000003");
++
++    /// <summary>
++    /// Seeds the dev tenant + dev teacher idempotently. No-op when either already exists, and a
++    /// no-op outside a Development host environment (<see cref="IHostEnvironment.IsDevelopment"/> —
++    /// the dev-only gate).
++    /// </summary>
++    public async Task SeedAsync(CancellationToken ct = default)
++    {
++        if (!environment.IsDevelopment())
++        {
++            logger.LogInformation(
++                "Dev identity seed skipped: host environment '{EnvironmentName}' is not Development",
++                environment.EnvironmentName);
++            return;
++        }
++
++        // P1: parameters are passed explicitly as an object[] so EF treats them as SQL parameters
++        // and passes ct as the CancellationToken (the bare `DevSchoolTenantId, ct` form would bind
++        // both into params object[], sending the token as a parameter value — a conversion failure
++        // at migrator startup).
++        // P2-2: `ON CONFLICT (name)` (not id) — tenants has a unique index on name
++        // (ix_tenants_name_unique), so a pre-existing "Dev School" row with a different id would
++        // otherwise raise a unique violation. The fixed id and the fixed name travel together, so
++        // the id PK conflict is covered by the same natural-key conflict target.
++        var insertedTenant = await settingsDb.Database.ExecuteSqlRawAsync(
++            """
++            INSERT INTO tenants (id, name, type, created_at, updated_at)
++            VALUES ({0}, 'Dev School', 'School', now(), now())
++            ON CONFLICT (name) DO NOTHING
++            """,
++            new object[] { DevSchoolTenantId }, ct);
++        if (insertedTenant > 0)
++            logger.LogInformation("Seeded dev tenant 'Dev School' ({Id})", DevSchoolTenantId);
++        else
++            logger.LogDebug("Dev tenant 'Dev School' already exists; skipping");
++
++        var insertedTeacher = await studentsDb.Database.ExecuteSqlRawAsync(
++            """
++            INSERT INTO teachers
++                (id, title_coded_value_id, first_name, last_name, date_of_birth,
++                 gender_coded_value_id, display_name, staff_user_id, staff_number,
++                 level_of_education_coded_value_id, tenant_id, is_deleted, deleted_at,
++                 created_at, updated_at)
++            VALUES
++                ({0}, NULL, 'Dev', 'Teacher', NULL, NULL, 'Dev Teacher', NULL, NULL, NULL,
++                 {1}, false, NULL, now(), now())
++            ON CONFLICT (id) DO NOTHING
++            """,
++            new object[] { DevTeacherId, DevSchoolTenantId }, ct);
++        if (insertedTeacher > 0)
++            logger.LogInformation("Seeded dev teacher 'Dev Teacher' ({Id})", DevTeacherId);
++        else
++            logger.LogDebug("Dev teacher 'Dev Teacher' already exists; skipping");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentApprovalCommandHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentApprovalCommandHandlerTests.cs
+index c17275ab..98f4dcbe 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentApprovalCommandHandlerTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentApprovalCommandHandlerTests.cs
+@@ -87,7 +87,7 @@ public class AssignmentApprovalCommandHandlerTests
+         var assignment = NewAssignment();
+         assignment.SubmitForApproval();
+         var repo = new FakeAssignmentRepository { Assignment = assignment };
+-        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(),
++        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<ApproveAssignmentCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new ApproveAssignmentCommand(assignment.Id, ApproverId));
+@@ -102,7 +102,7 @@ public class AssignmentApprovalCommandHandlerTests
+     {
+         var assignment = NewAssignment();
+         var repo = new FakeAssignmentRepository { Assignment = assignment };
+-        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(),
++        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<ApproveAssignmentCommandHandler>.Instance);
+ 
+         await FluentActions.Awaiting(() =>
+@@ -114,7 +114,7 @@ public class AssignmentApprovalCommandHandlerTests
+     public async Task Approve_UnknownId_Throws()
+     {
+         var repo = new FakeAssignmentRepository { Assignment = null };
+-        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(),
++        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<ApproveAssignmentCommandHandler>.Instance);
+ 
+         await FluentActions.Awaiting(() =>
+@@ -132,7 +132,7 @@ public class AssignmentApprovalCommandHandlerTests
+         assignment.Approve(ApproverId);
+         assignment.SubmitForApproval(); // back to Pending
+         var repo = new FakeAssignmentRepository { Assignment = assignment };
+-        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(),
++        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<RejectAssignmentCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new RejectAssignmentCommand(assignment.Id, ApproverId));
+@@ -147,7 +147,7 @@ public class AssignmentApprovalCommandHandlerTests
+     {
+         var assignment = NewAssignment();
+         var repo = new FakeAssignmentRepository { Assignment = assignment };
+-        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(),
++        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<RejectAssignmentCommandHandler>.Instance);
+ 
+         await FluentActions.Awaiting(() =>
+@@ -159,7 +159,7 @@ public class AssignmentApprovalCommandHandlerTests
+     public async Task Reject_UnknownId_Throws()
+     {
+         var repo = new FakeAssignmentRepository { Assignment = null };
+-        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(),
++        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<RejectAssignmentCommandHandler>.Instance);
+ 
+         await FluentActions.Awaiting(() =>
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAttributionTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAttributionTests.cs
+new file mode 100644
+index 00000000..b384b8c3
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAttributionTests.cs
+@@ -0,0 +1,205 @@
++using FluentAssertions;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Moq;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewAssignmentCommand;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.EntityCodes;
++using SchoolCollab.Core.Messaging;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// ar-20 discriminating tests for the P1-6 attribution rule (auth-mode-keyed principal-wins):
++/// a principal's <c>teacher_id</c> claim overrides the wire identity field, a missing claim
++/// is REJECTED in real-auth mode, and the wire field is honored ONLY under the TestAuth/dev
++/// branch (regression guard). Request-field values are non-empty Guids so "ignored" is
++/// distinguishable from "fallback".
++/// </summary>
++[TestClass]
++public class AssignmentAttributionTests
++{
++    private static readonly Guid PrincipalTeacher = Guid.Parse("00000000-0000-0000-0000-000000000003");
++    private static readonly Guid WireTeacher = Guid.Parse("00000000-0000-0000-0000-0000000000AA");
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
++    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-000000000020");
++
++    private static Assignment NewAssignment() =>
++        Assignment.Create("Attribution", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, TopicId, null, null, null, Guid.Empty)
++            .WithTenant(TenantId);
++
++    private static FakeAssignmentRepositoryForCapture NewCaptureRepo() => new();
++
++    // ── CreateAssignment: principal claim ⇒ not Guid.Empty ──────────────
++
++    [TestMethod]
++    public async Task CreateAssignment_WithTeacherClaim_PersistsPrincipalTeacher()
++    {
++        var repo = NewCaptureRepo();
++        var currentUser = new FakeCurrentUser { TeacherId = PrincipalTeacher };
++        var handler = new CreateAssignmentCommandHandler(
++            repo,
++            StubEntityCodeGenerator(),
++            StubPublisher(),
++            new FakeHybridCache(),
++            new StubTenantProvider(TenantId),
++            Options.Create(new AttachmentUploadOptions()),
++            currentUser,
++            new FakeTeacherDirectory { ExistsResult = true },
++            new FakeFeatureFlagService { IsEnabledValue = true }, // dev; claim governs
++            NullLogger<CreateAssignmentCommandHandler>.Instance);
++
++        await handler.HandleAsync(new CreateAssignmentCommand(
++            "Attribution HW", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, TopicId, null, null, null));
++
++        var created = repo.Added.Should().ContainSingle().Subject;
++        created.CreatedByTeacherId.Should().Be(PrincipalTeacher);
++        created.CreatedByTeacherId.Should().NotBe(Guid.Empty);
++    }
++
++    [TestMethod]
++    public async Task CreateAssignment_RealAuth_MissingClaim_ThrowsTyped()
++    {
++        // Regression: a real-auth identity with no teacher_id must NOT fall back to the wire.
++        var repo = NewCaptureRepo();
++        var handler = new CreateAssignmentCommandHandler(
++            repo,
++            StubEntityCodeGenerator(),
++            StubPublisher(),
++            new FakeHybridCache(),
++            new StubTenantProvider(TenantId),
++            Options.Create(new AttachmentUploadOptions()),
++            new FakeCurrentUser(),                       // TeacherId = null
++            new FakeTeacherDirectory(),
++            new FakeFeatureFlagService { IsEnabledValue = false }, // real-auth (DisableOIDCAuth=false)
++            NullLogger<CreateAssignmentCommandHandler>.Instance);
++
++        await FluentActions.Awaiting(() =>
++            handler.HandleAsync(new CreateAssignmentCommand(
++                "Attribution HW", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++                TargetAudienceType.AllStudents, TopicId, null, null, null, MandatoryReview: true)))
++            .Should().ThrowAsync<MissingTeacherPrincipalException>();
++    }
++
++    // ── ReviewAssignment: request TeacherId ignored when claim present ──
++
++    [TestMethod]
++    public async Task Review_RequestField_Ignored_WhenClaimPresent()
++    {
++        var assignment = NewAssignment();
++        var repo = new FakeReturningRepo { Assignment = assignment };
++        var handler = new ReviewAssignmentCommandHandler(
++            repo, new FakeHybridCache(),
++            new FakeCurrentUser { TeacherId = PrincipalTeacher },
++            new FakeFeatureFlagService { IsEnabledValue = true },
++            NullLogger<ReviewAssignmentCommandHandler>.Instance);
++
++        await handler.HandleAsync(new ReviewAssignmentCommand(
++            assignment.Id, WireTeacher, 90m, "ok")); // WireTeacher ≠ PrincipalTeacher
++
++        var review = assignment.Reviews.Should().ContainSingle().Subject;
++        review.TeacherId.Should().Be(PrincipalTeacher);     // principal wins
++        review.TeacherId.Should().NotBe(WireTeacher);      // request field ignored
++    }
++
++    // ── TestAuth/dev fallback (regression guard) ─────────────────────────
++
++    [TestMethod]
++    public async Task Review_DevFallback_NoClaim_HonorsRequestField()
++    {
++        var assignment = NewAssignment();
++        var repo = new FakeReturningRepo { Assignment = assignment };
++        var handler = new ReviewAssignmentCommandHandler(
++            repo, new FakeHybridCache(),
++            new FakeCurrentUser(),                          // no claim
++            new FakeFeatureFlagService { IsEnabledValue = true }, // TestAuth/dev
++            NullLogger<ReviewAssignmentCommandHandler>.Instance);
++
++        await handler.HandleAsync(new ReviewAssignmentCommand(
++            assignment.Id, WireTeacher, 90m, "ok"));
++
++        var review = assignment.Reviews.Should().ContainSingle().Subject;
++        review.TeacherId.Should().Be(WireTeacher);          // dev honors the wire field
++    }
++
++    // ── Real-auth + missing claim ⇒ typed rejection ─────────────────────
++
++    [TestMethod]
++    public async Task Review_RealAuth_MissingClaim_ThrowsTyped()
++    {
++        var assignment = NewAssignment();
++        var repo = new FakeReturningRepo { Assignment = assignment };
++        var handler = new ReviewAssignmentCommandHandler(
++            repo, new FakeHybridCache(),
++            new FakeCurrentUser(),                          // no claim
++            new FakeFeatureFlagService { IsEnabledValue = false }, // real-auth
++            NullLogger<ReviewAssignmentCommandHandler>.Instance);
++
++        await FluentActions.Awaiting(() =>
++            handler.HandleAsync(new ReviewAssignmentCommand(assignment.Id, WireTeacher, 90m, "ok")))
++            .Should().ThrowAsync<MissingTeacherPrincipalException>();
++    }
++
++    // ── helpers ──────────────────────────────────────────────────────────
++
++    private static IEntityCodeGenerator StubEntityCodeGenerator()
++    {
++        var g = new Mock<IEntityCodeGenerator>();
++        g.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
++         .ReturnsAsync("ASGA99");
++        return g.Object;
++    }
++
++    private static IIntegrationEventPublisher StubPublisher() => new Mock<IIntegrationEventPublisher>().Object;
++
++    private sealed class FakeAssignmentRepositoryForCapture : IAssignmentRepository
++    {
++        public List<Assignment> Added { get; } = [];
++        public Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult<Assignment?>(null);
++        public Task AddAsync(Assignment a, CancellationToken ct = default) { Added.Add(a); return Task.CompletedTask; }
++        public Task UpdateAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { }
++        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++    }
++
++    private sealed class FakeReturningRepo : IAssignmentRepository
++    {
++        public Assignment? Assignment;
++        public Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Assignment);
++        public Task AddAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task UpdateAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { }
++        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++    }
++
++    private sealed class StubTenantProvider(Guid tenantId) : ITenantProvider
++    {
++        public TenantContext GetTenantContext() => new(tenantId, "Dev School", TenantType.School);
++    }
++
++    private sealed class FakeHybridCache : HybridCache
++    {
++        public override ValueTask<T> GetOrCreateAsync<TState, T>(string key, TState state, Func<TState, CancellationToken, ValueTask<T>> factory, HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null, CancellationToken cancellationToken = default) => factory(state, cancellationToken);
++        public override ValueTask SetAsync<T>(string key, T value, HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
++        public override ValueTask RemoveAsync(string key, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
++        public override ValueTask RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerModuleResourceTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerModuleResourceTests.cs
+index 3afce387..d5e70131 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerModuleResourceTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerModuleResourceTests.cs
+@@ -63,6 +63,9 @@ public class CreateAssignmentCommandHandlerModuleResourceTests
+             cache,
+             tenants,
+             uploadOptions ?? Options.Create(new AttachmentUploadOptions()),
++            new FakeCurrentUser(),
++            new FakeTeacherDirectory(),
++            new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<CreateAssignmentCommandHandler>.Instance);
+     }
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs
+index dcb46c55..1ee612d2 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs
+@@ -60,6 +60,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
+             cache,
+             tenants,
+             Options.Create(new AttachmentUploadOptions()),
++            new FakeCurrentUser(),
++            new FakeTeacherDirectory(),
++            new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<CreateAssignmentCommandHandler>.Instance);
+     }
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/FakeCurrentUser.cs b/tests/SchoolCollab.Assignments.Tests.Unit/FakeCurrentUser.cs
+new file mode 100644
+index 00000000..51e90fdb
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/FakeCurrentUser.cs
+@@ -0,0 +1,18 @@
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>Test double for <see cref="ICurrentUser"/>. Default: authenticated with no
++/// <c>teacher_id</c> (TeacherId = null) and a fixed tenant. Tests set
++/// <see cref="TeacherId"/> to simulate a real-auth principal carrying the claim, or leave it
++/// null to exercise the TestAuth/dev wire-field fallback (ar-20 P1-6).</summary>
++public sealed class FakeCurrentUser : ICurrentUser
++{
++    public static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++
++    public bool IsAuthenticated { get; set; } = true;
++    public Guid? TeacherId { get; set; }
++    public TenantContext CurrentTenant { get; set; } =
++        new(TenantId, "Test Tenant", TenantType.School);
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/FakeTeacherDirectory.cs b/tests/SchoolCollab.Assignments.Tests.Unit/FakeTeacherDirectory.cs
+new file mode 100644
+index 00000000..42b9558d
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/FakeTeacherDirectory.cs
+@@ -0,0 +1,18 @@
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>Test double for <see cref="ITeacherDirectory"/> (ar-20). Default:
++/// <see cref="ExistsResult"/> = true so create-attribution validates unless a test flips it.
++/// <see cref="ExistenceChecks"/> records every queried id for assertion.</summary>
++public sealed class FakeTeacherDirectory : ITeacherDirectory
++{
++    public bool ExistsResult { get; set; } = true;
++    public List<Guid> ExistenceChecks { get; } = [];
++
++    public Task<bool> ExistsAsync(Guid teacherId, CancellationToken cancellationToken = default)
++    {
++        ExistenceChecks.Add(teacherId);
++        return Task.FromResult(ExistsResult);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/Handlers/CreateAssignmentCommandHandlerEntityCodeTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/Handlers/CreateAssignmentCommandHandlerEntityCodeTests.cs
+index a07f7029..99fc70c6 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/Handlers/CreateAssignmentCommandHandlerEntityCodeTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/Handlers/CreateAssignmentCommandHandlerEntityCodeTests.cs
+@@ -60,6 +60,9 @@ public class CreateAssignmentCommandHandlerEntityCodeTests
+                cache,
+                tenants,
+                Options.Create(new AttachmentUploadOptions()),
++               new FakeCurrentUser(),
++               new FakeTeacherDirectory(),
++               new FakeFeatureFlagService { IsEnabledValue = true },
+                NullLogger<CreateAssignmentCommandHandler>.Instance);
+ 
+     private static CreateAssignmentCommand SampleCommand() =>
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/OverrideStudentSubmissionAttemptsHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/OverrideStudentSubmissionAttemptsHandlerTests.cs
+index 732c07f0..1ddbcca2 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/OverrideStudentSubmissionAttemptsHandlerTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/OverrideStudentSubmissionAttemptsHandlerTests.cs
+@@ -87,7 +87,7 @@ public class OverrideStudentSubmissionAttemptsHandlerTests
+         var cache = new FakeHybridCache();
+         var teacherId = Guid.NewGuid();
+         var handler = new OverrideStudentSubmissionAttemptsCommandHandler(
+-            subRepo, cache, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
++            subRepo, cache, new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(submission.Id, teacherId));
+ 
+@@ -105,7 +105,7 @@ public class OverrideStudentSubmissionAttemptsHandlerTests
+         var subRepo = new FakeSubmissionRepository { SubmissionToReturn = null };
+         var cache = new FakeHybridCache();
+         var handler = new OverrideStudentSubmissionAttemptsCommandHandler(
+-            subRepo, cache, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
++            subRepo, cache, new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
+ 
+         var act = async () => await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(Guid.NewGuid(), Guid.NewGuid()));
+ 
+@@ -121,7 +121,7 @@ public class OverrideStudentSubmissionAttemptsHandlerTests
+         var subRepo = new FakeSubmissionRepository { SubmissionToReturn = submission };
+         var cache = new FakeHybridCache();
+         var handler = new OverrideStudentSubmissionAttemptsCommandHandler(
+-            subRepo, cache, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
++            subRepo, cache, new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
+ 
+         var act = async () => await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(submission.Id, Guid.Empty));
+ 
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SignatureDefaultsTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SignatureDefaultsTests.cs
+index 0b2c74c4..dfaab30a 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SignatureDefaultsTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SignatureDefaultsTests.cs
+@@ -158,6 +158,9 @@ public class SignatureDefaultsTests
+             cache,
+             tenants,
+             Options.Create(new AttachmentUploadOptions()),
++            new FakeCurrentUser(),
++            new FakeTeacherDirectory(),
++            new FakeFeatureFlagService { IsEnabledValue = true },
+             NullLogger<CreateAssignmentCommandHandler>.Instance);
+     }
+ }
+\ No newline at end of file
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthTenancyClaimMappingTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthTenancyClaimMappingTests.cs
+new file mode 100644
+index 00000000..70c71155
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthTenancyClaimMappingTests.cs
+@@ -0,0 +1,130 @@
++using System.IdentityModel.Tokens.Jwt;
++using System.Security.Claims;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.JwtBearer;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.IdentityModel.Tokens;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Core.Tests.Unit.Auth;
++
++/// <summary>
++/// ar-20 claim-mapping test. The <c>RealBearerPath</c> test drives the REAL
++/// <see cref="JwtBearerHandler"/> (an <c>AddJwtBearer</c> scheme with no <c>Authority</c>, so no
++/// metadata fetch) over a hand-signed JWT carrying <c>tenant_id</c> / <c>teacher_id</c>, then
++/// asserts both (i) the mapped principal carries those claims and (ii) <see cref="ICurrentUser"/>
++/// resolves teacher id + tenant from that principal. This is the non-vacuous guard: if the bearer
++/// scheme wiring or the token-validation parameters were broken, this test fails because the
++/// handler would not produce a successful <see cref="AuthenticateResult"/> or the claims would be
++/// missing. The TestAuth shape is compared for parity so the two dev/CI surfaces stay identical.
++/// </summary>
++[TestClass]
++public class AuthTenancyClaimMappingTests
++{
++    private static readonly Guid TenantId = Guid.Parse("00000000-0000-0000-0000-000000000002");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000003");
++    private const string Issuer = "https://keycloak.local/realms/school-collab";
++    private const string Audience = "school-collab-client";
++    private static readonly SymmetricSecurityKey SigningKey =
++        new("dev-only-signing-key-that-is-at-least-32-bytes-!!"u8.ToArray());
++
++    [TestMethod]
++    public async Task RealBearerPath_JwtBearerHandler_MapsClaims_And_CurrentUserResolves()
++    {
++        // Hand-signed JWT that would be rejected unless the AddJwtBearer scheme actually
++        // validates the token against the pinned TokenValidationParameters (issuer, audience,
++        // symmetric key) below.
++        var token = new JwtSecurityTokenHandler().WriteToken(
++            new JwtSecurityToken(
++                Issuer, Audience,
++                BaseClaims(),
++                notBefore: DateTime.UtcNow.AddMinutes(-1),
++                expires: DateTime.UtcNow.AddHours(1),
++                signingCredentials: new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256)));
++
++        // Register the REAL bearer scheme with NO Authority — the handler validates purely against
++        // the explicit TokenValidationParameters, so no discovery/metadata fetch is attempted in CI.
++        var services = new ServiceCollection();
++        services.AddLogging();
++        services
++            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
++            .AddJwtBearer(options =>
++            {
++                options.TokenValidationParameters = new TokenValidationParameters
++                {
++                    ValidIssuer = Issuer,
++                    ValidAudience = Audience,
++                    IssuerSigningKey = SigningKey,
++                };
++            });
++        var sp = services.BuildServiceProvider();
++
++        var httpContext = new DefaultHttpContext();
++        httpContext.RequestServices = sp;
++        httpContext.Request.Headers.Authorization = "Bearer " + token;
++
++        var result = await sp.GetRequiredService<IAuthenticationService>()
++            .AuthenticateAsync(httpContext, JwtBearerDefaults.AuthenticationScheme);
++
++        result.Succeeded.Should().BeTrue("the real JwtBearer handler must validate the hand-signed token");
++
++        var principal = result.Principal!;
++        foreach (var name in new[] { "tenant_id", "tenant_name", "tenant_type", "teacher_id" })
++            principal.FindFirst(name).Should().NotBeNull($"claim {name} must be mapped");
++        principal.FindFirst("tenant_id")!.Value.Should().Be(TenantId.ToString());
++        principal.FindFirst("teacher_id")!.Value.Should().Be(TeacherId.ToString());
++
++        // UseAuthentication middleware sets context.User from the AuthenticateResult; since we
++        // invoked IAuthenticationService directly, attach it the same way so CurrentUser reads it.
++        httpContext.User = principal;
++        var accessor = new HttpContextAccessor { HttpContext = httpContext };
++        var currentUser = new CurrentUser(accessor, new TenantProvider(accessor));
++        currentUser.IsAuthenticated.Should().BeTrue();
++        currentUser.TeacherId.Should().Be(TeacherId);
++        currentUser.CurrentTenant.TenantId.Should().Be(TenantId);
++    }
++
++    /// <summary>TestAuth shape resolves identically to the bearer shape through <see cref="ICurrentUser"/>.</summary>
++    [TestMethod]
++    public void TestAuthShape_Resolves_Identically_To_Bearer_Shape()
++    {
++        var bearerPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
++            new JwtSecurityTokenHandler().ReadJwtToken(
++                new JwtSecurityTokenHandler().WriteToken(
++                    new JwtSecurityToken(
++                        Issuer, Audience, BaseClaims(), notBefore: DateTime.UtcNow,
++                        expires: DateTime.UtcNow.AddHours(1)))).Claims, "Bearer"));
++
++        var testAuthPrincipal = new ClaimsPrincipal(
++            new ClaimsIdentity(BaseClaims(), "TestAuth"));
++
++        var bearerUser = Build(bearerPrincipal);
++        var testAuthUser = Build(testAuthPrincipal);
++
++        bearerUser.TeacherId.Should().Be(TeacherId);
++        testAuthUser.TeacherId.Should().Be(TeacherId);
++        bearerUser.CurrentTenant.TenantId.Should().Be(TenantId);
++        testAuthUser.CurrentTenant.TenantId.Should().Be(TenantId);
++    }
++
++    private static ICurrentUser Build(ClaimsPrincipal principal)
++    {
++        var httpContext = new DefaultHttpContext { User = principal };
++        var accessor = new HttpContextAccessor { HttpContext = httpContext };
++        return new CurrentUser(accessor, new TenantProvider(accessor));
++    }
++
++    private static IEnumerable<Claim> BaseClaims() =>
++    [
++        new(ClaimTypes.NameIdentifier, "test-user"),
++        new(ClaimTypes.Name, "Test User"),
++        new("tenant_id", TenantId.ToString()),
++        new("tenant_name", "Dev School"),
++        new("tenant_type", "School"),
++        new("teacher_id", TeacherId.ToString()),
++    ];
++}
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+new file mode 100644
+index 00000000..1108200c
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+@@ -0,0 +1,96 @@
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.JwtBearer;
++using Microsoft.AspNetCore.Authentication.OpenIdConnect;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Core.Tests.Unit.Auth;
++
++/// <summary>
++/// ar-20 wiring tests: exercises the round's OWN registration
++/// (<see cref="AuthTenancyExtensions.AddAuthAndTenancy"/>) instead of a test-local scheme,
++/// so a renamed/dropped <c>Bearer</c> scheme, an unpinned <c>Audience</c>/<c>Authority</c>,
++/// or an accidental HTTPS-metadata change fails here. The sibling
++/// <c>AuthTenancyClaimMappingTests</c> registers its own <c>AddJwtBearer</c> and therefore
++/// cannot observe any of this wiring.
++/// </summary>
++[TestClass]
++public class AuthWiringTests
++{
++    private const string Authority = "http://localhost:8080/realms/school-collab";
++    private const string ClientId = "school-collab-client";
++    private const string ClientSecret = "dev-only-school-collab-client-secret";
++
++    private static ServiceProvider Build(bool disableOidc)
++    {
++        var configuration = new ConfigurationBuilder()
++            .AddInMemoryCollection(new Dictionary<string, string?>
++            {
++                // Canonical flag key shape (configuration.md §5): FeatureFlags:FEATURE:<key>.
++                // A bare "FeatureFlags:DisableOIDCAuth" is NOT what the hosts set — getting this
++                // wrong silently exercises the OIDC branch in the TestAuth test (caught here).
++                ["FeatureFlags:FEATURE:DisableOIDCAuth"] = disableOidc ? "true" : "false",
++                ["Auth:Keycloak:Authority"] = Authority,
++                ["Auth:Keycloak:ClientId"] = ClientId,
++                ["Auth:Keycloak:ClientSecret"] = ClientSecret,
++            })
++            .Build();
++
++        var services = new ServiceCollection();
++        services.AddLogging();
++        services.AddDistributedMemoryCache();
++        services.AddAuthAndTenancy(configuration);
++        return services.BuildServiceProvider();
++    }
++
++    [TestMethod]
++    public async Task RealAuthMode_RegistersBearer_WithPinnedAudienceAuthority_AndHttpMetadataOff()
++    {
++        await using var provider = Build(disableOidc: false);
++        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
++
++        (await schemes.GetSchemeAsync(AuthTenancyExtensions.BearerScheme))
++            .Should().NotBeNull("real-auth mode must register the round's Bearer scheme name");
++
++        var jwt = provider
++            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
++            .Get(AuthTenancyExtensions.BearerScheme);
++
++        jwt.Audience.Should().Be(
++            ClientId,
++            "Keycloak's realm audience mapper emits aud=clientId, so the handler must validate that audience (IDX10214 otherwise)");
++        jwt.Authority.Should().Be(
++            Authority,
++            "the authority must come from Auth:Keycloak:Authority, not a hardcoded URL");
++        jwt.RequireHttpsMetadata.Should().BeFalse(
++            "the dev container is http-only; production must point Authority at an https URL instead");
++
++        (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
++            .Should().NotBeNull("the Blazor hosts keep the OIDC code flow");
++    }
++
++    [TestMethod]
++    public async Task TestAuthMode_RegistersTestAuth_AndNoBearerScheme()
++    {
++        await using var provider = Build(disableOidc: true);
++        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
++
++        var registered = (await schemes.GetAllSchemesAsync()).Select(s => s.Name).ToArray();
++
++        registered.Should().Contain(
++            TestAuthExtensions.TestAuthScheme,
++            $"the dev/CI posture must stay TestAuth so tests remain container-free (registered: {string.Join(", ", registered)})");
++
++        registered.Should().NotContain(
++            AuthTenancyExtensions.BearerScheme,
++            "bearer is registered only in the OIDC branch");
++
++        (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name.Should().Be(
++            TestAuthExtensions.TestAuthScheme,
++            "TestAuth must be the default authenticate scheme in this mode");
++    }
++}
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/CurrentUserTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/CurrentUserTests.cs
+new file mode 100644
+index 00000000..d1dc5bcb
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/CurrentUserTests.cs
+@@ -0,0 +1,88 @@
++using System.IdentityModel.Tokens.Jwt;
++using System.Security.Claims;
++using FluentAssertions;
++using Microsoft.AspNetCore.Http;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Core.Tests.Unit.Auth;
++
++/// <summary>
++/// ar-20 <see cref="ICurrentUser"/> claim-shape tests. Proves that the same
++/// <c>tenant_id</c>/<c>tenant_name</c>/<c>tenant_type</c>/<c>teacher_id</c> claims
++/// resolve identically whether the principal came from an (a) OIDC cookie, (b) bearer
++/// JWT, or (c) TestAuth identity — and that a principal without <c>teacher_id</c> yields
++/// <c>TeacherId == null</c> without throwing.
++/// </summary>
++[TestClass]
++public class CurrentUserTests
++{
++    private static readonly Guid TenantId = Guid.Parse("00000000-0000-0000-0000-000000000002");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000003");
++
++    private static ICurrentUser Build(ClaimsPrincipal principal)
++    {
++        var httpContext = new DefaultHttpContext { User = principal };
++        var accessor = new HttpContextAccessor { HttpContext = httpContext };
++        return new CurrentUser(accessor, new TenantProvider(accessor));
++    }
++
++    private static IEnumerable<Claim> BaseClaims() =>
++    [
++        new(ClaimTypes.NameIdentifier, "test-user"),
++        new(ClaimTypes.Name, "Test User"),
++        new("tenant_id", TenantId.ToString()),
++        new("tenant_name", "Dev School"),
++        new("tenant_type", "School"),
++    ];
++
++    // (a) OIDC-cookie shape — ClaimActions.MapJsonKey emits claims whose Type is the json
++    // key ("tenant_id", "teacher_id", …). The cookie identity carries these verbatim.
++    [TestMethod]
++    public void TeacherId_FromOidcCookieClaimShape()
++    {
++        var user = Build(new ClaimsPrincipal(new ClaimsIdentity(
++            BaseClaims().Append(new Claim("teacher_id", TeacherId.ToString())), "OIDC")));
++        user.IsAuthenticated.Should().BeTrue();
++        user.TeacherId.Should().Be(TeacherId);
++        user.CurrentTenant.TenantId.Should().Be(TenantId);
++    }
++
++    // (b) bearer-JWT shape — decode a real (unsigned) access token and map its claims the
++    // way JwtBearer's default inbound mapping does (custom claims keep their type verbatim).
++    [TestMethod]
++    public void TeacherId_FromBearerJwtClaimShape()
++    {
++        var jwtClaims = BaseClaims().Append(new Claim("teacher_id", TeacherId.ToString()));
++        var token = new JwtSecurityToken(
++            "https://keycloak.local/realms/school-collab", "school-collab-client",
++            jwtClaims, notBefore: DateTime.UtcNow, expires: DateTime.UtcNow.AddHours(1));
++        var jwt = new JwtSecurityTokenHandler().WriteToken(token);
++        var decodedClaims = new JwtSecurityTokenHandler().ReadJwtToken(jwt).Claims;
++
++        var principal = new ClaimsPrincipal(new ClaimsIdentity(decodedClaims, "Bearer"));
++        var user = Build(principal);
++        user.TeacherId.Should().Be(TeacherId);
++        user.CurrentTenant.TenantId.Should().Be(TenantId);
++    }
++
++    // (c) TestAuth shape — exactly the claims TestAuthHandler emits.
++    [TestMethod]
++    public void TeacherId_FromTestAuthClaimShape()
++    {
++        var claims = BaseClaims().Append(new Claim("teacher_id", TeacherId.ToString()));
++        var user = Build(new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")));
++        user.TeacherId.Should().Be(TeacherId);
++        user.CurrentTenant.TenantId.Should().Be(TenantId);
++    }
++
++    // No teacher_id ⇒ TeacherId == null, never throws.
++    [TestMethod]
++    public void NoTeacherClaim_TeacherIdIsNull_NeverThrows()
++    {
++        var user = Build(new ClaimsPrincipal(new ClaimsIdentity(BaseClaims(), "OIDC")));
++        user.TeacherId.Should().BeNull();
++        user.CurrentTenant.TenantId.Should().Be(TenantId); // tenant still resolves
++    }
++}

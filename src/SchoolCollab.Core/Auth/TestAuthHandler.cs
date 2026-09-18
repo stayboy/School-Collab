@@ -24,6 +24,14 @@ public class TestAuthHandlerOptions : AuthenticationSchemeOptions
     /// override this to simulate a specific tenant context.
     /// </summary>
     public Guid TenantId { get; set; } = Guid.Empty;
+
+    /// <summary>
+    /// The teacher id to stamp as a <c>teacher_id</c> claim on the TestAuth principal.
+    /// Defaults to <see cref="Guid.Empty"/> so NO <c>teacher_id</c> claim is emitted —
+    /// preserving the pre-ar-20 dev/CI posture where attribution falls back to the wire
+    /// request field. Tests set this to simulate a real Keycloak identity with a
+    /// <c>teacher_id</c> claim.</summary>
+    public Guid TeacherId { get; set; } = Guid.Empty;
 }
 
 public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
@@ -89,7 +97,13 @@ public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptio
             new Claim("tenant_type", "School"),
         };
 
-        var identity = new ClaimsIdentity(claims, Scheme.Name);
+        var claimsList = claims.ToList();
+        if (Options.TeacherId != Guid.Empty)
+        {
+            claimsList.Add(new Claim("teacher_id", Options.TeacherId.ToString()));
+        }
+
+        var identity = new ClaimsIdentity(claimsList, Scheme.Name);
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, Scheme.Name);
 

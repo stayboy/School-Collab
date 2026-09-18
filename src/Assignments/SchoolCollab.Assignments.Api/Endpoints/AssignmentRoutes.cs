@@ -243,6 +243,16 @@ public static class AssignmentRoutes
             {
                 return Results.BadRequest(new { ex.Message });
             }
+            // ar-20: real-auth rejections map distinctly (never a 500). A principal with no
+            // usable teacher_id claim in real-auth mode → 403; an unknown teacher → 409.
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            catch (UnknownTeacherException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
         });
 
         group.MapPut("/{id:guid}", async (
@@ -431,6 +441,11 @@ public static class AssignmentRoutes
             {
                 return Results.BadRequest(new { ex.Message });
             }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
         });
 
         // WS-A2 / spec §7 Q2: reject a pending assignment.
@@ -456,6 +471,11 @@ public static class AssignmentRoutes
             catch (InvalidOperationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
+            }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
         });
 
@@ -534,6 +554,11 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
         });
 
@@ -745,6 +770,11 @@ public static class AssignmentRoutes
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { ex.Message });
+            }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
         });
 
