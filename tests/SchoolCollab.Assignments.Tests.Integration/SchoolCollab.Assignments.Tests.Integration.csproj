@@ -1,4 +1,5 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <EnableMSTestRunner>true</EnableMSTestRunner>
@@ -9,18 +10,20 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" />
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
-    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Application\SchoolCollab.Assignments.Application.csproj" />
-    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Worker\SchoolCollab.Assignments.Worker.csproj" />
+    <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="MSTest" />
-    <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
-    <PackageReference Include="bunit" />
-    <PackageReference Include="RichardSzalay.MockHttp" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
   </ItemGroup>
+
 </Project>

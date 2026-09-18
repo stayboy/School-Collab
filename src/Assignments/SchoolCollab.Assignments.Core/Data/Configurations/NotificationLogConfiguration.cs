@@ -47,5 +47,17 @@ internal sealed class NotificationLogConfiguration : TenantEntityTypeConfigurati
         // Read path for GET /assignments/{id}/notification-failures.
         builder.HasIndex(x => new { x.AssignmentId, x.DeliveryStatus })
             .HasDatabaseName("ix_notification_logs_assignment_status");
+
+        // E3 (ar-19): partial uniqueness on the {TenantId, AssignmentId, RecipientId}
+        // key for the Publish kind only (WHERE kind = 0). A republish re-broadcast
+        // must not insert a second Publish row for the same recipient (the ar-16/ar-17
+        // F1 duplicate class), while the legitimate multiple Reminder / Overdue rows
+        // a recipient accrues over a cadence remain legal (those kinds are deliberately
+        // outside this index). Idempotency also lives in the broadcaster's republish
+        // upsert-in-place path; this index is the data-layer backstop.
+        builder.HasIndex(x => new { x.TenantId, x.AssignmentId, x.RecipientId })
+            .IsUnique()
+            .HasDatabaseName("ux_notification_logs_publish_uniqueness")
+            .HasFilter("\"kind\" = 0");
     }
 }

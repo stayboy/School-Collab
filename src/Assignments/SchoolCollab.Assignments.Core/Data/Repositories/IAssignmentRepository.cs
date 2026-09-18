@@ -28,4 +28,36 @@ public interface IAssignmentRepository
     /// <c>DueDate + ArchiveGraceDays</c> has passed. Same posture as the
     /// scheduled-publish query.</summary>
     Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default);
+
+    /// <summary>E3 (ar-19) — sanctioned cross-tenant candidate read for the reminder
+    /// sweep: published, non-archived assignments joined to their subscribed,
+    /// broadcast-enabled recipients whose ward is incomplete (no passing / not
+    /// signed-off) or unsigned (<c>AwaitingSignature</c>). Completed wards are excluded
+    /// in the read. Returns per-recipient candidates carrying the ids + policy/
+    /// recipient payload for per-tenant dispatch. Default empty (existing fake
+    /// repositories in tests remain valid).</summary>
+    Task<List<AssignmentReminderSweepCandidate>> ListReminderSweepCandidatesAsync(CancellationToken ct = default)
+        => Task.FromResult(new List<AssignmentReminderSweepCandidate>());
+
+    /// <summary>E3 (ar-19) — sanctioned cross-tenant candidate read for the
+    /// completion-to-guardian queueing: submissions sitting in
+    /// <see cref="SignOffState.AwaitingSignature"/> joined to the guardian recipient
+    /// for the ward. Default empty (existing fake repositories remain valid).</summary>
+    Task<List<AssignmentCompletionSweepCandidate>> ListCompletionSweepCandidatesAsync(CancellationToken ct = default)
+        => Task.FromResult(new List<AssignmentCompletionSweepCandidate>());
+
+    /// <summary>E3 (ar-19) — sanctioned cross-tenant candidate read for the overdue
+    /// sweep: publications closed/past due joined to their incomplete-ward recipients
+    /// (completed wards excluded in the read). Default empty (existing fake
+    /// repositories remain valid).</summary>
+    Task<List<AssignmentOverdueSweepCandidate>> ListOverdueSweepCandidatesAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+        => Task.FromResult(new List<AssignmentOverdueSweepCandidate>());
+
+    /// <summary>E3 (ar-19) — sanctioned cross-tenant aggregate of per-recipient reminder
+    /// log state (last non-terminal <c>Queued</c>/<c>Sent</c>/<c>Skipped</c> reminder +
+    /// non-terminal reminder count) for the <c>ReminderSweeper</c> cadence +
+    /// <c>MaxReminders</c> cap. <c>Skipped</c> counts as coverage (P1-2). Default empty.
+    /// </summary>
+    Task<List<RecipientReminderLogState>> ListReminderLogStateAsync(CancellationToken ct = default)
+        => Task.FromResult(new List<RecipientReminderLogState>());
 }

@@ -112,7 +112,9 @@ the user wants to choose explicitly:
    Tier 2. Small-to-medium behavioural fixes.
 3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
    round doc, worker implements, reviewer statically verifies, orchestrator accepts
-   and hands over UI-tester scope, UI tester bug-hunts delivered UI.
+   and hands over UI-tester scope, UI tester bug-hunts delivered UI. No-UI rounds
+   run **lean** (skill § "Tier 3 lean"): the parent transcribes acceptance and no
+   UI tester is dispatched — the orchestrator plan pass is never skipped.
 
 Each round produces a single `round-<slug>.md` (+ `diffs-<slug>.patch`) in
 `documents/rounds/` — see "Repository docs layout" below.

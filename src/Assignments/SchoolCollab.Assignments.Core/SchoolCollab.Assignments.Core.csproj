@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="SchoolCollab.Assignments.Tests.Unit" />
+    <InternalsVisibleTo Include="SchoolCollab.Assignments.Tests.Integration" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="EFCore.NamingConventions" />

@@ -1,6 +1,6 @@
 ---
 name: orchestrator-worker-reviewer
-description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, orchestrator accepts and hands over UI-tester scope, and a UI tester bug-hunts delivered UI work. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes (do those solo).
+description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, acceptance is written by the orchestrator or transcribed by the parent on lean no-UI rounds, and a UI tester bug-hunts delivered UI work when the UI trigger fires. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes (do those solo).
 ---
 
 # Orchestrator-Worker-Reviewer (with UI Tester) — tiered
@@ -38,7 +38,7 @@ Cost rules that apply to every round (speed + token budget):
 | 0 | Trivial non-behavioural change (typo, comment, config tweak) | 0 — do not invoke this skill | solo, per `AGENTS.md` |
 | 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | parent: scope check + authoritative build/test + transcribed verdict |
 | 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | parent adjudicates REVIEW + transcribes verdict |
-| 3 | Feature rounds, any UI round, anything failing the Tier-1 checklist | 4–5: orchestrator-plan, worker, reviewer, orchestrator-accept (+ UI tester when the UI trigger fires) | orchestrator writes the verdict (+ tester-scope handover) |
+| 3 | Feature rounds, any UI round, anything failing the Tier-1 checklist | 3–5: orchestrator-plan, worker, reviewer, then orchestrator-accept OR parent-transcribed acceptance (**lean**, no-UI rounds) + UI tester when the UI trigger fires | orchestrator writes the verdict, or the parent transcribes it on lean rounds (+ tester-scope handover when the tester fires) |
 
 Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
 When starting a feature or fix, offer the user the menu (solo / light round /
@@ -52,6 +52,31 @@ full four-agent) per repo `AGENTS.md` — do not default silently.
 - No EF migration, schema, or MassTransit contract changes; no new public API.
 - Existing tests cover it, or the plan states why a test change is unnecessary.
 - No interplay with other in-flight work.
+
+### Tier 3 lean (no-UI feature rounds)
+
+Formalized 2026-09-17 (owner), codifying what ar-17 already practised: when a
+Tier 3 round's UI trigger does **not** fire, the round runs **lean** — the
+orchestrator-plan, worker, and reviewer runs and the Tier-3 model ladder are
+unchanged, but the parent **transcribes the acceptance** (on the reviewer's
+verdict + its own authoritative pass) instead of dispatching an
+orchestrator-accept run, and no UI tester is dispatched (there is nothing to
+bug-hunt). Rework bound stays ≤2.
+
+**Hand rule: lean drops the accept-run, never the plan-run.** The
+orchestrator-plan pass is what separates Tier 3 from a stretched Tier 2 — it is
+where the design questions get *resolved* (worker tenancy, dedupe/backfill
+strategy for a mutating migration, contract inventories, idempotency
+semantics). It is mandatory on every Tier 3 round, lean or full. Full Tier 3
+(with the orchestrator-accept run) is for UI rounds — the tester fires anyway
+and the document owner hands over tester scope — or whenever the owner wants
+the plan's author to adjudicate the REVIEW personally.
+
+There is no defined tier between 2 and 3. A round that fails the Tier-2
+checklist only on file-level gates (migration, contracts, new project, diff
+size) with its design fully settled may be run at Tier 2 as an explicit
+**owner override**, recorded as a deviation on round-doc line 1 (the ar-16
+precedent); if the design is open, the round is Tier 3.
 
 ### Mid-round escalation
 
@@ -197,7 +222,8 @@ the tester never derives or expands its own scope.
 ## Procedure
 
 0. **Select the tier.** Apply the eligibility checklist; default to the lowest
-   safe tier; offer the AGENTS.md menu when the choice is not obvious. Record
+   safe tier; a no-UI Tier 3 round runs **lean** (see "Tier 3 lean" above);
+   offer the AGENTS.md menu when the choice is not obvious. Record
    the tier + provider + models in the round doc header, plus the round base
    (`git rev-parse HEAD`; if the tree is dirty at round start, also record
    `git diff --name-only` so the round diff can be isolated).
@@ -249,10 +275,12 @@ the tester never derives or expands its own scope.
    precisely because it never builds.
 5. **Accept.** Tiers 1–2: the parent adjudicates findings and transcribes the
    verdict into `## Acceptance` (criteria checklist, build/test numbers, P1
-   list or CLOSED, residual P2s). Tier 3: the orchestrator-accept run receives
-   the REVIEW block + the parent's build/test numbers and writes
-   `## Acceptance`; when the verdict is CLOSED and the UI trigger fires, it
-   also appends the tester-scope handover.
+   list or CLOSED, residual P2s). Tier 3 full: the orchestrator-accept run
+   receives the REVIEW block + the parent's build/test numbers and writes
+   `## Acceptance`. Tier 3 **lean** (no-UI rounds): the parent transcribes the
+   acceptance itself, on the reviewer's verdict plus its own authoritative pass
+   — the ar-17 precedent. When the verdict is CLOSED and the UI trigger fires,
+   the acceptance also appends the tester-scope handover.
 6. **UI tester pass (Tier 3, UI rounds).** Task = tester contract + the
    handover verbatim + patch path. The tester bug-hunts only the handed-over
    surfaces and returns UI TEST; the parent persists it into `## UI Tester`.

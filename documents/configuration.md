@@ -137,6 +137,19 @@ files only carry values that genuinely belong to that single service
 | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied for a relay that requires auth_ | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. Never commit it — set it via user-secrets / env-var like the other secrets below. |
 | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
 
+**`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
+
+The AppHost registers `assignments-worker` (`SchoolCollab.Assignments.Worker`) with
+`WithReference(assignmentsDb, rabbit, settingsApi, studentsApi)` and
+`WaitFor(rabbit) + WaitForCompletion(migrator)`. It does **not** add a `Parameters:`
+entry: it reuses the existing `outbox-exchange-assignments` parameter, injected as
+`RabbitMq__Subscriber__ExchangeName = assignments` so the worker subscribes to the
+same assignments exchange that `assignments-api` publishes `AssignmentPublishedIntegrationEvent`
+to. The Published handler kicks one reminder-sweep pass; the sweeps read policy
+(`settings-api`) and contacts (`students-api`) through the same named-
+HTTP-client service-discovery wires as `assignments-api`. The worker's local
+`appsettings.json` carries only the RabbitMq subscriber defaults (see §11).
+
 **Where to set them:**
 
 `src/AppHost/SchoolCollab.AppHost/appsettings.json` is the canonical file
@@ -722,6 +735,8 @@ matching env-var form:
 | `Assignments:AttachmentUpload:StagingRetentionHours` | `Assignments__AttachmentUpload__StagingRetentionHours` |
 | `Assignments:AttachmentUpload:SweepIntervalHours` | `Assignments__AttachmentUpload__SweepIntervalHours` |
 | `Outbox:ExchangeName` | `Outbox__ExchangeName` |
+| `RabbitMq:Subscriber:ExchangeName` | `RabbitMq__Subscriber__ExchangeName` |
+| `RabbitMq:Subscriber:QueueName` | `RabbitMq__Subscriber__QueueName` |
 | `Outbox:BatchSize` | `Outbox__BatchSize` |
 | `Outbox:PollInterval` | `Outbox__PollInterval` |
 | `Auth:Keycloak:Authority` | `Auth__Keycloak__Authority` |

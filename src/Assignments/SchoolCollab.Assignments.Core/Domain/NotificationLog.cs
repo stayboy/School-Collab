@@ -127,4 +127,25 @@ public sealed class NotificationLog : BaseTenantEntityWithAudit
         NextRetryAt = null;
         UpdatedAt = now;
     }
+
+    /// <summary>E3 (ar-19) — re-queues an existing row with a freshly rendered payload
+    /// (republish re-broadcast / reminder re-send). Resets the attempt cycle
+    /// (<c>Attempt = 0</c>), re-stamps the payload, and makes the row due now. Used by
+    /// the broadcaster's republish <b>upsert-in-place</b> path so a re-broadcast
+    /// refreshes the deep-link-token message without violating the Publish uniqueness
+    /// index. Transitions a previously <c>Skipped</c> row back to <c>Queued</c> — the
+    /// republish decision is a fresh queued decision, so a skip whose address now
+    /// resolves is deliberately revived.</summary>
+    public void Requeue(string toAddress, string subject, string bodyHtml, DateTimeOffset now)
+    {
+        Attempt = 0;
+        DeliveryStatus = NotificationDeliveryStatus.Queued;
+        SentAt = null;
+        FailureReason = null;
+        NextRetryAt = now;
+        ToAddress = toAddress;
+        Subject = subject;
+        BodyHtml = bodyHtml;
+        UpdatedAt = now;
+    }
 }
