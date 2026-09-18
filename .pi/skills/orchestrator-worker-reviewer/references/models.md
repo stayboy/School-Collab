@@ -13,6 +13,7 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 | Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` |
 | Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` |
 | Reviewer | `ollama-cloud/deepseek-v4.1-flash` (owner override 2026-09-15) | `cline-pass/deepseek-v4.1-flash` |
+| Plan reviewer (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
 | Escalator (blocked-pass rework) | the round's reviewer model | the round's reviewer model |
 | Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
@@ -28,7 +29,7 @@ header. **Pick one provider per round; never mix providers mid-round.**
 |---|---|---|---|---|
 | **Solo** | the single agent plans + implements + checks its own work | — | — | ask the user first (solo rule below) |
 | **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `glm-5.3-flash` | the reviewer/orchestrator **must differ** from the worker's model |
-| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `deepseek-v4.1-flash` (owner override 2026-09-15) | full ladder + UI tester `minimax-m3` |
+| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `deepseek-v4.1-flash` (owner override 2026-09-15) | full ladder + UI tester `minimax-m3`; **plan-review on full rounds = `glm-5.3:cloud`** (lean = the reviewer model) |
 
 Clinepass equivalents: light worker `cline-pass/deepseek-v4.1-flash`, light
 orchestrator/reviewer `cline-pass/glm-5.3-flash` (ollama profile:
@@ -62,7 +63,9 @@ the ids rather than assuming them.
    shares the implementer's model. Tier 3 keeps the standard ladder
    (`glm-5.3-flash` orchestrator, `deepseek-v4-flash-0731` worker,
    `deepseek-v4.1-flash` reviewer); lean rounds use the same ladder — only
-   the accept-run is skipped.
+   the accept-run is skipped. **Plan-review (step 2b):** full rounds run
+   `glm-5.3:cloud`, lean rounds run the reviewer model; either is subject to a
+   user-named override (item 1).
 5. **Cline**: always `clinepass` (cannot resolve `ollama` ids) — an exception,
    not an override.
 
@@ -129,7 +132,7 @@ agent definitions via `agent: "<name>"` (builtin
 |---|---|
 | 1 | Worker model only — no orchestrator/reviewer/tester models at all |
 | 2 | Worker + reviewer code specialist |
-| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped |
+| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **full → `glm-5.3:cloud`**, lean → the round's reviewer model |
 
 Rationale: tiers exist to keep simple tasks cheap — never pay for model
 round-trips (or roles) a task does not need.
@@ -139,6 +142,7 @@ round-trips (or roles) a task does not need.
 Round doc line 1 records which provider ran the round, e.g.:
 
 - `Provider: pi (models: glm-5.3-flash, deepseek-v4-flash-0731, deepseek-v4.1-flash, minimax-m3)`
+- `Provider: pi, full Tier 3 (models: glm-5.3-flash orchestrator, glm-5.3 plan-review, deepseek-v4-flash-0731 worker, deepseek-v4.1-flash reviewer, minimax-m3 tester)`
 - `Provider: pi/clinepass (models: glm-5.3, deepseek-v4-flash-0731, deepseek-v4.1-flash, minimax-m3)`
 - `Provider: Cline/clinepass (models: glm-5.3, deepseek-v4-flash, kimi-k2.7-code, minimax-m3)`
 

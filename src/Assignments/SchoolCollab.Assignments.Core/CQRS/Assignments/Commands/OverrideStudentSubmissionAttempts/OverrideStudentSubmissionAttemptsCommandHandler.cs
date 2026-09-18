@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 
@@ -18,6 +20,8 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.OverrideStuden
 public sealed class OverrideStudentSubmissionAttemptsCommandHandler(
     ISubmissionRepository submissionRepository,
     HybridCache cache,
+    ICurrentUser currentUser,
+    IFeatureFlagService featureFlags,
     ILogger<OverrideStudentSubmissionAttemptsCommandHandler> logger) : ICommandHandler<OverrideStudentSubmissionAttemptsCommand>
 {
     public async Task HandleAsync(OverrideStudentSubmissionAttemptsCommand command, CancellationToken cancellationToken = default)
@@ -27,12 +31,20 @@ public sealed class OverrideStudentSubmissionAttemptsCommandHandler(
         var submission = await submissionRepository.GetSubmissionAsync(command.SubmissionId, cancellationToken)
             ?? throw new SubmissionNotFoundException(command.SubmissionId);
 
-        submission.OverrideAttemptLimit(command.TeacherId);
+        // ar-20 P1-6 principal-wins keyed on AUTH MODE (see ApproveAssignmentCommandHandler).
+        var teacherId = currentUser.TeacherId
+            ?? (await IsRealAuthAsync(cancellationToken)
+                ? throw new MissingTeacherPrincipalException(nameof(OverrideStudentSubmissionAttemptsCommand))
+                : command.TeacherId);
+        submission.OverrideAttemptLimit(teacherId);
         submissionRepository.Update(submission);
         await submissionRepository.SaveChangesAsync(cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);
 
         logger.LogInformation("Teacher {TeacherId} overrode the attempt cap on submission {SubmissionId}",
-            command.TeacherId, command.SubmissionId);
+            teacherId, command.SubmissionId);
     }
+
+    private async Task<bool> IsRealAuthAsync(CancellationToken ct)
+        => !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, ct);
 }

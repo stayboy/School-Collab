@@ -87,7 +87,7 @@ public class AssignmentApprovalCommandHandlerTests
         var assignment = NewAssignment();
         assignment.SubmitForApproval();
         var repo = new FakeAssignmentRepository { Assignment = assignment };
-        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(),
+        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<ApproveAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new ApproveAssignmentCommand(assignment.Id, ApproverId));
@@ -102,7 +102,7 @@ public class AssignmentApprovalCommandHandlerTests
     {
         var assignment = NewAssignment();
         var repo = new FakeAssignmentRepository { Assignment = assignment };
-        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(),
+        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<ApproveAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>
@@ -114,7 +114,7 @@ public class AssignmentApprovalCommandHandlerTests
     public async Task Approve_UnknownId_Throws()
     {
         var repo = new FakeAssignmentRepository { Assignment = null };
-        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(),
+        var handler = new ApproveAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<ApproveAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>
@@ -132,7 +132,7 @@ public class AssignmentApprovalCommandHandlerTests
         assignment.Approve(ApproverId);
         assignment.SubmitForApproval(); // back to Pending
         var repo = new FakeAssignmentRepository { Assignment = assignment };
-        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(),
+        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<RejectAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new RejectAssignmentCommand(assignment.Id, ApproverId));
@@ -147,7 +147,7 @@ public class AssignmentApprovalCommandHandlerTests
     {
         var assignment = NewAssignment();
         var repo = new FakeAssignmentRepository { Assignment = assignment };
-        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(),
+        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<RejectAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>
@@ -159,7 +159,7 @@ public class AssignmentApprovalCommandHandlerTests
     public async Task Reject_UnknownId_Throws()
     {
         var repo = new FakeAssignmentRepository { Assignment = null };
-        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(),
+        var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<RejectAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>

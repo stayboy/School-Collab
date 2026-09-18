@@ -64,3 +64,35 @@ out-of-round observation for the parent. Return ONLY:
     P1: <file:line — user-facing defect>   (one per line; none if empty)
     P2: <file:line — defect>
     Out-of-round observations: <none | one line each>
+
+## Reviewer — plan-review pass (Tier 3, BEFORE the worker is dispatched)
+
+**Model:** Tier 3 **full** → `glm-5.3:cloud` (`cline-pass/glm-5.3`, owner default
+2026-09-18); Tier 3 **lean** → the round's reviewer model. Read-only `reviewer`
+shell either way; a user-named model wins.
+
+Same read-only reviewer, different target: the **plan**, not a diff. Read the
+round doc's `## Plan` plus the code/spec seams it cites — and nothing else (no
+repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
+
+1. **Feasibility** — every file, route, entity, named client, package and
+   pattern the plan cites actually exists and behaves as claimed. Give
+   file:line evidence for each, or flag the miss.
+2. **Scope gates** — UI files, contract-shape changes, migrations, committed
+   secrets, CPM/version rules: is the plan's in/out boundary honest, and does
+   its expected-files list stay inside it?
+3. **Acceptance honesty** — would each test the plan calls "discriminating"
+   actually fail against the pre-fix code? Name every one that cannot fail.
+4. **Security posture** — auth schemes, claim handling, token validation,
+   credential handling, tenant isolation: any hole in the planned approach?
+5. **Pinned decisions** — does the plan contradict a decision the owner pinned,
+   or silently re-open something declared out of scope?
+
+Return ONLY:
+
+    PLAN REVIEW
+    Verdict: ACCEPT | REWORK
+    P1: <plan section or cited file:line — blocking plan defect>   (one per line; none if empty)
+    P2: <plan section — should-fix>
+    Gates: <UI: none|risk · contract: none|risk · migrations: none|risk · secrets: none|risk>
+    Acceptance honesty: <ok | tests that cannot fail, one per line>

@@ -1,0 +1,114 @@
+{
+  // DEV-ONLY realm import for the Keycloak dev container (ar-20).
+  // CREDENTIALS IN THIS FILE ARE FOR LOCAL/DEV USE ONLY:
+  //   * dev-teacher login     : dev-teacher / dev-only-password
+  //   * school-collab-client  : secret dev-only-school-collab-client-secret
+  // NEITHER value may ever be reused in a real (production/demo) realm.
+  // The tenant_id / teacher_id protocol-mapper values below are the FIXED ids seeded
+  // by MigrationService DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003),
+  // so a dev login resolves to real backing rows on first boot.
+  "realm": "school-collab",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "clients": [
+    {
+      "clientId": "school-collab-client",
+      "name": "School Collab",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "secret": "dev-only-school-collab-client-secret",
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_name",
+            "claim.name": "tenant_name",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-type",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_type",
+            "claim.name": "tenant_type",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "teacher-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "teacher_id",
+            "claim.name": "teacher_id",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience-school-collab-client",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "school-collab-client",
+            "access.token.claim": true,
+            "id.token.claim": true
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "dev-teacher",
+      "enabled": true,
+      "email": "dev-teacher@schoolcollab.local",
+      "emailVerified": true,
+      "firstName": "Dev",
+      "lastName": "Teacher",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": ["00000000-0000-0000-0000-000000000002"],
+        "tenant_name": ["Dev School"],
+        "tenant_type": ["School"],
+        "teacher_id": ["00000000-0000-0000-0000-000000000003"]
+      }
+    }
+  ]
+}

@@ -136,6 +136,9 @@ files only carry values that genuinely belong to that single service
 | `smtp-user` | Aspire parameter | _none_ | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. |
 | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied for a relay that requires auth_ | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. Never commit it — set it via user-secrets / env-var like the other secrets below. |
 | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
+| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
+| `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied_ | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. **No committed default** — supply via user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, mirroring `postgres-password`. This is one of the two parameters AC#4 needs; see §4. |
+| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied_ | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. **No committed default** — dev supplies the pinned dev-only literal `dev-only-school-collab-client-secret` (the realm file's client `secret`) via user-secrets / env-var; production supplies a real secret store value. This is the other of the two parameters AC#4 needs; see §4. |
 
 **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
 
@@ -167,7 +170,8 @@ for non-secret defaults — open it, change the value, re-run the AppHost:
 ```
 
 For secrets (`postgres-password`, `rabbitmq-password`,
-`openrouter-api-key`, `smtp-password`) — do **not** commit them to source
+`openrouter-api-key`, `smtp-password`, `keycloak-admin-password`,
+`keycloak-client-secret`) — do **not** commit them to source
 control. Use the AppHost's user-secrets store (preferred for local dev):
 
 ```bash
@@ -176,6 +180,9 @@ dotnet user-secrets set "Parameters:postgres-password" "postgres"
 dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
 dotnet user-secrets set "Parameters:openrouter-api-key" "<your-key>"
 dotnet user-secrets set "Parameters:smtp-password" "<relay-password>"
+# ar-20 Keycloak dev container (both secrets, see §4)
+dotnet user-secrets set "Parameters:keycloak-admin-password" "<bootstrap-admin-password>"
+dotnet user-secrets set "Parameters:keycloak-client-secret" "dev-only-school-collab-client-secret"
 ```
 
 Or via env-vars (preferred for CI):
@@ -185,6 +192,8 @@ export Parameters__postgres-password=postgres
 export Parameters__rabbitmq-password=rabbit
 export Parameters__openrouter-api-key=<your-key>
 export Parameters__smtp_password=<relay-password>
+export Parameters__keycloak_admin_password=<bootstrap-admin-password>
+export Parameters__keycloak_client_secret=dev-only-school-collab-client-secret
 ```
 
 Aspire's `AddParameter(name, secret: true)` flags secrets so that they are
@@ -270,13 +279,74 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
 ## 4. `Auth:Keycloak` — OIDC authentication
 
 Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
-(used by every API + Admin).
+(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
+that imports the committed `src/AppHost/SchoolCollab.AppHost/realm-school-collab.json` realm
+(`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
+`settings-api`, and `admin`.
 
 | Key | Default | Description |
 | :--- | :--- | :--- |
-| `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). |
-| `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID. |
-| `Auth:Keycloak:ClientSecret` | `secret` | OpenID Connect client secret. **Override in production.** |
+| `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+| `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
+| `Auth:Keycloak:ClientSecret` | _(none committed — parameter required)_ | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the pinned dev-only literal `dev-only-school-collab-client-secret` (matching the realm file's client `secret`), supplied via `Parameters:keycloak-client-secret`; **production** MUST substitute a real secret-store value. |
+
+> 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
+> sensitive values here. Use one of:
+> - `dotnet user-secrets set "Parameters:keycloak-admin-password" "..."` and
+>   `dotnet user-secrets set "Parameters:keycloak-client-secret" "dev-only-school-collab-client-secret"` (local dev)
+> - Aspire `AddParameter(..., secret: true)` + reference (CI) — no committed default (see §2)
+> - Azure Key Vault / your platform's secret manager (production)
+
+### Dev-only `RequireHttpsMetadata = false`
+
+The Keycloak dev container exposes an **HTTP** authority (`http://<host>:<port>`, realm
+`school-collab`), so the OIDC + JwtBearer handlers are wired with
+`RequireHttpsMetadata = false`. **Today that value is set unconditionally** — it is *not*
+environment-gated (see the commented lines in `AuthTenancyExtensions`), so a Production
+deployment must point `Auth:Keycloak:Authority` at an **https** URL. Relaxing HTTPS metadata
+validation outside the dev container is unsafe; gating this value on the host environment is
+a recorded follow-up.
+
+### Minting a bearer token with username/password (dev, ROPC)
+
+The dev client `school-collab-client` has **direct access grants enabled**, so you can mint a
+token with the seeded `dev-teacher` user via the password grant against Keycloak's token endpoint:
+
+```bash
+REALM_URL="http://localhost:<keycloak-http-port>/realms/school-collab"
+curl -s -X POST "$REALM_URL/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password" \
+  -d "client_id=school-collab-client" \
+  -d "client_secret=dev-only-school-collab-client-secret" \
+  --data-urlencode "username=dev-teacher" \
+  --data-urlencode "password=dev-only-password"
+```
+
+The response `access_token` carries `tenant_id=…0002`, `tenant_name="Dev School"`, `tenant_type="School"`,
+`teacher_id=…0003` (the fixed ids seeded by the MigrationService `DevIdentitySeeder`), plus `aud=school-collab-client`
+(the oidc-audience-mapper). Use it as `Authorization: Bearer <access_token>` against the bearer endpoint groups
+(e.g. `GET /assignments`). Mint the token from the **same host form as `Auth:Keycloak:Authority`** (IDX10205 caveat above).
+
+> ⚠️ **ROPC is deprecated (OAuth 2.1).** The password grant above is for local dev / simple clients
+> only. **Production stays on the authorization-code flow with PKCE** (the `AddOpenIdConnect` code
+> flow + `ResponseType = "code"` — the browser/cookie path) — never use the password grant in a
+> real deployment.
+
+### The two parameters AC#4 needs
+
+Acceptance criterion #4 can only be exercised once these are supplied (no committed defaults):
+
+| Parameter | Purpose |
+| --- | --- |
+| `Parameters__keycloak_admin_password` (user-secrets `Parameters:keycloak-admin-password`) | Keycloak bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`). |
+| `Parameters__keycloak_client_secret` (user-secrets `Parameters:keycloak-client-secret`) | Dev client secret — set to the pinned dev-only literal `dev-only-school-collab-client-secret`. |
+
+### Real vs TestAuth modes
+
+When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-configuration-service)),
+the OIDC + JwtBearer registration is replaced with `TestAuthHandler`, which auto-authenticates
+every request as a test user without Keycloak — intended for local development / CI only.
 
 **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
 
@@ -291,16 +361,6 @@ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfig
   }
 }
 ```
-
-> 🔐 **Secrets.** `ClientSecret` is the most sensitive value in the
-> configuration tree. Use one of:
-> - `dotnet user-secrets set "Auth:Keycloak:ClientSecret" "..."` (local dev)
-> - Aspire `AddParameter(..., secret: true)` + reference (CI)
-> - Azure Key Vault / your platform's secret manager (production)
-
-When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-configuration-service)),
-the OIDC registration is replaced with `TestAuthHandler`, which auto-authenticates
-every request as a test user — intended for local development only.
 
 ---
 
@@ -713,6 +773,9 @@ matching env-var form:
 | `Parameters:smtp-user` | `Parameters__smtp_user` |
 | `Parameters:smtp-password` | `Parameters__smtp_password` |
 | `Parameters:smtp-from-address` | `Parameters__smtp_from_address` |
+| `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
+| `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
+| `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
 | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
 | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
 | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |

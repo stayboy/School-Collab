@@ -1,12 +1,15 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.EntityCodes;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -20,6 +23,9 @@ public sealed class CreateAssignmentCommandHandler(
     HybridCache cache,
     ITenantProvider tenantProvider,
     IOptions<AttachmentUploadOptions> uploadOptions,
+    ICurrentUser currentUser,
+    ITeacherDirectory teacherDirectory,
+    IFeatureFlagService featureFlags,
     ILogger<CreateAssignmentCommandHandler> logger) : ICommandHandler<CreateAssignmentCommand, Guid>
 {
     public async Task<Guid> HandleAsync(CreateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -27,6 +33,32 @@ public sealed class CreateAssignmentCommandHandler(
         logger.LogDebug("Handling CreateAssignment {Title}", command.Title);
 
         var tenantContext = tenantProvider.GetTenantContext();
+
+        // ar-20 P1-6 server-authoritative attribution, keyed on AUTH MODE (not claim
+        // absence): in real-auth (OIDC/bearer) a missing teacher_id is REJECTED — the wire
+        // has no teacher field, so there is nothing to fall back to. In TestAuth/dev the
+        // claim (if any) wins, else Guid.Empty (preserves today's posture). A present claim
+        // is always validated against the teacher directory (UnknownTeacher on miss).
+        var realAuth = !await featureFlags.IsEnabledAsync(FeatureFlagKeys.DisableOIDCAuth, cancellationToken);
+        var teacherClaim = currentUser.TeacherId;
+        Guid createdByTeacherId;
+        if (teacherClaim.HasValue)
+        {
+            createdByTeacherId = teacherClaim.Value;
+            var teacherExists = await teacherDirectory.ExistsAsync(createdByTeacherId, cancellationToken);
+            if (!teacherExists)
+            {
+                throw new UnknownTeacherException(createdByTeacherId);
+            }
+        }
+        else if (realAuth)
+        {
+            throw new MissingTeacherPrincipalException(nameof(CreateAssignmentCommand));
+        }
+        else
+        {
+            createdByTeacherId = Guid.Empty;
+        }
 
         // Spec §4.5: auto-generate the assignment code before constructing the entity.
         var assignmentNumber = await entityCodeGenerator.GenerateAsync("ASSIGNMENT_CODE", cancellationToken);
@@ -53,7 +85,7 @@ public sealed class CreateAssignmentCommandHandler(
             command.GradeLevelId,
             command.DueDate,
             command.MaxScore,
-            createdByTeacherId: Guid.Empty, // TODO: wire up authenticated teacher ID
+            createdByTeacherId: createdByTeacherId,
             mandatoryReview: command.MandatoryReview,
             assignmentNumber: assignmentNumber,
             aiPromptOverride: command.AiPromptOverride,

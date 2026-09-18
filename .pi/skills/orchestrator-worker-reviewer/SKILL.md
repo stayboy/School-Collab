@@ -14,9 +14,12 @@ verification, executed at the cheapest tier the task safely supports:
    acts as orchestrator** (parent-authored plan, parent-transcribed verdict).
 2. **Worker** — implements exactly the plan; runs build + affected tests; never
    edits the round doc; returns a structured WORKER REPORT.
-3. **Reviewer** — **static, diff-only**: verifies the worker's diff against
-   the plan plus the best-coding-practices check. Never builds or tests.
-   Returns a structured REVIEW block inline.
+3. **Reviewer** — **static; never builds or tests**. Two passes on the same
+   model: the **plan-review pass** (Tier 3, *before* the worker is dispatched —
+   feasibility, scope gates, acceptance honesty, security posture, judged
+   against the plan doc + the seams it cites) and the **diff-review pass**
+   (the worker's diff against the plan plus the best-coding-practices check).
+   Returns a structured PLAN REVIEW or REVIEW block inline.
 4. **UI Tester** — adversarial bug hunter over delivered UI, scoped
    **verbatim** to the orchestrator's handover. Not a second reviewer.
    Returns a structured UI TEST block inline.
@@ -38,7 +41,7 @@ Cost rules that apply to every round (speed + token budget):
 | 0 | Trivial non-behavioural change (typo, comment, config tweak) | 0 — do not invoke this skill | solo, per `AGENTS.md` |
 | 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | parent: scope check + authoritative build/test + transcribed verdict |
 | 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | parent adjudicates REVIEW + transcribes verdict |
-| 3 | Feature rounds, any UI round, anything failing the Tier-1 checklist | 3–5: orchestrator-plan, worker, reviewer, then orchestrator-accept OR parent-transcribed acceptance (**lean**, no-UI rounds) + UI tester when the UI trigger fires | orchestrator writes the verdict, or the parent transcribes it on lean rounds (+ tester-scope handover when the tester fires) |
+| 3 | Feature rounds, any UI round, anything failing the Tier-1 checklist | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR parent-transcribed acceptance (**lean**, no-UI rounds) + UI tester when the UI trigger fires | orchestrator writes the verdict, or the parent transcribes it on lean rounds (+ tester-scope handover when the tester fires) |
 
 Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
 When starting a feature or fix, offer the user the menu (solo / light round /
@@ -62,6 +65,22 @@ unchanged, but the parent **transcribes the acceptance** (on the reviewer's
 verdict + its own authoritative pass) instead of dispatching an
 orchestrator-accept run, and no UI tester is dispatched (there is nothing to
 bug-hunt). Rework bound stays ≤2.
+
+**The plan-review pass is NOT part of the lean/full split** (added 2026-09-18,
+owner): every Tier 3 round — lean or full — has the static reviewer read the
+**plan before the worker runs** (procedure step 2b). The plan is the round's most
+load-bearing artifact and a defect in it is the cheapest defect to fix; ar-19
+proved a diff-review alone cannot catch an unworkable premise (an EF helper that
+would not translate survived the entire implementation and surfaced only in the
+parent's own verification).
+
+**Plan-review model per sub-mode (owner default 2026-09-18):** on **Tier 3 full**
+the plan gate runs on the round's **higher model** — `ollama/glm-5.3:cloud` on the
+pi profile, `cline-pass/glm-5.3` on clinepass — because it is the
+highest-leverage review in the round (ar-20's plan review found 7 P1s before any
+code was accepted, including a security hole in a pinned decision). On **Tier 3
+lean** it runs on the round's *reviewer* model (`deepseek-v4.1-flash`). Both use
+the read-only `reviewer` shell; a user-named model still wins (precedence item 1).
 
 **Hand rule: lean drops the accept-run, never the plan-run.** The
 orchestrator-plan pass is what separates Tier 3 from a stretched Tier 2 — it is
@@ -92,7 +111,9 @@ a light tier through. Record escalations in the round doc.
   `## UI Tester` (fill only the tier-appropriate ones). Sole writer: the
   orchestrator run (Tier 3) or the parent (Tiers 1–2). Reviewer and tester
   never write files — they return structured blocks inline and the parent
-  persists them into the doc.
+  persists them into the doc. On Tier 3, `## Review` carries the **PLAN REVIEW**
+  verdict first (from step 2b, with its dispatch timestamp) and the
+  diff-review verdict beneath it, so the plan's own review is traceable.
 - `documents/rounds/diffs-<round-slug>.patch` — written **once** by the parent
   from `git diff` immediately after the worker run; passed by path to the
   reviewer and tester instead of inline hunks.
@@ -118,6 +139,7 @@ verbatim (the `ollama*` ids have drifted historically — verify, don't assume).
 | Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` | 3 only |
 | Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 1–3 |
 | Reviewer | `ollama-cloud/deepseek-v4.1-flash` (owner override 2026-09-15) | `cline-pass/deepseek-v4.1-flash` | 2–3 |
+| **Plan reviewer** (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 3 full only — owner default 2026-09-18; lean rounds use the Reviewer row |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
 | Escalator (blocked-pass rework) | the round's reviewer model | the round's reviewer model | on block |
 | Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | on escalation |
@@ -132,7 +154,7 @@ every role's `runs.run` — and record that choice in the round doc header.
 |---|---|---|---|---|
 | **Solo** | the single agent does plan + implement + check itself | — | — | ask the user first (see the solo rule) |
 | **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `glm-5.3-flash` | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model |
-| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `deepseek-v4.1-flash` (owner override 2026-09-15) | full ladder + UI tester `minimax-m3` |
+| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `deepseek-v4.1-flash` (owner override 2026-09-15) | full ladder + UI tester `minimax-m3`; **plan-review on full rounds = `glm-5.3:cloud`** (lean = the reviewer model) |
 
 **Solo rule:** a solo round is ONE agent doing everything (planner, implementer
 and its own acceptance check) — the same shape as a light round's worker. Before
@@ -204,9 +226,10 @@ re-read source specs — the plan is the single source of truth, and specs are
 opened only to resolve ambiguity.
 
 Structured blocks (formats in `references/role-contracts.md`): **WORKER
-REPORT** (changed files, build/test verdicts, deviations), **REVIEW** (P1/P2
-with file:line evidence + best-practices check), **UI TEST** (scope ack,
-P1/P2 with file:line, out-of-round observations).
+REPORT** (changed files, build/test verdicts, deviations), **PLAN REVIEW**
+(Tier 3 only: feasibility/scope gates/acceptance honesty/security + P1/P2 with
+file:line), **REVIEW** (P1/P2 with file:line evidence + best-practices check),
+**UI TEST** (scope ack, P1/P2 with file:line, out-of-round observations).
 
 ## Deterministic UI-round trigger
 
@@ -236,6 +259,24 @@ the tester never derives or expands its own scope.
    criteria). Tier 3: the orchestrator run reads the source specs/review
    docs, writes `## Plan`, and authors the worker/reviewer task specs and
    acceptance criteria. The plan must be implementable standalone.
+2b. **Plan review (Tier 3 — BEFORE the worker runs).** Dispatch the static
+   reviewer against the **plan**, not a diff: the plan doc plus the code/spec
+   seams it cites. It judges (i) **feasibility** — do the named files, routes,
+   entities, clients and patterns actually exist and behave as claimed? (ii)
+   **scope gates** — UI files, contract shape, migrations, committed secrets,
+   CPM rules: is the in/out boundary honest? (iii) **acceptance honesty** —
+   would each test the plan calls "discriminating" actually fail against the
+   pre-fix code? (iv) **security posture** — auth schemes, claim handling,
+   token validation, credential handling, tenant isolation; (v) **pinned
+   decisions** — does the plan contradict or silently re-open one? It returns a
+   **PLAN REVIEW** block. A plan **P1** → the orchestrator (Tier 3 full) or the
+   parent (lean) revises `## Plan` **before dispatch**; the reviewer then
+   re-reads only the revised sections. **≤1 plan-review iteration.** The worker
+   is never dispatched on a plan with an open P1. The pass is static — any
+   build/test numbers it volunteers are discarded like any other child's.
+   **Model:** Tier 3 **full** → `ollama/glm-5.3:cloud` (`cline-pass/glm-5.3`);
+   Tier 3 **lean** → the round's reviewer model. Read-only `reviewer` shell in
+   both cases; a user-named model wins.
 3. **Worker run.** Task = worker contract + the plan inline + expected files +
    round-doc path (the worker does not edit it). The worker implements, runs
    build + affected tests, returns WORKER REPORT. The parent persists the
@@ -370,3 +411,6 @@ the tester never derives or expands its own scope.
    ≤2, tester ≤2).
 6. The relevant backlog/spec doc is updated with completion notes; durable
    outcomes folded into `documents/specs/`.
+7. **Tier 3 only:** the plan carries a PLAN REVIEW with no open P1 from *before*
+   the worker was dispatched (step 2b), recorded in the round doc's `## Review`
+   above the diff-review verdict.

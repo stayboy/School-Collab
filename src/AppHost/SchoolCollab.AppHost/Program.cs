@@ -1,3 +1,5 @@
+using Aspire.Hosting.ApplicationModel;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 // Pin the postgres superuser password so it stays stable across AppHost
@@ -38,6 +40,45 @@ var redis = builder.AddRedis("cache");
 var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
     .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp")
     .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "http");
+
+// ── Keycloak dev IdP (ar-20) ───────────────────────────────────────────────────
+// Ships a Keycloak dev container with the committed realm-school-collab.json import
+// (realm `school-collab`, direct-access-grants client school-collab-client, seeded
+// dev-teacher user + tenant/teacher protocol mappers). Mirrors the mailpit block.
+// Secrets: `keycloak-admin-password` (Keycloak bootstrap admin) gets NO committed default
+// (operator supplies via Parameters__keycloak_admin_password / user-secrets).
+// `keycloak-client-secret` has a DEV-ONLY value matching the realm file's dev client
+// secret (labelled dev-only there) supplied via user-secrets/Parameters — see
+// documents/configuration.md §2/§4.
+var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-collab-client");
+var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
+var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
+
+// Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
+// bind mount path is stable regardless of the launch working directory.
+var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "realm-school-collab.json");
+
+var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
+    .WithArgs("start-dev", "--import-realm")
+    // Realm import is one-shot on empty state; a persistent volume may skip re-import
+    // after realm edits — remove the keycloak data volume (docker volume rm ...) to
+    // re-import a changed realm file (noted in the ar-20 worker report).
+    .WithBindMount(keycloakRealmPath, "/opt/keycloak/data/import/realm-school-collab.json")
+    .WithEnvironment("KC_BOOTSTRAP_ADMIN_USERNAME", "admin")
+    .WithEnvironment("KC_BOOTSTRAP_ADMIN_PASSWORD", keycloakAdminPassword)
+    .WithHttpEndpoint(name: "http");
+
+// Fan the Auth:Keycloak settings onto a consuming host (assignments-api, students-api,
+// settings-api, admin). The Authority is the Keycloak HTTP endpoint-reference expression
+// (Aspire resolves it at runtime); ClientId/ClientSecret come from the AppHost parameters.
+// No named-client service discovery is wired (the hosts read Auth:Keycloak:* directly).
+static void WireKeycloakAuth(
+    IResourceBuilder<ProjectResource> host, IResourceBuilder<ContainerResource> keycloak,
+    IResourceBuilder<ParameterResource> clientId, IResourceBuilder<ParameterResource> clientSecret)
+    => host
+        .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
+        .WithEnvironment("Auth__Keycloak__ClientId", clientId)
+        .WithEnvironment("Auth__Keycloak__ClientSecret", clientSecret);
 
 // Per-bounded-context outbox exchange names. Centralised in the AppHost's
 // appsettings.json under Parameters:outbox-exchange-* and fanned out to the
@@ -153,6 +194,8 @@ var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settin
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
+// ar-20: real bearer/OIDC auth from the Keycloak dev container.
+WireKeycloakAuth(settingsApi, keycloak, keycloakClientId, keycloakClientSecret);
 
 // Defensive: migrator references SchoolCollab.Settings.Core which exposes
 // AddConfigFeatureFlagClient (URL "https+http://settings-api"). Migrator does
@@ -188,6 +231,9 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
+// ar-20: real auth wiring for students-api (its endpoint-group bearer posture is a
+// cheap follow-up per decision 3; the shared AddAuthAndTenancy registration applies here).
+WireKeycloakAuth(studentsApi, keycloak, keycloakClientId, keycloakClientSecret);
 // NOTE: every cross-module HttpClient base address in src/** must have a matching
 // .WithReference(<resource>) on the calling project here. CrossModuleWiringTests
 // (Core.Tests.Unit/Architecture) enforces this — a missing reference surfaces at
@@ -213,6 +259,8 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
+// ar-20: wire the assignment endpoint groups to the Bearer scheme in the OIDC branch.
+WireKeycloakAuth(assignmentsApi, keycloak, keycloakClientId, keycloakClientSecret);
 
 // Activity-group delete-guard hop (Phase 2, FR-6); 404 = "no references".
 // Added after assignmentsApi is declared so the studentsApi block above stays in
@@ -265,7 +313,12 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WaitFor(settingsApi)
     .WaitFor(settingsAi)
     .WaitFor(assignmentsApi)
-    .WaitFor(studentsApi);
+    .WaitFor(studentsApi)
+    // ar-20: the Admin Blazor shell's existing OIDC code-flow (unchanged) now has real
+    // Keycloak wiring via the dev container; its UI/auth code is untouched this round.
+    .WithEnvironment("Auth__Keycloak__Authority", $"{keycloak.GetEndpoint("http")}/realms/school-collab")
+    .WithEnvironment("Auth__Keycloak__ClientId", keycloakClientId)
+    .WithEnvironment("Auth__Keycloak__ClientSecret", keycloakClientSecret);
 
 // F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
 // Option B, a separate host rather than routes on Admin). Depends on the

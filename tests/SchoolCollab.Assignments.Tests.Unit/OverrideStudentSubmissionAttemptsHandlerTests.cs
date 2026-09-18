@@ -87,7 +87,7 @@ public class OverrideStudentSubmissionAttemptsHandlerTests
         var cache = new FakeHybridCache();
         var teacherId = Guid.NewGuid();
         var handler = new OverrideStudentSubmissionAttemptsCommandHandler(
-            subRepo, cache, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
+            subRepo, cache, new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
 
         await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(submission.Id, teacherId));
 
@@ -105,7 +105,7 @@ public class OverrideStudentSubmissionAttemptsHandlerTests
         var subRepo = new FakeSubmissionRepository { SubmissionToReturn = null };
         var cache = new FakeHybridCache();
         var handler = new OverrideStudentSubmissionAttemptsCommandHandler(
-            subRepo, cache, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
+            subRepo, cache, new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(Guid.NewGuid(), Guid.NewGuid()));
 
@@ -121,7 +121,7 @@ public class OverrideStudentSubmissionAttemptsHandlerTests
         var subRepo = new FakeSubmissionRepository { SubmissionToReturn = submission };
         var cache = new FakeHybridCache();
         var handler = new OverrideStudentSubmissionAttemptsCommandHandler(
-            subRepo, cache, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
+            subRepo, cache, new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<OverrideStudentSubmissionAttemptsCommandHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(submission.Id, Guid.Empty));
 

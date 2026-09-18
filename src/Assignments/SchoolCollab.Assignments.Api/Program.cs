@@ -138,6 +138,12 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAiPromptPolic
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IStudentDirectory,
     SchoolCollab.Assignments.Api.Services.StudentDirectoryHttpClient>();
 
+// Teacher directory port (ar-20): validates a teacher_id claim against a real teacher row
+// via the students-api HTTP port (no cross-context reference). Reuses the existing
+// "students-api" named client registered above.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherDirectory,
+    SchoolCollab.Assignments.Api.Services.TeacherDirectoryHttpClient>();
+
 // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
 // port (Assignments → Students) for the link command and SelectedGroups publish.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,

@@ -68,6 +68,9 @@ builder.Services.AddScoped<CodedValueSeeder>();
 builder.Services.AddScoped<TenantSeeder>();
 builder.Services.AddScoped<EntityCodeRuleSeeder>();
 builder.Services.AddScoped<PilotActivityGroupFlagOverrideSeeder>();
+// ar-20: dev-only identity seed ("Dev School" tenant + "Dev Teacher") backing the
+// committed Keycloak realm's fixed claim values. Idempotent; dev/test only.
+builder.Services.AddScoped<DevIdentitySeeder>();
 
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
@@ -149,6 +152,21 @@ try
         catch (Exception ex)
         {
             logger.LogError(ex, "Students migration failed");
+            exitCode = 1;
+        }
+
+        // ── Dev identity seed (ar-20) ────────────────────────────────────────
+        // Seeds the fixed "Dev School" tenant (Settings) + "Dev Teacher" row (Students)
+        // that back the Keycloak realm's tenant_id/teacher_id mappers. Runs AFTER both
+        // migrations so the tenants + teachers tables exist. Idempotent; dev/test only.
+        try
+        {
+            var devIdentitySeeder = scope.ServiceProvider.GetRequiredService<DevIdentitySeeder>();
+            await devIdentitySeeder.SeedAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Dev identity seed failed");
             exitCode = 1;
         }
 

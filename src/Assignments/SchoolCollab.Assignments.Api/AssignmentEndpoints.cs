@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using SchoolCollab.Assignments.Api.Endpoints;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Assignments.Api;
@@ -12,7 +14,12 @@ public static class AssignmentEndpoints
 
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            group.RequireAuthorization();
+            // ar-20 real-auth mode: assignments API groups authenticate via the bearer JWT
+            // scheme (Keycloak access tokens). DefaultScheme stays Cookie for the Admin/
+            // Families browser flows; this group opts into Bearer explicitly (decision 2/3).
+            group.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
 
         group.MapAssignmentRoutes();
@@ -23,7 +30,9 @@ public static class AssignmentEndpoints
         var wardGroup = app.MapGroup("/students");
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            wardGroup.RequireAuthorization();
+            wardGroup.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
         wardGroup.MapWardAssignmentRoutes();
 
@@ -37,7 +46,9 @@ public static class AssignmentEndpoints
             var activityGroupsGroup = app.MapGroup("");
             if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
             {
-                activityGroupsGroup.RequireAuthorization();
+                activityGroupsGroup.RequireAuthorization(policy => policy
+                    .RequireAuthenticatedUser()
+                    .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
             }
             activityGroupsGroup.MapActivityGroupLinkRoutes();
         }
