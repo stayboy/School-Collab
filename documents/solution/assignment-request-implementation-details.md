@@ -978,4 +978,19 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   assignment to Draft while nothing deletes `NotificationLog` rows, so the gate is now **`PublishedAt is not null`**
   with `PublishedAt` threaded through `AssignmentSummary`, `AssignmentRepository.ListAsync` and both query
   handlers (each layer would otherwise have silently dropped it).
-  **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive); D-6 identity before Phase 5 WS-G.
+- `ar-18-light-residuals` — **CLOSED 2026-09-17, Tier 2 LIGHT ROUND**; Phase 4 E2 cleanup before E3
+  (`rounds/round-ar-18-light-residuals.md` + `diffs-ar-18-light-residuals.patch`; branch `stack/18-ar-18-light-residuals`
+  cut at `c8c0b077` = merged ar-17). L1: the API now registers `JsonStringEnumConverter<NotificationKindDto>` and
+  `<ContactChannelDto>` alongside its ten siblings, so the two delivery enums wire as **PascalCase strings**
+  (`"kind":"Publish"`, camelCase properties) instead of numbers — pinned by a revert-proven source-scan
+  discriminator plus a wire-shape test (the only harness that can observe `Program.cs`'s options, since every
+  existing host test builds its own `TestServer` and registers converters itself, which is exactly how the gap
+  hid). L2: F5 landed — the section raises `OnFailureCountLoaded` (`EventCallback<int>`) once per **successful**
+  load with the row count (zero reported, error never-raised), and Detail renders `Notifications (N)` when N > 0
+  via a `NotificationsTabLabel` computed property; no Detail-side fetch. L3: `[EditorRequired]` on both section
+  parameters. Worker `deepseek-v4.1-flash`, reviewer `glm-5.3-flash` (light-mode set); reviewer ACCEPT 0 P1
+  (2 P2 accepted: delimiter-brittle block slice that errs safe; pre-existing `AssignmentId` doc gap). 6 files,
+  +209/−6. Authoritative: build 0 errors; **639/0 · 80/0 · 21/0 · 84/0**.
+  **Next:** **E3** (`Assignments.Worker` reminders/overdue/completion/archive — carrying the
+  `(TenantId, AssignmentId, RecipientId, Kind)` unique index + F1 duplicate-row class); D-6 identity before
+  Phase 5 WS-G.

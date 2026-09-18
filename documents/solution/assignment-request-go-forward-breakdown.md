@@ -294,6 +294,13 @@ within a phase.
       full four-agent).
       **Residuals:** the API registers neither `NotificationKindDto` nor `ContactChannelDto` as string enums (the
       client converter is tolerance only); no `Failures (N)` tab count; the live HTTP path is untested end-to-end.
+      → **Both first two residuals CLOSED by ar-18 (2026-09-17, Tier 2 light round):** the API now registers
+      `JsonStringEnumConverter<NotificationKindDto>` + `<ContactChannelDto>` (delivery enums wire as PascalCase
+      strings like their 10 siblings; pinned by a revert-proven discriminator), the tab label counts via an
+      `EventCallback<int>` (`Notifications (N)` when N > 0, success-path-only reporting, zero-vs-never pinned),
+      and both section parameters carry `[EditorRequired]`. 6 files, +209/−6; 639/0 · 80/0 · 21/0 · 84/0.
+      Round: `rounds/round-ar-18-light-residuals.md` (CLOSED, Tier 2 — owner explicitly took the light tier
+      despite the UI trigger; the only UI surface is the tab label, bUnit-covered).
 - [ ] E3 reminder/overdue/completion worker (`Assignments.Worker`; archive sweep already ships in
       Assignments.Api) — consumes the unchanged `AssignmentPublishedIntegrationEvent` and carries the
       `(TenantId, AssignmentId, RecipientId, Kind)` unique-index residual from ar-16.

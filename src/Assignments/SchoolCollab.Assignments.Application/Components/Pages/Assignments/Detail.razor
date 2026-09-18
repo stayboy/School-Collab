@@ -339,8 +339,9 @@
                        renders an Info empty state when the endpoint returns zero rows. *@
                     @if (_item.PublishedAt is not null)
                     {
-                        <FluentTab Label="Notifications">
-                            <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true" />
+                        <FluentTab Label="@NotificationsTabLabel">
+                            <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true"
+                                                          OnFailureCountLoaded="@OnFailureCountLoaded" />
                         </FluentTab>
                     }
                 </FluentTabs>
@@ -358,6 +359,9 @@
     private AssignmentSummaryDto? _item;
     private bool _loading = true;
     private string? _error;
+    // WS-E2b / ar-18 (ar-17 follow-up F5): reported by the failures section's own load —
+    // Detail never fetches the failure list itself just to count it.
+    private int _notificationFailureCount;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -448,6 +452,13 @@
             if (!_disposed) _loading = false;
         }
     }
+
+    /// <summary>WS-E2b / ar-18: the failures tab badges its row count (F5).
+    /// Zero reads as the plain label — an empty list is not worth a "(0)".</summary>
+    private string NotificationsTabLabel =>
+        _notificationFailureCount > 0 ? $"Notifications ({_notificationFailureCount})" : "Notifications";
+
+    private void OnFailureCountLoaded(int count) => _notificationFailureCount = count;
 
     private string AudienceSummary()
     {

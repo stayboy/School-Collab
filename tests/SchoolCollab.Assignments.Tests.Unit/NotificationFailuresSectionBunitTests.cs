@@ -328,6 +328,64 @@ public class NotificationFailuresSectionBunitTests : BunitContext
     }
 
     [TestMethod]
+    public void FailureCountCallback_RaisedWithRowCount()
+    {
+        // WS-E2b / ar-18 (ar-17 follow-up F5): Detail badges its tab label from this
+        // callback, so the section must report the row count on its own load.
+        SetupFailures(
+            Row(ContactChannelDto.Email, NotificationKindDto.Publish),
+            Row(ContactChannelDto.SMS, NotificationKindDto.Reminder));
+        SetupContacts();
+
+        int? reported = null;
+        var cut = Render<NotificationFailuresSection>(p => p
+            .Add(x => x.AssignmentId, AssignmentId)
+            .Add(x => x.CanHaveFailures, true)
+            .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
+
+        cut.WaitForAssertion(() => reported.Should().Be(2,
+            "the count callback feeds the Detail tab badge"));
+    }
+
+    [TestMethod]
+    public void FailureCountCallback_ZeroOnEmptyList()
+    {
+        // Zero is still reported (the badge renders the plain label for it) — the
+        // distinction that matters is reported-0 versus never-reported.
+        SetupFailures();
+        SetupContacts();
+
+        int? reported = null;
+        var cut = Render<NotificationFailuresSection>(p => p
+            .Add(x => x.AssignmentId, AssignmentId)
+            .Add(x => x.CanHaveFailures, true)
+            .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
+
+        cut.WaitForAssertion(() => reported.Should().Be(0,
+            "an empty list reports 0 so the tab badge stays plain"));
+    }
+
+    [TestMethod]
+    public void FailureCountCallback_NotRaised_WhenLoadFails()
+    {
+        // The label must never advertise a count for a list the surface could not read
+        // (ar-18 parameter contract).
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/notification-failures")
+            .Respond(HttpStatusCode.InternalServerError);
+        SetupContacts();
+
+        int? reported = null;
+        var cut = Render<NotificationFailuresSection>(p => p
+            .Add(x => x.AssignmentId, AssignmentId)
+            .Add(x => x.CanHaveFailures, true)
+            .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("intent-error"));
+        reported.Should().BeNull(
+            "a failed load must not report a count — the error bar is the only signal");
+    }
+
+    [TestMethod]
     public void BlankContactValue_FallsBackToMarkedShortId_NotAnEmptyCell()
     {
         // UI-tester P2: SubscribedContactDto.Value is a non-nullable string with no
