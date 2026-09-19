@@ -1,0 +1,373 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 67f932de..76a29ed9 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -81,7 +81,7 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
+ | `rabbitmq` | Container (`rabbitmq`) | All APIs + Students.Worker |
+ | `cache` | Container (`redis`) | APIs + Worker |
+ | `migrator` | Project | (one-shot) |
+-| `settings-db` | Postgres database | migrator, settings-api |
++| `settings-db` | Postgres database | migrator, settings-api, assignments-api, students-api |
+ | `assignments-db` | Postgres database | migrator, assignments-api |
+ | `students-db` | Postgres database | migrator, students-api, students-worker |
+ | `settings-api` | Project | admin, settings-ai |
+@@ -640,7 +640,7 @@ Aspire injects connection strings into the apps that call
+ 
+ | Resource | Injected key | Used by |
+ | :--- | :--- | :--- |
+-| `settings-db` | `ConnectionStrings:settings-db` | `SchoolCollab.Settings.Api`, migrator |
++| `settings-db` | `ConnectionStrings:settings-db` | `SchoolCollab.Settings.Api`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api`, migrator |
+ | `assignments-db` | `ConnectionStrings:assignments-db` | `SchoolCollab.Assignments.Api`, migrator |
+ | `students-db` | `ConnectionStrings:students-db` | `SchoolCollab.Students.Api`, `SchoolCollab.Students.Worker`, migrator |
+ | `cache` | `ConnectionStrings:cache` | APIs + Worker (also surfaced as `Aspire:StackExchange:Redis:ConnectionString`) |
+@@ -651,6 +651,17 @@ Aspire injects connection strings into the apps that call
+ > They are documented here only so you know what to expect when running
+ > a single API outside the AppHost (e.g. from VS / VS Code).
+ 
++> ⚠️ **Every host that reads a connection string needs a matching `.WithReference`.**
++> `Settings.Core/Extensions.cs` (`AddSettingsCore` / `AddTenantDirectory`) and its
++> Students/Assignments peers fall back to a hardcoded
++> `Host=localhost;Port=5432` when the key is absent — the host still reports
++> **Healthy** (Aspire probes the endpoint), but the Settings outbox dispatcher
++> registered by `AddSettingsCore` then logs a connection error on every retry and
++> entity-code generation fails. A host is affected whenever its `Program.cs` calls
++> `AddSettingsCore(...)` (needed for `IEntityCodeGenerator` over `settings-db`).
++> `AppHostSettingsDbWiringArchitectureTests` in `SchoolCollab.ArchitectureTests.Unit`
++> enforces the reference for every such host.
++
+ ---
+ 
+ ## 9. Logging
+diff --git a/documents/runbooks/aspire-apphost-silent-hang.md b/documents/runbooks/aspire-apphost-silent-hang.md
+new file mode 100644
+index 00000000..59d669b2
+--- /dev/null
++++ b/documents/runbooks/aspire-apphost-silent-hang.md
+@@ -0,0 +1,119 @@
++# Runbook — Aspire AppHost hangs forever at startup with no error
++
++> Owner: Dev environment / tooling
++> Related: `documents/configuration.md` §1–§2 (AppHost topology),
++> upstream [microsoft/aspire#18922](https://github.com/microsoft/aspire/issues/18922)
++> Last updated: 2026-09-18
++
++## Symptom
++
++`dotnet run --project src/AppHost/SchoolCollab.AppHost` (or `aspire run`) never
++reaches the dashboard. The log ends with a block of **exactly one warning per
++network endpoint** and nothing after it:
++
++```text
++warn: Unable to allocate a network port for service 'postgres'
++warn: Unable to allocate a network port for service 'keycloak-http'
++warn: Unable to allocate a network port for service 'cache-tcp'
++... 8 lines total, including resources you did not touch ...
++```
++
++Distinguishing characteristics:
++
++- **No `fail:` or `crit:` lines at all** — the log looks benign.
++- `dcp.exe` (the DCP API server) **is** running; the AppHost **is** connected.
++- Every resource is created and sits in `Starting -> Waiting` forever.
++- **No containers are ever created** (not even the dashboard).
++- The dashboard never listens on `:15006`.
++- The log is **byte-identical across runs**, and the stall survives restarts,
++  different launch contexts, and unrelated changes.
++
++## Root cause
++
++`dcp run-controllers` — a **separate** DCP child process from `dcp start-apiserver`
++— exits immediately with status 1:
++
++```json
++{"ExitCode":1,"error":"failed to initialize state store: could not prepare state store
++ directory 'C:\\Users\\<user>\\.dcp\\state.elevated': directory ... has invalid ownership:
++ directory owner does not match current user or token owner"}
++```
++
++The API server keeps running, so the AppHost connects, builds its resource model,
++resolves parameters, creates the endpoint Services — and then **nothing reconciles
++them, ever**. DCP has no timeout for "no controller is processing this", so the
++process waits forever and prints nothing.
++
++The `1-minute` service-address watch inside that reconciliation path is what
++produces the misleading `Unable to allocate a network port` warnings.
++
++Sticky: once `~/.dcp/state` or `~/.dcp/state.elevated` reaches this state, **every**
++AppHost run on the machine hangs until the directory is cleared. A stale directory
++from a previous DCP/Aspire version (version skew between the Aspire CLI bundle and
++`Aspire.Hosting` migrates the shared store) is the usual trigger.
++
++## Diagnosis (2 minutes)
++
++1. **Count DCP processes.** A healthy run has a controller process alongside the
++   API server; the broken state has only one:
++
++   ```powershell
++   tasklist | Select-String dcp
++   ```
++
++2. **Run the controller by hand — it prints the real error in under a second.**
++   Point it at the newest DCP session directory and the running AppHost PID:
++
++   ```bash
++   DCP="$USERPROFILE/.nuget/packages/aspire.hosting.orchestration.win-x64/<version>/tools/dcp.exe"
++   K=$(ls -dt "$TEMP"/aspire-dcp* | head -1)
++   "$DCP" run-controllers --kubeconfig "$K/kubeconfig" --monitor <apphost-pid> \
++       --container-runtime docker -v=debug
++   ```
++
++   The `failed to initialize state store ... invalid ownership` line confirms it.
++
++3. *Optional* — set `DcpPublisher__DiagnosticsLogFolder=<dir>` when launching the
++   AppHost to have the same error written to file.
++
++## Fix
++
++Rename (safer than deleting) the DCP state directories, then relaunch. DCP
++recreates them with correct ownership:
++
++```powershell
++cd $env:USERPROFILE\.dcp
++Rename-Item state.elevated state.elevated.bak
++Rename-Item state state.bak
++```
++
++Verify after relaunch: **two or more `dcp.exe` processes**, **zero**
++`Unable to allocate a network port` warnings, and containers actually appearing
++(`docker ps`). The stale `*.bak` directories can be deleted once the AppHost is up.
++
++## Red herrings (each of these was tested and does **not** fix it)
++
++| Hypothesis | Why it looks plausible | Reality |
++|---|---|---|
++| Port exhaustion | the warning literally says "unable to allocate a port" | ~16 000 dynamic ports available, only a few listeners; no ports in use in the warned ranges |
++| Windows excluded/reserved port ranges | `netsh int ipv4 show excludedportrange` shows reserved blocks | the reserved ranges do not overlap the ports DCP wants |
++| Stale containers holding ports | postgres/rabbitmq containers linger between runs | stopping them changes nothing |
++| Missing `Parameters:` values | the AppHost prompts/waits for unset parameters | supplying them lets the parameter resources reach `Running`, but the stall persists |
++| `DOCKER_HOST` / named-pipe choice | Docker Desktop context differences | setting it explicitly changes nothing |
++| Docker Desktop health | plausible single point of failure | engine healthy, `docker network create` returns instantly |
++| Aspire version mismatch | CLI bundle and `Aspire.Hosting` versions differ | not the trigger, though it *is* what corrupts the state store in the first place |
++
++## Prevention
++
++- Keep the Aspire CLI bundle and `Aspire.Hosting` on the same version
++  (`aspire update`) — the shared `~/.dcp/state` store is migrated by whichever
++  DCP touches it first, and a version skew is what produced the stale directory.
++- If the AppHost ever hangs silently again, **check the DCP controller process
++  count first** — it takes seconds and skips every red herring above.
++
++## Related failure mode (same silent-hang family)
++
++A host that reports **Healthy** while logging a connection error on every retry
++(e.g. `Npgsql ... Failed to connect to 127.0.0.1:5432`) is a *missing
++`.WithReference`* problem, not a DCP problem. See
++`documents/configuration.md` §8 and `AppHostSettingsDbWiringArchitectureTests`.
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index c2007312..e9312d02 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -244,6 +244,11 @@ var settingsAi = builder.AddProject<Projects.SchoolCollab_AI_Server>("settings-a
+ 
+ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("students-api")
+     .WithReference(studentsDb)
++    // AddSettingsCore (IEntityCodeGenerator -> EntityCodeRule rows) resolves
++    // ConnectionStrings:settings-db. Without this reference Settings.Core/Extensions.cs
++    // silently falls back to Host=localhost, Port=5432 and the Settings outbox
++    // dispatcher registered by AddSettingsCore fails on every retry.
++    .WithReference(settingsDb)
+     .WithReference(settingsApi)     // enroll/grade validation hop to Settings CodedValues API
+     .WithReference(rabbit)
+     .WithReference(redis)
+@@ -263,6 +268,9 @@ WireKeycloakAuth(studentsApi, keycloak, keycloakClientId, keycloakClientSecret);
+ 
+ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
+     .WithReference(assignmentsDb)
++    // Same AddSettingsCore requirement as students-api above (IEntityCodeGenerator for
++    // auto-generated assignment codes) — see the AppHostSettingsDbWiringArchitectureTests guard.
++    .WithReference(settingsDb)
+     .WithReference(rabbit)
+     .WithReference(redis)
+     .WithReference(studentsApi)
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostSettingsDbWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostSettingsDbWiringArchitectureTests.cs
+new file mode 100644
+index 00000000..57e2b2b0
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostSettingsDbWiringArchitectureTests.cs
+@@ -0,0 +1,176 @@
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Guards the AppHost wiring that no standalone-run recipe can catch: a host whose
++/// <c>Program.cs</c> registers the Settings bounded context
++/// (<c>AddSettingsCore</c> — needed for <c>IEntityCodeGenerator</c>, which reads
++/// <c>EntityCodeRule</c> rows from <c>settings-db</c>) MUST also carry
++/// <c>.WithReference(settingsDb)</c> in its AppHost resource chain. Without it,
++/// <c>SchoolCollab.Settings.Core/Extensions.cs</c> silently falls back to
++/// <c>Host=localhost;Port=5432;Database=schoolcollab_settings</c>, so the Settings
++/// outbox dispatcher registered by <c>AddSettingsCore</c> logs a connection error
++/// on every retry (measured: ~1000 lines within minutes from a single cold start)
++/// and every entity-code generation attempt fails — while the host still reports
++/// Healthy, because Aspire only probes the endpoint.
++///
++/// <para>
++/// Discovered during the ar-21 orchestrated cold start (the first time the AppHost
++/// started on this machine at all): <c>assignments-api</c> logged 1029 such errors
++/// and <c>students-api</c> 1030, while <c>settings-api</c> — which does reference
++/// <c>settingsDb</c> — logged 0.
++/// </para>
++///
++/// <para>
++/// The scan resolves "which projects register Settings.Core" by looking at real
++/// <c>Program.cs</c> files under <c>src/</c> (skipping build output) rather than by
++/// mangling the project constant into a directory name: a stale
++/// <c>src/SchoolCollab.AI.Server/{bin,obj}</c> leftover from the AI project's move to
++/// <c>src/AI/</c> otherwise makes the directory lookup ambiguous. The walk-up helper
++/// follows the <c>AppHostRealmImportArchitectureTests</c> / <c>SeedCsvArchitectureTests</c>
++/// precedent and THROWS rather than passing vacuously when it cannot find the repo.
++/// </para>
++/// </summary>
++[TestClass]
++public class AppHostSettingsDbWiringArchitectureTests
++{
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    private static readonly IReadOnlyList<ProjectResourceChain> ProjectResources = ParseProjectResourceChains();
++
++    private static readonly HashSet<string> ProjectsRegisteringSettingsCore = FindProjectsRegisteringSettingsCore();
++
++    private static readonly string[] SettingsCoreResourceNames = [.. ProjectResources
++        .Where(resource => ProjectsRegisteringSettingsCore.Contains(ProjectNameOf(resource.ProjectConstant)))
++        .Select(resource => resource.ResourceName)
++        .OrderBy(name => name, StringComparer.Ordinal)];
++
++    [TestMethod]
++    public void EveryHostRegisteringSettingsCore_ReferencesSettingsDb()
++    {
++        foreach (var resource in ProjectResources)
++        {
++            if (!ProjectsRegisteringSettingsCore.Contains(ProjectNameOf(resource.ProjectConstant)))
++            {
++                continue;
++            }
++
++            resource.Chain.Should().Contain("WithReference(settingsDb)",
++                $"{resource.ResourceName} calls AddSettingsCore in its Program.cs, so the AppHost must inject "
++                + "ConnectionStrings:settings-db — otherwise Settings.Core falls back to localhost:5432 and the "
++                + "Settings outbox dispatcher fails on every retry (seen in the ar-21 cold start).");
++        }
++    }
++
++    [TestMethod]
++    public void SettingsCoreHosts_AreTheReviewedSet()
++    {
++        // A tripwire, not a tautology: the assertion above is skipped for any host the
++        // scan does not recognise, so this pins the set it actually inspected. A new
++        // host registering Settings.Core must update this list consciously (and get the
++        // settings-db reference decision reviewed).
++        SettingsCoreResourceNames.Should().BeEquivalentTo(
++            ["assignments-api", "settings-api", "students-api"],
++            "these are the AppHost project resources whose Program.cs calls AddSettingsCore.");
++    }
++
++    [TestMethod]
++    public void Scan_ActuallyFoundTheAppHostAndTheSettingsCoreProjects()
++    {
++        // Non-vacuity guard: if the AddProject regex or the src/ scan stops matching, the
++        // assertions above would pass while inspecting nothing.
++        ProjectResources.Should().HaveCountGreaterThanOrEqualTo(6,
++            "the AppHost declares at least six AddProject resources; fewer means the parser found no real chains.");
++
++        ProjectResources.Select(resource => resource.ResourceName)
++            .Should().Contain(["assignments-api", "settings-api", "students-api", "migrator"]);
++
++        ProjectsRegisteringSettingsCore.Should().Contain(
++            ["SchoolCollab.Assignments.Api", "SchoolCollab.Settings.Api", "SchoolCollab.Students.Api"],
++            "these projects call AddSettingsCore and must be discovered by the src/ Program.cs scan.");
++    }
++
++    private sealed record ProjectResourceChain(string ProjectConstant, string ResourceName, string Chain);
++
++    /// <summary>Projects.SchoolCollab_Assignments_Api → SchoolCollab.Assignments.Api</summary>
++    private static string ProjectNameOf(string projectConstant)
++        => projectConstant.Replace('_', '.');
++
++    private static IReadOnlyList<ProjectResourceChain> ParseProjectResourceChains()
++    {
++        var program = StripLineComments(
++            File.ReadAllText(Path.Combine(RepoRoot, "src", "AppHost", "SchoolCollab.AppHost", "Program.cs")));
++
++        // e.g. builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
++        var matches = Regex.Matches(program, """AddProject<Projects\.([A-Za-z0-9_]+)>\("([^"]+)"\)""");
++
++        var chains = new List<ProjectResourceChain>();
++        foreach (Match match in matches)
++        {
++            // A fluent AddProject chain contains no statement terminator, so the next
++            // ';' ends it (WireKeycloakAuth(...) calls follow as separate statements).
++            var end = program.IndexOf(';', match.Index);
++            if (end < 0)
++            {
++                throw new InvalidOperationException(
++                    $"Unterminated AddProject chain for '{match.Groups[2].Value}' in the AppHost Program.cs.");
++            }
++
++            chains.Add(new ProjectResourceChain(
++                match.Groups[1].Value,
++                match.Groups[2].Value,
++                program[match.Index..end]));
++        }
++
++        return chains;
++    }
++
++    private static HashSet<string> FindProjectsRegisteringSettingsCore()
++    {
++        var srcDir = Path.Combine(RepoRoot, "src");
++
++        return Directory
++            .GetFiles(srcDir, "Program.cs", SearchOption.AllDirectories)
++            .Where(path => !IsBuildOutputPath(path))
++            .Where(path => File.ReadAllText(path).Contains("AddSettingsCore(", StringComparison.Ordinal))
++            .Select(path => Path.GetFileName(Path.GetDirectoryName(path)!))
++            .ToHashSet(StringComparer.Ordinal);
++    }
++
++    private static bool IsBuildOutputPath(string path)
++    {
++        // bin/ and obj/ carry copied Program.cs files during a build.
++        var segments = path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
++        return segments.Contains("bin", StringComparer.OrdinalIgnoreCase)
++            || segments.Contains("obj", StringComparer.OrdinalIgnoreCase);
++    }
++
++    /// <summary>
++    /// Removes trailing <c>//</c> comments before chain extraction. A comment inside a
++    /// resource chain (e.g. one documenting the <c>localhost:5432</c> fallback, whose
++    /// semicolon would otherwise look like the end of the statement) must not truncate
++    /// the chain — that failure mode was hit while authoring this guard.
++    /// </summary>
++    private static string StripLineComments(string source)
++        => string.Join('\n', source.Split('\n').Select(line =>
++        {
++            var commentAt = line.IndexOf("//", StringComparison.Ordinal);
++            return commentAt >= 0 ? line[..commentAt] : line;
++        }));
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repository root from " + AppContext.BaseDirectory);
++    }
++}
