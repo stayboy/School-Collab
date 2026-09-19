@@ -244,6 +244,11 @@ var settingsAi = builder.AddProject<Projects.SchoolCollab_AI_Server>("settings-a
 
 var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("students-api")
     .WithReference(studentsDb)
+    // AddSettingsCore (IEntityCodeGenerator -> EntityCodeRule rows) resolves
+    // ConnectionStrings:settings-db. Without this reference Settings.Core/Extensions.cs
+    // silently falls back to Host=localhost, Port=5432 and the Settings outbox
+    // dispatcher registered by AddSettingsCore fails on every retry.
+    .WithReference(settingsDb)
     .WithReference(settingsApi)     // enroll/grade validation hop to Settings CodedValues API
     .WithReference(rabbit)
     .WithReference(redis)
@@ -263,6 +268,9 @@ WireKeycloakAuth(studentsApi, keycloak, keycloakClientId, keycloakClientSecret);
 
 var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
     .WithReference(assignmentsDb)
+    // Same AddSettingsCore requirement as students-api above (IEntityCodeGenerator for
+    // auto-generated assignment codes) — see the AppHostSettingsDbWiringArchitectureTests guard.
+    .WithReference(settingsDb)
     .WithReference(rabbit)
     .WithReference(redis)
     .WithReference(studentsApi)

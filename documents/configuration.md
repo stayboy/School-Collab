@@ -81,7 +81,7 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
 | `rabbitmq` | Container (`rabbitmq`) | All APIs + Students.Worker |
 | `cache` | Container (`redis`) | APIs + Worker |
 | `migrator` | Project | (one-shot) |
-| `settings-db` | Postgres database | migrator, settings-api |
+| `settings-db` | Postgres database | migrator, settings-api, assignments-api, students-api |
 | `assignments-db` | Postgres database | migrator, assignments-api |
 | `students-db` | Postgres database | migrator, students-api, students-worker |
 | `settings-api` | Project | admin, settings-ai |
@@ -640,7 +640,7 @@ Aspire injects connection strings into the apps that call
 
 | Resource | Injected key | Used by |
 | :--- | :--- | :--- |
-| `settings-db` | `ConnectionStrings:settings-db` | `SchoolCollab.Settings.Api`, migrator |
+| `settings-db` | `ConnectionStrings:settings-db` | `SchoolCollab.Settings.Api`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api`, migrator |
 | `assignments-db` | `ConnectionStrings:assignments-db` | `SchoolCollab.Assignments.Api`, migrator |
 | `students-db` | `ConnectionStrings:students-db` | `SchoolCollab.Students.Api`, `SchoolCollab.Students.Worker`, migrator |
 | `cache` | `ConnectionStrings:cache` | APIs + Worker (also surfaced as `Aspire:StackExchange:Redis:ConnectionString`) |
@@ -650,6 +650,17 @@ Aspire injects connection strings into the apps that call
 > running under Aspire — they will be overwritten by service-discovery.
 > They are documented here only so you know what to expect when running
 > a single API outside the AppHost (e.g. from VS / VS Code).
+
+> ⚠️ **Every host that reads a connection string needs a matching `.WithReference`.**
+> `Settings.Core/Extensions.cs` (`AddSettingsCore` / `AddTenantDirectory`) and its
+> Students/Assignments peers fall back to a hardcoded
+> `Host=localhost;Port=5432` when the key is absent — the host still reports
+> **Healthy** (Aspire probes the endpoint), but the Settings outbox dispatcher
+> registered by `AddSettingsCore` then logs a connection error on every retry and
+> entity-code generation fails. A host is affected whenever its `Program.cs` calls
+> `AddSettingsCore(...)` (needed for `IEntityCodeGenerator` over `settings-db`).
+> `AppHostSettingsDbWiringArchitectureTests` in `SchoolCollab.ArchitectureTests.Unit`
+> enforces the reference for every such host.
 
 ---
 
