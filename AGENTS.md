@@ -178,7 +178,7 @@ section below.
 - **Fix compiler errors before continuing.** If the build fails, treat the
   failures as the next task — do not move on to feature work, do not mark the
   step complete, and do not commit.
-- **Targets:** run `dotnet build SchoolCollab.sln` from the repo root. Tests
+- **Targets:** run `dotnet build SchoolCollab.slnx` from the repo root — the solution uses the **`.slnx`** XML format. Do **not** re-add a `SchoolCollab.sln`: CI runs no-arg `dotnet build` / `dotnet test` and relies on single-solution discovery (two solution files in one directory is an error). Tests
   aren't required for the in-session check unless the change touches test
   files directly.
 - **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a previous

@@ -302,7 +302,7 @@ the tester never derives or expands its own scope.
 4. **Freeze the diff, then verify in parallel.** The parent writes
    `diffs-<slug>.patch` (`git diff`, or `git diff <base-sha>` when the tree
    was dirty at start), then concurrently:
-   - (a) The parent runs the authoritative `dotnet build SchoolCollab.sln`
+   - (a) The parent runs the authoritative `dotnet build SchoolCollab.slnx`
      (incremental after the worker) and `dotnet test` on the affected
      projects **plus `SchoolCollab.ArchitectureTests.Unit`** (repo-wide
      scanner — always include it).
@@ -400,7 +400,7 @@ the tester never derives or expands its own scope.
 ## Verification
 
 1. All child runs completed (subagent status completed, exit 0).
-2. Parent-run `dotnet build SchoolCollab.sln -c Debug`: 0 errors.
+2. Parent-run `dotnet build SchoolCollab.slnx -c Debug`: 0 errors.
 3. Parent-run `dotnet test` — affected projects **plus
    `SchoolCollab.ArchitectureTests.Unit`**: 0 failures; pass counts recorded
    in the round doc.
