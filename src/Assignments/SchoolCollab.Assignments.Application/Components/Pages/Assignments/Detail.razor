@@ -12,6 +12,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthStateProvider
 @implements IDisposable
 
 <PageTitle>Assignment @_item?.Title</PageTitle>
@@ -611,6 +612,16 @@
         }
     }
 
+    // ar-24 row 2: the acting teacher id from the circuit principal's teacher_id claim
+    // (AuthenticationStateProvider — NOT IHttpContextAccessor, which is null in the
+    // interactive circuit). No claim (the dev/TestAuth default) => Guid.Empty (unchanged).
+    private async Task<Guid> GetActingTeacherIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var claim = state.User.FindFirst("teacher_id")?.Value;
+        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
+    }
+
     private async Task OnApproveAsync()
     {
         if (_item is null) return;
@@ -622,7 +633,7 @@
 
         try
         {
-            await Api.ApproveAsync(Id, Guid.Empty, ct);
+            await Api.ApproveAsync(Id, await GetActingTeacherIdAsync(), ct);
             _item = await Api.GetByIdAsync(Id, ct);
         }
         catch (OperationCanceledException) { }
@@ -649,7 +660,7 @@
 
         try
         {
-            await Api.RejectAsync(Id, Guid.Empty, ct);
+            await Api.RejectAsync(Id, await GetActingTeacherIdAsync(), ct);
             _item = await Api.GetByIdAsync(Id, ct);
         }
         catch (OperationCanceledException) { }
@@ -732,7 +743,7 @@
         {
             Logger.LogInformation("Submitting review for submission {SubmissionId}", _selectedSubmission.SubmissionId);
             await Api.ReviewSubmissionAsync(Id, _selectedSubmission.StudentId, new ReviewSubmissionRequest(
-                Guid.Empty, // TeacherId — placeholder, wired to auth in a later phase
+                await GetActingTeacherIdAsync(), // ar-24: acting teacher from the circuit principal (claim-wins server-side)
                 _submissionReviewModel.Score,
                 _submissionReviewModel.Grade,
                 _submissionReviewModel.Comments));
@@ -761,7 +772,7 @@
         {
             Logger.LogInformation("Submitting review for assignment {AssignmentId}", Id);
             var req = new ReviewAssignmentRequest(
-                Guid.Empty, // TeacherId — placeholder, will be wired to auth in Phase 6
+                await GetActingTeacherIdAsync(), // ar-24: acting teacher from the circuit principal
                 _reviewModel.Score,
                 _reviewModel.Comments);
             await Api.ReviewAsync(Id, req, ct);

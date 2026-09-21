@@ -43,6 +43,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.TryAddTransient<TenantForwardingDelegatingHandler>();
 builder.Services.AddCrossModuleHttpClient("students-core-coded-values", "http://settings-api", propagateTenant: false)
     .AddHttpMessageHandler<TenantForwardingDelegatingHandler>()
+    .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
     .AddTypedClient<SchoolCollab.Students.Core.Services.CodedValuesApiClient>();
 
 // Flag-gated swap (adr-cross-module-calls.md Phase 1): when
@@ -60,7 +61,8 @@ builder.Services.AddScoped<SchoolCollab.Students.Core.Services.ICodedValuesApiCl
 // TenantForwardingDelegatingHandler forwards the inbound request's tenant (see Class B
 // investigation) so Admin.Shared components resolve the same tenant as the API request.
 builder.Services.AddCrossModuleHttpClient<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>("http://settings-api", propagateTenant: false)
-    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>()
+    .AddHttpMessageHandler<BearerForwardingDelegatingHandler>();
 
 // Phase 2 (spec activity-group-enrollment.md FR-6): HTTP client for the
 // Assignments API delete-guard check. The named client is resolved via
@@ -69,7 +71,8 @@ builder.Services.AddCrossModuleHttpClient<SchoolCollab.Admin.Shared.Services.Cod
 // (Class B): assignments are strict-tenant entities, and a tenant-less guard
 // query can false-negative and allow a delete that should be blocked.
 builder.Services.AddCrossModuleHttpClient("assignments-api", "https+http://assignments-api", propagateTenant: false)
-    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>()
+    .AddHttpMessageHandler<BearerForwardingDelegatingHandler>();
 builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
     SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();
 

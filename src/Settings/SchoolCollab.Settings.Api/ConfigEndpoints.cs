@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authorization;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Settings.Api.Endpoints;
 
@@ -19,10 +21,12 @@ public static class ConfigEndpoints
 
         var group = app.MapGroup("/api/config");
 
-        // Reads (flags, audit) are cookie-gated when OIDC is on; open under TestAuth in dev.
+        // Reads (flags, audit) are bearer-gated when OIDC is on; open under TestAuth in dev.
         if (oidcEnabled)
         {
-            group.RequireAuthorization();
+            group.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
 
         group

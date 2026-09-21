@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Authorization;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Settings.Api.Endpoints;
 
@@ -18,7 +20,9 @@ public static class SignatureConsentTextEndpoints
 
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            group.RequireAuthorization();
+            group.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
 
         group.MapSignatureConsentTextRoutes();

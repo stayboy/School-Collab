@@ -381,6 +381,26 @@ every request as a test user without Keycloak — intended for local development
 }
 ```
 
+### ar-24 — bearer forwarding + receiving-side Bearer opt-in
+
+Post-flip (`FeatureFlags:FEATURE:DisableOIDCAuth=false`), an API host making a cross-context hop
+forwards the inbound request's `Authorization` header through `BearerForwardingDelegatingHandler`
+(real-auth only; a no-op in TestAuth/dev). The receiving groups must therefore accept a bearer:
+
+- **Assignments**: the `/assignments` and `/students` groups opt into Bearer (`AssignmentEndpoints.cs`).
+- **Students**: all five groups opt in (`StudentEndpoints.cs`) — incl. **`/teachers`** (the directory check calls it).
+- **Settings**: 10 sites — the 8 `*Endpoints.cs` groups, `Endpoints/ConfigResolveRoutes.cs` (tenant reads),
+  and the **`flag_admin` policy** (`Program.cs`) which now adds `AddAuthenticationSchemes(Bearer)` (role claim kept).
+
+**Named residuals (post-flip, not fixed this round):** `Assignments.Worker`→settings/students 401s (no caller
+token; client-credentials barred by the no-new-secrets gate) **and the identically-unattached
+`Students.Worker` background client (`Program.cs:53`, used by `CodedValueBackfillService`)**; the Blazor
+interactive clients (Families/Admin + the Application-layer typed clients) carry the OIDC **cookie**, not a
+bearer — no circuit-safe token source yet (their review/approve calls still work via the server-side
+claim-wins handlers); and **`RejectAssignment` has claim-wins but no tenant cross-check** (the fifth write
+path — defense-in-depth only today: the EF global tenant filter makes it non-exploitable).
+`AllowAutoRedirect=false` on both
+Assignments.Api named clients so a real-auth 302-challenge surfaces as a non-2xx (fail-closed directory check).
 ---
 
 ## 5. `FeatureFlags` — central configuration service

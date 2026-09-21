@@ -87,7 +87,7 @@ public sealed class DevIdentitySeeder(
                  level_of_education_coded_value_id, tenant_id, is_deleted, deleted_at,
                  created_at, updated_at)
             VALUES
-                ({0}, NULL, 'Dev', 'Teacher', NULL, NULL, 'Dev Teacher', NULL, NULL, NULL,
+                ({0}, NULL, 'Dev', 'Teacher', NULL, NULL, 'Dev Teacher', NULL, 'DEV-0001', NULL,
                  {1}, false, NULL, now(), now())
             ON CONFLICT (id) DO NOTHING
             """,
