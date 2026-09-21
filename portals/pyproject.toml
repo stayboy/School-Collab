@@ -1,0 +1,11 @@
+[project]
+name = "school-collab-portals"
+version = "0.0.0"
+description = "Phase-0 prefab-UI spike: ward portal surface over the existing School-Collab REST APIs. See documents/specs/teachers-ward-portal-prefab-plan.md"
+requires-python = ">=3.10"
+dependencies = [
+    "prefab-ui==0.20.2",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+]
