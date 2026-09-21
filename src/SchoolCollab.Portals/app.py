@@ -10,6 +10,9 @@ service-call dependency, and the routes:
 * service calls live in ``api/`` (typed client + discovery + DTOs + errors)
 * Prefab component trees live in ``views/``
 
+The HTTP client is async (``httpx.AsyncClient``) and lifespan-owned, so request
+handlers never block the event loop.
+
 See ``documents/solution/portals-service-client-pattern.md`` for the pattern.
 
 Routes:
@@ -50,7 +53,7 @@ HTTP_TIMEOUT_SECONDS = 10.0
 class PortalState:
     """Per-process portal state — no module-level mutable globals."""
 
-    http: httpx.Client | None = None
+    http: httpx.AsyncClient | None = None
     endpoint: ServiceEndpoint | None = None
     last_fetch: dict[str, Any] = field(default_factory=dict)
     discovery_error: str | None = None
@@ -78,12 +81,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     else:
         logger.info("portals wired to %s", state.endpoint.label)  # type: ignore[union-attr]
 
-    state.http = httpx.Client(timeout=HTTP_TIMEOUT_SECONDS)
+    state.http = httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS)
     application.state.portal = state
     try:
         yield
     finally:
-        state.http.close()
+        await state.http.aclose()
 
 
 app = FastAPI(title="School-Collab ward portal (prefab spike)", lifespan=lifespan)
@@ -93,12 +96,12 @@ def _portal_state(request: Request) -> PortalState:
     """The process state, created lazily if the lifespan never ran."""
     state: PortalState | None = getattr(request.app.state, "portal", None)
     if state is None:
-        state = PortalState(http=httpx.Client(timeout=HTTP_TIMEOUT_SECONDS))
+        state = PortalState(http=httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS))
         request.app.state.portal = state
     return state
 
 
-def get_assignments_client(request: Request) -> AssignmentsApiClient:
+async def get_assignments_client(request: Request) -> AssignmentsApiClient:
     """FastAPI dependency: the typed client for the Assignments API.
 
     Discovery is retried here when it failed at startup (the AppHost may inject
@@ -114,14 +117,14 @@ def get_assignments_client(request: Request) -> AssignmentsApiClient:
 
 
 @app.get("/", response_class=HTMLResponse)
-def ward_view(
+async def ward_view(
     request: Request,
     client: AssignmentsApiClient = Depends(get_assignments_client),
 ) -> HTMLResponse:
     """Render the ward view from a live assignments-api call."""
     state = _portal_state(request)
     try:
-        result = client.list_assignments()
+        result = await client.list_assignments()
     except PortalApiError as error:
         logger.error("ward view degraded: %s", error)
         state.last_fetch = {

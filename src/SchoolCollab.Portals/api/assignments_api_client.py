@@ -9,10 +9,14 @@ The client is deliberately **base-URL agnostic** — it is handed a resolved
 driven by any transport, including ``httpx.MockTransport``: that is what makes
 the portal testable with no server and no Docker.
 
+The client is **async** (``httpx.AsyncClient``): it is created once in the
+FastAPI lifespan and awaited from async route handlers, so request handling
+never blocks the event loop on I/O.
+
 Adding an endpoint is one method, e.g. the plan's MVP-1 ward endpoints::
 
-    def list_ward_assignments(self, student_id: str) -> FetchResult:
-        status, payload = self._get_json(f"/{student_id}/assignments")
+    async def list_ward_assignments(self, student_id: str) -> FetchResult:
+        status, payload = await self._get_json(f"/{student_id}/assignments")
         ...
 """
 
@@ -45,7 +49,7 @@ class FetchResult:
 class AssignmentsApiClient:
     """The ward portal's view of the Assignments API."""
 
-    def __init__(self, http: httpx.Client, endpoint: ServiceEndpoint) -> None:
+    def __init__(self, http: httpx.AsyncClient, endpoint: ServiceEndpoint) -> None:
         self._http = http
         self._endpoint = endpoint
 
@@ -54,9 +58,9 @@ class AssignmentsApiClient:
         """The resolved endpoint, for diagnostics (``/health``, error cards)."""
         return self._endpoint
 
-    def list_assignments(self) -> FetchResult:
+    async def list_assignments(self) -> FetchResult:
         """``GET /assignments`` — the assignments the ward view tabulates."""
-        status_code, payload = self._get_json("/assignments")
+        status_code, payload = await self._get_json("/assignments")
 
         # The API answers with a bare array; tolerate an envelope just in case.
         if isinstance(payload, dict):
@@ -71,10 +75,10 @@ class AssignmentsApiClient:
         rows = [AssignmentRow.from_payload(item) for item in payload if isinstance(item, dict)]
         return FetchResult(status_code=status_code, rows=rows)
 
-    def _get_json(self, path: str) -> tuple[int, Any]:
+    async def _get_json(self, path: str) -> tuple[int, Any]:
         """GET ``path`` and return ``(status, parsed_json)`` or raise a typed error."""
         try:
-            response = self._http.get(f"{self._endpoint.base_url}{path}")
+            response = await self._http.get(f"{self._endpoint.base_url}{path}")
             response.raise_for_status()
         except httpx.HTTPStatusError as error:
             raise ApiResponseError(

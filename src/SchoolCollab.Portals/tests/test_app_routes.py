@@ -4,6 +4,9 @@ Uses FastAPI's ``TestClient`` (no uvicorn) plus ``app.dependency_overrides`` —
 container-free coverage of the whole chain route -> client -> Prefab render,
 which is the Python analogue of the ar-24 decision to test rejection on a
 TestServer instead of a running host.
+
+``TestClient`` stays synchronous even though the routes are async: it drives the
+ASGI app on its own event loop, which is exactly what the async client needs.
 """
 
 from __future__ import annotations
@@ -22,13 +25,25 @@ STUB_ENDPOINT = ServiceEndpoint(
 )
 
 
-def _stub_client(rows: list[dict[str, Any]]) -> AssignmentsApiClient:
+def _stub_override(rows: list[dict[str, Any]]):
+    """A dependency override serving ``rows`` from a MockTransport.
+
+    Declared ``async`` so FastAPI builds the client inside the running event
+    loop, and deliberately left unclosed — ``httpx.MockTransport`` holds no
+    resources.
+    """
     handler = lambda request: httpx.Response(200, json=rows)  # noqa: E731
-    return AssignmentsApiClient(httpx.Client(transport=httpx.MockTransport(handler)), STUB_ENDPOINT)
+
+    async def override() -> AssignmentsApiClient:
+        return AssignmentsApiClient(
+            httpx.AsyncClient(transport=httpx.MockTransport(handler)), STUB_ENDPOINT
+        )
+
+    return override
 
 
 def test_ward_view_renders_rows_through_the_injected_client() -> None:
-    portal_app.app.dependency_overrides[portal_app.get_assignments_client] = lambda: _stub_client(
+    portal_app.app.dependency_overrides[portal_app.get_assignments_client] = _stub_override(
         [
             {
                 "id": "a1",

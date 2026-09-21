@@ -60,14 +60,15 @@ Rules the shape encodes:
    discovery failures are mapped the same way by an app-level exception handler.
 5. **No module-level mutable state**: `PortalState` (http client, endpoint, last fetch,
    discovery error) lives on `app.state.portal`, created in the FastAPI lifespan.
-6. **`Depends(get_assignments_client)`** is the injection seam: one pooled client per
-   process, overridable in tests via `app.dependency_overrides`.
+6. **`Depends(get_assignments_client)`** is the injection seam: one pooled **async**
+   client per process (created in the lifespan), overridable in tests via
+   `app.dependency_overrides`.
 
 ### Decisions taken (and the alternatives rejected)
 
 | Decision | Taken | Rejected because |
 |---|---|---|
-| HTTP style | sync `httpx.Client` (pooled, lifespan-owned) | `AsyncClient` + `async def` routes is the natural follow-up, but it would drag `pytest-asyncio`/`anyio` in for the first tests; the sync client keeps the suite plain pytest. FastAPI runs sync routes in a threadpool, which is fine at portal scale. **Deferred, not rejected on merit.** |
+| HTTP style | **async `httpx.AsyncClient`**, lifespan-owned, awaited by `async def` routes | sync `httpx.Client` was the first cut — it avoided `pytest-asyncio` but spent a threadpool worker per request. Converted once the pattern was agreed: `pytest-asyncio` + `asyncio_mode = "auto"` costs one dev dependency and no test restructuring |
 | Discovery placement | outside the client (`service_discovery.py`) | inside the client would make it untestable without env monkeypatching, and would hide the resolved env var from `/health` |
 | Row shape | frozen dataclasses parsed in the client | raw `dict` (spike) forces every view to guess keys and pushes shape drift to the UI |
 | Error surface | typed errors + error card | `raise_for_status()` alone produced a raw 500 page for an unreachable API |
@@ -79,8 +80,8 @@ Rules the shape encodes:
 2. `app.py` reduced to the app object, lifespan, one dependency, and the `GET /` + `GET /health`
    routes. `/health` keeps its ar-23 contract keys (`api_base_url`, `api_env_var`,
    `last_fetch{status,row_count,base_url,env_var}`) and adds `discovery_error`.
-3. `pyproject.toml`: `[dependency-groups] dev = ["pytest"]` plus
-   `[tool.pytest.ini_options] pythonpath = ["."], testpaths = ["tests"]`.
+3. `pyproject.toml`: `[dependency-groups] dev = ["pytest", "pytest-asyncio"]` plus
+   `[tool.pytest.ini_options] pythonpath = ["."], testpaths = ["tests"], asyncio_mode = "auto"`.
 4. `tests/`: `test_service_discovery.py`, `test_assignments_api_client.py`,
    `test_app_routes.py` — 14 tests, all container-free.
 5. `.gitignore`: `.pytest_cache/` (`.venv/` was already ignored).
@@ -91,7 +92,8 @@ Rules the shape encodes:
 |---|---|
 | `uv run pytest -q` | **14 passed** (discovery keys; URL + parse; empty-is-success; envelope + non-object rows; HTML content-type rejection; HTTP 500 detail; transport failure; route renders rows via an overridden dependency; route renders an error card for unreachable API **and** for failed discovery; `/health` ok + degraded) |
 | `uv run python -c "import app"` | imports cleanly (no environment needed at import time) |
-| Real ASGI entrypoint, no Docker | `env "services__assignments-api__http__0=http://127.0.0.1:9" uv run uvicorn app:app --port 5310` → `GET /health` **200** reporting the resolved endpoint; `GET /` **200** rendering the degraded card (`ApiUnavailableError`, server log: `ward view degraded: … actively refused it`) |
+| Real ASGI entrypoint, no Docker | `env "services__assignments-api__http__0=http://127.0.0.1:9" uv run uvicorn app:app --port 5311` → `GET /health` **200** reporting the resolved endpoint; `GET /` **200** rendering the degraded card (`ApiUnavailableError`; server log: `ward view degraded: … All connection attempts failed`) |
+| Async wiring | `inspect.iscoroutinefunction` → `True` for the route, the dependency and `AssignmentsApiClient.list_assignments`; shutdown `await`s `aclose()` (verified: clean stop, no lingering process) |
 | Behavioural parity with the spike | same routes, same `/health` keys, same Prefab table columns; the only intentional changes are the degraded-state page (was a 500) and the content-type guard |
 
 ## Pitfalls worth remembering
@@ -106,14 +108,19 @@ Rules the shape encodes:
 - **`httpx.MockTransport` must be given an explicit `content-type`** when testing
   rejection: `httpx.Response(200, text="...")` defaults to `text/plain`, so the HTML-login-page
   case has to set `headers={"content-type": "text/html"}` to model the real challenge.
+- **`asyncio_mode = "auto"` is required** for the client tests: they are plain `async def`
+  and rely on `pytest-asyncio` (dev-only). The route tests stay **synchronous** with
+  `TestClient` (it drives the ASGI app on its own loop), and their stub override is
+  declared `async` so FastAPI builds the client inside the running loop.
+- **Async and sync transport failures read differently** — `All connection attempts failed`
+  vs `[WinError 10061] … actively refused it`. Assert on the portal's own wording
+  ("unreachable"), never on the transport's message.
 - **Never kill processes with a filter string that also appears in the killing shell's
   own command line** — the filter matched nine processes (including the shell) and killed
   the tool call. Kill by PID read from `netstat`, or filter on `Name` only.
 
 ## Not done (deliberately)
 
-- `AsyncClient` conversion (see the decision table) — mechanical, worth doing when the
-  MVP adds mutating endpoints.
 - The remaining MVP endpoints (`list_ward_assignments`, `report_module_progress`,
   `submit`, the module-progress POST) — one method each, per the template in the client
   docstring. They arrive with the MVP, not speculatively now.
