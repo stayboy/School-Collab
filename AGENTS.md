@@ -228,9 +228,14 @@ project that references it automatically.
   <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   ```
 
-- `<Sdk Name="..." Version="..." />` at the top of a `.csproj` (e.g. `Aspire.AppHost.Sdk`)
-  is an **MSBuild SDK reference**, not a NuGet package — CPM does not manage it, leave the
-  `Version` attribute in place.
+- MSBuild **SDK references** are not NuGet packages — CPM does not manage them, so their
+  versions stay inline. Two forms exist in this repo:
+  - `<Sdk Name="..." Version="..." />` as a child element of a `Microsoft.NET.Sdk` project
+    (the older style);
+  - `<Project Sdk="Aspire.AppHost.Sdk/13.5.4">` — the form `aspire update` migrated the
+    AppHost to at 13.5.4. In that form the SDK also supplies `Aspire.Hosting.AppHost`, which
+    is therefore **no longer a `PackageReference`** (and its `PackageVersion` entry was
+    removed from `Directory.Packages.props`).
 
 ## Target framework
 
