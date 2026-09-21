@@ -89,7 +89,7 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
 | `assignments-api` | Project | admin |
 | `students-api` | Project | admin |
 | `students-worker` | Project | — |
-| `portals` | Python app (uv / FastAPI + Prefab UI) | — |
+| `portals` | Python app (uv / FastAPI + Prefab UI) in `src/SchoolCollab.Portals/` | — |
 
 > 📌 **Persistent volumes.** `postgres` and `rabbitmq` are wired with
 > `WithDataVolume()` + `WithLifetime(ContainerLifetime.Persistent)`. The
