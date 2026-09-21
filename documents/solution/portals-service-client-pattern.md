@@ -105,6 +105,13 @@ Rules the shape encodes:
 - **`pythonpath = ["."]` is required** for `import api` / `import views` under pytest,
   because the project is a uv *virtual* project (no build backend), so nothing installs
   the package.
+- **Adding a portal file means editing `SchoolCollab.slnx` too.** The VS solution view is
+  in use, and `.slnx` has **no globbing support** (VS FAQ: "globbing is not currently
+  supported"; the PR adding it was closed), so every solution item is an explicit path:
+  `api/`, `views/` and `tests/` are separate
+  `<Folder Name="/src/SchoolCollab.Portals/<dir>/">` nodes with one `<File>` per module.
+  It has no build effect, but it rots silently otherwise — the list was already stale one
+  refactor after it was introduced.
 - **`httpx.MockTransport` must be given an explicit `content-type`** when testing
   rejection: `httpx.Response(200, text="...")` defaults to `text/plain`, so the HTML-login-page
   case has to set `headers={"content-type": "text/html"}` to model the real challenge.

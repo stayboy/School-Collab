@@ -32,6 +32,22 @@
     <File Path="src/SchoolCollab.Portals/pyproject.toml" />
     <File Path="src/SchoolCollab.Portals/uv.lock" />
   </Folder>
+  <Folder Name="/src/SchoolCollab.Portals/api/">
+    <File Path="src/SchoolCollab.Portals/api/__init__.py" />
+    <File Path="src/SchoolCollab.Portals/api/assignments_api_client.py" />
+    <File Path="src/SchoolCollab.Portals/api/dto.py" />
+    <File Path="src/SchoolCollab.Portals/api/errors.py" />
+    <File Path="src/SchoolCollab.Portals/api/service_discovery.py" />
+  </Folder>
+  <Folder Name="/src/SchoolCollab.Portals/tests/">
+    <File Path="src/SchoolCollab.Portals/tests/test_app_routes.py" />
+    <File Path="src/SchoolCollab.Portals/tests/test_assignments_api_client.py" />
+    <File Path="src/SchoolCollab.Portals/tests/test_service_discovery.py" />
+  </Folder>
+  <Folder Name="/src/SchoolCollab.Portals/views/">
+    <File Path="src/SchoolCollab.Portals/views/__init__.py" />
+    <File Path="src/SchoolCollab.Portals/views/ward.py" />
+  </Folder>
   <Folder Name="/src/ServiceDefaults/">
     <Project Path="src/ServiceDefaults/SchoolCollab.ServiceDefaults/SchoolCollab.ServiceDefaults.csproj" />
   </Folder>
