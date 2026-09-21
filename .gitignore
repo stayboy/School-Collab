@@ -502,3 +502,4 @@ _tresult/
 testerr.txt
 testout.txt
 ci-artifacts/
+.pytest_cache/

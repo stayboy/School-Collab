@@ -9,3 +9,14 @@ dependencies = [
     "uvicorn",
     "httpx",
 ]
+
+# Dev-only: the client/route tests use httpx.MockTransport + FastAPI's TestClient,
+# so they need neither a server, nor Docker, nor Playwright.
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# The typed client is async; `auto` lets the async tests stay undecorated.
+asyncio_mode = "auto"

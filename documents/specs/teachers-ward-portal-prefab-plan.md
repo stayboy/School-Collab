@@ -131,17 +131,18 @@ AppHost (orchestrator)
      └── auth: pass-through — dev bypass first (Q2); OIDC deferred to Phase 3
 ```
 
-Suggested layout:
+Layout (**settled** — implemented; pattern, decisions and pitfalls in `documents/solution/portals-service-client-pattern.md`):
 
 ```
 School-Collab/
 └── src/
     └── SchoolCollab.Portals/     (NEW — own module folder, Python, Prefab UI, uv)
         ├── pyproject.toml / uv.lock  (deps: prefab-ui, httpx)
-        ├── app.py                    (entrypoint launched solely by AddUvicornApp)
-        ├── api/                      (typed httpx clients over the existing REST APIs)
-        ├── views/ward/               (Prefab component trees — ward portal, MVP 1)
-        └── views/teacher/            (Prefab component trees — teacher portal, MVP 2, deferred)
+        ├── app.py                    (thin FastAPI app; entrypoint launched solely by AddUvicornApp)
+        ├── api/                      (typed client + service discovery + DTOs + typed errors)
+        ├── views/ward.py             (Prefab component trees — ward portal, MVP 1)
+        ├── views/teacher/            (Prefab component trees — teacher portal, MVP 2, deferred)
+        └── tests/                    (pytest + httpx.MockTransport — no server, no Docker)
 ```
 
 ### API contract already fits — zero backend changes (Q3)
