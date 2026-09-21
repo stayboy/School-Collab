@@ -1,6 +1,6 @@
 # Portals — isolating service calls behind typed clients
 
-> Status: **implemented** (2026-09-21, branch `refactor/portals-service-client`, stacked on the portal-relocation PR).
+> Status: **merged to `main`** (`a6933c40`, PR #250, 2026-09-21) — on top of the portal relocation (`b97d02c0`, PR #249).
 > Related: `documents/specs/teachers-ward-portal-prefab-plan.md` (§4 layout, risk row
 > "isolate API client + view layers"), `documents/configuration.md` §1 (the `portals` resource),
 > `src/SchoolCollab.Portals/`.
