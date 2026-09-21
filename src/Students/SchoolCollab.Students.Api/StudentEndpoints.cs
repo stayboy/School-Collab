@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authorization;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Api.Endpoints;
 
@@ -10,7 +12,11 @@ public static class StudentEndpoints
         var studentsGroup = app.MapGroup("/students");
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            studentsGroup.RequireAuthorization();
+            // ar-24: receive forwarded bearer tokens from API-to-API hops, mirroring
+            // AssignmentEndpoints.cs (real-auth DefaultScheme is Cookie; opt into Bearer).
+            studentsGroup.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
 
         // Each specialty owns its own routes + request records. Endpoints keep the
@@ -35,7 +41,9 @@ public static class StudentEndpoints
             var activityGroupsGroup = app.MapGroup("");
             if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
             {
-                activityGroupsGroup.RequireAuthorization();
+                activityGroupsGroup.RequireAuthorization(policy => policy
+                    .RequireAuthenticatedUser()
+                    .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
             }
             activityGroupsGroup.MapActivityGroupRoutes();
         }
@@ -47,14 +55,18 @@ public static class StudentEndpoints
         var guardiansGroup = app.MapGroup("/guardians");
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            guardiansGroup.RequireAuthorization();
+            guardiansGroup.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
         guardiansGroup.MapGuardianRoutes();
 
         var contactsGroup = app.MapGroup("/contacts");
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            contactsGroup.RequireAuthorization();
+            contactsGroup.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
         contactsGroup.MapContactRoutes();
         contactsGroup.MapSubscriptionRoutes();
@@ -64,7 +76,9 @@ public static class StudentEndpoints
         var teachersGroup = app.MapGroup("/teachers");
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
-            teachersGroup.RequireAuthorization();
+            teachersGroup.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
         teachersGroup.MapTeacherRoutes();
 

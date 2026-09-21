@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Settings.Core.CQRS.FeatureFlags.Queries;
 using SchoolCollab.Settings.Core.DTOs;
@@ -29,7 +31,9 @@ public static class ConfigResolveRoutes
 
         if (oidcEnabled)
         {
-            tenantRead.RequireAuthorization();
+            tenantRead.RequireAuthorization(policy => policy
+                .RequireAuthenticatedUser()
+                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
 
         return app;

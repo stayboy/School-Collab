@@ -36,6 +36,12 @@ public sealed class OverrideStudentSubmissionAttemptsCommandHandler(
             ?? (await IsRealAuthAsync(cancellationToken)
                 ? throw new MissingTeacherPrincipalException(nameof(OverrideStudentSubmissionAttemptsCommand))
                 : command.TeacherId);
+
+        // ar-24 cross-tenant rejection: the acting teacher's tenant must match the submission's.
+        if (currentUser.CurrentTenant.TenantId != submission.TenantId)
+            throw new TeacherTenantMismatchException(
+                command.SubmissionId, "submission", currentUser.CurrentTenant.TenantId, submission.TenantId);
+
         submission.OverrideAttemptLimit(teacherId);
         submissionRepository.Update(submission);
         await submissionRepository.SaveChangesAsync(cancellationToken);

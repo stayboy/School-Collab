@@ -1,10 +1,12 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -38,11 +40,18 @@ public class AssignmentDetailBunitTests : BunitContext
 {
     private readonly MockHttpMessageHandler _mockHttp;
     private readonly JsonSerializerOptions _apiJsonOptions;
+    // ar-24 row 2: held so a discriminating test can stamp a teacher_id claim and assert
+    // the Detail page forwards it in the approve/reject/review bodies.
+    private readonly StubAuthStateProvider _authStateProvider = new();
 
     public AssignmentDetailBunitTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+        // ar-24 row 2: Detail resolves the acting teacher from the circuit principal's
+        // teacher_id claim via AuthenticationStateProvider. Default: no teacher_id claim
+        // => Guid.Empty, so the existing approve/reject body assertions hold.
+        Services.AddSingleton<AuthenticationStateProvider>(_authStateProvider);
 
         _apiJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
@@ -405,6 +414,33 @@ public class AssignmentDetailBunitTests : BunitContext
             _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
                 "the page reloads the assignment after the approve POST succeeds");
         }, TimeSpan.FromSeconds(15));
+    }
+
+    // ar-24 row 2 (discriminating): with a teacher_id claim on the circuit principal, the
+    // approve request body carries the acting teacher id — NOT the Guid.Empty placeholder.
+    [TestMethod]
+    public void Detail_WithTeacherClaim_ApprovePostsActingTeacherId()
+    {
+        var actingTeacherId = Guid.Parse("00000000-0000-0000-0000-00000000AB24");
+        _authStateProvider.TeacherId = actingTeacherId;
+
+        SetupFeatureFlag(true);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        SetupGetAssignment(dto);
+        SetupConfirmDialogResult(confirmed: true);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Approve"));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/approve")
+            .WithContent(JsonSerializer.Serialize(new ApproveAssignmentRequest(actingTeacherId), _apiJsonOptions))
+            .Respond(HttpStatusCode.NoContent);
+
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Approve").Click();
+
+        cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation(), TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
@@ -940,5 +976,22 @@ public class AssignmentDetailBunitTests : BunitContext
             "the (still-signed) row renders with a status badge"));
         cut.Markup.Should().NotContain("Certificate",
             "a not-yet-finalized ward must not offer the certificate download");
+    }
+
+    // ar-24 row 2: test-double AuthenticationStateProvider. Default: an unauthenticated
+    // principal with NO teacher_id claim (=> Detail sends Guid.Empty, the dev/TestAuth
+    // posture). The discriminating test sets TeacherId to prove the claim path drives the
+    // outgoing request body.
+    private sealed class StubAuthStateProvider : AuthenticationStateProvider
+    {
+        public Guid? TeacherId { get; set; }
+
+        public override Task<AuthenticationState> GetAuthenticationStateAsync()
+        {
+            var identity = TeacherId is null
+                ? new ClaimsIdentity()
+                : new ClaimsIdentity(new[] { new Claim("teacher_id", TeacherId.Value.ToString()) }, "test");
+            return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(identity)));
+        }
     }
 }

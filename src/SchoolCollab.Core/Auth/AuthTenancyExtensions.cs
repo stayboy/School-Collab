@@ -49,6 +49,10 @@ public static class AuthTenancyExtensions
         // the ClaimsPrincipal across OIDC cookie, bearer JWT, and TestAuth.
         services.AddScoped<ICurrentUser, CurrentUser>();
 
+        // ar-24: bearer forwarding for real-auth cross-context API hops. Transient (one
+        // instance per outgoing call via IHttpClientFactory); no-op in TestAuth/dev mode.
+        services.TryAddTransient<BearerForwardingDelegatingHandler>();
+
         // Dev tenant switcher store (auth-disabled / TestAuth mode only). Backed by
         // the shared IDistributedCache (Redis in dev) so the selection made in the
         // admin shell propagates to every API host's TestAuthHandler. Only consulted

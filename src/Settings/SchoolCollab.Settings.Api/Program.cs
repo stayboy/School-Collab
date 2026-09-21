@@ -44,7 +44,9 @@ builder.Services.AddSingleton<IActorAccessor, ClaimsPrincipalActorAccessor>();
 // The flag_admin role policy gates write endpoints when OIDC is enabled.
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("flag_admin", policy => policy.RequireClaim("role", "flag_admin"));
+    options.AddPolicy("flag_admin", policy => policy
+        .RequireClaim("role", "flag_admin")
+        .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
 });
 
 builder.Services.AddOpenApi();

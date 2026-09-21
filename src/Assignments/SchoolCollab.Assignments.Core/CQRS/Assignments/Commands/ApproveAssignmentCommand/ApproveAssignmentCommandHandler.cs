@@ -34,6 +34,12 @@ public sealed class ApproveAssignmentCommandHandler(
             ?? (await IsRealAuthAsync(cancellationToken)
                 ? throw new MissingTeacherPrincipalException(nameof(ApproveAssignmentCommand))
                 : command.ApproverId);
+
+        // ar-24 cross-tenant rejection: the acting approver's tenant must match the assignment's.
+        if (currentUser.CurrentTenant.TenantId != assignment.TenantId)
+            throw new TeacherTenantMismatchException(
+                command.AssignmentId, "assignment", currentUser.CurrentTenant.TenantId, assignment.TenantId);
+
         assignment.Approve(approverId);
 
         await repository.UpdateAsync(assignment, cancellationToken);

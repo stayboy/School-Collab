@@ -39,6 +39,8 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Assignments.Api.Endpoints;
 
@@ -446,6 +448,11 @@ public static class AssignmentRoutes
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
+            // ar-24: cross-tenant rejection — foreign-tenant approver ⇒ 403 (never a 500).
+            catch (TeacherTenantMismatchException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
         });
 
         // WS-A2 / spec §7 Q2: reject a pending assignment.
@@ -557,6 +564,11 @@ public static class AssignmentRoutes
             }
             // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
             catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
+            catch (TeacherTenantMismatchException ex)
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
@@ -776,6 +788,11 @@ public static class AssignmentRoutes
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
+            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
+            catch (TeacherTenantMismatchException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
         });
 
         // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
@@ -802,14 +819,45 @@ public static class AssignmentRoutes
             {
                 return Results.Problem(ex.Message, statusCode: 403);
             }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
+            catch (TeacherTenantMismatchException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
         });
 
         group.MapGet("/{id:guid}/submissions/review-queue", async (
             Guid id,
             Guid teacherId,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] IFeatureFlagService featureFlags,
             [FromServices] IQueryHandler<GetSubmissionsForReview, SubmissionForReviewDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(teacherId), ct)));
+        {
+            try
+            {
+                // ar-24: the acting teacher is resolved principal-first (R4).
+                var isRealAuth = !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth);
+                var effectiveTeacherId = currentUser.TeacherId
+                    ?? (isRealAuth
+                        ? throw new MissingTeacherPrincipalException("GetSubmissionsForReview")
+                        : teacherId);
+                return Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(effectiveTeacherId), ct));
+            }
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            catch (TeacherTenantMismatchException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+        });
 
         // ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ───────────────────
 

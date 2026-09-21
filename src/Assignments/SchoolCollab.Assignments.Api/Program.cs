@@ -106,14 +106,22 @@ builder.Services.AddSettingsCore(builder.Configuration);
 // Cross-bounded-context contact resolver (spec §9 G5): resolves subscribed
 // contacts from the Students API. The named client is resolved via Aspire
 // service discovery once the AppHost references students-api.
-builder.Services.AddHttpClient("students-api");
+// ar-24: real-auth bearer forwarding + fail-closed on a 302 challenge
+// (AllowAutoRedirect=false — the strict-2xx existence check must not follow
+// the OIDC challenge to a 200 login page).
+builder.Services.AddHttpClient("students-api")
+    .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolver, SchoolCollab.Assignments.Api.Services.StudentsContactResolver>();
 
 // Effective-policy resolver (notification-delivery-plan.md §3): reads the tenant
 // default (Settings API) + grade override (Students API), merges at publish time.
 // E3 (ar-19): relocated into Assignments.Core (Services/NotificationPolicyResolver.cs)
 // so both the API and the Assignments.Worker sweeps resolve the same policy.
-builder.Services.AddHttpClient("settings-api");
+// ar-24: same bearer-forwarding + AllowAutoRedirect=false posture as students-api.
+builder.Services.AddHttpClient("settings-api")
+    .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationPolicyResolver,
     SchoolCollab.Assignments.Core.Services.NotificationPolicyResolver>();
 // Guardian-signature default resolver (WS-C1 / spec §7 Q1): reads the tenant

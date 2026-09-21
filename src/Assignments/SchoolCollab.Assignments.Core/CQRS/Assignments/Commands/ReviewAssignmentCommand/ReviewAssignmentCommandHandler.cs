@@ -27,6 +27,12 @@ public sealed class ReviewAssignmentCommandHandler(
             ?? (await IsRealAuthAsync(cancellationToken)
                 ? throw new MissingTeacherPrincipalException(nameof(ReviewAssignmentCommand))
                 : command.TeacherId);
+
+        // ar-24 cross-tenant rejection: the acting teacher's tenant must match the assignment's.
+        if (currentUser.CurrentTenant.TenantId != assignment.TenantId)
+            throw new TeacherTenantMismatchException(
+                command.Id, "assignment", currentUser.CurrentTenant.TenantId, assignment.TenantId);
+
         assignment.AddReview(teacherId, command.Score, command.Comments);
         await repository.UpdateAsync(assignment, cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);

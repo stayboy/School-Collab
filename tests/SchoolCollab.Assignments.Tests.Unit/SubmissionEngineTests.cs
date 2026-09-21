@@ -240,7 +240,7 @@ public class SubmissionEngineTests
         var submissionRepo = new FakeSubmissionRepository { SubmissionToReturn = submission };
         var assignmentRepo = new FakeAssignmentRepository { Assignment = NewAssignment() };
         var handler = new ReviewSubmissionCommandHandler(
-            submissionRepo, assignmentRepo, TenantProvider(), NullLogger<ReviewSubmissionCommandHandler>.Instance);
+            submissionRepo, assignmentRepo, TenantProvider(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<ReviewSubmissionCommandHandler>.Instance);
 
         await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, TeacherId, 95m, null, "great"));
 
@@ -255,7 +255,7 @@ public class SubmissionEngineTests
         var submissionRepo = new FakeSubmissionRepository { SubmissionToReturn = submission };
         var assignmentRepo = new FakeAssignmentRepository { Assignment = NewAssignment() };
         var handler = new ReviewSubmissionCommandHandler(
-            submissionRepo, assignmentRepo, TenantProvider(), NullLogger<ReviewSubmissionCommandHandler>.Instance);
+            submissionRepo, assignmentRepo, TenantProvider(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<ReviewSubmissionCommandHandler>.Instance);
 
         await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, TeacherId, null, null, "ok"));
 
@@ -297,7 +297,7 @@ public class SubmissionEngineTests
         var submissionRepo = new FakeSubmissionRepository { SubmissionToReturn = submission };
         var assignmentRepo = new FakeAssignmentRepository { Assignment = NewAssignment() }; // CreatedBy = TeacherId
         var handler = new ReviewSubmissionCommandHandler(
-            submissionRepo, assignmentRepo, TenantProvider(), NullLogger<ReviewSubmissionCommandHandler>.Instance);
+            submissionRepo, assignmentRepo, TenantProvider(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true }, NullLogger<ReviewSubmissionCommandHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(
             new ReviewSubmissionCommand(submission.Id, OtherTeacherId, 95m, null, "x"));
