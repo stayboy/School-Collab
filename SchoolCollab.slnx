@@ -27,6 +27,11 @@
     <Project Path="src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj" />
     <Project Path="src/Assignments/SchoolCollab.Assignments.Worker/SchoolCollab.Assignments.Worker.csproj" />
   </Folder>
+  <Folder Name="/src/SchoolCollab.Portals/">
+    <File Path="src/SchoolCollab.Portals/app.py" />
+    <File Path="src/SchoolCollab.Portals/pyproject.toml" />
+    <File Path="src/SchoolCollab.Portals/uv.lock" />
+  </Folder>
   <Folder Name="/src/ServiceDefaults/">
     <Project Path="src/ServiceDefaults/SchoolCollab.ServiceDefaults/SchoolCollab.ServiceDefaults.csproj" />
   </Folder>
