@@ -62,15 +62,15 @@ indicative and should be re-verified):
 
 ## 3. Findings — Aspire Python hosting
 
-The AppHost (`src/AppHost/SchoolCollab.AppHost`, Aspire SDK **13.4.5**, net10.0)
+The AppHost (`src/AppHost/SchoolCollab.AppHost`, Aspire SDK **13.5.4**, net10.0)
 does **not** include Python support in `Aspire.Hosting` today (verified: no
 `AddPython*`/`PythonApp` symbols in the local `Aspire.Hosting.dll`). Python app
 orchestration requires the `Aspire.Hosting.Python` package:
 
-1. Add to `Directory.Packages.props` (CPM — version-pinned, 13.4.5 to match the
+1. Add to `Directory.Packages.props` (CPM — version-pinned, 13.5.4 to match the
    other hosting integrations):
    ```xml
-   <PackageVersion Include="Aspire.Hosting.Python" Version="13.4.5" />
+   <PackageVersion Include="Aspire.Hosting.Python" Version="13.5.4" />
    ```
 2. `<PackageReference Include="Aspire.Hosting.Python" />` in
    `SchoolCollab.AppHost.csproj` (no `Version` — CPM).
