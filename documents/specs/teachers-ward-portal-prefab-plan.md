@@ -1,6 +1,6 @@
 # Teachers & Ward Portal — Prefab UI (Python) integration plan
 
-Status: **Phase-0 spike LANDED (ar-23, PR #247 → `8d1c8a20`, 2026-09-21)** — phases 1+ remain a proposal pending the owner's MVP go/no-go
+Status: **Phase-0 spike LANDED (ar-23, PR #247 → `8d1c8a20`, 2026-09-21)** — phases 1+ remain a proposal pending the owner's MVP go/no-go. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
 Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`)
 Branch context: authored alongside the AR-13 round (branch `stack/13-ar-13-families-ward-surface`, since squash-merged to `main` as PR #236); the AR train (ar-13/ar-14/ar-15 — #236/#237/#239) has since fully merged to `main`. No code for this plan has landed.
 
