@@ -310,12 +310,15 @@ public class CrossModuleWiringTests
 
     private static DirectoryInfo FindRepoRoot()
     {
+        // The solution file is the repo-root marker. Accept either format so this
+        // helper survives the .sln -> .slnx migration (AGENTS.md: do not re-add a
+        // SchoolCollab.sln — two solution files in one directory is an error).
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SchoolCollab.sln")))
+        while (dir is not null && !dir.EnumerateFiles("SchoolCollab.sln*").Any())
         {
             dir = dir.Parent;
         }
-        dir.Should().NotBeNull("SchoolCollab.sln should exist above the test output directory");
+        dir.Should().NotBeNull("a SchoolCollab.slnx (or legacy SchoolCollab.sln) should exist above the test output directory");
         return dir!;
     }
 
