@@ -371,7 +371,7 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
 // the ward portal as a Python app (uv + FastAPI + Prefab UI), hosted solely by this
 // AppHost (plan Q5) and a pure HTTP consumer of assignments-api — zero backend change
 // (plan Q3). Spike only: the owner re-decides the MVP go/no-go before further work.
-builder.AddUvicornApp("portals", "..\\..\\..\\portals", "app:app")
+builder.AddUvicornApp("portals", "..\\..\\SchoolCollab.Portals", "app:app")
     .WithUv()
     .WithReference(assignmentsApi)
     .WaitFor(assignmentsApi);
