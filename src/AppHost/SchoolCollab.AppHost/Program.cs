@@ -52,10 +52,13 @@ var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
 // teacher_id protocol-mapper values pin the FIXED ids seeded by the MigrationService
 // DevIdentitySeeder (Dev School = ...0002, Dev Teacher = ...0003), so a dev login
 // resolves to real backing rows on first boot. Secrets: `keycloak-admin-password`
-// (Keycloak bootstrap admin) gets NO committed default (operator supplies via
-// Parameters__keycloak_admin_password / user-secrets). `keycloak-client-secret` has a
-// DEV-ONLY value matching the realm file's dev client secret supplied via
-// user-secrets/Parameters — see documents/configuration.md §2/§4.
+// (Keycloak bootstrap admin) and `keycloak-client-secret` both carry committed DEV-ONLY
+// defaults in appsettings.Development.json (`dev-only-keycloak-admin` and
+// `dev-only-school-collab-client-secret` — the latter matching the realm file's dev client
+// secret), so a plain `aspire run` starts Keycloak with no prompt. A non-dev value is
+// supplied via user-secrets (`Parameters:keycloak-*`) or the Parameters__keycloak_* env
+// vars, which override the committed dev literal; production never loads the Development
+// file — see documents/configuration.md §2/§4.
 // The container enables Keycloak's built-in readiness health signal
 // (KC_HEALTH_ENABLED) on the management interface, and a health check is bound to it
 // so the four Auth:Keycloak hosts below `.WaitFor(keycloak)` on real readiness — the
@@ -149,9 +152,11 @@ var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assig
 // WS-E2 (ar-16): SMTP transport for the MailKit email sender, fanned out onto
 // assignments-api as Smtp__Host/Port/User/Password/FromAddress. `smtp-host` blank =
 // the log-and-skip NullEmailSender (dev/standalone default; never a failure row).
-// `smtp-user` / `smtp-password` have NO committed default: MailPit accepts anonymous
-// mail, and a real relay's credentials come from user-secrets
-// (Parameters:smtp-password) or the Parameters__smtp_password env var — the same
+// `smtp-user` / `smtp-password` carry committed DEV-ONLY defaults in
+// appsettings.Development.json (`dev-user` / `dev-only-smtp-password`) so a plain
+// `aspire run` does not prompt; MailPit accepts anonymous mail, and a real relay's
+// credentials must come from user-secrets (Parameters:smtp-password) or the
+// Parameters__smtp_password env var, which override the committed dev literal — the same
 // posture as Parameters:openrouter-api-key. See documents/configuration.md §2/§11.
 var smtpHost        = builder.AddParameter("smtp-host");
 var smtpPort        = builder.AddParameter("smtp-port");
