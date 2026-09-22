@@ -311,14 +311,24 @@ settingsApi = settingsApi.WithReference(studentsApi);
 // E3 (ar-19): Assignments.Worker — reminder / completion-to-guardian / overdue sweeps
 // that queue NotificationLog rows (the Assignments.Api drain sends them), plus the
 // AssignmentPublishedIntegrationEvent subscription that kicks the reminder sweep.
+// The worker's Program.cs calls AddAssignmentsCore, which unconditionally registers the
+// shared OutboxDispatcher — so it needs Outbox__ExchangeName as well, or OutboxOptions
+// validation fails the host at startup with "ExchangeName must be set in the 'Outbox'
+// configuration section" (the worker's own appsettings.json has no Outbox section by
+// design — the AppHost is the single fan-out point).
 // Mirrors the students-worker shape: waits for rabbit + the migrator and subscribes to
 // the assignments exchange. No new Parameters: entries — the existing
-// outbox-exchange-assignments is reused.
+// outbox-exchange-assignments is reused for both environment variables.
+// It deliberately does NOT receive the smtp-* parameters: the worker only queues
+// NotificationLog rows; the drain that sends them — the only component that resolves
+// IEmailSender — is the API-side NotificationDispatchSweepService in assignments-api,
+// which already carries those settings.
 var assignmentsWorker = builder.AddProject<Projects.SchoolCollab_Assignments_Worker>("assignments-worker")
     .WithReference(assignmentsDb)
     .WithReference(rabbit)
     .WithReference(settingsApi)
     .WithReference(studentsApi)
+    .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
     .WithEnvironment("RabbitMq__Subscriber__ExchangeName", assignmentsOutboxExchange)
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);

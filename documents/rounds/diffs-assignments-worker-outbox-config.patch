@@ -1,0 +1,461 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index c7f5b7d3..ed869d5a 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -117,7 +117,7 @@ files only carry values that genuinely belong to that single service
+ | `postgres-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | Superuser password for the local Postgres container. **Pinned** so the persisted volume keeps working across runs. |
+ | `rabbitmq-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | `RABBITMQ_DEFAULT_PASS` for the local RabbitMQ container. Pinned for the same reason as Postgres. |
+ | `outbox-exchange-settings` | Aspire parameter | `settings` | Outbox topic exchange name for the Settings bounded context. Injected as `Outbox__ExchangeName` into `settings-api`. |
+-| `outbox-exchange-assignments` | Aspire parameter | `assignments` | Outbox topic exchange name for the Assignments bounded context. Injected as `Outbox__ExchangeName` into `assignments-api`. |
++| `outbox-exchange-assignments` | Aspire parameter | `assignments` | Outbox topic exchange name for the Assignments bounded context. Injected as `Outbox__ExchangeName` into `assignments-api` and `assignments-worker` (the worker's `AddAssignmentsCore` registers the shared outbox dispatcher too), and as `RabbitMq__Subscriber__ExchangeName` into `assignments-worker`. |
+ | `outbox-exchange-students` | Aspire parameter | `students` | Outbox topic exchange name for the Students bounded context. Injected as `Outbox__ExchangeName` into `students-api` and `students-worker`. |
+ | `ai-default-provider` | Aspire parameter | `openrouter` | Active AI provider name — `ollama` (local) or `openrouter` (cloud). Injected as `codedvalue-ai-provider`. |
+ | `ollama-endpoint` | Aspire parameter | `http://localhost:11434/v1` | Local Ollama OpenAI-compatible endpoint. Injected as `Ollama__Endpoint`. |
+@@ -146,13 +146,21 @@ files only carry values that genuinely belong to that single service
+ The AppHost registers `assignments-worker` (`SchoolCollab.Assignments.Worker`) with
+ `WithReference(assignmentsDb, rabbit, settingsApi, studentsApi)` and
+ `WaitFor(rabbit) + WaitForCompletion(migrator)`. It does **not** add a `Parameters:`
+-entry: it reuses the existing `outbox-exchange-assignments` parameter, injected as
+-`RabbitMq__Subscriber__ExchangeName = assignments` so the worker subscribes to the
+-same assignments exchange that `assignments-api` publishes `AssignmentPublishedIntegrationEvent`
+-to. The Published handler kicks one reminder-sweep pass; the sweeps read policy
+-(`settings-api`) and contacts (`students-api`) through the same named-
+-HTTP-client service-discovery wires as `assignments-api`. The worker's local
+-`appsettings.json` carries only the RabbitMq subscriber defaults (see §11).
++entry: it reuses the existing `outbox-exchange-assignments` parameter, injected **twice** —
++as `Outbox__ExchangeName = assignments`, because the worker's `Program.cs` calls
++`AddAssignmentsCore`, which unconditionally registers the shared `OutboxDispatcher` whose
++`OutboxOptions` are validated at startup (without this the host dies with
++`OptionsValidationException: ExchangeName must be set in the 'Outbox' configuration
++section`) — and as `RabbitMq__Subscriber__ExchangeName = assignments` so the worker
++subscribes to the same assignments exchange that `assignments-api` publishes
++`AssignmentPublishedIntegrationEvent` to. The Published handler kicks one reminder-sweep
++pass; the sweeps read policy (`settings-api`) and contacts (`students-api`) through the
++same named-HTTP-client service-discovery wires as `assignments-api`.
++The worker deliberately does **not** receive the `smtp-*` parameters: it only *queues*
++`NotificationLog` rows, and the drain that sends them — the only component that resolves
++`IEmailSender` — is the API-side `NotificationDispatchSweepService` in `assignments-api`,
++which already carries them. The worker's local `appsettings.json` carries only the RabbitMq
++subscriber defaults (see §11).
+ 
+ **Where to set them:**
+ 
+diff --git a/documents/solution/assignments-worker-outbox-exchange-fix.md b/documents/solution/assignments-worker-outbox-exchange-fix.md
+new file mode 100644
+index 00000000..acfa056e
+--- /dev/null
++++ b/documents/solution/assignments-worker-outbox-exchange-fix.md
+@@ -0,0 +1,117 @@
++# Assignments.Worker could not start — missing `Outbox__ExchangeName`
++
++> Owner: Cross-context messaging / AppHost wiring
++> Related: `documents/configuration.md` §2 (`assignments-worker`),
++> `documents/solution/messaging-consolidation-plan.md` (the shared outbox),
++> `tests/SchoolCollab.ArchitectureTests.Unit/AppHostOutboxExchangeWiringArchitectureTests.cs` (the new guard)
++> Fixed: 2026-09-22, round `assignments-worker-outbox-config` (Tier 2 light)
++
++## Finding
++
++`SchoolCollab.Assignments.Worker` could not start. It failed at `host.Run()`
++(`src/Assignments/SchoolCollab.Assignments.Worker/Program.cs:56`) with:
++
++```text
++Microsoft.Extensions.Options.OptionsValidationException
++  Message=ExchangeName must be set in the 'Outbox' configuration section.
++   at Microsoft.Extensions.Options.OptionsFactory`1.Create(String name)
++   at Microsoft.Extensions.Options.StartupValidator.Validate()
++```
++
++Reported by the owner from a real launch; the host had been dead since the ar-19 round that
++introduced it (`11cc37e1`).
++
++### Why it happened
++
++`AddAssignmentsCore` (`src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs:93`) calls
++`services.AddOutbox<AssignmentsDbContext>(...)` **unconditionally** — the extension is shared with
++`assignments-api`. That helper (`src/SchoolCollab.Core/Messaging/OutboxExtensions.cs:75-79`):
++
++- binds `OutboxOptions` from the `Outbox` configuration section,
++- requires a non-empty `ExchangeName` via `.ValidateOnStart()`,
++- and registers `OutboxDispatcher<TContext>` as a hosted background service.
++
++The worker's `appsettings.json` deliberately carries **no** `Outbox` section (only
++`RabbitMq:Subscriber`), because the AppHost is the single fan-out point — its own comment above the
++exchange parameters says the names are *"fanned out to the matching API/**Worker** via
++`WithEnvironment("Outbox__ExchangeName", param)`"*.
++
++But the AppHost's `assignments-worker` block set **only** `RabbitMq__Subscriber__ExchangeName`.
++So the one value the host required was the one value it never received. The sibling `students-worker`
++gets both, which is the precedent the block was written to mirror.
++
++### Why it stayed hidden
++
++Aspire reports a process that exits as **`Finished`** — the same state a successful one-shot
++resource (the `migrator`) ends in. During the 2026-09-22 cold-start verification the worker's
++`Finished` state was misread as by-design, and the `OptionsValidationException` sitting in its
++resource log was missed. An `OptionsValidationException` is a hard startup failure, not a degraded
++mode: nothing about the worker ran.
++
++### Scope of the miss: exactly one value
++
++`grep -rn ValidateOnStart src` returns only **two** call sites in the whole tree — the outbox
++(`OutboxExtensions.cs:79`) and the RabbitMQ subscriber (`:126`). The subscriber's `ExchangeName` +
++`QueueName` were already satisfied (worker `appsettings.json` plus the AppHost env var). Everything
++else the worker registers is unvalidated.
++
++**The `smtp-*` parameters were considered and deliberately NOT added.** The worker never resolves
++`IEmailSender`, so it never constructs an email sender, and `SmtpOptions` has no startup validation:
++
++- the worker only **queues** `NotificationLog` rows (`SweepNotificationQueuer`);
++- the drain that **sends** them is the API-side `NotificationDispatchSweepService` in
++  `assignments-api`, which opens a DI scope and delegates to `NotificationDispatchService`
++  (`src/Assignments/SchoolCollab.Assignments.Api/Services/NotificationDispatchSweepService.cs:36`) —
++  `NotificationDispatchService` is the only component that resolves `IEmailSender`;
++- and `assignments-api` already carries all five `Smtp__*` variables.
++
++Adding them to the worker would have implied the worker sends mail, which it does not.
++
++## Implementation
++
++One statement in the `assignments-worker` AppHost chain, plus the block comment:
++
++```csharp
++.WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
++```
++
++placed next to the existing `.WithEnvironment("RabbitMq__Subscriber__ExchangeName", assignmentsOutboxExchange)`
++and ordered `Outbox__…` first, matching the `students-worker` chain.
++
++- **No new `Parameters:` entry** — `outbox-exchange-assignments` already existed and is now reused for
++  both environment variables on this host.
++- **No `Outbox` section added to the worker's `appsettings.json`** — the AppHost remains the single
++  fan-out point (decision preserved).
++- **No change to `AddAssignmentsCore` / `AddOutbox` / `OutboxOptions`.** The alternative — not
++  registering the outbox for worker hosts — would have changed a shared extension that
++  `assignments-api` also uses, for a one-line wiring fix.
++- `documents/configuration.md` §2's `assignments-worker` paragraph now names both injections and
++  records the deliberate `smtp-*` exclusion.
++
++### Guard
++
++`tests/SchoolCollab.ArchitectureTests.Unit/AppHostOutboxExchangeWiringArchitectureTests.cs` — modelled
++on the sibling `AppHostSettingsDbWiringArchitectureTests`. It derives the affected hosts from source
++in two steps (never from the AppHost's own text, which would be tautological):
++
++1. every file calling `services.AddOutbox<` → the `Add{Layer}()Core` extension it declares
++   (today: `AddAssignmentsCore`, `AddSettingsCore`, `AddStudentsCore`);
++2. every `src/**/Program.cs` calling those methods → the host projects
++   (`assignments-api`, `assignments-worker`, `settings-api`, `students-api`, `students-worker`).
++
++It then requires each of those AppHost resources to carry `WithEnvironment("Outbox__ExchangeName"`,
++pins the resolved host set with a tripwire (a new host must consciously update the list), pins the
++registration side so a fourth outbox-registering core cannot silently change the inspected set, and
++carries a non-vacuity guard so a broken regex cannot make the assertions pass while inspecting nothing.
++
++## Verification
++
++| Check | Result |
++| --- | --- |
++| `dotnet build SchoolCollab.slnx` | **0 errors**; no warning originates from either touched file (the 88 on a clean full rebuild are the pre-existing `NU1902`/`NU1903`/`ASPIRE010` + CS families) |
++| `dotnet test tests/SchoolCollab.ArchitectureTests.Unit` | **45 / 0** (41 before; +4 new guard tests) |
++| Guard discrimination probe | with the added `.WithEnvironment` line removed: **1 failed / 44 succeeded**, and the failure is exactly `OutboxRegisteringHosts_GetOutboxExchangeName`; line restored → **45 / 0** |
++| AppHost cold start (`assignments-worker` reaches Running/Healthy) | **parent-run** — recorded in the round doc's acceptance (needs Docker) |
++
++The discrimination probe is the point: the guard fails on the pre-fix tree, so it would have caught
++this defect rather than merely agreeing with the fix.
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index f3fe8e4d..68b4bd8c 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -311,14 +311,24 @@ settingsApi = settingsApi.WithReference(studentsApi);
+ // E3 (ar-19): Assignments.Worker — reminder / completion-to-guardian / overdue sweeps
+ // that queue NotificationLog rows (the Assignments.Api drain sends them), plus the
+ // AssignmentPublishedIntegrationEvent subscription that kicks the reminder sweep.
++// The worker's Program.cs calls AddAssignmentsCore, which unconditionally registers the
++// shared OutboxDispatcher — so it needs Outbox__ExchangeName as well, or OutboxOptions
++// validation fails the host at startup with "ExchangeName must be set in the 'Outbox'
++// configuration section" (the worker's own appsettings.json has no Outbox section by
++// design — the AppHost is the single fan-out point).
+ // Mirrors the students-worker shape: waits for rabbit + the migrator and subscribes to
+ // the assignments exchange. No new Parameters: entries — the existing
+-// outbox-exchange-assignments is reused.
++// outbox-exchange-assignments is reused for both environment variables.
++// It deliberately does NOT receive the smtp-* parameters: the worker only queues
++// NotificationLog rows; the drain that sends them — the only component that resolves
++// IEmailSender — is the API-side NotificationDispatchSweepService in assignments-api,
++// which already carries those settings.
+ var assignmentsWorker = builder.AddProject<Projects.SchoolCollab_Assignments_Worker>("assignments-worker")
+     .WithReference(assignmentsDb)
+     .WithReference(rabbit)
+     .WithReference(settingsApi)
+     .WithReference(studentsApi)
++    .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
+     .WithEnvironment("RabbitMq__Subscriber__ExchangeName", assignmentsOutboxExchange)
+     .WaitFor(rabbit)
+     .WaitForCompletion(migrator);
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostOutboxExchangeWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostOutboxExchangeWiringArchitectureTests.cs
+new file mode 100644
+index 00000000..0962479e
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostOutboxExchangeWiringArchitectureTests.cs
+@@ -0,0 +1,260 @@
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Guards the AppHost wiring that no build or standalone-run recipe catches: a host whose
++/// <c>Program.cs</c> calls a module <c>Add{Layer}()Core</c> extension that registers the shared
++/// transactional outbox MUST also carry <c>.WithEnvironment("Outbox__ExchangeName", …)</c> in its
++/// AppHost resource chain. <c>AddOutbox&lt;TContext&gt;</c> binds <c>OutboxOptions</c> from the
++/// <c>Outbox</c> section and calls <c>ValidateOnStart()</c> on <c>ExchangeName</c>, so an omitted
++/// value is a hard startup failure — not a degraded mode.
++///
++/// <para>
++/// Found the hard way (2026-09-22): <c>assignments-worker</c> threw
++/// <c>OptionsValidationException: ExchangeName must be set in the 'Outbox' configuration section</c>
++/// at <c>host.Run()</c>, because the AppHost block set only <c>RabbitMq__Subscriber__ExchangeName</c>
++/// while the AppHost's own comment above the outbox parameters claims the exchange names are fanned
++/// out to the matching API/Worker. Aspire reported the dead worker as <c>Finished</c>, which reads
++/// like a normal one-shot resource, so the failure was easy to misread as by-design.
++/// </para>
++///
++/// <para>
++/// The scan resolves "which hosts register the outbox" in two steps, both from real source under
++/// <c>src/</c> — never from the AppHost's own text, which would make the assertion tautological:
++/// find the <c>Add{Layer}()Core</c> extensions that call <c>services.AddOutbox&lt;</c>, then find the
++/// <c>Program.cs</c> files that call those extensions. The helpers follow the
++/// <c>AppHostSettingsDbWiringArchitectureTests</c> / <c>SeedCsvArchitectureTests</c> precedent and
++/// THROW rather than passing vacuously when the repo or a scan target cannot be found.
++/// </para>
++/// </summary>
++[TestClass]
++public class AppHostOutboxExchangeWiringArchitectureTests
++{
++    /// <summary>The env-var injection every outbox-registering host must carry.</summary>
++    private const string ExpectedInjection = "WithEnvironment(\"Outbox__ExchangeName\"";
++
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    private static readonly IReadOnlyList<ProjectResourceChain> ProjectResources = ParseProjectResourceChains();
++
++    /// <summary>Repo-relative source path → the <c>Add{Layer}()Core</c> method declared in that file.</summary>
++    private static readonly IReadOnlyDictionary<string, string> OutboxModuleCores = FindOutboxRegisteringModuleCores();
++
++    private static readonly HashSet<string> ProjectsRegisteringOutbox =
++        FindHostProjectsCallingCoreMethods(OutboxModuleCores.Values);
++
++    private static readonly string[] OutboxResourceNames = [.. ProjectResources
++        .Where(resource => ProjectsRegisteringOutbox.Contains(ProjectNameOf(resource.ProjectConstant)))
++        .Select(resource => resource.ResourceName)
++        .OrderBy(name => name, StringComparer.Ordinal)];
++
++    [TestMethod]
++    public void OutboxRegisteringHosts_GetOutboxExchangeName()
++    {
++        foreach (var resource in ProjectResources)
++        {
++            if (!ProjectsRegisteringOutbox.Contains(ProjectNameOf(resource.ProjectConstant)))
++            {
++                continue;
++            }
++
++            resource.Chain.Should().Contain(ExpectedInjection,
++                $"{resource.ResourceName} calls a module Add{{Layer}}Core in its Program.cs, and that "
++                + "extension registers the shared OutboxDispatcher — so the AppHost must inject "
++                + "Outbox__ExchangeName, or OutboxOptions validation fails the host at startup with "
++                + "\"ExchangeName must be set in the 'Outbox' configuration section\" (exactly how "
++                + "assignments-worker was found dead in the 2026-09-22 cold start).");
++        }
++    }
++
++    [TestMethod]
++    public void OutboxRegisteringHosts_AreTheReviewedSet()
++    {
++        // A tripwire, not a tautology: the assertion above is skipped for any host the scan does not
++        // recognise, so this pins the set it actually inspected. A new host registering the outbox
++        // must update this list consciously (and get the exchange-name decision reviewed).
++        OutboxResourceNames.Should().BeEquivalentTo(
++            ["assignments-api", "assignments-worker", "settings-api", "students-api", "students-worker"],
++            "these are the AppHost project resources whose Program.cs calls an Add{Layer}Core that registers the outbox.");
++    }
++
++    [TestMethod]
++    public void Scan_ActuallyFoundTheAppHostAndTheOutboxHosts()
++    {
++        // Non-vacuity guard: if the AddProject regex or either src/ scan stops matching, the
++        // assertions above would pass while inspecting nothing.
++        ProjectResources.Should().HaveCountGreaterThanOrEqualTo(6,
++            "the AppHost declares at least six AddProject resources; fewer means the parser found no real chains.");
++
++        ProjectResources.Select(resource => resource.ResourceName)
++            .Should().Contain(["assignments-api", "assignments-worker", "migrator"]);
++
++        OutboxModuleCores.Values.Should().Contain(
++            ["AddAssignmentsCore", "AddSettingsCore", "AddStudentsCore"],
++            "these three module cores call services.AddOutbox<> and must be discovered by the src/ scan.");
++
++        ProjectsRegisteringOutbox.Should().Contain(
++            [
++                "SchoolCollab.Assignments.Api", "SchoolCollab.Assignments.Worker",
++                "SchoolCollab.Settings.Api", "SchoolCollab.Students.Api", "SchoolCollab.Students.Worker",
++            ],
++            "these projects call an outbox-registering Add{Layer}Core and must be discovered by the src/ Program.cs scan.");
++    }
++
++    [TestMethod]
++    public void ModuleCoresRegisteringTheOutbox_AreTheReviewedSet()
++    {
++        // Pins the registration side of the derivation. A fourth module core that starts calling
++        // services.AddOutbox<> makes its hosts subject to the Outbox__ExchangeName requirement too,
++        // so it must trip this and force that decision to be reviewed rather than silently changing
++        // the set of hosts the first test inspects.
++        OutboxModuleCores.Select(core => $"{core.Key} => {core.Value}").Should().BeEquivalentTo(
++            [
++                "src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs => AddAssignmentsCore",
++                "src/Settings/SchoolCollab.Settings.Core/Extensions.cs => AddSettingsCore",
++                "src/Students/SchoolCollab.Students.Core/Extensions.cs => AddStudentsCore",
++            ],
++            "these are the module cores that register the transactional outbox.");
++    }
++
++    // ── Helpers ─────────────────────────────────────────────────────────
++
++    private sealed record ProjectResourceChain(string ProjectConstant, string ResourceName, string Chain);
++
++    /// <summary>Projects.SchoolCollab_Assignments_Api → SchoolCollab.Assignments.Api</summary>
++    private static string ProjectNameOf(string projectConstant)
++        => projectConstant.Replace('_', '.');
++
++    private static IReadOnlyList<ProjectResourceChain> ParseProjectResourceChains()
++    {
++        var program = StripLineComments(
++            File.ReadAllText(Path.Combine(RepoRoot, "src", "AppHost", "SchoolCollab.AppHost", "Program.cs")));
++
++        // e.g. builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
++        var matches = Regex.Matches(program, """AddProject<Projects\.([A-Za-z0-9_]+)>\("([^"]+)"\)""");
++
++        var chains = new List<ProjectResourceChain>();
++        foreach (Match match in matches)
++        {
++            // A fluent AddProject chain contains no statement terminator, so the next
++            // ';' ends it (WireKeycloakAuth(...) calls follow as separate statements).
++            var end = program.IndexOf(';', match.Index);
++            if (end < 0)
++            {
++                throw new InvalidOperationException(
++                    $"Unterminated AddProject chain for '{match.Groups[2].Value}' in the AppHost Program.cs.");
++            }
++
++            chains.Add(new ProjectResourceChain(
++                match.Groups[1].Value,
++                match.Groups[2].Value,
++                program[match.Index..end]));
++        }
++
++        return chains;
++    }
++
++    /// <summary>
++    /// Resolves every module core that registers the transactional outbox: the
++    /// <c>Add{Layer}()Core</c> extension declared in a file that calls <c>services.AddOutbox&lt;</c>.
++    /// THROWS when such a file declares no such method, so a new registrar cannot be skipped
++    /// silently.
++    /// </summary>
++    private static IReadOnlyDictionary<string, string> FindOutboxRegisteringModuleCores()
++    {
++        var srcDir = Path.Combine(RepoRoot, "src");
++        var cores = new Dictionary<string, string>(StringComparer.Ordinal);
++
++        foreach (var path in Directory.GetFiles(srcDir, "*.cs", SearchOption.AllDirectories))
++        {
++            if (IsBuildOutputPath(path))
++            {
++                continue;
++            }
++
++            var text = File.ReadAllText(path);
++            if (!text.Contains("services.AddOutbox<", StringComparison.Ordinal))
++            {
++                continue;
++            }
++
++            var declaration = Regex.Match(text, @"public static IServiceCollection (Add[A-Za-z0-9_]*Core)\(");
++            if (!declaration.Success)
++            {
++                throw new InvalidOperationException(
++                    $"{path} calls services.AddOutbox<> but declares no Add{{Layer}}Core extension method, so its "
++                    + "hosts cannot be discovered — give it one, or extend this guard deliberately.");
++            }
++
++            cores[RelativePathOf(path)] = declaration.Groups[1].Value;
++        }
++
++        if (cores.Count == 0)
++        {
++            throw new InvalidOperationException(
++                $"No file under {srcDir} calls services.AddOutbox<> — the outbox-registration scan found nothing.");
++        }
++
++        return cores;
++    }
++
++    /// <summary>
++    /// Resolves the projects whose <c>Program.cs</c> calls any of the supplied
++    /// <c>Add{Layer}()Core</c> extension methods.
++    /// </summary>
++    private static HashSet<string> FindHostProjectsCallingCoreMethods(IEnumerable<string> coreMethodNames)
++    {
++        var srcDir = Path.Combine(RepoRoot, "src");
++        var names = coreMethodNames.ToArray();
++
++        return Directory
++            .GetFiles(srcDir, "Program.cs", SearchOption.AllDirectories)
++            .Where(path => !IsBuildOutputPath(path))
++            .Where(path =>
++            {
++                var text = File.ReadAllText(path);
++                return names.Any(name => text.Contains(name + "(", StringComparison.Ordinal));
++            })
++            .Select(path => Path.GetFileName(Path.GetDirectoryName(path)!))
++            .ToHashSet(StringComparer.Ordinal);
++    }
++
++    private static string RelativePathOf(string path)
++        => Path.GetRelativePath(RepoRoot, path).Replace('\\', '/');
++
++    private static bool IsBuildOutputPath(string path)
++    {
++        // bin/ and obj/ carry copied sources during a build.
++        var segments = path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
++        return segments.Contains("bin", StringComparer.OrdinalIgnoreCase)
++            || segments.Contains("obj", StringComparer.OrdinalIgnoreCase);
++    }
++
++    /// <summary>
++    /// Removes trailing <c>//</c> comments before chain extraction. A comment inside a resource
++    /// chain (e.g. one whose semicolon would otherwise look like the end of the statement) must not
++    /// truncate the chain — that failure mode was hit while authoring the sibling guard.
++    /// </summary>
++    private static string StripLineComments(string source)
++        => string.Join('\n', source.Split('\n').Select(line =>
++        {
++            var commentAt = line.IndexOf("//", StringComparison.Ordinal);
++            return commentAt >= 0 ? line[..commentAt] : line;
++        }));
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repository root from " + AppContext.BaseDirectory);
++    }
++}
