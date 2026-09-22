@@ -134,12 +134,12 @@ files only carry values that genuinely belong to that single service
 | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
 | `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
 | `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
-| `smtp-user` | Aspire parameter | _none_ | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. |
-| `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied for a relay that requires auth_ | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. Never commit it — set it via user-secrets / env-var like the other secrets below. |
+| `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
+| `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-smtp-password` (dev-only, `appsettings.Development.json`) | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. A **dev-only** default is committed in `appsettings.Development.json`; a relay that requires auth supplies the real value via user-secrets / env-var, which override it. **Never commit a production secret.** |
 | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
 | `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
-| `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied_ | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. **No committed default** — supply via user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, mirroring `postgres-password`. This is one of the two parameters AC#4 needs; see §4. |
-| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | _none — must be supplied_ | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. **No committed default** — dev supplies the pinned dev-only literal `dev-only-school-collab-client-secret` (the realm file's client `secret`) via user-secrets / env-var; production supplies a real secret store value. This is the other of the two parameters AC#4 needs; see §4. |
+| `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-keycloak-admin` (dev-only, `appsettings.Development.json`) | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. A **dev-only** default is committed in `appsettings.Development.json`, so a plain `aspire run` starts Keycloak without prompting; a non-dev value comes from user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, which override it (production never loads the Development file). One of the two parameters AC#4 needs; see §4. |
+| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
 
 **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
 
@@ -171,8 +171,7 @@ for non-secret defaults — open it, change the value, re-run the AppHost:
 ```
 
 For secrets (`postgres-password`, `rabbitmq-password`,
-`openrouter-api-key`, `smtp-password`, `keycloak-admin-password`,
-`keycloak-client-secret`) — do **not** commit them to source
+`openrouter-api-key`) — do **not** commit them to source
 control. Use the AppHost's user-secrets store (preferred for local dev):
 
 ```bash
@@ -197,10 +196,20 @@ export Parameters__keycloak_admin_password=<bootstrap-admin-password>
 export Parameters__keycloak_client_secret=dev-only-school-collab-client-secret
 ```
 
+The four **dev-only** exceptions to the rule above are `smtp-user`,
+`smtp-password`, `keycloak-admin-password` and `keycloak-client-secret`: each
+carries a committed default in `appsettings.Development.json` so a plain
+`aspire run` starts with no prompt. That file is never loaded outside
+Development, `AppHostDevParameterDefaultsArchitectureTests` asserts none of the
+four keys reach the non-Development `appsettings.json`, and any value set below
+overrides the committed dev literal.
+
 Aspire's `AddParameter(name, secret: true)` flags secrets so that they are
-masked in the Aspire dashboard, prompted for on first `aspire run`, and
-treated as sensitive in any deployment manifest. The non-secret parameters
-above are visible in plain text.
+masked in the Aspire dashboard and treated as sensitive in any deployment
+manifest. The non-secret parameters above are visible in plain text. A secret
+parameter with no value in **any** config source is prompted for on first
+`aspire run` — supplying the four dev-only defaults is what removes that prompt
+in Development.
 
 > ⚠️ **Why pinning matters.** Without a stable password, Aspire regenerates
 > one on every run; the persisted data volume keeps the *previous*
@@ -307,13 +316,16 @@ pick it up; no `docker volume rm` is needed.
 | :--- | :--- | :--- |
 | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
 | `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
-| `Auth:Keycloak:ClientSecret` | _(none committed — parameter required)_ | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the pinned dev-only literal `dev-only-school-collab-client-secret` (matching the realm file's client `secret`), supplied via `Parameters:keycloak-client-secret`; **production** MUST substitute a real secret-store value. |
+| `Auth:Keycloak:ClientSecret` | `dev-only-school-collab-client-secret` (dev-only) | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the committed dev-only default for `Parameters:keycloak-client-secret` in `appsettings.Development.json`, which **must equal** the realm file's client `secret` (guarded); **production** MUST substitute a real secret-store value — no production secret is committed. |
 
 > 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
 > sensitive values here. Use one of:
-> - `dotnet user-secrets set "Parameters:keycloak-admin-password" "..."` and
->   `dotnet user-secrets set "Parameters:keycloak-client-secret" "dev-only-school-collab-client-secret"` (local dev)
-> - Aspire `AddParameter(..., secret: true)` + reference (CI) — no committed default (see §2)
+> - nothing for local dev — `appsettings.Development.json` commits the pinned dev-only
+>   defaults. Override them with
+>   `dotnet user-secrets set "Parameters:keycloak-admin-password" "..."` and
+>   `dotnet user-secrets set "Parameters:keycloak-client-secret" "dev-only-school-collab-client-secret"`
+> - Aspire `AddParameter(..., secret: true)` + reference (CI) — the dev default is the only
+>   committed value; production supplies a secret-store value (see §2)
 > - Azure Key Vault / your platform's secret manager (production)
 
 ### Dev-only `RequireHttpsMetadata = false`
@@ -354,12 +366,15 @@ The response `access_token` carries `tenant_id=…0002`, `tenant_name="Dev Schoo
 
 ### The two parameters AC#4 needs
 
-Acceptance criterion #4 can only be exercised once these are supplied (no committed defaults):
+Acceptance criterion #4 is exercised **out of the box** in Development: both parameters
+carry dev-only defaults in `appsettings.Development.json`, so a plain `aspire run` starts
+Keycloak with no prompt. Production supplies real values — there is no committed
+production secret.
 
-| Parameter | Purpose |
-| --- | --- |
-| `Parameters__keycloak_admin_password` (user-secrets `Parameters:keycloak-admin-password`) | Keycloak bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`). |
-| `Parameters__keycloak_client_secret` (user-secrets `Parameters:keycloak-client-secret`) | Dev client secret — set to the pinned dev-only literal `dev-only-school-collab-client-secret`. |
+| Parameter | Dev default | Purpose |
+| --- | --- | --- |
+| `Parameters__keycloak_admin_password` (user-secrets `Parameters:keycloak-admin-password`) | `dev-only-keycloak-admin` | Keycloak bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`). |
+| `Parameters__keycloak_client_secret` (user-secrets `Parameters:keycloak-client-secret`) | `dev-only-school-collab-client-secret` | Dev client secret — must equal the realm file's `school-collab-client` `secret` (guarded). |
 
 ### Real vs TestAuth modes
 
@@ -887,7 +902,10 @@ Before deploying, verify:
 - [ ] **AppHost secrets** are sourced from a secret store, not committed:
       `Parameters:postgres-password`, `Parameters:rabbitmq-password`,
       `Parameters:openrouter-api-key`.
-- [ ] **`Auth:Keycloak:ClientSecret`** is sourced from a secret store.
+- [ ] **`Auth:Keycloak:ClientSecret`** is sourced from a secret store. The
+      `appsettings.Development.json` dev defaults (this one, `keycloak-admin-password`,
+      `smtp-user`, `smtp-password`) are never loaded in production and must not be relied
+      on there.
 - [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
       (or omitted) in production. The flag is sourced from the AppHost
       `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
