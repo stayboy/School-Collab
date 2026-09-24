@@ -67,11 +67,19 @@ var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-col
 var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
 var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
 
+// Service-account secret for the Keycloak Admin REST client (client `school-collab-auth-admin` in
+// the realm import). Same posture as keycloak-client-secret: DEV-ONLY literal in
+// appsettings.Development.json, no committed production value (configuration.md §2/§4/§12);
+// the auth service (pass 2) receives it as Auth__Keycloak__ServiceAccountClientSecret below.
+var keycloakAuthAdminSecret = builder.AddParameter("keycloak-auth-admin-secret", secret: true);
+
 // Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
 // bind mount path is stable regardless of the launch working directory.
 var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "school-collab-realm.json");
 
-var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
+// 26.4+ — official passkeys support (spec §6/§11.5). Newest docker-published 26.4.x as of
+// 2026-09-22 is 26.4.7 (26.4.8-16 exist as git tags but have no quay image).
+var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.4.7")
     .WithArgs("start-dev", "--import-realm")
     // No keycloak data volume is declared, so the realm file re-imports on every
     // container recreate (the dev-correct behaviour — edit the realm and recreate the
@@ -148,6 +156,32 @@ var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allo
 // parameter is the IConfiguration cold-start value; the Settings
 // Config-service row is the runtime authority (tenant-overridable).
 var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assignment-approval");
+
+// Round B (keycloak-ui-auth, spec §10 / D4/D5): selects WHICH login UI the browser-facing
+// hosts present — OFF (default) = Keycloak's hosted page via the standard OIDC code flow,
+// ON = the prefab auth portal's login form. A pure UI toggle: validation and authorization
+// are identical in both states. Like FEATURE:DisableOIDCAuth it is a deployment-time startup
+// switch (auth schemes are registered once), so it is NOT a Settings/Config-service flag;
+// it is fanned out below as FeatureFlags__FEATURE__DisableKeycloakLoginUi to all four
+// consumers (admin, families, auth, auth-portal).
+var disableKeycloakLoginUi = builder.AddParameter("feature-flag-disable-keycloak-login-ui");
+
+// Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist — the redirect
+// targets a one-time handshake code may be minted for. ONE parameter holds the browser-facing
+// apps' callbacks (the four Blazor hosts' /signin-handshake route, in both launch-profile
+// schemes: admin 5300/7300, families 5400/7400 — the exact spelling B1's challenge handler and
+// B4's BuildCallbackUri mint, whose query half is ignored by the matcher) and is fanned to BOTH
+// consumers: `Auth:AppCallbackPrefixes` on the auth service (which enforces it at code issuance)
+// and `AuthPortal:AppCallbackPrefixes` on the portal (its own defense-in-depth copy, used to
+// validate `return_uri` before rendering or redirecting). The portal's own bootstrap redemption
+// URI is appended to the AUTH copy only — it is derived from the portal's Aspire endpoint below
+// (no hardcoded port) and is never a `return_uri` the portal itself should accept.
+// A non-empty value is mandatory: the auth service validates it at startup (ValidateOnStart) and
+// the matcher is fail-closed, so a blank allowlist is a startup failure, never a fail-open.
+var appCallbackPrefixes = builder.AddParameter(
+    "app-callback-prefixes",
+    "http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake"
+    + ";http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake");
 
 // WS-E2 (ar-16): SMTP transport for the MailKit email sender, fanned out onto
 // assignments-api as Smtp__Host/Port/User/Password/FromAddress. `smtp-host` blank =
@@ -336,6 +370,61 @@ var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);
 
+// ── Auth service (round A pass 2) ──────────────────────────────────────────────────
+// The new SchoolCollab.Auth C# service: Direct-Grant credential exchange, the one-time-code
+// handshake, portal-session token custody and the Keycloak Admin REST client (passes 3a-3d).
+// Wired with the same WireKeycloakAuth shape as the three APIs — its AuthServiceOptions
+// validation (ValidateOnStart) then sees Auth:Keycloak:Authority/ClientId/ClientSecret — plus
+// the service-account secret the Admin REST client will use (pass 3b). Round B adds the
+// login-UI flag fan-out, the mediated-read references and the portal bootstrap redirect below.
+var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
+    // D17: the mediated picker reads (tenants / teachers) are HTTP calls the auth service makes
+    // on the session's behalf, so both data APIs must be reachable through service discovery.
+    .WithReference(settingsApi)
+    .WithReference(studentsApi)
+    .WithEnvironment("Auth__Keycloak__ServiceAccountClientSecret", keycloakAuthAdminSecret)
+    // D5: the auth service reads the login-UI flag at startup (its own AddAuthAndTenancy must
+    // know the flag), but it deliberately does NOT receive Auth:Portal:LoginUrl — the
+    // browser-facing login URL stays off this host, so the flag-ON challenge here fails closed
+    // with 401 instead of ever redirecting a browser (plan-review P2-5).
+    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi);
+WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
+
+// ── Auth portal (round B, spec §12 / D1) ──────────────────────────────────────────
+// The prefab login/logout/challenge UI + the user/role admin UI as a Python app (uv +
+// FastAPI + Prefab UI), hosted solely by this AppHost and a pure HTTP consumer of the auth
+// service — it holds no credential and makes no direct Keycloak or data-API call (D7/AC11).
+// Registered like `portals` below, NOT with WireKeycloakAuth: that helper takes a typed
+// IResourceBuilder<ProjectResource> and this resource is a Python app.
+var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
+    .WithUv()
+    // The portal's only upstream: WithReference injects the services__auth__http__0 discovery
+    // env var the typed client resolves (B2's AuthApiClient).
+    .WithReference(auth)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
+    .WaitFor(auth);
+// The portal's own browser-facing base URL comes from its Aspire endpoint; referencing the
+// resource from inside its own chain is why this is a second statement (owner-adjudicated
+// pattern: WithEnvironment from the endpoint, mirroring the Keycloak endpoint fan-out).
+authPortal = authPortal.WithEnvironment("AuthPortal__PublicBaseUrl", authPortal.GetEndpoint("http"));
+
+// B5b: the portal's copy of the app-callback allowlist. The portal validates `return_uri`
+// against it before rendering the form or redirecting (defense-in-depth + UX, B8); the
+// load-bearing enforcement stays in the auth service below.
+authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes", appCallbackPrefixes);
+
+// D16: on the passkey path the AUTH SERVICE is the OIDC relying party, so it is what 302s the
+// browser back to the portal after the WebAuthn ceremony — hence the bootstrap redirect target
+// reaches the auth service only (plan-review P2-5). The portal redeems the single-use bootstrap
+// code there and holds no token (AC11/AC12).
+auth = auth.WithEnvironment("Auth__Portal__BootstrapRedirectUrl", $"{authPortal.GetEndpoint("http")}/bootstrap");
+
+// B5b: the enforced allowlist. The portal's bootstrap redemption URI is appended from the
+// portal's endpoint expression (never a hardcoded port) so the D16 bootstrap code — which is
+// URI-bound like every other one-time code — satisfies the same allowlist the apps' callbacks do.
+// `auth` receives it WITHOUT `Auth:Portal:LoginUrl`, so its flag-ON challenge still fails closed.
+auth = auth.WithEnvironment("Auth__AppCallbackPrefixes", $"{appCallbackPrefixes};{authPortal.GetEndpoint("http")}/bootstrap");
+
 // Unified admin host — serves the unified Settings (CodedValues + Config
 // Flags), Assignments, and Students Blazor UIs.
 builder.AddProject<Projects.SchoolCollab_Admin>("admin")
@@ -344,7 +433,15 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WithReference(assignmentsApi)
     .WithReference(studentsApi)
     .WithReference(redis)
+    // P1-3: the D6 handshake transport. The host's typed redeem client uses the literal
+    // `https+http://auth` base address, which CrossModuleWiringTests only accepts when this
+    // matching reference exists — without it the handshake dies with "No such host is known".
+    .WithReference(auth)
     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
+    // D4/D5: the Blazor host's login-UI flag + the portal login URL the flag-ON challenge
+    // redirects to. The URL reaches the two browser-facing hosts only (plan-review P2-5).
+    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
+    .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
     .WaitFor(settingsApi)
     .WaitFor(settingsAi)
     .WaitFor(assignmentsApi)
@@ -370,6 +467,12 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
     // so it needs the settings-api reference for service discovery.
     .WithReference(settingsApi)
     .WithReference(redis)
+    // P1-3: same handshake transport as admin above — the literal base address at the call site
+    // in Families/Program.cs is matched by this reference (CrossModuleWiringTests).
+    .WithReference(auth)
+    // D4/D5: same flag + portal login URL fan-out as admin.
+    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
+    .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
     .WaitFor(assignmentsApi);
 
 // ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):

@@ -37,5 +37,9 @@
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Worker\SchoolCollab.Students.Worker.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Families\SchoolCollab.Families.csproj" />
+    <!-- Round A pass 2: the ProjectReference is what makes the generated
+         Projects.SchoolCollab_Auth constant exist for the AddProject call in
+         Program.cs (plan-review P1-1) — a resource, not IsAspireProjectResource="false". -->
+    <ProjectReference Include="..\..\SchoolCollab.Auth\SchoolCollab.Auth.csproj" />
   </ItemGroup>
 </Project>

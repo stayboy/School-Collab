@@ -1,0 +1,897 @@
+diff --git a/src/SchoolCollab.Admin/Program.cs b/src/SchoolCollab.Admin/Program.cs
+index db3870a5..cf95b298 100644
+--- a/src/SchoolCollab.Admin/Program.cs
++++ b/src/SchoolCollab.Admin/Program.cs
+@@ -47,6 +47,13 @@ builder.Services.AddSettingsModule();
+ builder.Services.AddAssignmentsModule();
+ builder.Services.AddStudentsModule();
+ 
++// B4 — the flag-ON portal handshake (spec §5.2 / D6): the typed redemption client against the
++// auth service, plus the host's /signin-handshake, /login and /logout routes. The base address is
++// this host's own literal so CrossModuleWiringTests can match it to the AppHost's
++// .WithReference(auth) on this host's resource (B3) — a literal inside Core would fail the guard
++// for the four other hosts that consume Core without referencing the auth service.
++builder.Services.AddPortalHandshake("https+http://auth");
++
+ // Cached, DB-backed feature-flag client (resolves runtime flags from the
+ // Settings FeatureFlag aggregate with an IConfiguration fallback). Replaces the
+ // config-only IFeatureFlagService registered by AddAuthAndTenancy.
+@@ -97,6 +104,12 @@ var razorComponents = app.MapRazorComponents<App>()
+ if (!disableOIDC)
+ {
+     razorComponents.RequireAuthorization();
++
++    // B4 — same conditional shape as the authorization gate above: the handshake group needs the
++    // OIDC cookie + challenge schemes, which only exist in the real-auth branch (with TestAuth
++    // there is no portal login, no OIDC sign-out and nothing to redeem). The routes are additive —
++    // with the login-UI flag OFF the challenge path stays today's OIDC behaviour (AC7).
++    app.MapPortalHandshakeEndpoints();
+ }
+ 
+ app.Run();
+diff --git a/src/SchoolCollab.Core/Auth/PortalHandshakeExtensions.cs b/src/SchoolCollab.Core/Auth/PortalHandshakeExtensions.cs
+new file mode 100644
+index 00000000..b97ebf40
+--- /dev/null
++++ b/src/SchoolCollab.Core/Auth/PortalHandshakeExtensions.cs
+@@ -0,0 +1,320 @@
++using System.Net.Http.Json;
++using System.Security.Claims;
++using System.Text.Json;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
++using Microsoft.AspNetCore.Authentication.OpenIdConnect;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Http;
++
++namespace SchoolCollab.Core.Auth;
++
++/// <summary>
++/// The claim set the auth service returns from the D6 redemption (<c>POST /auth/redeem</c>) —
++/// claims **as data**, never a token (spec §5.2 step 5 / D6). The names are the auth service's
++/// <c>PortalClaims</c> / <c>ClaimSetFactory</c> shape (D9): ONE shape shared with the OIDC path,
++/// so the handshake cannot drift from the claims the realm mappers produce.
++/// </summary>
++public sealed record PortalClaimSet(
++    string TenantId,
++    string TenantName,
++    string TenantType,
++    string TeacherId,
++    IReadOnlyList<string> Roles);
++
++/// <summary>
++/// Outcome of redeeming a one-time handshake code. <see cref="Error"/> carries the auth service's
++/// bounded failure code (<c>invalid_code</c>, <c>code_expired</c>, <c>redirect_uri_mismatch</c>,
++/// …) for the log line only — it is never returned to the browser.
++/// </summary>
++public sealed record PortalRedemption(bool IsSuccess, PortalClaimSet? Claims = null, string? Error = null)
++{
++    /// <summary>The code was valid, unexpired, bound to this host's callback URI, and consumed.</summary>
++    public static PortalRedemption Redeemed(PortalClaimSet claims) => new(true, claims);
++
++    /// <summary>The auth service refused the redemption (replay, TTL expiry, URI mismatch, …).</summary>
++    public static PortalRedemption Rejected(string error) => new(false, null, error);
++}
++
++/// <summary>
++/// The typed redemption client of the flag-ON handshake (spec §5.2 / D6): the calling Blazor host
++/// posts the portal-supplied one-time code to the auth service **server-to-server** and receives
++/// the claim set only. The response carries no token and no secret (AC9/AC11) — this client has no
++/// token-shaped member anywhere, so a token cannot leak into the host's HTTP response.
++/// </summary>
++/// <remarks>
++/// Registered by <see cref="PortalHandshakeExtensions.AddPortalHandshake"/>, which passes the
++/// caller's base address to <c>AddCrossModuleHttpClient</c> — the retry handler, the tenant
++/// propagation and the long handler lifetime of every other cross-module call site, plus the
++/// literal-at-call-site wiring <c>CrossModuleWiringTests</c> attributes to the host.
++/// </remarks>
++public sealed class PortalHandshakeClient(HttpClient httpClient)
++{
++    /// <summary>The auth service's redemption route.</summary>
++    public const string RedeemPath = "/auth/redeem";
++
++    /// <summary>The failure code reported when the auth service answered with a body this client
++    /// cannot read — never a caller-visible detail.</summary>
++    public const string UnreadableResponseError = "redeem_failed";
++
++    /// <summary>
++    /// Redeems <paramref name="code"/> bound to <paramref name="redirectUri"/> — the EXACT URI the
++    /// code was minted for (<c>redirect_uri_mismatch</c> otherwise, D6). Never throws on a
++    /// non-success status: the failure taxonomy is returned as data so the caller can fail closed.
++    /// </summary>
++    public async Task<PortalRedemption> RedeemAsync(
++        string code,
++        string redirectUri,
++        CancellationToken cancellationToken = default)
++    {
++        using var response = await httpClient.PostAsJsonAsync(
++            RedeemPath,
++            new RedeemRequest(code, redirectUri),
++            cancellationToken);
++
++        if (!response.IsSuccessStatusCode)
++        {
++            return PortalRedemption.Rejected(await ReadErrorCodeAsync(response, cancellationToken));
++        }
++
++        var claims = await response.Content.ReadFromJsonAsync<PortalClaimSet>(cancellationToken);
++        return claims is null
++            ? PortalRedemption.Rejected(UnreadableResponseError)
++            : PortalRedemption.Redeemed(claims);
++    }
++
++    /// <summary>Reads the bounded <c>error</c> code from a failure body; anything unparseable
++    /// degrades to <see cref="UnreadableResponseError"/> rather than surfacing upstream text.</summary>
++    private static async Task<string> ReadErrorCodeAsync(
++        HttpResponseMessage response,
++        CancellationToken cancellationToken)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(
++                await response.Content.ReadAsStringAsync(cancellationToken));
++
++            return document.RootElement.TryGetProperty("error", out var error)
++                && error.ValueKind == JsonValueKind.String
++                && error.GetString() is { Length: > 0 } code
++                    ? code
++                    : UnreadableResponseError;
++        }
++        catch (JsonException)
++        {
++            return UnreadableResponseError;
++        }
++    }
++
++    /// <summary>Request body for <c>POST /auth/redeem</c> — mirrors the auth service's
++    /// <c>RedeemRequest</c> (code + the caller's own callback URI).</summary>
++    private sealed record RedeemRequest(string Code, string RedirectUri);
++}
++
++/// <summary>
++/// The calling Blazor hosts' half of the flag-ON handshake (spec §5.2 / D6, design P1-3), shared by
++/// Admin and Families: register the typed redemption client, then map the three host-level routes
++/// the portal and the auth service hand the browser to.
++/// </summary>
++/// <remarks>
++/// <para>
++/// <b>Base address is a parameter, never a literal in this file (plan-review P1-1).</b>
++/// <c>CrossModuleWiringTests</c> attributes a cross-module base-address literal to the project that
++/// contains it and demands a matching <c>.WithReference(auth)</c> on that project. Core is consumed
++/// by students-api / settings-api / settings-ai / assignments-api, which do not reference the auth
++/// service, so a literal here would red-light the suite for four unrelated hosts; a config-bound
++/// value would be invisible to the guard and fail at runtime with "No such host is known". Each
++/// host therefore passes its own literal (<c>"https+http://auth"</c>) at its call site — the
++/// <c>FamiliesModuleServices</c> pattern — and B3 pins the matching references.
++/// </para>
++/// <para>
++/// <b>The routes.</b> <c>GET /signin-handshake?code=…&amp;ReturnUrl=…</c> redeems the code and signs
++/// the caller into the host's own cookie (D6); <c>GET /login</c> and <c>GET /logout</c> are the
++/// explicit endpoints the hosts lacked (spec §13): login defers to the startup-selected challenge
++/// — so with the flag ON it lands on the portal's login page through
++/// <see cref="PortalRedirectChallengeHandler"/>, and with it OFF on Keycloak exactly as today —
++/// and logout signs out through the OIDC handler, which ends the Keycloak SSO session (D13).
++/// </para>
++/// </remarks>
++public static class PortalHandshakeExtensions
++{
++    /// <summary>The host's explicit login route (spec §13).</summary>
++    public const string LoginPath = "/login";
++
++    /// <summary>The host's explicit logout route (spec §13).</summary>
++    public const string LogoutPath = "/logout";
++
++    /// <summary>The site root — the continuation used when a caller supplies no local return URL.</summary>
++    public const string HomePath = "/";
++
++    /// <summary>
++    /// Registers the handshake transport. <paramref name="baseAddress"/> is the caller's own
++    /// cross-module literal for the auth service so the wiring guard can attribute it to this host.
++    /// </summary>
++    public static IServiceCollection AddPortalHandshake(this IServiceCollection services, string baseAddress)
++    {
++        services.AddCrossModuleHttpClient<PortalHandshakeClient>(baseAddress, propagateTenant: true);
++        return services;
++    }
++
++    /// <summary>
++    /// Maps the handshake group. Routed at the host root (not inline in <c>Program.cs</c>), and
++    /// deliberately WITHOUT <c>RequireAuthorization</c>: it is the surface an anonymous caller
++    /// reaches to become authenticated.
++    /// </summary>
++    public static IEndpointRouteBuilder MapPortalHandshakeEndpoints(this IEndpointRouteBuilder app)
++    {
++        var group = app.MapGroup(string.Empty);
++
++        group.MapGet(PortalRedirectChallengeHandler.HandshakeCallbackPath, HandshakeAsync);
++        group.MapGet(LoginPath, Login);
++        group.MapGet(LogoutPath, Logout);
++
++        return app;
++    }
++
++    /// <summary>
++    /// The D6 redemption: verify the one-time code against the auth service, then sign the caller
++    /// into this host's cookie with the SAME claim set the OIDC path produces, and continue to the
++    /// page the challenge originally blocked.
++    /// </summary>
++    /// <remarks>
++    /// Fail-closed on every failure path: no cookie, no redirect, and a single bounded status —
++    /// the failure class stays in the log (never in the response), so the endpoint is no oracle for
++    /// code probing. The redirect URI sent to the auth service is REBUILT from this request
++    /// (scheme + host + path base + the fixed callback path + the escaped <c>ReturnUrl</c>) in the
++    /// exact shape <see cref="PortalRedirectChallengeHandler"/> minted as the code's binding — the
++    /// constants are shared, so the two spellings cannot drift.
++    /// </remarks>
++    private static async Task<IResult> HandshakeAsync(
++        HttpContext context,
++        PortalHandshakeClient client,
++        ILogger<PortalHandshakeClient> logger,
++        string? code = null,
++        string? returnUrl = null,
++        CancellationToken cancellationToken = default)
++    {
++        if (string.IsNullOrWhiteSpace(code))
++        {
++            logger.LogWarning("Portal handshake was called without a one-time code; refusing to sign in.");
++            return HandshakeRejected();
++        }
++
++        var redirectUri = BuildCallbackUri(context.Request, returnUrl ?? string.Empty);
++        var redemption = await client.RedeemAsync(code, redirectUri, cancellationToken);
++
++        if (!redemption.IsSuccess)
++        {
++            logger.LogWarning(
++                "Portal handshake redemption was rejected ({Error}); refusing to sign in.",
++                redemption.Error);
++            return HandshakeRejected();
++        }
++
++        var claims = redemption.Claims!;
++        await context.SignInAsync(
++            CookieAuthenticationDefaults.AuthenticationScheme,
++            CreatePrincipal(claims));
++
++        logger.LogInformation(
++            "Portal handshake signed the caller in for tenant {TenantId}.",
++            claims.TenantId);
++
++        return Results.Redirect(IsLocalPath(returnUrl) ? returnUrl! : HomePath);
++    }
++
++    /// <summary>
++    /// The hosts' explicit login route. It defers to the startup-selected challenge scheme, so the
++    /// login UI choice (portal form when the flag is ON, Keycloak when it is OFF) has exactly ONE
++    /// spelling — the policy scheme B1 registers — and this endpoint can never disagree with the
++    /// challenge a gated page issues (D5/AC7).
++    /// </summary>
++    private static IResult Login(HttpContext context, string? returnUrl = null)
++    {
++        var target = IsLocalPath(returnUrl) ? returnUrl! : HomePath;
++
++        // Post-handshake continuation lands here first; an authenticated caller must be sent on
++        // rather than challenged again (a re-challenge here would loop through the portal).
++        if (context.User.Identity?.IsAuthenticated == true)
++        {
++            return Results.LocalRedirect(target);
++        }
++
++        return Results.Challenge(new AuthenticationProperties { RedirectUri = target });
++    }
++
++    /// <summary>
++    /// The hosts' explicit logout route (D13): the OIDC handler signs out this host's cookie and
++    /// redirects to Keycloak's <c>end_session</c> endpoint, ending the central SSO session. Both
++    /// hosts use this under BOTH flag states — the flag only selects which login UI is presented.
++    /// No <c>RedirectUri</c> is supplied: the handler builds <c>post_logout_redirect_uri</c> from
++    /// its own <c>SignedOutCallbackPath</c> (<c>/signout-callback-oidc</c>), which is exactly the
++    /// per-host URI the realm registers — the one value Keycloak accepts as a post-logout target.
++    /// </summary>
++    private static IResult Logout() => Results.SignOut(
++        authenticationSchemes:
++        [
++            CookieAuthenticationDefaults.AuthenticationScheme,
++            OpenIdConnectDefaults.AuthenticationScheme,
++        ]);
++
++    /// <summary>
++    /// The callback URI the one-time code is bound to — rebuilt in
++    /// <see cref="PortalRedirectChallengeHandler"/>'s exact shape
++    /// (<c>{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl={escaped}</c>).
++    /// </summary>
++    private static string BuildCallbackUri(HttpRequest request, string returnUrl)
++    {
++        var pathBase = request.PathBase.Value ?? string.Empty;
++
++        return $"{request.Scheme}://{request.Host}{pathBase}"
++            + PortalRedirectChallengeHandler.HandshakeCallbackPath
++            + $"?{PortalRedirectChallengeHandler.ReturnUrlParameter}={Uri.EscapeDataString(returnUrl)}";
++    }
++
++    /// <summary>
++    /// Builds the cookie principal from the redeemed claim set. Claim names match the OIDC cookie
++    /// identity exactly — the realm mappers' <c>tenant_id</c>/<c>tenant_name</c>/<c>tenant_type</c>/
++    /// <c>teacher_id</c> (consumed by <see cref="CurrentUser"/> and
++    /// <see cref="TenantClaimsTransformation"/>) and roles emitted under
++    /// <see cref="ClaimTypes.Role"/>, the type the OIDC handler's default inbound mapping renames the
++    /// realm's <c>roles</c> claim to (the D9 pin) — so <c>RequireRole</c> resolves identically on
++    /// both paths.
++    /// </summary>
++    private static ClaimsPrincipal CreatePrincipal(PortalClaimSet claims)
++    {
++        var identity = new ClaimsIdentity(
++            [
++                new Claim("tenant_id", claims.TenantId),
++                new Claim("tenant_name", claims.TenantName),
++                new Claim("tenant_type", claims.TenantType),
++                new Claim("teacher_id", claims.TeacherId),
++            ],
++            CookieAuthenticationDefaults.AuthenticationScheme);
++
++        foreach (var role in claims.Roles ?? [])
++        {
++            identity.AddClaim(new Claim(ClaimTypes.Role, role));
++        }
++
++        return new ClaimsPrincipal(identity);
++    }
++
++    /// <summary>Fail-closed answer for every rejected handshake: <c>401</c>, no cookie, no
++    /// <c>Location</c> header.</summary>
++    private static IResult HandshakeRejected() => Results.StatusCode(StatusCodes.Status401Unauthorized);
++
++    /// <summary>
++    /// Whether <paramref name="url"/> is a site-local path — the open-redirect guard for the
++    /// challenge <c>ReturnUrl</c> and the login <c>returnUrl</c> (a protocol-relative
++    /// <c>//host</c> or an absolute URL is not local).
++    /// </summary>
++    private static bool IsLocalPath(string? url)
++        => !string.IsNullOrEmpty(url)
++        && url[0] == '/'
++        && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'));
++}
+diff --git a/src/SchoolCollab.Families/Program.cs b/src/SchoolCollab.Families/Program.cs
+index dc66d51f..1e2f9356 100644
+--- a/src/SchoolCollab.Families/Program.cs
++++ b/src/SchoolCollab.Families/Program.cs
+@@ -75,6 +75,12 @@ builder.Services.AddFluentUIComponents();
+ // F1 — the Families Http client against the Assignments API (service discovery).
+ builder.Services.AddFamiliesModule();
+ 
++// B4 — the flag-ON portal handshake (spec §5.2 / D6), mirroring the Admin host: the typed
++// redemption client against the auth service plus this host's /signin-handshake, /login and
++// /logout routes. The literal base address sits at the call site so CrossModuleWiringTests can
++// match it to the .WithReference(auth) the AppHost puts on this host (B3).
++builder.Services.AddPortalHandshake("https+http://auth");
++
+ // WS-E1 (ar-14-deep-links): cached, DB-backed runtime feature-flag client (resolves
+ // FEATURE:EnableDeepLinks tenant-isolated from the Settings FeatureFlag aggregate with
+ // an IConfiguration fallback). Replaces the config-only IFeatureFlagService installed by
+@@ -135,6 +141,12 @@ var razorComponents = app.MapRazorComponents<App>()
+ if (!disableOIDC)
+ {
+     razorComponents.RequireAuthorization();
++
++    // B4 — same conditional shape as the authorization gate above: the handshake group needs the
++    // OIDC cookie + challenge schemes, which only exist in the real-auth branch (with TestAuth
++    // there is no portal login, no OIDC sign-out and nothing to redeem). The routes are additive —
++    // with the login-UI flag OFF the challenge path stays today's OIDC behaviour (AC7).
++    app.MapPortalHandshakeEndpoints();
+ }
+ 
+ // WS-E1 (ar-14-deep-links): the repo's first public token-auth route group — mapped
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalHandshakeTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalHandshakeTests.cs
+new file mode 100644
+index 00000000..f05e4a04
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalHandshakeTests.cs
+@@ -0,0 +1,504 @@
++using System.Collections.Concurrent;
++using System.Net;
++using System.Net.Http.Json;
++using System.Net.Sockets;
++using System.Security.Claims;
++using System.Text;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
++using Microsoft.AspNetCore.Authentication.OpenIdConnect;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.IdentityModel.Protocols;
++using Microsoft.IdentityModel.Protocols.OpenIdConnect;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Core.Tests.Unit.Auth;
++
++/// <summary>
++/// Round-B pass B4 — the Blazor hosts' half of the flag-ON handshake (spec §5.2 / D6, design P1-3):
++/// the typed redemption client, the <c>/signin-handshake</c> redemption endpoint that signs the
++/// caller into the host's OWN cookie, and the <c>/login</c>/<c>/logout</c> endpoints the hosts
++/// lacked (spec §13). The tests run a real in-process Kestrel host composed from the public
++/// extensions only, with the auth service's redemption endpoint replaced by a scripted handler —
++/// no socket ever reaches Keycloak or the auth service.
++/// </summary>
++/// <remarks>
++/// The tests pin: the redeem request contract (the code plus this host's EXACT callback URI — the
++/// URI binding the auth service enforces), the claim set that reaches the cookie INCLUDING roles
++/// under <see cref="ClaimTypes.Role"/> (the D9 parity axis, proven by authenticating the cookie
++/// through the host's own pipeline), fail-closed rejection (replay/TTL/unreachable: no cookie, no
++/// redirect, no failure class disclosed), the open-redirect guard on <c>ReturnUrl</c>, and the
++/// challenge/sign-out delegation (flag ON → portal login page via
++/// <see cref="PortalRedirectChallengeHandler"/>; flag OFF → Keycloak, i.e. today's behaviour, AC7).
++/// </remarks>
++[TestClass]
++public class PortalHandshakeTests
++{
++    private const string PortalLoginUrl = "https://localhost:5600/login";
++    private const string KeycloakRealmUrl = "http://localhost:1/realms/school-collab";
++    private const string KeycloakAuthorizeEndpoint = KeycloakRealmUrl + "/protocol/openid-connect/auth";
++    private const string KeycloakEndSessionEndpoint = KeycloakRealmUrl + "/protocol/openid-connect/logout";
++    private const string ReturnUrl = "/admin/students?page=2";
++    private const string TenantId = "00000000-0000-0000-0000-000000000002";
++    private const string TeacherId = "00000000-0000-0000-0000-000000000003";
++
++    /// <summary>The auth service's redemption body (<c>ClaimSetFactory</c>'s shape, camelCased by
++    /// the minimal-API serializer) — claims as data, no token (AC9/D9).</summary>
++    private static string ClaimSetBody(string roles = """["user-admin"]""") =>
++        $$"""
++        {"tenantId":"{{TenantId}}","tenantName":"Dev School","tenantType":"School",
++         "teacherId":"{{TeacherId}}","roles":{{roles}}}
++        """;
++
++    // ── the tests ───────────────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task Handshake_WithAValidCode_SignsTheCallerIntoTheHostCookieWithTheOidcClaimSet()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.OK, ClaimSetBody());
++
++        var response = await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "one-time-code"));
++
++        response.StatusCode.Should().Be(
++            HttpStatusCode.Redirect,
++            "a redeemed code continues to the page the challenge blocked (D6 step 5)");
++        response.Headers.Location!.ToString().Should().Be(ReturnUrl);
++
++        var cookie = SingleCookie(response);
++        cookie.Should().StartWith(
++            $"{CookieName}=",
++            "the host signs in with its OWN cookie — the same mechanism the OIDC path uses");
++
++        // The proof that matters: the host's real authentication pipeline accepts that cookie and
++        // resolves the claim set the auth service returned, roles included.
++        using var authed = host.ClientWithCookie(cookie);
++        var claims = await authed.GetFromJsonAsync<JsonElement>("/probe/claims");
++
++        claims.GetProperty("isAuthenticated").GetBoolean().Should().BeTrue();
++        claims.GetProperty("tenantId").GetString().Should().Be(TenantId);
++        claims.GetProperty("tenantName").GetString().Should().Be("Dev School");
++        claims.GetProperty("tenantType").GetString().Should().Be("School");
++        claims.GetProperty("teacherId").GetString().Should().Be(TeacherId);
++        claims.GetProperty("roles")[0].GetString().Should().Be("user-admin");
++        claims.GetProperty("isAdmin").GetBoolean().Should().BeTrue(
++            "roles must land under ClaimTypes.Role — the type the OIDC handler's default inbound "
++            + "mapping produces (D9) — or RequireRole would resolve on one path only");
++    }
++
++    [TestMethod]
++    public async Task Handshake_PostsTheCodeToTheAuthService_BoundToThisHostsExactCallbackUri()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.OK, ClaimSetBody());
++
++        await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "one-time-code"));
++
++        var request = host.Auth.CapturedRequests.Should().ContainSingle().Subject;
++        request.Method.Should().Be("POST");
++        request.PathAndQuery.Should().Be(PortalHandshakeClient.RedeemPath);
++        request.Body.Should().Contain("\"one-time-code\"");
++
++        // The auth service rejects a redemption whose redirect URI differs from the code's binding
++        // (redirect_uri_mismatch), so this EXACT value is the contract: scheme + host + port of the
++        // origin the browser used + the fixed callback path + the escaped blocked path — the shape
++        // PortalRedirectChallengeHandler minted at exchange time.
++        request.RedirectUri.Should().Be(
++            host.BaseUrl + PortalRedirectChallengeHandler.HandshakeCallbackPath
++            + $"?{PortalRedirectChallengeHandler.ReturnUrlParameter}={Uri.EscapeDataString(ReturnUrl)}");
++    }
++
++    [TestMethod]
++    public async Task Handshake_WhenTheCodeWasAlreadyRedeemed_IssuesNoCookieAndFailsClosed()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.NotFound, """{"error":"invalid_code"}""");
++
++        var response = await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "replayed-code"));
++
++        await AssertFailClosedAsync(response);
++    }
++
++    [TestMethod]
++    public async Task Handshake_WhenTheCodeExpired_IssuesNoCookieAndFailsClosed()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.BadRequest, """{"error":"code_expired"}""");
++
++        var response = await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "expired-code"));
++
++        await AssertFailClosedAsync(response);
++    }
++
++    [TestMethod]
++    public async Task Handshake_WhenTheAuthServiceIsUnreachable_IssuesNoCookieAndFailsClosed()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.BadGateway, """{"error":"upstream_unreachable"}""");
++
++        var response = await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "one-time-code"));
++
++        await AssertFailClosedAsync(response);
++    }
++
++    [TestMethod]
++    public async Task Handshake_WithoutACode_NeverCallsTheAuthService()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.OK, ClaimSetBody());
++
++        var response = await host.Client.GetAsync(
++            PortalRedirectChallengeHandler.HandshakeCallbackPath
++            + $"?{PortalRedirectChallengeHandler.ReturnUrlParameter}={Uri.EscapeDataString(ReturnUrl)}");
++
++        await AssertFailClosedAsync(response);
++        host.Auth.CapturedRequests.Should().BeEmpty(
++            "there is nothing to redeem without a code, so the host must not touch the auth service");
++    }
++
++    [TestMethod]
++    public async Task Handshake_WhenReturnUrlIsNotSiteLocal_DoesNotRedirectOffSite()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.OK, ClaimSetBody());
++
++        var response = await host.Client.GetAsync(HandshakeUrl("//attacker.example/steal", "one-time-code"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
++        response.Headers.Location!.ToString().Should().Be(
++            "/",
++            "ReturnUrl is caller-supplied on a public endpoint — an absolute or protocol-relative "
++            + "value must never become the post-handshake Location (open-redirect guard)");
++    }
++
++    [TestMethod]
++    public async Task Login_WhenTheLoginUiFlagIsOn_RedirectsToThePortalLoginWithTheHandshakeCallback()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++
++        var response = await host.Client.GetAsync(PortalHandshakeExtensions.LoginPath);
++
++        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
++        var location = response.Headers.Location!.ToString();
++        location.Should().StartWith(PortalLoginUrl + "?");
++
++        var returnUri = ExtractReturnUri(location);
++        returnUri.Should().Be(
++            host.BaseUrl + PortalRedirectChallengeHandler.HandshakeCallbackPath
++            + $"?{PortalRedirectChallengeHandler.ReturnUrlParameter}="
++            + Uri.EscapeDataString(PortalHandshakeExtensions.LoginPath),
++            "login defers to the same challenge the policy scheme selects, so the callback the portal "
++            + "receives is byte-identical to a gated page's challenge (D6/D5)");
++    }
++
++    [TestMethod]
++    public async Task Login_WhenTheLoginUiFlagIsOff_ChallengesKeycloakAsBefore()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: false);
++
++        var response = await host.Client.GetAsync(PortalHandshakeExtensions.LoginPath);
++
++        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
++        response.Headers.Location!.ToString().Should().StartWith(
++            KeycloakAuthorizeEndpoint,
++            "with the flag OFF the new login route must present today's login UI — Keycloak's hosted "
++            + "page (AC7), never the portal");
++        host.Auth.CapturedRequests.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task Login_WhenAlreadySignedIn_SendsTheCallerOnToTheRequestedPage()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.OK, ClaimSetBody());
++
++        var handshake = await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "one-time-code"));
++        using var authed = host.ClientWithCookie(SingleCookie(handshake));
++
++        var response = await authed.GetAsync(PortalHandshakeExtensions.LoginPath + "?returnUrl=/admin/students");
++
++        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
++        response.Headers.Location!.ToString().Should().Be(
++            "/admin/students",
++            "the post-handshake continuation comes back through /login; re-challenging an "
++            + "authenticated caller would loop through the portal");
++    }
++
++    [TestMethod]
++    public async Task Logout_SignsOutThroughTheOidcHandler()
++    {
++        await using var host = await HandshakeTestHost.StartAsync(loginUiFlagOn: true);
++        host.Auth.Respond(HttpStatusCode.OK, ClaimSetBody());
++
++        var handshake = await host.Client.GetAsync(HandshakeUrl(ReturnUrl, "one-time-code"));
++        using var authed = host.ClientWithCookie(SingleCookie(handshake));
++
++        var response = await authed.GetAsync(PortalHandshakeExtensions.LogoutPath);
++
++        response.StatusCode.Should().Be(HttpStatusCode.Redirect);
++        var location = response.Headers.Location!.ToString();
++        location.Should().StartWith(
++            KeycloakEndSessionEndpoint,
++            "logout ends the central Keycloak SSO session through the OIDC handler (D13)");
++        ExtractQueryParameter(location, "post_logout_redirect_uri").Should().Be(
++            host.BaseUrl + "/signout-callback-oidc",
++            "the OIDC handler builds post_logout_redirect_uri from its own SignedOutCallbackPath — "
++            + "the per-host URI the realm registers (school-collab-realm.json), which is the only "
++            + "value Keycloak accepts as a post-logout target");
++        response.Headers.GetValues("Set-Cookie").Should().Contain(
++            header => header.StartsWith(
++                $"{CookieName}=",
++                StringComparison.Ordinal),
++            "the host clears its own cookie on the way out (D13)");
++    }
++
++    // ── helpers ─────────────────────────────────────────────────────────
++
++    private static string HandshakeUrl(string returnUrl, string code)
++        => PortalRedirectChallengeHandler.HandshakeCallbackPath
++           + $"?{PortalRedirectChallengeHandler.ReturnUrlParameter}={Uri.EscapeDataString(returnUrl)}"
++           + $"&code={code}";
++
++    /// <summary>The host cookie's name: the cookie handler's prefix + the scheme name (the scheme
++    /// name alone is NOT the cookie name).</summary>
++    private static readonly string CookieName = CookieAuthenticationDefaults.CookiePrefix
++        + CookieAuthenticationDefaults.AuthenticationScheme;
++
++    /// <summary>The single <c>Set-Cookie</c> the host emitted, reduced to its name=value pair.</summary>
++    private static string SingleCookie(HttpResponseMessage response)
++        => response.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
++
++    /// <summary>Decodes one query parameter of an absolute URL.</summary>
++    private static string ExtractQueryParameter(string url, string name)
++    {
++        var query = url[(url.IndexOf('?', StringComparison.Ordinal) + 1)..];
++        var parameter = query.Split('&')
++            .Single(part => part.StartsWith($"{name}=", StringComparison.Ordinal));
++
++        return Uri.UnescapeDataString(parameter[(name.Length + 1)..]);
++    }
++
++    private static string ExtractReturnUri(string loginRedirect)
++    {
++        var query = loginRedirect[(loginRedirect.IndexOf('?', StringComparison.Ordinal) + 1)..];
++        var parameter = query.Split('&')
++            .Single(part => part.StartsWith(
++                $"{PortalRedirectChallengeHandler.ReturnUriParameter}=", StringComparison.Ordinal));
++
++        return Uri.UnescapeDataString(
++            parameter[(PortalRedirectChallengeHandler.ReturnUriParameter.Length + 1)..]);
++    }
++
++    private static async Task AssertFailClosedAsync(HttpResponseMessage response)
++    {
++        response.StatusCode.Should().Be(
++            HttpStatusCode.Unauthorized,
++            "a rejected handshake must fail closed with one bounded status — never a redirect and "
++            + "never a distinguishable failure class (no oracle for code probing)");
++        response.Headers.Contains("Set-Cookie").Should().BeFalse("no identity may be established");
++        response.Headers.Contains("Location").Should().BeFalse();
++        (await response.Content.ReadAsStringAsync()).Should().NotContain(TenantId);
++    }
++
++    /// <summary>
++    /// A real in-process Kestrel host for the hosts' handshake surface, composed from the PUBLIC
++    /// extensions exactly as <c>Admin/Program.cs</c> and <c>Families/Program.cs</c> do
++    /// (<c>AddAuthAndTenancy</c> + <c>AddPortalHandshake</c> + <c>MapPortalHandshakeEndpoints</c>),
++    /// mirroring <c>AuthEndpointTestHost</c>'s no-new-package approach.
++    /// <para>
++    /// Two test-host adjustments, both documented: the OIDC metadata is a static configuration
++    /// (so the challenge and sign-out paths never open a socket to a real Keycloak), and the
++    /// redemption client's primary handler is the <see cref="ScriptedHandler"/> (no test touches the
++    /// auth service over the network).
++    /// </para>
++    /// </summary>
++    private sealed class HandshakeTestHost : IAsyncDisposable
++    {
++        private readonly WebApplication _app;
++        private readonly HttpClient _client;
++
++        private HandshakeTestHost(WebApplication app, HttpClient client, ScriptedHandler auth, string baseUrl)
++        {
++            _app = app;
++            _client = client;
++            Auth = auth;
++            BaseUrl = baseUrl;
++        }
++
++        /// <summary>Configured client rooted at the ephemeral listener; redirects are NOT followed
++        /// so every test can assert the exact Location and Set-Cookie the host produced.</summary>
++        public HttpClient Client => _client;
++
++        /// <summary>The scripted auth service (the typed client's primary handler).</summary>
++        public ScriptedHandler Auth { get; }
++
++        /// <summary>The listener's base URL — the "scheme://host:port" the challenge handler derives
++        /// the handshake callback from.</summary>
++        public string BaseUrl { get; }
++
++        public static async Task<HandshakeTestHost> StartAsync(bool loginUiFlagOn)
++        {
++            var builder = WebApplication.CreateBuilder();
++
++            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
++            {
++                ["FeatureFlags:FEATURE:DisableOIDCAuth"] = "false",
++                ["FeatureFlags:FEATURE:DisableKeycloakLoginUi"] = loginUiFlagOn ? "true" : "false",
++                ["Auth:Keycloak:Authority"] = KeycloakRealmUrl,
++                ["Auth:Keycloak:ClientId"] = "school-collab-client",
++                ["Auth:Keycloak:ClientSecret"] = "test-client-secret",
++                ["Auth:Portal:LoginUrl"] = PortalLoginUrl,
++            });
++
++            // Reserve a free loopback port up front (WebApplication.Urls keeps a literal :0), then
++            // bind it — the same ephemeral-port pattern AuthEndpointTestHost uses.
++            var listener = new TcpListener(IPAddress.Loopback, 0);
++            listener.Start();
++            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
++            listener.Stop();
++            var baseUrl = $"http://127.0.0.1:{port}";
++            builder.WebHost.UseUrls(baseUrl);
++
++            builder.Services.AddLogging();
++            builder.Services.AddDataProtection();
++            builder.Services.AddDistributedMemoryCache();
++
++            // The REAL registrations — exactly what both hosts call.
++            builder.Services.AddAuthAndTenancy(builder.Configuration);
++            builder.Services.AddPortalHandshake("https+http://auth");
++
++            var auth = new ScriptedHandler();
++            builder.Services.AddSingleton(auth);
++            builder.Services.AddHttpClient<PortalHandshakeClient>()
++                .ConfigurePrimaryHttpMessageHandler(() => auth);
++
++            // Hermetic OIDC: a static metadata document, so the challenge and the sign-out redirects
++            // are built without a discovery round-trip (the real handlers stay fully real).
++            builder.Services.PostConfigure<OpenIdConnectOptions>(
++                OpenIdConnectDefaults.AuthenticationScheme,
++                options =>
++                {
++                    var configuration = new OpenIdConnectConfiguration
++                    {
++                        Issuer = KeycloakRealmUrl,
++                        AuthorizationEndpoint = KeycloakAuthorizeEndpoint,
++                        TokenEndpoint = KeycloakRealmUrl + "/protocol/openid-connect/token",
++                        EndSessionEndpoint = KeycloakEndSessionEndpoint,
++                    };
++
++                    options.Authority = null;
++                    options.Configuration = configuration;
++                    options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
++                    options.RequireHttpsMetadata = false;
++                });
++
++            var app = builder.Build();
++            app.UseAuthentication();
++            app.UseAuthorization();
++
++            app.MapPortalHandshakeEndpoints();
++
++            // Test-only probe: proves the cookie this host's own pipeline reads resolves the claims.
++            app.MapGet("/probe/claims", (ClaimsPrincipal user) => Results.Ok(new
++            {
++                isAuthenticated = user.Identity?.IsAuthenticated ?? false,
++                tenantId = user.FindFirst("tenant_id")?.Value,
++                tenantName = user.FindFirst("tenant_name")?.Value,
++                tenantType = user.FindFirst("tenant_type")?.Value,
++                teacherId = user.FindFirst("teacher_id")?.Value,
++                roles = user.FindAll(ClaimTypes.Role).Select(claim => claim.Value).ToArray(),
++                isAdmin = user.IsInRole("user-admin"),
++            }));
++
++            await app.StartAsync();
++
++            var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
++            {
++                BaseAddress = new Uri(baseUrl),
++            };
++
++            return new HandshakeTestHost(app, client, auth, baseUrl);
++        }
++
++        /// <summary>A client carrying the given cookie pair, for the authenticated follow-up.</summary>
++        public HttpClient ClientWithCookie(string cookie)
++        {
++            var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
++            {
++                BaseAddress = new Uri(BaseUrl),
++            };
++            client.DefaultRequestHeaders.Add("Cookie", cookie);
++            return client;
++        }
++
++        public async ValueTask DisposeAsync()
++        {
++            _client.Dispose();
++            await _app.DisposeAsync();
++        }
++    }
++
++    /// <summary>
++    /// Scripted <see cref="HttpMessageHandler"/> standing in for the auth service's redemption
++    /// endpoint — the repo's HTTP-testing pattern (never Moq for HTTP). The default answer is a
++    /// bare 502, so a test that forgets to script the outcome fails loudly instead of passing
++    /// vacuously.
++    /// </summary>
++    private sealed class ScriptedHandler : HttpMessageHandler
++    {
++        /// <summary>One captured redemption request: method, path and the two body fields the
++        /// contract is about.</summary>
++        public sealed record Captured(string Method, string PathAndQuery, string Body, string? RedirectUri);
++
++        private readonly ConcurrentQueue<Captured> _captured = new();
++        private HttpStatusCode _status = HttpStatusCode.BadGateway;
++        private string _body = "";
++
++        public IReadOnlyList<Captured> CapturedRequests => _captured.ToArray();
++
++        /// <summary>Scripts the answer the next redemption receives.</summary>
++        public void Respond(HttpStatusCode status, string json)
++        {
++            _status = status;
++            _body = json;
++        }
++
++        protected override async Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request,
++            CancellationToken cancellationToken)
++        {
++            var body = request.Content is null
++                ? string.Empty
++                : await request.Content.ReadAsStringAsync(cancellationToken);
++
++            string? redirectUri = null;
++            if (body.Length > 0)
++            {
++                using var document = JsonDocument.Parse(body);
++                if (document.RootElement.TryGetProperty("redirectUri", out var value))
++                {
++                    redirectUri = value.GetString();
++                }
++            }
++
++            _captured.Enqueue(new Captured(
++                request.Method.Method,
++                request.RequestUri!.PathAndQuery,
++                body,
++                redirectUri));
++
++            return new HttpResponseMessage(_status)
++            {
++                Content = new StringContent(_body, Encoding.UTF8, "application/json"),
++            };
++        }
++    }
++}

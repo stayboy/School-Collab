@@ -1,0 +1,783 @@
+diff --git a/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs b/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
+new file mode 100644
+index 00000000..f198bfdf
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
+@@ -0,0 +1,111 @@
++using System.IO;
++using System.Text.Json;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>The portal-facing claim set (spec §5.4 / D9). ONE shape, ONE factory: the Direct-Grant
++/// handshake path and the realm-mapper-driven paths must not drift apart, so the claim names here
++/// ARE the mapper contract pinned by the realm import (school-collab-realm.json).</summary>
++public sealed record PortalClaims(
++    string TenantId,
++    string TenantName,
++    string TenantType,
++    string TeacherId,
++    IReadOnlyList<string> Roles);
++
++/// <summary>
++/// Builds the claim set from a decoded Keycloak token payload. The caller owns token validation
++/// and JWT decoding; this class is purely about claim SHAPE, so a single fixture pins both paths
++/// to the same names (D9). The tenant/teacher claims are REQUIRED — a session without them cannot
++/// bind to a tenant, so a missing claim fails fast naming the claim rather than degrading.
++/// <c>roles</c> is multivalued (the realm's <c>User Realm Role</c> mapper sets
++/// <c>multivalued: true</c>); its absence means no roles.
++/// </summary>
++public sealed class ClaimSetFactory
++{
++    // These names are the realm mapper contract — changing the realm mappers or these constants
++    // without the other is exactly the drift D9 forbids (school-collab-realm.json mappers:
++    // tenant-id → tenant_id, tenant-name → tenant_name, tenant-type → tenant_type,
++    // teacher-id → teacher_id, roles → roles).
++    public const string TenantIdClaim = "tenant_id";
++    public const string TenantNameClaim = "tenant_name";
++    public const string TenantTypeClaim = "tenant_type";
++    public const string TeacherIdClaim = "teacher_id";
++    public const string RolesClaim = "roles";
++
++    /// <summary>
++    /// <paramref name="payload"/> must be a JSON object — a decoded token payload (the ID token
++    /// on the handshake path; the same shape the realm's attribute and role mappers emit on both
++    /// paths).
++    /// </summary>
++    /// <exception cref="InvalidDataException">The payload is not an object, a required
++    /// tenant/teacher claim is missing or not textual, or <c>roles</c> is malformed.</exception>
++    public PortalClaims Build(JsonElement payload)
++    {
++        if (payload.ValueKind != JsonValueKind.Object)
++        {
++            throw new InvalidDataException("the token payload must be a JSON object.");
++        }
++
++        var tenantId = GetRequiredString(payload, TenantIdClaim);
++        var tenantName = GetRequiredString(payload, TenantNameClaim);
++        var tenantType = GetRequiredString(payload, TenantTypeClaim);
++        var teacherId = GetRequiredString(payload, TeacherIdClaim);
++        var roles = GetRoles(payload);
++
++        return new PortalClaims(tenantId, tenantName, tenantType, teacherId, roles);
++    }
++
++    private static string GetRequiredString(JsonElement payload, string claim)
++    {
++        if (!payload.TryGetProperty(claim, out var value))
++        {
++            throw new InvalidDataException(
++                $"the token payload is missing the required '{claim}' claim — the realm mapper "
++                + "contract (school-collab-realm.json) provides it on both the ID and access tokens.");
++        }
++
++        // The realm's attribute mappers are NOT multivalued, so the token carries a plain JSON
++        // string; a single-element array is accepted defensively in case a mapper is ever flipped.
++        if (value.ValueKind == JsonValueKind.String)
++        {
++            return value.GetString() ?? string.Empty;
++        }
++
++        if (value.ValueKind == JsonValueKind.Array
++            && value.GetArrayLength() == 1
++            && value[0].ValueKind == JsonValueKind.String)
++        {
++            return value[0].GetString() ?? string.Empty;
++        }
++
++        throw new InvalidDataException(
++            $"the '{claim}' claim must be a string (or a single-element string array), was {value.ValueKind}.");
++    }
++
++    private static IReadOnlyList<string> GetRoles(JsonElement payload)
++    {
++        if (!payload.TryGetProperty(RolesClaim, out var value))
++        {
++            return Array.Empty<string>();
++        }
++
++        if (value.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidDataException(
++                $"the '{RolesClaim}' claim must be an array of strings (the realm mapper sets "
++                + $"multivalued: true), was {value.ValueKind}.");
++        }
++
++        var roles = new List<string>(value.GetArrayLength());
++        foreach (var item in value.EnumerateArray())
++        {
++            if (item.ValueKind != JsonValueKind.String)
++            {
++                throw new InvalidDataException($"the '{RolesClaim}' claim contains a non-string entry.");
++            }
++            roles.Add(item.GetString() ?? string.Empty);
++        }
++        return roles;
++    }
++}
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+index 540096e4..fbdb4886 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+@@ -81,6 +81,139 @@ public class AppHostRealmImportArchitectureTests
+             "the bind-mount target must point at the derived realm filename under /opt/keycloak/data/import/ (the only dir --import-realm scans).");
+     }
+ 
++    [TestMethod]
++    public void RealmImportFile_DeclaresTheTwoRealmRoles()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        doc.RootElement.TryGetProperty("roles", out var roles).Should().BeTrue(
++            "the realm import must declare a top-level `roles` object (spec §11.2).");
++        roles.TryGetProperty("realm", out var realmRoles).Should().BeTrue(
++            "realm roles must live under `roles.realm`.");
++
++        var names = realmRoles.EnumerateArray()
++            .Where(r => r.ValueKind == JsonValueKind.Object && r.TryGetProperty("name", out _))
++            .Select(r => r.GetProperty("name").GetString())
++            .ToArray();
++
++        names.Should().Contain(new[] { "user-admin", "platform-admin" },
++            "the realm must declare the two realm roles the auth service gates on (spec §11.2).");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_DeclaresTheServiceAccountClient()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var realmRoot = doc.RootElement;
++        var client = FindClient(realmRoot, "school-collab-auth-admin");
++
++        client.TryGetProperty("serviceAccountsEnabled", out var sa).Should().BeTrue(
++            "the admin service-account client must enable service accounts.");
++        sa.ValueKind.Should().Be(JsonValueKind.True,
++            "serviceAccountsEnabled must be true for the client_credentials grant (spec §11.3).");
++        client.TryGetProperty("secret", out var secret).Should().BeTrue();
++        secret.ValueKind.Should().Be(JsonValueKind.String, "the service-account client must carry a secret.");
++
++        // The realm-management grant lives as clientRoles on the service-account USER entry
++        // (username `service-account-<clientId>`), not on the client representation:
++        // ClientRepresentation has no clientRoles property, and Keycloak's realm import silently
++        // drops unknown properties — a client-side block would leave the first Admin REST call
++        // with 403 (diff-review P1, round keycloak-ui-auth).
++        var saUser = FindServiceAccountUser(realmRoot, "school-collab-auth-admin");
++        saUser.TryGetProperty("clientRoles", out var clientRoles).Should().BeTrue(
++            "the service-account user entry must carry the realm-management grant (diff-review P1).");
++        clientRoles.TryGetProperty("realm-management", out var rm).Should().BeTrue(
++            "the grant must target the realm-management client roles.");
++        rm.ValueKind.Should().Be(JsonValueKind.Array, "realm-management must be an array of role names.");
++        var granted = rm.EnumerateArray()
++            .Where(r => r.ValueKind == JsonValueKind.String)
++            .Select(r => r.GetString())
++            .Where(r => r is not null)
++            .Cast<string>()
++            .ToArray();
++        granted.Should().BeEquivalentTo(new[] { "view-users", "manage-users", "view-realm", "manage-realm" },
++            "the service account must be granted EXACTLY the least-privilege realm-management quartet (spec §16.2) — an exact-set assertion so silent privilege creep or a dropped role cannot pass the guard.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_HasRolesMapperOnBothTokenPaths()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue();
++        var rolesMapper = mappers.EnumerateArray().FirstOrDefault(m =>
++            m.ValueKind == JsonValueKind.Object
++            && m.TryGetProperty("protocolMapper", out var pm)
++            && pm.ValueKind == JsonValueKind.String
++            && pm.GetString() == "oidc-usermodel-realm-role-mapper");
++
++        rolesMapper.ValueKind.Should().Be(JsonValueKind.Object,
++            "school-collab-client must carry a realm-role mapper emitting the `roles` claim.");
++        rolesMapper.GetProperty("config").TryGetProperty("access.token.claim", out var atc).Should().BeTrue();
++        atc.ValueKind.Should().Be(JsonValueKind.True,
++            "the bearer path reads `roles` from the access token, so access.token.claim must be true.");
++        rolesMapper.GetProperty("config").TryGetProperty("id.token.claim", out var itc).Should().BeTrue();
++        itc.ValueKind.Should().Be(JsonValueKind.True,
++            "the cookie path reads `roles` from the ID token, so id.token.claim must be true.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_MappersEmitExactlyTheClaimSetFactoryClaimNames()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue(
++            "the guard must not pass vacuously over a missing protocolMappers block.");
++        var claimNames = new List<string>();
++        foreach (var mapper in mappers.EnumerateArray())
++        {
++            if (mapper.ValueKind != JsonValueKind.Object
++                || !mapper.TryGetProperty("config", out var config)
++                || config.ValueKind != JsonValueKind.Object
++                || !config.TryGetProperty("claim.name", out var name)
++                || name.ValueKind != JsonValueKind.String)
++            {
++                continue;
++            }
++
++            claimNames.Add(name.GetString()!);
++        }
++
++        // The five claim names ARE the ClaimSetFactory contract (D9) — the factory lives in the
++        // auth service and cannot be referenced from this project, so the values are pinned here.
++        // Exact-set assertion: renaming a mapper's claim.name (a silent tenant-binding break),
++        // dropping one, or adding a new claim mapper without updating this guard ALL fail.
++        claimNames.Should().BeEquivalentTo(
++            new[] { "tenant_id", "tenant_name", "tenant_type", "teacher_id", "roles" },
++            "school-collab-client's protocol mappers must emit EXACTLY the claim names "
++            + "ClaimSetFactory reads (tenant_id/tenant_name/tenant_type/teacher_id/roles): "
++            + "a mapper rename in school-collab-realm.json must fail this guard.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_HasRedirectUrisAndWebOrigins()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("redirectUris", out var uris).Should().BeTrue();
++        uris.ValueKind.Should().Be(JsonValueKind.Array);
++        var list = uris.EnumerateArray()
++            .Where(u => u.ValueKind == JsonValueKind.String)
++            .Select(u => u.GetString())
++            .Where(u => u is not null)
++            .Cast<string>()
++            .ToArray();
++        list.Should().HaveCountGreaterThan(0, "the OIDC code flow cannot complete without registered redirect URIs.");
++        list.Should().Contain(u => u.Contains("localhost:5300") && u.Contains("/signin-oidc"));
++        list.Should().Contain(u => u.Contains("localhost:5400") && u.Contains("/signin-oidc"));
++
++        client.TryGetProperty("webOrigins", out var origins).Should().BeTrue();
++        origins.ValueKind.Should().Be(JsonValueKind.Array);
++        origins.GetArrayLength().Should().BeGreaterThan(0);
++    }
++
+     // ── Helpers ─────────────────────────────────────────────────────────
+ 
+     /// <summary>Resolves the single realm candidate anywhere in the AppHost dir
+@@ -122,6 +255,56 @@ public class AppHostRealmImportArchitectureTests
+         return realm.GetString()!;
+     }
+ 
++    /// <summary>Resolves the named client from an already-parsed realm document root. THROWS when the
++    /// client is missing, so a renamed/removed client cannot pass the assertions vacuously. The caller
++    /// owns the <see cref="JsonDocument"/> lifetime (a returned <see cref="JsonElement"/> is invalid
++    /// after its document is disposed).</summary>
++    private static JsonElement FindClient(JsonElement realmRoot, string clientId)
++    {
++        if (!realmRoot.TryGetProperty("clients", out var clients) || clients.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidOperationException("Realm file has no 'clients' array.");
++        }
++
++        foreach (var client in clients.EnumerateArray())
++        {
++            if (client.ValueKind == JsonValueKind.Object
++                && client.TryGetProperty("clientId", out var id)
++                && id.ValueKind == JsonValueKind.String
++                && id.GetString() == clientId)
++            {
++                return client;
++            }
++        }
++
++        throw new InvalidOperationException($"Realm file has no client with clientId '{clientId}'.");
++    }
++
++    /// <summary>Resolves the service-account USER entry for the named client (username convention
++    /// `service-account-{clientId}`, identified by its `serviceAccountClientId` property — the shape
++    /// an admin-console realm export produces for a client with a role grant). THROWS when missing,
++    /// so a dropped grant entry cannot pass the assertions vacuously.</summary>
++    private static JsonElement FindServiceAccountUser(JsonElement realmRoot, string clientId)
++    {
++        if (!realmRoot.TryGetProperty("users", out var users) || users.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidOperationException("Realm file has no 'users' array.");
++        }
++
++        foreach (var user in users.EnumerateArray())
++        {
++            if (user.ValueKind == JsonValueKind.Object
++                && user.TryGetProperty("serviceAccountClientId", out var sac)
++                && sac.ValueKind == JsonValueKind.String
++                && sac.GetString() == clientId)
++            {
++                return user;
++            }
++        }
++
++        throw new InvalidOperationException($"Realm file has no service-account user with serviceAccountClientId '{clientId}'.");
++    }
++
+     private static string ReadAppHostFile(string name)
+         => File.ReadAllText(Path.Combine(FindAppHostDir(), name));
+ 
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAdminClientTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAdminClientTests.cs
+new file mode 100644
+index 00000000..c0e5dbf1
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAdminClientTests.cs
+@@ -0,0 +1,459 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Admin REST client coverage (plan step 6): every operation's exact HTTP method, PATH and
++/// request BODY, the token-cache discipline, the admin-base derivation trap, and the failure
++/// taxonomy. HTTP is scripted with a hand-written recording handler (dotnet-best-practices:
++/// "Scripted HttpMessageHandler — not Moq/NSubstitute"); the repo's MockHttp matcher pitfall is
++/// avoided by asserting the explicit <see cref="HttpMethod"/> on every recorded call.
++/// </summary>
++[TestClass]
++public class KeycloakAdminClientTests
++{
++    private const string Authority = "http://keycloak:8080/realms/school-collab";
++    private const string TokenPath = "/realms/school-collab/protocol/openid-connect/token";
++    private const string AdminUsersPath = "/admin/realms/school-collab/users";
++
++    private sealed class FakeTimeProvider : TimeProvider
++    {
++        public DateTimeOffset Now { get; set; } = new(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
++
++        public override DateTimeOffset GetUtcNow() => Now;
++    }
++
++    /// <summary>A scripted handler that records every request (method, path, query, body, bearer)
++    /// and serves the token endpoint with a distinct token per fetch — so a test can distinguish a
++    /// single cached fetch from per-call fetching.</summary>
++    private sealed class RecordingHandler : HttpMessageHandler
++    {
++        public sealed record ObservedRequest(HttpMethod Method, string Path, string Query, string Body, string? Bearer);
++
++        private readonly Func<HttpRequestMessage, int, HttpResponseMessage> _respond;
++
++        public List<ObservedRequest> Calls { get; } = [];
++
++        public int TokenFetches { get; private set; }
++
++        /// <param name="respond">Receives the request and the current token-fetch count (1-based);
++        /// return the canned response. The token path is routed by the caller for full control.</param>
++        public RecordingHandler(Func<HttpRequestMessage, int, HttpResponseMessage> respond) => _respond = respond;
++
++        protected override async Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request,
++            CancellationToken cancellationToken)
++        {
++            var body = request.Content is null
++                ? string.Empty
++                : await request.Content.ReadAsStringAsync(cancellationToken);
++
++            if (request.RequestUri!.AbsolutePath.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal))
++            {
++                TokenFetches++;
++            }
++
++            Calls.Add(new ObservedRequest(
++                request.Method,
++                request.RequestUri.AbsolutePath,
++                request.RequestUri.Query,
++                body,
++                request.Headers.Authorization is null ? null : request.Headers.Authorization.Parameter));
++            return _respond(request, TokenFetches);
++        }
++    }
++
++    [TestMethod]
++    public async Task AdminCall_WithNonRealmAuthority_ThrowsInvalidOperationException()
++    {
++        // AdminBase derivation must fail loudly on a non-realm-form authority (pass-3b review P2-2):
++        // only a /realms/<realm> tail yields a valid Admin REST base. The token fetch must SUCCEED
++        // (RoutingHandler serves a valid token) so the flow reaches the admin URL construction,
++        // where BuildAdminBase throws — a failing token gate would return early without ever
++        // evaluating the admin base.
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK));
++        var opts = Options();
++        opts.Keycloak.Authority = "https://keycloak.example.com/auth";
++        var client = new KeycloakAdminClient(
++            new HttpClient(handler),
++            Microsoft.Extensions.Options.Options.Create(opts),
++            new FakeTimeProvider());
++
++        var act = () => client.ListUsersAsync();
++        await act.Should().ThrowAsync<InvalidOperationException>()
++            .WithMessage("*realms*");
++    }
++
++    private static AuthServiceOptions Options() => new()
++    {
++        Keycloak = new AuthServiceOptions.KeycloakOptions
++        {
++            Authority = Authority,
++            ClientId = "school-collab-client",
++            ClientSecret = "a-client-secret",
++            ServiceAccountClientSecret = "a-service-account-secret",
++        },
++    };
++
++    private static KeycloakAdminClient Client(RecordingHandler handler, FakeTimeProvider clock)
++        => new(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(Options()), clock);
++
++    /// <summary>Default router: the token path returns a fresh token per fetch; every other path
++    /// returns the supplied canned response.</summary>
++    private static RecordingHandler RoutingHandler(
++        HttpResponseMessage adminResponse,
++        HttpResponseMessage? tokenResponse = null)
++    {
++        return new RecordingHandler((request, fetchCount) =>
++            request.RequestUri!.AbsolutePath.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal)
++                ? tokenResponse ?? new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(
++                        $$"""{"access_token":"admin-token-{{fetchCount}}","expires_in":300,"token_type":"Bearer"}"""),
++                }
++                : new HttpResponseMessage(adminResponse.StatusCode)
++                {
++                    Content = new StringContent(adminResponse.Content is null ? string.Empty : adminResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()),
++                });
++    }
++
++    [TestMethod]
++    public async Task ListUsers_NoFilters_SendsExplicitGetToTheAdminRealmUsersPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("""
++                [{"id":"u1","username":"dev-teacher","enabled":true,"email":"dev-teacher@schoolcollab.local"}]
++                """),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.IsSuccess.Should().BeTrue();
++        result.Users.Should().ContainSingle().Which.Username.Should().Be("dev-teacher");
++
++        handler.Calls.Should().HaveCount(2);
++        var adminCall = handler.Calls[1];
++        adminCall.Method.Should().Be(HttpMethod.Get,
++            "the Admin REST list is a GET and the repo's MockHttp matcher will not infer the verb — the explicit method is asserted.");
++        adminCall.Path.Should().Be(AdminUsersPath);
++        adminCall.Query.Should().BeEmpty();
++        adminCall.Bearer.Should().Be("admin-token-1");
++    }
++
++    [TestMethod]
++    public async Task ListUsers_Filters_SendAnEncodedQueryOnTheUsersPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync(username: "dev teacher", email: "a.b@c.d");
++
++        result.IsSuccess.Should().BeTrue();
++        var adminCall = handler.Calls[1];
++        adminCall.Path.Should().Be(AdminUsersPath);
++        adminCall.Query.Should().Be("?username=dev%20teacher&email=a.b%40c.d");
++    }
++
++    [TestMethod]
++    public async Task AdminBase_FromARealmFormAuthority_NeverConcatenatesAdminOntoTheRealmPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        await client.ListUsersAsync();
++
++        // Structural trap: the authority is the REALM url; the Admin base is the SERVER ROOT.
++        // A naive concat would produce /realms/school-collab/admin/... — no recorded call may.
++        handler.Calls.Select(c => c.Path).Should().NotContain(path => path.Contains("/realms/school-collab/admin", StringComparison.Ordinal));
++        handler.Calls[1].Path.Should().Be("/admin/realms/school-collab/users");
++        // ... and the token POST uses the realm-form token endpoint, not the admin base.
++        handler.Calls[0].Path.Should().Be(TokenPath);
++    }
++
++    [TestMethod]
++    public async Task AccessToken_IsFetchedOnce_AndReusedAcrossAdminCalls()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        await client.ListUsersAsync();
++        await client.ListRealmRolesAsync();
++
++        // Distinct per-fetch tokens: both calls must carry the FIRST token, proving a single
++        // cached fetch — a per-call fetch would have used "admin-token-2" on the second call.
++        handler.TokenFetches.Should().Be(1);
++        handler.Calls[1].Bearer.Should().Be("admin-token-1");
++        handler.Calls[2].Bearer.Should().Be("admin-token-1");
++    }
++
++    [TestMethod]
++    public async Task AccessToken_IsRefetched_OnceTheCachedTokenPassesItsSafetyMargin()
++    {
++        var clock = new FakeTimeProvider();
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, clock);
++
++        await client.ListUsersAsync();
++        handler.Calls[1].Bearer.Should().Be("admin-token-1");
++
++        // expires_in=300, margin=30 -> cache valid ~270 s; advance past it.
++        clock.Now = clock.Now.AddSeconds(271);
++
++        await client.ListUsersAsync();
++
++        handler.TokenFetches.Should().Be(2);
++        handler.Calls[^1].Bearer.Should().Be("admin-token-2");
++    }
++
++    [TestMethod]
++    public async Task CreateUser_SendsExplicitPost_WithACamelCaseJsonBody()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.Created));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.CreateUserAsync(new KeycloakUser(
++            Id: null, Username: "new-user", Enabled: true, Email: "new@schoolcollab.local"));
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Post);
++        call.Path.Should().Be(AdminUsersPath);
++
++        using var body = JsonDocument.Parse(call.Body);
++        var root = body.RootElement;
++        root.GetProperty("username").GetString().Should().Be("new-user");
++        root.GetProperty("enabled").GetBoolean().Should().BeTrue();
++        root.GetProperty("email").GetString().Should().Be("new@schoolcollab.local");
++        root.TryGetProperty("id", out _).Should().BeFalse(
++            "the create body must not carry an id (Web serialization omits nulls).");
++    }
++
++    [TestMethod]
++    public async Task UpdateUser_SendsExplicitPut_ToTheUsersIdPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.UpdateUserAsync(new KeycloakUser(
++            Id: "u1", Username: "dev-teacher", Enabled: true, Email: "dev-teacher@schoolcollab.local"));
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Put);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1");
++    }
++
++    [TestMethod]
++    public async Task GetUser_WithAnUnknownId_MapsNotFoundToNotFoundStatus()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NotFound)
++        {
++            Content = new StringContent("""{"error":"unknown_user","error_description":"User not found"}"""),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.GetUserAsync("missing");
++
++        result.Status.Should().Be(AdminStatus.NotFound);
++        result.User.Should().BeNull();
++        result.Detail.Should().Contain("User not found");
++    }
++
++    [TestMethod]
++    public async Task CreateUser_OnKeycloakConflict_MapsToConflictStatus()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.Conflict));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.CreateUserAsync(new KeycloakUser(Id: null, Username: "dev-teacher"));
++
++        result.Status.Should().Be(AdminStatus.Conflict);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task AdminCall_OnForbidden_MapsToForbiddenStatus()
++    {
++        // The loud-403 cold-start check: an insufficient imported realm-management role set must
++        // surface as Forbidden (a distinct class), never as some generic failure.
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.Forbidden));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListRealmRolesAsync();
++
++        result.Status.Should().Be(AdminStatus.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task ListRealmRoles_SendsExplicitGet_ToTheAdminRolesPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("""
++                [{"id":"r1","name":"user-admin","composite":false},{"id":"r2","name":"platform-admin","composite":false}]
++                """),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListRealmRolesAsync();
++
++        result.IsSuccess.Should().BeTrue();
++        result.Roles.Should().HaveCount(2);
++        result.Roles[0].Should().Be(new KeycloakRole("r1", "user-admin"));
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Get);
++        call.Path.Should().Be("/admin/realms/school-collab/roles");
++    }
++
++    [TestMethod]
++    public async Task ResetPassword_SendsExplicitPut_WithTypePasswordBody_AndMapsNoContentToSuccess()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ResetPasswordAsync("u1", "new-password");
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Put);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1/reset-password");
++
++        using var body = JsonDocument.Parse(call.Body);
++        var root = body.RootElement;
++        root.GetProperty("type").GetString().Should().Be("password");
++        root.GetProperty("value").GetString().Should().Be("new-password");
++        root.GetProperty("temporary").GetBoolean().Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task AssignRealmRoles_SendsExplicitPost_ToRoleMappingsRealm_WithTheIdNameArray()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.AssignRealmRolesAsync("u1", new[] { new KeycloakRole("r1", "user-admin") });
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Post);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1/role-mappings/realm");
++
++        var roles = JsonSerializer.Deserialize<List<JsonElement>>(call.Body);
++        roles.Should().ContainSingle();
++        roles![0].GetProperty("id").GetString().Should().Be("r1");
++        roles[0].GetProperty("name").GetString().Should().Be("user-admin");
++    }
++
++    [TestMethod]
++    public async Task UnassignRealmRoles_SendsExplicitDelete_ToRoleMappingsRealm_WithTheArrayBody()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.UnassignRealmRolesAsync("u1", new[] { new KeycloakRole("r1", "user-admin") });
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Delete);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1/role-mappings/realm");
++        call.Body.Should().Contain("\"id\":\"r1\"");
++    }
++
++    [TestMethod]
++    public async Task TokenEndpoint_UsesClientCredentials_WithTheServiceAccountClient()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        await client.ListUsersAsync();
++
++        var tokenCall = handler.Calls[0];
++        tokenCall.Path.Should().Be(TokenPath);
++        tokenCall.Method.Should().Be(HttpMethod.Post);
++
++        var form = System.Web.HttpUtility.ParseQueryString(tokenCall.Body);
++        form["grant_type"].Should().Be("client_credentials");
++        form["client_id"].Should().Be("school-collab-auth-admin");
++        form["client_secret"].Should().Be("a-service-account-secret");
++    }
++
++    [TestMethod]
++    public async Task AdminCall_WhenTheTokenEndpointFails_MapsToUnreachableWithNoRequest()
++    {
++        var handler = RoutingHandler(
++            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") },
++            tokenResponse: new HttpResponseMessage(HttpStatusCode.Unauthorized));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.Status.Should().Be(AdminStatus.Unreachable);
++        handler.Calls.Should().HaveCount(1,
++            "with no token no admin request may be sent (the secret never leaks past the token call).");
++    }
++
++    [TestMethod]
++    public async Task AdminCall_WhenTheEndpointThrows_MapsToUnreachable()
++    {
++        var handler = new RecordingHandler((request, fetchCount) =>
++            request.RequestUri!.AbsolutePath.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal)
++                ? new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(
++                        $$"""{"access_token":"admin-token-{{fetchCount}}","expires_in":300,"token_type":"Bearer"}"""),
++                }
++                : throw new HttpRequestException("connection refused"));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.Status.Should().Be(AdminStatus.Unreachable);
++    }
++
++    [TestMethod]
++    public async Task CallerCancellation_IsRethrownNotSwallowed()
++    {
++        var handler = new RecordingHandler((_, _) => throw new OperationCanceledException("cancelled"));
++        var client = Client(handler, new FakeTimeProvider());
++        using var cts = new CancellationTokenSource();
++        cts.Cancel();
++
++        var act = () => client.ListUsersAsync(cancellationToken: cts.Token);
++
++        await act.Should().ThrowAsync<OperationCanceledException>(
++            "caller cancellation must propagate — it is not an Admin failure to be consumed into a Status result.");
++    }
++
++    [TestMethod]
++    public async Task HttpClientTimeout_WithoutCallerCancellation_MapsToUnreachable()
++    {
++        var handler = new RecordingHandler((_, _) => throw new OperationCanceledException("timeout"));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.Status.Should().Be(AdminStatus.Unreachable);
++    }
++}

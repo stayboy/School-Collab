@@ -1,0 +1,845 @@
+diff --git a/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs b/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs
+new file mode 100644
+index 00000000..20318963
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs
+@@ -0,0 +1,190 @@
++using System.Net;
++using System.Text.Json;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Outcome of a Direct-Grant exchange (spec §5.2 / D6).</summary>
++public enum DirectGrantStatus
++{
++    Success,
++    InvalidCredentials,
++    DisabledUser,
++    KeycloakUnreachable,
++}
++
++/// <summary>
++/// Result of <see cref="DirectGrantExchanger.ExchangeAsync"/>. The tokens are
++/// present only on <see cref="IsSuccess"/> and must be handed to the session
++/// custody store — they never appear in an HTTP response body, a log line or an
++/// exception message (D7 / AC9).
++/// </summary>
++public sealed record DirectGrantResult(
++    DirectGrantStatus Status,
++    string? AccessToken = null,
++    string? RefreshToken = null,
++    string? IdToken = null,
++    int ExpiresInSeconds = 0,
++    string? Detail = null)
++{
++    public bool IsSuccess => Status == DirectGrantStatus.Success;
++
++    /// <summary>Builds a success result from the token endpoint's 200 JSON payload.</summary>
++    public static DirectGrantResult SuccessFromTokenJson(string json)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(json);
++            var root = document.RootElement;
++            var accessToken = GetString(root, "access_token");
++            if (accessToken is null)
++            {
++                // A 200 without an access token is a malformed endpoint, not a
++                // credential failure: fail toward "unreachable" rather than
++                // letting an empty token be stored.
++                return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable,
++                    Detail: "the token endpoint returned 200 with no access_token");
++            }
++
++            return new DirectGrantResult(
++                DirectGrantStatus.Success,
++                AccessToken: accessToken,
++                RefreshToken: GetString(root, "refresh_token"),
++                IdToken: GetString(root, "id_token"),
++                ExpiresInSeconds: GetInt(root, "expires_in"));
++        }
++        catch (JsonException)
++        {
++            return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable,
++                Detail: "the token endpoint returned a non-JSON 200 response");
++        }
++    }
++
++    /// <summary>
++    /// Classifies a non-success token response. Credential failures are the 400/401
++    /// family; everything else (5xx, redirects, other errors) fails toward
++    /// <see cref="DirectGrantStatus.KeycloakUnreachable"/> so a healthy caller never
++    /// mistakes an endpoint outage for a bad password.
++    /// </summary>
++    public static DirectGrantResult ClassifyFailure(HttpStatusCode status, string body)
++    {
++        var description = TryGetErrorDescription(body) ?? body;
++        if (status is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized)
++        {
++            return ContainsAccountDisabled(description)
++                ? new DirectGrantResult(DirectGrantStatus.DisabledUser, Detail: description)
++                : new DirectGrantResult(DirectGrantStatus.InvalidCredentials, Detail: description);
++        }
++
++        return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable, Detail: description);
++    }
++
++    /// <summary>Convenience for transport failures (no HTTP response was received).</summary>
++    public static DirectGrantResult Unreachable() => new(DirectGrantStatus.KeycloakUnreachable);
++
++    private static bool ContainsAccountDisabled(string description)
++        // Broad match is deliberate (P1 fix): Keycloak 26.4's canonical disabled-account
++        // error_description is "Account is disabled, contact your administrator."
++        // (accountDisabledMessage) — it does NOT contain the substring "account disabled"
++        // because of the intervening "is ", so a narrower match misclassifies a disabled
++        // user as InvalidCredentials. The "is not fully set up" phrase catches the
++        // not-fully-provisioned variant. The brute-force lockout message
++        // ("Invalid username or password.") contains no "disabled" and must stay classified
++        // as InvalidCredentials deliberately (no user enumeration).
++        => description.Contains("disabled", StringComparison.OrdinalIgnoreCase)
++           || description.Contains("is not fully set up", StringComparison.OrdinalIgnoreCase);
++
++    private static string? TryGetErrorDescription(string body)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(body);
++            return document.RootElement.TryGetProperty("error_description", out var description)
++                ? description.GetString()
++                : null;
++        }
++        catch (JsonException)
++        {
++            return null;
++        }
++    }
++
++    private static string? GetString(JsonElement root, string name)
++        => root.TryGetProperty(name, out var value) ? value.GetString() : null;
++
++    private static int GetInt(JsonElement root, string name)
++        => root.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : 0;
++}
++
++/// <summary>
++/// Performs the OAuth2 Resource Owner Password Credentials (Direct Grant) exchange
++/// against Keycloak's token endpoint (spec §5.2 / D6). The confidential client
++/// secret stays server-side for the lifetime of the request; the returned token
++/// set is handed to the session custody store, never to a response body.
++/// </summary>
++public sealed class DirectGrantExchanger
++{
++    private readonly HttpClient _httpClient;
++    private readonly AuthServiceOptions _options;
++
++    public DirectGrantExchanger(HttpClient httpClient, IOptions<AuthServiceOptions> options)
++    {
++        _httpClient = httpClient;
++        _options = options.Value;
++    }
++
++    public async Task<DirectGrantResult> ExchangeAsync(
++        string username,
++        string password,
++        CancellationToken cancellationToken = default)
++    {
++        if (string.IsNullOrWhiteSpace(username) || password is null)
++        {
++            // No exchange is attempted for a blank credential pair: fail the same
++            // way Keycloak would, without ever sending an empty password.
++            return new DirectGrantResult(DirectGrantStatus.InvalidCredentials,
++                Detail: "username or password was blank");
++        }
++
++        var endpoint = new Uri($"{_options.Keycloak.Authority.TrimEnd('/')}/protocol/openid-connect/token");
++
++        using var form = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
++        {
++            ["grant_type"] = "password",
++            ["client_id"] = _options.Keycloak.ClientId,
++            ["client_secret"] = _options.Keycloak.ClientSecret,
++            ["username"] = username,
++            ["password"] = password,
++        });
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await _httpClient.PostAsync(endpoint, form, cancellationToken);
++        }
++        catch (HttpRequestException)
++        {
++            // Network failure / TLS / DNS: the endpoint did not answer at all.
++            return DirectGrantResult.Unreachable();
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // Caller cancellation is not a Keycloak failure — rethrow, never swallow.
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            // HttpClient timeout: the token endpoint did not answer in time.
++            return DirectGrantResult.Unreachable();
++        }
++
++        using (response)
++        {
++            var body = await response.Content.ReadAsStringAsync(cancellationToken);
++            return response.IsSuccessStatusCode
++                ? DirectGrantResult.SuccessFromTokenJson(body)
++                : DirectGrantResult.ClassifyFailure(response.StatusCode, body);
++        }
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Services/OneTimeCodeStore.cs b/src/SchoolCollab.Auth/Services/OneTimeCodeStore.cs
+new file mode 100644
+index 00000000..a4c64006
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/OneTimeCodeStore.cs
+@@ -0,0 +1,125 @@
++using System.Collections.Concurrent;
++using System.Security.Cryptography;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Outcome of a one-time code redemption (spec §5.2 / D6).</summary>
++public enum RedeemStatus
++{
++    /// <summary>The code was valid, unexpired, bound to the given redirect URI, and consumed.</summary>
++    Success,
++    /// <summary>No live code exists under that value — either it was never issued or a previous redemption/rejection consumed it.</summary>
++    InvalidCode,
++    /// <summary>The code existed but its TTL elapsed before redemption.</summary>
++    Expired,
++    /// <summary>The code existed but is bound to a different redirect URI than the caller supplied.</summary>
++    RedirectUriMismatch,
++}
++
++/// <summary>Payload stored for a live one-time code.</summary>
++public sealed record OneTimeCodeEntry(string RedirectUri, DateTimeOffset ExpiresAtUtc);
++
++/// <summary>Redeem outcome with the consumed entry on success.</summary>
++public sealed record RedeemResult(RedeemStatus Status, OneTimeCodeEntry? Entry = null);
++
++/// <summary>
++/// Server-side store for the flag-ON one-time handshake codes (spec §5.2 / D6):
++/// single-use, short TTL (default 60 s, configured via <c>Auth:OneTimeCodeTtl</c>),
++/// and bound to the redirect URI of the originating app so a code observed in one
++/// portal call site cannot be redeemed from another. Redemption removes the entry
++/// atomically (a value-compared <c>ConcurrentDictionary.TryRemove</c>), so exactly
++/// one concurrent caller wins. The clock comes from <see cref="TimeProvider"/> (the
++/// repo's testable-clock pattern) — never <c>DateTime.UtcNow</c> directly.
++/// </summary>
++public sealed class OneTimeCodeStore
++{
++    private readonly ConcurrentDictionary<string, OneTimeCodeEntry> _codes = new(StringComparer.Ordinal);
++    private readonly TimeProvider _timeProvider;
++    private readonly TimeSpan _ttl;
++
++    // Bounded housekeeping (diff-review P2-1): a created-but-never-redeemed code (or one burned
++    // by a redirect-URI mismatch) used to stay in the dictionary forever. The store now sweeps
++    // expired entries opportunistically on Create — once per SweepEveryNCreates issued codes
++    // (periodic, so a low-traffic store also reclaims) and whenever the live count passes
++    // MaxLiveEntries (cap-driven). A code being swept is one that is already past its TTL, so
++    // the exactly-one-winner redemption semantics are unaffected. Live entries are never evicted.
++    private const int MaxLiveEntries = 1024;
++    private const int SweepEveryNCreates = 256;
++    private long _createdCount;
++
++    public OneTimeCodeStore(TimeProvider timeProvider, IOptions<AuthServiceOptions> options)
++    {
++        _timeProvider = timeProvider;
++        _ttl = options.Value.OneTimeCodeTtl;
++    }
++
++    /// <summary>Issues a new unguessable code bound to <paramref name="redirectUri"/>.</summary>
++    public string Create(string redirectUri)
++    {
++        var code = RandomNumberGenerator.GetHexString(32);
++        _codes[code] = new OneTimeCodeEntry(redirectUri, _timeProvider.GetUtcNow() + _ttl);
++
++        var created = Interlocked.Increment(ref _createdCount);
++        if (created % SweepEveryNCreates == 0 || _codes.Count > MaxLiveEntries)
++        {
++            SweepExpired();
++        }
++
++        return code;
++    }
++
++    /// <summary>
++    /// Removes every expired entry using value-compared removal, so a racer that is mid-<see
++    /// cref="Redeem"/> can never have its exactly-one-winner semantics broken by the sweep: an
++    /// entry the sweep removes is already past its TTL, which the racer's own expiry check would
++    /// have rejected anyway. The value-compared overload also stops the sweep from removing an
++    /// entry that a concurrent Redeem has just consumed.
++    /// </summary>
++    private void SweepExpired()
++    {
++        var now = _timeProvider.GetUtcNow();
++        foreach (var (key, entry) in _codes)
++        {
++            if (entry.ExpiresAtUtc <= now)
++            {
++                _codes.TryRemove(new KeyValuePair<string, OneTimeCodeEntry>(key, entry));
++            }
++        }
++    }
++
++    /// <summary>
++    /// Redeems a code exactly once. A replay, an expired code and a redirect-URI
++    /// mismatch all fail; the winner of the concurrent race is the only caller that
++    /// observes <see cref="RedeemStatus.Success"/>.
++    /// </summary>
++    public RedeemResult Redeem(string code, string redirectUri)
++    {
++        if (!_codes.TryGetValue(code, out var entry))
++        {
++            return new RedeemResult(RedeemStatus.InvalidCode);
++        }
++
++        var now = _timeProvider.GetUtcNow();
++        if (entry.ExpiresAtUtc <= now)
++        {
++            _codes.TryRemove(code, out _); // sweep the dead entry
++            return new RedeemResult(RedeemStatus.Expired);
++        }
++
++        if (!string.Equals(entry.RedirectUri, redirectUri, StringComparison.Ordinal))
++        {
++            // A mismatched URI is treated as misuse: consume the code so it cannot
++            // be probed again with a different caller.
++            _codes.TryRemove(code, out _);
++            return new RedeemResult(RedeemStatus.RedirectUriMismatch);
++        }
++
++        // Value-compared removal: when two callers race, only the one whose entry
++        // snapshot still matches the dictionary wins; the loser sees false.
++        return _codes.TryRemove(new KeyValuePair<string, OneTimeCodeEntry>(code, entry))
++            ? new RedeemResult(RedeemStatus.Success, entry)
++            : new RedeemResult(RedeemStatus.InvalidCode);
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs
+new file mode 100644
+index 00000000..87c302db
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs
+@@ -0,0 +1,132 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Options-validator coverage for pass 3a (plan step 6): the shared
++/// <see cref="AuthServiceOptions.FirstValidationError"/> used by Program.cs's
++/// ValidateOnStart rejects EACH missing required Keycloak value, the new timing
++/// values carry safe defaults, and the range guards on them reject misconfiguration.
++/// </summary>
++[TestClass]
++public class AuthServiceOptionsTests
++{
++    private static AuthServiceOptions Valid()
++        => new()
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++
++    [DataTestMethod]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.Authority), "Auth:Keycloak:Authority")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ClientId), "Auth:Keycloak:ClientId")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ClientSecret), "Auth:Keycloak:ClientSecret")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ServiceAccountClientSecret), "Auth:Keycloak:ServiceAccountClientSecret")]
++    public void Validator_RejectsEachMissingRequiredKeycloakValue(string memberName, string expectedSectionName)
++    {
++        var options = Valid();
++
++        switch (memberName)
++        {
++            case nameof(AuthServiceOptions.KeycloakOptions.Authority):
++                options.Keycloak.Authority = string.Empty;
++                break;
++            case nameof(AuthServiceOptions.KeycloakOptions.ClientId):
++                options.Keycloak.ClientId = string.Empty;
++                break;
++            case nameof(AuthServiceOptions.KeycloakOptions.ClientSecret):
++                options.Keycloak.ClientSecret = string.Empty;
++                break;
++            default:
++                options.Keycloak.ServiceAccountClientSecret = string.Empty;
++                break;
++        }
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().NotBeNull();
++        failure.Should().Contain(expectedSectionName,
++            "the failing key must be named so an operator can fix the AppHost env var.");
++    }
++
++    [TestMethod]
++    public void Validator_AcceptsCompleteConfiguration()
++    {
++        AuthServiceOptions.FirstValidationError(Valid()).Should().BeNull();
++    }
++
++    [TestMethod]
++    public void TimingDefaults_AreSafe()
++    {
++        var options = Valid();
++
++        options.OneTimeCodeTtl.Should().BeGreaterThan(TimeSpan.Zero)
++            .And.BeLessThanOrEqualTo(TimeSpan.FromSeconds(60),
++                "the plan pins the one-time code TTL default at <= 60 s (spec §5.2).");
++        options.PortalSessionTtl.Should().BePositive();
++        options.CredentialEndpointRateLimitWindow.Should().BePositive();
++        options.CredentialEndpointRateLimitPermits.Should().BeGreaterThanOrEqualTo(1);
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroOneTimeCodeTtl()
++    {
++        var options = Valid();
++        options.OneTimeCodeTtl = TimeSpan.Zero;
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().Contain("OneTimeCodeTtl",
++            "a zero TTL would make a single-use code live forever.");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroPortalSessionTtl()
++    {
++        var options = Valid();
++        options.PortalSessionTtl = TimeSpan.Zero;
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("PortalSessionTtl");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroCredentialEndpointRateLimitPermits()
++    {
++        var options = Valid();
++        options.CredentialEndpointRateLimitPermits = 0;
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("CredentialEndpointRateLimitPermits");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsOneTimeCodeTtlLongerThanFiveMinutes()
++    {
++        var options = Valid();
++        options.OneTimeCodeTtl = TimeSpan.FromMinutes(6);
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().Contain("OneTimeCodeTtl",
++            "a TTL past 5 minutes would widen the single-use code's exposure window beyond what the plan permits (diff-review P2-3).");
++    }
++
++    [DataTestMethod]
++    [DataRow(0)]
++    [DataRow(-1)]
++    public void Validator_RejectsNonPositiveCredentialEndpointRateLimitWindow(int minutes)
++    {
++        var options = Valid();
++        options.CredentialEndpointRateLimitWindow = TimeSpan.FromMinutes(minutes);
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("CredentialEndpointRateLimitWindow",
++            "a zero or negative window would make the rate-limit policy meaningless (diff-review P2-3).");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/DirectGrantExchangeTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/DirectGrantExchangeTests.cs
+new file mode 100644
+index 00000000..3e9d0540
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/DirectGrantExchangeTests.cs
+@@ -0,0 +1,214 @@
++using System.Net;
++using System.Web;
++using FluentAssertions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Moq;
++using Moq.Protected;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Direct-Grant exchange coverage (plan step 6): the happy path, every failure
++/// taxonomy branch, and the outgoing request shape — the repo's MockHttp matcher
++/// pitfall is handled by asserting the request method explicitly (it must be POST)
++/// and by reading the form body inside the mocked SendAsync.
++/// </summary>
++[TestClass]
++public class DirectGrantExchangeTests
++{
++    private static readonly Uri TokenEndpoint =
++        new("http://keycloak:8080/realms/school-collab/protocol/openid-connect/token");
++
++    private static readonly AuthServiceOptions Options = new()
++    {
++        Keycloak = new AuthServiceOptions.KeycloakOptions
++        {
++            Authority = "http://keycloak:8080/realms/school-collab",
++            ClientId = "school-collab-client",
++            ClientSecret = "a-client-secret",
++            ServiceAccountClientSecret = "a-service-account-secret",
++        },
++    };
++
++    private static Mock<HttpMessageHandler> RespondingHandler(
++        HttpStatusCode status,
++        string body,
++        Action<HttpRequestMessage, string>? observe = null)
++    {
++        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send =
++            async (request, _) =>
++            {
++                var requestBody = request.Content is null
++                    ? string.Empty
++                    : await request.Content.ReadAsStringAsync(CancellationToken.None);
++                observe?.Invoke(request, requestBody);
++                return new HttpResponseMessage(status) { Content = new StringContent(body) };
++            };
++
++        var handler = new Mock<HttpMessageHandler>();
++        handler.Protected()
++            .Setup<Task<HttpResponseMessage>>(
++                "SendAsync",
++                ItExpr.IsAny<HttpRequestMessage>(),
++                ItExpr.IsAny<CancellationToken>())
++            .Returns(send);
++        return handler;
++    }
++
++    private static Mock<HttpMessageHandler> ThrowingHandler(Exception exception)
++    {
++        var handler = new Mock<HttpMessageHandler>();
++        handler.Protected()
++            .Setup<Task<HttpResponseMessage>>(
++                "SendAsync",
++                ItExpr.IsAny<HttpRequestMessage>(),
++                ItExpr.IsAny<CancellationToken>())
++            .ThrowsAsync(exception);
++        return handler;
++    }
++
++    private static DirectGrantExchanger Exchange(Mock<HttpMessageHandler> handler)
++        => new(new HttpClient(handler.Object), Microsoft.Extensions.Options.Options.Create(Options));
++
++    [TestMethod]
++    public async Task Exchange_Success_ReturnsTheTokenSet()
++    {
++        var handler = RespondingHandler(HttpStatusCode.OK, """
++            {"access_token":"at-1","refresh_token":"rt-1","id_token":"it-1","expires_in":300,"token_type":"Bearer"}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.Success);
++        result.IsSuccess.Should().BeTrue();
++        result.AccessToken.Should().Be("at-1");
++        result.RefreshToken.Should().Be("rt-1");
++        result.IdToken.Should().Be("it-1");
++        result.ExpiresInSeconds.Should().Be(300);
++    }
++
++    [TestMethod]
++    public async Task Exchange_InvalidCredentials_OnUnauthorized()
++    {
++        var handler = RespondingHandler(HttpStatusCode.Unauthorized, """
++            {"error":"invalid_grant","error_description":"Invalid user credentials"}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "wrong-password");
++
++        result.Status.Should().Be(DirectGrantStatus.InvalidCredentials);
++        result.IsSuccess.Should().BeFalse();
++        result.AccessToken.Should().BeNull();
++    }
++
++    [TestMethod]
++    public async Task Exchange_DisabledUser_OnCanonicalKeycloakMessage()
++    {
++        // The REAL Keycloak 26.4 disabled-account error_description (accountDisabledMessage).
++        // Note the intervening "is ": the string reads "Account IS disabled, ...", so a naive
++        // matcher looking for "account disabled" misses it and would classify this as
++        // InvalidCredentials — exactly the classification bug this fixture exists to pin.
++        var handler = RespondingHandler(HttpStatusCode.Unauthorized, """
++            {"error":"invalid_grant","error_description":"Account is disabled, contact your administrator."}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.DisabledUser);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task Exchange_BruteForceLockout_StaysInvalidCredentials()
++    {
++        // accountTemporarilyDisabledMessage = "Invalid username or password." in Keycloak 26.4:
++        // the brute-force lockout is DELIBERATELY indistinguishable from bad credentials to avoid
++        // user enumeration, so it must keep classifying as InvalidCredentials and never become
++        // DisabledUser. Mapping it any other way would leak lockout state through the portal.
++        var handler = RespondingHandler(HttpStatusCode.Unauthorized, """
++            {"error":"invalid_grant","error_description":"Invalid username or password."}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.InvalidCredentials);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task Exchange_KeycloakUnreachable_OnHttpRequestException()
++    {
++        var handler = ThrowingHandler(new HttpRequestException("connection refused"));
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.KeycloakUnreachable);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task Exchange_CallerCancellation_IsRethrownNotSwallowed()
++    {
++        var handler = ThrowingHandler(new OperationCanceledException("cancelled"));
++        using var cts = new CancellationTokenSource();
++        cts.Cancel();
++
++        var exchange = Exchange(handler);
++        var act = () => exchange.ExchangeAsync("dev-teacher", "dev-only-password", cts.Token);
++
++        await act.Should().ThrowAsync<OperationCanceledException>(
++            "caller cancellation is not a Keycloak failure — it must propagate, never be swallowed into a Status result.");
++    }
++
++    [TestMethod]
++    public async Task Exchange_HttpClientTimeout_MapsToUnreachable()
++    {
++        // The same OperationCanceledException family WITHOUT caller cancellation is an
++        // HttpClient-side timeout: it must map to KeycloakUnreachable, never to a credential verdict.
++        var handler = ThrowingHandler(new OperationCanceledException("timeout"));
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.KeycloakUnreachable);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task Exchange_KeycloakUnreachable_OnServerError()
++    {
++        var handler = RespondingHandler(HttpStatusCode.InternalServerError, "oops");
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.KeycloakUnreachable,
++            "a 5xx is an endpoint outage, not a credential verdict.");
++    }
++
++    [TestMethod]
++    public async Task Exchange_UsesExplicitPost_WithConfidentialClientCredentials()
++    {
++        HttpRequestMessage? observedRequest = null;
++        var observedBody = string.Empty;
++        var handler = RespondingHandler(
++            HttpStatusCode.OK,
++            """{"access_token":"at","expires_in":300}""",
++            (request, body) => { observedRequest = request; observedBody = body; });
++
++        await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        observedRequest.Should().NotBeNull();
++        observedRequest!.Method.Should().Be(HttpMethod.Post,
++            "the token endpoint is a POST and the repo's MockHttp matcher will not infer the verb; the explicit method is asserted here.");
++        observedRequest.RequestUri.Should().Be(TokenEndpoint);
++
++        var form = HttpUtility.ParseQueryString(observedBody);
++        form["grant_type"].Should().Be("password");
++        form["client_id"].Should().Be("school-collab-client");
++        form["client_secret"].Should().Be("a-client-secret");
++        form["username"].Should().Be("dev-teacher");
++        form["password"].Should().Be("dev-only-password");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/OneTimeCodeStoreTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/OneTimeCodeStoreTests.cs
+new file mode 100644
+index 00000000..5a0ca9c4
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/OneTimeCodeStoreTests.cs
+@@ -0,0 +1,154 @@
++using FluentAssertions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// One-time-code store coverage (plan step 6): single-use, TTL expiry, redirect-URI
++/// binding, and concurrent redemption with exactly one winner. The clock is a
++/// lightweight fake TimeProvider (the repo's testable-clock pattern) so TTL
++/// expiry is deterministic without wall-clock sleeps.
++/// </summary>
++[TestClass]
++public class OneTimeCodeStoreTests
++{
++    private const string Callback = "http://localhost:5300/signin-handshake";
++    private const string OtherCallback = "https://localhost:7300/signin-handshake";
++
++    private sealed class FakeTimeProvider : TimeProvider
++    {
++        public DateTimeOffset Now { get; set; } = new(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
++
++        public override DateTimeOffset GetUtcNow() => Now;
++    }
++
++    private static OneTimeCodeStore CreateStore(FakeTimeProvider clock, out AuthServiceOptions options)
++    {
++        options = new AuthServiceOptions
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++        return new OneTimeCodeStore(clock, Microsoft.Extensions.Options.Options.Create(options));
++    }
++
++    [TestMethod]
++    public void Redeem_WithMatchingRedirectUri_SucceedsOnce()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        var first = store.Redeem(code, Callback);
++        first.Status.Should().Be(RedeemStatus.Success);
++        first.Entry.Should().NotBeNull();
++        first.Entry!.RedirectUri.Should().Be(Callback);
++
++        store.Redeem(code, Callback).Status.Should().Be(RedeemStatus.InvalidCode,
++            "a redeemed code is single-use and may never be replayed.");
++    }
++
++    [TestMethod]
++    public void Redeem_UnknownCode_IsInvalid()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++
++        store.Redeem("00000000000000000000000000000000", Callback).Status
++            .Should().Be(RedeemStatus.InvalidCode);
++    }
++
++    [TestMethod]
++    public void Redeem_AfterTtlExpiry_IsRejected()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        clock.Now = clock.Now.Add(TimeSpan.FromSeconds(61));
++
++        store.Redeem(code, Callback).Status.Should().Be(RedeemStatus.Expired);
++    }
++
++    [TestMethod]
++    public void Redeem_WithMismatchedRedirectUri_IsRejected()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        var verdict = store.Redeem(code, OtherCallback);
++
++        verdict.Status.Should().Be(RedeemStatus.RedirectUriMismatch,
++            "a code is bound to the originating app's redirect URI (spec §5.2 / D6).");
++    }
++
++    [TestMethod]
++    public void Create_PeriodicSweep_ReclaimsExpiredNeverRedeemedCodes()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var abandoned = store.Create(Callback);
++
++        clock.Now = clock.Now.AddHours(1); // well past the 60 s TTL — the code will never be redeemed
++
++        for (var i = 0; i < 256; i++)
++        {
++            store.Create(Callback);
++        }
++
++        store.Redeem(abandoned, Callback).Status.Should().Be(RedeemStatus.InvalidCode,
++            "the periodic sweep must remove the expired, never-redeemed code — an Expired verdict here would mean the dead entry was never reclaimed.");
++    }
++
++    [TestMethod]
++    public void Create_CapDrivenSweep_KeepsTheStoreBounded()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var first = store.Create(Callback);
++
++        // Fill past the 1024 cap with the clock standing still (all still live, so the
++        // cap-driven sweep has nothing expired to remove yet).
++        for (var i = 1; i < 1100; i++)
++        {
++            store.Create(Callback);
++        }
++
++        // Expire everything issued so far, then issue one more code: the count is still past
++        // the cap, so the sweep runs and reclaims the expired entries.
++        clock.Now = clock.Now.AddHours(1);
++        var live = store.Create(Callback);
++
++        store.Redeem(live, Callback).Status.Should().Be(RedeemStatus.Success);
++        store.Redeem(first, Callback).Status.Should().Be(RedeemStatus.InvalidCode,
++            "the cap-driven sweep must have reclaimed the expired entries — the store must not grow without bound.");
++    }
++
++    [TestMethod]
++    public void Redeem_ConcurrentCallers_ExactlyOneWinner()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        var tasks = Enumerable.Range(0, 8)
++            .Select(_ => Task.Run(() => store.Redeem(code, Callback)))
++            .ToArray();
++        Task.WaitAll(tasks);
++
++        var winners = tasks.Count(t => t.Result.Status == RedeemStatus.Success);
++        winners.Should().Be(1,
++            "redemption removes the entry atomically — exactly one concurrent caller may win.");
++        tasks.Select(t => t.Result.Status).Distinct().Should().OnlyContain(
++            status => status == RedeemStatus.Success || status == RedeemStatus.InvalidCode);
++    }
++}

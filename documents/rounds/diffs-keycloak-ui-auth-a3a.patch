@@ -1,0 +1,1217 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index ed869d5a..556296b4 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -137,9 +137,10 @@ files only carry values that genuinely belong to that single service
+ | `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
+ | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-smtp-password` (dev-only, `appsettings.Development.json`) | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. A **dev-only** default is committed in `appsettings.Development.json`; a relay that requires auth supplies the real value via user-secrets / env-var, which override it. **Never commit a production secret.** |
+ | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
+-| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
++| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, `admin`, and the `auth` service. See §4. |
+ | `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-keycloak-admin` (dev-only, `appsettings.Development.json`) | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. A **dev-only** default is committed in `appsettings.Development.json`, so a plain `aspire run` starts Keycloak without prompting; a non-dev value comes from user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, which override it (production never loads the Development file). One of the two parameters AC#4 needs; see §4. |
+-| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the same five hosts as `keycloak-client-id` above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-auth-admin-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-auth-admin-secret` (dev-only, `appsettings.Development.json`) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin` in the realm import. Injected as `Auth__Keycloak__ServiceAccountClientSecret`; read as `Auth:Keycloak:ServiceAccountClientSecret`. Consumed by the `auth` service only. The committed dev-only default **must equal the realm file's `school-collab-auth-admin` `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects the client_credentials grant on the first admin call. A user-secrets / env-var value overrides it; production supplies a real secret-store value. See §4. |
+ 
+ **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
+ 
+@@ -297,10 +298,10 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
+ ## 4. `Auth:Keycloak` — OIDC authentication
+ 
+ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
+-(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
++(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.4.7` — 26.4+ for official passkey support)
+ that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
+ (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
+-`settings-api`, and `admin`.
++`settings-api`, `admin`, and the `auth` service.
+ 
+ The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
+ `dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
+@@ -311,8 +312,8 @@ Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
+ 
+ **Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
+ management endpoint (targetPort 9000) and binds an HTTP readiness health check
+-(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
+-`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
++(`/health/ready`) to it. All five `Auth:Keycloak:*` consuming hosts — `assignments-api`,
++`students-api`, `settings-api`, `admin`, and the `auth` service — `.WaitFor(keycloak)`, so none of them fetches
+ OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
+ does not fully start until the import completes).
+ 
+@@ -320,11 +321,16 @@ does not fully start until the import completes).
+ file re-imports on every container recreate — edit the realm and recreate the container to
+ pick it up; no `docker volume rm` is needed.
+ 
++**Realm additions (round A, keycloak-ui-auth)** — all declarative in `school-collab-realm.json`, so they re-import automatically: the realm roles `user-admin` and `platform-admin`; a `User Realm Role` protocol mapper on `school-collab-client` emitting a flat `roles` claim on the ID, access **and** userinfo tokens (this is what `RoleClaimType = "roles"` in `AuthTenancyExtensions` consumes on both the cookie and bearer paths); the service-account client `school-collab-auth-admin` (`serviceAccountsEnabled`, granted `realm-management` `view-users`/`manage-users`/`view-realm`/`manage-realm`) that the auth service uses for the Keycloak Admin REST API; registered `redirectUris` + `webOrigins` for the two Blazor hosts (`admin` 5300/7300, `families` 5400/7400 — the OIDC code flow could never complete before these existed, plan-review P2); and the realm-level WebAuthn **Passwordless Policy** with the passkeys toggle (`webAuthnPolicyPasswordlessPasskeysEnabled`) plus the `Webauthn Register Passwordless` required action (`spec §6/§11.5`).
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+ | `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
+ | `Auth:Keycloak:ClientSecret` | `dev-only-school-collab-client-secret` (dev-only) | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the committed dev-only default for `Parameters:keycloak-client-secret` in `appsettings.Development.json`, which **must equal** the realm file's client `secret` (guarded); **production** MUST substitute a real secret-store value — no production secret is committed. |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `dev-only-school-collab-auth-admin-secret` (dev-only) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin`, bound from the AppHost's `keycloak-auth-admin-secret` parameter. **No code fallback** — the auth service validates its options on start (`ValidateOnStart`), so a missing or blank value fails the host fast at launch instead of 401-ing on the first admin call. **dev** uses the committed dev-only default for `Parameters:keycloak-auth-admin-secret`, which **must equal** the realm file's `school-collab-auth-admin` `secret` (guarded); **production** MUST substitute a real secret-store value. Consumed by the `auth` service only. |
++
++The `auth` service also carries four tunables, each with a safe default and each validated on start: `Auth:OneTimeCodeTtl` (60 s — the single-use code's lifetime; a long TTL would defeat the one-time-code mitigation), `Auth:PortalSessionTtl` (8 h — how long a portal session may live), and the credential-endpoint rate-limit pair `Auth:CredentialEndpointRateLimitWindow` (1 min) / `Auth:CredentialEndpointRateLimitPermits` (5). These are ordinary appsettings/env keys rather than AppHost parameters, so no dev default is committed for them; the §11 table below carries their env-var forms.
+ 
+ > 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
+ > sensitive values here. Use one of:
+@@ -849,6 +855,7 @@ matching env-var form:
+ | `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
+ | `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
+ | `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
++| `Parameters:keycloak-auth-admin-secret` | `Parameters__keycloak_auth_admin_secret` |
+ | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+ | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+ | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+@@ -878,6 +885,11 @@ matching env-var form:
+ | `Auth:Keycloak:Authority` | `Auth__Keycloak__Authority` |
+ | `Auth:Keycloak:ClientId` | `Auth__Keycloak__ClientId` |
+ | `Auth:Keycloak:ClientSecret` | `Auth__Keycloak__ClientSecret` |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `Auth__Keycloak__ServiceAccountClientSecret` |
++| `Auth:OneTimeCodeTtl` | `Auth__OneTimeCodeTtl` |
++| `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
++| `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
++| `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
+ | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
+ | `Promotion:CronExpression` | `Promotion__CronExpression` |
+ | `Promotion:PollInterval` | `Promotion__PollInterval` |
+@@ -914,6 +926,9 @@ Before deploying, verify:
+       `appsettings.Development.json` dev defaults (this one, `keycloak-admin-password`,
+       `smtp-user`, `smtp-password`) are never loaded in production and must not be relied
+       on there.
++- [ ] **`Parameters:keycloak-auth-admin-secret`** — the Keycloak Admin REST
++      service-account secret — is sourced from a secret store in production; its
++      `appsettings.Development.json` dev default must not be relied on.
+ - [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
+       (or omitted) in production. The flag is sourced from the AppHost
+       `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
+diff --git a/src/SchoolCollab.Auth/AuthServiceExtensions.cs b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+new file mode 100644
+index 00000000..816e863c
+--- /dev/null
++++ b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+@@ -0,0 +1,57 @@
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth;
++
++/// <summary>
++/// DI registrations for the SchoolCollab.Auth service, kept out of the feature
++/// host's <c>Program.cs</c> (dotnet-best-practices "Never": no inline
++/// <c>services.Add*()</c> in a feature <c>Program.cs</c>; the repo precedent is
++/// <c>SchoolCollab.Core.Messaging.OutboxExtensions</c>). Later round-A passes
++/// that add registrations extend this file instead of inlining them.
++/// </summary>
++public static class AuthServiceExtensions
++{
++    /// <summary>
++    /// Registers <see cref="AuthServiceOptions"/> from the <c>Auth</c> configuration
++    /// section with startup validation (<c>ValidateOnStart</c>), so a missing Keycloak
++    /// setting fails fast at launch instead of surfacing mid-request. The validator is
++    /// <see cref="AuthServiceOptions.FirstValidationError"/> — shared with
++    /// <c>AuthServiceSmokeTests</c> so the startup check and the tests cannot drift.
++    /// </summary>
++    public static IServiceCollection AddAuthServiceOptions(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services
++            .AddOptions<AuthServiceOptions>()
++            .Bind(configuration.GetSection(AuthServiceOptions.SectionName))
++            .Validate(o => AuthServiceOptions.FirstValidationError(o) is null,
++                "Invalid SchoolCollab.Auth configuration; see AuthServiceOptions.FirstValidationError for the failing key.")
++            .ValidateOnStart();
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the round-A services. The Direct-Grant exchanger is a typed
++    /// <see cref="HttpClient"/> consumer (its endpoint is derived from
++    /// <c>Auth:Keycloak:Authority</c>); the one-time-code store uses
++    /// <see cref="TimeProvider"/> (the repo's testable-clock pattern).
++    /// </summary>
++    public static IServiceCollection AddAuthServices(this IServiceCollection services)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++
++        services.AddHttpClient<DirectGrantExchanger>();
++        services.AddSingleton(TimeProvider.System);
++        services.AddSingleton<OneTimeCodeStore>();
++
++        return services;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+new file mode 100644
+index 00000000..216f1fa1
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+@@ -0,0 +1,25 @@
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Routing;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// Maps the auth service's endpoint groups. Round A pass 2 carries the grouping
++/// extension plus a placeholder <c>GET /auth/ping</c> so the skeleton is
++/// exercisable and the wiring is real; passes 3c/3d replace/extend the group with
++/// the exchange/redeem/session and admin endpoints. Endpoint groups are always
++/// grouped extension methods (AGENTS.md) — never inline route maps in Program.cs.
++/// </summary>
++public static class AuthEndpointGroup
++{
++    /// <summary>Maps the <c>/auth</c> group under the app's route builder.</summary>
++    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
++    {
++        var group = app.MapGroup("/auth");
++
++        group.MapGet("/ping", () => Results.Ok(new { status = "ok" }));
++
++        return app;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Options/AuthServiceOptions.cs b/src/SchoolCollab.Auth/Options/AuthServiceOptions.cs
+new file mode 100644
+index 00000000..48fae378
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Options/AuthServiceOptions.cs
+@@ -0,0 +1,120 @@
++namespace SchoolCollab.Auth.Options;
++
++/// <summary>
++/// Configuration for the SchoolCollab.Auth service. Bound from the <c>Auth</c>
++/// section by Program.cs (the AppHost fans the values out as <c>Auth__Keycloak__*</c>
++/// env vars — see <c>WireKeycloakAuth</c> and the <c>keycloak-auth-admin-secret</c>
++/// parameter) and validated at startup via
++/// <see cref="FirstValidationError"/>. The <c>Auth:Keycloak:*</c> names match the
++/// shared consumers in SchoolCollab.Core (<see cref="SchoolCollab.Core.Auth.AuthTenancyExtensions"/>).
++/// Round A pass 2 carries the Keycloak authority/client id/secret and the
++/// service-account credential the later passes consume; pass 3a extends this
++/// class with the timing values (one-time-code and portal-session TTLs, rate-limit
++/// window/permit).
++/// </summary>
++public sealed class AuthServiceOptions
++{
++    /// <summary>Default configuration section name: <c>Auth</c>.</summary>
++    public const string SectionName = "Auth";
++
++    /// <summary>Keycloak connection settings (spec §11).</summary>
++    public KeycloakOptions Keycloak { get; set; } = new();
++
++    /// <summary>
++    /// Lifetime of a one-time handshake code (spec §5.2 / D6). Short by design —
++    /// single-use plus a short TTL is the whole mitigation. Default 60 s; the
++    /// validator caps it at 5 minutes.
++    /// </summary>
++    public TimeSpan OneTimeCodeTtl { get; set; } = TimeSpan.FromSeconds(60);
++
++    /// <summary>
++    /// Lifetime of a portal session (spec §5.4 / D12). Default 8 h.
++    /// </summary>
++    public TimeSpan PortalSessionTtl { get; set; } = TimeSpan.FromHours(8);
++
++    /// <summary>
++    /// Rate-limit window for the credential endpoint <c>POST /auth/exchange</c>
++    /// (spec §14, consumed by pass 3c). Default 1 minute.
++    /// </summary>
++    public TimeSpan CredentialEndpointRateLimitWindow { get; set; } = TimeSpan.FromMinutes(1);
++
++    /// <summary>
++    /// Maximum permitted calls to <c>POST /auth/exchange</c> within the window
++    /// above (spec §14, consumed by pass 3c). Default 5.
++    /// </summary>
++    public int CredentialEndpointRateLimitPermits { get; set; } = 5;
++
++    /// <summary>
++    /// Returns the first validation failure message, or <c>null</c> when the options
++    /// are valid. Shared by Program.cs (<c>.Validate(...).ValidateOnStart()</c>) and
++    /// the smoke test so the startup guard and the tests cannot drift.
++    /// </summary>
++    public static string? FirstValidationError(AuthServiceOptions options)
++    {
++        ArgumentNullException.ThrowIfNull(options);
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.Authority))
++        {
++            return "Auth:Keycloak:Authority must be set (see AuthServiceOptions).";
++        }
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.ClientId))
++        {
++            return "Auth:Keycloak:ClientId must be set (see AuthServiceOptions).";
++        }
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.ClientSecret))
++        {
++            return "Auth:Keycloak:ClientSecret must be set (see AuthServiceOptions).";
++        }
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.ServiceAccountClientSecret))
++        {
++            return "Auth:Keycloak:ServiceAccountClientSecret must be set (see AuthServiceOptions).";
++        }
++
++        // Timing values carry defaults, so these guards are range checks, not
++        // presence checks: a zero/negative TTL would make a one-time code
++        // immediately consumable forever, and a zero permit count would
++        // rate-limit the endpoint to nothing.
++        if (options.OneTimeCodeTtl <= TimeSpan.Zero || options.OneTimeCodeTtl > TimeSpan.FromMinutes(5))
++        {
++            return "Auth:OneTimeCodeTtl must be a positive duration of at most 5 minutes (see AuthServiceOptions).";
++        }
++
++        if (options.PortalSessionTtl <= TimeSpan.Zero)
++        {
++            return "Auth:PortalSessionTtl must be a positive duration (see AuthServiceOptions).";
++        }
++
++        if (options.CredentialEndpointRateLimitWindow <= TimeSpan.Zero)
++        {
++            return "Auth:CredentialEndpointRateLimitWindow must be a positive duration (see AuthServiceOptions).";
++        }
++
++        if (options.CredentialEndpointRateLimitPermits < 1)
++        {
++            return "Auth:CredentialEndpointRateLimitPermits must be at least 1 (see AuthServiceOptions).";
++        }
++
++        return null;
++    }
++
++    /// <summary>
++    /// Keycloak connection settings, bound from <c>Auth:Keycloak:*</c>.
++    /// The service-account credential is the <c>school-collab-auth-admin</c> client
++    /// secret (the realm import), supplied by the AppHost's
++    /// <c>keycloak-auth-admin-secret</c> parameter. It never appears in a response
++    /// body or a log line.
++    /// </summary>
++    public sealed class KeycloakOptions
++    {
++        public string Authority { get; set; } = string.Empty;
++
++        public string ClientId { get; set; } = string.Empty;
++
++        public string ClientSecret { get; set; } = string.Empty;
++
++        public string ServiceAccountClientSecret { get; set; } = string.Empty;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Program.cs b/src/SchoolCollab.Auth/Program.cs
+new file mode 100644
+index 00000000..1bba7574
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Program.cs
+@@ -0,0 +1,29 @@
++using SchoolCollab.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Core.Auth;
++
++var builder = WebApplication.CreateBuilder(args);
++
++builder.AddServiceDefaults();
++
++// Options and services are registered via extension methods (dotnet-best-practices
++// "Never": no inline services.Add*() in a feature host). AddAuthServiceOptions binds
++// + validates AuthServiceOptions on start (the validator is shared with
++// AuthServiceSmokeTests so the startup check and the tests cannot drift);
++// AddAuthServices registers the Direct-Grant exchanger and the one-time-code store.
++builder.Services.AddAuthServiceOptions(builder.Configuration);
++builder.Services.AddAuthServices();
++
++// Shared auth/tenancy: registers the OIDC + JwtBearer schemes (or TestAuth when
++// FEATURE:DisableOIDCAuth is on), the tenant bridge and ICurrentUser. The same
++// Auth:Keycloak:* env vars the options above validate are consumed here.
++builder.Services.AddAuthAndTenancy(builder.Configuration);
++
++var app = builder.Build();
++
++// Service-defaults health endpoints + the auth endpoint groups (extension
++// methods only — never inline route maps in Program.cs, per AGENTS.md).
++app.MapDefaultEndpoints();
++app.MapAuthEndpoints();
++
++app.Run();
+diff --git a/src/SchoolCollab.Auth/SchoolCollab.Auth.csproj b/src/SchoolCollab.Auth/SchoolCollab.Auth.csproj
+new file mode 100644
+index 00000000..86ba66bf
+--- /dev/null
++++ b/src/SchoolCollab.Auth/SchoolCollab.Auth.csproj
+@@ -0,0 +1,16 @@
++<Project Sdk="Microsoft.NET.Sdk.Web">
++
++  <PropertyGroup>
++    <TargetFramework>net10.0</TargetFramework>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <Nullable>enable</Nullable>
++  </PropertyGroup>
++
++  <ItemGroup>
++    <!-- No PackageReference in round A: the rate limiter (pass 3c) and everything
++         else are framework-provided. Directory.Packages.props stays untouched. -->
++    <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
++    <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
++  </ItemGroup>
++
++</Project>
+diff --git a/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs b/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs
+new file mode 100644
+index 00000000..322e44dd
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs
+@@ -0,0 +1,182 @@
++using System.Net;
++using System.Text.Json;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Outcome of a Direct-Grant exchange (spec §5.2 / D6).</summary>
++public enum DirectGrantStatus
++{
++    Success,
++    InvalidCredentials,
++    DisabledUser,
++    KeycloakUnreachable,
++}
++
++/// <summary>
++/// Result of <see cref="DirectGrantExchanger.ExchangeAsync"/>. The tokens are
++/// present only on <see cref="IsSuccess"/> and must be handed to the session
++/// custody store — they never appear in an HTTP response body, a log line or an
++/// exception message (D7 / AC9).
++/// </summary>
++public sealed record DirectGrantResult(
++    DirectGrantStatus Status,
++    string? AccessToken = null,
++    string? RefreshToken = null,
++    string? IdToken = null,
++    int ExpiresInSeconds = 0,
++    string? Detail = null)
++{
++    public bool IsSuccess => Status == DirectGrantStatus.Success;
++
++    /// <summary>Builds a success result from the token endpoint's 200 JSON payload.</summary>
++    public static DirectGrantResult SuccessFromTokenJson(string json)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(json);
++            var root = document.RootElement;
++            var accessToken = GetString(root, "access_token");
++            if (accessToken is null)
++            {
++                // A 200 without an access token is a malformed endpoint, not a
++                // credential failure: fail toward "unreachable" rather than
++                // letting an empty token be stored.
++                return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable,
++                    Detail: "the token endpoint returned 200 with no access_token");
++            }
++
++            return new DirectGrantResult(
++                DirectGrantStatus.Success,
++                AccessToken: accessToken,
++                RefreshToken: GetString(root, "refresh_token"),
++                IdToken: GetString(root, "id_token"),
++                ExpiresInSeconds: GetInt(root, "expires_in"));
++        }
++        catch (JsonException)
++        {
++            return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable,
++                Detail: "the token endpoint returned a non-JSON 200 response");
++        }
++    }
++
++    /// <summary>
++    /// Classifies a non-success token response. Credential failures are the 400/401
++    /// family; everything else (5xx, redirects, other errors) fails toward
++    /// <see cref="DirectGrantStatus.KeycloakUnreachable"/> so a healthy caller never
++    /// mistakes an endpoint outage for a bad password.
++    /// </summary>
++    public static DirectGrantResult ClassifyFailure(HttpStatusCode status, string body)
++    {
++        var description = TryGetErrorDescription(body) ?? body;
++        if (status is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized)
++        {
++            return ContainsAccountDisabled(description)
++                ? new DirectGrantResult(DirectGrantStatus.DisabledUser, Detail: description)
++                : new DirectGrantResult(DirectGrantStatus.InvalidCredentials, Detail: description);
++        }
++
++        return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable, Detail: description);
++    }
++
++    /// <summary>Convenience for transport failures (no HTTP response was received).</summary>
++    public static DirectGrantResult Unreachable() => new(DirectGrantStatus.KeycloakUnreachable);
++
++    private static bool ContainsAccountDisabled(string description)
++        => description.Contains("account disabled", StringComparison.OrdinalIgnoreCase)
++           || description.Contains("is not fully set up", StringComparison.OrdinalIgnoreCase);
++
++    private static string? TryGetErrorDescription(string body)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(body);
++            return document.RootElement.TryGetProperty("error_description", out var description)
++                ? description.GetString()
++                : null;
++        }
++        catch (JsonException)
++        {
++            return null;
++        }
++    }
++
++    private static string? GetString(JsonElement root, string name)
++        => root.TryGetProperty(name, out var value) ? value.GetString() : null;
++
++    private static int GetInt(JsonElement root, string name)
++        => root.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : 0;
++}
++
++/// <summary>
++/// Performs the OAuth2 Resource Owner Password Credentials (Direct Grant) exchange
++/// against Keycloak's token endpoint (spec §5.2 / D6). The confidential client
++/// secret stays server-side for the lifetime of the request; the returned token
++/// set is handed to the session custody store, never to a response body.
++/// </summary>
++public sealed class DirectGrantExchanger
++{
++    private readonly HttpClient _httpClient;
++    private readonly AuthServiceOptions _options;
++
++    public DirectGrantExchanger(HttpClient httpClient, IOptions<AuthServiceOptions> options)
++    {
++        _httpClient = httpClient;
++        _options = options.Value;
++    }
++
++    public async Task<DirectGrantResult> ExchangeAsync(
++        string username,
++        string password,
++        CancellationToken cancellationToken = default)
++    {
++        if (string.IsNullOrWhiteSpace(username) || password is null)
++        {
++            // No exchange is attempted for a blank credential pair: fail the same
++            // way Keycloak would, without ever sending an empty password.
++            return new DirectGrantResult(DirectGrantStatus.InvalidCredentials,
++                Detail: "username or password was blank");
++        }
++
++        var endpoint = new Uri($"{_options.Keycloak.Authority.TrimEnd('/')}/protocol/openid-connect/token");
++
++        using var form = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
++        {
++            ["grant_type"] = "password",
++            ["client_id"] = _options.Keycloak.ClientId,
++            ["client_secret"] = _options.Keycloak.ClientSecret,
++            ["username"] = username,
++            ["password"] = password,
++        });
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await _httpClient.PostAsync(endpoint, form, cancellationToken);
++        }
++        catch (HttpRequestException)
++        {
++            // Network failure / TLS / DNS: the endpoint did not answer at all.
++            return DirectGrantResult.Unreachable();
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // Caller cancellation is not a Keycloak failure — rethrow, never swallow.
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            // HttpClient timeout: the token endpoint did not answer in time.
++            return DirectGrantResult.Unreachable();
++        }
++
++        using (response)
++        {
++            var body = await response.Content.ReadAsStringAsync(cancellationToken);
++            return response.IsSuccessStatusCode
++                ? DirectGrantResult.SuccessFromTokenJson(body)
++                : DirectGrantResult.ClassifyFailure(response.StatusCode, body);
++        }
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Services/OneTimeCodeStore.cs b/src/SchoolCollab.Auth/Services/OneTimeCodeStore.cs
+new file mode 100644
+index 00000000..23ae00ef
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/OneTimeCodeStore.cs
+@@ -0,0 +1,89 @@
++using System.Collections.Concurrent;
++using System.Security.Cryptography;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Outcome of a one-time code redemption (spec §5.2 / D6).</summary>
++public enum RedeemStatus
++{
++    /// <summary>The code was valid, unexpired, bound to the given redirect URI, and consumed.</summary>
++    Success,
++    /// <summary>No live code exists under that value — either it was never issued or a previous redemption/rejection consumed it.</summary>
++    InvalidCode,
++    /// <summary>The code existed but its TTL elapsed before redemption.</summary>
++    Expired,
++    /// <summary>The code existed but is bound to a different redirect URI than the caller supplied.</summary>
++    RedirectUriMismatch,
++}
++
++/// <summary>Payload stored for a live one-time code.</summary>
++public sealed record OneTimeCodeEntry(string RedirectUri, DateTimeOffset ExpiresAtUtc);
++
++/// <summary>Redeem outcome with the consumed entry on success.</summary>
++public sealed record RedeemResult(RedeemStatus Status, OneTimeCodeEntry? Entry = null);
++
++/// <summary>
++/// Server-side store for the flag-ON one-time handshake codes (spec §5.2 / D6):
++/// single-use, short TTL (default 60 s, configured via <c>Auth:OneTimeCodeTtl</c>),
++/// and bound to the redirect URI of the originating app so a code observed in one
++/// portal call site cannot be redeemed from another. Redemption removes the entry
++/// atomically (a value-compared <c>ConcurrentDictionary.TryRemove</c>), so exactly
++/// one concurrent caller wins. The clock comes from <see cref="TimeProvider"/> (the
++/// repo's testable-clock pattern) — never <c>DateTime.UtcNow</c> directly.
++/// </summary>
++public sealed class OneTimeCodeStore
++{
++    private readonly ConcurrentDictionary<string, OneTimeCodeEntry> _codes = new(StringComparer.Ordinal);
++    private readonly TimeProvider _timeProvider;
++    private readonly TimeSpan _ttl;
++
++    public OneTimeCodeStore(TimeProvider timeProvider, IOptions<AuthServiceOptions> options)
++    {
++        _timeProvider = timeProvider;
++        _ttl = options.Value.OneTimeCodeTtl;
++    }
++
++    /// <summary>Issues a new unguessable code bound to <paramref name="redirectUri"/>.</summary>
++    public string Create(string redirectUri)
++    {
++        var code = RandomNumberGenerator.GetHexString(32);
++        _codes[code] = new OneTimeCodeEntry(redirectUri, _timeProvider.GetUtcNow() + _ttl);
++        return code;
++    }
++
++    /// <summary>
++    /// Redeems a code exactly once. A replay, an expired code and a redirect-URI
++    /// mismatch all fail; the winner of the concurrent race is the only caller that
++    /// observes <see cref="RedeemStatus.Success"/>.
++    /// </summary>
++    public RedeemResult Redeem(string code, string redirectUri)
++    {
++        if (!_codes.TryGetValue(code, out var entry))
++        {
++            return new RedeemResult(RedeemStatus.InvalidCode);
++        }
++
++        var now = _timeProvider.GetUtcNow();
++        if (entry.ExpiresAtUtc <= now)
++        {
++            _codes.TryRemove(code, out _); // sweep the dead entry
++            return new RedeemResult(RedeemStatus.Expired);
++        }
++
++        if (!string.Equals(entry.RedirectUri, redirectUri, StringComparison.Ordinal))
++        {
++            // A mismatched URI is treated as misuse: consume the code so it cannot
++            // be probed again with a different caller.
++            _codes.TryRemove(code, out _);
++            return new RedeemResult(RedeemStatus.RedirectUriMismatch);
++        }
++
++        // Value-compared removal: when two callers race, only the one whose entry
++        // snapshot still matches the dictionary wins; the loser sees false.
++        return _codes.TryRemove(new KeyValuePair<string, OneTimeCodeEntry>(code, entry))
++            ? new RedeemResult(RedeemStatus.Success, entry)
++            : new RedeemResult(RedeemStatus.InvalidCode);
++    }
++}
+diff --git a/src/SchoolCollab.Auth/appsettings.json b/src/SchoolCollab.Auth/appsettings.json
+new file mode 100644
+index 00000000..1990e489
+--- /dev/null
++++ b/src/SchoolCollab.Auth/appsettings.json
+@@ -0,0 +1,12 @@
++{
++  "Logging": {
++    "LogLevel": {
++      "Default": "Information",
++      "Microsoft.AspNetCore": "Warning"
++    }
++  },
++  "AllowedHosts": "*",
++  "FeatureFlags": {
++    "FEATURE:DisableOIDCAuth": "true"
++  }
++}
+diff --git a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+index 3aaec1fc..73bda558 100644
+--- a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
++++ b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+@@ -95,6 +95,12 @@ public static class AuthTenancyExtensions
+                     options.ResponseType = "code";
+                     options.SaveTokens = true;
+ 
++                    // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
++                    // protocol mapper emits a flat `roles` claim on the ID token; pinning
++                    // RoleClaimType here makes [Authorize(Roles=...)] resolve from that claim.
++                    // Must stay identical to the JwtBearer value below (cookie/bearer parity).
++                    options.TokenValidationParameters.RoleClaimType = "roles";
++
+                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
+                     // an http:// authority is rejected unless metadata HTTPS is relaxed.
+                     // Production MUST keep this true (default) — gate on the dev flag.
+@@ -116,6 +122,11 @@ public static class AuthTenancyExtensions
+                     // realm's oidc-audience-mapper emits aud=clientId on the access token.
+                     options.Audience = keycloakClientId;
+ 
++                    // D9 parity with the OIDC path: the same `roles` claim from the realm's
++                    // `User Realm Role` mapper travels on the access token, so bearer and
++                    // cookie authorization resolve roles identically.
++                    options.TokenValidationParameters.RoleClaimType = "roles";
++
+                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority) —
+                     // production MUST keep this false (default). Same dev-gating note as the
+                     // OIDC branch above.
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs
+new file mode 100644
+index 00000000..3c1a5bd9
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs
+@@ -0,0 +1,108 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Options-validator coverage for pass 3a (plan step 6): the shared
++/// <see cref="AuthServiceOptions.FirstValidationError"/> used by Program.cs's
++/// ValidateOnStart rejects EACH missing required Keycloak value, the new timing
++/// values carry safe defaults, and the range guards on them reject misconfiguration.
++/// </summary>
++[TestClass]
++public class AuthServiceOptionsTests
++{
++    private static AuthServiceOptions Valid()
++        => new()
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++
++    [DataTestMethod]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.Authority), "Auth:Keycloak:Authority")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ClientId), "Auth:Keycloak:ClientId")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ClientSecret), "Auth:Keycloak:ClientSecret")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ServiceAccountClientSecret), "Auth:Keycloak:ServiceAccountClientSecret")]
++    public void Validator_RejectsEachMissingRequiredKeycloakValue(string memberName, string expectedSectionName)
++    {
++        var options = Valid();
++
++        switch (memberName)
++        {
++            case nameof(AuthServiceOptions.KeycloakOptions.Authority):
++                options.Keycloak.Authority = string.Empty;
++                break;
++            case nameof(AuthServiceOptions.KeycloakOptions.ClientId):
++                options.Keycloak.ClientId = string.Empty;
++                break;
++            case nameof(AuthServiceOptions.KeycloakOptions.ClientSecret):
++                options.Keycloak.ClientSecret = string.Empty;
++                break;
++            default:
++                options.Keycloak.ServiceAccountClientSecret = string.Empty;
++                break;
++        }
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().NotBeNull();
++        failure.Should().Contain(expectedSectionName,
++            "the failing key must be named so an operator can fix the AppHost env var.");
++    }
++
++    [TestMethod]
++    public void Validator_AcceptsCompleteConfiguration()
++    {
++        AuthServiceOptions.FirstValidationError(Valid()).Should().BeNull();
++    }
++
++    [TestMethod]
++    public void TimingDefaults_AreSafe()
++    {
++        var options = Valid();
++
++        options.OneTimeCodeTtl.Should().BeGreaterThan(TimeSpan.Zero)
++            .And.BeLessThanOrEqualTo(TimeSpan.FromSeconds(60),
++                "the plan pins the one-time code TTL default at <= 60 s (spec §5.2).");
++        options.PortalSessionTtl.Should().BePositive();
++        options.CredentialEndpointRateLimitWindow.Should().BePositive();
++        options.CredentialEndpointRateLimitPermits.Should().BeGreaterThanOrEqualTo(1);
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroOneTimeCodeTtl()
++    {
++        var options = Valid();
++        options.OneTimeCodeTtl = TimeSpan.Zero;
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().Contain("OneTimeCodeTtl",
++            "a zero TTL would make a single-use code live forever.");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroPortalSessionTtl()
++    {
++        var options = Valid();
++        options.PortalSessionTtl = TimeSpan.Zero;
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("PortalSessionTtl");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroCredentialEndpointRateLimitPermits()
++    {
++        var options = Valid();
++        options.CredentialEndpointRateLimitPermits = 0;
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("CredentialEndpointRateLimitPermits");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceSmokeTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceSmokeTests.cs
+new file mode 100644
+index 00000000..625ecb6b
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceSmokeTests.cs
+@@ -0,0 +1,54 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Smoke test proving the auth service skeleton's wiring is real (AC-A-C): the
++/// shared validator used by Program.cs's
++/// <c>AddOptions&lt;AuthServiceOptions&gt;().Validate(...).ValidateOnStart()</c>
++/// rejects a missing Keycloak client id, so a host launched without the AppHost's
++/// <c>Auth__Keycloak__*</c> env vars fails fast at startup instead of surfacing
++/// mid-request.
++/// </summary>
++[TestClass]
++public class AuthServiceSmokeTests
++{
++    [TestMethod]
++    public void OptionsValidator_RejectsMissingKeycloakClientId()
++    {
++        var options = new AuthServiceOptions
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().NotBeNull();
++        failure.Should().Contain("ClientId",
++            "the missing value must be named so an operator can fix the AppHost env var.");
++    }
++
++    [TestMethod]
++    public void OptionsValidator_AcceptsCompleteConfiguration()
++    {
++        var options = new AuthServiceOptions
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++
++        AuthServiceOptions.FirstValidationError(options).Should().BeNull();
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/DirectGrantExchangeTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/DirectGrantExchangeTests.cs
+new file mode 100644
+index 00000000..ccbf6dfa
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/DirectGrantExchangeTests.cs
+@@ -0,0 +1,166 @@
++using System.Net;
++using System.Web;
++using FluentAssertions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Moq;
++using Moq.Protected;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Direct-Grant exchange coverage (plan step 6): the happy path, every failure
++/// taxonomy branch, and the outgoing request shape — the repo's MockHttp matcher
++/// pitfall is handled by asserting the request method explicitly (it must be POST)
++/// and by reading the form body inside the mocked SendAsync.
++/// </summary>
++[TestClass]
++public class DirectGrantExchangeTests
++{
++    private static readonly Uri TokenEndpoint =
++        new("http://keycloak:8080/realms/school-collab/protocol/openid-connect/token");
++
++    private static readonly AuthServiceOptions Options = new()
++    {
++        Keycloak = new AuthServiceOptions.KeycloakOptions
++        {
++            Authority = "http://keycloak:8080/realms/school-collab",
++            ClientId = "school-collab-client",
++            ClientSecret = "a-client-secret",
++            ServiceAccountClientSecret = "a-service-account-secret",
++        },
++    };
++
++    private static Mock<HttpMessageHandler> RespondingHandler(
++        HttpStatusCode status,
++        string body,
++        Action<HttpRequestMessage, string>? observe = null)
++    {
++        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send =
++            async (request, _) =>
++            {
++                var requestBody = request.Content is null
++                    ? string.Empty
++                    : await request.Content.ReadAsStringAsync(CancellationToken.None);
++                observe?.Invoke(request, requestBody);
++                return new HttpResponseMessage(status) { Content = new StringContent(body) };
++            };
++
++        var handler = new Mock<HttpMessageHandler>();
++        handler.Protected()
++            .Setup<Task<HttpResponseMessage>>(
++                "SendAsync",
++                ItExpr.IsAny<HttpRequestMessage>(),
++                ItExpr.IsAny<CancellationToken>())
++            .Returns(send);
++        return handler;
++    }
++
++    private static Mock<HttpMessageHandler> ThrowingHandler(Exception exception)
++    {
++        var handler = new Mock<HttpMessageHandler>();
++        handler.Protected()
++            .Setup<Task<HttpResponseMessage>>(
++                "SendAsync",
++                ItExpr.IsAny<HttpRequestMessage>(),
++                ItExpr.IsAny<CancellationToken>())
++            .ThrowsAsync(exception);
++        return handler;
++    }
++
++    private static DirectGrantExchanger Exchange(Mock<HttpMessageHandler> handler)
++        => new(new HttpClient(handler.Object), Microsoft.Extensions.Options.Options.Create(Options));
++
++    [TestMethod]
++    public async Task Exchange_Success_ReturnsTheTokenSet()
++    {
++        var handler = RespondingHandler(HttpStatusCode.OK, """
++            {"access_token":"at-1","refresh_token":"rt-1","id_token":"it-1","expires_in":300,"token_type":"Bearer"}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.Success);
++        result.IsSuccess.Should().BeTrue();
++        result.AccessToken.Should().Be("at-1");
++        result.RefreshToken.Should().Be("rt-1");
++        result.IdToken.Should().Be("it-1");
++        result.ExpiresInSeconds.Should().Be(300);
++    }
++
++    [TestMethod]
++    public async Task Exchange_InvalidCredentials_OnUnauthorized()
++    {
++        var handler = RespondingHandler(HttpStatusCode.Unauthorized, """
++            {"error":"invalid_grant","error_description":"Invalid user credentials"}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "wrong-password");
++
++        result.Status.Should().Be(DirectGrantStatus.InvalidCredentials);
++        result.IsSuccess.Should().BeFalse();
++        result.AccessToken.Should().BeNull();
++    }
++
++    [TestMethod]
++    public async Task Exchange_DisabledUser_OnAccountDisabled()
++    {
++        var handler = RespondingHandler(HttpStatusCode.Unauthorized, """
++            {"error":"invalid_grant","error_description":"Account disabled"}
++            """);
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.DisabledUser);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task Exchange_KeycloakUnreachable_OnHttpRequestException()
++    {
++        var handler = ThrowingHandler(new HttpRequestException("connection refused"));
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.KeycloakUnreachable);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task Exchange_KeycloakUnreachable_OnServerError()
++    {
++        var handler = RespondingHandler(HttpStatusCode.InternalServerError, "oops");
++
++        var result = await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        result.Status.Should().Be(DirectGrantStatus.KeycloakUnreachable,
++            "a 5xx is an endpoint outage, not a credential verdict.");
++    }
++
++    [TestMethod]
++    public async Task Exchange_UsesExplicitPost_WithConfidentialClientCredentials()
++    {
++        HttpRequestMessage? observedRequest = null;
++        var observedBody = string.Empty;
++        var handler = RespondingHandler(
++            HttpStatusCode.OK,
++            """{"access_token":"at","expires_in":300}""",
++            (request, body) => { observedRequest = request; observedBody = body; });
++
++        await Exchange(handler).ExchangeAsync("dev-teacher", "dev-only-password");
++
++        observedRequest.Should().NotBeNull();
++        observedRequest!.Method.Should().Be(HttpMethod.Post,
++            "the token endpoint is a POST and the repo's MockHttp matcher will not infer the verb; the explicit method is asserted here.");
++        observedRequest.RequestUri.Should().Be(TokenEndpoint);
++
++        var form = HttpUtility.ParseQueryString(observedBody);
++        form["grant_type"].Should().Be("password");
++        form["client_id"].Should().Be("school-collab-client");
++        form["client_secret"].Should().Be("a-client-secret");
++        form["username"].Should().Be("dev-teacher");
++        form["password"].Should().Be("dev-only-password");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/OneTimeCodeStoreTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/OneTimeCodeStoreTests.cs
+new file mode 100644
+index 00000000..b2c60cc9
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/OneTimeCodeStoreTests.cs
+@@ -0,0 +1,112 @@
++using FluentAssertions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// One-time-code store coverage (plan step 6): single-use, TTL expiry, redirect-URI
++/// binding, and concurrent redemption with exactly one winner. The clock is a
++/// lightweight fake TimeProvider (the repo's testable-clock pattern) so TTL
++/// expiry is deterministic without wall-clock sleeps.
++/// </summary>
++[TestClass]
++public class OneTimeCodeStoreTests
++{
++    private const string Callback = "http://localhost:5300/signin-handshake";
++    private const string OtherCallback = "https://localhost:7300/signin-handshake";
++
++    private sealed class FakeTimeProvider : TimeProvider
++    {
++        public DateTimeOffset Now { get; set; } = new(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
++
++        public override DateTimeOffset GetUtcNow() => Now;
++    }
++
++    private static OneTimeCodeStore CreateStore(FakeTimeProvider clock, out AuthServiceOptions options)
++    {
++        options = new AuthServiceOptions
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++        return new OneTimeCodeStore(clock, Microsoft.Extensions.Options.Options.Create(options));
++    }
++
++    [TestMethod]
++    public void Redeem_WithMatchingRedirectUri_SucceedsOnce()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        var first = store.Redeem(code, Callback);
++        first.Status.Should().Be(RedeemStatus.Success);
++        first.Entry.Should().NotBeNull();
++        first.Entry!.RedirectUri.Should().Be(Callback);
++
++        store.Redeem(code, Callback).Status.Should().Be(RedeemStatus.InvalidCode,
++            "a redeemed code is single-use and may never be replayed.");
++    }
++
++    [TestMethod]
++    public void Redeem_UnknownCode_IsInvalid()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++
++        store.Redeem("00000000000000000000000000000000", Callback).Status
++            .Should().Be(RedeemStatus.InvalidCode);
++    }
++
++    [TestMethod]
++    public void Redeem_AfterTtlExpiry_IsRejected()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        clock.Now = clock.Now.Add(TimeSpan.FromSeconds(61));
++
++        store.Redeem(code, Callback).Status.Should().Be(RedeemStatus.Expired);
++    }
++
++    [TestMethod]
++    public void Redeem_WithMismatchedRedirectUri_IsRejected()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        var verdict = store.Redeem(code, OtherCallback);
++
++        verdict.Status.Should().Be(RedeemStatus.RedirectUriMismatch,
++            "a code is bound to the originating app's redirect URI (spec §5.2 / D6).");
++    }
++
++    [TestMethod]
++    public void Redeem_ConcurrentCallers_ExactlyOneWinner()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var code = store.Create(Callback);
++
++        var tasks = Enumerable.Range(0, 8)
++            .Select(_ => Task.Run(() => store.Redeem(code, Callback)))
++            .ToArray();
++        Task.WaitAll(tasks);
++
++        var winners = tasks.Count(t => t.Result.Status == RedeemStatus.Success);
++        winners.Should().Be(1,
++            "redemption removes the entry atomically — exactly one concurrent caller may win.");
++        tasks.Select(t => t.Result.Status).Distinct().Should().OnlyContain(
++            status => status == RedeemStatus.Success || status == RedeemStatus.InvalidCode);
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/SchoolCollab.Auth.Tests.Unit.csproj b/tests/SchoolCollab.Auth.Tests.Unit/SchoolCollab.Auth.Tests.Unit.csproj
+new file mode 100644
+index 00000000..467f81c6
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/SchoolCollab.Auth.Tests.Unit.csproj
+@@ -0,0 +1,24 @@
++<Project Sdk="Microsoft.NET.Sdk">
++
++  <PropertyGroup>
++    <OutputType>Exe</OutputType>
++    <EnableMSTestRunner>true</EnableMSTestRunner>
++    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
++    <TargetFramework>net10.0</TargetFramework>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <Nullable>enable</Nullable>
++    <IsPackable>false</IsPackable>
++    <RootNamespace>SchoolCollab.Auth.Tests.Unit</RootNamespace>
++  </PropertyGroup>
++
++  <ItemGroup>
++    <PackageReference Include="MSTest" />
++    <PackageReference Include="Moq" />
++    <PackageReference Include="FluentAssertions" />
++  </ItemGroup>
++
++  <ItemGroup>
++    <ProjectReference Include="..\..\src\SchoolCollab.Auth\SchoolCollab.Auth.csproj" />
++  </ItemGroup>
++
++</Project>
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+index 1108200c..f23c2bea 100644
+--- a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+@@ -71,6 +71,23 @@ public class AuthWiringTests
+ 
+         (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
+             .Should().NotBeNull("the Blazor hosts keep the OIDC code flow");
++
++        // D9 parity: both handlers must resolve roles from the flat `roles` claim the
++        // realm's `User Realm Role` mapper emits (on the ID token and on the access
++        // token), so [Authorize(Roles=...)] behaves identically over the cookie and
++        // bearer paths. This asserts the WIRING and claim shape, not live gate
++        // behaviour (the round's honesty note: live checks need a running Keycloak).
++        jwt.TokenValidationParameters.RoleClaimType.Should().Be(
++            "roles",
++            "the bearer path must pin RoleClaimType to the realm's flat `roles` claim (D9)");
++
++        var oidc = provider
++            .GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
++            .Get(OpenIdConnectDefaults.AuthenticationScheme);
++
++        oidc.TokenValidationParameters.RoleClaimType.Should().Be(
++            "roles",
++            "the OIDC cookie path must pin the same RoleClaimType as the bearer path (D9)");
+     }
+ 
+     [TestMethod]

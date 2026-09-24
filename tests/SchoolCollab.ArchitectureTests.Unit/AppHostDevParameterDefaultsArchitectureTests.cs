@@ -6,12 +6,12 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 
 /// <summary>
 /// Guards the AppHost's committed DEV-ONLY parameter defaults (keycloak-dev-defaults round).
-/// Four parameters — <c>keycloak-admin-password</c>, <c>keycloak-client-secret</c>,
-/// <c>smtp-user</c> and <c>smtp-password</c> — had no value in any Development config
-/// source, so Aspire stopped and prompted on a plain <c>aspire run</c>. Their defaults now
-/// live in <c>appsettings.Development.json</c>, which is NOT loaded outside Development, so
-/// the "no committed production secret" posture is preserved. That posture is asserted here
-/// by requiring the same four keys to be ABSENT from the non-Development
+/// Five DEV-ONLY parameters — <c>keycloak-admin-password</c>, <c>keycloak-client-secret</c>,
+/// <c>keycloak-auth-admin-secret</c>, <c>smtp-user</c> and <c>smtp-password</c> — had no value in
+/// any Development config source, so Aspire stopped and prompted on a plain <c>aspire run</c>. Their
+/// defaults now live in <c>appsettings.Development.json</c>, which is NOT loaded outside
+/// Development, so the "no committed production secret" posture is preserved. That posture is
+/// asserted here by requiring the same keys to be ABSENT from the non-Development
 /// <c>appsettings.json</c> — i.e. they are DEV-ONLY, never merely defaulted.
 /// <para>
 /// The client-secret default must equal the realm import file's <c>school-collab-client</c>
@@ -22,12 +22,20 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 /// Discovery THROWS rather than passing vacuously when the AppHost directory or either JSON
 /// file is missing (the <c>AppHostRealmImportArchitectureTests</c> precedent).
 /// </para>
+/// <para>
+/// A committed dev default is not evidence that the parameter EXISTS: one round shipped a dev
+/// default and documentation for <c>keycloak-auth-admin-secret</c> while the <c>AddParameter(...)</c>
+/// declaration was never written, and the JSON-only guards stayed green.
+/// <c>EveryDevParameterDefault_IsDeclaredAsAnAppHostParameter</c> ties each dev default back to a
+/// real <c>AddParameter("&lt;key&gt;")</c> call in the AppHost source.
+/// </para>
 /// </summary>
 [TestClass]
 public class AppHostDevParameterDefaultsArchitectureTests
 {
     private const string KeycloakAdminPasswordKey = "keycloak-admin-password";
     private const string KeycloakClientSecretKey = "keycloak-client-secret";
+    private const string KeycloakAuthAdminSecretKey = "keycloak-auth-admin-secret";
     private const string SmtpUserKey = "smtp-user";
     private const string SmtpPasswordKey = "smtp-password";
 
@@ -82,10 +90,46 @@ public class AppHostDevParameterDefaultsArchitectureTests
         }
     }
 
+    [TestMethod]
+    public void DevAuthAdminSecret_MatchesRealmFileServiceAccountClientSecret()
+    {
+        var realmSecret = ReadRealmClientSecret(RealmPath, "school-collab-auth-admin");
+        var devSecret = ReadParameters(DevSettingsPath)[KeycloakAuthAdminSecretKey];
+
+        devSecret.Should().Be(realmSecret,
+            "the committed dev `keycloak-auth-admin-secret` must equal the realm import file's "
+            + "`school-collab-auth-admin` secret — a mismatch makes Keycloak reject the Admin REST "
+            + "client_credentials grant on the first admin call, and it surfaces only at runtime.");
+    }
+
+    [TestMethod]
+    public void EveryDevParameterDefault_IsDeclaredAsAnAppHostParameter()
+    {
+        var devParameters = ReadParameters(DevSettingsPath);
+        devParameters.Should().NotBeEmpty(
+            "the dev-default guard must not pass vacuously over an empty parameter set.");
+
+        // Direction matters: JSON -> code. Reading only the JSON is exactly how a missing
+        // `AddParameter` declaration went unnoticed while every guard stayed green.
+        var appHostSource = File.ReadAllText(FindAppHostFile("Program.cs"));
+        var missing = devParameters.Keys
+            .Where(key => !appHostSource.Contains($"AddParameter(\"{key}\"", StringComparison.Ordinal))
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToList();
+
+        missing.Should().BeEmpty(
+            "every committed dev default (appsettings.Development.json `Parameters:`) must be backed "
+            + "by a real Aspire parameter declaration (`AddParameter(\"<key>\"` in the AppHost "
+            + "Program.cs). Precedent: `keycloak-auth-admin-secret` carried a dev default and "
+            + "documentation while `builder.AddParameter(\"keycloak-auth-admin-secret\", secret: true)` "
+            + "was never written — every other guard stayed green because it read only the JSON. "
+            + "Missing declarations: " + string.Join(", ", missing) + ".");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────
 
     private static string[] PromptingSecretParameterKeys()
-        => new[] { KeycloakAdminPasswordKey, KeycloakClientSecretKey, SmtpUserKey, SmtpPasswordKey };
+        => new[] { KeycloakAdminPasswordKey, KeycloakClientSecretKey, KeycloakAuthAdminSecretKey, SmtpUserKey, SmtpPasswordKey };
 
     /// <summary>Reads a file's <c>Parameters</c> section as a key → value map. THROWS when
     /// the section is absent, so a missing block cannot make the assertions above pass

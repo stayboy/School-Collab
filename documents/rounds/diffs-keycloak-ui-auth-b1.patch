@@ -1,0 +1,545 @@
+diff --git a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+index 3aaec1fc..7a6c8300 100644
+--- a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
++++ b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+@@ -1,3 +1,4 @@
++using System.Security.Claims;
+ using Microsoft.AspNetCore.Authentication;
+ using Microsoft.AspNetCore.Authentication.Cookies;
+ using Microsoft.AspNetCore.Authentication.JwtBearer;
+@@ -23,6 +24,17 @@ public static class AuthTenancyExtensions
+     /// </summary>
+     public const string BearerScheme = "Bearer";
+ 
++    /// <summary>
++    /// The challenge-routing policy scheme (round B, design P1-2). Registered as
++    /// <see cref="AuthenticationOptions.DefaultChallengeScheme"/> in the OIDC branch so that
++    /// <c>AddOpenIdConnect</c> no longer challenges Keycloak unconditionally: the scheme
++    /// forwards the challenge to <see cref="OpenIdConnectDefaults.AuthenticationScheme"/> when
++    /// <c>FEATURE:DisableKeycloakLoginUi</c> is OFF (today's behaviour, unchanged) and to
++    /// <see cref="PortalRedirectChallengeHandler.SchemeName"/> when it is ON. The target is
++    /// chosen once, at startup (D5) — auth pipelines are fixed at startup.
++    /// </summary>
++    public const string LoginUiChallengeScheme = "LoginUiChallenge";
++
+     /// <summary>
+     /// Adds cookie + OpenID Connect authentication using Keycloak and wires the current tenant
+     /// from token claims into <see cref="ITenantProvider"/> via <see cref="TenantClaimsTransformation"/>.
+@@ -78,12 +90,29 @@ public static class AuthTenancyExtensions
+             var keycloakClientId = configuration["Auth:Keycloak:ClientId"]
+                 ?? "school-collab-client";
+ 
++            // D4/D5: which login UI the Blazor hosts present. Read ONCE here at startup —
++            // the challenge target is baked into the policy scheme below, the same
++            // "pipeline fixed at startup" posture as DisableOIDCAuth above. It only re-routes
++            // the challenge; validation/authorization stay identical in both states.
++            var disableKeycloakLoginUi = IsFlagEnabled(
++                configuration,
++                FeatureFlagKeys.DisableKeycloakLoginUi);
++
+             // Authentication + authorization
+-            services
++            var authentication = services
+                 .AddAuthentication(options =>
+                 {
+                     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+-                    options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
++                    // Not OpenIdConnect directly: the policy scheme below forwards to the
++                    // scheme the login-UI flag selected. OFF is today's OIDC challenge
++                    // (the forward target is the OIDC scheme).
++                    options.DefaultChallengeScheme = LoginUiChallengeScheme;
++                })
++                .AddPolicyScheme(LoginUiChallengeScheme, "Login UI challenge routing", policy =>
++                {
++                    policy.ForwardChallenge = disableKeycloakLoginUi
++                        ? PortalRedirectChallengeHandler.SchemeName
++                        : OpenIdConnectDefaults.AuthenticationScheme;
+                 })
+                 .AddCookie()
+                 .AddOpenIdConnect(options =>
+@@ -95,6 +124,18 @@ public static class AuthTenancyExtensions
+                     options.ResponseType = "code";
+                     options.SaveTokens = true;
+ 
++                    // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
++                    // protocol mapper emits a flat `roles` claim on the ID token, and the
++                    // handler's DEFAULT inbound mapping (MapInboundClaims=true — nothing in the
++                    // repo overrides it) renames that claim to ClaimTypes.Role. Pinning the
++                    // MAPPED type here is what makes [Authorize(Roles=...)]/RequireRole resolve
++                    // from the claim that actually survives. Pinning the literal "roles" was
++                    // PROVEN ineffective (pass-3d corrective pass: the round's /auth/admin gate
++                    // rejected every authenticated caller under the default mapping until the
++                    // pin was corrected; 12 gate tests failed with the literal pin). Must stay
++                    // identical to the JwtBearer value below (cookie/bearer parity).
++                    options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
++
+                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
+                     // an http:// authority is rejected unless metadata HTTPS is relaxed.
+                     // Production MUST keep this true (default) — gate on the dev flag.
+@@ -116,6 +157,13 @@ public static class AuthTenancyExtensions
+                     // realm's oidc-audience-mapper emits aud=clientId on the access token.
+                     options.Audience = keycloakClientId;
+ 
++                    // D9 parity with the OIDC path: the same claim travels on the access token
++                    // and the same default inbound mapping renames it to ClaimTypes.Role, so the
++                    // pinned type stays identical to the OIDC value above and bearer roles
++                    // resolve exactly like cookie roles. (Same corrective-pass evidence as the
++                    // OIDC comment.)
++                    options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
++
+                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority) —
+                     // production MUST keep this false (default). Same dev-gating note as the
+                     // OIDC branch above.
+@@ -127,6 +175,18 @@ public static class AuthTenancyExtensions
+                     // mappers with access.token.claim=true), so ICurrentUser reads the same
+                     // claim shape from a bearer token as from the OIDC cookie. No mapping here.
+                 });
++
++            if (disableKeycloakLoginUi)
++            {
++                // Registered only with the flag ON: with it OFF the policy scheme forwards to
++                // OIDC and this handler is unreachable, keeping the OFF pipeline identical to
++                // the pre-flag one. The login URL is a startup read of Auth:Portal:LoginUrl
++                // (env-var Auth__Portal__LoginUrl) fanned to the browser-facing hosts only;
++                // absent here it makes the handler fail closed with 401.
++                authentication.AddScheme<PortalRedirectChallengeOptions, PortalRedirectChallengeHandler>(
++                    PortalRedirectChallengeHandler.SchemeName,
++                    options => options.LoginUrl = configuration["Auth:Portal:LoginUrl"]);
++            }
+         }
+ 
+         services.AddAuthorization();
+diff --git a/src/SchoolCollab.Core/Auth/PortalRedirectChallengeHandler.cs b/src/SchoolCollab.Core/Auth/PortalRedirectChallengeHandler.cs
+new file mode 100644
+index 00000000..4f104964
+--- /dev/null
++++ b/src/SchoolCollab.Core/Auth/PortalRedirectChallengeHandler.cs
+@@ -0,0 +1,102 @@
++using System.Text.Encodings.Web;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++
++namespace SchoolCollab.Core.Auth;
++
++/// <summary>
++/// Options for <see cref="PortalRedirectChallengeHandler"/>.
++/// </summary>
++public sealed class PortalRedirectChallengeOptions : AuthenticationSchemeOptions
++{
++    /// <summary>
++    /// Absolute URL of the auth portal's login page — configuration key
++    /// <c>Auth:Portal:LoginUrl</c> (env-var <c>Auth__Portal__LoginUrl</c>), supplied by the
++    /// AppHost to the browser-facing Blazor hosts only. When null or blank the handler
++    /// fails closed with <c>401</c> instead of redirecting (see
++    /// <see cref="PortalRedirectChallengeHandler"/>).
++    /// </summary>
++    public string? LoginUrl { get; set; }
++}
++
++/// <summary>
++/// The custom-login-UI challenge handler (spec D4/D5, round-B design P1-2). Registered as an
++/// authentication scheme named <see cref="SchemeName"/> and selected as the forward-challenge
++/// target of the <see cref="AuthTenancyExtensions.LoginUiChallengeScheme"/> policy scheme when
++/// <c>FEATURE:DisableKeycloakLoginUi</c> is ON.
++/// </summary>
++/// <remarks>
++/// <para>
++/// A gated page's challenge becomes a <c>302</c> to
++/// <c>{Auth:Portal:LoginUrl}?return_uri=&lt;app handshake callback&gt;</c>, where the callback is
++/// derived from the request (<c>{scheme}://{host}{pathBase}/signin-handshake</c>) so it matches
++/// the origin the browser actually used, and the blocked in-app path travels with it as the
++/// nested <c>ReturnUrl</c> parameter for post-handshake continuation (D6). The portal validates
++/// the callback against its app-callback allowlist before rendering, and the auth service
++/// enforces the same allowlist at code issuance.
++/// </para>
++/// <para>
++/// <b>Fail-closed:</b> when the portal login URL is not configured the handler answers
++/// <c>401</c> — it must never emit a blank redirect and must never silently fall back to
++/// Keycloak's hosted page (which is the UI the flag turned off). Keycloak itself is unaffected:
++/// the auth service receives the flag but not the browser-facing login URL.
++/// </para>
++/// </remarks>
++public sealed class PortalRedirectChallengeHandler : AuthenticationHandler<PortalRedirectChallengeOptions>
++{
++    /// <summary>The scheme name this handler is registered under.</summary>
++    public const string SchemeName = "PortalRedirect";
++
++    /// <summary>The query parameter carrying the app callback the portal must return to (spec D6).</summary>
++    public const string ReturnUriParameter = "return_uri";
++
++    /// <summary>The query parameter carrying the blocked in-app path on the handshake callback.</summary>
++    public const string ReturnUrlParameter = "ReturnUrl";
++
++    /// <summary>The handshake callback path each Blazor host exposes for D6 code redemption.</summary>
++    public const string HandshakeCallbackPath = "/signin-handshake";
++
++    public PortalRedirectChallengeHandler(
++        IOptionsMonitor<PortalRedirectChallengeOptions> options,
++        ILoggerFactory logger,
++        UrlEncoder encoder)
++        : base(options, logger, encoder) { }
++
++    /// <summary>
++    /// This scheme only routes challenges; it never authenticates a caller, so it is
++    /// explicitly a non-participant in the authenticate step (<c>NoResult</c>) rather than a
++    /// silent failure.
++    /// </summary>
++    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
++        => Task.FromResult(AuthenticateResult.NoResult());
++
++    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
++    {
++        var loginUrl = Options.LoginUrl;
++
++        if (string.IsNullOrWhiteSpace(loginUrl))
++        {
++            Logger.LogWarning(
++                "Custom login UI is enabled but Auth:Portal:LoginUrl is not configured; "
++                + "failing the challenge closed with 401 instead of redirecting to Keycloak.");
++
++            Response.StatusCode = StatusCodes.Status401Unauthorized;
++            return Task.CompletedTask;
++        }
++
++        var request = Request;
++        var pathBase = request.PathBase.Value ?? string.Empty;
++        var returnUrl = $"{pathBase}{request.Path.Value}{request.QueryString.Value}";
++
++        var handshakeCallback = $"{request.Scheme}://{request.Host}{pathBase}{HandshakeCallbackPath}";
++        var returnUri = $"{handshakeCallback}?{ReturnUrlParameter}={Uri.EscapeDataString(returnUrl)}";
++
++        var separator = loginUrl.Contains('?', StringComparison.Ordinal) ? '&' : '?';
++        Response.Redirect(
++            $"{loginUrl}{separator}{ReturnUriParameter}={Uri.EscapeDataString(returnUri)}");
++
++        return Task.CompletedTask;
++    }
++}
+diff --git a/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs b/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs
+index 1e0b9a7a..b6da1ff5 100644
+--- a/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs
++++ b/src/SchoolCollab.Core/Features/FeatureFlagKeys.cs
+@@ -19,6 +19,16 @@ public static class FeatureFlagKeys
+     /// </summary>
+     public const string DisableOIDCAuth = "FEATURE:DisableOIDCAuth";
+ 
++    /// <summary>
++    /// Toggles <b>which login UI</b> a Blazor host presents (spec D4/D5): OFF (default)
++    /// keeps Keycloak's hosted page via the standard OIDC code flow; ON forwards the
++    /// challenge to the prefab auth portal's login form, which exchanges credentials
++    /// through the auth service (D6 handshake). Pure UI toggle — read once at startup by
++    /// <c>AddAuthAndTenancy</c> to select the policy scheme's forward-challenge target;
++    /// authentication, validation and authorization are identical in both states.
++    /// </summary>
++    public const string DisableKeycloakLoginUi = "FEATURE:DisableKeycloakLoginUi";
++
+     /// <summary>
+     /// Enables the AI chat assistant on the Coded Values landing page.
+     /// </summary>
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+index 1108200c..8e080318 100644
+--- a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+@@ -1,3 +1,4 @@
++using System.Security.Claims;
+ using FluentAssertions;
+ using Microsoft.AspNetCore.Authentication;
+ using Microsoft.AspNetCore.Authentication.JwtBearer;
+@@ -24,20 +25,34 @@ public class AuthWiringTests
+     private const string Authority = "http://localhost:8080/realms/school-collab";
+     private const string ClientId = "school-collab-client";
+     private const string ClientSecret = "dev-only-school-collab-client-secret";
++    private const string PortalLoginUrl = "https://localhost:5600/login";
+ 
+-    private static ServiceProvider Build(bool disableOidc)
++    private static ServiceProvider Build(
++        bool disableOidc,
++        bool disableKeycloakLoginUi = false,
++        string? portalLoginUrl = null)
+     {
++        var settings = new Dictionary<string, string?>
++        {
++            // Canonical flag key shape (configuration.md §5): FeatureFlags:FEATURE:<key>.
++            // A bare "FeatureFlags:DisableOIDCAuth" is NOT what the hosts set — getting this
++            // wrong silently exercises the OIDC branch in the TestAuth test (caught here).
++            ["FeatureFlags:FEATURE:DisableOIDCAuth"] = disableOidc ? "true" : "false",
++            ["FeatureFlags:FEATURE:DisableKeycloakLoginUi"] = disableKeycloakLoginUi ? "true" : "false",
++            ["Auth:Keycloak:Authority"] = Authority,
++            ["Auth:Keycloak:ClientId"] = ClientId,
++            ["Auth:Keycloak:ClientSecret"] = ClientSecret,
++        };
++
++        // B3 fans Auth:Portal:LoginUrl to the browser-facing hosts only; its absence is the
++        // fail-closed case the challenge-handler tests pin.
++        if (portalLoginUrl is not null)
++        {
++            settings["Auth:Portal:LoginUrl"] = portalLoginUrl;
++        }
++
+         var configuration = new ConfigurationBuilder()
+-            .AddInMemoryCollection(new Dictionary<string, string?>
+-            {
+-                // Canonical flag key shape (configuration.md §5): FeatureFlags:FEATURE:<key>.
+-                // A bare "FeatureFlags:DisableOIDCAuth" is NOT what the hosts set — getting this
+-                // wrong silently exercises the OIDC branch in the TestAuth test (caught here).
+-                ["FeatureFlags:FEATURE:DisableOIDCAuth"] = disableOidc ? "true" : "false",
+-                ["Auth:Keycloak:Authority"] = Authority,
+-                ["Auth:Keycloak:ClientId"] = ClientId,
+-                ["Auth:Keycloak:ClientSecret"] = ClientSecret,
+-            })
++            .AddInMemoryCollection(settings)
+             .Build();
+ 
+         var services = new ServiceCollection();
+@@ -71,6 +86,24 @@ public class AuthWiringTests
+ 
+         (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
+             .Should().NotBeNull("the Blazor hosts keep the OIDC code flow");
++
++        // D9 parity: both handlers must resolve roles from the flat `roles` claim the
++        // realm's `User Realm Role` mapper emits (on the ID token and on the access
++        // token), so [Authorize(Roles=...)] behaves identically over the cookie and
++        // bearer paths. This asserts the WIRING and claim shape, not live gate
++        // behaviour (the round's honesty note: live checks need a running Keycloak).
++        jwt.TokenValidationParameters.RoleClaimType.Should().Be(
++            ClaimTypes.Role,
++            "the bearer path must pin RoleClaimType to the type the default inbound mapping produces — "
++            + "the realm's flat `roles` claim is renamed to ClaimTypes.Role, so the literal name could never match (D9)");
++
++        var oidc = provider
++            .GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
++            .Get(OpenIdConnectDefaults.AuthenticationScheme);
++
++        oidc.TokenValidationParameters.RoleClaimType.Should().Be(
++            ClaimTypes.Role,
++            "the OIDC cookie path must pin the same RoleClaimType as the bearer path (D9)");
+     }
+ 
+     [TestMethod]
+@@ -93,4 +126,78 @@ public class AuthWiringTests
+             TestAuthExtensions.TestAuthScheme,
+             "TestAuth must be the default authenticate scheme in this mode");
+     }
++
++    [TestMethod]
++    public async Task RealAuthMode_ChallengesThroughLoginUiPolicyScheme_ForwardingToOidc_WhenFlagOff()
++    {
++        await using var provider = Build(disableOidc: false);
++        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
++
++        (await schemes.GetDefaultChallengeSchemeAsync())?.Name.Should().Be(
++            AuthTenancyExtensions.LoginUiChallengeScheme,
++            "the OIDC branch must no longer challenge Keycloak directly — the policy scheme is the single challenge entry point that the flag re-targets (D5, design P1-2)");
++
++        var policy = provider
++            .GetRequiredService<IOptionsMonitor<PolicySchemeOptions>>()
++            .Get(AuthTenancyExtensions.LoginUiChallengeScheme);
++
++        policy.ForwardChallenge.Should().Be(
++            OpenIdConnectDefaults.AuthenticationScheme,
++            "with the flag OFF an unauthenticated gated page must still 302 to Keycloak's hosted login exactly as before the flag existed (AC7 / round-B criterion B-A)");
++
++        (await schemes.GetSchemeAsync(PortalRedirectChallengeHandler.SchemeName))
++            .Should().BeNull(
++                "the portal-redirect handler is registered only with the flag ON, so the OFF pipeline stays the pre-flag pipeline");
++    }
++
++    [TestMethod]
++    public async Task RealAuthMode_PolicyScheme_ForwardsToPortalRedirect_WhenFlagOn()
++    {
++        await using var provider = Build(
++            disableOidc: false,
++            disableKeycloakLoginUi: true,
++            portalLoginUrl: PortalLoginUrl);
++
++        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
++
++        (await schemes.GetDefaultChallengeSchemeAsync())?.Name.Should().Be(
++            AuthTenancyExtensions.LoginUiChallengeScheme,
++            "the challenge still enters through the policy scheme; only its target changes");
++
++        var policy = provider
++            .GetRequiredService<IOptionsMonitor<PolicySchemeOptions>>()
++            .Get(AuthTenancyExtensions.LoginUiChallengeScheme);
++
++        policy.ForwardChallenge.Should().Be(
++            PortalRedirectChallengeHandler.SchemeName,
++            "with the flag ON the challenge must land on the portal-redirect handler instead of Keycloak");
++
++        (await schemes.GetSchemeAsync(PortalRedirectChallengeHandler.SchemeName))
++            .Should().NotBeNull("the flag-ON challenge target must be a registered scheme");
++
++        (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
++            .Should().NotBeNull(
++                "the OIDC handler stays registered with the flag ON — the passkey/bootstrap path (D16) and the auth service's own flow still use it");
++    }
++
++    [TestMethod]
++    public async Task TestAuthMode_RegistersNoLoginUiPolicyScheme()
++    {
++        await using var provider = Build(
++            disableOidc: true,
++            disableKeycloakLoginUi: true,
++            portalLoginUrl: PortalLoginUrl);
++
++        var registered = (await provider
++            .GetRequiredService<IAuthenticationSchemeProvider>()
++            .GetAllSchemesAsync()).Select(s => s.Name).ToArray();
++
++        registered.Should().NotContain(
++            AuthTenancyExtensions.LoginUiChallengeScheme,
++            $"the flag is a login-UI toggle for the OIDC branch only; DisableOIDCAuth must keep its own pipeline untouched (registered: {string.Join(", ", registered)})");
++
++        registered.Should().NotContain(
++            PortalRedirectChallengeHandler.SchemeName,
++            "no portal-redirect challenge can exist when OIDC itself is disabled");
++    }
+ }
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalRedirectChallengeHandlerTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalRedirectChallengeHandlerTests.cs
+new file mode 100644
+index 00000000..8aba7abe
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalRedirectChallengeHandlerTests.cs
+@@ -0,0 +1,140 @@
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Core.Tests.Unit.Auth;
++
++/// <summary>
++/// Round-B pass B1 challenge-path tests (design P1-2, spec D4/D5/D6). They drive the real
++/// registration — <see cref="AuthTenancyExtensions.AddAuthAndTenancy"/> plus the policy scheme —
++/// and issue the challenge through <see cref="IAuthenticationService"/>, so they pin both the
++/// interception (the policy scheme really does reach the portal handler) and the redirect shape
++/// the portal consumes.
++/// </summary>
++[TestClass]
++public class PortalRedirectChallengeHandlerTests
++{
++    private const string PortalLoginUrl = "https://localhost:5600/login";
++
++    private static ServiceProvider Build(bool disableKeycloakLoginUi, string? portalLoginUrl)
++    {
++        var settings = new Dictionary<string, string?>
++        {
++            ["FeatureFlags:FEATURE:DisableOIDCAuth"] = "false",
++            ["FeatureFlags:FEATURE:DisableKeycloakLoginUi"] = disableKeycloakLoginUi ? "true" : "false",
++            ["Auth:Keycloak:Authority"] = "http://localhost:8080/realms/school-collab",
++            ["Auth:Keycloak:ClientId"] = "school-collab-client",
++            ["Auth:Keycloak:ClientSecret"] = "dev-only-school-collab-client-secret",
++        };
++
++        if (portalLoginUrl is not null)
++        {
++            settings["Auth:Portal:LoginUrl"] = portalLoginUrl;
++        }
++
++        var configuration = new ConfigurationBuilder()
++            .AddInMemoryCollection(settings)
++            .Build();
++
++        var services = new ServiceCollection();
++        services.AddLogging();
++        services.AddDistributedMemoryCache();
++        services.AddAuthAndTenancy(configuration);
++        return services.BuildServiceProvider();
++    }
++
++    /// <summary>
++    /// Issues an unauthenticated-gated-page challenge (no explicit scheme ⇒ the default
++    /// challenge scheme, i.e. the policy scheme under test) on a request that looks like the
++    /// admin host on port 7300.
++    /// </summary>
++    private static async Task<HttpContext> ChallengeAsync(
++        ServiceProvider provider,
++        string path = "/admin/students",
++        string query = "?page=2")
++    {
++        var context = new DefaultHttpContext { RequestServices = provider };
++        context.Request.Scheme = "https";
++        context.Request.Host = new HostString("localhost", 7300);
++        context.Request.Path = path;
++        context.Request.QueryString = new QueryString(query);
++
++        await provider
++            .GetRequiredService<IAuthenticationService>()
++            .ChallengeAsync(context, scheme: null, properties: null);
++
++        return context;
++    }
++
++    private static string ExpectedHandshakeCallback(string returnUrl)
++        => "https://localhost:7300"
++            + PortalRedirectChallengeHandler.HandshakeCallbackPath
++            + $"?{PortalRedirectChallengeHandler.ReturnUrlParameter}={Uri.EscapeDataString(returnUrl)}";
++
++    [TestMethod]
++    public async Task Challenge_WhenFlagOn_RedirectsToPortalLogin_CarryingHandshakeCallbackAndBlockedPath()
++    {
++        await using var provider = Build(disableKeycloakLoginUi: true, portalLoginUrl: PortalLoginUrl);
++
++        var context = await ChallengeAsync(provider);
++
++        context.Response.StatusCode.Should().Be(
++            StatusCodes.Status302Found,
++            "flag ON must redirect the browser to the prefab login form instead of Keycloak (D4/AC7)");
++
++        context.Response.Headers.Location.ToString().Should().Be(
++            PortalLoginUrl
++            + $"?{PortalRedirectChallengeHandler.ReturnUriParameter}="
++            + Uri.EscapeDataString(ExpectedHandshakeCallback("/admin/students?page=2")),
++            "the portal needs the request-derived handshake callback (scheme+host+port so the cookie lands on the origin the browser used) and the blocked in-app path for post-handshake continuation (D6)");
++    }
++
++    [TestMethod]
++    public async Task Challenge_AppendsReturnUriWithAmpersand_WhenPortalLoginUrlAlreadyCarriesAQuery()
++    {
++        await using var provider = Build(
++            disableKeycloakLoginUi: true,
++            portalLoginUrl: PortalLoginUrl + "?tenant=acme");
++
++        var context = await ChallengeAsync(provider);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status302Found);
++        context.Response.Headers.Location.ToString().Should().Be(
++            PortalLoginUrl
++            + "?tenant=acme&"
++            + $"{PortalRedirectChallengeHandler.ReturnUriParameter}="
++            + Uri.EscapeDataString(ExpectedHandshakeCallback("/admin/students?page=2")),
++            "an already-parameterised login URL must be extended, not corrupted with a second '?'");
++    }
++
++    [TestMethod]
++    public async Task Challenge_WhenFlagOnButPortalLoginUrlMissing_FailsClosedWith401()
++    {
++        await using var provider = Build(disableKeycloakLoginUi: true, portalLoginUrl: null);
++
++        var context = await ChallengeAsync(provider);
++
++        context.Response.StatusCode.Should().Be(
++            StatusCodes.Status401Unauthorized,
++            "fail-closed: with no portal login URL configured the challenge must never emit a blank redirect and must never fall back to Keycloak's hosted page — the auth service receives the flag without the browser-facing login URL, so a Keycloak fallback would silently re-enable the UI the flag turned off (B1 hard requirement / criterion B-A)");
++
++        context.Response.Headers.Location.ToString().Should().BeEmpty(
++            "a 401 must not carry a redirect target");
++    }
++
++    [TestMethod]
++    public async Task Challenge_WhenPortalLoginUrlBlank_FailsClosedWith401()
++    {
++        await using var provider = Build(disableKeycloakLoginUi: true, portalLoginUrl: "   ");
++
++        var context = await ChallengeAsync(provider);
++
++        context.Response.StatusCode.Should().Be(
++            StatusCodes.Status401Unauthorized,
++            "a whitespace-only login URL is a configuration error, not a valid redirect target");
++    }
++}

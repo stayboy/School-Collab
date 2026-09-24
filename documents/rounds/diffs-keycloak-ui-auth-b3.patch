@@ -1,0 +1,645 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index ed869d5a..11fc9859 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -132,14 +132,16 @@ files only carry values that genuinely belong to that single service
+ | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
+ | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
+ | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
++| `feature-flag-disable-keycloak-login-ui` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:DisableKeycloakLoginUi` (round B `keycloak-ui-auth`, spec §10 / D4/D5). Injected as `FeatureFlags__FEATURE__DisableKeycloakLoginUi` into all four consumers — `admin`, `families`, `auth` and `auth-portal`. It selects **which login UI renders**: OFF (default) = Keycloak's hosted page via the standard OIDC code flow; ON = the prefab auth portal's login form. A pure UI toggle — validation and authorization are identical in both states — and it is read **at startup** (auth pipelines are registered once, exactly like `FEATURE:DisableOIDCAuth`), so it is **not** a Settings/Config-service flag. See §5. |
+ | `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
+ | `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
+ | `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
+ | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-smtp-password` (dev-only, `appsettings.Development.json`) | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. A **dev-only** default is committed in `appsettings.Development.json`; a relay that requires auth supplies the real value via user-secrets / env-var, which override it. **Never commit a production secret.** |
+ | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
+-| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
++| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, `admin`, and the `auth` service. See §4. |
+ | `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-keycloak-admin` (dev-only, `appsettings.Development.json`) | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. A **dev-only** default is committed in `appsettings.Development.json`, so a plain `aspire run` starts Keycloak without prompting; a non-dev value comes from user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, which override it (production never loads the Development file). One of the two parameters AC#4 needs; see §4. |
+-| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the same five hosts as `keycloak-client-id` above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-auth-admin-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-auth-admin-secret` (dev-only, `appsettings.Development.json`) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin` in the realm import. Injected as `Auth__Keycloak__ServiceAccountClientSecret`; read as `Auth:Keycloak:ServiceAccountClientSecret`. Consumed by the `auth` service only. The committed dev-only default **must equal the realm file's `school-collab-auth-admin` `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects the client_credentials grant on the first admin call. A user-secrets / env-var value overrides it; production supplies a real secret-store value. See §4. |
+ 
+ **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
+ 
+@@ -297,10 +299,10 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
+ ## 4. `Auth:Keycloak` — OIDC authentication
+ 
+ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
+-(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
++(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.4.7` — 26.4+ for official passkey support)
+ that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
+ (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
+-`settings-api`, and `admin`.
++`settings-api`, `admin`, and the `auth` service.
+ 
+ The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
+ `dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
+@@ -311,8 +313,8 @@ Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
+ 
+ **Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
+ management endpoint (targetPort 9000) and binds an HTTP readiness health check
+-(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
+-`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
++(`/health/ready`) to it. All five `Auth:Keycloak:*` consuming hosts — `assignments-api`,
++`students-api`, `settings-api`, `admin`, and the `auth` service — `.WaitFor(keycloak)`, so none of them fetches
+ OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
+ does not fully start until the import completes).
+ 
+@@ -320,11 +322,36 @@ does not fully start until the import completes).
+ file re-imports on every container recreate — edit the realm and recreate the container to
+ pick it up; no `docker volume rm` is needed.
+ 
++**Realm additions (round A, keycloak-ui-auth)** — all declarative in `school-collab-realm.json`, so they re-import automatically: the realm roles `user-admin` and `platform-admin`; a `User Realm Role` protocol mapper on `school-collab-client` emitting a flat `roles` claim on the ID, access **and** userinfo tokens (this is what `RoleClaimType = ClaimTypes.Role` in `AuthTenancyExtensions` resolves to after the handlers' default inbound claim mapping renames the flat `roles` claim — on both the cookie and bearer paths); the service-account client `school-collab-auth-admin` (`serviceAccountsEnabled`, granted `realm-management` `view-users`/`manage-users`/`view-realm`/`manage-realm`) that the auth service uses for the Keycloak Admin REST API; registered `redirectUris` + `webOrigins` for the two Blazor hosts (`admin` 5300/7300, `families` 5400/7400 — the OIDC code flow could never complete before these existed, plan-review P2); and the realm-level WebAuthn **Passwordless Policy** with the passkeys toggle (`webAuthnPolicyPasswordlessPasskeysEnabled`) plus the `Webauthn Register Passwordless` required action (`spec §6/§11.5`).
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+ | `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
+ | `Auth:Keycloak:ClientSecret` | `dev-only-school-collab-client-secret` (dev-only) | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the committed dev-only default for `Parameters:keycloak-client-secret` in `appsettings.Development.json`, which **must equal** the realm file's client `secret` (guarded); **production** MUST substitute a real secret-store value — no production secret is committed. |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `dev-only-school-collab-auth-admin-secret` (dev-only) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin`, bound from the AppHost's `keycloak-auth-admin-secret` parameter. **No code fallback** — the auth service validates its options on start (`ValidateOnStart`), so a missing or blank value fails the host fast at launch instead of 401-ing on the first admin call. **dev** uses the committed dev-only default for `Parameters:keycloak-auth-admin-secret`, which **must equal** the realm file's `school-collab-auth-admin` `secret` (guarded); **production** MUST substitute a real secret-store value. Consumed by the `auth` service only. |
++
++The `auth` service also carries four tunables, each with a safe default and each validated on start: `Auth:OneTimeCodeTtl` (60 s — the single-use code's lifetime; a long TTL would defeat the one-time-code mitigation), `Auth:PortalSessionTtl` (8 h — how long a portal session may live), and the credential-endpoint rate-limit pair `Auth:CredentialEndpointRateLimitWindow` (1 min) / `Auth:CredentialEndpointRateLimitPermits` (5). These are ordinary appsettings/env keys rather than AppHost parameters, so no dev default is committed for them; the §11 table below carries their env-var forms.
++
++### Round B — the auth portal's URLs (`Auth:Portal:*`, `AuthPortal:PublicBaseUrl`)
++
++Three keys distribute the auth portal's URLs (round B `keycloak-ui-auth`, spec D1/D5/D16;
++plan-review P2-5). None of them is an AppHost parameter: each is derived from the
++`auth-portal` resource's Aspire HTTP endpoint, so the live URL is resolved at launch exactly
++like the Keycloak endpoint fan-out (the AppHost writes the endpoint reference expression, e.g.
++the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded**.
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `Auth:Portal:LoginUrl` | _none — **fails closed (401)**_ | The portal's login page URL. Read at startup by the `PortalRedirect` challenge handler that `AddAuthAndTenancy` registers when `FEATURE:DisableKeycloakLoginUi` is ON, and fanned **only** to the two browser-facing Blazor hosts (`admin`, `families`) as `Auth__Portal__LoginUrl`. With the flag ON and this key unset the handler answers **401** — it never emits a blank redirect and never falls back to Keycloak's hosted page (the UI the flag turned off). |
++| `Auth:Portal:BootstrapRedirectUrl` | _none_ | The portal route the **auth service** 302s the browser to after the D16 passkey ceremony, carrying the single-use bootstrap code. Fanned **only** to the `auth` service as `Auth__Portal__BootstrapRedirectUrl` — the auth service is the OIDC relying party, so it is the component that performs the redirect. |
++| `AuthPortal:PublicBaseUrl` | _none_ | The portal's own browser-facing base URL (its Aspire endpoint), fanned only to the `auth-portal` resource as `AuthPortal__PublicBaseUrl` so the portal can build its own URLs. |
++
++**The auth service deliberately does NOT receive `Auth:Portal:LoginUrl`.** That absence is what
++makes its own flag-ON challenge fail closed with 401: the auth service hosts no browser-facing
++login UI, so it must not redirect a browser. `AppHostLoginUiFlagWiringArchitectureTests` asserts
++both halves — the fan-out to the two Blazor hosts *and* the absence on `auth` (a presence-only
++check would pass with the URL leaked onto the service).
+ 
+ > 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
+ > sensitive values here. Use one of:
+@@ -494,6 +521,7 @@ flags moved to the Config service.
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
++| `FEATURE:DisableKeycloakLoginUi` | `false` | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag** (auth schemes are registered once, so a startup read is the only correct one). AppHost parameter `feature-flag-disable-keycloak-login-ui`, fanned to `SchoolCollab.Admin` + `SchoolCollab.Families` (the browser-facing challenges that redirect to the portal), the `auth` service (its own startup read; without `Auth:Portal:LoginUrl` there it fails closed with 401) and the `auth-portal` Python app. See §4 for the three portal-URL keys. |
+ 
+ ### Setting a flag
+ 
+@@ -836,6 +864,7 @@ matching env-var form:
+ | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
+ | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
+ | `Parameters:feature-flag-require-assignment-approval` | `Parameters__feature_flag_require_assignment_approval` |
++| `Parameters:feature-flag-disable-keycloak-login-ui` | `Parameters__feature_flag_disable_keycloak_login_ui` |
+ | `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
+ | `Parameters:assignment-file-store-root` | `Parameters__assignment_file_store_root` |
+ | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
+@@ -849,6 +878,7 @@ matching env-var form:
+ | `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
+ | `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
+ | `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
++| `Parameters:keycloak-auth-admin-secret` | `Parameters__keycloak_auth_admin_secret` |
+ | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+ | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+ | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+@@ -878,7 +908,16 @@ matching env-var form:
+ | `Auth:Keycloak:Authority` | `Auth__Keycloak__Authority` |
+ | `Auth:Keycloak:ClientId` | `Auth__Keycloak__ClientId` |
+ | `Auth:Keycloak:ClientSecret` | `Auth__Keycloak__ClientSecret` |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `Auth__Keycloak__ServiceAccountClientSecret` |
++| `Auth:OneTimeCodeTtl` | `Auth__OneTimeCodeTtl` |
++| `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
++| `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
++| `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
+ | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
++| `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
++| `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
++| `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
++| `AuthPortal:PublicBaseUrl` | `AuthPortal__PublicBaseUrl` |
+ | `Promotion:CronExpression` | `Promotion__CronExpression` |
+ | `Promotion:PollInterval` | `Promotion__PollInterval` |
+ | `Promotion:ErrorDelay` | `Promotion__ErrorDelay` |
+@@ -914,9 +953,18 @@ Before deploying, verify:
+       `appsettings.Development.json` dev defaults (this one, `keycloak-admin-password`,
+       `smtp-user`, `smtp-password`) are never loaded in production and must not be relied
+       on there.
++- [ ] **`Parameters:keycloak-auth-admin-secret`** — the Keycloak Admin REST
++      service-account secret — is sourced from a secret store in production; its
++      `appsettings.Development.json` dev default must not be relied on.
+ - [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
+       (or omitted) in production. The flag is sourced from the AppHost
+       `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
++- [ ] **`Parameters:feature-flag-disable-keycloak-login-ui`** is `false` (or omitted) in
++      production unless the prefab auth portal is actually deployed there: with it ON, `admin`,
++      `families` and the `auth` service challenge the portal instead of Keycloak's hosted page,
++      so the three portal-URL keys in §4 (`Auth:Portal:LoginUrl` on the two Blazor hosts,
++      `Auth:Portal:BootstrapRedirectUrl` on `auth`) must resolve to browser-reachable URLs —
++      otherwise every unauthenticated gated page fails closed with 401.
+ - [ ] **OIDC `Authority`** points to the production Keycloak realm.
+ - [ ] **Outbox `ExchangeName`** values match the consumer subscriptions
+       for each bounded context (`Parameters:outbox-exchange-*`).
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 68b4bd8c..6a129255 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -67,11 +67,19 @@ var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-col
+ var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
+ var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
+ 
++// Service-account secret for the Keycloak Admin REST client (client `school-collab-auth-admin` in
++// the realm import). Same posture as keycloak-client-secret: DEV-ONLY literal in
++// appsettings.Development.json, no committed production value (configuration.md §2/§4/§12);
++// the auth service (pass 2) receives it as Auth__Keycloak__ServiceAccountClientSecret below.
++var keycloakAuthAdminSecret = builder.AddParameter("keycloak-auth-admin-secret", secret: true);
++
+ // Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
+ // bind mount path is stable regardless of the launch working directory.
+ var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "school-collab-realm.json");
+ 
+-var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
++// 26.4+ — official passkeys support (spec §6/§11.5). Newest docker-published 26.4.x as of
++// 2026-09-22 is 26.4.7 (26.4.8-16 exist as git tags but have no quay image).
++var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.4.7")
+     .WithArgs("start-dev", "--import-realm")
+     // No keycloak data volume is declared, so the realm file re-imports on every
+     // container recreate (the dev-correct behaviour — edit the realm and recreate the
+@@ -149,6 +157,15 @@ var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allo
+ // Config-service row is the runtime authority (tenant-overridable).
+ var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assignment-approval");
+ 
++// Round B (keycloak-ui-auth, spec §10 / D4/D5): selects WHICH login UI the browser-facing
++// hosts present — OFF (default) = Keycloak's hosted page via the standard OIDC code flow,
++// ON = the prefab auth portal's login form. A pure UI toggle: validation and authorization
++// are identical in both states. Like FEATURE:DisableOIDCAuth it is a deployment-time startup
++// switch (auth schemes are registered once), so it is NOT a Settings/Config-service flag;
++// it is fanned out below as FeatureFlags__FEATURE__DisableKeycloakLoginUi to all four
++// consumers (admin, families, auth, auth-portal).
++var disableKeycloakLoginUi = builder.AddParameter("feature-flag-disable-keycloak-login-ui");
++
+ // WS-E2 (ar-16): SMTP transport for the MailKit email sender, fanned out onto
+ // assignments-api as Smtp__Host/Port/User/Password/FromAddress. `smtp-host` blank =
+ // the log-and-skip NullEmailSender (dev/standalone default; never a failure row).
+@@ -346,6 +363,50 @@ var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("
+     .WaitFor(rabbit)
+     .WaitForCompletion(migrator);
+ 
++// ── Auth service (round A pass 2) ──────────────────────────────────────────────────
++// The new SchoolCollab.Auth C# service: Direct-Grant credential exchange, the one-time-code
++// handshake, portal-session token custody and the Keycloak Admin REST client (passes 3a-3d).
++// Wired with the same WireKeycloakAuth shape as the three APIs — its AuthServiceOptions
++// validation (ValidateOnStart) then sees Auth:Keycloak:Authority/ClientId/ClientSecret — plus
++// the service-account secret the Admin REST client will use (pass 3b). Round B adds the
++// login-UI flag fan-out, the mediated-read references and the portal bootstrap redirect below.
++var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
++    // D17: the mediated picker reads (tenants / teachers) are HTTP calls the auth service makes
++    // on the session's behalf, so both data APIs must be reachable through service discovery.
++    .WithReference(settingsApi)
++    .WithReference(studentsApi)
++    .WithEnvironment("Auth__Keycloak__ServiceAccountClientSecret", keycloakAuthAdminSecret)
++    // D5: the auth service reads the login-UI flag at startup (its own AddAuthAndTenancy must
++    // know the flag), but it deliberately does NOT receive Auth:Portal:LoginUrl — the
++    // browser-facing login URL stays off this host, so the flag-ON challenge here fails closed
++    // with 401 instead of ever redirecting a browser (plan-review P2-5).
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi);
++WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
++
++// ── Auth portal (round B, spec §12 / D1) ──────────────────────────────────────────
++// The prefab login/logout/challenge UI + the user/role admin UI as a Python app (uv +
++// FastAPI + Prefab UI), hosted solely by this AppHost and a pure HTTP consumer of the auth
++// service — it holds no credential and makes no direct Keycloak or data-API call (D7/AC11).
++// Registered like `portals` below, NOT with WireKeycloakAuth: that helper takes a typed
++// IResourceBuilder<ProjectResource> and this resource is a Python app.
++var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
++    .WithUv()
++    // The portal's only upstream: WithReference injects the services__auth__http__0 discovery
++    // env var the typed client resolves (B2's AuthApiClient).
++    .WithReference(auth)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WaitFor(auth);
++// The portal's own browser-facing base URL comes from its Aspire endpoint; referencing the
++// resource from inside its own chain is why this is a second statement (owner-adjudicated
++// pattern: WithEnvironment from the endpoint, mirroring the Keycloak endpoint fan-out).
++authPortal = authPortal.WithEnvironment("AuthPortal__PublicBaseUrl", authPortal.GetEndpoint("http"));
++
++// D16: on the passkey path the AUTH SERVICE is the OIDC relying party, so it is what 302s the
++// browser back to the portal after the WebAuthn ceremony — hence the bootstrap redirect target
++// reaches the auth service only (plan-review P2-5). The portal redeems the single-use bootstrap
++// code there and holds no token (AC11/AC12).
++auth = auth.WithEnvironment("Auth__Portal__BootstrapRedirectUrl", $"{authPortal.GetEndpoint("http")}/bootstrap");
++
+ // Unified admin host — serves the unified Settings (CodedValues + Config
+ // Flags), Assignments, and Students Blazor UIs.
+ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+@@ -354,7 +415,15 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+     .WithReference(assignmentsApi)
+     .WithReference(studentsApi)
+     .WithReference(redis)
++    // P1-3: the D6 handshake transport. The host's typed redeem client uses the literal
++    // `https+http://auth` base address, which CrossModuleWiringTests only accepts when this
++    // matching reference exists — without it the handshake dies with "No such host is known".
++    .WithReference(auth)
+     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
++    // D4/D5: the Blazor host's login-UI flag + the portal login URL the flag-ON challenge
++    // redirects to. The URL reaches the two browser-facing hosts only (plan-review P2-5).
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
+     .WaitFor(settingsApi)
+     .WaitFor(settingsAi)
+     .WaitFor(assignmentsApi)
+@@ -380,6 +449,12 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
+     // so it needs the settings-api reference for service discovery.
+     .WithReference(settingsApi)
+     .WithReference(redis)
++    // P1-3: same handshake transport as admin above — the literal base address at the call site
++    // in Families/Program.cs is matched by this reference (CrossModuleWiringTests).
++    .WithReference(auth)
++    // D4/D5: same flag + portal login URL fan-out as admin.
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
+     .WaitFor(assignmentsApi);
+ 
+ // ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):
+diff --git a/src/AppHost/SchoolCollab.AppHost/appsettings.json b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+index 74cfe7f2..e1a5b249 100644
+--- a/src/AppHost/SchoolCollab.AppHost/appsettings.json
++++ b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+@@ -22,6 +22,7 @@
+     "assignment-upload-max-total-bytes": "104857600",
+     "assignment-upload-allowed-extensions": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv",
+     "feature-flag-require-assignment-approval": "false",
++    "feature-flag-disable-keycloak-login-ui": "false",
+     "smtp-host": "localhost",
+     "smtp-port": "1025",
+     "smtp-from-address": "no-reply@schoolcollab.local",
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostLoginUiFlagWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostLoginUiFlagWiringArchitectureTests.cs
+new file mode 100644
+index 00000000..38b0afa9
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostLoginUiFlagWiringArchitectureTests.cs
+@@ -0,0 +1,362 @@
++using System.Text;
++using System.Text.Json;
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Guards the round-B login-UI flag wiring in the AppHost
++/// (<c>keycloak-ui-auth</c>, spec D4/D5/D16, plan-review P2-5). Four invariants that no
++/// build or unit test can see, because they live in the AppHost's parameter fan-out:
++/// <list type="number">
++///   <item>the <c>FEATURE:DisableKeycloakLoginUi</c> startup flag is fanned out to
++///        <b>exactly</b> its four consumers — admin, families, auth and auth-portal;</item>
++///   <item><c>Auth:Portal:LoginUrl</c> reaches the two browser-facing Blazor hosts and
++///        <b>not</b> the auth service — the flag-ON challenge handler fails closed with
++///        <c>401</c> exactly because the auth service never receives the login URL;</item>
++///   <item><c>Auth:Portal:BootstrapRedirectUrl</c> reaches the auth service only (it is the
++///        server-side D16 redirect target of the passkey ceremony, which the auth service
++///        alone performs);</item>
++///   <item>the auth portal is registered as a <b>Uvicorn</b> app (<c>AddUvicornApp</c> +
++///        <c>WithUv</c>, never the typed-<c>ProjectResource</c> <c>WireKeycloakAuth</c> helper),
++///        and the two Blazor hosts carry the <c>.WithReference(auth)</c> that
++///        <c>CrossModuleWiringTests</c> demands for the literal <c>https+http://auth</c>
++///        handshake base address.</item>
++/// </list>
++/// <para>
++/// Resource blocks are parsed from the real <c>Program.cs</c> by line: a block opens at its
++/// <c>AddProject&lt;…&gt;("name")</c> / <c>AddUvicornApp("name", …)</c> call, absorbs the fluent
++/// continuation lines that follow, and also absorbs later <c>name = name.…</c> reassignment
++/// statements — the shape a cross-referencing pair of resources forces (the auth service needs
++/// the portal's endpoint, the portal needs the auth service's service-discovery env var). A
++/// plain substring scan over the whole file would not distinguish "fanned to the auth service"
++/// from "fanned to a Blazor host", which is exactly the distinction P2-5 turns on.
++/// </para>
++/// <para>
++/// The walk-up helper follows the <c>AppHostRealmImportArchitectureTests</c> /
++/// <c>AppHostSettingsDbWiringArchitectureTests</c> precedent and THROWS rather than passing
++/// vacuously when the AppHost or a named resource block cannot be found.
++/// </para>
++/// </summary>
++[TestClass]
++public class AppHostLoginUiFlagWiringArchitectureTests
++{
++    private const string FlagFanOut =
++        """WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)""";
++
++    private const string LoginUrlFanOut =
++        """WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")""";
++
++    private const string BootstrapRedirectUrlFanOut =
++        """WithEnvironment("Auth__Portal__BootstrapRedirectUrl", $"{authPortal.GetEndpoint("http")}/bootstrap")""";
++
++    private const string PublicBaseUrlFanOut =
++        """WithEnvironment("AuthPortal__PublicBaseUrl", authPortal.GetEndpoint("http"))""";
++
++    /// <summary>The four consumers the flag must reach (spec §10 / D5) — and no others.</summary>
++    private static readonly string[] FlagConsumers = ["admin", "auth", "auth-portal", "families"];
++
++    private static readonly string[] BlazorHosts = ["admin", "families"];
++
++    private static readonly Regex CreatedResource = new(
++        """^\s*(?:var\s+)?(?:(?<variable>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*)?builder\.(?:AddProject<Projects\.[A-Za-z0-9_]+>|AddUvicornApp)\("(?<resource>[^"]+)"[,)]""",
++        RegexOptions.Compiled);
++
++    private static readonly Regex ReassignedResource = new(
++        @"^\s*(?<alias>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<target>[A-Za-z_][A-Za-z0-9_]*)\.",
++        RegexOptions.Compiled);
++
++    private static readonly string AppHostProgramPath =
++        Path.Combine(FindAppHostDir(), "Program.cs");
++
++    private static readonly string AppHostSettingsPath =
++        Path.Combine(FindAppHostDir(), "appsettings.json");
++
++    /// <summary>The whole comment-stripped <c>Program.cs</c> — used for the exact-count assertions
++    /// that pin a fan-out to a total number of call sites.</summary>
++    private static readonly string Program = StripLineComments(File.ReadAllText(AppHostProgramPath));
++
++    private static readonly IReadOnlyList<ResourceBlock> Blocks = ParseResourceBlocks(Program);
++
++    [TestMethod]
++    public void FlagFanOut_ReachesExactlyTheFourLoginUiConsumers()
++    {
++        var consumers = Blocks
++            .Where(block => block.Source.Contains(FlagFanOut, StringComparison.Ordinal))
++            .Select(block => block.ResourceName)
++            .OrderBy(name => name, StringComparer.Ordinal)
++            .ToArray();
++
++        consumers.Should().BeEquivalentTo(FlagConsumers,
++            "the login-UI flag is read at startup by exactly these four consumers (spec §10 / D5) — "
++            + "a new consumer must be a conscious decision, and a silently dropped fan-out makes "
++            + "that host render the wrong login UI.");
++
++        // A whole-file count, so a fan-out written OUTSIDE any resource block (or into one the
++        // block parser did not recognise) cannot slip past the per-block assertion above.
++        Count(Program, FlagFanOut).Should().Be(FlagConsumers.Length,
++            "each of the four consumers must receive the flag via the AppHost parameter — not a "
++            + "literal and not a fifth call site.");
++    }
++
++    [TestMethod]
++    public void PortalLoginUrl_ReachesTheBlazorHosts_AndIsAbsentFromTheAuthService()
++    {
++        foreach (var host in BlazorHosts)
++        {
++            Block(host).Source.Should().Contain(LoginUrlFanOut,
++                $"{host} presents the challenge that the flag-ON PortalRedirect handler redirects to "
++                + "the portal, so it needs the login URL — derived from the portal's own Aspire "
++                + "endpoint, never a hardcoded port.");
++        }
++
++        // The absent half is the load-bearing one (plan-review P2-5): the auth service receives
++        // the flag but NOT the login URL, so its own flag-ON challenge fails closed with 401
++        // instead of redirecting a browser to a UI it does not host.
++        Block("auth").Source.Should().NotContain("Auth__Portal__LoginUrl",
++            "the auth service must NOT receive Auth:Portal:LoginUrl — the fail-closed 401 branch of "
++            + "PortalRedirectChallengeHandler depends on it staying unconfigured there.");
++
++        Count(Program, "Auth__Portal__LoginUrl").Should().Be(2,
++            "the login URL reaches the two browser-facing Blazor hosts only; a third fan-out is a "
++            + "widening of the browser-facing surface.");
++    }
++
++    [TestMethod]
++    public void PortalBootstrapRedirectUrl_ReachesTheAuthServiceOnly()
++    {
++        Block("auth").Source.Should().Contain(BootstrapRedirectUrlFanOut,
++            "on the passkey path the auth service is the OIDC relying party and is what redirects "
++            + "the browser back to the portal's bootstrap route (D16) — so it, and only it, needs "
++            + "the portal's bootstrap URL.");
++
++        foreach (var other in FlagConsumers.Where(name => name != "auth"))
++        {
++            Block(other).Source.Should().NotContain("Auth__Portal__BootstrapRedirectUrl",
++                $"{other} does not perform the passkey ceremony, so the bootstrap redirect target "
++                + "must not leak onto it.");
++        }
++
++        Count(Program, "Auth__Portal__BootstrapRedirectUrl").Should().Be(1,
++            "exactly one consumer receives the server-side D16 redirect target.");
++    }
++
++    [TestMethod]
++    public void AuthPortal_IsRegisteredAsAUvicornApp_WithUv_AndReferencesTheAuthService()
++    {
++        var portal = Block("auth-portal");
++
++        portal.Source.Should().Contain(
++                """AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")""",
++                "the Python portal is launched through Aspire's Uvicorn integration, mirroring the "
++                + "`portals` resource.")
++            .And.Contain("WithUv()", "the project is a uv project — the resource must run `uv sync` before start.")
++            .And.Contain("WithReference(auth)",
++                "the portal's typed client resolves the auth service through the AppHost-injected "
++                + "service-discovery env var (B2's AuthApiClient reads services__auth__http__0).")
++            .And.Contain(PublicBaseUrlFanOut,
++                "the portal's own browser-facing base URL comes from its Aspire endpoint "
++                + "(owner-adjudicated pattern), not a hardcoded port.");
++
++        Program.Should().NotContain("WireKeycloakAuth(authPortal",
++            "WireKeycloakAuth is typed to IResourceBuilder<ProjectResource>; the Python portal cannot "
++            + "use it and must take explicit WithEnvironment calls instead.");
++    }
++
++    [TestMethod]
++    public void HandshakeTransport_ReferencesSurviveOnBothSides()
++    {
++        foreach (var host in BlazorHosts)
++        {
++            Block(host).Source.Should().Contain("WithReference(auth)",
++                $"{host} registers the typed redeem client with the literal `https+http://auth` base "
++                + "address, so CrossModuleWiringTests requires this matching AppHost reference — "
++                + "without it the handshake dies at runtime with \"No such host is known\".");
++        }
++
++        Block("auth").Source.Should().Contain("WithReference(settingsApi)")
++            .And.Contain("WithReference(studentsApi)",
++                "D17: the mediated picker reads (tenants / teachers) are HTTP calls from the auth "
++                + "service, so it must reference both data APIs.");
++    }
++
++    [TestMethod]
++    public void FlagParameter_IsDeclaredInProgram_AndDefaultsOffInAppSettings()
++    {
++        Program.Should().Contain("""AddParameter("feature-flag-disable-keycloak-login-ui")""",
++            "a Parameters: entry is not evidence the parameter exists — the round-A lesson "
++            + "(keycloak-auth-admin-secret shipped a default and docs with no declaration).");
++
++        ReadParameters(AppHostSettingsPath).Should()
++            .ContainKey("feature-flag-disable-keycloak-login-ui")
++            .WhoseValue.Should().Be("false",
++                "spec D5: the custom login UI is opt-in, so the committed default stays OFF.");
++    }
++
++    [TestMethod]
++    public void Scan_ActuallyFoundTheAppHostResources()
++    {
++        // Non-vacuity: every assertion above is per-resource, so a parser that silently matched
++        // nothing (or that lost the continuation lines) would pass while inspecting empty blocks.
++        Blocks.Should().HaveCountGreaterThanOrEqualTo(10,
++            "the AppHost declares more than ten project/uvicorn resources; fewer means the parser "
++            + "found no real blocks.");
++
++        Blocks.Select(block => block.ResourceName)
++            .Should().Contain(["migrator", "settings-api", "students-api", "assignments-api",
++                "admin", "families", "auth", "auth-portal"]);
++
++        foreach (var name in FlagConsumers)
++        {
++            Block(name).Source.Should().Contain("WithEnvironment(",
++                $"the '{name}' block must have absorbed its fluent continuation lines.");
++        }
++    }
++
++    // ── Helpers ─────────────────────────────────────────────────────────
++
++    private sealed record ResourceBlock(string ResourceName, string Source);
++
++    /// <summary>
++    /// Splits the AppHost source into per-resource blocks: the block opens on the resource's
++    /// creation call, absorbs the fluent lines that follow, and absorbs later
++    /// <c>name = name.…</c> reassignments of the same alias. A non-fluent statement closes the
++    /// block; blank/comment lines are transparent (they are stripped beforehand, and the AppHost
++    /// carries documented comments between chain lines).
++    /// </summary>
++    private static IReadOnlyList<ResourceBlock> ParseResourceBlocks(string program)
++    {
++        var sources = new Dictionary<string, StringBuilder>(StringComparer.Ordinal);
++        var aliasToResource = new Dictionary<string, string>(StringComparer.Ordinal);
++        string? open = null;
++
++        foreach (var rawLine in program.Split('\n'))
++        {
++            var line = rawLine.TrimEnd('\r');
++
++            if (string.IsNullOrWhiteSpace(line))
++            {
++                continue;
++            }
++
++            var created = CreatedResource.Match(line);
++            if (created.Success)
++            {
++                var resource = created.Groups["resource"].Value;
++                var variable = created.Groups["variable"].Success
++                    ? created.Groups["variable"].Value
++                    : null;
++
++                if (variable is not null)
++                {
++                    aliasToResource[variable] = resource;
++                }
++
++                sources[resource] = new StringBuilder(line);
++                open = resource;
++                continue;
++            }
++
++            var reassigned = ReassignedResource.Match(line);
++            if (reassigned.Success)
++            {
++                var alias = reassigned.Groups["alias"].Value;
++                var isSelfReassignment = alias == reassigned.Groups["target"].Value;
++
++                if (isSelfReassignment && aliasToResource.TryGetValue(alias, out var resource))
++                {
++                    sources[resource].Append('\n').Append(line);
++                    open = resource;
++                }
++                else
++                {
++                    open = null;
++                }
++
++                continue;
++            }
++
++            // Continuation lines are indented, so the marker is checked after trimming the
++            // leading whitespace only (a `.` mid-line is not a fluent continuation).
++            if (line.TrimStart().StartsWith('.'))
++            {
++                if (open is not null)
++                {
++                    sources[open].Append('\n').Append(line);
++                }
++
++                continue;
++            }
++
++            // Any other statement (helper definition, parameter declaration, `Build().Run()`,
++            // `WireKeycloakAuth(...)`) ends the open chain.
++            open = null;
++        }
++
++        return [.. sources.Select(entry => new ResourceBlock(entry.Key, entry.Value.ToString()))];
++    }
++
++    private static ResourceBlock Block(string resourceName)
++        => Blocks.SingleOrDefault(block => block.ResourceName == resourceName)
++            ?? throw new InvalidOperationException(
++                $"The AppHost Program.cs has no resource block named '{resourceName}'. Known blocks: "
++                + string.Join(", ", Blocks.Select(block => block.ResourceName).OrderBy(name => name, StringComparer.Ordinal)));
++
++    private static int Count(string source, string needle)
++    {
++        var count = 0;
++        var index = 0;
++        while ((index = source.IndexOf(needle, index, StringComparison.Ordinal)) != -1)
++        {
++            count++;
++            index += needle.Length;
++        }
++
++        return count;
++    }
++
++    /// <summary>Reads a file's <c>Parameters</c> section as a key → value map. THROWS when the
++    /// section is absent, so a missing block cannot make the assertions pass vacuously.</summary>
++    private static Dictionary<string, string> ReadParameters(string path)
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(path));
++        if (!doc.RootElement.TryGetProperty("Parameters", out var parameters)
++            || parameters.ValueKind != JsonValueKind.Object)
++        {
++            throw new InvalidOperationException($"{path} has no object 'Parameters' section.");
++        }
++
++        return parameters.EnumerateObject()
++            .ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty, StringComparer.Ordinal);
++    }
++
++    /// <summary>
++    /// Removes trailing <c>//</c> comments before parsing. The AppHost documents its chains with
++    /// comments between continuation lines, and a <c>//</c>-comment naming a config key would
++    /// otherwise satisfy (or break) a substring assertion. No string literal in the file contains
++    /// <c>//</c> (urls in the file are built from endpoint expressions, e.g.
++    /// <c>$"{keycloak.GetEndpoint("http")}/realms/school-collab"</c>).
++    /// </summary>
++    private static string StripLineComments(string source)
++        => string.Join('\n', source.Split('\n').Select(line =>
++        {
++            var commentAt = line.IndexOf("//", StringComparison.Ordinal);
++            return commentAt >= 0 ? line[..commentAt] : line;
++        }));
++
++    private static string FindAppHostDir()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir is null
++            ? throw new InvalidOperationException(
++                "Could not locate src/AppHost/SchoolCollab.AppHost from " + AppContext.BaseDirectory)
++            : Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost");
++    }
++}

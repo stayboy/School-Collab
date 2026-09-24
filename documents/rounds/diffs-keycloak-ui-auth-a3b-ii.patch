@@ -1,0 +1,1229 @@
+diff --git a/src/SchoolCollab.Auth/AuthServiceExtensions.cs b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+new file mode 100644
+index 00000000..17e846d7
+--- /dev/null
++++ b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+@@ -0,0 +1,61 @@
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth;
++
++/// <summary>
++/// DI registrations for the SchoolCollab.Auth service, kept out of the feature
++/// host's <c>Program.cs</c> (dotnet-best-practices "Never": no inline
++/// <c>services.Add*()</c> in a feature <c>Program.cs</c>; the repo precedent is
++/// <c>SchoolCollab.Core.Messaging.OutboxExtensions</c>). Later round-A passes
++/// that add registrations extend this file instead of inlining them.
++/// </summary>
++public static class AuthServiceExtensions
++{
++    /// <summary>
++    /// Registers <see cref="AuthServiceOptions"/> from the <c>Auth</c> configuration
++    /// section with startup validation (<c>ValidateOnStart</c>), so a missing Keycloak
++    /// setting fails fast at launch instead of surfacing mid-request. The validator is
++    /// <see cref="AuthServiceOptions.FirstValidationError"/> — shared with
++    /// <c>AuthServiceSmokeTests</c> so the startup check and the tests cannot drift.
++    /// </summary>
++    public static IServiceCollection AddAuthServiceOptions(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services
++            .AddOptions<AuthServiceOptions>()
++            .Bind(configuration.GetSection(AuthServiceOptions.SectionName))
++            .Validate(o => AuthServiceOptions.FirstValidationError(o) is null,
++                "Invalid SchoolCollab.Auth configuration; see AuthServiceOptions.FirstValidationError for the failing key.")
++            .ValidateOnStart();
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the round-A services. The Direct-Grant exchanger and the Admin REST client are
++    /// typed <see cref="HttpClient"/> consumers (their endpoints are derived from
++    /// <c>Auth:Keycloak:Authority</c>); the stores use <see cref="TimeProvider"/> (the repo's
++    /// testable-clock pattern); the audit log is a thin structured <see cref="ILogger"/> wrapper.
++    /// </summary>
++    public static IServiceCollection AddAuthServices(this IServiceCollection services)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++
++        services.AddSingleton(TimeProvider.System);
++        services.AddSingleton<OneTimeCodeStore>();
++        services.AddSingleton<PortalSessionStore>();
++        services.AddSingleton<ClaimSetFactory>();
++        services.AddSingleton<AuthAuditLog>();
++        services.AddHttpClient<DirectGrantExchanger>();
++        services.AddHttpClient<KeycloakAdminClient>();
++
++        return services;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Program.cs b/src/SchoolCollab.Auth/Program.cs
+new file mode 100644
+index 00000000..44437812
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Program.cs
+@@ -0,0 +1,30 @@
++using SchoolCollab.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Core.Auth;
++
++var builder = WebApplication.CreateBuilder(args);
++
++builder.AddServiceDefaults();
++
++// Options and services are registered via extension methods (dotnet-best-practices
++// "Never": no inline services.Add*() in a feature host). AddAuthServiceOptions binds
++// + validates AuthServiceOptions on start (the validator is shared with
++// AuthServiceSmokeTests so the startup check and the tests cannot drift);
++// AddAuthServices registers the Direct-Grant exchanger and the one-time-code store,
++// the portal-session store, the claim factory, the Admin REST client and the audit log.
++builder.Services.AddAuthServiceOptions(builder.Configuration);
++builder.Services.AddAuthServices();
++
++// Shared auth/tenancy: registers the OIDC + JwtBearer schemes (or TestAuth when
++// FEATURE:DisableOIDCAuth is on), the tenant bridge and ICurrentUser. The same
++// Auth:Keycloak:* env vars the options above validate are consumed here.
++builder.Services.AddAuthAndTenancy(builder.Configuration);
++
++var app = builder.Build();
++
++// Service-defaults health endpoints + the auth endpoint groups (extension
++// methods only — never inline route maps in Program.cs, per AGENTS.md).
++app.MapDefaultEndpoints();
++app.MapAuthEndpoints();
++
++app.Run();
+diff --git a/src/SchoolCollab.Auth/Services/AuthAuditLog.cs b/src/SchoolCollab.Auth/Services/AuthAuditLog.cs
+new file mode 100644
+index 00000000..56319f1d
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/AuthAuditLog.cs
+@@ -0,0 +1,47 @@
++using Microsoft.Extensions.Logging;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>
++/// Structured audit wrapper (spec §14): every admin mutation emits one structured
++/// log record naming the ACTOR, the ACTION, the TARGET and the TENANT. Only
++/// identifiers and role names are logged — never a token, a secret or a password.
++/// </summary>
++public sealed class AuthAuditLog(ILogger<AuthAuditLog> logger)
++{
++    /// <summary>A tenant user was created.</summary>
++    public void UserCreated(string actor, string targetUserId, string tenantId)
++        => Emit("user.created", actor, targetUserId, tenantId);
++
++    /// <summary>A tenant user was updated.</summary>
++    public void UserUpdated(string actor, string targetUserId, string tenantId)
++        => Emit("user.updated", actor, targetUserId, tenantId);
++
++    /// <summary>A tenant user's password was reset.</summary>
++    public void PasswordReset(string actor, string targetUserId, string tenantId)
++        => Emit("user.password-reset", actor, targetUserId, tenantId);
++
++    /// <summary>A realm role was assigned to a tenant user.</summary>
++    public void RoleAssigned(string actor, string targetUserId, string roleName, string tenantId)
++        => Emit("role.assigned", actor, targetUserId, tenantId, roleName);
++
++    /// <summary>A realm role was revoked from a tenant user.</summary>
++    public void RoleUnassigned(string actor, string targetUserId, string roleName, string tenantId)
++        => Emit("role.unassigned", actor, targetUserId, tenantId, roleName);
++
++    private void Emit(string action, string actor, string target, string tenantId, string? role = null)
++    {
++        if (role is null)
++        {
++            logger.LogInformation(
++                "Auth admin mutation: actor '{Actor}' action '{Action}' target '{Target}' tenant '{TenantId}'",
++                actor, action, target, tenantId);
++        }
++        else
++        {
++            logger.LogInformation(
++                "Auth admin mutation: actor '{Actor}' action '{Action}' target '{Target}' tenant '{TenantId}' role '{Role}'",
++                actor, action, target, tenantId, role);
++        }
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Services/KeycloakAdminClient.cs b/src/SchoolCollab.Auth/Services/KeycloakAdminClient.cs
+new file mode 100644
+index 00000000..82062c16
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/KeycloakAdminClient.cs
+@@ -0,0 +1,511 @@
++using System.Net;
++using System.Net.Http.Headers;
++using System.Text;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Outcome status of an Admin REST operation.</summary>
++public enum AdminStatus
++{
++    /// <summary>The operation succeeded (2xx).</summary>
++    Success,
++
++    /// <summary>The Admin REST endpoint returned 404 (user or role not found).</summary>
++    NotFound,
++
++    /// <summary>The Admin REST endpoint returned 409 (e.g. duplicate username on create).</summary>
++    Conflict,
++
++    /// <summary>The Admin REST endpoint returned 401 (token missing/expired/revoked).</summary>
++    Unauthorized,
++
++    /// <summary>The Admin REST endpoint returned 403 — the service account lacks the
++    /// required <c>realm-management</c> role. This is the loud failure the cold start
++    /// relies on: an insufficient imported role set must surface here instead of as
++    /// a generic error.</summary>
++    Forbidden,
++
++    /// <summary>The endpoint did not answer (transport failure, 5xx, malformed body).</summary>
++    Unreachable,
++}
++
++/// <summary>
++/// Result of a <see cref="KeycloakAdminClient"/> mutation. <see cref="Detail"/> carries only
++/// Keycloak's own error text — never a token, secret or password (AC9; the auth service is
++/// the only credential holder).
++/// </summary>
++public sealed record AdminOperationResult(AdminStatus Status, string? Detail = null)
++{
++    public bool IsSuccess => Status == AdminStatus.Success;
++}
++
++/// <summary>Result of <see cref="KeycloakAdminClient.ListUsersAsync"/>.</summary>
++public sealed record AdminUserListResult(AdminStatus Status, IReadOnlyList<KeycloakUser> Users, string? Detail = null)
++{
++    public bool IsSuccess => Status == AdminStatus.Success;
++}
++
++/// <summary>Result of <see cref="KeycloakAdminClient.GetUserAsync"/>.</summary>
++public sealed record AdminUserGetResult(AdminStatus Status, KeycloakUser? User = null, string? Detail = null)
++{
++    public bool IsSuccess => Status == AdminStatus.Success;
++}
++
++/// <summary>Result of <see cref="KeycloakAdminClient.ListRealmRolesAsync"/>.</summary>
++public sealed record AdminRealmRoleListResult(AdminStatus Status, IReadOnlyList<KeycloakRole> Roles, string? Detail = null)
++{
++    public bool IsSuccess => Status == AdminStatus.Success;
++}
++
++/// <summary>A minimal Admin REST user representation (camelCase JSON on the wire).</summary>
++public sealed record KeycloakUser(
++    string? Id,
++    string Username,
++    bool Enabled = true,
++    string? Email = null,
++    string? FirstName = null,
++    string? LastName = null);
++
++/// <summary>
++/// A minimal realm role representation. <see cref="Id"/> is what Keycloak's
++/// role-mappings endpoints resolve on, so callers must use the id returned by
++/// <see cref="KeycloakAdminClient.ListRealmRolesAsync"/> (the name alone is not sufficient).
++/// </summary>
++public sealed record KeycloakRole(string Id, string Name);
++
++/// <summary>
++/// Admin REST client for the <c>school-collab-auth-admin</c> service-account client (spec
++/// §13 / §16.2). Two structural traps this class exists to get right: (a) the configured
++/// <c>Auth:Keycloak:Authority</c> is the REALM URL (<c>…/realms/school-collab</c>) while the
++/// Admin REST base is the SERVER ROOT plus <c>/admin/realms/{realm}/…</c> — the root and realm
++/// are derived from the authority, never concatenated onto the realm path; (b) the admin token
++/// is fetched ONCE per expiry window and cached (with a safety margin on the injected
++/// <see cref="TimeProvider"/>), never requested per call. The client secret and the admin token
++/// stay inside this service: nothing is logged and neither ever reaches a response body.
++/// </summary>
++public sealed class KeycloakAdminClient(
++    HttpClient httpClient,
++    IOptions<AuthServiceOptions> options,
++    TimeProvider timeProvider)
++{
++    /// <summary>
++    /// Client id of the realm import's service-account client (school-collab-realm.json).
++    /// It is a fixed, declarative realm constant rather than an option because the realm is
++    /// fully declarative (D3) and the parity guard already pins its secret; the Direct-Grant
++    /// <c>ClientId</c> option is the OIDC app client and is deliberately NOT reused here.
++    /// </summary>
++    private const string ServiceAccountClientId = "school-collab-auth-admin";
++
++    /// <summary>Fetched tokens are considered stale this many seconds before their real expiry,
++    /// so a slow Admin call cannot race the token's actual expiry.</summary>
++    private const int TokenExpirySafetyMarginSeconds = 30;
++
++    /// <summary>CamelCase (Keycloak's wire convention) with nulls omitted — a create body must
++    /// not carry <c>"id": null</c> placeholders. Reads tolerate both forms.</summary>
++    private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
++    {
++        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
++    };
++
++    private string? _cachedAccessToken;
++    private DateTimeOffset _accessTokenExpiresAtUtc;
++    private string? _adminBase;
++
++    /// <summary>
++    /// The Admin REST base URL — <c>{serverRoot}/admin/realms/{realm}</c> — derived from the
++    /// realm-form <c>Auth:Keycloak:Authority</c>. Derived once and cached; throws on a
++    /// malformed authority so a misconfiguration surfaces loudly instead of 404ing per call.
++    /// </summary>
++    private string AdminBase => _adminBase ??= BuildAdminBase(Options.Keycloak.Authority);
++
++    private AuthServiceOptions Options => options.Value;
++
++    private static string BuildAdminBase(string authority)
++    {
++        var uri = new Uri(authority);
++        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
++        if (segments.Length < 2 || !string.Equals(segments[^2], "realms", StringComparison.Ordinal))
++        {
++            throw new InvalidOperationException(
++                $"The Auth:Keycloak:Authority must end in /realms/<realm> so the Admin REST base can be derived (got: \"{authority}\").");
++        }
++
++        var realm = segments[^1];
++        var root = new UriBuilder(uri) { Path = "/" }.Uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
++        return $"{root}/admin/realms/{realm}";
++    }
++
++    /// <summary>Sends an authorized Admin REST request. Returns the raw response on success, or a
++    /// typed failure for the transport cases (endpoint silent, HTTP timeout, no token).</summary>
++    private async Task<SendResult> SendAuthorizedAsync(
++        HttpMethod method,
++        string path,
++        string? jsonBody,
++        CancellationToken cancellationToken)
++    {
++        var token = await GetAccessTokenAsync(cancellationToken);
++        if (token is null)
++        {
++            return new SendResult(null, new AdminOperationResult(AdminStatus.Unreachable,
++                "the Admin REST token could not be obtained"));
++        }
++
++        using var request = new HttpRequestMessage(method, new Uri($"{AdminBase}{path}", UriKind.Absolute))
++        {
++            Content = jsonBody is null
++                ? null
++                : new StringContent(jsonBody, Encoding.UTF8, "application/json"),
++        };
++        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
++
++        try
++        {
++            var response = await httpClient.SendAsync(request, cancellationToken);
++            return new SendResult(response, null);
++        }
++        catch (HttpRequestException)
++        {
++            // Network / TLS / DNS: the endpoint did not answer at all.
++            return new SendResult(null, new AdminOperationResult(AdminStatus.Unreachable));
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // Caller cancellation is not an Admin failure — rethrow, never swallow.
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            // HttpClient timeout: the endpoint did not answer in time.
++            return new SendResult(null, new AdminOperationResult(AdminStatus.Unreachable));
++        }
++    }
++
++    /// <summary>
++    /// Returns the cached admin token, or fetches one via <c>client_credentials</c> against the
++    /// token endpoint. The cache is valid only until shortly before the token's real expiry
++    /// (<see cref="TokenExpirySafetyMarginSeconds"/>), checked on the injected
++    /// <see cref="TimeProvider"/> so tests can fake the clock. Never logs the token or the secret.
++    /// </summary>
++    private async Task<string?> GetAccessTokenAsync(CancellationToken cancellationToken)
++    {
++        if (_cachedAccessToken is not null && timeProvider.GetUtcNow() < _accessTokenExpiresAtUtc)
++        {
++            return _cachedAccessToken;
++        }
++
++        var endpoint = new Uri($"{Options.Keycloak.Authority.TrimEnd('/')}/protocol/openid-connect/token");
++        using var form = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
++        {
++            ["grant_type"] = "client_credentials",
++            ["client_id"] = ServiceAccountClientId,
++            ["client_secret"] = Options.Keycloak.ServiceAccountClientSecret,
++        });
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await httpClient.PostAsync(endpoint, form, cancellationToken);
++        }
++        catch (HttpRequestException)
++        {
++            return null;
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            return null;
++        }
++
++        using (response)
++        {
++            if (!response.IsSuccessStatusCode)
++            {
++                return null;
++            }
++
++            var body = await response.Content.ReadAsStringAsync(cancellationToken);
++            try
++            {
++                using var document = JsonDocument.Parse(body);
++                var root = document.RootElement;
++                var token = root.TryGetProperty("access_token", out var accessToken) ? accessToken.GetString() : null;
++                var expiresIn = root.TryGetProperty("expires_in", out var expires)
++                    && expires.TryGetInt32(out var seconds)
++                        ? seconds
++                        : 0;
++                if (string.IsNullOrEmpty(token))
++                {
++                    return null;
++                }
++
++                var margin = expiresIn > TokenExpirySafetyMarginSeconds * 2
++                    ? TokenExpirySafetyMarginSeconds
++                    : expiresIn / 2;
++                _cachedAccessToken = token;
++                _accessTokenExpiresAtUtc = timeProvider.GetUtcNow().AddSeconds(expiresIn - margin);
++                return token;
++            }
++            catch (JsonException)
++            {
++                return null;
++            }
++        }
++    }
++
++    /// <summary>Lists realm users, optionally filtered by username and/or email (spec §13).</summary>
++    public async Task<AdminUserListResult> ListUsersAsync(
++        string? username = null,
++        string? email = null,
++        CancellationToken cancellationToken = default)
++    {
++        var filters = new List<string>(2);
++        if (!string.IsNullOrWhiteSpace(username))
++        {
++            filters.Add($"username={Uri.EscapeDataString(username)}");
++        }
++
++        if (!string.IsNullOrWhiteSpace(email))
++        {
++            filters.Add($"email={Uri.EscapeDataString(email)}");
++        }
++
++        var query = filters.Count == 0 ? string.Empty : "?" + string.Join("&", filters);
++
++        var send = await SendAuthorizedAsync(HttpMethod.Get, $"/users{query}", jsonBody: null, cancellationToken);
++        if (send.Failure is not null)
++        {
++            return new AdminUserListResult(send.Failure.Status, Array.Empty<KeycloakUser>(), send.Failure.Detail);
++        }
++
++        using var response = send.Response!;
++        var body = await response.Content.ReadAsStringAsync(cancellationToken);
++        if (!response.IsSuccessStatusCode)
++        {
++            var failure = Classify(response, body);
++            return new AdminUserListResult(failure.Status, Array.Empty<KeycloakUser>(), failure.Detail);
++        }
++
++        try
++        {
++            var users = JsonSerializer.Deserialize<List<KeycloakUser>>(body, _json) ?? [];
++            return new AdminUserListResult(AdminStatus.Success, users, null);
++        }
++        catch (JsonException)
++        {
++            return new AdminUserListResult(AdminStatus.Unreachable, Array.Empty<KeycloakUser>(),
++                "the Admin REST returned a malformed user list");
++        }
++    }
++
++    /// <summary>Gets one realm user by id. A 404 maps to <see cref="AdminStatus.NotFound"/>.</summary>
++    public async Task<AdminUserGetResult> GetUserAsync(
++        string userId,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(userId);
++
++        var send = await SendAuthorizedAsync(HttpMethod.Get, $"/users/{Uri.EscapeDataString(userId)}", jsonBody: null, cancellationToken);
++        if (send.Failure is not null)
++        {
++            return new AdminUserGetResult(send.Failure.Status, null, send.Failure.Detail);
++        }
++
++        using var response = send.Response!;
++        var body = await response.Content.ReadAsStringAsync(cancellationToken);
++        if (response.StatusCode == HttpStatusCode.NotFound)
++        {
++            return new AdminUserGetResult(AdminStatus.NotFound, null, TryGetErrorDescription(body));
++        }
++
++        if (!response.IsSuccessStatusCode)
++        {
++            var failure = Classify(response, body);
++            return new AdminUserGetResult(failure.Status, null, failure.Detail);
++        }
++
++        try
++        {
++            var user = JsonSerializer.Deserialize<KeycloakUser>(body, _json);
++            return user is null
++                ? new AdminUserGetResult(AdminStatus.Unreachable, null, "the Admin REST returned an empty user body")
++                : new AdminUserGetResult(AdminStatus.Success, user, null);
++        }
++        catch (JsonException)
++        {
++            return new AdminUserGetResult(AdminStatus.Unreachable, null,
++                "the Admin REST returned a malformed user representation");
++        }
++    }
++
++    /// <summary>Creates a realm user. A duplicate username surfaces as <see cref="AdminStatus.Conflict"/>.</summary>
++    public async Task<AdminOperationResult> CreateUserAsync(
++        KeycloakUser user,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(user);
++
++        return await SendMutationAsync(HttpMethod.Post, "/users", JsonSerializer.Serialize(user, _json), cancellationToken);
++    }
++
++    /// <summary>Updates a realm user (PUT semantics: the body is the full representation to replace).</summary>
++    public async Task<AdminOperationResult> UpdateUserAsync(
++        KeycloakUser user,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(user);
++        if (string.IsNullOrWhiteSpace(user.Id))
++        {
++            throw new ArgumentException("user.Id is required for an update (Keycloak resolves the user by id).", nameof(user));
++        }
++
++        return await SendMutationAsync(
++            HttpMethod.Put,
++            $"/users/{Uri.EscapeDataString(user.Id)}",
++            JsonSerializer.Serialize(user, _json),
++            cancellationToken);
++    }
++
++    /// <summary>Resets a realm user's password.</summary>
++    public async Task<AdminOperationResult> ResetPasswordAsync(
++        string userId,
++        string newPassword,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(userId);
++        ArgumentNullException.ThrowIfNull(newPassword);
++
++        var body = $$"""
++            {"type":"password","value":{{JsonSerializer.Serialize(newPassword, _json)}},"temporary":false}
++            """;
++        return await SendMutationAsync(
++            HttpMethod.Put,
++            $"/users/{Uri.EscapeDataString(userId)}/reset-password",
++            body,
++            cancellationToken);
++    }
++
++    /// <summary>Grants realm roles to a user (the id-and-name array Keycloak's role-mappings endpoint requires).</summary>
++    public async Task<AdminOperationResult> AssignRealmRolesAsync(
++        string userId,
++        IReadOnlyCollection<KeycloakRole> roles,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(userId);
++        ArgumentNullException.ThrowIfNull(roles);
++
++        return await SendMutationAsync(
++            HttpMethod.Post,
++            $"/users/{Uri.EscapeDataString(userId)}/role-mappings/realm",
++            JsonSerializer.Serialize(roles.ToList(), _json),
++            cancellationToken);
++    }
++
++    /// <summary>Revokes realm roles from a user (Keycloak accepts the same array body on DELETE).</summary>
++    public async Task<AdminOperationResult> UnassignRealmRolesAsync(
++        string userId,
++        IReadOnlyCollection<KeycloakRole> roles,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(userId);
++        ArgumentNullException.ThrowIfNull(roles);
++
++        return await SendMutationAsync(
++            HttpMethod.Delete,
++            $"/users/{Uri.EscapeDataString(userId)}/role-mappings/realm",
++            JsonSerializer.Serialize(roles.ToList(), _json),
++            cancellationToken);
++    }
++
++    /// <summary>Lists the realm's roles (used to resolve role ids before assign/unassign).</summary>
++    public async Task<AdminRealmRoleListResult> ListRealmRolesAsync(CancellationToken cancellationToken = default)
++    {
++        var send = await SendAuthorizedAsync(HttpMethod.Get, "/roles", jsonBody: null, cancellationToken);
++        if (send.Failure is not null)
++        {
++            return new AdminRealmRoleListResult(send.Failure.Status, Array.Empty<KeycloakRole>(), send.Failure.Detail);
++        }
++
++        using var response = send.Response!;
++        var body = await response.Content.ReadAsStringAsync(cancellationToken);
++        if (!response.IsSuccessStatusCode)
++        {
++            var failure = Classify(response, body);
++            return new AdminRealmRoleListResult(failure.Status, Array.Empty<KeycloakRole>(), failure.Detail);
++        }
++
++        try
++        {
++            var roles = JsonSerializer.Deserialize<List<KeycloakRole>>(body, _json) ?? [];
++            return new AdminRealmRoleListResult(AdminStatus.Success, roles, null);
++        }
++        catch (JsonException)
++        {
++            return new AdminRealmRoleListResult(AdminStatus.Unreachable, Array.Empty<KeycloakRole>(),
++                "the Admin REST returned a malformed role list");
++        }
++    }
++
++    /// <summary>Shared mutation path: send, then classify the HTTP status.</summary>
++    private async Task<AdminOperationResult> SendMutationAsync(
++        HttpMethod method,
++        string path,
++        string jsonBody,
++        CancellationToken cancellationToken)
++    {
++        ArgumentNullException.ThrowIfNull(jsonBody);
++
++        var send = await SendAuthorizedAsync(method, path, jsonBody, cancellationToken);
++        if (send.Failure is not null)
++        {
++            return send.Failure;
++        }
++
++        using var response = send.Response!;
++        var body = await response.Content.ReadAsStringAsync(cancellationToken);
++        return response.IsSuccessStatusCode
++            ? new AdminOperationResult(AdminStatus.Success)
++            : Classify(response, body);
++    }
++
++    /// <summary>Classifies a non-success Admin REST response. 404/409/401/403 get distinct
++    /// statuses; 5xx and everything else fails toward <see cref="AdminStatus.Unreachable"/>.</summary>
++    private static AdminOperationResult Classify(HttpResponseMessage response, string body)
++    {
++        var detail = TryGetErrorDescription(body) ?? body;
++        return response.StatusCode switch
++        {
++            HttpStatusCode.OK or HttpStatusCode.Created or HttpStatusCode.NoContent
++                => new AdminOperationResult(AdminStatus.Success),
++            HttpStatusCode.NotFound => new AdminOperationResult(AdminStatus.NotFound, detail),
++            HttpStatusCode.Conflict => new AdminOperationResult(AdminStatus.Conflict, detail),
++            HttpStatusCode.Unauthorized => new AdminOperationResult(AdminStatus.Unauthorized, detail),
++            HttpStatusCode.Forbidden => new AdminOperationResult(AdminStatus.Forbidden, detail),
++            _ => new AdminOperationResult(AdminStatus.Unreachable,
++                detail == body ? $"Admin REST returned HTTP {(int)response.StatusCode}" : detail),
++        };
++    }
++
++    private static string? TryGetErrorDescription(string body)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(body);
++            return document.RootElement.TryGetProperty("error_description", out var description)
++                ? description.GetString()
++                : null;
++        }
++        catch (JsonException)
++        {
++            return null;
++        }
++    }
++
++    private sealed record SendResult(HttpResponseMessage? Response, AdminOperationResult? Failure);
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthAuditLogTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthAuditLogTests.cs
+new file mode 100644
+index 00000000..bc9139d9
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthAuditLogTests.cs
+@@ -0,0 +1,106 @@
++using FluentAssertions;
++using Microsoft.Extensions.Logging;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Audit-log coverage (plan step 6 / AC-A-F): each mutation kind emits exactly one structured
++/// record whose captured state names the actor, the action, the target and the tenant — and,
++/// for role mutations, the role. The logger is a small recording <c>ILogger&lt;AuthAuditLog&gt;</c>
++/// so the ASSERTIONS run over the real structured state, not over a formatted string.
++/// </summary>
++[TestClass]
++public class AuthAuditLogTests
++{
++    private sealed class RecordingLogger : ILogger<AuthAuditLog>
++    {
++        public List<(LogLevel Level, IReadOnlyDictionary<string, object?> State)> Entries { get; } = [];
++
++        public IDisposable? BeginScope<TState>(TState state)
++            where TState : notnull => null;
++
++        public bool IsEnabled(LogLevel logLevel) => true;
++
++        public void Log<TState>(
++            LogLevel logLevel,
++            EventId eventId,
++            TState state,
++            Exception? exception,
++            Func<TState, Exception?, string> formatter)
++        {
++            var pairs = ((IEnumerable<KeyValuePair<string, object?>>)state!)
++                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
++            Entries.Add((logLevel, pairs));
++        }
++    }
++
++    private static (AuthAuditLog Log, RecordingLogger Logger) Create()
++    {
++        var logger = new RecordingLogger();
++        return (new AuthAuditLog(logger), logger);
++    }
++
++    [TestMethod]
++    public void UserCreated_EmitsOneInformationRecord_NamingActorActionTargetAndTenant()
++    {
++        var (log, logger) = Create();
++
++        log.UserCreated(actor: "dev-teacher", targetUserId: "u1", tenantId: "t-1");
++
++        var entry = logger.Entries.Should().ContainSingle().Which;
++        entry.Level.Should().Be(LogLevel.Information);
++        entry.State["Actor"].Should().Be("dev-teacher");
++        entry.State["Action"].Should().Be("user.created");
++        entry.State["Target"].Should().Be("u1");
++        entry.State["TenantId"].Should().Be("t-1");
++    }
++
++    [TestMethod]
++    public void UserUpdated_EmitsTheUserUpdatedAction()
++    {
++        var (log, logger) = Create();
++
++        log.UserUpdated(actor: "admin-1", targetUserId: "u1", tenantId: "t-1");
++
++        logger.Entries.Should().ContainSingle().Which.State["Action"].Should().Be("user.updated");
++    }
++
++    [TestMethod]
++    public void PasswordReset_EmitsThePasswordResetAction_WithNoPasswordInState()
++    {
++        var (log, logger) = Create();
++
++        log.PasswordReset(actor: "admin-1", targetUserId: "u1", tenantId: "t-1");
++
++        var state = logger.Entries.Should().ContainSingle().Which.State;
++        state["Action"].Should().Be("user.password-reset");
++        state.Keys.Should().NotContain(key => key.Contains("password", StringComparison.OrdinalIgnoreCase),
++            "the audit record names the mutation kind, never the secret itself.");
++    }
++
++    [TestMethod]
++    public void RoleAssigned_EmitsTheRoleAssignedAction_IncludingTheRoleName()
++    {
++        var (log, logger) = Create();
++
++        log.RoleAssigned(actor: "admin-1", targetUserId: "u1", roleName: "user-admin", tenantId: "t-1");
++
++        var state = logger.Entries.Should().ContainSingle().Which.State;
++        state["Action"].Should().Be("role.assigned");
++        state["Role"].Should().Be("user-admin");
++    }
++
++    [TestMethod]
++    public void RoleUnassigned_EmitsTheRoleUnassignedAction_IncludingTheRoleName()
++    {
++        var (log, logger) = Create();
++
++        log.RoleUnassigned(actor: "admin-1", targetUserId: "u1", roleName: "user-admin", tenantId: "t-1");
++
++        var state = logger.Entries.Should().ContainSingle().Which.State;
++        state["Action"].Should().Be("role.unassigned");
++        state["Role"].Should().Be("user-admin");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAdminClientTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAdminClientTests.cs
+new file mode 100644
+index 00000000..d8df75ae
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAdminClientTests.cs
+@@ -0,0 +1,438 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Admin REST client coverage (plan step 6): every operation's exact HTTP method, PATH and
++/// request BODY, the token-cache discipline, the admin-base derivation trap, and the failure
++/// taxonomy. HTTP is scripted with a hand-written recording handler (dotnet-best-practices:
++/// "Scripted HttpMessageHandler — not Moq/NSubstitute"); the repo's MockHttp matcher pitfall is
++/// avoided by asserting the explicit <see cref="HttpMethod"/> on every recorded call.
++/// </summary>
++[TestClass]
++public class KeycloakAdminClientTests
++{
++    private const string Authority = "http://keycloak:8080/realms/school-collab";
++    private const string TokenPath = "/realms/school-collab/protocol/openid-connect/token";
++    private const string AdminUsersPath = "/admin/realms/school-collab/users";
++
++    private sealed class FakeTimeProvider : TimeProvider
++    {
++        public DateTimeOffset Now { get; set; } = new(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
++
++        public override DateTimeOffset GetUtcNow() => Now;
++    }
++
++    /// <summary>A scripted handler that records every request (method, path, query, body, bearer)
++    /// and serves the token endpoint with a distinct token per fetch — so a test can distinguish a
++    /// single cached fetch from per-call fetching.</summary>
++    private sealed class RecordingHandler : HttpMessageHandler
++    {
++        public sealed record ObservedRequest(HttpMethod Method, string Path, string Query, string Body, string? Bearer);
++
++        private readonly Func<HttpRequestMessage, int, HttpResponseMessage> _respond;
++
++        public List<ObservedRequest> Calls { get; } = [];
++
++        public int TokenFetches { get; private set; }
++
++        /// <param name="respond">Receives the request and the current token-fetch count (1-based);
++        /// return the canned response. The token path is routed by the caller for full control.</param>
++        public RecordingHandler(Func<HttpRequestMessage, int, HttpResponseMessage> respond) => _respond = respond;
++
++        protected override async Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request,
++            CancellationToken cancellationToken)
++        {
++            var body = request.Content is null
++                ? string.Empty
++                : await request.Content.ReadAsStringAsync(cancellationToken);
++
++            if (request.RequestUri!.AbsolutePath.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal))
++            {
++                TokenFetches++;
++            }
++
++            Calls.Add(new ObservedRequest(
++                request.Method,
++                request.RequestUri.AbsolutePath,
++                request.RequestUri.Query,
++                body,
++                request.Headers.Authorization is null ? null : request.Headers.Authorization.Parameter));
++            return _respond(request, TokenFetches);
++        }
++    }
++
++    private static AuthServiceOptions Options() => new()
++    {
++        Keycloak = new AuthServiceOptions.KeycloakOptions
++        {
++            Authority = Authority,
++            ClientId = "school-collab-client",
++            ClientSecret = "a-client-secret",
++            ServiceAccountClientSecret = "a-service-account-secret",
++        },
++    };
++
++    private static KeycloakAdminClient Client(RecordingHandler handler, FakeTimeProvider clock)
++        => new(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(Options()), clock);
++
++    /// <summary>Default router: the token path returns a fresh token per fetch; every other path
++    /// returns the supplied canned response.</summary>
++    private static RecordingHandler RoutingHandler(
++        HttpResponseMessage adminResponse,
++        HttpResponseMessage? tokenResponse = null)
++    {
++        return new RecordingHandler((request, fetchCount) =>
++            request.RequestUri!.AbsolutePath.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal)
++                ? tokenResponse ?? new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(
++                        $$"""{"access_token":"admin-token-{{fetchCount}}","expires_in":300,"token_type":"Bearer"}"""),
++                }
++                : new HttpResponseMessage(adminResponse.StatusCode)
++                {
++                    Content = new StringContent(adminResponse.Content is null ? string.Empty : adminResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()),
++                });
++    }
++
++    [TestMethod]
++    public async Task ListUsers_NoFilters_SendsExplicitGetToTheAdminRealmUsersPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("""
++                [{"id":"u1","username":"dev-teacher","enabled":true,"email":"dev-teacher@schoolcollab.local"}]
++                """),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.IsSuccess.Should().BeTrue();
++        result.Users.Should().ContainSingle().Which.Username.Should().Be("dev-teacher");
++
++        handler.Calls.Should().HaveCount(2);
++        var adminCall = handler.Calls[1];
++        adminCall.Method.Should().Be(HttpMethod.Get,
++            "the Admin REST list is a GET and the repo's MockHttp matcher will not infer the verb — the explicit method is asserted.");
++        adminCall.Path.Should().Be(AdminUsersPath);
++        adminCall.Query.Should().BeEmpty();
++        adminCall.Bearer.Should().Be("admin-token-1");
++    }
++
++    [TestMethod]
++    public async Task ListUsers_Filters_SendAnEncodedQueryOnTheUsersPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync(username: "dev teacher", email: "a.b@c.d");
++
++        result.IsSuccess.Should().BeTrue();
++        var adminCall = handler.Calls[1];
++        adminCall.Path.Should().Be(AdminUsersPath);
++        adminCall.Query.Should().Be("?username=dev%20teacher&email=a.b%40c.d");
++    }
++
++    [TestMethod]
++    public async Task AdminBase_FromARealmFormAuthority_NeverConcatenatesAdminOntoTheRealmPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        await client.ListUsersAsync();
++
++        // Structural trap: the authority is the REALM url; the Admin base is the SERVER ROOT.
++        // A naive concat would produce /realms/school-collab/admin/... — no recorded call may.
++        handler.Calls.Select(c => c.Path).Should().NotContain(path => path.Contains("/realms/school-collab/admin", StringComparison.Ordinal));
++        handler.Calls[1].Path.Should().Be("/admin/realms/school-collab/users");
++        // ... and the token POST uses the realm-form token endpoint, not the admin base.
++        handler.Calls[0].Path.Should().Be(TokenPath);
++    }
++
++    [TestMethod]
++    public async Task AccessToken_IsFetchedOnce_AndReusedAcrossAdminCalls()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        await client.ListUsersAsync();
++        await client.ListRealmRolesAsync();
++
++        // Distinct per-fetch tokens: both calls must carry the FIRST token, proving a single
++        // cached fetch — a per-call fetch would have used "admin-token-2" on the second call.
++        handler.TokenFetches.Should().Be(1);
++        handler.Calls[1].Bearer.Should().Be("admin-token-1");
++        handler.Calls[2].Bearer.Should().Be("admin-token-1");
++    }
++
++    [TestMethod]
++    public async Task AccessToken_IsRefetched_OnceTheCachedTokenPassesItsSafetyMargin()
++    {
++        var clock = new FakeTimeProvider();
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, clock);
++
++        await client.ListUsersAsync();
++        handler.Calls[1].Bearer.Should().Be("admin-token-1");
++
++        // expires_in=300, margin=30 -> cache valid ~270 s; advance past it.
++        clock.Now = clock.Now.AddSeconds(271);
++
++        await client.ListUsersAsync();
++
++        handler.TokenFetches.Should().Be(2);
++        handler.Calls[^1].Bearer.Should().Be("admin-token-2");
++    }
++
++    [TestMethod]
++    public async Task CreateUser_SendsExplicitPost_WithACamelCaseJsonBody()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.Created));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.CreateUserAsync(new KeycloakUser(
++            Id: null, Username: "new-user", Enabled: true, Email: "new@schoolcollab.local"));
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Post);
++        call.Path.Should().Be(AdminUsersPath);
++
++        using var body = JsonDocument.Parse(call.Body);
++        var root = body.RootElement;
++        root.GetProperty("username").GetString().Should().Be("new-user");
++        root.GetProperty("enabled").GetBoolean().Should().BeTrue();
++        root.GetProperty("email").GetString().Should().Be("new@schoolcollab.local");
++        root.TryGetProperty("id", out _).Should().BeFalse(
++            "the create body must not carry an id (Web serialization omits nulls).");
++    }
++
++    [TestMethod]
++    public async Task UpdateUser_SendsExplicitPut_ToTheUsersIdPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.UpdateUserAsync(new KeycloakUser(
++            Id: "u1", Username: "dev-teacher", Enabled: true, Email: "dev-teacher@schoolcollab.local"));
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Put);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1");
++    }
++
++    [TestMethod]
++    public async Task GetUser_WithAnUnknownId_MapsNotFoundToNotFoundStatus()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NotFound)
++        {
++            Content = new StringContent("""{"error":"unknown_user","error_description":"User not found"}"""),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.GetUserAsync("missing");
++
++        result.Status.Should().Be(AdminStatus.NotFound);
++        result.User.Should().BeNull();
++        result.Detail.Should().Contain("User not found");
++    }
++
++    [TestMethod]
++    public async Task CreateUser_OnKeycloakConflict_MapsToConflictStatus()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.Conflict));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.CreateUserAsync(new KeycloakUser(Id: null, Username: "dev-teacher"));
++
++        result.Status.Should().Be(AdminStatus.Conflict);
++        result.IsSuccess.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task AdminCall_OnForbidden_MapsToForbiddenStatus()
++    {
++        // The loud-403 cold-start check: an insufficient imported realm-management role set must
++        // surface as Forbidden (a distinct class), never as some generic failure.
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.Forbidden));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListRealmRolesAsync();
++
++        result.Status.Should().Be(AdminStatus.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task ListRealmRoles_SendsExplicitGet_ToTheAdminRolesPath()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("""
++                [{"id":"r1","name":"user-admin","composite":false},{"id":"r2","name":"platform-admin","composite":false}]
++                """),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListRealmRolesAsync();
++
++        result.IsSuccess.Should().BeTrue();
++        result.Roles.Should().HaveCount(2);
++        result.Roles[0].Should().Be(new KeycloakRole("r1", "user-admin"));
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Get);
++        call.Path.Should().Be("/admin/realms/school-collab/roles");
++    }
++
++    [TestMethod]
++    public async Task ResetPassword_SendsExplicitPut_WithTypePasswordBody_AndMapsNoContentToSuccess()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ResetPasswordAsync("u1", "new-password");
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Put);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1/reset-password");
++
++        using var body = JsonDocument.Parse(call.Body);
++        var root = body.RootElement;
++        root.GetProperty("type").GetString().Should().Be("password");
++        root.GetProperty("value").GetString().Should().Be("new-password");
++        root.GetProperty("temporary").GetBoolean().Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task AssignRealmRoles_SendsExplicitPost_ToRoleMappingsRealm_WithTheIdNameArray()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.AssignRealmRolesAsync("u1", new[] { new KeycloakRole("r1", "user-admin") });
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Post);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1/role-mappings/realm");
++
++        var roles = JsonSerializer.Deserialize<List<JsonElement>>(call.Body);
++        roles.Should().ContainSingle();
++        roles![0].GetProperty("id").GetString().Should().Be("r1");
++        roles[0].GetProperty("name").GetString().Should().Be("user-admin");
++    }
++
++    [TestMethod]
++    public async Task UnassignRealmRoles_SendsExplicitDelete_ToRoleMappingsRealm_WithTheArrayBody()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.NoContent));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.UnassignRealmRolesAsync("u1", new[] { new KeycloakRole("r1", "user-admin") });
++
++        result.IsSuccess.Should().BeTrue();
++        var call = handler.Calls[1];
++        call.Method.Should().Be(HttpMethod.Delete);
++        call.Path.Should().Be("/admin/realms/school-collab/users/u1/role-mappings/realm");
++        call.Body.Should().Contain("\"id\":\"r1\"");
++    }
++
++    [TestMethod]
++    public async Task TokenEndpoint_UsesClientCredentials_WithTheServiceAccountClient()
++    {
++        var handler = RoutingHandler(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("[]"),
++        });
++        var client = Client(handler, new FakeTimeProvider());
++
++        await client.ListUsersAsync();
++
++        var tokenCall = handler.Calls[0];
++        tokenCall.Path.Should().Be(TokenPath);
++        tokenCall.Method.Should().Be(HttpMethod.Post);
++
++        var form = System.Web.HttpUtility.ParseQueryString(tokenCall.Body);
++        form["grant_type"].Should().Be("client_credentials");
++        form["client_id"].Should().Be("school-collab-auth-admin");
++        form["client_secret"].Should().Be("a-service-account-secret");
++    }
++
++    [TestMethod]
++    public async Task AdminCall_WhenTheTokenEndpointFails_MapsToUnreachableWithNoRequest()
++    {
++        var handler = RoutingHandler(
++            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") },
++            tokenResponse: new HttpResponseMessage(HttpStatusCode.Unauthorized));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.Status.Should().Be(AdminStatus.Unreachable);
++        handler.Calls.Should().HaveCount(1,
++            "with no token no admin request may be sent (the secret never leaks past the token call).");
++    }
++
++    [TestMethod]
++    public async Task AdminCall_WhenTheEndpointThrows_MapsToUnreachable()
++    {
++        var handler = new RecordingHandler((request, fetchCount) =>
++            request.RequestUri!.AbsolutePath.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal)
++                ? new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(
++                        $$"""{"access_token":"admin-token-{{fetchCount}}","expires_in":300,"token_type":"Bearer"}"""),
++                }
++                : throw new HttpRequestException("connection refused"));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.Status.Should().Be(AdminStatus.Unreachable);
++    }
++
++    [TestMethod]
++    public async Task CallerCancellation_IsRethrownNotSwallowed()
++    {
++        var handler = new RecordingHandler((_, _) => throw new OperationCanceledException("cancelled"));
++        var client = Client(handler, new FakeTimeProvider());
++        using var cts = new CancellationTokenSource();
++        cts.Cancel();
++
++        var act = () => client.ListUsersAsync(cancellationToken: cts.Token);
++
++        await act.Should().ThrowAsync<OperationCanceledException>(
++            "caller cancellation must propagate — it is not an Admin failure to be consumed into a Status result.");
++    }
++
++    [TestMethod]
++    public async Task HttpClientTimeout_WithoutCallerCancellation_MapsToUnreachable()
++    {
++        var handler = new RecordingHandler((_, _) => throw new OperationCanceledException("timeout"));
++        var client = Client(handler, new FakeTimeProvider());
++
++        var result = await client.ListUsersAsync();
++
++        result.Status.Should().Be(AdminStatus.Unreachable);
++    }
++}

@@ -1,0 +1,1920 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index ed869d5a..af99fa57 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -132,14 +132,17 @@ files only carry values that genuinely belong to that single service
+ | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
+ | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
+ | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
++| `feature-flag-disable-keycloak-login-ui` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:DisableKeycloakLoginUi` (round B `keycloak-ui-auth`, spec §10 / D4/D5). Injected as `FeatureFlags__FEATURE__DisableKeycloakLoginUi` into all four consumers — `admin`, `families`, `auth` and `auth-portal`. It selects **which login UI renders**: OFF (default) = Keycloak's hosted page via the standard OIDC code flow; ON = the prefab auth portal's login form. A pure UI toggle — validation and authorization are identical in both states — and it is read **at startup** (auth pipelines are registered once, exactly like `FEATURE:DisableOIDCAuth`), so it is **not** a Settings/Config-service flag. See §5. |
++| `app-callback-prefixes` | Aspire parameter (`AddParameter` inline default) | `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake` | Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist a one-time handshake code may be minted for. Fanned to the `auth` service as `Auth__AppCallbackPrefixes` (**plus** the portal's bootstrap redemption URI, appended from the portal's Aspire endpoint — no hardcoded port) and to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The auth service rejects a blank value at start (`ValidateOnStart`), so the list can never be empty in a running deployment. See §4. |
+ | `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
+ | `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
+ | `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
+ | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-smtp-password` (dev-only, `appsettings.Development.json`) | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. A **dev-only** default is committed in `appsettings.Development.json`; a relay that requires auth supplies the real value via user-secrets / env-var, which override it. **Never commit a production secret.** |
+ | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
+-| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
++| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, `admin`, and the `auth` service. See §4. |
+ | `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-keycloak-admin` (dev-only, `appsettings.Development.json`) | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. A **dev-only** default is committed in `appsettings.Development.json`, so a plain `aspire run` starts Keycloak without prompting; a non-dev value comes from user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, which override it (production never loads the Development file). One of the two parameters AC#4 needs; see §4. |
+-| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the same five hosts as `keycloak-client-id` above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-auth-admin-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-auth-admin-secret` (dev-only, `appsettings.Development.json`) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin` in the realm import. Injected as `Auth__Keycloak__ServiceAccountClientSecret`; read as `Auth:Keycloak:ServiceAccountClientSecret`. Consumed by the `auth` service only. The committed dev-only default **must equal the realm file's `school-collab-auth-admin` `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects the client_credentials grant on the first admin call. A user-secrets / env-var value overrides it; production supplies a real secret-store value. See §4. |
+ 
+ **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
+ 
+@@ -297,10 +300,10 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
+ ## 4. `Auth:Keycloak` — OIDC authentication
+ 
+ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
+-(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
++(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.4.7` — 26.4+ for official passkey support)
+ that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
+ (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
+-`settings-api`, and `admin`.
++`settings-api`, `admin`, and the `auth` service.
+ 
+ The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
+ `dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
+@@ -311,8 +314,8 @@ Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
+ 
+ **Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
+ management endpoint (targetPort 9000) and binds an HTTP readiness health check
+-(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
+-`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
++(`/health/ready`) to it. All five `Auth:Keycloak:*` consuming hosts — `assignments-api`,
++`students-api`, `settings-api`, `admin`, and the `auth` service — `.WaitFor(keycloak)`, so none of them fetches
+ OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
+ does not fully start until the import completes).
+ 
+@@ -320,11 +323,57 @@ does not fully start until the import completes).
+ file re-imports on every container recreate — edit the realm and recreate the container to
+ pick it up; no `docker volume rm` is needed.
+ 
++**Realm additions (round A, keycloak-ui-auth)** — all declarative in `school-collab-realm.json`, so they re-import automatically: the realm roles `user-admin` and `platform-admin`; a `User Realm Role` protocol mapper on `school-collab-client` emitting a flat `roles` claim on the ID, access **and** userinfo tokens (this is what `RoleClaimType = ClaimTypes.Role` in `AuthTenancyExtensions` resolves to after the handlers' default inbound claim mapping renames the flat `roles` claim — on both the cookie and bearer paths); the service-account client `school-collab-auth-admin` (`serviceAccountsEnabled`, granted `realm-management` `view-users`/`manage-users`/`view-realm`/`manage-realm`) that the auth service uses for the Keycloak Admin REST API; registered `redirectUris` + `webOrigins` for the two Blazor hosts (`admin` 5300/7300, `families` 5400/7400 — the OIDC code flow could never complete before these existed, plan-review P2); and the realm-level WebAuthn **Passwordless Policy** with the passkeys toggle (`webAuthnPolicyPasswordlessPasskeysEnabled`) plus the `Webauthn Register Passwordless` required action (`spec §6/§11.5`).
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+ | `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
+ | `Auth:Keycloak:ClientSecret` | `dev-only-school-collab-client-secret` (dev-only) | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the committed dev-only default for `Parameters:keycloak-client-secret` in `appsettings.Development.json`, which **must equal** the realm file's client `secret` (guarded); **production** MUST substitute a real secret-store value — no production secret is committed. |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `dev-only-school-collab-auth-admin-secret` (dev-only) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin`, bound from the AppHost's `keycloak-auth-admin-secret` parameter. **No code fallback** — the auth service validates its options on start (`ValidateOnStart`), so a missing or blank value fails the host fast at launch instead of 401-ing on the first admin call. **dev** uses the committed dev-only default for `Parameters:keycloak-auth-admin-secret`, which **must equal** the realm file's `school-collab-auth-admin` `secret` (guarded); **production** MUST substitute a real secret-store value. Consumed by the `auth` service only. |
++
++The `auth` service also carries four tunables, each with a safe default and each validated on start: `Auth:OneTimeCodeTtl` (60 s — the single-use code's lifetime; a long TTL would defeat the one-time-code mitigation), `Auth:PortalSessionTtl` (8 h — how long a portal session may live), and the credential-endpoint rate-limit pair `Auth:CredentialEndpointRateLimitWindow` (1 min) / `Auth:CredentialEndpointRateLimitPermits` (5). These are ordinary appsettings/env keys rather than AppHost parameters, so no dev default is committed for them; the §11 table below carries their env-var forms.
++
++### Round B — the auth portal's URLs (`Auth:Portal:*`, `AuthPortal:PublicBaseUrl`)
++
++Three keys distribute the auth portal's URLs (round B `keycloak-ui-auth`, spec D1/D5/D16;
++plan-review P2-5). None of them is an AppHost parameter: each is derived from the
++`auth-portal` resource's Aspire HTTP endpoint, so the live URL is resolved at launch exactly
++like the Keycloak endpoint fan-out (the AppHost writes the endpoint reference expression, e.g.
++the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded**.
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `Auth:Portal:LoginUrl` | _none — **fails closed (401)**_ | The portal's login page URL. Read at startup by the `PortalRedirect` challenge handler that `AddAuthAndTenancy` registers when `FEATURE:DisableKeycloakLoginUi` is ON, and fanned **only** to the two browser-facing Blazor hosts (`admin`, `families`) as `Auth__Portal__LoginUrl`. With the flag ON and this key unset the handler answers **401** — it never emits a blank redirect and never falls back to Keycloak's hosted page (the UI the flag turned off). |
++| `Auth:Portal:BootstrapRedirectUrl` | _none_ | The portal route the **auth service** 302s the browser to after the D16 passkey ceremony, carrying the single-use bootstrap code. Fanned **only** to the `auth` service as `Auth__Portal__BootstrapRedirectUrl` — the auth service is the OIDC relying party, so it is the component that performs the redirect. |
++| `AuthPortal:PublicBaseUrl` | _none_ | The portal's own browser-facing base URL (its Aspire endpoint), fanned only to the `auth-portal` resource as `AuthPortal__PublicBaseUrl` so the portal can build its own URLs. |
++
++**The auth service deliberately does NOT receive `Auth:Portal:LoginUrl`.** That absence is what
++makes its own flag-ON challenge fail closed with 401: the auth service hosts no browser-facing
++login UI, so it must not redirect a browser. `AppHostLoginUiFlagWiringArchitectureTests` asserts
++both halves — the fan-out to the two Blazor hosts *and* the absence on `auth` (a presence-only
++check would pass with the URL leaked onto the service).
++
++### Round B — the per-app callback allowlist (`Auth:AppCallbackPrefixes`, `AuthPortal:AppCallbackPrefixes`)
++
++The redirect-target allowlist (spec §14, plan-review P1-3). A one-time handshake code is minted
++**only** for a redirect target that matches a configured entry: identical scheme, host and port,
++and a path that starts with the entry's path. The query and fragment are ignored, so the Blazor
++hosts' real callback spelling — `{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=<escaped>`
++— matches while the code's destination stays pinned. Without it, a crafted
++`portal/login?return_uri=attacker` link would deliver an **attacker-redeemable** code carrying the
++victim's claim set: URI binding is defenceless when the attacker chooses the URI.
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `Auth:AppCallbackPrefixes` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | Semicolon-separated allowlist of exact callback prefixes, read by the auth service as `Auth__AppCallbackPrefixes`. Enforced at **code issuance** — `/auth/exchange` rejects a non-allowlisted `RedirectUri` (`redirect_uri_not_allowed`, 400) before the credential exchange, so no code exists for an attacker URI (`AppCallbackAllowlist`, fail-closed/default-deny: a malformed entry matches nothing, an empty list matches nothing). Dev value (the AppHost parameter `app-callback-prefixes`, plus the portal's bootstrap URI appended from its Aspire endpoint): `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake;{auth-portal endpoint}/bootstrap`. The four handshake forms are the `admin` (5300/7300) and `families` (5400/7400) launch-profile origins; the bootstrap URI is the D16 redemption target the passkey path's one-time code is bound to. Production must list the real app origins. |
++| `AuthPortal:AppCallbackPrefixes` | _none_ | The portal's own copy of the same list (the four Blazor handshake callbacks only — never its own bootstrap URI), fanned to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The portal validates `return_uri` against it before rendering the form or redirecting; that check is defense-in-depth + UX — the load-bearing enforcement is the auth service's, so a portal bug cannot mint an attacker-redeemable code. |
++
++There is deliberately **no safe default** for `Auth:AppCallbackPrefixes`: a hardcoded non-empty
++fallback would make production fail *open*, and an unvalidated empty list would look like a login
++outage. The shared validator (`AuthServiceOptions.FirstValidationError`, the same function
++`AddAuthServiceOptions` wires into `.Validate(...).ValidateOnStart()`) therefore rejects a blank
++value at launch and names the key.
+ 
+ > 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
+ > sensitive values here. Use one of:
+@@ -494,6 +543,7 @@ flags moved to the Config service.
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
++| `FEATURE:DisableKeycloakLoginUi` | `false` | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag** (auth schemes are registered once, so a startup read is the only correct one). AppHost parameter `feature-flag-disable-keycloak-login-ui`, fanned to `SchoolCollab.Admin` + `SchoolCollab.Families` (the browser-facing challenges that redirect to the portal), the `auth` service (its own startup read; without `Auth:Portal:LoginUrl` there it fails closed with 401) and the `auth-portal` Python app. See §4 for the three portal-URL keys. |
+ 
+ ### Setting a flag
+ 
+@@ -836,6 +886,7 @@ matching env-var form:
+ | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
+ | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
+ | `Parameters:feature-flag-require-assignment-approval` | `Parameters__feature_flag_require_assignment_approval` |
++| `Parameters:feature-flag-disable-keycloak-login-ui` | `Parameters__feature_flag_disable_keycloak_login_ui` |
+ | `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
+ | `Parameters:assignment-file-store-root` | `Parameters__assignment_file_store_root` |
+ | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
+@@ -849,6 +900,8 @@ matching env-var form:
+ | `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
+ | `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
+ | `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
++| `Parameters:keycloak-auth-admin-secret` | `Parameters__keycloak_auth_admin_secret` |
++| `Parameters:app-callback-prefixes` | `Parameters__app_callback_prefixes` |
+ | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+ | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+ | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+@@ -878,7 +931,18 @@ matching env-var form:
+ | `Auth:Keycloak:Authority` | `Auth__Keycloak__Authority` |
+ | `Auth:Keycloak:ClientId` | `Auth__Keycloak__ClientId` |
+ | `Auth:Keycloak:ClientSecret` | `Auth__Keycloak__ClientSecret` |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `Auth__Keycloak__ServiceAccountClientSecret` |
++| `Auth:OneTimeCodeTtl` | `Auth__OneTimeCodeTtl` |
++| `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
++| `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
++| `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
+ | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
++| `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
++| `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
++| `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
++| `AuthPortal:PublicBaseUrl` | `AuthPortal__PublicBaseUrl` |
++| `Auth:AppCallbackPrefixes` | `Auth__AppCallbackPrefixes` |
++| `AuthPortal:AppCallbackPrefixes` | `AuthPortal__AppCallbackPrefixes` |
+ | `Promotion:CronExpression` | `Promotion__CronExpression` |
+ | `Promotion:PollInterval` | `Promotion__PollInterval` |
+ | `Promotion:ErrorDelay` | `Promotion__ErrorDelay` |
+@@ -914,9 +978,18 @@ Before deploying, verify:
+       `appsettings.Development.json` dev defaults (this one, `keycloak-admin-password`,
+       `smtp-user`, `smtp-password`) are never loaded in production and must not be relied
+       on there.
++- [ ] **`Parameters:keycloak-auth-admin-secret`** — the Keycloak Admin REST
++      service-account secret — is sourced from a secret store in production; its
++      `appsettings.Development.json` dev default must not be relied on.
+ - [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
+       (or omitted) in production. The flag is sourced from the AppHost
+       `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
++- [ ] **`Parameters:feature-flag-disable-keycloak-login-ui`** is `false` (or omitted) in
++      production unless the prefab auth portal is actually deployed there: with it ON, `admin`,
++      `families` and the `auth` service challenge the portal instead of Keycloak's hosted page,
++      so the three portal-URL keys in §4 (`Auth:Portal:LoginUrl` on the two Blazor hosts,
++      `Auth:Portal:BootstrapRedirectUrl` on `auth`) must resolve to browser-reachable URLs —
++      otherwise every unauthenticated gated page fails closed with 401.
+ - [ ] **OIDC `Authority`** points to the production Keycloak realm.
+ - [ ] **Outbox `ExchangeName`** values match the consumer subscriptions
+       for each bounded context (`Parameters:outbox-exchange-*`).
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 68b4bd8c..0bf7cafa 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -67,11 +67,19 @@ var keycloakClientId    = builder.AddParameter("keycloak-client-id", "school-col
+ var keycloakAdminPassword = builder.AddParameter("keycloak-admin-password", secret: true);
+ var keycloakClientSecret  = builder.AddParameter("keycloak-client-secret", secret: true);
+ 
++// Service-account secret for the Keycloak Admin REST client (client `school-collab-auth-admin` in
++// the realm import). Same posture as keycloak-client-secret: DEV-ONLY literal in
++// appsettings.Development.json, no committed production value (configuration.md §2/§4/§12);
++// the auth service (pass 2) receives it as Auth__Keycloak__ServiceAccountClientSecret below.
++var keycloakAuthAdminSecret = builder.AddParameter("keycloak-auth-admin-secret", secret: true);
++
+ // Realm file ships next to the AppHost dll (copy-to-output in the csproj) so the
+ // bind mount path is stable regardless of the launch working directory.
+ var keycloakRealmPath = Path.Combine(AppContext.BaseDirectory, "school-collab-realm.json");
+ 
+-var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.2")
++// 26.4+ — official passkeys support (spec §6/§11.5). Newest docker-published 26.4.x as of
++// 2026-09-22 is 26.4.7 (26.4.8-16 exist as git tags but have no quay image).
++var keycloak = builder.AddContainer("keycloak", "quay.io/keycloak/keycloak:26.4.7")
+     .WithArgs("start-dev", "--import-realm")
+     // No keycloak data volume is declared, so the realm file re-imports on every
+     // container recreate (the dev-correct behaviour — edit the realm and recreate the
+@@ -149,6 +157,32 @@ var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allo
+ // Config-service row is the runtime authority (tenant-overridable).
+ var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assignment-approval");
+ 
++// Round B (keycloak-ui-auth, spec §10 / D4/D5): selects WHICH login UI the browser-facing
++// hosts present — OFF (default) = Keycloak's hosted page via the standard OIDC code flow,
++// ON = the prefab auth portal's login form. A pure UI toggle: validation and authorization
++// are identical in both states. Like FEATURE:DisableOIDCAuth it is a deployment-time startup
++// switch (auth schemes are registered once), so it is NOT a Settings/Config-service flag;
++// it is fanned out below as FeatureFlags__FEATURE__DisableKeycloakLoginUi to all four
++// consumers (admin, families, auth, auth-portal).
++var disableKeycloakLoginUi = builder.AddParameter("feature-flag-disable-keycloak-login-ui");
++
++// Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist — the redirect
++// targets a one-time handshake code may be minted for. ONE parameter holds the browser-facing
++// apps' callbacks (the four Blazor hosts' /signin-handshake route, in both launch-profile
++// schemes: admin 5300/7300, families 5400/7400 — the exact spelling B1's challenge handler and
++// B4's BuildCallbackUri mint, whose query half is ignored by the matcher) and is fanned to BOTH
++// consumers: `Auth:AppCallbackPrefixes` on the auth service (which enforces it at code issuance)
++// and `AuthPortal:AppCallbackPrefixes` on the portal (its own defense-in-depth copy, used to
++// validate `return_uri` before rendering or redirecting). The portal's own bootstrap redemption
++// URI is appended to the AUTH copy only — it is derived from the portal's Aspire endpoint below
++// (no hardcoded port) and is never a `return_uri` the portal itself should accept.
++// A non-empty value is mandatory: the auth service validates it at startup (ValidateOnStart) and
++// the matcher is fail-closed, so a blank allowlist is a startup failure, never a fail-open.
++var appCallbackPrefixes = builder.AddParameter(
++    "app-callback-prefixes",
++    "http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake"
++    + ";http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake");
++
+ // WS-E2 (ar-16): SMTP transport for the MailKit email sender, fanned out onto
+ // assignments-api as Smtp__Host/Port/User/Password/FromAddress. `smtp-host` blank =
+ // the log-and-skip NullEmailSender (dev/standalone default; never a failure row).
+@@ -346,6 +380,61 @@ var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("
+     .WaitFor(rabbit)
+     .WaitForCompletion(migrator);
+ 
++// ── Auth service (round A pass 2) ──────────────────────────────────────────────────
++// The new SchoolCollab.Auth C# service: Direct-Grant credential exchange, the one-time-code
++// handshake, portal-session token custody and the Keycloak Admin REST client (passes 3a-3d).
++// Wired with the same WireKeycloakAuth shape as the three APIs — its AuthServiceOptions
++// validation (ValidateOnStart) then sees Auth:Keycloak:Authority/ClientId/ClientSecret — plus
++// the service-account secret the Admin REST client will use (pass 3b). Round B adds the
++// login-UI flag fan-out, the mediated-read references and the portal bootstrap redirect below.
++var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
++    // D17: the mediated picker reads (tenants / teachers) are HTTP calls the auth service makes
++    // on the session's behalf, so both data APIs must be reachable through service discovery.
++    .WithReference(settingsApi)
++    .WithReference(studentsApi)
++    .WithEnvironment("Auth__Keycloak__ServiceAccountClientSecret", keycloakAuthAdminSecret)
++    // D5: the auth service reads the login-UI flag at startup (its own AddAuthAndTenancy must
++    // know the flag), but it deliberately does NOT receive Auth:Portal:LoginUrl — the
++    // browser-facing login URL stays off this host, so the flag-ON challenge here fails closed
++    // with 401 instead of ever redirecting a browser (plan-review P2-5).
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi);
++WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
++
++// ── Auth portal (round B, spec §12 / D1) ──────────────────────────────────────────
++// The prefab login/logout/challenge UI + the user/role admin UI as a Python app (uv +
++// FastAPI + Prefab UI), hosted solely by this AppHost and a pure HTTP consumer of the auth
++// service — it holds no credential and makes no direct Keycloak or data-API call (D7/AC11).
++// Registered like `portals` below, NOT with WireKeycloakAuth: that helper takes a typed
++// IResourceBuilder<ProjectResource> and this resource is a Python app.
++var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
++    .WithUv()
++    // The portal's only upstream: WithReference injects the services__auth__http__0 discovery
++    // env var the typed client resolves (B2's AuthApiClient).
++    .WithReference(auth)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WaitFor(auth);
++// The portal's own browser-facing base URL comes from its Aspire endpoint; referencing the
++// resource from inside its own chain is why this is a second statement (owner-adjudicated
++// pattern: WithEnvironment from the endpoint, mirroring the Keycloak endpoint fan-out).
++authPortal = authPortal.WithEnvironment("AuthPortal__PublicBaseUrl", authPortal.GetEndpoint("http"));
++
++// B5b: the portal's copy of the app-callback allowlist. The portal validates `return_uri`
++// against it before rendering the form or redirecting (defense-in-depth + UX, B8); the
++// load-bearing enforcement stays in the auth service below.
++authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes", appCallbackPrefixes);
++
++// D16: on the passkey path the AUTH SERVICE is the OIDC relying party, so it is what 302s the
++// browser back to the portal after the WebAuthn ceremony — hence the bootstrap redirect target
++// reaches the auth service only (plan-review P2-5). The portal redeems the single-use bootstrap
++// code there and holds no token (AC11/AC12).
++auth = auth.WithEnvironment("Auth__Portal__BootstrapRedirectUrl", $"{authPortal.GetEndpoint("http")}/bootstrap");
++
++// B5b: the enforced allowlist. The portal's bootstrap redemption URI is appended from the
++// portal's endpoint expression (never a hardcoded port) so the D16 bootstrap code — which is
++// URI-bound like every other one-time code — satisfies the same allowlist the apps' callbacks do.
++// `auth` receives it WITHOUT `Auth:Portal:LoginUrl`, so its flag-ON challenge still fails closed.
++auth = auth.WithEnvironment("Auth__AppCallbackPrefixes", $"{appCallbackPrefixes};{authPortal.GetEndpoint("http")}/bootstrap");
++
+ // Unified admin host — serves the unified Settings (CodedValues + Config
+ // Flags), Assignments, and Students Blazor UIs.
+ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+@@ -354,7 +443,15 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+     .WithReference(assignmentsApi)
+     .WithReference(studentsApi)
+     .WithReference(redis)
++    // P1-3: the D6 handshake transport. The host's typed redeem client uses the literal
++    // `https+http://auth` base address, which CrossModuleWiringTests only accepts when this
++    // matching reference exists — without it the handshake dies with "No such host is known".
++    .WithReference(auth)
+     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
++    // D4/D5: the Blazor host's login-UI flag + the portal login URL the flag-ON challenge
++    // redirects to. The URL reaches the two browser-facing hosts only (plan-review P2-5).
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
+     .WaitFor(settingsApi)
+     .WaitFor(settingsAi)
+     .WaitFor(assignmentsApi)
+@@ -380,6 +477,12 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
+     // so it needs the settings-api reference for service discovery.
+     .WithReference(settingsApi)
+     .WithReference(redis)
++    // P1-3: same handshake transport as admin above — the literal base address at the call site
++    // in Families/Program.cs is matched by this reference (CrossModuleWiringTests).
++    .WithReference(auth)
++    // D4/D5: same flag + portal login URL fan-out as admin.
++    .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
+     .WaitFor(assignmentsApi);
+ 
+ // ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):
+diff --git a/src/SchoolCollab.Auth/AuthServiceExtensions.cs b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+new file mode 100644
+index 00000000..3c95db48
+--- /dev/null
++++ b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+@@ -0,0 +1,142 @@
++using System.Threading.RateLimiting;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.RateLimiting;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Providers;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth;
++
++/// <summary>
++/// DI registrations for the SchoolCollab.Auth service, kept out of the feature
++/// host's <c>Program.cs</c> (dotnet-best-practices "Never": no inline
++/// <c>services.Add*()</c> in a feature <c>Program.cs</c>; the repo precedent is
++/// <c>SchoolCollab.Core.Messaging.OutboxExtensions</c>). Later round-A passes
++/// that add registrations extend this file instead of inlining them.
++/// </summary>
++public static class AuthServiceExtensions
++{
++    /// <summary>
++    /// Registers <see cref="AuthServiceOptions"/> from the <c>Auth</c> configuration
++    /// section with startup validation (<c>ValidateOnStart</c>), so a missing Keycloak
++    /// setting fails fast at launch instead of surfacing mid-request. The validator is
++    /// <see cref="AuthServiceOptions.FirstValidationError"/> — shared with
++    /// <c>AuthServiceSmokeTests</c> so the startup check and the tests cannot drift.
++    /// </summary>
++    public static IServiceCollection AddAuthServiceOptions(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services
++            .AddOptions<AuthServiceOptions>()
++            .Bind(configuration.GetSection(AuthServiceOptions.SectionName))
++            .Validate(o => AuthServiceOptions.FirstValidationError(o) is null,
++                "Invalid SchoolCollab.Auth configuration; see AuthServiceOptions.FirstValidationError for the failing key.")
++            .ValidateOnStart();
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the round-A services plus round B's D15 provider seam and portal-session scheme.
++    /// The Direct-Grant exchanger, the Admin REST client and the <see cref="KeycloakAuthProvider"/>
++    /// are typed <see cref="HttpClient"/> consumers (their endpoints are derived from
++    /// <c>Auth:Keycloak:Authority</c>); the stores use <see cref="TimeProvider"/> (the repo's
++    /// testable-clock pattern); the audit log is a thin structured <see cref="ILogger"/> wrapper.
++    /// </summary>
++    public static IServiceCollection AddAuthServices(this IServiceCollection services)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++
++        services.AddSingleton(TimeProvider.System);
++        services.AddSingleton<OneTimeCodeStore>();
++        services.AddSingleton<PortalSessionStore>();
++        services.AddSingleton<ClaimSetFactory>();
++        services.AddSingleton<AuthAuditLog>();
++        // The per-app callback allowlist (round B pass B5b, spec §14): one shared, immutable
++        // matcher over Auth:AppCallbackPrefixes. Singleton because the bound options are fixed at
++        // startup (ValidateOnStart) and the matcher holds only parsed prefixes.
++        services.AddSingleton<AppCallbackAllowlist>();
++        services.AddHttpClient<DirectGrantExchanger>();
++        services.AddHttpClient<KeycloakAdminClient>();
++        services.AddHttpClient<KeycloakAuthProvider>();
++
++        // The seam resolves to the SAME typed-client instance the factory above builds — a second
++        // registration of the implementation type would hand it an unwired HttpClient. It is a
++        // SINGLETON because the provider remembers a session's refreshed token set in custody
++        // (see KeycloakAuthProvider): a per-request instance would lose it between requests and
++        // break refresh-token rotation.
++        services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<KeycloakAuthProvider>());
++
++        // The portal-session scheme (D12): the portal presents its opaque session id instead of a
++        // token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
++        // surface exists with OIDC either on or off — the portal's own login is the D16 form path, so
++        // it holds a session in both flag states. The scheme list of the portal-facing policy lives
++        // in AuthEndpointGroup.
++        services.AddAuthentication()
++            .AddScheme<PortalSessionAuthenticationOptions, PortalSessionAuthenticationHandler>(
++                PortalSessionAuthenticationHandler.SchemeName,
++                static _ => { })
++            .AddPolicyScheme(
++                PortalSessionAuthenticationHandler.GatewaySchemeName,
++                "Portal-session or host-scheme routing",
++                policy =>
++                {
++                    // Authentication follows the request (portal session vs the host's own scheme);
++                    // the challenge is ALWAYS this scheme's bare 401, never a redirect.
++                    policy.ForwardDefaultSelector = PortalSessionAuthenticationHandler.SelectAuthenticationScheme;
++                    policy.ForwardChallenge = PortalSessionAuthenticationHandler.SchemeName;
++                });
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the fixed-window rate limiter for <c>POST /auth/exchange</c> (spec §14,
++    /// plan-review P1-5, service side). Moved out of <c>Program.cs</c> so the endpoint tests
++    /// can compose the real pipeline from public extensions only (the 429 assertion needs the
++    /// genuine middleware; the <c>Microsoft.AspNetCore.Mvc.Testing</c> package route was
++    /// rejected to honour round A's no-new-package constraint — pass 3c row 51). The ordering
++    /// requirement that made the host file the lawful home is preserved: <c>Program.cs</c>
++    /// still calls this BEFORE <c>builder.Build()</c>.
++    /// </summary>
++    public static IServiceCollection AddAuthRateLimiting(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        // TRUST BOUNDARY: POST /auth/exchange is called server-to-server by the portal inside
++        // the AppHost network, never from a browser; this limiter is the service-side mitigation,
++        // keyed per portal caller. The portal form's own antiforgery requirement is round B's,
++        // because the form does not exist in round A. Framework-provided — no new package.
++        var rateLimitConfig = configuration.GetSection(AuthServiceOptions.SectionName)
++            .Get<AuthServiceOptions>() ?? new AuthServiceOptions();
++        services.AddRateLimiter(rateLimiter =>
++        {
++            // The framework default rejection status is 503; the 429 endpoint assertion depends
++            // on this override.
++            rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
++            rateLimiter.AddPolicy(AuthEndpointGroup.ExchangeRateLimitPolicyName, context =>
++                RateLimitPartition.GetFixedWindowLimiter(
++                    context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
++                    _ => new FixedWindowRateLimiterOptions
++                    {
++                        Window = rateLimitConfig.CredentialEndpointRateLimitWindow,
++                        PermitLimit = rateLimitConfig.CredentialEndpointRateLimitPermits,
++                        QueueLimit = 0,
++                    }));
++        });
++
++        return services;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/ExchangeEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/ExchangeEndpoints.cs
+new file mode 100644
+index 00000000..82462490
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/ExchangeEndpoints.cs
+@@ -0,0 +1,107 @@
++using System.Threading;
++using Microsoft.AspNetCore.Http;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// <c>POST /auth/exchange</c> — the flag-ON handshake's credential step (spec §5.2 / D6),
++/// called **server-to-server by the portal inside the AppHost network, never from a browser**
++/// (spec §14 trust boundary). It exchanges Keycloak credentials (Direct Grant) for a server-side
++/// portal session plus a single-use handshake code bound to the originating app's redirect URI.
++/// The code entry carries the session reference (spec §5.2 step 4), so the app that
++/// redeems the code resolves the claims from the code alone — it never receives or holds
++/// a session id or a token.
++/// The success response carries NO token: only the opaque session id and the one-time code. The
++/// token set lives solely in <see cref="PortalSessionStore"/> (D12) and never reaches a response
++/// body, a log line or an exception message (D7 / AC9).
++/// <para>
++/// The supplied <c>RedirectUri</c> is checked against the per-app allowlist
++/// (<see cref="AppCallbackAllowlist"/>, round B pass B5b) <b>before anything else happens</b> —
++/// before the upstream Direct-Grant call and therefore before any code exists. A crafted
++/// <c>portal/login?return_uri=attacker</c> link is defused here rather than at redemption: URI
++/// binding cannot defend a URI the attacker chooses, so the code must never be minted for one.
++/// </para>
++/// </summary>
++public static class ExchangeEndpoints
++{
++    /// <summary>Request body for <c>POST /auth/exchange</c>. <c>RedirectUri</c> is the
++    /// originating app's URI the one-time code is bound to (the redemption must supply
++    /// the identical value) — and that must match the per-app allowlist, or no code is
++    /// minted at all (round B pass B5b).</summary>
++    public sealed record ExchangeRequest(string Username, string Password, string RedirectUri);
++
++    /// <summary>Success body. Token-free by design: only the single-use code and the opaque
++    /// session id the caller needs to redeem and to revoke the session later.</summary>
++    public sealed record ExchangeResponse(string Code, string SessionId, int ExpiresInSeconds);
++
++    /// <summary>
++    /// Handles the exchange. The Direct-Grant failure taxonomy (pass 3a) is surfaced so the
++    /// portal can present the right message; <c>Detail</c> is Keycloak's own
++    /// <c>error_description</c> when the body parses, otherwise a short bounded message —
++    /// never the raw upstream body and never a token. The two redirect-URI guards reuse that
++    /// taxonomy's 400: a blank value is <c>redirect_uri_required</c>, a value outside the
++    /// allowlist is <c>redirect_uri_not_allowed</c>. Neither body carries a code (there is none
++    /// to carry) and neither echoes the rejected URI.
++    /// </summary>
++    public static async Task<IResult> Exchange(
++        ExchangeRequest request,
++        AppCallbackAllowlist callbackAllowlist,
++        DirectGrantExchanger exchanger,
++        PortalSessionStore sessions,
++        OneTimeCodeStore codes,
++        CancellationToken cancellationToken)
++    {
++        if (string.IsNullOrWhiteSpace(request.RedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_required" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        // The allowlist is enforced at ISSUANCE and ahead of the credential exchange: a
++        // non-allowlisted target must not receive a code, and must not even cost a Keycloak
++        // round trip. Fail-closed — AppCallbackAllowlist denies anything it cannot match.
++        if (!callbackAllowlist.IsAllowed(request.RedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_not_allowed" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        var result = await exchanger.ExchangeAsync(request.Username, request.Password, cancellationToken);
++        if (!result.IsSuccess)
++        {
++            return result.Status switch
++            {
++                DirectGrantStatus.InvalidCredentials => Results.Json(
++                    new { error = "invalid_credentials", detail = result.Detail },
++                    statusCode: StatusCodes.Status401Unauthorized),
++                DirectGrantStatus.DisabledUser => Results.Json(
++                    new { error = "disabled_user", detail = result.Detail },
++                    statusCode: StatusCodes.Status403Forbidden),
++                _ => Results.Json(
++                    new { error = "keycloak_unreachable", detail = result.Detail },
++                    statusCode: StatusCodes.Status502BadGateway),
++            };
++        }
++
++        // The token set exists ONLY in the custody store; the caller receives the opaque
++        // session id plus the single-use code — never a token. Keycloak's ROPC + openid
++        // response always carries all three tokens, so a "success" that omits id_token or
++        // refresh_token is a malformed endpoint (same family as a 200 with no access_token)
++        // and must not seed a custody entry that redemption or logout could never use.
++        if (result.IdToken is null || result.RefreshToken is null)
++        {
++            return Results.Json(
++                new { error = "keycloak_unreachable", detail = "the token endpoint omitted id_token or refresh_token" },
++                statusCode: StatusCodes.Status502BadGateway);
++        }
++
++        var sessionId = sessions.Create(
++            result.AccessToken!, result.RefreshToken, result.IdToken, result.ExpiresInSeconds);
++        var code = codes.Create(request.RedirectUri, sessionId);
++
++        return Results.Ok(new ExchangeResponse(code, sessionId, result.ExpiresInSeconds));
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Options/AuthServiceOptions.cs b/src/SchoolCollab.Auth/Options/AuthServiceOptions.cs
+new file mode 100644
+index 00000000..aed68f17
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Options/AuthServiceOptions.cs
+@@ -0,0 +1,148 @@
++namespace SchoolCollab.Auth.Options;
++
++/// <summary>
++/// Configuration for the SchoolCollab.Auth service. Bound from the <c>Auth</c>
++/// section by Program.cs (the AppHost fans the values out as <c>Auth__Keycloak__*</c>
++/// env vars — see <c>WireKeycloakAuth</c> and the <c>keycloak-auth-admin-secret</c>
++/// parameter) and validated at startup via
++/// <see cref="FirstValidationError"/>. The <c>Auth:Keycloak:*</c> names match the
++/// shared consumers in SchoolCollab.Core (<see cref="SchoolCollab.Core.Auth.AuthTenancyExtensions"/>).
++/// Round A pass 2 carries the Keycloak authority/client id/secret and the
++/// service-account credential the later passes consume; pass 3a extends this
++/// class with the timing values (one-time-code and portal-session TTLs, rate-limit
++/// window/permit); round B pass B5b adds the per-app callback allowlist
++/// (<see cref="AppCallbackPrefixes"/>).
++/// </summary>
++public sealed class AuthServiceOptions
++{
++    /// <summary>Default configuration section name: <c>Auth</c>.</summary>
++    public const string SectionName = "Auth";
++
++    /// <summary>Keycloak connection settings (spec §11).</summary>
++    public KeycloakOptions Keycloak { get; set; } = new();
++
++    /// <summary>
++    /// Lifetime of a one-time handshake code (spec §5.2 / D6). Short by design —
++    /// single-use plus a short TTL is the whole mitigation. Default 60 s; the
++    /// validator caps it at 5 minutes.
++    /// </summary>
++    public TimeSpan OneTimeCodeTtl { get; set; } = TimeSpan.FromSeconds(60);
++
++    /// <summary>
++    /// Lifetime of a portal session (spec §5.4 / D12). Default 8 h.
++    /// </summary>
++    public TimeSpan PortalSessionTtl { get; set; } = TimeSpan.FromHours(8);
++
++    /// <summary>
++    /// The per-app callback allowlist (spec §14, plan-review P1-3): a semicolon-separated
++    /// list of <b>exact callback prefixes</b> — scheme + host + port + path; the query is
++    /// ignored — that a one-time handshake code may be minted for. It is the load-bearing
++    /// control against the crafted <c>portal/login?return_uri=attacker</c> attack: a redirect
++    /// target that is not on this list never yields a redeemable code, so an attacker-supplied
++    /// URI cannot receive the victim's claim set. Consumed through
++    /// <see cref="SchoolCollab.Auth.Services.AppCallbackAllowlist"/>, which denies by default.
++    /// <para>
++    /// There is deliberately <b>no safe default</b>: an empty, blank or absent value is a
++    /// startup failure (<see cref="FirstValidationError"/>), never a fail-open. Dev supplies the
++    /// four Blazor hosts' <c>/signin-handshake</c> callbacks plus the portal's bootstrap
++    /// redemption URI via the AppHost's <c>app-callback-prefixes</c> parameter.
++    /// </para>
++    /// </summary>
++    public string AppCallbackPrefixes { get; set; } = string.Empty;
++
++    /// <summary>
++    /// Rate-limit window for the credential endpoint <c>POST /auth/exchange</c>
++    /// (spec §14, consumed by pass 3c). Default 1 minute.
++    /// </summary>
++    public TimeSpan CredentialEndpointRateLimitWindow { get; set; } = TimeSpan.FromMinutes(1);
++
++    /// <summary>
++    /// Maximum permitted calls to <c>POST /auth/exchange</c> within the window
++    /// above (spec §14, consumed by pass 3c). Default 5.
++    /// </summary>
++    public int CredentialEndpointRateLimitPermits { get; set; } = 5;
++
++    /// <summary>
++    /// Returns the first validation failure message, or <c>null</c> when the options
++    /// are valid. Shared by Program.cs (<c>.Validate(...).ValidateOnStart()</c>) and
++    /// the smoke test so the startup guard and the tests cannot drift.
++    /// </summary>
++    public static string? FirstValidationError(AuthServiceOptions options)
++    {
++        ArgumentNullException.ThrowIfNull(options);
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.Authority))
++        {
++            return "Auth:Keycloak:Authority must be set (see AuthServiceOptions).";
++        }
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.ClientId))
++        {
++            return "Auth:Keycloak:ClientId must be set (see AuthServiceOptions).";
++        }
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.ClientSecret))
++        {
++            return "Auth:Keycloak:ClientSecret must be set (see AuthServiceOptions).";
++        }
++
++        if (string.IsNullOrWhiteSpace(options.Keycloak.ServiceAccountClientSecret))
++        {
++            return "Auth:Keycloak:ServiceAccountClientSecret must be set (see AuthServiceOptions).";
++        }
++
++        // Round B (plan-review P1-3): the app-callback allowlist has no safe default. A host
++        // that started with an empty list would match nothing and fail closed per request, but
++        // the misconfiguration must be loud at launch — and, more importantly, no deployment may
++        // ever be tempted to treat "no allowlist" as "allow everything".
++        if (string.IsNullOrWhiteSpace(options.AppCallbackPrefixes))
++        {
++            return "Auth:AppCallbackPrefixes must list at least one allowed app callback "
++                + "(semicolon-separated scheme+host+port+path prefixes) — see AuthServiceOptions.";
++        }
++
++        // Timing values carry defaults, so these guards are range checks, not
++        // presence checks: a zero/negative TTL would make a one-time code
++        // immediately consumable forever, and a zero permit count would
++        // rate-limit the endpoint to nothing.
++        if (options.OneTimeCodeTtl <= TimeSpan.Zero || options.OneTimeCodeTtl > TimeSpan.FromMinutes(5))
++        {
++            return "Auth:OneTimeCodeTtl must be a positive duration of at most 5 minutes (see AuthServiceOptions).";
++        }
++
++        if (options.PortalSessionTtl <= TimeSpan.Zero)
++        {
++            return "Auth:PortalSessionTtl must be a positive duration (see AuthServiceOptions).";
++        }
++
++        if (options.CredentialEndpointRateLimitWindow <= TimeSpan.Zero)
++        {
++            return "Auth:CredentialEndpointRateLimitWindow must be a positive duration (see AuthServiceOptions).";
++        }
++
++        if (options.CredentialEndpointRateLimitPermits < 1)
++        {
++            return "Auth:CredentialEndpointRateLimitPermits must be at least 1 (see AuthServiceOptions).";
++        }
++
++        return null;
++    }
++
++    /// <summary>
++    /// Keycloak connection settings, bound from <c>Auth:Keycloak:*</c>.
++    /// The service-account credential is the <c>school-collab-auth-admin</c> client
++    /// secret (the realm import), supplied by the AppHost's
++    /// <c>keycloak-auth-admin-secret</c> parameter. It never appears in a response
++    /// body or a log line.
++    /// </summary>
++    public sealed class KeycloakOptions
++    {
++        public string Authority { get; set; } = string.Empty;
++
++        public string ClientId { get; set; } = string.Empty;
++
++        public string ClientSecret { get; set; } = string.Empty;
++
++        public string ServiceAccountClientSecret { get; set; } = string.Empty;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Services/AppCallbackAllowlist.cs b/src/SchoolCollab.Auth/Services/AppCallbackAllowlist.cs
+new file mode 100644
+index 00000000..f3b58129
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/AppCallbackAllowlist.cs
+@@ -0,0 +1,154 @@
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>
++/// Fail-closed matcher for the per-app callback allowlist (spec §14, plan-review P1-3). A
++/// one-time handshake code is minted only for a redirect target that matches a configured
++/// <b>exact prefix</b>: identical scheme, identical host, identical port, and a path that is
++/// either identical to the configured path or extends it at a <c>/</c> segment boundary
++/// (<c>/signin-handshake</c> and <c>/signin-handshake/continuation</c> match; the
++/// suffix-confusion spellings <c>/signin-handshake-evil</c> and <c>/signin-handshakeX</c> do
++/// not). The query string and fragment are ignored — the Blazor hosts mint
++/// <c>{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=&lt;escaped&gt;</c>
++/// (<see cref="SchoolCollab.Core.Auth.PortalRedirectChallengeHandler"/> and B4's
++/// <c>BuildCallbackUri</c>), so the nested <c>ReturnUrl</c> must not break the match while the
++/// destination's scheme/host/port/path stay pinned.
++/// <para>
++/// The comparison is component-wise on a parsed <see cref="Uri"/>, never a substring or raw
++/// string-prefix test on the caller's text: <c>http://evil.example/?next=http://localhost:5300/signin-handshake</c>
++/// contains an allowlisted prefix but reaches an attacker host, and must be rejected. A malformed
++/// candidate (relative, unparseable, non-http(s), hostless, or carrying userinfo the browser would
++/// hide) and a malformed allowlist entry both match nothing — malformed entries are skipped rather
++/// than fatal, so one typo narrows the list instead of widening it.
++/// </para>
++/// <para>
++/// <b>Default deny:</b> with no usable entry (empty, blank or all-malformed configuration) every
++/// candidate is rejected. The allowlist can never fail open; the accompanying
++/// <see cref="AuthServiceOptions.FirstValidationError"/> makes an empty configured value a startup
++/// failure so even that closed state is not reachable by an unconfigured deployment.
++/// </para>
++/// </summary>
++public sealed class AppCallbackAllowlist
++{
++    private readonly IReadOnlyList<AllowedPrefix> _prefixes;
++
++    /// <summary>Binds the allowlist from <c>Auth:AppCallbackPrefixes</c> (DI path).</summary>
++    public AppCallbackAllowlist(IOptions<AuthServiceOptions> options)
++        : this(ConfiguredValue(options))
++    {
++    }
++
++    /// <summary>Builds the matcher from an already-resolved configuration value — the shape the
++    /// tests compose, so the matcher's own semantics are covered without an options binder.</summary>
++    public AppCallbackAllowlist(string? configuredPrefixes)
++    {
++        _prefixes = Parse(configuredPrefixes);
++    }
++
++    /// <summary>
++    /// Whether <paramref name="redirectUri"/> may receive a one-time code: an absolute http(s) URI
++    /// without userinfo whose scheme, host and port equal a configured prefix and whose path is
++    /// that prefix's path exactly or a <c>/</c>-delimited extension of it. Anything else —
++    /// including <c>null</c>, a relative path, an unparseable value or an empty allowlist —
++    /// returns <c>false</c>.
++    /// </summary>
++    public bool IsAllowed(string? redirectUri)
++    {
++        if (!Uri.TryCreate(redirectUri?.Trim(), UriKind.Absolute, out var candidate)
++            || !IsHttpScheme(candidate.Scheme)
++            || candidate.Host.Length == 0
++            || candidate.UserInfo.Length > 0)
++        {
++            return false;
++        }
++
++        foreach (var prefix in _prefixes)
++        {
++            if (string.Equals(prefix.Scheme, candidate.Scheme, StringComparison.Ordinal)
++                && string.Equals(prefix.Host, candidate.Host, StringComparison.OrdinalIgnoreCase)
++                && prefix.Port == candidate.Port
++                && MatchesPath(prefix.Path, candidate.AbsolutePath))
++            {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    /// <summary>Reads the configured list, rejecting a missing options instance rather than
++    /// silently building an empty (deny-everything) allowlist from it.</summary>
++    private static string? ConfiguredValue(IOptions<AuthServiceOptions> options)
++    {
++        ArgumentNullException.ThrowIfNull(options);
++
++        return options.Value.AppCallbackPrefixes;
++    }
++
++    /// <summary>
++    /// Splits the semicolon-separated configuration value into usable prefixes. An entry that is
++    /// blank, unparseable, not http(s), hostless, carrying userinfo, or carrying a query/fragment
++    /// of its own (it could never be matched, since matching ignores the query) is dropped: a
++    /// malformed entry grants nothing, and dropping it keeps every other entry working.
++    /// </summary>
++    private static IReadOnlyList<AllowedPrefix> Parse(string? configuredPrefixes)
++    {
++        if (string.IsNullOrWhiteSpace(configuredPrefixes))
++        {
++            return [];
++        }
++
++        var prefixes = new List<AllowedPrefix>();
++
++        foreach (var entry in configuredPrefixes.Split(';', StringSplitOptions.TrimEntries))
++        {
++            if (entry.Length == 0
++                || !Uri.TryCreate(entry, UriKind.Absolute, out var parsed)
++                || !IsHttpScheme(parsed.Scheme)
++                || parsed.Host.Length == 0
++                || parsed.UserInfo.Length > 0
++                || parsed.Query.Length > 0
++                || parsed.Fragment.Length > 0)
++            {
++                continue;
++            }
++
++            prefixes.Add(new AllowedPrefix(
++                parsed.Scheme, parsed.Host, parsed.Port, NormalizePath(parsed.AbsolutePath)));
++        }
++
++        return prefixes;
++    }
++
++    /// <summary>
++    /// The path rule: the candidate path must be the configured path itself or extend it only at a
++    /// <c>/</c> segment boundary. A prefix that is not boundary-checked is a suffix-confusion hole
++    /// — <c>/signin-handshake-evil</c> and <c>/signin-handshakeX</c> are different resources on the
++    /// allowlisted origin, so they must not inherit the callback's trust.
++    /// </summary>
++    private static bool MatchesPath(string prefixPath, string candidatePath)
++        => string.Equals(candidatePath, prefixPath, StringComparison.Ordinal)
++            || candidatePath.StartsWith(prefixPath + "/", StringComparison.Ordinal);
++
++    /// <summary>
++    /// Strips a configured entry's trailing <c>/</c> so the boundary check can never compare
++    /// against a doubled <c>//</c> (<c>/signin-handshake/</c> and <c>/signin-handshake</c> are the
++    /// same prefix). A bare <c>/</c> entry is kept as-is, and therefore matches the root path only
++    /// — the boundary rule applies to it exactly as to every other entry.
++    /// </summary>
++    private static string NormalizePath(string path)
++        => path.Length > 1 ? path.TrimEnd('/') : path;
++
++    /// <summary>Only the browser-facing schemes are allowlistable — a configured
++    /// <c>ftp://</c>/<c>file://</c> entry is malformed, not an alternative transport.</summary>
++    private static bool IsHttpScheme(string scheme)
++        => string.Equals(scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)
++            || string.Equals(scheme, Uri.UriSchemeHttps, StringComparison.Ordinal);
++
++    /// <summary>One configured prefix, normalized by <see cref="Uri"/>: the port is the scheme's
++    /// default when the entry omits it (so <c>http://host/x</c> and <c>http://host:80/x</c> are the
++    /// same destination) and the path always starts with <c>/</c>.</summary>
++    private readonly record struct AllowedPrefix(string Scheme, string Host, int Port, string Path);
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AppCallbackAllowlistTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AppCallbackAllowlistTests.cs
+new file mode 100644
+index 00000000..0dfa6bd9
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AppCallbackAllowlistTests.cs
+@@ -0,0 +1,259 @@
++using FluentAssertions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// <see cref="AppCallbackAllowlist"/> coverage (round B pass B5b, spec §14 / plan-review P1-3):
++/// the fail-closed matcher behind the redirect-target allowlist. The axes are the ones the
++/// security fix turns on — an allowlisted callback passes (including the Blazor hosts' nested
++/// <c>ReturnUrl</c> query), scheme + host + port + path must all match (a substring/loose-prefix
++/// implementation must NOT pass this suite), an attacker URI in any spelling is denied, malformed
++/// input on either side grants nothing, and an empty allowlist denies everything rather than
++/// failing open.
++/// </summary>
++[TestClass]
++public class AppCallbackAllowlistTests
++{
++    /// <summary>The admin host's handshake callback (launch profile <c>http://localhost:5300</c>).</summary>
++    private const string AdminCallback = "http://localhost:5300/signin-handshake";
++
++    /// <summary>The admin host's https scheme spelling (<c>https://localhost:7300</c>).</summary>
++    private const string AdminCallbackHttps = "https://localhost:7300/signin-handshake";
++
++    /// <summary>The portal's D16 bootstrap redemption URI — the second kind of allowlisted target
++    /// (derived from the portal's Aspire endpoint by the AppHost, never hardcoded there).</summary>
++    private const string PortalBootstrap = "http://localhost:9091/bootstrap";
++
++    private static AppCallbackAllowlist Allowlist()
++        => new AppCallbackAllowlist($"{AdminCallback};{AdminCallbackHttps};{PortalBootstrap}");
++
++    [TestMethod]
++    public void IsAllowed_AcceptsAnAllowlistedCallback_IgnoringTheQuery() =>
++        // The Blazor hosts mint `{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=<escaped>`
++        // (B1's challenge handler and B4's BuildCallbackUri share the spelling), so the query half
++        // — including a nested ReturnUrl that itself looks like a URL — must be ignored, not
++        // treated as a mismatch.
++        Allowlist().IsAllowed($"{AdminCallback}?ReturnUrl=%2Fstudents%3Fpage%3D2").Should().BeTrue();
++
++    [TestMethod]
++    public void IsAllowed_AcceptsAnAllowlistedCallback_WithoutAnyQuery() =>
++        Allowlist().IsAllowed(AdminCallback).Should().BeTrue();
++
++    [TestMethod]
++    public void IsAllowed_AcceptsThePortalsBootstrapRedemptionUri() =>
++        Allowlist().IsAllowed(PortalBootstrap).Should().BeTrue();
++
++    [TestMethod]
++    public void IsAllowed_AcceptsAPathExtensionOfAnAllowlistedPath()
++    {
++        // The plan pins path PREFIX matching — at a segment boundary: the scheme/host/port bind the
++        // code's destination, and a DEEPER path on an allowlisted origin stays on that origin.
++        Allowlist().IsAllowed($"{AdminCallback}/continuation").Should().BeTrue();
++    }
++
++    [TestMethod]
++    public void IsAllowed_AcceptsATrailingSlashSpellingOfAnAllowlistedPath()
++    {
++        // Review P1-1: `/signin-handshake/` and `/signin-handshake` are the same resource; the
++        // entry's trailing slash is normalized, so both spellings match.
++        Allowlist().IsAllowed($"{AdminCallback}/").Should().BeTrue();
++
++        var trailingSlashEntry = new AppCallbackAllowlist($"{AdminCallback}/");
++        trailingSlashEntry.IsAllowed(AdminCallback).Should().BeTrue(
++            "a configured trailing slash must not build a `//` comparison that matches nothing.");
++        trailingSlashEntry.IsAllowed($"{AdminCallback}/continuation").Should().BeTrue();
++    }
++
++    [TestMethod]
++    public void IsAllowed_RejectsASuffixAppendedToAnAllowlistedPath()
++    {
++        // DISCRIMINATION (review P1-1): a plain `AbsolutePath.StartsWith(prefix.Path)` accepts
++        // both of these — `-evil` and `X` are appended with no `/` boundary, so they are DIFFERENT
++        // resources on the allowlisted origin that would inherit the callback's trust.
++        var allowlist = Allowlist();
++
++        allowlist.IsAllowed($"{AdminCallback}-evil")
++            .Should().BeFalse("a suffix-confused path is not the allowlisted callback.");
++        allowlist.IsAllowed($"{AdminCallback}X")
++            .Should().BeFalse("a path extension that is not `/`-delimited is a different resource.");
++        allowlist.IsAllowed($"{AdminCallback}-evil?ReturnUrl=%2F")
++            .Should().BeFalse("ignoring the query must not turn a suffix-confused path into a match.");
++        allowlist.IsAllowed($"{PortalBootstrap}-evil")
++            .Should().BeFalse("the portal's bootstrap entry is boundary-checked like every other.");
++    }
++
++    [TestMethod]
++    public void IsAllowed_RejectsUserInfoOnTheCandidate()
++    {
++        // Review P2: `http://attacker@localhost:5300/signin-handshake` parses with host=localhost
++        // and UserInfo="attacker" — the browser hides the prefix, so a userinfo-carrying target is
++        // never the allowlisted callback even though its scheme/host/port/path match.
++        var allowlist = Allowlist();
++
++        allowlist.IsAllowed("http://attacker@localhost:5300/signin-handshake").Should().BeFalse();
++        allowlist.IsAllowed("http://attacker:secret@localhost:5300/signin-handshake").Should().BeFalse();
++        allowlist.IsAllowed("http://attacker@localhost:5300/signin-handshake?ReturnUrl=%2F").Should().BeFalse();
++    }
++
++    [TestMethod]
++    public void IsAllowed_SkipsConfiguredEntriesCarryingUserInfo()
++    {
++        // Review P2, entry direction — DISCRIMINATION: the entry's userinfo is NOT one of the
++        // compared components, so an entry that were merely kept would still grant the clean
++        // candidate `host=localhost, port=5300, path=/signin-handshake`. Dropping it is what makes
++        // the list below deny the clean candidate.
++        var userInfoOnly = new AppCallbackAllowlist("http://attacker@localhost:5300/signin-handshake");
++
++        userInfoOnly.IsAllowed(AdminCallback)
++            .Should().BeFalse("a configured userinfo entry grants nothing — it is dropped, not honoured.");
++
++        // …and dropping it keeps the other entries working.
++        var mixed = new AppCallbackAllowlist($"http://attacker@localhost:5300/signin-handshake;{AdminCallback}");
++
++        mixed.IsAllowed(AdminCallback).Should().BeTrue();
++        mixed.IsAllowed(AdminCallbackHttps).Should().BeFalse("the dropped entry did not become a host-wide grant.");
++    }
++
++    [TestMethod]
++    public void IsAllowed_RejectsAHostThatMerelyContainsAnAllowlistedPrefix()
++    {
++        var allowlist = Allowlist();
++
++        // Each of these contains an allowlisted prefix as a substring but delivers the code
++        // somewhere else entirely — the loose-substring implementation this guard replaces would
++        // accept every one of them.
++        allowlist.IsAllowed("http://attacker.example/?next=http://localhost:5300/signin-handshake")
++            .Should().BeFalse("the allowlisted prefix appears only in the attacker's query string.");
++        allowlist.IsAllowed("http://attacker.example#http://localhost:5300/signin-handshake")
++            .Should().BeFalse("the allowlisted prefix appears only in the fragment.");
++        allowlist.IsAllowed("http://localhost.attacker.example:5300/signin-handshake")
++            .Should().BeFalse("the attacker host merely starts with the allowlisted host name.");
++        allowlist.IsAllowed("http://attacker.example/signin-handshake")
++            .Should().BeFalse("the path matches but the host does not.");
++    }
++
++    [TestMethod]
++    public void IsAllowed_RequiresTheExactSchemeHostAndPort()
++    {
++        var allowlist = Allowlist();
++
++        allowlist.IsAllowed("https://localhost:5300/signin-handshake")
++            .Should().BeFalse("the allowlisted admin callback is http-only (https is 7300).");
++        allowlist.IsAllowed("http://localhost:5400/signin-handshake")
++            .Should().BeFalse("5400 is another host's port — a per-app prefix list must not be host-wide.");
++        allowlist.IsAllowed("http://localhost/signin-handshake")
++            .Should().BeFalse("the implicit port 80 is not the allowlisted 5300.");
++        allowlist.IsAllowed("http://localhost:5301/signin-handshake")
++            .Should().BeFalse("one port off is still another origin.");
++    }
++
++    [TestMethod]
++    public void IsAllowed_RequiresAnAllowlistedPath()
++    {
++        var allowlist = Allowlist();
++
++        allowlist.IsAllowed("http://localhost:5300/login")
++            .Should().BeFalse("only the handshake callback may receive a code.");
++        allowlist.IsAllowed("http://localhost:5300/")
++            .Should().BeFalse("the origin alone is not an allowlisted callback.");
++        allowlist.IsAllowed("http://localhost:9091/session")
++            .Should().BeFalse("the portal's allowlisted path is its bootstrap route.");
++    }
++
++    [TestMethod]
++    public void IsAllowed_TreatsTheExplicitDefaultPortAsTheAbsentOne()
++    {
++        // Uri normalizes the default port, so an entry written without a port still matches a
++        // candidate that spells it out — and still cannot match a non-default port.
++        var allowlist = new AppCallbackAllowlist("http://callback.example/signin-handshake");
++
++        allowlist.IsAllowed("http://callback.example:80/signin-handshake").Should().BeTrue();
++        allowlist.IsAllowed("http://callback.example:8080/signin-handshake").Should().BeFalse();
++    }
++
++    [TestMethod]
++    public void IsAllowed_IsCaseInsensitiveForSchemeAndHost_ButNotForThePath()
++    {
++        var allowlist = Allowlist();
++
++        allowlist.IsAllowed("HTTP://LOCALHOST:5300/signin-handshake").Should().BeTrue();
++        allowlist.IsAllowed("http://localhost:5300/SIGNIN-HANDSHAKE")
++            .Should().BeFalse("URI paths are case-sensitive; a case-insensitive path compare widens the target set.");
++    }
++
++    [TestMethod]
++    [DataRow(null)]
++    [DataRow("")]
++    [DataRow("   ")]
++    [DataRow("/signin-handshake")]
++    [DataRow("not a uri at all")]
++    [DataRow("ftp://localhost:5300/signin-handshake")]
++    [DataRow("file:///signin-handshake")]
++    [DataRow("http:///signin-handshake")]
++    public void IsAllowed_DeniesMalformedCandidates(string? candidate) =>
++        Allowlist().IsAllowed(candidate)
++            .Should().BeFalse("an unparseable, relative, hostless or non-http(s) target is never allowed.");
++
++    [TestMethod]
++    public void IsAllowed_SkipsMalformedEntries_WithoutWideningOrDisablingTheList()
++    {
++        // The malformed entries (an unparseable token, a blank entry, and an entry carrying its
++        // own query — which could never match, since the candidate's query is ignored) grant
++        // nothing; the valid entry still works.
++        var allowlist = new AppCallbackAllowlist(
++            $"not a uri; ;ftp://localhost:5300/signin-handshake;{AdminCallback}?ReturnUrl=x;{AdminCallback}");
++
++        allowlist.IsAllowed(AdminCallback).Should().BeTrue();
++        allowlist.IsAllowed("http://localhost:5300/signin-handshake?ReturnUrl=x")
++            .Should().BeTrue("the valid entry covers it — the malformed query-carrying entry must not be the only rule.");
++        allowlist.IsAllowed("ftp://localhost:5300/signin-handshake")
++            .Should().BeFalse("a non-http(s) entry is malformed, not an alternative transport.");
++        allowlist.IsAllowed("http://attacker.example/signin-handshake").Should().BeFalse();
++    }
++
++    [TestMethod]
++    [DataRow(null)]
++    [DataRow("")]
++    [DataRow("   ")]
++    [DataRow(";;")]
++    [DataRow("; ;")]
++    public void IsAllowed_DeniesEverything_WhenTheAllowlistIsEmptyOrBlank(string? configuredPrefixes)
++    {
++        // DISCRIMINATION (the fail-open defect this pass exists to prevent): an allowlist that
++        // resolves to no usable entry must deny every candidate. An implementation that skips the
++        // match when nothing is configured would mint a code for ANY caller-supplied URI — the
++        // crafted `return_uri=attacker` link would work again.
++        var allowlist = new AppCallbackAllowlist(configuredPrefixes);
++
++        allowlist.IsAllowed(AdminCallback).Should().BeFalse();
++        allowlist.IsAllowed("http://attacker.example/signin-handshake").Should().BeFalse();
++        allowlist.IsAllowed($"{AdminCallback}?ReturnUrl=%2Fstudents").Should().BeFalse();
++    }
++
++    [TestMethod]
++    public void Constructor_BindsTheConfiguredValue_FromAuthServiceOptions()
++    {
++        var options = new OptionsWrapper<AuthServiceOptions>(new AuthServiceOptions
++        {
++            AppCallbackPrefixes = AdminCallback,
++        });
++
++        var allowlist = new AppCallbackAllowlist(options);
++
++        allowlist.IsAllowed(AdminCallback).Should().BeTrue();
++        allowlist.IsAllowed(AdminCallbackHttps).Should().BeFalse(
++            "the matcher reads Auth:AppCallbackPrefixes — not a wider default of its own.");
++    }
++
++    [TestMethod]
++    public void Constructor_RejectsMissingOptions()
++    {
++        var act = () => new AppCallbackAllowlist((IOptions<AuthServiceOptions>)null!);
++
++        act.Should().Throw<ArgumentNullException>();
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthEndpointTestHost.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthEndpointTestHost.cs
+new file mode 100644
+index 00000000..21e26028
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthEndpointTestHost.cs
+@@ -0,0 +1,286 @@
++using System.Collections.Concurrent;
++using System.Net;
++using System.Net.Sockets;
++using System.Text;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.JwtBearer;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.IdentityModel.Protocols;
++using Microsoft.IdentityModel.Protocols.OpenIdConnect;
++using Microsoft.IdentityModel.Tokens;
++using SchoolCollab.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// A real, in-process Kestrel host for the auth service's endpoint tests (pass 3c, row 51).
++/// <para>
++/// WHY this exists: the endpoint tests must prove the rate limiter rejects the N+1-th request
++/// with <c>429</c>, which requires the genuine middleware pipeline. The usual route —
++/// <c>Microsoft.AspNetCore.Mvc.Testing</c>'s <c>WebApplicationFactory</c> — was rejected to
++/// honour round A's no-new-package constraint, so this host composes the app from the service's
++/// PUBLIC extension methods only and runs it on <c>http://127.0.0.1:0</c> (ephemeral port).
++/// </para>
++/// <para>
++/// The Direct-Grant exchanger's primary HTTP handler is replaced with a shared
++/// <see cref="StubHttpHandler"/> so no test ever touches the network; the limiter, routing and
++/// endpoint pipeline themselves stay real.
++/// </para>
++/// </summary>
++public sealed class AuthEndpointTestHost : IAsyncDisposable
++{
++    private readonly WebApplication _app;
++
++    private AuthEndpointTestHost(
++        WebApplication app,
++        HttpClient client,
++        StubHttpHandler exchangeStub,
++        StubHttpHandler adminStub,
++        CapturingLoggerProvider auditLogs)
++    {
++        _app = app;
++        Client = client;
++        ExchangeStub = exchangeStub;
++        AdminStub = adminStub;
++        AuditLogs = auditLogs;
++    }
++
++    /// <summary>Configured client rooted at the ephemeral listener.</summary>
++    public HttpClient Client { get; }
++
++    /// <summary>Primary handler of the typed <c>DirectGrantExchanger</c> client — tests set
++    /// <see cref="StubHttpHandler.OnSendAsync"/> to control exchange outcomes hermetically.</summary>
++    public StubHttpHandler ExchangeStub { get; }
++
++    /// <summary>Primary handler of the typed <c>KeycloakAdminClient</c> — the Admin REST tests
++    /// route token fetches and operations through <see cref="StubHttpHandler.OnSendAsync"/>.</summary>
++    public StubHttpHandler AdminStub { get; }
++
++    /// <summary>Captured records from the REAL logging path (the AuthAuditLog records).</summary>
++    public CapturingLoggerProvider AuditLogs { get; }
++
++    /// <summary>The host's service provider (for any DI override the tests need).</summary>
++    public IServiceProvider Services => _app.Services;
++
++    /// <summary>Issuer the host's JwtBearer accepts (<c>ValidateIssuer</c> is off; the value just
++    /// keeps minted tokens issuer-realistic). Shared with the test token minter.</summary>
++    public const string TestIssuer = "school-collab-test-issuer";
++
++    /// <summary>Test signing material (HS256) shared by the host's JwtBearer validator and the
++    /// test token minter, so what the tests mint is exactly what the host validates.</summary>
++    public static SymmetricSecurityKey TestSigningKey { get; } =
++        new(Encoding.UTF8.GetBytes(new string('k', 32)));
++
++    /// <summary>Starts the host on an ephemeral loopback port with the real pipeline.</summary>
++    public static async Task<AuthEndpointTestHost> StartAsync()
++    {
++        var builder = WebApplication.CreateBuilder();
++
++        // ValidateOnStart demands the complete Auth config; the timing values are tuned so the
++        // endpoint tests hit the rate limit quickly (permit 3 within a 20 s window). The
++        // authority points at a closed loopback port — the stub below intercepts every call,
++        // so nothing here ever reaches the network.
++        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
++        {
++            ["Auth:Keycloak:Authority"] = "http://localhost:1/realms/school-collab",
++            ["Auth:Keycloak:ClientId"] = "school-collab-client",
++            ["Auth:Keycloak:ClientSecret"] = "test-client-secret",
++            ["Auth:Keycloak:ServiceAccountClientSecret"] = "test-service-account-secret",
++            // B5b: AuthServiceOptions.AppCallbackPrefixes has no safe default (ValidateOnStart
++            // rejects a blank value), so the composed host cannot start without it. The single
++            // entry is the admin host's real handshake callback — the value the exchange tests
++            // post as RedirectUri.
++            ["Auth:AppCallbackPrefixes"] = "http://localhost:5300/signin-handshake",
++            ["Auth:OneTimeCodeTtl"] = "00:00:20",
++            ["Auth:PortalSessionTtl"] = "00:30:00",
++            ["Auth:CredentialEndpointRateLimitWindow"] = "00:00:20",
++            ["Auth:CredentialEndpointRateLimitPermits"] = "3",
++            // The Auth project's appsettings.json — transitively copied into this test output —
++            // sets FEATURE:DisableOIDCAuth=true for dev, which would switch AddAuthAndTenancy to
++            // TestAuth (requiring IDistributedCache, which this composed host does not register).
++            // That is NOT what this host is for: it exists to exercise the REAL bearer pipeline,
++            // so the flag is pinned OFF here — this in-memory provider is consulted before the
++            // copied file, and the real OIDC + JwtBearer schemes always register.
++            ["FeatureFlags:FEATURE:DisableOIDCAuth"] = "false",
++        });
++
++        // Reserve a free loopback port up front (the test project cannot reference the
++        // IServerAddressesFeature type it would need to read a dynamic :0 assignment back out,
++        // and WebApplication.Urls keeps the literal :0) — Kestrel then binds this exact port.
++        var listener = new TcpListener(IPAddress.Loopback, 0);
++        listener.Start();
++        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
++        listener.Stop();
++        var baseUrl = $"http://127.0.0.1:{port}";
++        builder.WebHost.UseUrls(baseUrl);
++
++        // The real pipeline, composed from the app's public extensions only.
++        builder.Services.AddAuthServiceOptions(builder.Configuration);
++        builder.Services.AddAuthServices();
++
++        // Hermetic tests: replace the exchanger's primary handler with the shared stub. The
++        // DefaultHttpMessageHandlerBuilder only instantiates the default HttpClientHandler when
++        // PrimaryHandler is null, so this later ConfigurePrimaryHttpMessageHandler wins.
++        var exchangeStub = new StubHttpHandler();
++        builder.Services.AddSingleton(exchangeStub);
++        builder.Services.AddHttpClient<DirectGrantExchanger>()
++            .ConfigurePrimaryHttpMessageHandler(() => exchangeStub);
++
++        builder.Services.AddAuthRateLimiting(builder.Configuration);
++
++        // Pass 3d: the REAL auth/tenancy registration, exactly as Program.cs wires it — the host
++        // config declares no FEATURE:DisableOIDCAuth, so the OIDC + JwtBearer schemes register
++        // (never TestAuth) and the /auth/admin role gate becomes exercisable.
++        builder.Services.AddAuthAndTenancy(builder.Configuration);
++
++        // The host exercises the BEARER path only: (a) policy evaluation for the /auth/admin gate
++        // has no explicit AuthenticationSchemes, so it authenticates via DefaultAuthenticateScheme —
++        // AddAuthAndTenancy defaults that to the Cookie scheme, which would ignore a Bearer token;
++        // (b) an unauthenticated call to a guarded endpoint must then challenge the bearer scheme
++        // (-> 401) rather than OIDC (-> a 302 to Keycloak, which is what the real app wants for its
++        // browser flows). Both routing choices are test-host adjustments, documented: the JwtBearer
++        // handler itself stays fully real.
++        builder.Services.Configure<AuthenticationOptions>(options =>
++        {
++            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
++            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
++        });
++
++        // The bearer handler validates against a STATIC test configuration — no metadata fetch,
++        // and the Auth:Keycloak:Authority in the host config (a closed port) is never opened.
++        // TokenValidationParameters is mutated IN PLACE so the RoleClaimType = ClaimTypes.Role that
++        // AddAuthAndTenancy pinned on this handler survives; replacing the instance would
++        // silently drop the role wiring this host exists to exercise.
++        builder.Services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
++        {
++            var issuerConfig = new OpenIdConnectConfiguration { Issuer = TestIssuer };
++            issuerConfig.SigningKeys.Add(TestSigningKey);
++            options.Authority = null;
++            options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(issuerConfig);
++            options.TokenValidationParameters.ValidateIssuer = false;
++            options.TokenValidationParameters.ValidateAudience = false;
++            options.TokenValidationParameters.ValidateLifetime = true;
++            options.TokenValidationParameters.IssuerSigningKey = TestSigningKey;
++
++        });
++
++        // Hermetic Admin REST: the Admin client is a SECOND typed HttpClient (registered by
++        // AddAuthServices); stub its primary handler exactly like the exchanger's.
++        var adminStub = new StubHttpHandler();
++        builder.Services.AddSingleton(adminStub);
++        builder.Services.AddHttpClient<KeycloakAdminClient>()
++            .ConfigurePrimaryHttpMessageHandler(() => adminStub);
++
++        // Capture the AuthAuditLog's structured records through a REAL ILogger provider, so the
++        // audit assertions run over the genuine logging path, never a swapped-in spy.
++        var auditLogs = new CapturingLoggerProvider();
++        builder.Logging.AddProvider(auditLogs);
++        builder.Services.AddSingleton(auditLogs);
++
++        var app = builder.Build();
++        app.UseRateLimiter();
++
++        // Auth + authorization middleware — mirror the real Program.cs (pass 3d part i): without
++        // these, the /auth/admin RequireAuthorization metadata is never enforced.
++        app.UseAuthentication();
++        app.UseAuthorization();
++
++        app.MapAuthEndpoints();
++
++        await app.StartAsync();
++
++        var client = new HttpClient { BaseAddress = new Uri(baseUrl) };
++
++        return new AuthEndpointTestHost(app, client, exchangeStub, adminStub, auditLogs);
++    }
++
++    /// <inheritdoc />
++    public async ValueTask DisposeAsync()
++    {
++        Client.Dispose();
++        await _app.DisposeAsync();
++    }
++}
++
++/// <summary>
++/// Minimal <see cref="HttpMessageHandler"/> standing in for the Direct-Grant exchanger's real
++/// network. The default response is a bare 502, so a test that forgets to configure
++/// <see cref="OnSendAsync"/> fails loudly instead of silently touching the network.
++/// </summary>
++public sealed class StubHttpHandler : HttpMessageHandler
++{
++    private int _receivedRequests;
++
++    public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> OnSendAsync { get; set; }
++        = static (_, _) => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway));
++
++    /// <summary>How many requests reached the stub (proves the network was never touched).</summary>
++    public int ReceivedRequests => Volatile.Read(ref _receivedRequests);
++
++    protected override async Task<HttpResponseMessage> SendAsync(
++        HttpRequestMessage request,
++        CancellationToken cancellationToken)
++    {
++        Interlocked.Increment(ref _receivedRequests);
++        return await OnSendAsync(request, cancellationToken);
++    }
++}
++
++/// <summary>
++/// Capturing <see cref="ILoggerProvider"/>: the audit assertions run over the REAL logging path —
++/// the endpoints call the registered <see cref="AuthAuditLog"/>, which logs through the host's
++/// <see cref="ILoggerFactory"/> including this provider, and the structured state (Actor / Action /
++/// Target / TenantId / Role) is preserved exactly as <c>AuthAuditLogTests</c> captures it.
++/// </summary>
++public sealed class CapturingLoggerProvider : ILoggerProvider
++{
++    /// <summary>One captured record with its raw structured state.</summary>
++    public sealed record Record(string Category, LogLevel Level, IReadOnlyDictionary<string, object?> State);
++
++    private readonly ConcurrentQueue<Record> _records = new();
++
++    /// <summary>A point-in-time snapshot of every record captured so far.</summary>
++    public IReadOnlyList<Record> Snapshot() => _records.ToList();
++
++    /// <summary>Snapshots only the records whose category ends with the given suffix
++    /// (e.g. <c>"AuthAuditLog"</c>), so tests can ignore the framework's own logging noise.</summary>
++    public IReadOnlyList<Record> ForCategory(string categorySuffix) =>
++        _records.Where(r => r.Category.EndsWith(categorySuffix, StringComparison.Ordinal)).ToList();
++
++    public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
++
++    public void Dispose()
++    {
++    }
++
++    private sealed class Logger(CapturingLoggerProvider parent, string category) : ILogger
++    {
++        public IDisposable? BeginScope<TState>(TState state)
++            where TState : notnull => null;
++
++        public bool IsEnabled(LogLevel logLevel) => true;
++
++        public void Log<TState>(
++            LogLevel logLevel,
++            EventId eventId,
++            TState state,
++            Exception? exception,
++            Func<TState, Exception?, string> formatter)
++        {
++            if (state is IEnumerable<KeyValuePair<string, object?>> pairs)
++            {
++                parent._records.Enqueue(new Record(
++                    category,
++                    logLevel,
++                    pairs.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal)));
++            }
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs
+new file mode 100644
+index 00000000..3d626a45
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceOptionsTests.cs
+@@ -0,0 +1,161 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Options-validator coverage for pass 3a (plan step 6): the shared
++/// <see cref="AuthServiceOptions.FirstValidationError"/> used by Program.cs's
++/// ValidateOnStart rejects EACH missing required Keycloak value, the new timing
++/// values carry safe defaults, and the range guards on them reject misconfiguration.
++/// Round B pass B5b adds the per-app callback allowlist's presence guard
++/// (<c>Auth:AppCallbackPrefixes</c>) — the key has no safe default, so a blank value must
++/// fail the startup validation instead of failing open at request time.
++/// </summary>
++[TestClass]
++public class AuthServiceOptionsTests
++{
++    /// <summary>The dev-shaped value the AppHost fans out: the four Blazor handshake callbacks
++    /// (spec §14 / plan-review P1-3). A single valid entry is enough for the validator.</summary>
++    private const string CallbackPrefixes =
++        "http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake";
++
++    private static AuthServiceOptions Valid()
++        => new()
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++            AppCallbackPrefixes = CallbackPrefixes,
++        };
++
++    [DataTestMethod]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.Authority), "Auth:Keycloak:Authority")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ClientId), "Auth:Keycloak:ClientId")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ClientSecret), "Auth:Keycloak:ClientSecret")]
++    [DataRow(nameof(AuthServiceOptions.KeycloakOptions.ServiceAccountClientSecret), "Auth:Keycloak:ServiceAccountClientSecret")]
++    public void Validator_RejectsEachMissingRequiredKeycloakValue(string memberName, string expectedSectionName)
++    {
++        var options = Valid();
++
++        switch (memberName)
++        {
++            case nameof(AuthServiceOptions.KeycloakOptions.Authority):
++                options.Keycloak.Authority = string.Empty;
++                break;
++            case nameof(AuthServiceOptions.KeycloakOptions.ClientId):
++                options.Keycloak.ClientId = string.Empty;
++                break;
++            case nameof(AuthServiceOptions.KeycloakOptions.ClientSecret):
++                options.Keycloak.ClientSecret = string.Empty;
++                break;
++            default:
++                options.Keycloak.ServiceAccountClientSecret = string.Empty;
++                break;
++        }
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().NotBeNull();
++        failure.Should().Contain(expectedSectionName,
++            "the failing key must be named so an operator can fix the AppHost env var.");
++    }
++
++    [TestMethod]
++    public void Validator_AcceptsCompleteConfiguration()
++    {
++        AuthServiceOptions.FirstValidationError(Valid()).Should().BeNull();
++    }
++
++    [TestMethod]
++    [DataRow("")]
++    [DataRow("   ")]
++    public void Validator_RejectsEmptyAppCallbackPrefixes(string configuredPrefixes)
++    {
++        // DISCRIMINATION: without the presence guard the auth service starts with an empty
++        // allowlist — every app callback is then denied (fail-closed on the matcher side, but a
++        // misconfiguration that looks like a login outage). The guard turns it into the loud
++        // startup failure the AppHost/config rows promise; a hardcoded non-empty default would
++        // instead make production fail OPEN, which is the defect this replaces.
++        var options = Valid();
++        options.AppCallbackPrefixes = configuredPrefixes;
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().NotBeNull();
++        failure.Should().Contain("Auth:AppCallbackPrefixes",
++            "the failing key must be named so an operator can fix the AppHost parameter/env var.");
++    }
++
++    [TestMethod]
++    public void TimingDefaults_AreSafe()
++    {
++        var options = Valid();
++
++        options.OneTimeCodeTtl.Should().BeGreaterThan(TimeSpan.Zero)
++            .And.BeLessThanOrEqualTo(TimeSpan.FromSeconds(60),
++                "the plan pins the one-time code TTL default at <= 60 s (spec §5.2).");
++        options.PortalSessionTtl.Should().BePositive();
++        options.CredentialEndpointRateLimitWindow.Should().BePositive();
++        options.CredentialEndpointRateLimitPermits.Should().BeGreaterThanOrEqualTo(1);
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroOneTimeCodeTtl()
++    {
++        var options = Valid();
++        options.OneTimeCodeTtl = TimeSpan.Zero;
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().Contain("OneTimeCodeTtl",
++            "a zero TTL would make a single-use code live forever.");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroPortalSessionTtl()
++    {
++        var options = Valid();
++        options.PortalSessionTtl = TimeSpan.Zero;
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("PortalSessionTtl");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsZeroCredentialEndpointRateLimitPermits()
++    {
++        var options = Valid();
++        options.CredentialEndpointRateLimitPermits = 0;
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("CredentialEndpointRateLimitPermits");
++    }
++
++    [TestMethod]
++    public void Validator_RejectsOneTimeCodeTtlLongerThanFiveMinutes()
++    {
++        var options = Valid();
++        options.OneTimeCodeTtl = TimeSpan.FromMinutes(6);
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().Contain("OneTimeCodeTtl",
++            "a TTL past 5 minutes would widen the single-use code's exposure window beyond what the plan permits (diff-review P2-3).");
++    }
++
++    [DataTestMethod]
++    [DataRow(0)]
++    [DataRow(-1)]
++    public void Validator_RejectsNonPositiveCredentialEndpointRateLimitWindow(int minutes)
++    {
++        var options = Valid();
++        options.CredentialEndpointRateLimitWindow = TimeSpan.FromMinutes(minutes);
++
++        AuthServiceOptions.FirstValidationError(options).Should().Contain("CredentialEndpointRateLimitWindow",
++            "a zero or negative window would make the rate-limit policy meaningless (diff-review P2-3).");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceSmokeTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceSmokeTests.cs
+new file mode 100644
+index 00000000..2718205d
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AuthServiceSmokeTests.cs
+@@ -0,0 +1,58 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Smoke test proving the auth service skeleton's wiring is real (AC-A-C): the
++/// shared validator used by Program.cs's
++/// <c>AddOptions&lt;AuthServiceOptions&gt;().Validate(...).ValidateOnStart()</c>
++/// rejects a missing Keycloak client id, so a host launched without the AppHost's
++/// <c>Auth__Keycloak__*</c> env vars fails fast at startup instead of surfacing
++/// mid-request.
++/// </summary>
++[TestClass]
++public class AuthServiceSmokeTests
++{
++    [TestMethod]
++    public void OptionsValidator_RejectsMissingKeycloakClientId()
++    {
++        var options = new AuthServiceOptions
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++        };
++
++        var failure = AuthServiceOptions.FirstValidationError(options);
++
++        failure.Should().NotBeNull();
++        failure.Should().Contain("ClientId",
++            "the missing value must be named so an operator can fix the AppHost env var.");
++    }
++
++    [TestMethod]
++    public void OptionsValidator_AcceptsCompleteConfiguration()
++    {
++        var options = new AuthServiceOptions
++        {
++            Keycloak = new AuthServiceOptions.KeycloakOptions
++            {
++                Authority = "http://keycloak:8080/realms/school-collab",
++                ClientId = "school-collab-client",
++                ClientSecret = "a-client-secret",
++                ServiceAccountClientSecret = "a-service-account-secret",
++            },
++            // Round B pass B5b: AppCallbackPrefixes is a required key (no safe default — an empty
++            // allowlist must fail the start rather than deny/fail open mid-request), so a
++            // "complete configuration" fixture has to carry it.
++            AppCallbackPrefixes = "http://localhost:5300/signin-handshake",
++        };
++
++        AuthServiceOptions.FirstValidationError(options).Should().BeNull();
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/ExchangeEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/ExchangeEndpointTests.cs
+new file mode 100644
+index 00000000..b69d665b
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/ExchangeEndpointTests.cs
+@@ -0,0 +1,233 @@
++using System.Net;
++using System.Net.Http.Json;
++using System.Text;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Endpoints;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// <c>POST /auth/exchange</c> coverage (pass 3c step 4): the success shape
++/// (code + sessionId + expiry, token-free), the Direct-Grant failure taxonomy surfaced as
++/// endpoint statuses (401 / 403 / 502), the defensive 502 for a "success" payload that omits a
++/// token, the blank-redirect-URI guard, and the 429 rate-limit proof. Every request goes through
++/// the REAL Kestrel pipeline of <see cref="AuthEndpointTestHost"/>; only the Direct-Grant
++/// exchanger's network hop is stubbed (<see cref="StubHttpHandler"/>), so
++/// <c>ExchangeStub.ReceivedRequests</c> also proves nothing ever touched the network.
++/// Round B pass B5b adds the per-app allowlist: a redirect URI outside
++/// <c>Auth:AppCallbackPrefixes</c> is rejected before a code exists, which is also why
++/// <see cref="RedirectUri"/> is the allowlisted handshake callback the test host configures.
++/// </summary>
++[TestClass]
++public class ExchangeEndpointTests
++{
++    /// <summary>The admin host's handshake callback — the exact shape B1's challenge handler and
++    /// B4's <c>BuildCallbackUri</c> mint (query with the nested <c>ReturnUrl</c> ignored by the
++    /// matcher), and the one the test host's <c>Auth:AppCallbackPrefixes</c> allows.</summary>
++    private const string RedirectUri = "http://localhost:5300/signin-handshake";
++
++    /// <summary>Well-formed Direct-Grant success. The token values are DISTINCTIVE so the
++    /// no-token-in-body scan can assert their absence in the raw response.</summary>
++    private const string SuccessTokenBody =
++        """{"access_token":"seeded_access_token","refresh_token":"seeded_refresh_token","id_token":"seeded_id_token","expires_in":3600}""";
++
++    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
++
++    private static void StubSuccess(AuthEndpointTestHost host) =>
++        host.ExchangeStub.OnSendAsync = static (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent(SuccessTokenBody, Encoding.UTF8, "application/json"),
++        });
++
++    private static void StubFailure(AuthEndpointTestHost host, HttpStatusCode status, string body) =>
++        host.ExchangeStub.OnSendAsync = (_, _) => Task.FromResult(new HttpResponseMessage(status)
++        {
++            Content = new StringContent(body, Encoding.UTF8, "application/json"),
++        });
++
++    private static JsonContent Request(string? redirectUri = RedirectUri) =>
++        JsonContent.Create(
++            new ExchangeEndpoints.ExchangeRequest("dev-teacher", "dev-only-password", redirectUri!),
++            options: WebJson);
++
++    [TestMethod]
++    public async Task Exchange_Success_ReturnsCodeAndSessionId_AndNoTokenInBody()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        StubSuccess(host);
++
++        var response = await host.Client.PostAsync("/auth/exchange", Request());
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++
++        var json = await response.Content.ReadAsStringAsync();
++        using var doc = JsonDocument.Parse(json);
++        var code = doc.RootElement.GetProperty("code").GetString()!;
++        var sessionId = doc.RootElement.GetProperty("sessionId").GetString()!;
++        doc.RootElement.GetProperty("expiresInSeconds").GetInt32().Should().Be(3600);
++
++        code.Should().NotBeNullOrWhiteSpace();
++        sessionId.Should().NotBeNullOrWhiteSpace();
++        sessionId.Should().HaveLength(64); // 256-bit opaque custody id (D12) — not a token
++
++        // AC9: the success body is exactly { code, sessionId, expiresInSeconds }. Scanning the
++        // RAW serialized JSON — rather than the typed DTO — means a token field added to the
++        // payload later fails here instead of being silently ignored by deserialization.
++        json.Should().NotContain("seeded_access_token");
++        json.Should().NotContain("seeded_refresh_token");
++        json.Should().NotContain("seeded_id_token");
++
++        host.ExchangeStub.ReceivedRequests.Should().Be(1, "the stub — not the network — answered the exchange");
++    }
++
++    [TestMethod]
++    public async Task Exchange_InvalidCredentials_Is401()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        StubFailure(host, HttpStatusCode.Unauthorized,
++            """{"error":"invalid_grant","error_description":"Invalid user credentials"}""");
++
++        var response = await host.Client.PostAsync("/auth/exchange", Request());
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("invalid_credentials");
++    }
++
++    [TestMethod]
++    public async Task Exchange_DisabledUser_Is403()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        // Keycloak's canonical accountDisabledMessage (verified against the 26.4.7 message
++        // sources in pass 3a's fix): a disabled user must be surfaced as 403, not as a generic
++        // credential failure — the whole point of the pass-3a P1 fix.
++        StubFailure(host, HttpStatusCode.Unauthorized,
++            """{"error":"invalid_grant","error_description":"Account is disabled, contact your administrator."}""");
++
++        var response = await host.Client.PostAsync("/auth/exchange", Request());
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("disabled_user");
++    }
++
++    [TestMethod]
++    public async Task Exchange_Unreachable_Is502()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        StubFailure(host, HttpStatusCode.BadGateway, "gateway exploded");
++
++        var response = await host.Client.PostAsync("/auth/exchange", Request());
++
++        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
++    }
++
++    [TestMethod]
++    public async Task Exchange_SuccessOmittingIdToken_Is502()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        host.ExchangeStub.OnSendAsync = static (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
++        {
++            Content = new StringContent("""{"access_token":"seeded_access_token"}""", Encoding.UTF8, "application/json"),
++        });
++
++        var response = await host.Client.PostAsync("/auth/exchange", Request());
++
++        // A 200 that omits id_token/refresh_token is a malformed endpoint (comment in
++        // ExchangeEndpoints): it must not seed a custody entry that redemption or logout could
++        // never use, so it surfaces as unreachable rather than success.
++        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
++    }
++
++    [TestMethod]
++    public async Task Exchange_BlankRedirectUri_Is400_BeforeTouchingKeycloak()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        // No stub configured here: the default stub answers 502. The redirect-URI guard must
++        // win BEFORE any exchange, so ReceivedRequests stays at zero even though the stub would
++        // fail if it were called — proving the guard is first in the handler.
++        var response = await host.Client.PostAsync("/auth/exchange", Request("   "));
++
++        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
++        host.ExchangeStub.ReceivedRequests.Should().Be(0, "the redirect-URI guard runs before the exchange");
++    }
++
++    [TestMethod]
++    public async Task Exchange_NonAllowlistedRedirectUri_IsRejected_WithNoCodeAndNoUpstreamCall()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        // The stub WOULD answer a code-minting success. The allowlist guard must therefore win
++        // before the exchange: otherwise the crafted `portal/login?return_uri=attacker` link
++        // mints an attacker-redeemable code carrying the victim's claim set (spec §14 / P1-3).
++        StubSuccess(host);
++
++        var response = await host.Client.PostAsync(
++            "/auth/exchange",
++            Request("http://attacker.example/signin-handshake"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
++
++        var json = await response.Content.ReadAsStringAsync();
++        json.Should().Contain("redirect_uri_not_allowed");
++
++        // No code in the rejection body — asserted on the raw JSON (a typed-DTO assertion would
++        // silently ignore a code field added later).
++        using (var doc = JsonDocument.Parse(json))
++        {
++            doc.RootElement.TryGetProperty("code", out _).Should().BeFalse(
++                "the rejection body carries no one-time code — rejecting is pointless if a code leaks first.");
++        }
++
++        json.Should().NotContain("seeded_access_token");
++        json.Should().NotContain("seeded_refresh_token");
++        json.Should().NotContain("seeded_id_token");
++
++        host.ExchangeStub.ReceivedRequests.Should().Be(0,
++            "the allowlist is enforced before the credential exchange: a disallowed target must not even cost a Keycloak round trip.");
++    }
++
++    [TestMethod]
++    public async Task Exchange_AllowlistedRedirectUri_WithNestedReturnUrlQuery_IssuesTheCode()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        StubSuccess(host);
++
++        // The exact spelling the Blazor hosts mint: `…/signin-handshake?ReturnUrl=<escaped>`. The
++        // nested query must not break the allowlist comparison, or the flag-ON handshake could
++        // never complete (B1/B4's callback shape — cross-pass wire pin).
++        var response = await host.Client.PostAsync(
++            "/auth/exchange",
++            Request($"{RedirectUri}?ReturnUrl=%2Fstudents%3Fpage%3D2"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++
++        var json = await response.Content.ReadAsStringAsync();
++        using var doc = JsonDocument.Parse(json);
++        doc.RootElement.GetProperty("code").GetString().Should().NotBeNullOrWhiteSpace();
++    }
++
++    [TestMethod]
++    public async Task Exchange_FourthCallWithinWindow_Is429()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        StubSuccess(host);
++
++        var first = await host.Client.PostAsync("/auth/exchange", Request());
++        var second = await host.Client.PostAsync("/auth/exchange", Request());
++        var third = await host.Client.PostAsync("/auth/exchange", Request());
++        var fourth = await host.Client.PostAsync("/auth/exchange", Request());
++
++        first.StatusCode.Should().Be(HttpStatusCode.OK);
++        second.StatusCode.Should().Be(HttpStatusCode.OK);
++        third.StatusCode.Should().Be(HttpStatusCode.OK);
++        fourth.StatusCode.Should().Be((HttpStatusCode)429);
++
++        // DISCRIMINATION (why this cannot pass without the limiter): the host config permits
++        // exactly THREE requests per fixed window per partition (the connection's loopback
++        // address) with a 429 rejection status. The limiter middleware counts requests BEFORE
++        // the endpoint handler runs, so without `AddAuthRateLimiting` + `RequireRateLimiting`
++        // on this route the fourth call would reach the handler and return 200 like its
++        // predecessors — only the limiter's own rejection path can emit 429.
++        host.ExchangeStub.ReceivedRequests.Should().BeGreaterThan(0, "requests really reached the pipeline");
++    }
++}

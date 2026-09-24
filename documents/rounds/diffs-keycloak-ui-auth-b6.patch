@@ -1,0 +1,1974 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index ed869d5a..9dcf0544 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -132,14 +132,17 @@ files only carry values that genuinely belong to that single service
+ | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
+ | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
+ | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
++| `feature-flag-disable-keycloak-login-ui` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:DisableKeycloakLoginUi` (round B `keycloak-ui-auth`, spec §10 / D4/D5). Injected as `FeatureFlags__FEATURE__DisableKeycloakLoginUi` into all four consumers — `admin`, `families`, `auth` and `auth-portal`. It selects **which login UI renders**: OFF (default) = Keycloak's hosted page via the standard OIDC code flow; ON = the prefab auth portal's login form. A pure UI toggle — validation and authorization are identical in both states — and it is read **at startup** (auth pipelines are registered once, exactly like `FEATURE:DisableOIDCAuth`), so it is **not** a Settings/Config-service flag. See §5. |
++| `app-callback-prefixes` | Aspire parameter (`AddParameter` inline default) | `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake` | Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist a one-time handshake code may be minted for. Fanned to the `auth` service as `Auth__AppCallbackPrefixes` (**plus** the portal's bootstrap redemption URI, appended from the portal's Aspire endpoint — no hardcoded port) and to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The auth service rejects a blank value at start (`ValidateOnStart`), so the list can never be empty in a running deployment. See §4. |
+ | `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
+ | `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
+ | `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
+ | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-smtp-password` (dev-only, `appsettings.Development.json`) | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. A **dev-only** default is committed in `appsettings.Development.json`; a relay that requires auth supplies the real value via user-secrets / env-var, which override it. **Never commit a production secret.** |
+ | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
+-| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
++| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, `admin`, and the `auth` service. See §4. |
+ | `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-keycloak-admin` (dev-only, `appsettings.Development.json`) | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. A **dev-only** default is committed in `appsettings.Development.json`, so a plain `aspire run` starts Keycloak without prompting; a non-dev value comes from user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, which override it (production never loads the Development file). One of the two parameters AC#4 needs; see §4. |
+-| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the same five hosts as `keycloak-client-id` above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
++| `keycloak-auth-admin-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-auth-admin-secret` (dev-only, `appsettings.Development.json`) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin` in the realm import. Injected as `Auth__Keycloak__ServiceAccountClientSecret`; read as `Auth:Keycloak:ServiceAccountClientSecret`. Consumed by the `auth` service only. The committed dev-only default **must equal the realm file's `school-collab-auth-admin` `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects the client_credentials grant on the first admin call. A user-secrets / env-var value overrides it; production supplies a real secret-store value. See §4. |
+ 
+ **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
+ 
+@@ -297,10 +300,10 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
+ ## 4. `Auth:Keycloak` — OIDC authentication
+ 
+ Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
+-(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
++(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.4.7` — 26.4+ for official passkey support)
+ that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
+ (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
+-`settings-api`, and `admin`.
++`settings-api`, `admin`, and the `auth` service.
+ 
+ The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
+ `dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
+@@ -311,8 +314,8 @@ Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
+ 
+ **Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
+ management endpoint (targetPort 9000) and binds an HTTP readiness health check
+-(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
+-`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
++(`/health/ready`) to it. All five `Auth:Keycloak:*` consuming hosts — `assignments-api`,
++`students-api`, `settings-api`, `admin`, and the `auth` service — `.WaitFor(keycloak)`, so none of them fetches
+ OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
+ does not fully start until the import completes).
+ 
+@@ -320,11 +323,80 @@ does not fully start until the import completes).
+ file re-imports on every container recreate — edit the realm and recreate the container to
+ pick it up; no `docker volume rm` is needed.
+ 
++**Realm additions (round A, keycloak-ui-auth)** — all declarative in `school-collab-realm.json`, so they re-import automatically: the realm roles `user-admin` and `platform-admin`; a `User Realm Role` protocol mapper on `school-collab-client` emitting a flat `roles` claim on the ID, access **and** userinfo tokens (this is what `RoleClaimType = ClaimTypes.Role` in `AuthTenancyExtensions` resolves to after the handlers' default inbound claim mapping renames the flat `roles` claim — on both the cookie and bearer paths); the service-account client `school-collab-auth-admin` (`serviceAccountsEnabled`, granted `realm-management` `view-users`/`manage-users`/`view-realm`/`manage-realm`) that the auth service uses for the Keycloak Admin REST API; registered `redirectUris` + `webOrigins` for the two Blazor hosts (`admin` 5300/7300, `families` 5400/7400 — the OIDC code flow could never complete before these existed, plan-review P2); and the realm-level WebAuthn **Passwordless Policy** with the passkeys toggle (`webAuthnPolicyPasswordlessPasskeysEnabled`) plus the `Webauthn Register Passwordless` required action (`spec §6/§11.5`).
++
++**Realm additions (round B pass B6, keycloak-ui-auth)** — again purely declarative, so the file
++re-imports on the next container recreate:
++
++- **The auth service's own `/signin-oidc` redirect URIs, in both dev schemes** —
++  `https://localhost:55458/signin-oidc` and `http://localhost:55459/signin-oidc`
++  (`src/SchoolCollab.Auth/Properties/launchSettings.json`'s
++  `applicationUrl: "https://localhost:55458;http://localhost:55459"`), matching round A's
++  per-host both-scheme registration. On the round-B passkey path (D16) the **auth service is the
++  OIDC relying party**: it starts the ceremony, Keycloak runs the WebAuthn ceremony, and the
++  authorization response returns to *this* service's `/signin-oidc` — so those URIs must be
++  registered or the ceremony cannot complete on either launch profile.
++- **No portal OIDC client and no portal redirect URI anywhere in the realm (D16).** The portal
++  performs no OIDC code flow at all: its password login is the prefab form → `POST /auth/exchange`,
++  and its passkey login is the bootstrap handoff. The realm's `clients` set is therefore exactly
++  `school-collab-client` (the apps' client) + `school-collab-auth-admin` (the admin service
++  account), and no portal URL — least of all the portal's `/bootstrap` route — appears in any
++  `redirectUris`: the bootstrap code reaches the portal as a **one-time bootstrap code** in a
++  redirect from the auth service, never as an authorization code it could exchange for a token
++  (AC12). `AppHostRealmImportArchitectureTests` asserts **both halves** — the two auth-service
++  URIs are present, *and* the client set is exactly those two with no portal URL in any redirect
++  URI — because a presence-only guard would stay green while a portal client quietly reintroduced
++  the design D16 removed.
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+ | `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
+ | `Auth:Keycloak:ClientSecret` | `dev-only-school-collab-client-secret` (dev-only) | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the committed dev-only default for `Parameters:keycloak-client-secret` in `appsettings.Development.json`, which **must equal** the realm file's client `secret` (guarded); **production** MUST substitute a real secret-store value — no production secret is committed. |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `dev-only-school-collab-auth-admin-secret` (dev-only) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin`, bound from the AppHost's `keycloak-auth-admin-secret` parameter. **No code fallback** — the auth service validates its options on start (`ValidateOnStart`), so a missing or blank value fails the host fast at launch instead of 401-ing on the first admin call. **dev** uses the committed dev-only default for `Parameters:keycloak-auth-admin-secret`, which **must equal** the realm file's `school-collab-auth-admin` `secret` (guarded); **production** MUST substitute a real secret-store value. Consumed by the `auth` service only. |
++
++The `auth` service also carries four tunables, each with a safe default and each validated on start: `Auth:OneTimeCodeTtl` (60 s — the single-use code's lifetime; a long TTL would defeat the one-time-code mitigation), `Auth:PortalSessionTtl` (8 h — how long a portal session may live), and the credential-endpoint rate-limit pair `Auth:CredentialEndpointRateLimitWindow` (1 min) / `Auth:CredentialEndpointRateLimitPermits` (5). These are ordinary appsettings/env keys rather than AppHost parameters, so no dev default is committed for them; the §11 table below carries their env-var forms.
++
++### Round B — the auth portal's URLs (`Auth:Portal:*`, `AuthPortal:PublicBaseUrl`)
++
++Three keys distribute the auth portal's URLs (round B `keycloak-ui-auth`, spec D1/D5/D16;
++plan-review P2-5). None of them is an AppHost parameter: each is derived from the
++`auth-portal` resource's Aspire HTTP endpoint, so the live URL is resolved at launch exactly
++like the Keycloak endpoint fan-out (the AppHost writes the endpoint reference expression, e.g.
++the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded**.
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `Auth:Portal:LoginUrl` | _none — **fails closed (401)**_ | The portal's login page URL. Read at startup by the `PortalRedirect` challenge handler that `AddAuthAndTenancy` registers when `FEATURE:DisableKeycloakLoginUi` is ON, and fanned **only** to the two browser-facing Blazor hosts (`admin`, `families`) as `Auth__Portal__LoginUrl`. With the flag ON and this key unset the handler answers **401** — it never emits a blank redirect and never falls back to Keycloak's hosted page (the UI the flag turned off). |
++| `Auth:Portal:BootstrapRedirectUrl` | _none_ | The portal route the **auth service** 302s the browser to after the D16 passkey ceremony, carrying the single-use bootstrap code. Fanned **only** to the `auth` service as `Auth__Portal__BootstrapRedirectUrl` — the auth service is the OIDC relying party, so it is the component that performs the redirect. |
++| `AuthPortal:PublicBaseUrl` | _none_ | The portal's own browser-facing base URL (its Aspire endpoint), fanned only to the `auth-portal` resource as `AuthPortal__PublicBaseUrl` so the portal can build its own URLs. |
++
++**The auth service deliberately does NOT receive `Auth:Portal:LoginUrl`.** That absence is what
++makes its own flag-ON challenge fail closed with 401: the auth service hosts no browser-facing
++login UI, so it must not redirect a browser. `AppHostLoginUiFlagWiringArchitectureTests` asserts
++both halves — the fan-out to the two Blazor hosts *and* the absence on `auth` (a presence-only
++check would pass with the URL leaked onto the service).
++
++### Round B — the per-app callback allowlist (`Auth:AppCallbackPrefixes`, `AuthPortal:AppCallbackPrefixes`)
++
++The redirect-target allowlist (spec §14, plan-review P1-3). A one-time handshake code is minted
++**only** for a redirect target that matches a configured entry: identical scheme, host and port,
++and a path that starts with the entry's path. The query and fragment are ignored, so the Blazor
++hosts' real callback spelling — `{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=<escaped>`
++— matches while the code's destination stays pinned. Without it, a crafted
++`portal/login?return_uri=attacker` link would deliver an **attacker-redeemable** code carrying the
++victim's claim set: URI binding is defenceless when the attacker chooses the URI.
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `Auth:AppCallbackPrefixes` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | Semicolon-separated allowlist of exact callback prefixes, read by the auth service as `Auth__AppCallbackPrefixes`. Enforced at **code issuance** — `/auth/exchange` rejects a non-allowlisted `RedirectUri` (`redirect_uri_not_allowed`, 400) before the credential exchange, so no code exists for an attacker URI (`AppCallbackAllowlist`, fail-closed/default-deny: a malformed entry matches nothing, an empty list matches nothing). Dev value (the AppHost parameter `app-callback-prefixes`, plus the portal's bootstrap URI appended from its Aspire endpoint): `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake;{auth-portal endpoint}/bootstrap`. The four handshake forms are the `admin` (5300/7300) and `families` (5400/7400) launch-profile origins; the bootstrap URI is the D16 redemption target the passkey path's one-time code is bound to. Production must list the real app origins. |
++| `AuthPortal:AppCallbackPrefixes` | _none_ | The portal's own copy of the same list (the four Blazor handshake callbacks only — never its own bootstrap URI), fanned to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The portal validates `return_uri` against it before rendering the form or redirecting; that check is defense-in-depth + UX — the load-bearing enforcement is the auth service's, so a portal bug cannot mint an attacker-redeemable code. |
++
++There is deliberately **no safe default** for `Auth:AppCallbackPrefixes`: a hardcoded non-empty
++fallback would make production fail *open*, and an unvalidated empty list would look like a login
++outage. The shared validator (`AuthServiceOptions.FirstValidationError`, the same function
++`AddAuthServiceOptions` wires into `.Validate(...).ValidateOnStart()`) therefore rejects a blank
++value at launch and names the key.
+ 
+ > 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
+ > sensitive values here. Use one of:
+@@ -494,6 +566,7 @@ flags moved to the Config service.
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
++| `FEATURE:DisableKeycloakLoginUi` | `false` | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag** (auth schemes are registered once, so a startup read is the only correct one). AppHost parameter `feature-flag-disable-keycloak-login-ui`, fanned to `SchoolCollab.Admin` + `SchoolCollab.Families` (the browser-facing challenges that redirect to the portal), the `auth` service (its own startup read; without `Auth:Portal:LoginUrl` there it fails closed with 401) and the `auth-portal` Python app. See §4 for the three portal-URL keys. |
+ 
+ ### Setting a flag
+ 
+@@ -836,6 +909,7 @@ matching env-var form:
+ | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
+ | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
+ | `Parameters:feature-flag-require-assignment-approval` | `Parameters__feature_flag_require_assignment_approval` |
++| `Parameters:feature-flag-disable-keycloak-login-ui` | `Parameters__feature_flag_disable_keycloak_login_ui` |
+ | `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
+ | `Parameters:assignment-file-store-root` | `Parameters__assignment_file_store_root` |
+ | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
+@@ -849,6 +923,8 @@ matching env-var form:
+ | `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
+ | `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
+ | `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
++| `Parameters:keycloak-auth-admin-secret` | `Parameters__keycloak_auth_admin_secret` |
++| `Parameters:app-callback-prefixes` | `Parameters__app_callback_prefixes` |
+ | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+ | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+ | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+@@ -878,7 +954,18 @@ matching env-var form:
+ | `Auth:Keycloak:Authority` | `Auth__Keycloak__Authority` |
+ | `Auth:Keycloak:ClientId` | `Auth__Keycloak__ClientId` |
+ | `Auth:Keycloak:ClientSecret` | `Auth__Keycloak__ClientSecret` |
++| `Auth:Keycloak:ServiceAccountClientSecret` | `Auth__Keycloak__ServiceAccountClientSecret` |
++| `Auth:OneTimeCodeTtl` | `Auth__OneTimeCodeTtl` |
++| `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
++| `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
++| `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
+ | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
++| `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
++| `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
++| `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
++| `AuthPortal:PublicBaseUrl` | `AuthPortal__PublicBaseUrl` |
++| `Auth:AppCallbackPrefixes` | `Auth__AppCallbackPrefixes` |
++| `AuthPortal:AppCallbackPrefixes` | `AuthPortal__AppCallbackPrefixes` |
+ | `Promotion:CronExpression` | `Promotion__CronExpression` |
+ | `Promotion:PollInterval` | `Promotion__PollInterval` |
+ | `Promotion:ErrorDelay` | `Promotion__ErrorDelay` |
+@@ -914,9 +1001,18 @@ Before deploying, verify:
+       `appsettings.Development.json` dev defaults (this one, `keycloak-admin-password`,
+       `smtp-user`, `smtp-password`) are never loaded in production and must not be relied
+       on there.
++- [ ] **`Parameters:keycloak-auth-admin-secret`** — the Keycloak Admin REST
++      service-account secret — is sourced from a secret store in production; its
++      `appsettings.Development.json` dev default must not be relied on.
+ - [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
+       (or omitted) in production. The flag is sourced from the AppHost
+       `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
++- [ ] **`Parameters:feature-flag-disable-keycloak-login-ui`** is `false` (or omitted) in
++      production unless the prefab auth portal is actually deployed there: with it ON, `admin`,
++      `families` and the `auth` service challenge the portal instead of Keycloak's hosted page,
++      so the three portal-URL keys in §4 (`Auth:Portal:LoginUrl` on the two Blazor hosts,
++      `Auth:Portal:BootstrapRedirectUrl` on `auth`) must resolve to browser-reachable URLs —
++      otherwise every unauthenticated gated page fails closed with 401.
+ - [ ] **OIDC `Authority`** points to the production Keycloak realm.
+ - [ ] **Outbox `ExchangeName`** values match the consumer subscriptions
+       for each bounded context (`Parameters:outbox-exchange-*`).
+diff --git a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+index 3a962299..7057c05a 100644
+--- a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
++++ b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+@@ -4,6 +4,29 @@
+   "sslRequired": "external",
+   "registrationAllowed": false,
+   "loginWithEmailAllowed": false,
++  "roles": {
++    "realm": [
++      { "name": "user-admin" },
++      { "name": "platform-admin" }
++    ]
++  },
++  "requiredActions": [
++    {
++      "alias": "webauthn-register-passwordless",
++      "name": "Webauthn Register Passwordless",
++      "providerId": "webauthn-register-passwordless",
++      "enabled": true,
++      "defaultAction": false,
++      "priority": 70,
++      "config": {}
++    }
++  ],
++  "webAuthnPolicyPasswordlessRpEntityName": "school-collab",
++  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256", "RS256"],
++  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
++  "webAuthnPolicyPasswordlessRequireResidentKey": "yes",
++  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
++  "webAuthnPolicyPasswordlessPasskeysEnabled": true,
+   "clients": [
+     {
+       "clientId": "school-collab-client",
+@@ -14,6 +37,24 @@
+       "directAccessGrantsEnabled": true,
+       "protocol": "openid-connect",
+       "secret": "dev-only-school-collab-client-secret",
++      "redirectUris": [
++        "http://localhost:5300/signin-oidc",
++        "https://localhost:7300/signin-oidc",
++        "http://localhost:5300/signout-callback-oidc",
++        "https://localhost:7300/signout-callback-oidc",
++        "http://localhost:5400/signin-oidc",
++        "https://localhost:7400/signin-oidc",
++        "http://localhost:5400/signout-callback-oidc",
++        "https://localhost:7400/signout-callback-oidc",
++        "https://localhost:55458/signin-oidc",
++        "http://localhost:55459/signin-oidc"
++      ],
++      "webOrigins": [
++        "http://localhost:5300",
++        "https://localhost:7300",
++        "http://localhost:5400",
++        "https://localhost:7400"
++      ],
+       "protocolMappers": [
+         {
+           "name": "tenant-id",
+@@ -76,8 +117,31 @@
+             "access.token.claim": true,
+             "id.token.claim": true
+           }
++        },
++        {
++          "name": "roles",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-realm-role-mapper",
++          "config": {
++            "claim.name": "roles",
++            "jsonType.label": "String",
++            "access.token.claim": true,
++            "id.token.claim": true,
++            "userinfo.token.claim": true,
++            "multivalued": true
++          }
+         }
+       ]
++    },
++    {
++      "clientId": "school-collab-auth-admin",
++      "name": "School Collab Auth Admin (service account)",
++      "enabled": true,
++      "publicClient": false,
++      "standardFlowEnabled": false,
++      "directAccessGrantsEnabled": false,
++      "serviceAccountsEnabled": true,
++      "secret": "dev-only-school-collab-auth-admin-secret"
+     }
+   ],
+   "users": [
+@@ -101,6 +165,14 @@
+         "tenant_type": ["School"],
+         "teacher_id": ["00000000-0000-0000-0000-000000000003"]
+       }
++    },
++    {
++      "username": "service-account-school-collab-auth-admin",
++      "enabled": true,
++      "serviceAccountClientId": "school-collab-auth-admin",
++      "clientRoles": {
++        "realm-management": ["view-users", "manage-users", "view-realm", "manage-realm"]
++      }
+     }
+   ]
+ }
+diff --git a/src/SchoolCollab.Auth/AuthServiceExtensions.cs b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+new file mode 100644
+index 00000000..38ea86e9
+--- /dev/null
++++ b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+@@ -0,0 +1,148 @@
++using System.Threading.RateLimiting;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.RateLimiting;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Providers;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth;
++
++/// <summary>
++/// DI registrations for the SchoolCollab.Auth service, kept out of the feature
++/// host's <c>Program.cs</c> (dotnet-best-practices "Never": no inline
++/// <c>services.Add*()</c> in a feature <c>Program.cs</c>; the repo precedent is
++/// <c>SchoolCollab.Core.Messaging.OutboxExtensions</c>). Later round-A passes
++/// that add registrations extend this file instead of inlining them.
++/// </summary>
++public static class AuthServiceExtensions
++{
++    /// <summary>
++    /// Registers <see cref="AuthServiceOptions"/> from the <c>Auth</c> configuration
++    /// section with startup validation (<c>ValidateOnStart</c>), so a missing Keycloak
++    /// setting fails fast at launch instead of surfacing mid-request. The validator is
++    /// <see cref="AuthServiceOptions.FirstValidationError"/> — shared with
++    /// <c>AuthServiceSmokeTests</c> so the startup check and the tests cannot drift.
++    /// </summary>
++    public static IServiceCollection AddAuthServiceOptions(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services
++            .AddOptions<AuthServiceOptions>()
++            .Bind(configuration.GetSection(AuthServiceOptions.SectionName))
++            .Validate(o => AuthServiceOptions.FirstValidationError(o) is null,
++                "Invalid SchoolCollab.Auth configuration; see AuthServiceOptions.FirstValidationError for the failing key.")
++            .ValidateOnStart();
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the round-A services plus round B's D15 provider seam and portal-session scheme.
++    /// The Direct-Grant exchanger, the Admin REST client and the <see cref="KeycloakAuthProvider"/>
++    /// are typed <see cref="HttpClient"/> consumers (their endpoints are derived from
++    /// <c>Auth:Keycloak:Authority</c>); the stores use <see cref="TimeProvider"/> (the repo's
++    /// testable-clock pattern); the audit log is a thin structured <see cref="ILogger"/> wrapper.
++    /// </summary>
++    public static IServiceCollection AddAuthServices(this IServiceCollection services)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++
++        services.AddSingleton(TimeProvider.System);
++        services.AddSingleton<OneTimeCodeStore>();
++        // Round B pass B6 (D16): the bootstrap-code custody. It REUSES round A's OneTimeCodeStore
++        // primitive (single-use, TTL-bound, redirect-URI-bound) in a dedicated instance created
++        // inside the store, so bootstrap codes and D6 handshake codes live in two namespaces that
++        // cannot cross-redeem: the portal-bound code can never be turned into a claim set at
++        // /auth/redeem, and an app's handshake code can never be redeemed at /auth/bootstrap/redeem.
++        services.AddSingleton<BootstrapCodeStore>();
++        services.AddSingleton<PortalSessionStore>();
++        services.AddSingleton<ClaimSetFactory>();
++        services.AddSingleton<AuthAuditLog>();
++        // The per-app callback allowlist (round B pass B5b, spec §14): one shared, immutable
++        // matcher over Auth:AppCallbackPrefixes. Singleton because the bound options are fixed at
++        // startup (ValidateOnStart) and the matcher holds only parsed prefixes.
++        services.AddSingleton<AppCallbackAllowlist>();
++        services.AddHttpClient<DirectGrantExchanger>();
++        services.AddHttpClient<KeycloakAdminClient>();
++        services.AddHttpClient<KeycloakAuthProvider>();
++
++        // The seam resolves to the SAME typed-client instance the factory above builds — a second
++        // registration of the implementation type would hand it an unwired HttpClient. It is a
++        // SINGLETON because the provider remembers a session's refreshed token set in custody
++        // (see KeycloakAuthProvider): a per-request instance would lose it between requests and
++        // break refresh-token rotation.
++        services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<KeycloakAuthProvider>());
++
++        // The portal-session scheme (D12): the portal presents its opaque session id instead of a
++        // token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
++        // surface exists with OIDC either on or off — the portal's own login is the D16 form path, so
++        // it holds a session in both flag states. The scheme list of the portal-facing policy lives
++        // in AuthEndpointGroup.
++        services.AddAuthentication()
++            .AddScheme<PortalSessionAuthenticationOptions, PortalSessionAuthenticationHandler>(
++                PortalSessionAuthenticationHandler.SchemeName,
++                static _ => { })
++            .AddPolicyScheme(
++                PortalSessionAuthenticationHandler.GatewaySchemeName,
++                "Portal-session or host-scheme routing",
++                policy =>
++                {
++                    // Authentication follows the request (portal session vs the host's own scheme);
++                    // the challenge is ALWAYS this scheme's bare 401, never a redirect.
++                    policy.ForwardDefaultSelector = PortalSessionAuthenticationHandler.SelectAuthenticationScheme;
++                    policy.ForwardChallenge = PortalSessionAuthenticationHandler.SchemeName;
++                });
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the fixed-window rate limiter for <c>POST /auth/exchange</c> (spec §14,
++    /// plan-review P1-5, service side). Moved out of <c>Program.cs</c> so the endpoint tests
++    /// can compose the real pipeline from public extensions only (the 429 assertion needs the
++    /// genuine middleware; the <c>Microsoft.AspNetCore.Mvc.Testing</c> package route was
++    /// rejected to honour round A's no-new-package constraint — pass 3c row 51). The ordering
++    /// requirement that made the host file the lawful home is preserved: <c>Program.cs</c>
++    /// still calls this BEFORE <c>builder.Build()</c>.
++    /// </summary>
++    public static IServiceCollection AddAuthRateLimiting(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        // TRUST BOUNDARY: POST /auth/exchange is called server-to-server by the portal inside
++        // the AppHost network, never from a browser; this limiter is the service-side mitigation,
++        // keyed per portal caller. The portal form's own antiforgery requirement is round B's,
++        // because the form does not exist in round A. Framework-provided — no new package.
++        var rateLimitConfig = configuration.GetSection(AuthServiceOptions.SectionName)
++            .Get<AuthServiceOptions>() ?? new AuthServiceOptions();
++        services.AddRateLimiter(rateLimiter =>
++        {
++            // The framework default rejection status is 503; the 429 endpoint assertion depends
++            // on this override.
++            rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
++            rateLimiter.AddPolicy(AuthEndpointGroup.ExchangeRateLimitPolicyName, context =>
++                RateLimitPartition.GetFixedWindowLimiter(
++                    context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
++                    _ => new FixedWindowRateLimiterOptions
++                    {
++                        Window = rateLimitConfig.CredentialEndpointRateLimitWindow,
++                        PermitLimit = rateLimitConfig.CredentialEndpointRateLimitPermits,
++                        QueueLimit = 0,
++                    }));
++        });
++
++        return services;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+new file mode 100644
+index 00000000..0d4f7c25
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+@@ -0,0 +1,155 @@
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.RateLimiting;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Features;
++using System.Security.Claims;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// Maps the auth service's endpoint groups. Endpoint groups are always grouped extension
++/// methods (AGENTS.md) — never inline route maps in Program.cs. Round A pass 2 carries the
++/// grouping plus a placeholder <c>GET /auth/ping</c>; pass 3c wires the exchange/redeem/session
++/// groups and attaches the fixed-window rate-limit policy to the credential exchange (spec §14);
++/// pass 3d adds the admin groups and the <c>user-admin</c> role gate.
++/// </summary>
++public static class AuthEndpointGroup
++{
++    /// <summary>Name of the fixed-window rate-limit policy applied to <c>POST /auth/exchange</c>.
++    /// Registered by Program.cs (before <c>builder.Build()</c>) and required here.</summary>
++    public const string ExchangeRateLimitPolicyName = "exchange-fixed-window";
++
++    /// <summary>The realm role that authorizes the <c>/auth/admin/*</c> groups
++    /// (<c>school-collab-realm.json</c> roles, spec §11.2).</summary>
++    public const string UserAdminRoleName = "user-admin";
++
++    /// <summary>Maps the <c>/auth</c> group under the app's route builder.</summary>
++    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
++    {
++        var group = app.MapGroup("/auth");
++
++        group.MapGet("/ping", () => Results.Ok(new { status = "ok" }));
++
++        // Trust boundary: the exchange is called server-to-server by the portal inside the
++        // AppHost network, never from a browser — the rate limit is the service-side half of
++        // spec §14 (the portal form's own antiforgery is round B's: the form does not exist
++        // in round A, so there is nothing to antiforgery yet).
++        group.MapPost("/exchange", ExchangeEndpoints.Exchange)
++            .RequireRateLimiting(ExchangeRateLimitPolicyName);
++        group.MapPost("/redeem", RedeemEndpoints.Redeem);
++
++        // Round B pass B6 — the D16 passkey relying-party flow. /passkey/login is the portal's
++        // passkey handoff (the auth service holds the OIDC session with Keycloak), /passkey/complete
++        // finishes the ceremony in custody, and /bootstrap/redeem is the portal's server-to-server
++        // redemption of the single-use bootstrap code. None of the three is browser-authenticated
++        // when it starts: login/completed are the ceremony itself, and the redemption's authorization
++        // is the code's single-use + TTL + URI binding against the app-callback allowlist.
++        group.MapGet("/passkey/login", PasskeyEndpoints.Login);
++        group.MapGet("/passkey/complete", PasskeyEndpoints.Complete);
++        group.MapPost("/bootstrap/redeem", PasskeyEndpoints.BootstrapRedeem);
++        group.MapGet("/session/{sessionId}", SessionEndpoints.Get);
++        group.MapDelete("/session/{sessionId}", SessionEndpoints.Delete);
++
++        // Pass 3d — the admin groups (spec §13). The /auth/admin/* gate mirrors
++        // AssignmentEndpoints' conditional-group shape: it applies while OIDC auth is on and
++        // opens when FEATURE:DisableOIDCAuth is set. The role requirement uses RequireRole:
++        // the realm's `User Realm Role` mapper emits a flat `roles` claim, the handlers'
++        // DEFAULT inbound mapping (MapInboundClaims=true — nothing overrides it) renames it to
++        // ClaimTypes.Role, and AuthTenancyExtensions pins each handler's RoleClaimType to that
++        // same default type, so IsInRole resolves against exactly the claim the mapping
++        // produced — identically on the bearer and cookie paths (D9). EMPIRICAL (pass 3d-ii +
++        // the corrective pass): the previous RequireClaim("roles", ...) form failed the gate's
++        // OWN tests (12 failures under the default mapping, including a caller holding
++        // user-admin being rejected), because the literal claim name cannot match after the
++        // rename; a bare RequireRole keeps them green.
++        var featureFlags = app.ServiceProvider.GetService<IFeatureFlagService>();
++        var adminGroup = app.MapGroup("/auth/admin");
++        // GetService (not GetRequiredService) on purpose: the endpoint-test host composes the
++        // pipeline from public extensions and does not register the flag service (AddAuthAndTenancy
++        // is part ii's addition); a MISSING service therefore means "gate on" — the production
++        // posture — never "gate open".
++        if (featureFlags is null || !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
++        {
++            adminGroup.RequireAuthorization(ConfigurePortalFacingAdminPolicy);
++        }
++
++        adminGroup.MapAdminUserRoutes();
++        adminGroup.MapAdminRoleRoutes();
++
++        return app;
++    }
++
++    /// <summary>
++    /// The portal-facing admin policy (spec §13 gate, widened by round B's D12/D15): the SAME
++    /// authenticated-user + <c>user-admin</c> requirement round A pinned — now satisfiable by the
++    /// portal, which holds no token, only its opaque session id
++    /// (<see cref="PortalSessionAuthenticationHandler"/> / AC11).
++    /// <para>
++    /// The policy names ONE scheme, the portal-session gateway, and that is deliberate: the
++    /// authorization middleware CHALLENGES every scheme a policy lists, and <c>Bearer</c> /
++    /// <c>Cookies</c> / <c>TestAuth</c> are not all registered in both flag states — a listed scheme
++    /// without a handler fails the challenge with a 500 instead of a 401. The gateway always
++    /// exists, routes authentication to whichever scheme this app already uses (so round A's
++    /// cookie/bearer/TestAuth callers are unchanged), and its challenge is a bare 401.
++    /// </para>
++    /// </summary>
++    internal static void ConfigurePortalFacingAdminPolicy(AuthorizationPolicyBuilder policy)
++    {
++        ArgumentNullException.ThrowIfNull(policy);
++
++        policy
++            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
++            .RequireAuthenticatedUser()
++            .RequireRole(UserAdminRoleName);
++    }
++
++    /// <summary>Maps an <see cref="AdminStatus"/> from the Keycloak Admin client onto a typed HTTP
++    /// result. <c>Forbidden</c> stays a distinct 403 (the loud cold-start failure an insufficient
++    /// imported role set must surface as). <c>Detail</c> is Keycloak's own error text — never a
++    /// token or a secret.</summary>
++    internal static IResult AdminFailure(AdminStatus status, string? detail) => status switch
++    {
++        AdminStatus.NotFound => Results.Json(new { error = "not_found", detail }, statusCode: StatusCodes.Status404NotFound),
++        AdminStatus.Conflict => Results.Json(new { error = "conflict", detail }, statusCode: StatusCodes.Status409Conflict),
++        AdminStatus.Forbidden => Results.Json(new { error = "forbidden", detail }, statusCode: StatusCodes.Status403Forbidden),
++        AdminStatus.Unauthorized => Results.Json(new { error = "unauthorized", detail }, statusCode: StatusCodes.Status401Unauthorized),
++        _ => Results.Json(new { error = "upstream_unreachable", detail }, statusCode: StatusCodes.Status502BadGateway),
++    };
++
++    /// <summary>
++    /// The audit actor identifier: the teacher id from the authenticated principal's
++    /// <c>teacher_id</c> claim — the SAME claim and the SAME read <see cref="CurrentUser"/> uses
++    /// ("the same way for OIDC cookie, bearer JWT, and TestAuth principals") — or "unknown".
++    /// </summary>
++    /// <remarks>
++    /// The mutation routes resolve the actor/tenant from the principal directly (via the always
++    /// inferable <see cref="HttpContext"/> parameter) rather than injecting <see cref="ICurrentUser"/>:
++    /// a route parameter whose type is not a registered service fails parameter inference GLOBALLY
++    /// (every endpoint's metadata is inferred when the router initializes), and the endpoint-test
++    /// host bootstraps without <c>AddAuthAndTenancy</c> (which registers <c>ICurrentUser</c>) until
++    /// part ii adds the auth pipeline. The claims read here are identical to what
++    /// <see cref="CurrentUser"/> and <see cref="TenantClaimsTransformation"/> consume, so the audit
++    /// values do not change when part ii registers the real service.
++    /// </remarks>
++    internal static string AuditActor(ClaimsPrincipal user)
++        => user.FindFirst(TeacherIdClaim)?.Value ?? "unknown";
++
++    internal static string AuditTenant(ClaimsPrincipal user)
++        => user.FindFirst(TenantIdClaim)?.Value ?? SystemTenantId;
++
++    /// <summary>Claim names consumed by <see cref="CurrentUser"/> and
++    /// <see cref="TenantClaimsTransformation"/> in <c>SchoolCollab.Core.Auth</c>.</summary>
++    private const string TeacherIdClaim = "teacher_id";
++
++    private const string TenantIdClaim = "tenant_id";
++
++    /// <summary>The seeded System tenant (<c>TenantSeeder</c>). Used when the principal carries
++    /// no <c>tenant_id</c> claim — the same fallback posture <c>ICurrentUser.CurrentTenant</c>
++    /// documents ("the default System context when no tenant is in scope").</summary>
++    private const string SystemTenantId = "00000000-0000-0000-0000-000000000001";
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/PasskeyEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/PasskeyEndpoints.cs
+new file mode 100644
+index 00000000..b126658d
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/PasskeyEndpoints.cs
+@@ -0,0 +1,538 @@
++using System.Collections.Concurrent;
++using System.Text.Json;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
++using Microsoft.AspNetCore.Authentication.OpenIdConnect;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Providers;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// The D16 passkey relying-party flow (round B pass B6). On this path the **auth service is the
++/// OIDC relying party** — the realm has no portal client — so the WebAuthn ceremony happens
++/// between the browser and Keycloak and comes back to this service's own <c>/signin-oidc</c>. The
++/// portal never sees a token or an authorization code: it receives a single-use, short-TTL
++/// bootstrap code whose redemption yields its opaque session id (AC11/AC12).
++/// <para>
++/// <b>Three routes.</b> <see cref="Login"/> starts the ceremony, <see cref="Complete"/> finishes
++/// it, and <see cref="BootstrapRedeem"/> is the portal's server-to-server redemption of the
++/// bootstrap code the 302 carried.
++/// </para>
++/// <para>
++/// <b>The open-redirect control is the B5b allowlist, enforced at issuance.</b> The
++/// <c>app_redirect_uri</c> the caller supplies is checked against
++/// <see cref="AppCallbackAllowlist"/> <b>before</b> the challenge, then persisted in the OIDC
++/// pending state (the correlation cookie's authentication properties) and <b>re-validated from
++/// that persisted value</b> at <see cref="Complete"/>. <see cref="Complete"/> never reads a fresh
++/// query parameter: the value that decides where the D6 continuation code points is the one the
++/// ceremony carried, so a modified URL at the callback cannot redirect a minted code.
++/// </para>
++/// </summary>
++public static class PasskeyEndpoints
++{
++    /// <summary>
++    /// The <see cref="AuthenticationProperties"/> item the validated <c>app_redirect_uri</c>
++    /// travels in. The OIDC handler protects the challenge's properties into the correlation
++    /// cookie's state parameter and returns them on the callback ticket (the same channel that
++    /// carries <c>SaveTokens</c>' <c>.Token.*</c> entries), so the value survives the ceremony
++    /// without this service storing per-request state of its own.
++    /// </summary>
++    public const string AppRedirectUriItemName = "app_redirect_uri";
++
++    /// <summary>The ceremony's start path (what the portal's passkey button links to).</summary>
++    public const string LoginPath = "/auth/passkey/login";
++
++    /// <summary>
++    /// The ceremony's completion path — the <see cref="AuthenticationProperties.RedirectUri"/> the
++    /// challenge pins, so the OIDC handler redirects the browser here after <c>/signin-oidc</c>
++    /// signs the cookie instead of back into <see cref="Login"/> (which would re-challenge).
++    /// </summary>
++    public const string CompletePath = "/auth/passkey/complete";
++
++    /// <summary>
++    /// Configuration key for the portal route the browser is 302d to with the bootstrap code
++    /// (B3's pin: fanned to the auth service only, derived from the portal's Aspire endpoint — no
++    /// hardcoded port). Read from <see cref="IConfiguration"/> rather than
++    /// <see cref="AuthServiceOptions"/> because it belongs to the passkey flow alone and has no
++    /// startup validation contract; a blank value fails closed per request (see
++    /// <see cref="Complete"/>).
++    /// </summary>
++    internal const string BootstrapRedirectUrlKey = "Auth:Portal:BootstrapRedirectUrl";
++
++    /// <summary>Query parameter carrying the single-use bootstrap code on the 302.</summary>
++    internal const string BootstrapCodeQueryName = "code";
++
++    /// <summary>
++    /// An access-token lifetime used only when the token's own <c>exp</c> claim cannot be read: a
++    /// deliberately SHORT fallback, so the session's refresh happens early (an unnecessary
++    /// refresh) rather than late (a token the data APIs reject).
++    /// </summary>
++    private const int FallbackAccessTokenLifetimeSeconds = 300;
++
++    /// <summary>
++    /// Starts the passkey ceremony (D16). The supplied <c>app_redirect_uri</c> — the callback a
++    /// Blazor app's sign-in must eventually continue to, or the portal's own route when the portal
++    /// itself initiated the sign-in — is validated against <see cref="AppCallbackAllowlist"/>
++    /// <b>before</b> the challenge, so no ceremony is ever started for a target that could not
++    /// receive a code. A blank value (400 <c>redirect_uri_required</c>) and a non-allowlisted value
++    /// (400 <c>redirect_uri_not_allowed</c>) are refused without a single redirect; neither body
++    /// echoes the rejected URI.
++    /// <para>
++    /// The challenge names the <see cref="OpenIdConnectDefaults.AuthenticationScheme"/> explicitly
++    /// on purpose: the host's default challenge scheme is the login-UI policy scheme (B1), and the
++    /// auth service must NOT let that route its own browser-facing passkey challenge to the portal's
++    /// login page — the auth service is the relying party here, in both flag states.
++    /// </para>
++    /// </summary>
++    public static async Task<IResult> Login(
++        HttpContext httpContext,
++        AppCallbackAllowlist callbackAllowlist)
++    {
++        ArgumentNullException.ThrowIfNull(httpContext);
++        ArgumentNullException.ThrowIfNull(callbackAllowlist);
++
++        var appRedirectUri = httpContext.Request.Query[AppRedirectUriItemName].ToString();
++
++        if (string.IsNullOrWhiteSpace(appRedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_required" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        if (!callbackAllowlist.IsAllowed(appRedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_not_allowed" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        // Persisted, not stored: the OIDC handler protects these properties into the correlation
++        // cookie's state and returns them on the callback ticket, so Complete can re-read the
++        // value the ceremony started with (never a query parameter supplied at the callback).
++        var properties = new AuthenticationProperties { RedirectUri = CompletePath };
++        properties.Items[AppRedirectUriItemName] = appRedirectUri.Trim();
++
++        await httpContext.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme, properties);
++
++        // The challenge has already written the 302; nothing may be appended.
++        return Results.Empty;
++    }
++
++    /// <summary>
++    /// Completes the passkey ceremony (D16): the OIDC callback signed this browser in (the cookie
++    /// is the ceremony's result), so the service now
++    /// <list type="number">
++    /// <item>reads the <c>app_redirect_uri</c> from the <b>persisted</b> authentication properties
++    /// and re-validates it against the allowlist — a fresh query parameter is never consulted;</item>
++    /// <item>takes the token set out of the cookie's properties (the OIDC handler's
++    /// <c>SaveTokens</c> channel) into custody, returning only the opaque session id;</item>
++    /// <item>mints the single-use, TTL-bound, URI-bound bootstrap code for the portal, plus — when
++    /// a Blazor app originated the sign-in — the D6 one-time handshake code for that app's
++    /// callback;</item>
++    /// <item>302s the browser to <c>Auth:Portal:BootstrapRedirectUrl</c> with only the bootstrap
++    /// code. No token and no authorization code ever leaves this service on this response
++    /// (AC12).</item>
++    /// </list>
++    /// Fail-closed throughout: an unauthenticated caller (401), a missing/withdrawn/non-allowlisted
++    /// persisted target (400), an unusable token set (502) and an unconfigured portal bootstrap URL
++    /// (500) all end without a code being minted.
++    /// </summary>
++    public static async Task<IResult> Complete(
++        HttpContext httpContext,
++        AppCallbackAllowlist callbackAllowlist,
++        PortalSessionStore sessions,
++        OneTimeCodeStore codes,
++        BootstrapCodeStore bootstrapCodes,
++        IConfiguration configuration,
++        TimeProvider timeProvider)
++    {
++        ArgumentNullException.ThrowIfNull(httpContext);
++        ArgumentNullException.ThrowIfNull(callbackAllowlist);
++        ArgumentNullException.ThrowIfNull(sessions);
++        ArgumentNullException.ThrowIfNull(codes);
++        ArgumentNullException.ThrowIfNull(bootstrapCodes);
++        ArgumentNullException.ThrowIfNull(configuration);
++        ArgumentNullException.ThrowIfNull(timeProvider);
++
++        // The ceremony's own result is the cookie the OIDC handler signed on /signin-oidc.
++        var ceremony = await httpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
++        if (!ceremony.Succeeded || ceremony.Properties is null)
++        {
++            return Results.Json(
++                new { error = "passkey_ceremony_incomplete" },
++                statusCode: StatusCodes.Status401Unauthorized);
++        }
++
++        // The PERSISTED value decides where the continuation code may point. A query parameter on
++        // this request is ignored by construction — it is never read here.
++        if (!ceremony.Properties.Items.TryGetValue(AppRedirectUriItemName, out var persistedAppRedirectUri)
++            || string.IsNullOrWhiteSpace(persistedAppRedirectUri)
++            || !callbackAllowlist.IsAllowed(persistedAppRedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_not_allowed" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        var appRedirectUri = persistedAppRedirectUri.Trim();
++
++        var tokens = ReadTokenSet(ceremony.Properties, timeProvider);
++        if (tokens is null)
++        {
++            return Results.Json(
++                new { error = "keycloak_unreachable", detail = "the ceremony returned no usable token set" },
++                statusCode: StatusCodes.Status502BadGateway);
++        }
++
++        if (!TryResolveBootstrapTarget(configuration, out var bootstrapRedirectUrl, out var bootstrapBinding))
++        {
++            return Results.Json(
++                new { error = "bootstrap_redirect_unconfigured" },
++                statusCode: StatusCodes.Status500InternalServerError);
++        }
++
++        // Custody: the token set lives only here; the session id is the only value a caller holds.
++        var sessionId = sessions.Create(
++            tokens.AccessToken, tokens.RefreshToken, tokens.IdToken, tokens.ExpiresInSeconds);
++
++        // D16 continuation: a sign-in that began at a gated Blazor page gets the D6 one-time code
++        // for that app's callback, which the portal hands onward after the redemption. A sign-in
++        // that began at the portal itself shares the portal's origin and needs no continuation —
++        // the portal only needs its session id.
++        BootstrapContinuation? continuation = null;
++        if (!IsPortalOwnSignIn(appRedirectUri, bootstrapBinding))
++        {
++            continuation = new BootstrapContinuation(
++                appRedirectUri,
++                codes.Create(appRedirectUri, sessionId));
++        }
++
++        var bootstrapCode = bootstrapCodes.Create(bootstrapBinding, sessionId, continuation);
++
++        var location = $"{bootstrapRedirectUrl}"
++            + (bootstrapRedirectUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?")
++            + $"{BootstrapCodeQueryName}={Uri.EscapeDataString(bootstrapCode)}";
++
++        return Results.Redirect(location, permanent: false);
++    }
++
++    /// <summary>Request body for <c>POST /auth/bootstrap/redeem</c> — the shape B2's portal client
++    /// pins: <c>{code, redirectUri}</c>, where <c>redirectUri</c> is the portal's own bootstrap
++    /// redemption URI (the URI the code was bound to when this service issued it).</summary>
++    public sealed record BootstrapRedeemRequest(string Code, string RedirectUri);
++
++    /// <summary>
++    /// Success body for the portal (AC12): its opaque session id plus — for a Blazor-originated
++    /// sign-in — the D6 continuation (that app's callback and the one-time code the portal redirects
++    /// onward with). <b>No token and no authorization code of the portal's own is ever present.</b>
++    /// </summary>
++    public sealed record BootstrapRedeemResponse(string SessionId, string? AppRedirectUri = null, string? AppCode = null);
++
++    /// <summary>
++    /// Redeems the bootstrap code server-to-server for the portal (D16). The supplied
++    /// <c>redirectUri</c> is checked against the allowlist <b>and</b> against the code's own binding,
++    /// so a code observed in one call site cannot be redeemed from another. Single-use, TTL-bound,
++    /// and fail-closed on every rejection; the response carries only non-token data (AC12).
++    /// </summary>
++    public static IResult BootstrapRedeem(
++        BootstrapRedeemRequest request,
++        AppCallbackAllowlist callbackAllowlist,
++        BootstrapCodeStore bootstrapCodes)
++    {
++        ArgumentNullException.ThrowIfNull(request);
++        ArgumentNullException.ThrowIfNull(callbackAllowlist);
++        ArgumentNullException.ThrowIfNull(bootstrapCodes);
++
++        if (string.IsNullOrWhiteSpace(request.RedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_required" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        if (!callbackAllowlist.IsAllowed(request.RedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_not_allowed" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        var redemption = bootstrapCodes.Redeem(request.Code, request.RedirectUri);
++        return redemption.Status switch
++        {
++            RedeemStatus.Success => Results.Ok(new BootstrapRedeemResponse(
++                redemption.SessionId!,
++                redemption.Continuation?.AppRedirectUri,
++                redemption.Continuation?.AppCode)),
++            RedeemStatus.InvalidCode => Results.Json(
++                new { error = "invalid_code" },
++                statusCode: StatusCodes.Status404NotFound),
++            RedeemStatus.Expired => Results.Json(
++                new { error = "code_expired" },
++                statusCode: StatusCodes.Status400BadRequest),
++            _ => Results.Json(
++                new { error = "redirect_uri_mismatch" },
++                statusCode: StatusCodes.Status400BadRequest),
++        };
++    }
++
++    /// <summary>
++    /// Resolves the configured portal bootstrap target: the URL the browser is redirected to (as
++    /// configured) and the normalized <c>scheme://host[:port]/path</c> the bootstrap code is bound
++    /// to (query and fragment stripped, so the code's binding is stable while the redirect may carry
++    /// its own parameters). <c>false</c> — never a blank redirect — when the key is absent, blank or
++    /// not an absolute http(s) URI.
++    /// </summary>
++    private static bool TryResolveBootstrapTarget(
++        IConfiguration configuration,
++        out string redirectUrl,
++        out string binding)
++    {
++        redirectUrl = string.Empty;
++        binding = string.Empty;
++
++        var configured = configuration[BootstrapRedirectUrlKey];
++        if (string.IsNullOrWhiteSpace(configured)
++            || !Uri.TryCreate(configured.Trim(), UriKind.Absolute, out var parsed)
++            || (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
++        {
++            return false;
++        }
++
++        redirectUrl = configured.Trim();
++        binding = parsed.GetLeftPart(UriPartial.Path);
++        return true;
++    }
++
++    /// <summary>
++    /// Whether the sign-in began at the portal itself rather than at a Blazor app: the persisted
++    /// target shares the portal bootstrap URL's origin. Such a sign-in needs no D6 continuation
++    /// (the portal only needs its session id); every other origin is an app and gets one.
++    /// </summary>
++    private static bool IsPortalOwnSignIn(string appRedirectUri, string portalBootstrapBinding)
++    {
++        return Uri.TryCreate(appRedirectUri.Trim(), UriKind.Absolute, out var app)
++            && Uri.TryCreate(portalBootstrapBinding, UriKind.Absolute, out var portal)
++            && string.Equals(
++                app.GetLeftPart(UriPartial.Authority),
++                portal.GetLeftPart(UriPartial.Authority),
++                StringComparison.OrdinalIgnoreCase);
++    }
++
++    /// <summary>
++    /// The ceremony's token set, read from the cookie properties the OIDC handler wrote
++    /// (<c>SaveTokens</c>). <c>null</c> when any of the three tokens is missing: a session without
++    /// a refresh token could never be refreshed or revoked, so it must not be created at all — the
++    /// same posture round A's exchange takes for a token-less "success".
++    /// <para>
++    /// <see cref="ProviderTokenSet"/> travels only into <see cref="PortalSessionStore"/>; it is never
++    /// serialized, so this type is not a response shape (D12/AC11).
++    /// </para>
++    /// </summary>
++    private static ProviderTokenSet? ReadTokenSet(AuthenticationProperties properties, TimeProvider timeProvider)
++    {
++        var accessToken = properties.GetTokenValue("access_token");
++        var refreshToken = properties.GetTokenValue("refresh_token");
++        var idToken = properties.GetTokenValue("id_token");
++
++        if (string.IsNullOrEmpty(accessToken)
++            || string.IsNullOrEmpty(refreshToken)
++            || string.IsNullOrEmpty(idToken))
++        {
++            return null;
++        }
++
++        return new ProviderTokenSet(
++            accessToken,
++            refreshToken,
++            idToken,
++            AccessTokenLifetimeSeconds(accessToken, timeProvider));
++    }
++
++    /// <summary>
++    /// The access token's remaining lifetime, read from its own <c>exp</c> claim so custody's
++    /// refresh timing matches what Keycloak issued. Falls back to
++    /// <see cref="FallbackAccessTokenLifetimeSeconds"/> when the payload cannot be read — refreshing
++    /// early is harmless, refreshing late is not.
++    /// </summary>
++    private static int AccessTokenLifetimeSeconds(string accessToken, TimeProvider timeProvider)
++    {
++        try
++        {
++            var payload = DecodePayloadSegment(accessToken);
++            if (payload.TryGetProperty("exp", out var exp)
++                && exp.ValueKind == JsonValueKind.Number
++                && exp.TryGetInt64(out var unixSeconds))
++            {
++                var remaining = DateTimeOffset.FromUnixTimeSeconds(unixSeconds) - timeProvider.GetUtcNow();
++                if (remaining > TimeSpan.Zero)
++                {
++                    return (int)Math.Min(remaining.TotalSeconds, int.MaxValue);
++                }
++            }
++        }
++        catch (InvalidDataException)
++        {
++            // Not a readable JWT payload: fall through to the conservative lifetime below.
++        }
++
++        return FallbackAccessTokenLifetimeSeconds;
++    }
++
++    /// <summary>
++    /// Decodes the <c>payload</c> segment of a JWT as JSON **without cryptographic verification**,
++    /// exactly as round A's redemption path and <c>KeycloakAuthProvider</c> do: the token was minted
++    /// by Keycloak and handed to this service by its own OIDC handler moments earlier, so only the
++    /// claim value is needed. A three-segment JWT with a base64url JSON payload is assumed; anything
++    /// else throws.
++    /// </summary>
++    private static JsonElement DecodePayloadSegment(string token)
++    {
++        var parts = token.Split('.');
++        if (parts.Length != 3)
++        {
++            throw new InvalidDataException("the token is not a three-segment JWT.");
++        }
++
++        var segment = (parts[1].Length % 4) switch
++        {
++            0 => parts[1],
++            2 => parts[1] + "==",
++            3 => parts[1] + "=",
++            _ => throw new InvalidDataException("the token payload segment has an invalid length."),
++        };
++
++        byte[] bytes;
++        try
++        {
++            bytes = Convert.FromBase64String(segment.Replace('-', '+').Replace('_', '/'));
++        }
++        catch (FormatException ex)
++        {
++            throw new InvalidDataException("the token payload segment is not valid base64url.", ex);
++        }
++
++        try
++        {
++            using var document = JsonDocument.Parse(bytes);
++            return document.RootElement.Clone();
++        }
++        catch (JsonException ex)
++        {
++            throw new InvalidDataException("the token payload segment is not valid JSON.", ex);
++        }
++    }
++}
++
++/// <summary>
++/// The D16 continuation a bootstrap code carries: the originating app's callback and the D6
++/// one-time handshake code minted for it. Present only when a Blazor app — not the portal —
++/// originated the sign-in.
++/// </summary>
++public sealed record BootstrapContinuation(string AppRedirectUri, string AppCode);
++
++/// <summary>Outcome of a bootstrap-code redemption: the round-A <see cref="RedeemStatus"/>, the
++/// custody session id when the code was consumed, and the continuation carried by the code.</summary>
++public sealed record BootstrapRedemptionResult(
++    RedeemStatus Status,
++    string? SessionId = null,
++    BootstrapContinuation? Continuation = null);
++
++/// <summary>
++/// Custody for the D16 bootstrap codes (round B pass B6). It reuses round A's
++/// <see cref="OneTimeCodeStore"/> primitive for the code itself — single-use, TTL-bound, and bound
++/// to the portal's bootstrap redemption URI — in a **dedicated instance**, so the bootstrap
++/// namespace and the D6 handshake namespace can never cross: a bootstrap code can never be
++/// redeemed at <c>/auth/redeem</c> (which returns a claim set) and a handshake code can never be
++/// redeemed at <c>/auth/bootstrap/redeem</c>.
++/// <para>
++/// What it adds to the primitive is the optional <see cref="BootstrapContinuation"/> the bootstrap
++/// code must carry to redemption, so the portal learns the app callback and the D6 code from the
++/// redemption response (D16) instead of from a browser-visible parameter. The continuation is
++/// removed with any redemption attempt of its code and is swept on the same TTL as the code itself,
++/// so custody stays bounded — the standard the round-A store review set.
++/// </para>
++/// </summary>
++public sealed class BootstrapCodeStore
++{
++    private const int MaxLiveContinuations = 1024;
++    private const int SweepEveryNCreates = 256;
++
++    private readonly OneTimeCodeStore _codes;
++    private readonly ConcurrentDictionary<string, (BootstrapContinuation Continuation, DateTimeOffset ExpiresAtUtc)> _continuations
++        = new(StringComparer.Ordinal);
++    private readonly TimeProvider _timeProvider;
++    private readonly TimeSpan _ttl;
++
++    private long _createdCount;
++
++    public BootstrapCodeStore(TimeProvider timeProvider, IOptions<AuthServiceOptions> options)
++    {
++        ArgumentNullException.ThrowIfNull(timeProvider);
++        ArgumentNullException.ThrowIfNull(options);
++
++        _timeProvider = timeProvider;
++        _ttl = options.Value.OneTimeCodeTtl;
++        _codes = new OneTimeCodeStore(timeProvider, options);
++    }
++
++    /// <summary>
++    /// Issues a bootstrap code bound to <paramref name="redirectUri"/> (the portal's bootstrap
++    /// redemption URI) for <paramref name="sessionId"/>, carrying
++    /// <paramref name="continuation"/> when the sign-in began at a Blazor app.
++    /// </summary>
++    public string Create(string redirectUri, string sessionId, BootstrapContinuation? continuation = null)
++    {
++        var code = _codes.Create(redirectUri, sessionId);
++
++        if (continuation is not null)
++        {
++            _continuations[code] = (continuation, _timeProvider.GetUtcNow() + _ttl);
++
++            var created = Interlocked.Increment(ref _createdCount);
++            if (created % SweepEveryNCreates == 0 || _continuations.Count > MaxLiveContinuations)
++            {
++                SweepExpiredContinuations();
++            }
++        }
++
++        return code;
++    }
++
++    /// <summary>
++    /// Redeems a bootstrap code exactly once. Any attempt — success, replay, expiry or a
++    /// redirect-URI mismatch — also drops the code's continuation: after the code is gone the
++    /// continuation can never be handed out again.
++    /// </summary>
++    public BootstrapRedemptionResult Redeem(string code, string redirectUri)
++    {
++        var redemption = _codes.Redeem(code, redirectUri);
++        _continuations.TryRemove(code, out var continuation);
++
++        return redemption.Status == RedeemStatus.Success
++            ? new BootstrapRedemptionResult(RedeemStatus.Success, redemption.Entry!.SessionId, continuation.Continuation)
++            : new BootstrapRedemptionResult(redemption.Status);
++    }
++
++    /// <summary>
++    /// Reclaims continuations whose code has outlived its own TTL — the ones a sweep in the code
++    /// store already dropped, and any code that was simply never redeemed.
++    /// </summary>
++    private void SweepExpiredContinuations()
++    {
++        var now = _timeProvider.GetUtcNow();
++        foreach (var (key, entry) in _continuations)
++        {
++            if (entry.ExpiresAtUtc <= now)
++            {
++                _continuations.TryRemove(new KeyValuePair<string, (BootstrapContinuation, DateTimeOffset)>(key, entry));
++            }
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+index 540096e4..2288392b 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+@@ -81,6 +81,208 @@ public class AppHostRealmImportArchitectureTests
+             "the bind-mount target must point at the derived realm filename under /opt/keycloak/data/import/ (the only dir --import-realm scans).");
+     }
+ 
++    [TestMethod]
++    public void RealmImportFile_DeclaresTheTwoRealmRoles()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        doc.RootElement.TryGetProperty("roles", out var roles).Should().BeTrue(
++            "the realm import must declare a top-level `roles` object (spec §11.2).");
++        roles.TryGetProperty("realm", out var realmRoles).Should().BeTrue(
++            "realm roles must live under `roles.realm`.");
++
++        var names = realmRoles.EnumerateArray()
++            .Where(r => r.ValueKind == JsonValueKind.Object && r.TryGetProperty("name", out _))
++            .Select(r => r.GetProperty("name").GetString())
++            .ToArray();
++
++        names.Should().Contain(new[] { "user-admin", "platform-admin" },
++            "the realm must declare the two realm roles the auth service gates on (spec §11.2).");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_DeclaresTheServiceAccountClient()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var realmRoot = doc.RootElement;
++        var client = FindClient(realmRoot, "school-collab-auth-admin");
++
++        client.TryGetProperty("serviceAccountsEnabled", out var sa).Should().BeTrue(
++            "the admin service-account client must enable service accounts.");
++        sa.ValueKind.Should().Be(JsonValueKind.True,
++            "serviceAccountsEnabled must be true for the client_credentials grant (spec §11.3).");
++        client.TryGetProperty("secret", out var secret).Should().BeTrue();
++        secret.ValueKind.Should().Be(JsonValueKind.String, "the service-account client must carry a secret.");
++
++        // The realm-management grant lives as clientRoles on the service-account USER entry
++        // (username `service-account-<clientId>`), not on the client representation:
++        // ClientRepresentation has no clientRoles property, and Keycloak's realm import silently
++        // drops unknown properties — a client-side block would leave the first Admin REST call
++        // with 403 (diff-review P1, round keycloak-ui-auth).
++        var saUser = FindServiceAccountUser(realmRoot, "school-collab-auth-admin");
++        saUser.TryGetProperty("clientRoles", out var clientRoles).Should().BeTrue(
++            "the service-account user entry must carry the realm-management grant (diff-review P1).");
++        clientRoles.TryGetProperty("realm-management", out var rm).Should().BeTrue(
++            "the grant must target the realm-management client roles.");
++        rm.ValueKind.Should().Be(JsonValueKind.Array, "realm-management must be an array of role names.");
++        var granted = rm.EnumerateArray()
++            .Where(r => r.ValueKind == JsonValueKind.String)
++            .Select(r => r.GetString())
++            .Where(r => r is not null)
++            .Cast<string>()
++            .ToArray();
++        granted.Should().BeEquivalentTo(new[] { "view-users", "manage-users", "view-realm", "manage-realm" },
++            "the service account must be granted EXACTLY the least-privilege realm-management quartet (spec §16.2) — an exact-set assertion so silent privilege creep or a dropped role cannot pass the guard.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_HasRolesMapperOnBothTokenPaths()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue();
++        var rolesMapper = mappers.EnumerateArray().FirstOrDefault(m =>
++            m.ValueKind == JsonValueKind.Object
++            && m.TryGetProperty("protocolMapper", out var pm)
++            && pm.ValueKind == JsonValueKind.String
++            && pm.GetString() == "oidc-usermodel-realm-role-mapper");
++
++        rolesMapper.ValueKind.Should().Be(JsonValueKind.Object,
++            "school-collab-client must carry a realm-role mapper emitting the `roles` claim.");
++        rolesMapper.GetProperty("config").TryGetProperty("access.token.claim", out var atc).Should().BeTrue();
++        atc.ValueKind.Should().Be(JsonValueKind.True,
++            "the bearer path reads `roles` from the access token, so access.token.claim must be true.");
++        rolesMapper.GetProperty("config").TryGetProperty("id.token.claim", out var itc).Should().BeTrue();
++        itc.ValueKind.Should().Be(JsonValueKind.True,
++            "the cookie path reads `roles` from the ID token, so id.token.claim must be true.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_MappersEmitExactlyTheClaimSetFactoryClaimNames()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue(
++            "the guard must not pass vacuously over a missing protocolMappers block.");
++        var claimNames = new List<string>();
++        foreach (var mapper in mappers.EnumerateArray())
++        {
++            if (mapper.ValueKind != JsonValueKind.Object
++                || !mapper.TryGetProperty("config", out var config)
++                || config.ValueKind != JsonValueKind.Object
++                || !config.TryGetProperty("claim.name", out var name)
++                || name.ValueKind != JsonValueKind.String)
++            {
++                continue;
++            }
++
++            claimNames.Add(name.GetString()!);
++        }
++
++        // The five claim names ARE the ClaimSetFactory contract (D9) — the factory lives in the
++        // auth service and cannot be referenced from this project, so the values are pinned here.
++        // Exact-set assertion: renaming a mapper's claim.name (a silent tenant-binding break),
++        // dropping one, or adding a new claim mapper without updating this guard ALL fail.
++        claimNames.Should().BeEquivalentTo(
++            new[] { "tenant_id", "tenant_name", "tenant_type", "teacher_id", "roles" },
++            "school-collab-client's protocol mappers must emit EXACTLY the claim names "
++            + "ClaimSetFactory reads (tenant_id/tenant_name/tenant_type/teacher_id/roles): "
++            + "a mapper rename in school-collab-realm.json must fail this guard.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_HasRedirectUrisAndWebOrigins()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("redirectUris", out var uris).Should().BeTrue();
++        uris.ValueKind.Should().Be(JsonValueKind.Array);
++        var list = uris.EnumerateArray()
++            .Where(u => u.ValueKind == JsonValueKind.String)
++            .Select(u => u.GetString())
++            .Where(u => u is not null)
++            .Cast<string>()
++            .ToArray();
++        list.Should().HaveCountGreaterThan(0, "the OIDC code flow cannot complete without registered redirect URIs.");
++        list.Should().Contain(u => u.Contains("localhost:5300") && u.Contains("/signin-oidc"));
++        list.Should().Contain(u => u.Contains("localhost:5400") && u.Contains("/signin-oidc"));
++
++        client.TryGetProperty("webOrigins", out var origins).Should().BeTrue();
++        origins.ValueKind.Should().Be(JsonValueKind.Array);
++        origins.GetArrayLength().Should().BeGreaterThan(0);
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_RegistersTheAuthServiceRelyingPartyRedirectUris_BothDevSchemes()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("redirectUris", out var uris).Should().BeTrue();
++        var list = uris.EnumerateArray()
++            .Where(u => u.ValueKind == JsonValueKind.String)
++            .Select(u => u.GetString())
++            .Where(u => u is not null)
++            .Cast<string>()
++            .ToArray();
++
++        // Round B pass B6 (D16): the passkey path makes the AUTH SERVICE the OIDC relying party,
++        // so its own launch-profile URLs must be registered or the authorization response has
++        // nowhere legal to return to. Both dev schemes are registered, exactly as round A does
++        // per host (the dev HTTPS profile plus the HTTP one, `Properties/launchSettings.json`:
++        // `https://localhost:55458;http://localhost:55459`) — a single-scheme registration would
++        // let the ceremony break silently depending on which profile is active.
++        list.Should().Contain("https://localhost:55458/signin-oidc",
++            "the auth service is the D16 passkey relying party and must have its HTTPS dev /signin-oidc callback registered.");
++        list.Should().Contain("http://localhost:55459/signin-oidc",
++            "the auth service's HTTP dev launch profile must also be able to complete the ceremony.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_DeclaresNoPortalOidcClient_AndNoPortalRedirectUri()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var realmRoot = doc.RootElement;
++        realmRoot.TryGetProperty("clients", out var clients).Should().BeTrue();
++        clients.ValueKind.Should().Be(JsonValueKind.Array);
++
++        var clientIds = clients.EnumerateArray()
++            .Where(c => c.ValueKind == JsonValueKind.Object && c.TryGetProperty("clientId", out _))
++            .Select(c => c.GetProperty("clientId").GetString())
++            .Where(id => id is not null)
++            .Cast<string>()
++            .ToArray();
++
++        // D16's NEGATIVE invariant: the portal is NOT an OIDC client. It performs no code flow —
++        // its own login is the custom form + /auth/exchange, and its passkey login is the
++        // bootstrap handoff with the auth service as the relying party — so a `clients` entry
++        // for it (which would come with a redirect URI the portal could be redirected to) is
++        // exactly the design D16 removed. Asserting the EXACT client-id set makes the guard
++        // discriminating: any added client fails, whatever it is named (a name-based check would
++        // pass for a portal client spelled differently).
++        clientIds.Should().BeEquivalentTo(
++            new[] { "school-collab-client", "school-collab-auth-admin" },
++            "the realm must declare exactly the app/Blazor client and the admin service-account client — D16 forbids a portal OIDC client (the portal holds no token and performs no code flow).");
++
++        var redirectUris = clients.EnumerateArray()
++            .Where(c => c.ValueKind == JsonValueKind.Object
++                && c.TryGetProperty("redirectUris", out var uris)
++                && uris.ValueKind == JsonValueKind.Array)
++            .SelectMany(c => c.GetProperty("redirectUris").EnumerateArray())
++            .Where(u => u.ValueKind == JsonValueKind.String)
++            .Select(u => u.GetString()!)
++            .ToArray();
++
++        redirectUris.Should().NotBeEmpty(
++            "the guard must not pass vacuously when no client carries a redirectUris array.");
++        redirectUris.Should().NotContain(u => u.Contains("portal", StringComparison.OrdinalIgnoreCase),
++            "no portal URL may be registered as a redirect URI anywhere in the realm (D16).");
++        redirectUris.Should().NotContain(u => u.EndsWith("/bootstrap", StringComparison.OrdinalIgnoreCase),
++            "the portal's bootstrap redemption route is a code-receiving URI but it is NOT an OIDC redirect URI: on the passkey path the code reaches the portal as a one-time bootstrap code, never as an authorization code (D16/AC12).");
++    }
++
+     // ── Helpers ─────────────────────────────────────────────────────────
+ 
+     /// <summary>Resolves the single realm candidate anywhere in the AppHost dir
+@@ -122,6 +324,56 @@ public class AppHostRealmImportArchitectureTests
+         return realm.GetString()!;
+     }
+ 
++    /// <summary>Resolves the named client from an already-parsed realm document root. THROWS when the
++    /// client is missing, so a renamed/removed client cannot pass the assertions vacuously. The caller
++    /// owns the <see cref="JsonDocument"/> lifetime (a returned <see cref="JsonElement"/> is invalid
++    /// after its document is disposed).</summary>
++    private static JsonElement FindClient(JsonElement realmRoot, string clientId)
++    {
++        if (!realmRoot.TryGetProperty("clients", out var clients) || clients.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidOperationException("Realm file has no 'clients' array.");
++        }
++
++        foreach (var client in clients.EnumerateArray())
++        {
++            if (client.ValueKind == JsonValueKind.Object
++                && client.TryGetProperty("clientId", out var id)
++                && id.ValueKind == JsonValueKind.String
++                && id.GetString() == clientId)
++            {
++                return client;
++            }
++        }
++
++        throw new InvalidOperationException($"Realm file has no client with clientId '{clientId}'.");
++    }
++
++    /// <summary>Resolves the service-account USER entry for the named client (username convention
++    /// `service-account-{clientId}`, identified by its `serviceAccountClientId` property — the shape
++    /// an admin-console realm export produces for a client with a role grant). THROWS when missing,
++    /// so a dropped grant entry cannot pass the assertions vacuously.</summary>
++    private static JsonElement FindServiceAccountUser(JsonElement realmRoot, string clientId)
++    {
++        if (!realmRoot.TryGetProperty("users", out var users) || users.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidOperationException("Realm file has no 'users' array.");
++        }
++
++        foreach (var user in users.EnumerateArray())
++        {
++            if (user.ValueKind == JsonValueKind.Object
++                && user.TryGetProperty("serviceAccountClientId", out var sac)
++                && sac.ValueKind == JsonValueKind.String
++                && sac.GetString() == clientId)
++            {
++                return user;
++            }
++        }
++
++        throw new InvalidOperationException($"Realm file has no service-account user with serviceAccountClientId '{clientId}'.");
++    }
++
+     private static string ReadAppHostFile(string name)
+         => File.ReadAllText(Path.Combine(FindAppHostDir(), name));
+ 
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/PasskeyBootstrapTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/PasskeyBootstrapTests.cs
+new file mode 100644
+index 00000000..afa6eb2a
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/PasskeyBootstrapTests.cs
+@@ -0,0 +1,541 @@
++using System.Net;
++using System.Net.Http.Json;
++using System.Text;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
++using Microsoft.AspNetCore.Authentication.OpenIdConnect;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Moq;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// The D16 passkey relying-party flow (round B pass B6): the bootstrap code's single-use / TTL /
++/// URI-binding / allowlist rules, the D6 continuation, and — the round's AC12 axis — that neither
++/// a token nor an authorization code ever reaches the portal.
++/// <para>
++/// The two ceremony endpoints are driven <b>directly</b> (their delegates take the
++/// <see cref="HttpContext"/> and their dependencies explicitly), because the interesting states —
++/// a ceremony cookie whose <c>app_redirect_uri</c> is missing, withdrawn from the allowlist, or
++/// present — cannot be produced by a hermetic HTTP request (the real flow needs a live Keycloak
++/// WebAuthn ceremony). The cookie is therefore a genuine <see cref="AuthenticationTicket"/> with
++/// crafted properties, and an <see cref="IAuthenticationService"/> mock stands in for the handler
++/// that would have deserialized it. The HTTP surface (route mapping, status codes, raw response
++/// bodies) is covered through the REAL Kestrel pipeline of <see cref="AuthEndpointTestHost"/>.
++/// </para>
++/// </summary>
++[TestClass]
++public class PasskeyBootstrapTests
++{
++    /// <summary>The Blazor callback the test host's <c>Auth:AppCallbackPrefixes</c> allows — the
++    /// exact shape B1's challenge handler and B4's <c>BuildCallbackUri</c> mint.</summary>
++    private const string AppCallback = "http://localhost:5300/signin-handshake";
++
++    /// <summary>A second allowlisted callback, used to prove matching is per-entry, not
++    /// per-non-empty-list.</summary>
++    private const string OtherAppCallback = "https://localhost:7400/signin-handshake";
++
++    /// <summary>The portal's bootstrap redemption URI (a distinct origin from every app callback,
++    /// so a sign-in targeting it is the portal's own — D16 issues no continuation for it).</summary>
++    private const string PortalBootstrapUrl = "http://localhost:9000/bootstrap";
++
++    /// <summary>A redirect target that is NOT on the allowlist — the attacker URI
++    /// (<c>portal/login?return_uri=…</c>) the B5b allowlist exists to defeat.</summary>
++    private const string AttackerCallback = "http://evil.example/signin-handshake";
++
++    private const string CustodySessionId = "9f2c8a1e5b34d607ef82a1c39d45b670";
++
++    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
++
++    private sealed class FakeTimeProvider : TimeProvider
++    {
++        public DateTimeOffset Now { get; set; } = new(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
++
++        public override DateTimeOffset GetUtcNow() => Now;
++    }
++
++    private static AppCallbackAllowlist Allowlist()
++        => new($"{AppCallback};{OtherAppCallback};{PortalBootstrapUrl}");
++
++    private static AuthServiceOptions OptionsFixture() => new()
++    {
++        Keycloak = new AuthServiceOptions.KeycloakOptions
++        {
++            Authority = "http://keycloak:8080/realms/school-collab",
++            ClientId = "school-collab-client",
++            ClientSecret = "a-client-secret",
++            ServiceAccountClientSecret = "a-service-account-secret",
++        },
++        AppCallbackPrefixes = $"{AppCallback};{OtherAppCallback};{PortalBootstrapUrl}",
++    };
++
++    private static IConfiguration ConfigurationFixture(string? bootstrapRedirectUrl = PortalBootstrapUrl)
++        => new ConfigurationBuilder()
++            .AddInMemoryCollection(new Dictionary<string, string?>
++            {
++                ["Auth:Portal:BootstrapRedirectUrl"] = bootstrapRedirectUrl,
++            })
++            .Build();
++
++    private static OneTimeCodeStore HandshakeCodes(FakeTimeProvider clock)
++        => new(clock, Microsoft.Extensions.Options.Options.Create(OptionsFixture()));
++
++    private static BootstrapCodeStore BootstrapCodes(FakeTimeProvider clock)
++        => new(clock, Microsoft.Extensions.Options.Options.Create(OptionsFixture()));
++
++    /// <summary>A three-segment JWT carrying <paramref name="payloadJson"/> as its payload — the
++    /// shape the endpoint's <c>exp</c> read (and round A's claim reads) expect. The signature is
++    /// irrelevant here: the token never leaves the process and is never validated.</summary>
++    private static string FakeJwt(string payloadJson)
++        => "header." + Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
++            .TrimEnd('=').Replace('+', '-').Replace('/', '_') + ".signature";
++
++    private static string AccessToken(FakeTimeProvider clock, int lifetimeSeconds = 1800)
++    {
++        var exp = clock.Now.AddSeconds(lifetimeSeconds).ToUnixTimeSeconds();
++        return FakeJwt($$"""{"exp":{{exp}},"tenant_id":"tenant","teacher_id":"teacher"}""");
++    }
++
++    /// <summary>The properties the OIDC handler's <c>SaveTokens</c> channel writes onto the
++    /// signed-in cookie, with the ceremony's persisted <paramref name="persistedAppRedirectUri"/>
++    /// item (absent when the challenge never set one — the state a tampered callback produces).</summary>
++    private static AuthenticationProperties CeremonyProperties(
++        FakeTimeProvider clock,
++        string? persistedAppRedirectUri,
++        bool withTokens = true)
++    {
++        var properties = new AuthenticationProperties();
++
++        if (persistedAppRedirectUri is not null)
++        {
++            properties.Items[PasskeyEndpoints.AppRedirectUriItemName] = persistedAppRedirectUri;
++        }
++
++        if (withTokens)
++        {
++            properties.Items[".Token.access_token"] = AccessToken(clock);
++            properties.Items[".Token.refresh_token"] = "seeded_refresh_token";
++            properties.Items[".Token.id_token"] = FakeJwt("""{"tenant_id":"tenant"}""");
++        }
++
++        return properties;
++    }
++
++    private static (HttpContext Context, Mock<IAuthenticationService> Authentication) Context(
++        AuthenticationProperties? ceremonyProperties,
++        string? query = null)
++    {
++        var authentication = new Mock<IAuthenticationService>();
++        authentication
++            .Setup(s => s.AuthenticateAsync(It.IsAny<HttpContext>(), It.IsAny<string?>()))
++            .ReturnsAsync(ceremonyProperties is null
++                ? AuthenticateResult.NoResult()
++                : AuthenticateResult.Success(new AuthenticationTicket(
++                    new System.Security.Claims.ClaimsPrincipal(
++                        new System.Security.Claims.ClaimsIdentity("Cookies")),
++                    ceremonyProperties,
++                    CookieAuthenticationDefaults.AuthenticationScheme)));
++
++        var context = new DefaultHttpContext();
++        context.RequestServices = new ServiceCollection()
++            .AddOptions()
++            .AddLogging()
++            .AddSingleton(authentication.Object)
++            .BuildServiceProvider();
++
++        if (query is not null)
++        {
++            context.Request.QueryString = new QueryString(query);
++        }
++
++        return (context, authentication);
++    }
++
++    // ── GET /auth/passkey/login ──────────────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task Login_BlankAppRedirectUri_Is400_AndNeverChallenges()
++    {
++        var (context, authentication) = Context(ceremonyProperties: null);
++
++        var result = await PasskeyEndpoints.Login(context, Allowlist());
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
++        authentication.Verify(
++            s => s.ChallengeAsync(It.IsAny<HttpContext>(), It.IsAny<string?>(), It.IsAny<AuthenticationProperties?>()),
++            Times.Never,
++            "a blank app_redirect_uri must be refused before any ceremony starts.");
++    }
++
++    [TestMethod]
++    public async Task Login_NonAllowlistedAppRedirectUri_Is400_AndNeverChallenges()
++    {
++        var (context, authentication) = Context(ceremonyProperties: null,
++            query: $"?app_redirect_uri={Uri.EscapeDataString(AttackerCallback)}");
++
++        var result = await PasskeyEndpoints.Login(context, Allowlist());
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
++        context.Response.Headers.Location.Should().BeEmpty(
++            "the attack the allowlist defeats is exactly this: an outbound redirect carrying a code to an attacker URI.");
++        authentication.Verify(
++            s => s.ChallengeAsync(It.IsAny<HttpContext>(), It.IsAny<string?>(), It.IsAny<AuthenticationProperties?>()),
++            Times.Never,
++            "no ceremony may be started for a target that could never legally receive a code.");
++    }
++
++    [TestMethod]
++    public async Task Login_AllowlistedAppRedirectUri_ChallengesTheOidcSchemeWithThePersistedPendingState()
++    {
++        var (context, authentication) = Context(ceremonyProperties: null,
++            query: $"?app_redirect_uri={Uri.EscapeDataString(AppCallback)}");
++
++        AuthenticationProperties? challenged = null;
++        string? challengedScheme = null;
++        authentication
++            .Setup(s => s.ChallengeAsync(It.IsAny<HttpContext>(), It.IsAny<string?>(), It.IsAny<AuthenticationProperties?>()))
++            .Callback<HttpContext, string?, AuthenticationProperties?>((_, scheme, properties) =>
++            {
++                challengedScheme = scheme;
++                challenged = properties;
++            })
++            .Returns(Task.CompletedTask);
++
++        await PasskeyEndpoints.Login(context, Allowlist());
++
++        // The OIDC scheme is named EXPLICITLY: the host's default challenge scheme is B1's
++        // login-UI policy scheme, and the auth service is the relying party on this path in both
++        // flag states — routing its own passkey challenge to the portal's login page would loop.
++        challengedScheme.Should().Be(OpenIdConnectDefaults.AuthenticationScheme);
++
++        challenged.Should().NotBeNull();
++        challenged!.Items.Should().ContainKey(PasskeyEndpoints.AppRedirectUriItemName);
++        challenged.Items[PasskeyEndpoints.AppRedirectUriItemName].Should().Be(AppCallback,
++            "the validated target must travel with the ceremony (the correlation cookie's protected state) — not be re-supplied at the callback.");
++        challenged.RedirectUri.Should().Be(PasskeyEndpoints.CompletePath,
++            "the handler must come back to /complete after /signin-oidc, never re-enter /login (which would re-challenge).");
++    }
++
++    // ── GET /auth/passkey/complete ───────────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task Complete_WithoutACeremonyCookie_Is401_AndRedirectsNowhere()
++    {
++        var clock = new FakeTimeProvider();
++        var (context, _) = Context(ceremonyProperties: null, query: $"?app_redirect_uri={Uri.EscapeDataString(AppCallback)}");
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), SessionStore(clock), HandshakeCodes(clock), BootstrapCodes(clock),
++            ConfigurationFixture(), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized,
++            "no cookie means no ceremony was completed — a query parameter alone never signs anyone in.");
++        context.Response.Headers.Location.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task Complete_FreshQueryParameterIsNeverTrusted_Is400()
++    {
++        var clock = new FakeTimeProvider();
++        // A COMPLETE ceremony (valid token set) that never persisted an app_redirect_uri, plus an
++        // allowlisted callback supplied as a fresh query parameter. If /complete read the query
++        // parameter this request would succeed and mint a code — it must not.
++        var (context, _) = Context(
++            CeremonyProperties(clock, persistedAppRedirectUri: null),
++            query: $"?app_redirect_uri={Uri.EscapeDataString(AppCallback)}");
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), SessionStore(clock), HandshakeCodes(clock), BootstrapCodes(clock),
++            ConfigurationFixture(), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
++        context.Response.Headers.Location.Should().BeEmpty(
++            "the persisted value decides where a code points; a parameter a caller can rewrite at the callback must never be consulted.");
++    }
++
++    [TestMethod]
++    public async Task Complete_PersistedTargetWithdrawnFromTheAllowlist_Is400_AndIssuesNoCode()
++    {
++        var clock = new FakeTimeProvider();
++        var (context, _) = Context(CeremonyProperties(clock, persistedAppRedirectUri: AttackerCallback));
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), SessionStore(clock), HandshakeCodes(clock), BootstrapCodes(clock),
++            ConfigurationFixture(), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest,
++            "the persisted value is RE-VALIDATED at completion: a target that was legal at /login but is not now must not receive a code.");
++        context.Response.Headers.Location.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task Complete_WithoutAUsableTokenSet_Is502_AndIssuesNoCode()
++    {
++        var clock = new FakeTimeProvider();
++        var (context, _) = Context(CeremonyProperties(clock, AppCallback, withTokens: false));
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), SessionStore(clock), HandshakeCodes(clock), BootstrapCodes(clock),
++            ConfigurationFixture(), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status502BadGateway,
++            "a session without a refresh token could never be refreshed or revoked, so it must not be created at all.");
++        context.Response.Headers.Location.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task Complete_PersistedAllowlistedTarget_RedirectsWithABootstrapCodeCarryingTheD6Continuation()
++    {
++        var clock = new FakeTimeProvider();
++        var sessions = SessionStore(clock);
++        var codes = HandshakeCodes(clock);
++        var bootstrapCodes = BootstrapCodes(clock);
++        var (context, _) = Context(CeremonyProperties(clock, AppCallback));
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), sessions, codes, bootstrapCodes, ConfigurationFixture(), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status302Found);
++        var location = context.Response.Headers.Location.ToString();
++        location.Should().StartWith(PortalBootstrapUrl + "?code=",
++            "the browser is handed the bootstrap code only — never a token, never an authorization code (AC12).");
++
++        var bootstrapCode = location[(location.IndexOf("code=", StringComparison.Ordinal) + "code=".Length)..];
++
++        var redemption = bootstrapCodes.Redeem(bootstrapCode, PortalBootstrapUrl);
++        redemption.Status.Should().Be(RedeemStatus.Success);
++        redemption.SessionId.Should().NotBeNullOrWhiteSpace();
++        sessions.Get(redemption.SessionId!).Should().NotBeNull("the ceremony's token set must be in custody under that id.");
++        redemption.Continuation.Should().NotBeNull(
++            "a sign-in that began at a Blazor page carries the D16 continuation — it is never suppressed.");
++        redemption.Continuation!.AppRedirectUri.Should().Be(AppCallback);
++
++        // The continuation code is a REAL D6 handshake code: the app redeems it at /auth/redeem
++        // with its own callback for the claim set.
++        codes.Redeem(redemption.Continuation.AppCode, AppCallback).Status.Should().Be(RedeemStatus.Success);
++    }
++
++    [TestMethod]
++    public async Task Complete_PortalOwnSignIn_OmitsTheD6Continuation()
++    {
++        var clock = new FakeTimeProvider();
++        var bootstrapCodes = BootstrapCodes(clock);
++        var (context, _) = Context(CeremonyProperties(clock, PortalBootstrapUrl));
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), SessionStore(clock), HandshakeCodes(clock), bootstrapCodes,
++            ConfigurationFixture(), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status302Found);
++        var location = context.Response.Headers.Location.ToString();
++        var bootstrapCode = location[(location.IndexOf("code=", StringComparison.Ordinal) + "code=".Length)..];
++
++        var redemption = bootstrapCodes.Redeem(bootstrapCode, PortalBootstrapUrl);
++        redemption.Status.Should().Be(RedeemStatus.Success);
++        redemption.Continuation.Should().BeNull(
++            "a sign-in that began at the portal itself needs only its session id (D16: the app_redirect_uri/app_code pair is absent otherwise).");
++    }
++
++    [TestMethod]
++    public async Task Complete_WithoutAConfiguredBootstrapUrl_FailsClosed_AndIssuesNoCode()
++    {
++        var clock = new FakeTimeProvider();
++        var (context, _) = Context(CeremonyProperties(clock, AppCallback));
++
++        var result = await PasskeyEndpoints.Complete(
++            context, Allowlist(), SessionStore(clock), HandshakeCodes(clock), BootstrapCodes(clock),
++            ConfigurationFixture(bootstrapRedirectUrl: null), clock);
++        await result.ExecuteAsync(context);
++
++        context.Response.StatusCode.Should().Be(StatusCodes.Status500InternalServerError,
++            "an unconfigured portal redirect target must fail loudly rather than emit a blank or relative redirect.");
++        context.Response.Headers.Location.Should().BeEmpty();
++    }
++
++    // ── POST /auth/bootstrap/redeem (direct) ─────────────────────────────────────────
++
++    [TestMethod]
++    public async Task BootstrapRedeem_BlankRedirectUri_Is400_AndNonAllowlistedUri_Is400()
++    {
++        var clock = new FakeTimeProvider();
++        var store = BootstrapCodes(clock);
++
++        var blank = await ExecuteStatusAsync(PasskeyEndpoints.BootstrapRedeem(
++            new PasskeyEndpoints.BootstrapRedeemRequest("a-code", "  "), Allowlist(), store));
++        blank.Should().Be(StatusCodes.Status400BadRequest);
++
++        var attacker = await ExecuteStatusAsync(PasskeyEndpoints.BootstrapRedeem(
++            new PasskeyEndpoints.BootstrapRedeemRequest("a-code", AttackerCallback), Allowlist(), store));
++        attacker.Should().Be(StatusCodes.Status400BadRequest,
++            "the redemption is allowlist-bound as well as URI-bound.");
++    }
++
++    [TestMethod]
++    public async Task BootstrapRedeem_UnknownCode_Is404_AndReplayOrMismatchIsRejected()
++    {
++        var clock = new FakeTimeProvider();
++        var store = BootstrapCodes(clock);
++        var sessionId = CustodySessionId;
++
++        var unknown = await ExecuteStatusAsync(PasskeyEndpoints.BootstrapRedeem(
++            new PasskeyEndpoints.BootstrapRedeemRequest("never-issued", PortalBootstrapUrl), Allowlist(), store));
++        unknown.Should().Be(StatusCodes.Status404NotFound);
++
++        var code = store.Create(PortalBootstrapUrl, sessionId);
++
++        var mismatch = await ExecuteStatusAsync(PasskeyEndpoints.BootstrapRedeem(
++            new PasskeyEndpoints.BootstrapRedeemRequest(code, AppCallback), Allowlist(), store));
++        mismatch.Should().Be(StatusCodes.Status400BadRequest, "a code may only be redeemed at the URI it was bound to.");
++
++        var replay = await ExecuteStatusAsync(PasskeyEndpoints.BootstrapRedeem(
++            new PasskeyEndpoints.BootstrapRedeemRequest(code, PortalBootstrapUrl), Allowlist(), store));
++        replay.Should().Be(StatusCodes.Status404NotFound,
++            "a mismatched attempt consumes the code (round A's store semantics), so nothing is left to redeem.");
++    }
++
++    // ── BootstrapCodeStore: single-use / TTL / binding / continuation ─────────────────
++
++    [TestMethod]
++    public void BootstrapCodeStore_IsSingleUse_BoundToItsUri_AndTtlLimited()
++    {
++        var clock = new FakeTimeProvider();
++        var store = BootstrapCodes(clock);
++
++        var code = store.Create(PortalBootstrapUrl, CustodySessionId);
++
++        store.Redeem(code, AppCallback).Status.Should().Be(RedeemStatus.RedirectUriMismatch);
++        store.Redeem(code, PortalBootstrapUrl).Status.Should().Be(RedeemStatus.InvalidCode,
++            "the mismatch consumed the code.");
++
++        var live = store.Create(PortalBootstrapUrl, CustodySessionId);
++        store.Redeem(live, PortalBootstrapUrl).Status.Should().Be(RedeemStatus.Success);
++        store.Redeem(live, PortalBootstrapUrl).Status.Should().Be(RedeemStatus.InvalidCode,
++            "a bootstrap code is single-use.");
++
++        var expiring = store.Create(PortalBootstrapUrl, CustodySessionId);
++        clock.Now = clock.Now.Add(OptionsFixture().OneTimeCodeTtl).AddSeconds(1);
++        store.Redeem(expiring, PortalBootstrapUrl).Status.Should().Be(RedeemStatus.Expired,
++            "the bootstrap code inherits round A's short TTL.");
++    }
++
++    [TestMethod]
++    public void BootstrapCodeStore_HandsOutTheContinuationOnlyOnce()
++    {
++        var clock = new FakeTimeProvider();
++        var store = BootstrapCodes(clock);
++        var continuation = new BootstrapContinuation(AppCallback, "d6-continuation-code");
++
++        var code = store.Create(PortalBootstrapUrl, CustodySessionId, continuation);
++
++        var redeemed = store.Redeem(code, PortalBootstrapUrl);
++        redeemed.SessionId.Should().Be(CustodySessionId);
++        redeemed.Continuation.Should().Be(continuation);
++
++        var relayed = store.Create(PortalBootstrapUrl, CustodySessionId, continuation);
++        store.Redeem(relayed, AppCallback);
++        store.Redeem(relayed, PortalBootstrapUrl).Continuation.Should().BeNull(
++            "a rejected attempt drops the continuation with the code — it can never be handed out twice.");
++    }
++
++    // ── HTTP surface through the REAL pipeline ───────────────────────────────────────
++
++    [TestMethod]
++    public async Task PasskeyRoutes_AreMappedAndFailClosed()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        (await host.Client.GetAsync($"{PasskeyEndpoints.LoginPath}"))
++            .StatusCode.Should().Be(HttpStatusCode.BadRequest, "a blank app_redirect_uri is refused at the route.");
++        (await host.Client.GetAsync($"{PasskeyEndpoints.LoginPath}?app_redirect_uri={Uri.EscapeDataString(AttackerCallback)}"))
++            .StatusCode.Should().Be(HttpStatusCode.BadRequest);
++        (await host.Client.GetAsync(PasskeyEndpoints.CompletePath))
++            .StatusCode.Should().Be(HttpStatusCode.Unauthorized,
++                "no ceremony cookie: there is no bootstrap code to hand out.");
++
++        // The redemption's taxonomy, over the wire (the shape B2's portal client maps).
++        var blank = await host.Client.PostAsync(
++            "/auth/bootstrap/redeem",
++            JsonContent.Create(new PasskeyEndpoints.BootstrapRedeemRequest("a-code", ""), options: WebJson));
++        blank.StatusCode.Should().Be(HttpStatusCode.BadRequest);
++        (await blank.Content.ReadAsStringAsync()).Should().Contain("redirect_uri_required");
++
++        var unknown = await host.Client.PostAsync(
++            "/auth/bootstrap/redeem",
++            JsonContent.Create(
++                new PasskeyEndpoints.BootstrapRedeemRequest("never-issued", AppCallback), options: WebJson));
++        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await unknown.Content.ReadAsStringAsync()).Should().Contain("invalid_code");
++    }
++
++    [TestMethod]
++    public async Task BootstrapRedeem_ResponseCarriesTheSessionIdAndContinuation_AndNoTokenOfAnyKind()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        // The test host's allowlist has exactly one entry (the admin handshake callback), so the
++        // bootstrap redemption URI this test uses IS that entry — the code is bound to it exactly
++        // as the real one is bound to the portal's `/bootstrap` route.
++        const string portalBootstrapUri = AppCallback;
++        var store = host.Services.GetRequiredService<BootstrapCodeStore>();
++        var code = store.Create(
++            portalBootstrapUri,
++            CustodySessionId,
++            new BootstrapContinuation(OtherAppCallback, "seeded_d6_handshake_code"));
++
++        var response = await host.Client.PostAsync(
++            "/auth/bootstrap/redeem",
++            JsonContent.Create(new PasskeyEndpoints.BootstrapRedeemRequest(code, portalBootstrapUri), options: WebJson));
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        var raw = await response.Content.ReadAsStringAsync();
++
++        // AC12: the portal-bound body is scanned as RAW TEXT, so a token field added to the payload
++        // later fails here instead of being ignored by deserialization.
++        raw.Should().NotContain("seeded_access_token");
++        raw.Should().NotContain("seeded_refresh_token");
++        raw.Should().NotContain("seeded_id_token");
++        raw.Should().NotContainAny("access_token", "refresh_token", "id_token");
++
++        using var doc = JsonDocument.Parse(raw);
++        var root = doc.RootElement;
++        root.EnumerateObject().Select(p => p.Name)
++            .Should().BeEquivalentTo(new[] { "sessionId", "appRedirectUri", "appCode" },
++                "the redemption body is exactly the D6 continuation payload the portal client pins — no field may be silently added.");
++        root.GetProperty("sessionId").GetString().Should().Be(CustodySessionId);
++        root.GetProperty("appRedirectUri").GetString().Should().Be(OtherAppCallback);
++        root.GetProperty("appCode").GetString().Should().Be("seeded_d6_handshake_code",
++            "the continuation code is the auth service's own D6 one-time code, minted for the app's callback.");
++    }
++
++    /// <summary>Executes an endpoint result against a bare context and reports its status — the
++    /// shape the direct-invocation tests assert (the HTTP surface is covered separately through the
++    /// real pipeline).</summary>
++    private static async Task<int> ExecuteStatusAsync(IResult result)
++    {
++        var context = new DefaultHttpContext();
++        context.RequestServices = new ServiceCollection().AddOptions().AddLogging().BuildServiceProvider();
++        context.Response.Body = new MemoryStream();
++        await result.ExecuteAsync(context);
++        return context.Response.StatusCode;
++    }
++
++    private static PortalSessionStore SessionStore(FakeTimeProvider clock)
++        => new(clock, Microsoft.Extensions.Options.Options.Create(OptionsFixture()));
++}

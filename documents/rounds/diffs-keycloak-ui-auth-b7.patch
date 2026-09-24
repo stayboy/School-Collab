@@ -1,0 +1,1791 @@
+diff --git a/src/SchoolCollab.Auth/AuthServiceExtensions.cs b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+new file mode 100644
+index 00000000..ad652b92
+--- /dev/null
++++ b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+@@ -0,0 +1,171 @@
++using System.Threading.RateLimiting;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.RateLimiting;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Providers;
++using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Http;
++
++namespace SchoolCollab.Auth;
++
++/// <summary>
++/// DI registrations for the SchoolCollab.Auth service, kept out of the feature
++/// host's <c>Program.cs</c> (dotnet-best-practices "Never": no inline
++/// <c>services.Add*()</c> in a feature <c>Program.cs</c>; the repo precedent is
++/// <c>SchoolCollab.Core.Messaging.OutboxExtensions</c>). Later round-A passes
++/// that add registrations extend this file instead of inlining them.
++/// </summary>
++public static class AuthServiceExtensions
++{
++    /// <summary>
++    /// Registers <see cref="AuthServiceOptions"/> from the <c>Auth</c> configuration
++    /// section with startup validation (<c>ValidateOnStart</c>), so a missing Keycloak
++    /// setting fails fast at launch instead of surfacing mid-request. The validator is
++    /// <see cref="AuthServiceOptions.FirstValidationError"/> — shared with
++    /// <c>AuthServiceSmokeTests</c> so the startup check and the tests cannot drift.
++    /// </summary>
++    public static IServiceCollection AddAuthServiceOptions(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services
++            .AddOptions<AuthServiceOptions>()
++            .Bind(configuration.GetSection(AuthServiceOptions.SectionName))
++            .Validate(o => AuthServiceOptions.FirstValidationError(o) is null,
++                "Invalid SchoolCollab.Auth configuration; see AuthServiceOptions.FirstValidationError for the failing key.")
++            .ValidateOnStart();
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the round-A services plus round B's D15 provider seam and portal-session scheme.
++    /// The Direct-Grant exchanger, the Admin REST client and the <see cref="KeycloakAuthProvider"/>
++    /// are typed <see cref="HttpClient"/> consumers (their endpoints are derived from
++    /// <c>Auth:Keycloak:Authority</c>); the stores use <see cref="TimeProvider"/> (the repo's
++    /// testable-clock pattern); the audit log is a thin structured <see cref="ILogger"/> wrapper.
++    /// </summary>
++    public static IServiceCollection AddAuthServices(this IServiceCollection services)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++
++        services.AddSingleton(TimeProvider.System);
++        services.AddSingleton<OneTimeCodeStore>();
++        // Round B pass B6 (D16): the bootstrap-code custody. It REUSES round A's OneTimeCodeStore
++        // primitive (single-use, TTL-bound, redirect-URI-bound) in a dedicated instance created
++        // inside the store, so bootstrap codes and D6 handshake codes live in two namespaces that
++        // cannot cross-redeem: the portal-bound code can never be turned into a claim set at
++        // /auth/redeem, and an app's handshake code can never be redeemed at /auth/bootstrap/redeem.
++        services.AddSingleton<BootstrapCodeStore>();
++        services.AddSingleton<PortalSessionStore>();
++        services.AddSingleton<ClaimSetFactory>();
++        services.AddSingleton<AuthAuditLog>();
++        // The per-app callback allowlist (round B pass B5b, spec §14): one shared, immutable
++        // matcher over Auth:AppCallbackPrefixes. Singleton because the bound options are fixed at
++        // startup (ValidateOnStart) and the matcher holds only parsed prefixes.
++        services.AddSingleton<AppCallbackAllowlist>();
++        services.AddHttpClient<DirectGrantExchanger>();
++        services.AddHttpClient<KeycloakAdminClient>();
++        services.AddHttpClient<KeycloakAuthProvider>();
++
++        // Round B pass B7 (D17): the mediated picker readers. Each is a typed cross-module
++        // HttpClient — retry handler + long handler lifetime, and the base address is the LITERAL
++        // Aspire service name at the call site (the FamiliesModuleServices precedent), which the
++        // auth resource's .WithReference(settingsApi)/.WithReference(studentsApi) satisfies. Tenant
++        // propagation is OFF: the identity of a mediated read travels in the forwarded bearer token
++        // (the data APIs' tenant middleware reads its tenant_id claim), so a dev-tenant header would
++        // be a second, weaker source of scope.
++        services.AddCrossModuleHttpClient<TenantDirectoryReader>(
++            "https+http://settings-api",
++            propagateTenant: false);
++        services.AddCrossModuleHttpClient<TeacherDirectoryReader>(
++            "https+http://students-api",
++            propagateTenant: false);
++
++        // The custody access-token read a mediated call needs. It resolves THROUGH the seam's own
++        // singleton, so a mediated read and every portal-facing call share ONE custody view of a
++        // session; it is NOT part of IAuthProvider, whose seven members are the portal-facing
++        // contract (D15). The provider implements both interfaces by construction — round B has
++        // exactly one provider implementation, so the cast is a wiring invariant, not a guess.
++        services.AddSingleton<ISessionTokenAccessor>(
++            sp => (ISessionTokenAccessor)sp.GetRequiredService<IAuthProvider>());
++
++        // The seam resolves to the SAME typed-client instance the factory above builds — a second
++        // registration of the implementation type would hand it an unwired HttpClient. It is a
++        // SINGLETON because the provider remembers a session's refreshed token set in custody
++        // (see KeycloakAuthProvider): a per-request instance would lose it between requests and
++        // break refresh-token rotation.
++        services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<KeycloakAuthProvider>());
++
++        // The portal-session scheme (D12): the portal presents its opaque session id instead of a
++        // token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
++        // surface exists with OIDC either on or off — the portal's own login is the D16 form path, so
++        // it holds a session in both flag states. The scheme list of the portal-facing policy lives
++        // in AuthEndpointGroup.
++        services.AddAuthentication()
++            .AddScheme<PortalSessionAuthenticationOptions, PortalSessionAuthenticationHandler>(
++                PortalSessionAuthenticationHandler.SchemeName,
++                static _ => { })
++            .AddPolicyScheme(
++                PortalSessionAuthenticationHandler.GatewaySchemeName,
++                "Portal-session or host-scheme routing",
++                policy =>
++                {
++                    // Authentication follows the request (portal session vs the host's own scheme);
++                    // the challenge is ALWAYS this scheme's bare 401, never a redirect.
++                    policy.ForwardDefaultSelector = PortalSessionAuthenticationHandler.SelectAuthenticationScheme;
++                    policy.ForwardChallenge = PortalSessionAuthenticationHandler.SchemeName;
++                });
++
++        return services;
++    }
++
++    /// <summary>
++    /// Registers the fixed-window rate limiter for <c>POST /auth/exchange</c> (spec §14,
++    /// plan-review P1-5, service side). Moved out of <c>Program.cs</c> so the endpoint tests
++    /// can compose the real pipeline from public extensions only (the 429 assertion needs the
++    /// genuine middleware; the <c>Microsoft.AspNetCore.Mvc.Testing</c> package route was
++    /// rejected to honour round A's no-new-package constraint — pass 3c row 51). The ordering
++    /// requirement that made the host file the lawful home is preserved: <c>Program.cs</c>
++    /// still calls this BEFORE <c>builder.Build()</c>.
++    /// </summary>
++    public static IServiceCollection AddAuthRateLimiting(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        // TRUST BOUNDARY: POST /auth/exchange is called server-to-server by the portal inside
++        // the AppHost network, never from a browser; this limiter is the service-side mitigation,
++        // keyed per portal caller. The portal form's own antiforgery requirement is round B's,
++        // because the form does not exist in round A. Framework-provided — no new package.
++        var rateLimitConfig = configuration.GetSection(AuthServiceOptions.SectionName)
++            .Get<AuthServiceOptions>() ?? new AuthServiceOptions();
++        services.AddRateLimiter(rateLimiter =>
++        {
++            // The framework default rejection status is 503; the 429 endpoint assertion depends
++            // on this override.
++            rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
++            rateLimiter.AddPolicy(AuthEndpointGroup.ExchangeRateLimitPolicyName, context =>
++                RateLimitPartition.GetFixedWindowLimiter(
++                    context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
++                    _ => new FixedWindowRateLimiterOptions
++                    {
++                        Window = rateLimitConfig.CredentialEndpointRateLimitWindow,
++                        PermitLimit = rateLimitConfig.CredentialEndpointRateLimitPermits,
++                        QueueLimit = 0,
++                    }));
++        });
++
++        return services;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+new file mode 100644
+index 00000000..1984cdab
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+@@ -0,0 +1,160 @@
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.RateLimiting;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Features;
++using System.Security.Claims;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// Maps the auth service's endpoint groups. Endpoint groups are always grouped extension
++/// methods (AGENTS.md) — never inline route maps in Program.cs. Round A pass 2 carries the
++/// grouping plus a placeholder <c>GET /auth/ping</c>; pass 3c wires the exchange/redeem/session
++/// groups and attaches the fixed-window rate-limit policy to the credential exchange (spec §14);
++/// pass 3d adds the admin groups and the <c>user-admin</c> role gate.
++/// </summary>
++public static class AuthEndpointGroup
++{
++    /// <summary>Name of the fixed-window rate-limit policy applied to <c>POST /auth/exchange</c>.
++    /// Registered by Program.cs (before <c>builder.Build()</c>) and required here.</summary>
++    public const string ExchangeRateLimitPolicyName = "exchange-fixed-window";
++
++    /// <summary>The realm role that authorizes the <c>/auth/admin/*</c> groups
++    /// (<c>school-collab-realm.json</c> roles, spec §11.2).</summary>
++    public const string UserAdminRoleName = "user-admin";
++
++    /// <summary>Maps the <c>/auth</c> group under the app's route builder.</summary>
++    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
++    {
++        var group = app.MapGroup("/auth");
++
++        group.MapGet("/ping", () => Results.Ok(new { status = "ok" }));
++
++        // Trust boundary: the exchange is called server-to-server by the portal inside the
++        // AppHost network, never from a browser — the rate limit is the service-side half of
++        // spec §14 (the portal form's own antiforgery is round B's: the form does not exist
++        // in round A, so there is nothing to antiforgery yet).
++        group.MapPost("/exchange", ExchangeEndpoints.Exchange)
++            .RequireRateLimiting(ExchangeRateLimitPolicyName);
++        group.MapPost("/redeem", RedeemEndpoints.Redeem);
++
++        // Round B pass B6 — the D16 passkey relying-party flow. /passkey/login is the portal's
++        // passkey handoff (the auth service holds the OIDC session with Keycloak), /passkey/complete
++        // finishes the ceremony in custody, and /bootstrap/redeem is the portal's server-to-server
++        // redemption of the single-use bootstrap code. None of the three is browser-authenticated
++        // when it starts: login/completed are the ceremony itself, and the redemption's authorization
++        // is the code's single-use + TTL + URI binding against the app-callback allowlist.
++        group.MapGet("/passkey/login", PasskeyEndpoints.Login);
++        group.MapGet("/passkey/complete", PasskeyEndpoints.Complete);
++        group.MapPost("/bootstrap/redeem", PasskeyEndpoints.BootstrapRedeem);
++        group.MapGet("/session/{sessionId}", SessionEndpoints.Get);
++        group.MapDelete("/session/{sessionId}", SessionEndpoints.Delete);
++
++        // Round B pass B7 — D17's mediated picker reads (/auth/pickers/tenants, /auth/pickers/teachers).
++        // The portal holds no credential, so these are its only way to fill a tenant/teacher picker:
++        // each requires a portal session and runs as that session's user (see MediatedReadEndpoints).
++        group.MapMediatedReadEndpoints();
++
++        // Pass 3d — the admin groups (spec §13). The /auth/admin/* gate mirrors
++        // AssignmentEndpoints' conditional-group shape: it applies while OIDC auth is on and
++        // opens when FEATURE:DisableOIDCAuth is set. The role requirement uses RequireRole:
++        // the realm's `User Realm Role` mapper emits a flat `roles` claim, the handlers'
++        // DEFAULT inbound mapping (MapInboundClaims=true — nothing overrides it) renames it to
++        // ClaimTypes.Role, and AuthTenancyExtensions pins each handler's RoleClaimType to that
++        // same default type, so IsInRole resolves against exactly the claim the mapping
++        // produced — identically on the bearer and cookie paths (D9). EMPIRICAL (pass 3d-ii +
++        // the corrective pass): the previous RequireClaim("roles", ...) form failed the gate's
++        // OWN tests (12 failures under the default mapping, including a caller holding
++        // user-admin being rejected), because the literal claim name cannot match after the
++        // rename; a bare RequireRole keeps them green.
++        var featureFlags = app.ServiceProvider.GetService<IFeatureFlagService>();
++        var adminGroup = app.MapGroup("/auth/admin");
++        // GetService (not GetRequiredService) on purpose: the endpoint-test host composes the
++        // pipeline from public extensions and does not register the flag service (AddAuthAndTenancy
++        // is part ii's addition); a MISSING service therefore means "gate on" — the production
++        // posture — never "gate open".
++        if (featureFlags is null || !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
++        {
++            adminGroup.RequireAuthorization(ConfigurePortalFacingAdminPolicy);
++        }
++
++        adminGroup.MapAdminUserRoutes();
++        adminGroup.MapAdminRoleRoutes();
++
++        return app;
++    }
++
++    /// <summary>
++    /// The portal-facing admin policy (spec §13 gate, widened by round B's D12/D15): the SAME
++    /// authenticated-user + <c>user-admin</c> requirement round A pinned — now satisfiable by the
++    /// portal, which holds no token, only its opaque session id
++    /// (<see cref="PortalSessionAuthenticationHandler"/> / AC11).
++    /// <para>
++    /// The policy names ONE scheme, the portal-session gateway, and that is deliberate: the
++    /// authorization middleware CHALLENGES every scheme a policy lists, and <c>Bearer</c> /
++    /// <c>Cookies</c> / <c>TestAuth</c> are not all registered in both flag states — a listed scheme
++    /// without a handler fails the challenge with a 500 instead of a 401. The gateway always
++    /// exists, routes authentication to whichever scheme this app already uses (so round A's
++    /// cookie/bearer/TestAuth callers are unchanged), and its challenge is a bare 401.
++    /// </para>
++    /// </summary>
++    internal static void ConfigurePortalFacingAdminPolicy(AuthorizationPolicyBuilder policy)
++    {
++        ArgumentNullException.ThrowIfNull(policy);
++
++        policy
++            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
++            .RequireAuthenticatedUser()
++            .RequireRole(UserAdminRoleName);
++    }
++
++    /// <summary>Maps an <see cref="AdminStatus"/> from the Keycloak Admin client onto a typed HTTP
++    /// result. <c>Forbidden</c> stays a distinct 403 (the loud cold-start failure an insufficient
++    /// imported role set must surface as). <c>Detail</c> is Keycloak's own error text — never a
++    /// token or a secret.</summary>
++    internal static IResult AdminFailure(AdminStatus status, string? detail) => status switch
++    {
++        AdminStatus.NotFound => Results.Json(new { error = "not_found", detail }, statusCode: StatusCodes.Status404NotFound),
++        AdminStatus.Conflict => Results.Json(new { error = "conflict", detail }, statusCode: StatusCodes.Status409Conflict),
++        AdminStatus.Forbidden => Results.Json(new { error = "forbidden", detail }, statusCode: StatusCodes.Status403Forbidden),
++        AdminStatus.Unauthorized => Results.Json(new { error = "unauthorized", detail }, statusCode: StatusCodes.Status401Unauthorized),
++        _ => Results.Json(new { error = "upstream_unreachable", detail }, statusCode: StatusCodes.Status502BadGateway),
++    };
++
++    /// <summary>
++    /// The audit actor identifier: the teacher id from the authenticated principal's
++    /// <c>teacher_id</c> claim — the SAME claim and the SAME read <see cref="CurrentUser"/> uses
++    /// ("the same way for OIDC cookie, bearer JWT, and TestAuth principals") — or "unknown".
++    /// </summary>
++    /// <remarks>
++    /// The mutation routes resolve the actor/tenant from the principal directly (via the always
++    /// inferable <see cref="HttpContext"/> parameter) rather than injecting <see cref="ICurrentUser"/>:
++    /// a route parameter whose type is not a registered service fails parameter inference GLOBALLY
++    /// (every endpoint's metadata is inferred when the router initializes), and the endpoint-test
++    /// host bootstraps without <c>AddAuthAndTenancy</c> (which registers <c>ICurrentUser</c>) until
++    /// part ii adds the auth pipeline. The claims read here are identical to what
++    /// <see cref="CurrentUser"/> and <see cref="TenantClaimsTransformation"/> consume, so the audit
++    /// values do not change when part ii registers the real service.
++    /// </remarks>
++    internal static string AuditActor(ClaimsPrincipal user)
++        => user.FindFirst(TeacherIdClaim)?.Value ?? "unknown";
++
++    internal static string AuditTenant(ClaimsPrincipal user)
++        => user.FindFirst(TenantIdClaim)?.Value ?? SystemTenantId;
++
++    /// <summary>Claim names consumed by <see cref="CurrentUser"/> and
++    /// <see cref="TenantClaimsTransformation"/> in <c>SchoolCollab.Core.Auth</c>.</summary>
++    private const string TeacherIdClaim = "teacher_id";
++
++    private const string TenantIdClaim = "tenant_id";
++
++    /// <summary>The seeded System tenant (<c>TenantSeeder</c>). Used when the principal carries
++    /// no <c>tenant_id</c> claim — the same fallback posture <c>ICurrentUser.CurrentTenant</c>
++    /// documents ("the default System context when no tenant is in scope").</summary>
++    private const string SystemTenantId = "00000000-0000-0000-0000-000000000001";
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs
+new file mode 100644
+index 00000000..1f3e5ac4
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs
+@@ -0,0 +1,136 @@
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Routing;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Providers;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// The portal's mediated picker reads (spec D17): <c>GET /auth/pickers/tenants</c> and
++/// <c>GET /auth/pickers/teachers</c>.
++/// <para>
++/// The portal holds no credential of any kind (AC11/D12) and makes no direct call to settings-api
++/// or students-api, so the auth service performs those reads on its behalf — **as the session's
++/// user**: it resolves the presented portal session through the D15 provider seam, forwards that
++/// session's custody access token server-side, and returns the upstream data only. The data API's
++/// own tenant middleware (<c>TenantClaimsTransformation</c>) then scopes the result from the
++/// forwarded token's <c>tenant_id</c> claim, exactly as it does for a direct authenticated call.
++/// </para>
++/// <para>
++/// Responses are DATA ONLY: no token, session id, secret or upstream error body is ever echoed
++/// (AC9/AC11). Every failure is fail-closed and typed — the D18 <c>session_not_found</c> /
++/// <c>session_ended</c> states, and one degraded <c>upstream_unreachable</c> status the portal
++/// renders as an AC10 card. A mediated read never returns 500.
++/// </para>
++/// </summary>
++public static class MediatedReadEndpoints
++{
++    /// <summary>
++    /// Maps the <c>/auth/pickers</c> group (called from <c>AuthEndpointGroup</c>, so the routes
++    /// live under the service's single <c>/auth</c> group like every other route — endpoint groups
++    /// are always grouped extension methods, never inline maps).
++    /// </summary>
++    public static RouteGroupBuilder MapMediatedReadEndpoints(this IEndpointRouteBuilder app)
++    {
++        ArgumentNullException.ThrowIfNull(app);
++
++        var group = app.MapGroup("/pickers");
++        group.RequireAuthorization(ConfigurePortalSessionPolicy);
++        group.MapGet("/tenants", Tenants);
++        group.MapGet("/teachers", Teachers);
++
++        return group;
++    }
++
++    /// <summary>The tenant-picker rows (settings-api's tenant registry, read as the session's user).</summary>
++    public static Task<IResult> Tenants(
++        HttpContext httpContext,
++        ISessionTokenAccessor sessionTokens,
++        TenantDirectoryReader tenants,
++        CancellationToken cancellationToken = default)
++        => MediateAsync(httpContext, sessionTokens, tenants.ReadAsync, cancellationToken);
++
++    /// <summary>The teacher-picker rows (students-api's teacher list, read as the session's user).</summary>
++    public static Task<IResult> Teachers(
++        HttpContext httpContext,
++        ISessionTokenAccessor sessionTokens,
++        TeacherDirectoryReader teachers,
++        CancellationToken cancellationToken = default)
++        => MediateAsync(httpContext, sessionTokens, teachers.ReadAsync, cancellationToken);
++
++    /// <summary>
++    /// The one mediation shape both pickers share: session → custody access token → upstream read.
++    /// </summary>
++    /// <remarks>
++    /// The token comes from <see cref="ISessionTokenAccessor"/> — never from the custody store
++    /// directly — because that read refreshes an elapsed token in place and returns the set the
++    /// store then holds: a direct store read could hand this method a stale access token, and the
++    /// data API would reject the forward.
++    /// </remarks>
++    private static async Task<IResult> MediateAsync<TItem>(
++        HttpContext httpContext,
++        ISessionTokenAccessor sessionTokens,
++        Func<string, CancellationToken, Task<MediatedRead<IReadOnlyList<TItem>>>> read,
++        CancellationToken cancellationToken)
++    {
++        var sessionId = PortalSessionAuthenticationHandler.PresentedSessionId(httpContext.Request);
++        if (sessionId is null)
++        {
++            // Unreachable through this group's policy (PortalSession returns no result without a
++            // session id, so the request is challenged first) — kept as the fail-closed default so
++            // the mediator never mediates on behalf of an unidentified caller if the policy is ever
++            // loosened or the method is invoked directly.
++            return SessionNotFound(StatusCodes.Status401Unauthorized);
++        }
++
++        var accessToken = await sessionTokens.GetAccessTokenAsync(sessionId, cancellationToken);
++
++        if (accessToken.Status != ProviderAccessTokenStatus.Active)
++        {
++            return accessToken.Status switch
++            {
++                ProviderAccessTokenStatus.SessionEnded => Results.Json(
++                    new { error = "session_ended" },
++                    statusCode: StatusCodes.Status410Gone),
++                ProviderAccessTokenStatus.NotFound => SessionNotFound(StatusCodes.Status404NotFound),
++                _ => UpstreamUnavailable(),
++            };
++        }
++
++        var result = await read(accessToken.AccessToken!, cancellationToken);
++
++        return result.Status == MediatedReadStatus.Ok
++            ? Results.Ok(result.Data)
++            : UpstreamUnavailable();
++    }
++
++    /// <summary>
++    /// Authorization for the picker group, stated explicitly: a valid **portal session**, and
++    /// nothing else. The policy lists one scheme whose handler is registered in BOTH flag states
++    /// (<c>AddAuthServices</c>), so the challenge is the portal-session handler's bare <c>401</c> —
++    /// never a redirect, and never a 500 from a policy naming a scheme this host does not register.
++    /// Bearer and cookie callers are deliberately NOT accepted: the pickers exist for the portal,
++    /// which presents its opaque session id in <c>X-Portal-Session</c> (D12).
++    /// </summary>
++    private static void ConfigurePortalSessionPolicy(AuthorizationPolicyBuilder policy)
++    {
++        ArgumentNullException.ThrowIfNull(policy);
++
++        policy
++            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.SchemeName)
++            .RequireAuthenticatedUser();
++    }
++
++    /// <summary>No usable session: the same body code at 401 (nothing presented) and 404 (unknown),
++    /// so the portal has one vocabulary for "this session is not usable" (D18).</summary>
++    private static IResult SessionNotFound(int statusCode) =>
++        Results.Json(new { error = "session_not_found" }, statusCode: statusCode);
++
++    /// <summary>One degraded status for every upstream failure class: the portal cannot act on the
++    /// difference, and the upstream status or body must not travel (AC11).</summary>
++    private static IResult UpstreamUnavailable() =>
++        Results.Json(new { error = "upstream_unreachable" }, statusCode: StatusCodes.Status502BadGateway);
++}
+diff --git a/src/SchoolCollab.Auth/Providers/IAuthProvider.cs b/src/SchoolCollab.Auth/Providers/IAuthProvider.cs
+new file mode 100644
+index 00000000..78173558
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Providers/IAuthProvider.cs
+@@ -0,0 +1,241 @@
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Providers;
++
++/// <summary>
++/// Outcome of <see cref="IAuthProvider.AuthenticateAsync"/> (spec §5.2 / D6). The taxonomy is
++/// round A's Direct-Grant taxonomy, re-stated at the seam so a caller never sees
++/// Keycloak-specific types.
++/// </summary>
++public enum ProviderAuthenticationStatus
++{
++    /// <summary>Credentials accepted; the token set is on the result and must go straight to custody.</summary>
++    Success,
++
++    /// <summary>The credential pair was rejected.</summary>
++    InvalidCredentials,
++
++    /// <summary>The account exists but is disabled / not fully provisioned.</summary>
++    DisabledUser,
++
++    /// <summary>The token endpoint did not answer, or answered with something unusable.</summary>
++    UpstreamUnreachable,
++}
++
++/// <summary>
++/// A session's token set as it travels **inside** the auth service: exchange result → custody
++/// (<see cref="PortalSessionStore"/>). It is never serialized, never returned to the portal and
++/// never logged (D7 / D12 / AC11) — the portal-facing response records carry claims as data only.
++/// </summary>
++public sealed record ProviderTokenSet(
++    string AccessToken,
++    string RefreshToken,
++    string IdToken,
++    int ExpiresInSeconds);
++
++/// <summary>Result of an authenticate operation. <see cref="Tokens"/> is present only on
++/// <see cref="ProviderAuthenticationStatus.Success"/>; <see cref="Detail"/> is bounded
++/// diagnostic text (never a token, never the raw upstream body).</summary>
++public sealed record ProviderAuthentication(
++    ProviderAuthenticationStatus Status,
++    ProviderTokenSet? Tokens = null,
++    string? Detail = null)
++{
++    public bool IsSuccess => Status == ProviderAuthenticationStatus.Success;
++}
++
++/// <summary>Outcome of a token refresh (spec D18).</summary>
++public enum ProviderRefreshStatus
++{
++    /// <summary>Keycloak issued a fresh token set; it now lives in custody.</summary>
++    Refreshed,
++
++    /// <summary>No live session exists under that id.</summary>
++    NotFound,
++
++    /// <summary>Keycloak rejected the refresh token — revoked or expired. The session is over
++    /// (D18's distinct <c>session ended</c> state): the custody entry is dropped.</summary>
++    SessionEnded,
++
++    /// <summary>Keycloak did not answer (or answered unusably). The session is NOT ended —
++    /// nothing is revoked — so the caller must not tear the portal's session down.</summary>
++    UpstreamUnreachable,
++}
++
++/// <summary>Result of a refresh. <see cref="ExpiresInSeconds"/> is the fresh access token's
++/// lifetime when the refresh succeeded.</summary>
++public sealed record ProviderRefresh(ProviderRefreshStatus Status, int ExpiresInSeconds = 0);
++
++/// <summary>State of a session read (spec D18).</summary>
++public enum ProviderSessionStatus
++{
++    /// <summary>The session is live and the claim set is on the result.</summary>
++    Active,
++
++    /// <summary>No live session exists under that id.</summary>
++    NotFound,
++
++    /// <summary>The session's refresh token was rejected — the session ended (D18).</summary>
++    SessionEnded,
++
++    /// <summary>The identity provider could not be reached; the session state is unknown.</summary>
++    UpstreamUnreachable,
++
++    /// <summary>The token payload did not carry the pinned claim contract (D9) — the realm
++    /// mappers and <see cref="ClaimSetFactory"/> have drifted.</summary>
++    ClaimSetIncomplete,
++}
++
++/// <summary>
++/// A session read (spec D18): the claim set **as data** plus the session's remaining lifetime.
++/// Deliberately token-free — this record's data is what a portal-facing response may serialize
++/// (AC11); a token never enters it.
++/// </summary>
++public sealed record ProviderSessionRead(
++    ProviderSessionStatus Status,
++    PortalClaims? Claims = null,
++    int ExpiresInSeconds = 0);
++
++/// <summary>Result of a session revocation (local custody removal).</summary>
++public sealed record ProviderRevocation(bool Found);
++
++/// <summary>
++/// Result of a logout (spec §9 / D13): whether a live session was found, and — when one was —
++/// the fully-built Keycloak <c>end_session</c> URL the portal redirects the browser to.
++/// <see cref="EndSessionUrl"/> carries no token (see
++/// <see cref="KeycloakAuthProvider.BuildEndSessionUrl"/>).
++/// </summary>
++public sealed record ProviderLogout(bool Found, string? EndSessionUrl = null);
++
++/// <summary>
++/// The ONE portal-facing provider seam (spec D15). Keycloak is the only implementation today
++/// (<see cref="KeycloakAuthProvider"/>); another IdP would be another implementation selected by
++/// configuration, so the portal never learns which provider is behind the seam. The Keycloak
++/// **Admin REST** surface deliberately stays Keycloak-specific (<c>KeycloakAdminClient</c>): it
++/// *is* a Keycloak admin API, not a portable identity operation.
++/// </summary>
++/// <remarks>
++/// D15's operations, one member each: <see cref="AuthenticateAsync"/> (authenticate),
++/// <see cref="CreateSession"/> (session create), <see cref="ReadSessionAsync"/> (session read),
++/// <see cref="ReadClaims"/> (claims), <see cref="RefreshAsync"/> (refresh),
++/// <see cref="RevokeSession"/> (session revoke), <see cref="LogoutAsync"/> (logout).
++/// Every member keeps the token set inside the auth service: no member returns a token to a
++/// caller that serializes it, and the portal-facing shapes (<see cref="ProviderSessionRead"/>,
++/// <see cref="ProviderLogout"/>) are token-free by construction (D12 / AC11).
++/// </remarks>
++public interface IAuthProvider
++{
++    /// <summary>
++    /// Verifies a credential pair against the identity provider and returns the resulting token
++    /// set (or the typed failure). The caller decides what to do with it — the auth service
++    /// stores it via <see cref="CreateSession"/>.
++    /// </summary>
++    Task<ProviderAuthentication> AuthenticateAsync(
++        string username,
++        string password,
++        CancellationToken cancellationToken = default);
++
++    /// <summary>
++    /// Stores a token set as a portal session and returns the opaque session id — the only value
++    /// the portal (or a Blazor app) ever holds (D12).
++    /// </summary>
++    string CreateSession(ProviderTokenSet tokens);
++
++    /// <summary>
++    /// Reads a session as **data** (spec D18): the claim set plus the remaining session lifetime.
++    /// Tokens are refreshed transparently in custody when the access token has elapsed, so the
++    /// caller never has to know about token lifetimes; a refresh Keycloak rejects yields
++    /// <see cref="ProviderSessionStatus.SessionEnded"/>.
++    /// </summary>
++    Task<ProviderSessionRead> ReadSessionAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default);
++
++    /// <summary>
++    /// The claim set for a live session as data, with **no** I/O and no refresh — the cheap
++    /// projection the portal-session authentication scheme uses on every portal call.
++    /// <c>null</c> when the session is unknown, expired, or its token payload does not carry the
++    /// pinned claim contract (the caller fails closed).
++    /// </summary>
++    PortalClaims? ReadClaims(string sessionId);
++
++    /// <summary>
++    /// Refreshes a session's token set in custody (spec D18). <see
++    /// cref="ProviderRefreshStatus.SessionEnded"/> means Keycloak revoked/rejected the session —
++    /// the custody entry is dropped and the caller must treat the session as over.
++    /// </summary>
++    Task<ProviderRefresh> RefreshAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default);
++
++    /// <summary>
++    /// Drops a session from custody. The refresh token is NOT handed to the caller (round-A
++    /// contract superseded per AC11): revocation at Keycloak belongs to <see cref="LogoutAsync"/>,
++    /// which performs it server-side.
++    /// </summary>
++    ProviderRevocation RevokeSession(string sessionId);
++
++    /// <summary>
++    /// Logout (spec §9 / D13): drops the custody entry, revokes the refresh token at Keycloak
++    /// **server-side**, and returns the fully-built <c>end_session</c> URL for the portal to
++    /// redirect the browser to. Revocation at Keycloak is defense-in-depth and best-effort — the
++    /// local session is gone either way — and no token is ever returned.
++    /// </summary>
++    Task<ProviderLogout> LogoutAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default);
++}
++
++/// <summary>
++/// Outcome of the custody access-token read (D17's mediated reads). The four states are the D18
++/// session taxonomy, so a mediator maps them onto the SAME fail-closed responses the session read
++/// uses.
++/// </summary>
++public enum ProviderAccessTokenStatus
++{
++    /// <summary>A live session exists and its access token is current (refreshed if it had elapsed).</summary>
++    Active,
++
++    /// <summary>No live session exists under that id.</summary>
++    NotFound,
++
++    /// <summary>Keycloak rejected the session's refresh token — the session is over (D18).</summary>
++    SessionEnded,
++
++    /// <summary>Keycloak did not answer, so no current token could be produced. The session is
++    /// NOT ended — nothing is revoked.</summary>
++    UpstreamUnreachable,
++}
++
++/// <summary>
++/// A live session's custody access token — the narrow projection the auth service forwards
++/// server-side when it calls another module as the session's user (D17). It carries ONLY the
++/// access token (never the refresh or id token) and is internal to the service: it is never
++/// serialized into a portal-facing response and never logged (D7 / D12 / AC11).
++/// </summary>
++public sealed record ProviderAccessToken(ProviderAccessTokenStatus Status, string? AccessToken = null);
++
++/// <summary>
++/// The auth service's OWN custody read (spec D17): the access token of a live session, refreshed
++/// transparently when it has elapsed, so a mediated call can act as the session's user without the
++/// portal ever holding a credential (AC11).
++/// </summary>
++/// <remarks>
++/// Deliberately a SEPARATE interface rather than an eighth member of <see cref="IAuthProvider"/>:
++/// D15 pins that seam at its seven portal-facing operations, and this read is not one of them —
++/// nothing portals call goes through it. <see cref="KeycloakAuthProvider"/> implements both, so
++/// there is still exactly ONE custody implementation and ONE source of truth for a session's
++/// tokens (the store, via <see cref="Services.PortalSessionStore.ReplaceTokens"/>).
++/// </remarks>
++public interface ISessionTokenAccessor
++{
++    /// <summary>
++    /// The access token of a live session, refreshed in custody when it has elapsed (minus the
++    /// provider's safety margin) so the caller never forwards a stale credential; the value handed
++    /// back is the one the custody store now holds. Failure taxonomy: <c>NotFound</c> and
++    /// <c>SessionEnded</c> are the D18 session states, <c>UpstreamUnreachable</c> the degraded one.
++    /// </summary>
++    Task<ProviderAccessToken> GetAccessTokenAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default);
++}
+diff --git a/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs b/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs
+new file mode 100644
+index 00000000..a5e6f91b
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs
+@@ -0,0 +1,491 @@
++using System.IO;
++using System.Net;
++using System.Text.Json;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Providers;
++
++/// <summary>
++/// The Keycloak implementation of the portal-facing provider seam (spec D15). It performs no
++/// identity work of its own: authenticate and the token JSON shape are round A's
++/// <see cref="DirectGrantExchanger"/> / <c>DirectGrantResult</c>, custody is round A's
++/// <see cref="PortalSessionStore"/>, and the claim shape is round A's
++/// <see cref="ClaimSetFactory"/>. What this class adds is the **refresh** and **logout** halves of
++/// the session lifecycle (D13/D18), which are Keycloak HTTP calls with no round-A home.
++/// </summary>
++/// <remarks>
++/// <para>
++/// <b>Custody — ONE store.</b> The token set lives in <see cref="PortalSessionStore"/> and nowhere
++/// else: nothing here is serialized, logged or returned to the portal, and no portal-facing
++/// response record can carry a token by construction (D7 / D12 / AC11). A refresh swaps the token
++/// set **through that store** (<see cref="PortalSessionStore.ReplaceTokens"/>), so there is a single
++/// source of truth — any reader sees the rotated (`refresh_token`) set rather than the exchanged
++/// one, and the swapped-in set is as durable as the session itself.
++/// </para>
++/// <para>
++/// <b>Refresh policy.</b> The custody record carries both the session's absolute expiry
++/// (<see cref="PortalSessionEntry.ExpiresAtUtc"/>) and the current token set's own expiry
++/// (<see cref="PortalSessionEntry.AccessTokenExpiresAtUtc"/>), so the provider refreshes once the
++/// access token has elapsed (minus a small safety margin) — refresh-on-demand, so the caller asks
++/// for claims and always gets live ones.
++/// </para>
++/// </remarks>
++public sealed class KeycloakAuthProvider : IAuthProvider, ISessionTokenAccessor
++{
++    /// <summary>Keycloak's OIDC token endpoint, relative to <c>Auth:Keycloak:Authority</c>.</summary>
++    private const string TokenPath = "/protocol/openid-connect/token";
++
++    /// <summary>Keycloak's OIDC token revocation endpoint (spec §9 / D13).</summary>
++    private const string RevocationPath = "/protocol/openid-connect/revoke";
++
++    /// <summary>Keycloak's RP-initiated logout endpoint (the <c>end_session</c> URL's path).</summary>
++    private const string LogoutPath = "/protocol/openid-connect/logout";
++
++    /// <summary>Refresh this long before the access token's real expiry, so a slow round-trip
++    /// cannot race it. Mirrors <c>KeycloakAdminClient</c>'s safety margin.</summary>
++    private static readonly TimeSpan RefreshSafetyMargin = TimeSpan.FromSeconds(30);
++
++    private readonly DirectGrantExchanger _exchanger;
++    private readonly PortalSessionStore _sessions;
++    private readonly ClaimSetFactory _claimSetFactory;
++    private readonly HttpClient _httpClient;
++    private readonly AuthServiceOptions _options;
++    private readonly TimeProvider _timeProvider;
++    private readonly ILogger<KeycloakAuthProvider> _logger;
++
++    public KeycloakAuthProvider(
++        DirectGrantExchanger exchanger,
++        PortalSessionStore sessions,
++        ClaimSetFactory claimSetFactory,
++        HttpClient httpClient,
++        IOptions<AuthServiceOptions> options,
++        TimeProvider timeProvider,
++        ILogger<KeycloakAuthProvider> logger)
++    {
++        _exchanger = exchanger;
++        _sessions = sessions;
++        _claimSetFactory = claimSetFactory;
++        _httpClient = httpClient;
++        _options = options.Value;
++        _timeProvider = timeProvider;
++        _logger = logger;
++    }
++
++    /// <inheritdoc />
++    public async Task<ProviderAuthentication> AuthenticateAsync(
++        string username,
++        string password,
++        CancellationToken cancellationToken = default)
++    {
++        var result = await _exchanger.ExchangeAsync(username, password, cancellationToken);
++
++        return result.Status switch
++        {
++            DirectGrantStatus.Success => new ProviderAuthentication(
++                ProviderAuthenticationStatus.Success,
++                new ProviderTokenSet(
++                    result.AccessToken!,
++                    result.RefreshToken!,
++                    result.IdToken!,
++                    result.ExpiresInSeconds)),
++            DirectGrantStatus.InvalidCredentials => new ProviderAuthentication(
++                ProviderAuthenticationStatus.InvalidCredentials,
++                Detail: result.Detail),
++            DirectGrantStatus.DisabledUser => new ProviderAuthentication(
++                ProviderAuthenticationStatus.DisabledUser,
++                Detail: result.Detail),
++            _ => new ProviderAuthentication(
++                ProviderAuthenticationStatus.UpstreamUnreachable,
++                Detail: result.Detail),
++        };
++    }
++
++    /// <inheritdoc />
++    public string CreateSession(ProviderTokenSet tokens)
++    {
++        ArgumentNullException.ThrowIfNull(tokens);
++
++        return _sessions.Create(tokens.AccessToken, tokens.RefreshToken, tokens.IdToken, tokens.ExpiresInSeconds);
++    }
++
++    /// <inheritdoc />
++    public async Task<ProviderSessionRead> ReadSessionAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default)
++    {
++        var (tokens, tokenExpiresAtUtc) = CurrentTokens(sessionId);
++        if (tokens is null)
++        {
++            return new ProviderSessionRead(ProviderSessionStatus.NotFound);
++        }
++
++        if (_timeProvider.GetUtcNow() >= tokenExpiresAtUtc - RefreshSafetyMargin)
++        {
++            // The refresh swaps the custody entry atomically and hands back what it wrote, so the
++            // claims below come from the authoritative set: the session's TTL can elapse (or a
++            // concurrent logout revoke it) while Keycloak answers — that lands as a rejected
++            // replacement, i.e. the D18 session-over state, never an exception and never a second
++            // racy read of custody.
++            var refresh = await RefreshTokensAsync(sessionId, cancellationToken);
++            if (refresh.Tokens is null)
++            {
++                return new ProviderSessionRead(refresh.Status switch
++                {
++                    ProviderRefreshStatus.SessionEnded => ProviderSessionStatus.SessionEnded,
++                    ProviderRefreshStatus.NotFound => ProviderSessionStatus.NotFound,
++                    _ => ProviderSessionStatus.UpstreamUnreachable,
++                });
++            }
++
++            tokens = refresh.Tokens;
++        }
++
++        var claims = BuildClaims(tokens!.IdToken);
++        if (claims is null)
++        {
++            return new ProviderSessionRead(ProviderSessionStatus.ClaimSetIncomplete);
++        }
++
++        return new ProviderSessionRead(
++            ProviderSessionStatus.Active,
++            claims,
++            RemainingSessionSeconds(sessionId));
++    }
++
++    /// <inheritdoc />
++    public PortalClaims? ReadClaims(string sessionId)
++    {
++        var (tokens, _) = CurrentTokens(sessionId);
++        return tokens is null ? null : BuildClaims(tokens.IdToken);
++    }
++
++    /// <inheritdoc />
++    public async Task<ProviderRefresh> RefreshAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default)
++    {
++        var refresh = await RefreshTokensAsync(sessionId, cancellationToken);
++        return new ProviderRefresh(refresh.Status, refresh.Tokens?.ExpiresInSeconds ?? 0);
++    }
++
++    /// <inheritdoc />
++    /// <remarks>
++    /// The mediated read's credential (D17). It refreshes through the SAME
++    /// <see cref="RefreshTokensAsync"/> the session read uses, so the token handed to the caller is
++    /// the authoritative set the custody store now holds: the decision to refresh and the write
++    /// happen in one place, and there is no second read of custody that could observe a different
++    /// state. <see cref="ProviderAccessTokenStatus.Active"/> therefore always means "current",
++    /// never "possibly stale" — which is exactly what makes it safe to forward.
++    /// </remarks>
++    public async Task<ProviderAccessToken> GetAccessTokenAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default)
++    {
++        var (tokens, tokenExpiresAtUtc) = CurrentTokens(sessionId);
++        if (tokens is null)
++        {
++            return new ProviderAccessToken(ProviderAccessTokenStatus.NotFound);
++        }
++
++        if (_timeProvider.GetUtcNow() >= tokenExpiresAtUtc - RefreshSafetyMargin)
++        {
++            var refresh = await RefreshTokensAsync(sessionId, cancellationToken);
++            if (refresh.Tokens is null)
++            {
++                return new ProviderAccessToken(refresh.Status switch
++                {
++                    ProviderRefreshStatus.SessionEnded => ProviderAccessTokenStatus.SessionEnded,
++                    ProviderRefreshStatus.NotFound => ProviderAccessTokenStatus.NotFound,
++                    _ => ProviderAccessTokenStatus.UpstreamUnreachable,
++                });
++            }
++
++            tokens = refresh.Tokens;
++        }
++
++        return new ProviderAccessToken(ProviderAccessTokenStatus.Active, tokens.AccessToken);
++    }
++
++    /// <summary>
++    /// The refresh itself, returning the token set that now lives in custody — the private half of
++    /// <see cref="RefreshAsync"/>, so the read path can serve claims from the SAME set the store
++    /// wrote instead of re-reading custody (that re-read is the race the store's atomic swap closes).
++    /// The token set never leaves this class except into the custody store.
++    /// </summary>
++    private async Task<(ProviderRefreshStatus Status, ProviderTokenSet? Tokens)> RefreshTokensAsync(
++        string sessionId,
++        CancellationToken cancellationToken)
++    {
++        var (tokens, _) = CurrentTokens(sessionId);
++        if (tokens is null)
++        {
++            return (ProviderRefreshStatus.NotFound, null);
++        }
++
++        using var form = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
++        {
++            ["grant_type"] = "refresh_token",
++            ["client_id"] = _options.Keycloak.ClientId,
++            ["client_secret"] = _options.Keycloak.ClientSecret,
++            ["refresh_token"] = tokens.RefreshToken,
++        });
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await _httpClient.PostAsync(TokenEndpoint(), form, cancellationToken);
++        }
++        catch (HttpRequestException)
++        {
++            return (ProviderRefreshStatus.UpstreamUnreachable, null);
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            return (ProviderRefreshStatus.UpstreamUnreachable, null);
++        }
++
++        using (response)
++        {
++            var body = await response.Content.ReadAsStringAsync(cancellationToken);
++
++            if (!response.IsSuccessStatusCode)
++            {
++                // Keycloak answers a revoked/expired/rotated-away refresh token with the 400/401
++                // family. Anything else (5xx, gateway errors) is an outage: the session may well
++                // still be alive, so it must NOT be reported as ended (D18's state must mean
++                // "revoked/expired", never "Keycloak was down").
++                if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized
++                    or HttpStatusCode.Forbidden)
++                {
++                    EndSession(sessionId);
++                    return (ProviderRefreshStatus.SessionEnded, null);
++                }
++
++                return (ProviderRefreshStatus.UpstreamUnreachable, null);
++            }
++
++            // Round A's parser is the ONE token-JSON shape reader (access_token present,
++            // refresh_token/id_token optional in the wild but required for a usable session).
++            var parsed = DirectGrantResult.SuccessFromTokenJson(body);
++            if (!parsed.IsSuccess || parsed.AccessToken is null || parsed.RefreshToken is null)
++            {
++                return (ProviderRefreshStatus.UpstreamUnreachable, null);
++            }
++
++            // The refreshed set goes into the ONE custody store, under the SAME session id and the
++            // SAME session expiry (D18): the rotated refresh token is what the next refresh must
++            // present, and a direct store reader must see it too. A null replacement means the
++            // session expired or was revoked while Keycloak was answering, so the refreshed tokens
++            // are unusable and the session is over — the D18 state, reported without throwing.
++            var replaced = _sessions.ReplaceTokens(
++                sessionId,
++                parsed.AccessToken,
++                parsed.RefreshToken,
++                parsed.IdToken ?? tokens.IdToken,
++                parsed.ExpiresInSeconds);
++
++            if (replaced is null)
++            {
++                _logger.LogInformation(
++                    "The portal session was no longer live when its refreshed tokens came back; the refresh ends the session.");
++                return (ProviderRefreshStatus.SessionEnded, null);
++            }
++
++            // The authoritative set the store now holds — what the claims (and the next refresh)
++            // are built from.
++            return (ProviderRefreshStatus.Refreshed, new ProviderTokenSet(
++                replaced.AccessToken, replaced.RefreshToken, replaced.IdToken, replaced.ExpiresInSeconds));
++        }
++    }
++
++    /// <inheritdoc />
++    public ProviderRevocation RevokeSession(string sessionId)
++    {
++        return new ProviderRevocation(_sessions.Revoke(sessionId).Found);
++    }
++
++    /// <inheritdoc />
++    public async Task<ProviderLogout> LogoutAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default)
++    {
++        var revocation = _sessions.Revoke(sessionId);
++
++        if (!revocation.Found)
++        {
++            return new ProviderLogout(Found: false);
++        }
++
++        if (revocation.RefreshToken is not null)
++        {
++            await RevokeAtKeycloakAsync(revocation.RefreshToken, cancellationToken);
++        }
++
++        return new ProviderLogout(Found: true, BuildEndSessionUrl());
++    }
++
++    /// <summary>
++    /// The fully-built <c>end_session</c> URL the portal redirects the browser to (D13).
++    /// </summary>
++    /// <remarks>
++    /// Token-free by construction — and the reason is now an owner adjudication, not a reading of
++    /// AC11 over D13: the round restores D13 by having the **auth service perform the browser-facing
++    /// logout redirect itself**, carrying <c>id_token_hint</c> + <c>post_logout_redirect_uri</c> in a
++    /// <c>Location</c> header. The id token then never enters a response body (AC11 holds) and never
++    /// reaches Python state (the portal only follows a redirect). That endpoint and the realm's
++    /// post-logout redirect URI are pass **B6**'s work — this pass returns the token-free URL only.
++    /// Keycloak accepts <c>client_id</c> when <c>id_token_hint</c> is absent, so this URL still
++    /// terminates the session; it is the fallback shape, not the round's final logout flow.
++    /// </remarks>
++    public string BuildEndSessionUrl()
++    {
++        var authority = _options.Keycloak.Authority.TrimEnd('/');
++        var clientId = Uri.EscapeDataString(_options.Keycloak.ClientId);
++        return $"{authority}{LogoutPath}?client_id={clientId}";
++    }
++
++    /// <summary>
++    /// Revokes the refresh token at Keycloak (spec §9 / D13). Best-effort by design: D13 calls
++    /// revocation defense-in-depth — the custody entry is already gone and the browser is about to
++    /// be sent to <c>end_session</c> — so an outage must not turn a logout into a failure. The
++    /// token is never logged.
++    /// </summary>
++    private async Task RevokeAtKeycloakAsync(string refreshToken, CancellationToken cancellationToken)
++    {
++        using var form = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
++        {
++            ["client_id"] = _options.Keycloak.ClientId,
++            ["client_secret"] = _options.Keycloak.ClientSecret,
++            ["token"] = refreshToken,
++            ["token_type_hint"] = "refresh_token",
++        });
++
++        try
++        {
++            using var response = await _httpClient.PostAsync(RevocationEndpoint(), form, cancellationToken);
++            if (!response.IsSuccessStatusCode)
++            {
++                _logger.LogWarning(
++                    "Keycloak rejected the refresh-token revocation during logout with status {StatusCode}; "
++                    + "the local session is already revoked.",
++                    (int)response.StatusCode);
++            }
++        }
++        catch (HttpRequestException)
++        {
++            _logger.LogWarning(
++                "Keycloak was unreachable for the refresh-token revocation during logout; "
++                + "the local session is already revoked.");
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            _logger.LogWarning(
++                "Keycloak timed out for the refresh-token revocation during logout; "
++                + "the local session is already revoked.");
++        }
++    }
++
++    private void EndSession(string sessionId) => _sessions.Revoke(sessionId);
++
++    /// <summary>The token set currently in custody for the session plus that set's access-token
++    /// expiry. Both are <c>null</c>/default when the session is unknown or expired.</summary>
++    private (ProviderTokenSet? Tokens, DateTimeOffset TokenExpiresAtUtc) CurrentTokens(string sessionId)
++    {
++        var entry = _sessions.Get(sessionId);
++        if (entry is null)
++        {
++            return (null, default);
++        }
++
++        return (new ProviderTokenSet(
++            entry.AccessToken, entry.RefreshToken, entry.IdToken, entry.ExpiresInSeconds),
++            entry.AccessTokenExpiresAtUtc);
++    }
++
++    private int RemainingSessionSeconds(string sessionId)
++    {
++        var entry = _sessions.Get(sessionId);
++        if (entry is null)
++        {
++            return 0;
++        }
++
++        var remaining = entry.ExpiresAtUtc - _timeProvider.GetUtcNow();
++        return remaining <= TimeSpan.Zero ? 0 : (int)remaining.TotalSeconds;
++    }
++
++    private PortalClaims? BuildClaims(string idToken)
++    {
++        try
++        {
++            return _claimSetFactory.Build(DecodePayloadSegment(idToken));
++        }
++        catch (InvalidDataException ex)
++        {
++            // The token came from Keycloak through this service's own exchange: a payload that is
++            // not a well-formed JWT with the pinned claim contract (D9) is an internal
++            // inconsistency, so the caller fails closed rather than rendering half a page.
++            _logger.LogWarning(ex, "The session's ID token payload did not yield a claim set.");
++            return null;
++        }
++    }
++
++    /// <summary>
++    /// Decodes the <c>payload</c> segment of a JWT as JSON **without cryptographic verification**,
++    /// exactly as round A's redemption path does: the token was minted by Keycloak and stored by
++    /// this service moments earlier, so the read path only needs the claim SHAPE (D9). The helper
++    /// is private to round A's <c>RedeemEndpoints</c>, which this pass's expected-files rows do not
++    /// cover, so it is restated here rather than shared.
++    /// </summary>
++    private static JsonElement DecodePayloadSegment(string idToken)
++    {
++        var parts = idToken.Split('.');
++        if (parts.Length != 3)
++        {
++            throw new InvalidDataException("the ID token is not a three-segment JWT.");
++        }
++
++        var segment = (parts[1].Length % 4) switch
++        {
++            0 => parts[1],
++            2 => parts[1] + "==",
++            3 => parts[1] + "=",
++            _ => throw new InvalidDataException("the ID token payload segment has an invalid length."),
++        };
++
++        byte[] bytes;
++        try
++        {
++            bytes = Convert.FromBase64String(segment.Replace('-', '+').Replace('_', '/'));
++        }
++        catch (FormatException ex)
++        {
++            throw new InvalidDataException("the ID token payload segment is not valid base64url.", ex);
++        }
++
++        try
++        {
++            using var document = JsonDocument.Parse(bytes);
++            return document.RootElement.Clone();
++        }
++        catch (JsonException ex)
++        {
++            throw new InvalidDataException("the ID token payload segment is not valid JSON.", ex);
++        }
++    }
++
++    private Uri TokenEndpoint() => new($"{_options.Keycloak.Authority.TrimEnd('/')}{TokenPath}");
++
++    private Uri RevocationEndpoint() => new($"{_options.Keycloak.Authority.TrimEnd('/')}{RevocationPath}");
++}
+diff --git a/src/SchoolCollab.Auth/Services/MediatedReaders.cs b/src/SchoolCollab.Auth/Services/MediatedReaders.cs
+new file mode 100644
+index 00000000..be912eb2
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/MediatedReaders.cs
+@@ -0,0 +1,163 @@
++using System.Net.Http.Headers;
++using System.Net.Http.Json;
++using System.Text.Json;
++using Microsoft.Extensions.Logging;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>
++/// Outcome of one mediated read (spec D17). Deliberately a single failure state: the portal can do
++/// exactly one thing with a failed mediated read — render the AC10 degraded card — so the mediator
++/// does not invent distinctions the caller cannot act on (a rejected forward, a 5xx and an
++/// unparseable body all mean "this read produced no data"). The failure CLASS is logged
++/// server-side; it is never disclosed in the response and no upstream body is ever echoed.
++/// </summary>
++public enum MediatedReadStatus
++{
++    /// <summary>The upstream module answered with the expected data-only shape.</summary>
++    Ok,
++
++    /// <summary>The data could not be read: transport failure, a non-success status, or a body
++    /// that was not the expected shape. Fail closed.</summary>
++    Unavailable,
++}
++
++/// <summary>A mediated read's result: the upstream data as a value, or nothing (<see
++/// cref="MediatedReadStatus.Unavailable"/>).</summary>
++public sealed record MediatedRead<TData>(MediatedReadStatus Status, TData? Data = default)
++{
++    /// <summary>A successful read. Internal by design: the mediator is the only producer, so no
++    /// caller can fabricate an "Ok" without data.</summary>
++    internal static MediatedRead<TData> Ok(TData data) => new(MediatedReadStatus.Ok, data);
++
++    /// <summary>A failed read.</summary>
++    internal static MediatedRead<TData> Unavailable() => new(MediatedReadStatus.Unavailable);
++}
++
++/// <summary>A tenant-picker row (D17) — the data-only projection of settings-api's tenant
++/// registry, carrying exactly what a picker renders. Nothing else from the upstream record
++/// travels, so a mediated response cannot leak more than the picker needs (AC11).</summary>
++public sealed record PickerTenant(Guid Id, string Name, string Type);
++
++/// <summary>A teacher-picker row (D17) — the data-only projection of students-api's teacher
++/// list: identity and display text only, no assignments, dates or coding references.</summary>
++public sealed record PickerTeacher(Guid Id, string FirstName, string LastName, string? DisplayName);
++
++/// <summary>
++/// A mediated read of another module's data on the portal's behalf (spec D17 / D15's boundary):
++/// the portal holds no credential, so the auth service performs the read **as the session's user**
++/// by forwarding that session's custody access token (AC11). The upstream module's own tenant
++/// middleware resolves the forwarded token's <c>tenant_id</c> claim, so the results are scoped
++/// exactly as they are for a direct authenticated call — the mediator adds no scoping of its own.
++/// </summary>
++/// <remarks>
++/// One implementation per upstream module (a typed <see cref="HttpClient"/> each, registered with
++/// the cross-module retry handler and long handler lifetime); the shared half here is only the
++/// request/response discipline: bearer-forward, typed deserialization, fail-closed on anything
++/// else. The client deliberately propagates no tenant header — the identity travels in the
++/// forwarded bearer token, and a dev-tenant header would be a second, weaker source of scope.
++/// </remarks>
++public abstract class MediatedReader<TItem>(
++    HttpClient httpClient,
++    ILogger<MediatedReader<TItem>> logger)
++{
++    /// <summary>The upstream route this reader calls, relative to its typed client's base address.</summary>
++    protected abstract string UpstreamPath { get; }
++
++    /// <summary>Web defaults, stated explicitly rather than relied on implicitly (the B4
++    /// precedent): every module serializes .NET records as camelCase, and the read must tolerate
++    /// case changes rather than blank a picker.</summary>
++    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
++
++    /// <summary>
++    /// Reads the upstream list while authenticated as the session whose access token is passed in.
++    /// </summary>
++    /// <remarks>
++    /// Fail-closed by construction: a non-success status, a transport fault, a timeout or a body
++    /// that is not the expected JSON shape all return
++    /// <see cref="MediatedReadStatus.Unavailable"/> — never an exception into the request pipeline
++    /// (a mediated read must not turn an upstream outage into a 500) and never the upstream body.
++    /// The upstream status is logged as a category; neither the token nor the session id is logged.
++    /// </remarks>
++    public async Task<MediatedRead<IReadOnlyList<TItem>>> ReadAsync(
++        string accessToken,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
++
++        using var request = new HttpRequestMessage(HttpMethod.Get, UpstreamPath);
++        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
++
++        try
++        {
++            using var response = await httpClient.SendAsync(request, cancellationToken);
++
++            if (!response.IsSuccessStatusCode)
++            {
++                // Includes a rejected forward (401/403): the read produced no data, and the portal
++                // cannot act on the difference — it renders the same degraded card. The class is
++                // logged, so the distinction is not lost to operators.
++                logger.LogWarning(
++                    "The mediated read of {UpstreamPath} failed with status {StatusCode}.",
++                    UpstreamPath,
++                    (int)response.StatusCode);
++                return MediatedRead<IReadOnlyList<TItem>>.Unavailable();
++            }
++
++            var items = await response.Content.ReadFromJsonAsync<List<TItem>>(JsonOptions, cancellationToken);
++            return items is null
++                ? MediatedRead<IReadOnlyList<TItem>>.Unavailable()
++                : MediatedRead<IReadOnlyList<TItem>>.Ok(items);
++        }
++        catch (HttpRequestException ex)
++        {
++            LogUnreachable(ex);
++            return MediatedRead<IReadOnlyList<TItem>>.Unavailable();
++        }
++        catch (JsonException ex)
++        {
++            LogUnreachable(ex);
++            return MediatedRead<IReadOnlyList<TItem>>.Unavailable();
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // The caller went away (the portal navigated off) — propagate the cancellation instead
++            // of inventing a degraded read for a request nobody is waiting for.
++            throw;
++        }
++        catch (OperationCanceledException ex)
++        {
++            LogUnreachable(ex);
++            return MediatedRead<IReadOnlyList<TItem>>.Unavailable();
++        }
++    }
++
++    private void LogUnreachable(Exception ex) =>
++        logger.LogWarning(
++            ex,
++            "The mediated read of {UpstreamPath} could not be completed.",
++            UpstreamPath);
++}
++
++/// <summary>Tenants for the portal's picker (D17): settings-api's read-only tenant registry,
++/// <c>GET /api/tenants</c>, read as the session's user.</summary>
++public sealed class TenantDirectoryReader(
++    HttpClient httpClient,
++    ILogger<MediatedReader<PickerTenant>> logger)
++    : MediatedReader<PickerTenant>(httpClient, logger)
++{
++    /// <inheritdoc />
++    protected override string UpstreamPath => "api/tenants";
++}
++
++/// <summary>Teachers for the portal's picker (D17): students-api's teacher list,
++/// <c>GET /teachers</c>, read as the session's user — the same call the students-api tenant
++/// middleware scopes for any other authenticated caller.</summary>
++public sealed class TeacherDirectoryReader(
++    HttpClient httpClient,
++    ILogger<MediatedReader<PickerTeacher>> logger)
++    : MediatedReader<PickerTeacher>(httpClient, logger)
++{
++    /// <inheritdoc />
++    protected override string UpstreamPath => "teachers";
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs
+new file mode 100644
+index 00000000..ac1bd8d4
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs
+@@ -0,0 +1,387 @@
++using System.Net;
++using System.Text;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Auth;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Providers;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// The D17 mediated picker reads (pass B7): <c>GET /auth/pickers/tenants</c> and
++/// <c>GET /auth/pickers/teachers</c>.
++/// <para>
++/// What this file pins, in the round's terms: the routes exist AND are authorization-gated on the
++/// portal-session scheme (an anonymous caller gets a bare 401 — a 404 would mean the route is not
++/// mapped, a 2xx/500 would mean the policy is not attached); every mediated call runs as the
++/// session's user by forwarding the **custody access token** as a bearer credential, and that token
++/// is the CURRENT one (an elapsed token is refreshed first — the whole point of reading through
++/// <see cref="ISessionTokenAccessor"/> rather than the custody store); the upstream failure classes
++/// all collapse to one fail-closed degraded status and never to a 500; and no response body carries
++/// a token, a secret or an upstream body (AC9/AC11) — including the upstream's extra fields, which
++/// the typed projection drops.
++/// </para>
++/// <para>
++/// Split of technique, mirroring <c>SessionEndpointTests</c>: the authorization/mapping axes run
++/// through the real Kestrel pipeline (<see cref="AuthEndpointTestHost"/>), while the token, session
++/// and upstream axes are invoked directly under a scripted transport and a fake clock — the hosted
++/// path cannot script settings-api/students-api nor expire an access token without waiting.
++/// </para>
++/// </summary>
++[TestClass]
++public class MediatedReadEndpointTests
++{
++    private const string TenantsRoute = "/auth/pickers/tenants";
++    private const string TeachersRoute = "/auth/pickers/teachers";
++
++    private const string StaleAccessToken = "seeded_access_token";
++    private const string StaleRefreshToken = "seeded_refresh_token";
++    private const string RotatedAccessToken = "rotated_access_token";
++    private const string RotatedRefreshToken = "rotated_refresh_token";
++    private const string UnknownSessionId =
++        "0000000000000000000000000000000000000000000000000000000000000000";
++
++    /// <summary>Distinctive strings only an upstream body could carry: their ABSENCE from every
++    /// mediated response is the projection/token-scan assertion.</summary>
++    private const string UpstreamTokenMarker = "upstream_access_token_marker";
++    private const string UpstreamSecretMarker = "upstream_secret_marker";
++
++    private static readonly string CustodyIdToken =
++        SessionEndpointTests.JwtWithClaims(tenantName: "Dev School", roles: ["user-admin"]);
++
++    private static readonly string TenantDirectoryJson =
++        "[{\"id\":\"11111111-1111-1111-1111-111111111111\",\"name\":\"Dev School\","
++        + "\"type\":\"School\",\"accessToken\":\"" + UpstreamTokenMarker + "\","
++        + "\"secret\":\"" + UpstreamSecretMarker + "\"}]";
++
++    // ── Routes and authorization (real pipeline) ─────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task Pickers_WithoutAPortalSession_Are401_Not404()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        foreach (var route in new[] { TenantsRoute, TeachersRoute })
++        {
++            var response = await host.Client.GetAsync(route);
++            var body = await response.Content.ReadAsStringAsync();
++
++            // 401 (not 404) proves the route is MAPPED and that an anonymous caller is refused. The
++            // policy half is pinned by Pickers_WithAnUnknownSession_Are401 below (a session-shaped
++            // id that the scheme cannot resolve answers 404 when the policy is absent, 401 when it
++            // is present) — this test alone would also pass off the mediator's own fail-closed
++            // guard, so the two together are what make the authorization explicit.
++            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, $"{route} must require a portal session");
++            response.Headers.Location.Should().BeNull("the portal-session challenge is a bare 401, never a redirect");
++            body.Should().NotContain(StaleAccessToken);
++            body.Should().NotContain(UnknownSessionId);
++        }
++    }
++
++    [TestMethod]
++    public async Task Pickers_WithAnUnknownSession_Are401_AndDiscloseNothing()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        foreach (var route in new[] { TenantsRoute, TeachersRoute })
++        {
++            using var request = new HttpRequestMessage(HttpMethod.Get, route);
++            request.Headers.Add(PortalSessionAuthenticationHandler.SessionHeaderName, UnknownSessionId);
++
++            var response = await host.Client.SendAsync(request);
++            var body = await response.Content.ReadAsStringAsync();
++
++            // Unknown, expired and unusable sessions all fail closed at the scheme's challenge —
++            // and this is the assertion that discriminates the POLICY: with the picker group
++            // unauthorized, the same request reaches the mediator and answers 404 instead.
++            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++            body.Should().NotContain("upstream_unreachable");
++            body.Should().NotContain(UnknownSessionId);
++        }
++    }
++
++    // ── Registration (the pass's DI row) ────────────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task MediatedReaders_AndTheCustodyAccessor_AreRegistered()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        host.Services.GetRequiredService<TenantDirectoryReader>().Should().NotBeNull();
++        host.Services.GetRequiredService<TeacherDirectoryReader>().Should().NotBeNull();
++
++        // ONE custody implementation: the accessor a mediated read uses must be the very instance
++        // behind the D15 seam — a second instance would be a second view of a session's tokens.
++        host.Services.GetRequiredService<ISessionTokenAccessor>()
++            .Should().BeSameAs(host.Services.GetRequiredService<IAuthProvider>());
++    }
++
++    // ── Forwarding, tenant scoping and data-only responses (direct invocation) ──────────────
++
++    [TestMethod]
++    public async Task Tenants_WithALiveSession_ForwardsTheCustodyToken_AndReturnsDataOnly()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => throw new InvalidOperationException("Keycloak must not be called")));
++        var sessionId = sessions.Create(StaleAccessToken, StaleRefreshToken, CustodyIdToken, 3600);
++
++        var upstream = new RecordingHandler(_ =>
++            Json(HttpStatusCode.OK, TenantDirectoryJson));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Tenants(ContextPresenting(sessionId), provider, TenantReader(upstream)));
++
++        status.Should().Be(200);
++        body.Should().Contain("Dev School");
++
++        // Runs AS THE SESSION'S USER: the custody access token is the bearer credential the data
++        // API sees, on settings-api's real route. The data API's own tenant middleware resolves the
++        // tenant from that token, which is what scopes the result exactly as a direct call.
++        upstream.Authorization.Should().Be($"Bearer {StaleAccessToken}");
++        upstream.LastRequestUri!.AbsolutePath.Should().Be("/api/tenants");
++
++        // DATA ONLY: the picker projection drops the upstream's extra fields, and no token of any
++        // kind (seeded, stored or upstream-supplied) reaches the body (AC9/AC11).
++        var root = JsonDocument.Parse(body).RootElement;
++        root.ValueKind.Should().Be(JsonValueKind.Array);
++        body.Should().NotContain(UpstreamTokenMarker);
++        body.Should().NotContain(UpstreamSecretMarker);
++        body.Should().NotContain(StaleAccessToken);
++        body.Should().NotContain(StaleRefreshToken);
++        body.Should().NotContain(CustodyIdToken);
++    }
++
++    [TestMethod]
++    public async Task Teachers_WithALiveSession_ForwardsTheCustodyToken_ToTheStudentsApiRoute()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => throw new InvalidOperationException("Keycloak must not be called")));
++        var sessionId = sessions.Create(StaleAccessToken, StaleRefreshToken, CustodyIdToken, 3600);
++
++        var upstream = new RecordingHandler(_ => Json(
++            HttpStatusCode.OK,
++            "[{\"id\":\"22222222-2222-2222-2222-222222222222\",\"firstName\":\"Ada\","
++            + "\"lastName\":\"Lovelace\",\"displayName\":\"A. Lovelace\",\"isDeleted\":false}]"));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Teachers(ContextPresenting(sessionId), provider, TeacherReader(upstream)));
++
++        status.Should().Be(200);
++        body.Should().Contain("A. Lovelace");
++        upstream.Authorization.Should().Be($"Bearer {StaleAccessToken}");
++        upstream.LastRequestUri!.AbsolutePath.Should().Be("/teachers");
++        body.Should().NotContain(StaleAccessToken);
++        body.Should().NotContain(CustodyIdToken);
++    }
++
++    [TestMethod]
++    public async Task Tenants_WhenTheAccessTokenHasElapsed_ForwardsTheRefreshedToken_NotTheStaleOne()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var keycloak = new SessionEndpointTests.ScriptedHandler(_ => Json(HttpStatusCode.OK,
++            "{\"access_token\":\"" + RotatedAccessToken + "\",\"refresh_token\":\"" + RotatedRefreshToken
++            + "\",\"expires_in\":300}"));
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(clock, keycloak);
++        var sessionId = sessions.Create(StaleAccessToken, StaleRefreshToken, CustodyIdToken, 300);
++
++        clock.Now = clock.Now.AddSeconds(301);
++
++        var upstream = new RecordingHandler(_ => Json(HttpStatusCode.OK, TenantDirectoryJson));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Tenants(ContextPresenting(sessionId), provider, TenantReader(upstream)));
++
++        status.Should().Be(200);
++
++        // THE stale-token axis: reading the token through the seam (not the custody store) is what
++        // makes this hold — the elapsed token is refreshed first, and the credential the data API
++        // receives is the rotated one. A direct store read would forward the stale token and the
++        // data API would reject the call.
++        keycloak.Requests.Should().Be(1);
++        upstream.Authorization.Should().Be($"Bearer {RotatedAccessToken}");
++        upstream.Authorization.Should().NotContain(StaleAccessToken);
++        upstream.Authorization.Should().NotContain(StaleRefreshToken);
++
++        // Neither the refreshed token nor the refresh token reaches the caller (AC11).
++        body.Should().NotContain(RotatedAccessToken);
++        body.Should().NotContain(RotatedRefreshToken);
++        body.Should().NotContain(StaleAccessToken);
++    }
++
++    // ── Fail-closed taxonomy (never a 500, never an upstream body) ───────────────────────────
++
++    [TestMethod]
++    public async Task Tenants_WhenKeycloakRejectsTheRefresh_Is410SessionEnded_AndNeverReadsUpstream()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => Json(
++                HttpStatusCode.BadRequest, """{"error":"invalid_grant","error_description":"Refresh token expired"}""")));
++        var sessionId = sessions.Create(StaleAccessToken, StaleRefreshToken, CustodyIdToken, 300);
++
++        clock.Now = clock.Now.AddSeconds(301);
++
++        var upstream = new RecordingHandler(_ => Json(HttpStatusCode.OK, TenantDirectoryJson));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Tenants(ContextPresenting(sessionId), provider, TenantReader(upstream)));
++
++        // The D18 session state, distinct from a stale cookie (404) and from an outage (502).
++        status.Should().Be(410);
++        body.Should().Contain("session_ended");
++        body.Should().NotContain("invalid_grant");
++        upstream.Requests.Should().Be(0, "an ended session must not produce an upstream call");
++    }
++
++    [TestMethod]
++    public async Task Tenants_WhenKeycloakIsDown_Is502_AndKeepsTheSession()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => throw new HttpRequestException("connection refused")));
++        var sessionId = sessions.Create(StaleAccessToken, StaleRefreshToken, CustodyIdToken, 300);
++
++        clock.Now = clock.Now.AddSeconds(301);
++
++        var upstream = new RecordingHandler(_ => Json(HttpStatusCode.OK, TenantDirectoryJson));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Tenants(ContextPresenting(sessionId), provider, TenantReader(upstream)));
++
++        // An outage is NOT the end of a session (nothing was revoked) — the degraded status only.
++        status.Should().Be(502);
++        body.Should().Contain("upstream_unreachable");
++        upstream.Requests.Should().Be(0);
++        sessions.Get(sessionId).Should().NotBeNull("an unreachable IdP must not tear the session down");
++    }
++
++    [TestMethod]
++    public async Task Tenants_WithoutAPresentedSession_Is401_AndNeverReadsUpstream()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, _, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => throw new InvalidOperationException("Keycloak must not be called")));
++
++        var upstream = new RecordingHandler(_ => Json(HttpStatusCode.OK, TenantDirectoryJson));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Tenants(ContextPresenting(sessionId: null), provider, TenantReader(upstream)));
++
++        // Unreachable through the group's policy (the challenge runs first); asserted so the
++        // mediator can never mediate for an unidentified caller if the policy is loosened.
++        status.Should().Be(401);
++        body.Should().Contain("session_not_found");
++        upstream.Requests.Should().Be(0);
++    }
++
++    [TestMethod]
++    public async Task Tenants_WhenTheSessionVanishesBeforeTheMediation_Is404_AndNeverReadsUpstream()
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, _, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => throw new InvalidOperationException("Keycloak must not be called")));
++
++        var upstream = new RecordingHandler(_ => Json(HttpStatusCode.OK, TenantDirectoryJson));
++
++        // A session that authenticated a moment ago and was revoked/expired in between.
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Tenants(ContextPresenting(UnknownSessionId), provider, TenantReader(upstream)));
++
++        status.Should().Be(404);
++        body.Should().Contain("session_not_found");
++        body.Should().NotContain(UnknownSessionId);
++        upstream.Requests.Should().Be(0);
++    }
++
++    [TestMethod]
++    [DataRow(HttpStatusCode.InternalServerError, "{\"error\":\"boom\",\"refresh_token\":\"" + UpstreamTokenMarker + "\"}", DisplayName = "upstream 500")]
++    [DataRow(HttpStatusCode.Unauthorized, "{\"error\":\"invalid_token\"}", DisplayName = "upstream rejected the forward")]
++    [DataRow(HttpStatusCode.OK, "not json at all", DisplayName = "upstream body is not the expected shape")]
++    public async Task Teachers_WhenTheUpstreamFails_Is502Degraded_NeverA500_AndNeverEchoesTheUpstream(
++        HttpStatusCode upstreamStatus,
++        string upstreamBody)
++    {
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
++            clock,
++            new SessionEndpointTests.ScriptedHandler(_ => throw new InvalidOperationException("Keycloak must not be called")));
++        var sessionId = sessions.Create(StaleAccessToken, StaleRefreshToken, CustodyIdToken, 3600);
++
++        var upstream = new RecordingHandler(_ => Json(upstreamStatus, upstreamBody));
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            await MediatedReadEndpoints.Teachers(ContextPresenting(sessionId), provider, TeacherReader(upstream)));
++
++        upstream.Requests.Should().Be(1);
++        status.Should().Be(502);
++        status.Should().NotBe(500);
++        body.Should().Contain("upstream_unreachable");
++
++        // One clean degraded status: no upstream status code, error code or body text travels.
++        body.Should().NotContain("boom");
++        body.Should().NotContain("invalid_token");
++        body.Should().NotContain("not json at all");
++        body.Should().NotContain(UpstreamTokenMarker);
++        body.Should().NotContain(StaleAccessToken);
++    }
++
++    // ── Fixtures ───────────────────────────────────────────────────────────────────────────
++
++    private static DefaultHttpContext ContextPresenting(string? sessionId)
++    {
++        var context = new DefaultHttpContext();
++        if (sessionId is not null)
++        {
++            context.Request.Headers[PortalSessionAuthenticationHandler.SessionHeaderName] = sessionId;
++        }
++
++        return context;
++    }
++
++    private static TenantDirectoryReader TenantReader(RecordingHandler handler) =>
++        new(new HttpClient(handler) { BaseAddress = new Uri("https+http://settings-api") },
++            NullLogger<MediatedReader<PickerTenant>>.Instance);
++
++    private static TeacherDirectoryReader TeacherReader(RecordingHandler handler) =>
++        new(new HttpClient(handler) { BaseAddress = new Uri("https+http://students-api") },
++            NullLogger<MediatedReader<PickerTeacher>>.Instance);
++
++    private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
++        new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
++
++    /// <summary>Scripted upstream transport that records what a mediated read actually sent — the
++    /// bearer credential especially, which is the whole D17 assertion (scripted
++    /// <see cref="HttpMessageHandler"/>, per the repo's HTTP-testing rule).</summary>
++    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
++    {
++        public int Requests { get; private set; }
++
++        public Uri? LastRequestUri { get; private set; }
++
++        public string? Authorization { get; private set; }
++
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request,
++            CancellationToken cancellationToken)
++        {
++            Requests++;
++            LastRequestUri = request.RequestUri;
++            Authorization = request.Headers.Authorization?.ToString();
++            return Task.FromResult(respond(request));
++        }
++    }
++}

@@ -47,6 +47,13 @@ builder.Services.AddSettingsModule();
 builder.Services.AddAssignmentsModule();
 builder.Services.AddStudentsModule();
 
+// B4 — the flag-ON portal handshake (spec §5.2 / D6): the typed redemption client against the
+// auth service, plus the host's /signin-handshake, /login and /logout routes. The base address is
+// this host's own literal so CrossModuleWiringTests can match it to the AppHost's
+// .WithReference(auth) on this host's resource (B3) — a literal inside Core would fail the guard
+// for the four other hosts that consume Core without referencing the auth service.
+builder.Services.AddPortalHandshake("https+http://auth");
+
 // Cached, DB-backed feature-flag client (resolves runtime flags from the
 // Settings FeatureFlag aggregate with an IConfiguration fallback). Replaces the
 // config-only IFeatureFlagService registered by AddAuthAndTenancy.
@@ -97,6 +104,12 @@ var razorComponents = app.MapRazorComponents<App>()
 if (!disableOIDC)
 {
     razorComponents.RequireAuthorization();
+
+    // B4 — same conditional shape as the authorization gate above: the handshake group needs the
+    // OIDC cookie + challenge schemes, which only exist in the real-auth branch (with TestAuth
+    // there is no portal login, no OIDC sign-out and nothing to redeem). The routes are additive —
+    // with the login-UI flag OFF the challenge path stays today's OIDC behaviour (AC7).
+    app.MapPortalHandshakeEndpoints();
 }
 
 app.Run();

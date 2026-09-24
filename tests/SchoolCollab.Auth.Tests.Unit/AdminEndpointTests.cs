@@ -1,0 +1,507 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Auth.Endpoints;
+using SchoolCollab.Auth.Services;
+
+namespace SchoolCollab.Auth.Tests.Unit;
+
+/// <summary>
+/// <c>/auth/admin/*</c> coverage (pass 3d step 4 / spec §13): each operation's method/path/body
+/// and its audit record (spec §14), with the <c>user-admin</c> ROLE GATE proven through the REAL
+/// JwtBearer handler — a signed test JWT carrying the flat <c>roles</c> claim, presented via
+/// <c>Authorization: Bearer</c>, is validated by the host's genuine bearer pipeline. That is the
+/// point of the pass: the gate's <c>RequireRole("user-admin")</c> is exercised END-TO-END and
+/// under the framework-default claim mapping, not merely asserted by inspecting configuration.
+/// <para>
+/// Why the role claim is mapped (the round's role-claim correction): the JWT/OIDC handlers'
+/// default <c>MapInboundClaims</c> renames the realm's flat <c>roles</c> claim to
+/// <c>ClaimTypes.Role</c> (the long role URI), so <c>AuthTenancyExtensions</c> pins
+/// <c>RoleClaimType = ClaimTypes.Role</c> — the type <c>IsInRole</c> consults, which is what makes
+/// <c>RequireRole</c> / <c>[Authorize(Roles = "...")]</c> resolve on both the cookie and bearer
+/// paths. ClaimSetFactory.RolesClaim still reads <c>roles</c>, because that is the claim-set
+/// contract from the token PAYLOAD, which the inbound mapping does not touch.
+/// </para>
+/// <para>
+/// The gate shape: no token -> 401 (the host challenges the BEARER scheme for unauthenticated
+/// calls, see <see cref="AuthEndpointTestHost"/>), an authenticated caller without <c>user-admin</c>
+/// -> 403, with <c>user-admin</c> -> allowed.
+/// </para>
+/// <para>
+/// Audit semantics chosen here (and asserted): ONLY successful mutations emit an
+/// <see cref="AuthAuditLog"/> record — a mutation that did not happen must not leave an audit
+/// trail claiming it did, so a failed create (409) is NOT recorded.
+/// </para>
+/// </summary>
+[TestClass]
+public class AdminEndpointTests
+{
+    private const string TeacherId = "00000000-0000-0000-0000-000000000003";
+    private const string TenantId = "00000000-0000-0000-0000-000000000002";
+    private const string UserAdmin = "user-admin";
+    private const string PlatformAdmin = "platform-admin";
+
+    /// <summary>Admin REST paths hang off this suffix, derived by the real client from the
+    /// host's <c>Auth:Keycloak:Authority</c> (<c>{serverRoot}/admin/realms/{realm}</c>).</summary>
+    private const string AdminBase = "/admin/realms/school-collab";
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    // ── Token minting (signed with the host's own test key) ─────────────────────────────────
+
+    private static string MintToken(params (string Type, string Value)[] claims)
+    {
+        var credentials = new SigningCredentials(AuthEndpointTestHost.TestSigningKey, SecurityAlgorithms.HmacSha256);
+        var token = new JwtSecurityToken(
+            issuer: AuthEndpointTestHost.TestIssuer,
+            audience: "school-collab-client",
+            claims: claims.Select(c => new Claim(c.Type, c.Value)),
+            notBefore: DateTime.UtcNow.AddMinutes(-1),
+            expires: DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: credentials);
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static void AuthorizeAs(AuthEndpointTestHost host, params (string Type, string Value)[] claims)
+    {
+        host.Client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", MintToken(claims));
+    }
+
+    private static void AuthorizeAsAdmin(AuthEndpointTestHost host) =>
+        AuthorizeAs(host, ("roles", UserAdmin), ("teacher_id", TeacherId), ("tenant_id", TenantId));
+
+    // ── Hermetic Admin REST stub ──────────────────────────────────────────────────────────────
+
+    private static HttpResponseMessage JsonResponse(HttpStatusCode status, string json) =>
+        new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+
+    /// <summary>Routes the admin client's token fetch to a canned success and each declared
+    /// operation route to its canned response. Any other call fails loudly (502) rather than
+    /// touching the network.</summary>
+    private static void StubAdmin(
+        AuthEndpointTestHost host,
+        params (HttpMethod Method, string PathEndsWith, HttpStatusCode Status, string? Body)[] routes)
+    {
+        host.AdminStub.OnSendAsync = (request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+
+            if (path.Contains("/protocol/openid-connect/token", StringComparison.Ordinal))
+            {
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK,
+                    """{"access_token":"admin-bearer-token","expires_in":3600}"""));
+            }
+
+            foreach (var (method, suffix, status, body) in routes)
+            {
+                if (request.Method == method && path.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    return Task.FromResult(body is null
+                        ? new HttpResponseMessage(status)
+                        : JsonResponse(status, body));
+                }
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway));
+        };
+    }
+
+    /// <summary>
+    /// Like <see cref="StubAdmin"/>, for the two things its fixed route tuples cannot express: it
+    /// CAPTURES the body of every non-token admin call, and it builds each response per request (a
+    /// <c>201 Created</c> must carry Keycloak's <c>Location</c> header, which is the only place the
+    /// created user's id appears).
+    /// </summary>
+    private static List<string> StubAdminCapturingBodies(
+        AuthEndpointTestHost host,
+        Func<HttpRequestMessage, HttpResponseMessage> respond)
+    {
+        var bodies = new List<string>();
+        host.AdminStub.OnSendAsync = (request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+
+            if (path.Contains("/protocol/openid-connect/token", StringComparison.Ordinal))
+            {
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK,
+                    """{"access_token":"admin-bearer-token","expires_in":3600}"""));
+            }
+
+            bodies.Add(request.Content is null
+                ? string.Empty
+                : request.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            return Task.FromResult(respond(request));
+        };
+        return bodies;
+    }
+
+    // ── Audit capture helpers ─────────────────────────────────────────────────────────────
+
+    private static IReadOnlyList<CapturingLoggerProvider.Record> AuditRecords(AuthEndpointTestHost host) =>
+        host.AuditLogs.ForCategory("AuthAuditLog");
+
+    private static string? Field(CapturingLoggerProvider.Record record, string name) =>
+        record.State.TryGetValue(name, out var value) ? value?.ToString() : null;
+
+    // ── THE GATE (through the real JwtBearer handler) ──────────────────────────────────────
+
+    [TestMethod]
+    public async Task Gate_NoToken_Is401()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+
+        var response = await host.Client.GetAsync("/auth/admin/users");
+
+        // Unauthenticated: the host's challenge routing (Bearer, not OIDC) yields 401 even
+        // though the underlying JwtBearer validation is entirely real.
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
+    public async Task Gate_TokenWithoutUserAdminRole_Is403()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        // Authenticated, but with a different realm role: the claims requirement must reject.
+        AuthorizeAs(host, ("roles", PlatformAdmin), ("teacher_id", TeacherId), ("tenant_id", TenantId));
+
+        var response = await host.Client.GetAsync("/auth/admin/users");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [TestMethod]
+    public async Task Gate_WithUserAdminRole_AllowsAdminReads()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Get, $"{AdminBase}/users", HttpStatusCode.OK, """[{"id":"u1","username":"alice","enabled":true}]"""));
+
+        var response = await host.Client.GetAsync("/auth/admin/users");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("alice");
+    }
+
+    [TestMethod]
+    public async Task Gate_MultiValuedRoles_IncludingUserAdmin_AllowsAdminReads()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        // The realm mapper emits `roles` as a MULTI-VALUED array (multivalued: true); the handler
+        // materialises one mapped claim per array element, so a token carrying both roles must pass.
+        AuthorizeAs(host,
+            ("roles", PlatformAdmin), ("roles", UserAdmin),
+            ("teacher_id", TeacherId), ("tenant_id", TenantId));
+        StubAdmin(host, (HttpMethod.Get, $"{AdminBase}/users", HttpStatusCode.OK, """[{"id":"u1","username":"alice"}]"""));
+
+        var response = await host.Client.GetAsync("/auth/admin/users");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [TestMethod]
+    public async Task Gate_MultiValuedRoles_WithoutUserAdmin_Is403()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        // A multi-valued array WITHOUT user-admin: the gate must stay closed even for a role-bearing
+        // caller. This half of the pair is what proves the gate is genuinely CLOSED rather than
+        // merely open to anything carrying a `roles` claim, so the pair cannot pass vacuously.
+        AuthorizeAs(host,
+            ("roles", PlatformAdmin), ("roles", "some-other-role"),
+            ("teacher_id", TeacherId), ("tenant_id", TenantId));
+
+        var response = await host.Client.GetAsync("/auth/admin/users");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    // ── Operations: method / path / body ────────────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task ListUsers_ReturnsUsers_ViaTheExpectedPathAndFilterQuery()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Get, $"{AdminBase}/users", HttpStatusCode.OK, """[{"id":"u1","username":"alice"}]"""));
+
+        var response = await host.Client.GetAsync($"/auth/admin/users?username=alic&email=@schoolcollab.local");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await response.Content.ReadAsStringAsync();
+        json.Should().Contain("\"username\":\"alice\"");
+
+        // Reads are not mutations: no audit record.
+        AuditRecords(host).Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task GetUser_ReturnsTheUser_AndUnknownUserIs404()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host,
+            (HttpMethod.Get, $"{AdminBase}/users/u1", HttpStatusCode.OK, """{"id":"u1","username":"alice"}"""),
+            (HttpMethod.Get, $"{AdminBase}/users/nope", HttpStatusCode.NotFound, null));
+
+        var found = await host.Client.GetAsync("/auth/admin/users/u1");
+        found.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await found.Content.ReadAsStringAsync()).Should().Contain("alice");
+
+        var missing = await host.Client.GetAsync("/auth/admin/users/nope");
+        missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ── Mutations + audit records (real logging path) ──────────────────────────────────────
+
+    [TestMethod]
+    public async Task CreateUser_EmitsUserCreatedAudit()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Post, $"{AdminBase}/users", HttpStatusCode.Created, null));
+
+        var response = await host.Client.PostAsync("/auth/admin/users",
+            JsonContent.Create(new KeycloakUser(null, "alice", Email: "alice@schoolcollab.local"), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        // One structured record on the REAL logging path, with the actor from the principal's
+        // teacher_id claim, the tenant from tenant_id, and the new user's username as target.
+        var record = AuditRecords(host).Should().ContainSingle().Which;
+        Field(record, "Action").Should().Be("user.created");
+        Field(record, "Actor").Should().Be(TeacherId);
+        Field(record, "Target").Should().Be("alice");
+        Field(record, "TenantId").Should().Be(TenantId);
+    }
+
+    [TestMethod]
+    public async Task CreateUser_ForwardsTheClaimAttributes_AndThe201CarriesTheCreatedId()
+    {
+        // R3 (the AC5 residual). Two things at once, because they are one round trip: the D10 claim
+        // attributes the editor submits must reach Keycloak in its own name -> ARRAY shape (AC5's
+        // "edit its claim attributes" is met only if they persist), and the 201 body must carry the
+        // id Keycloak minted — read off its Location header — so the caller does not have to resolve
+        // the new user by username.
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        const string createdId = "2f6a1c0e-1111-4444-8888-999999999999";
+        var bodies = StubAdminCapturingBodies(host, _ =>
+        {
+            var created = new HttpResponseMessage(HttpStatusCode.Created);
+            created.Headers.Location = new Uri($"http://keycloak:8080{AdminBase}/users/{createdId}");
+            return created;
+        });
+
+        var response = await host.Client.PostAsync("/auth/admin/users",
+            JsonContent.Create(new KeycloakUser(
+                Id: null,
+                Username: "alice",
+                Email: "alice@schoolcollab.local",
+                Attributes: new Dictionary<string, string[]>
+                {
+                    ["tenant_id"] = [TenantId],
+                    ["teacher_id"] = [TeacherId],
+                }), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        bodies.Should().ContainSingle();
+        using var posted = JsonDocument.Parse(bodies[0]);
+        var attributes = posted.RootElement.GetProperty("attributes");
+        attributes.GetProperty("tenant_id").ValueKind.Should().Be(JsonValueKind.Array,
+            "the realm's mappers read an array — a bare string would not resolve into a claim.");
+        attributes.GetProperty("tenant_id")[0].GetString().Should().Be(TenantId);
+        attributes.GetProperty("teacher_id")[0].GetString().Should().Be(TeacherId);
+
+        using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        created.RootElement.GetProperty("id").GetString().Should().Be(createdId);
+        created.RootElement.GetProperty("status").GetString().Should().Be("created");
+
+        // The audit trail still names the created user by the handle the caller supplied.
+        var record = AuditRecords(host).Should().ContainSingle().Which;
+        Field(record, "Action").Should().Be("user.created");
+        Field(record, "Target").Should().Be("alice");
+    }
+
+    [TestMethod]
+    public async Task CreateUser_OnConflict_EmitsNoAudit()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Post, $"{AdminBase}/users", HttpStatusCode.Conflict, """{"errorMessage":"User exists with same username"}"""));
+
+        var response = await host.Client.PostAsync("/auth/admin/users",
+            JsonContent.Create(new KeycloakUser(null, "alice"), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        // Chosen semantics: a mutation that did not happen must not leave a success trail.
+        AuditRecords(host).Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task UpdateUser_EmitsUserUpdatedAudit()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Put, $"{AdminBase}/users/u1", HttpStatusCode.OK, null));
+
+        var response = await host.Client.PutAsync("/auth/admin/users",
+            JsonContent.Create(new KeycloakUser("u1", "alice", FirstName: "Alice"), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var record = AuditRecords(host).Should().ContainSingle().Which;
+        Field(record, "Action").Should().Be("user.updated");
+        Field(record, "Actor").Should().Be(TeacherId);
+        Field(record, "Target").Should().Be("u1");
+        Field(record, "TenantId").Should().Be(TenantId);
+    }
+
+    [TestMethod]
+    public async Task UpdateUser_ForwardsTheClaimAttributes()
+    {
+        // An update is how the D10 editor changes an existing user's claims: the PUT body is the
+        // full representation Keycloak replaces the user with, so the attributes must be on it.
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        var bodies = StubAdminCapturingBodies(host, _ => new HttpResponseMessage(HttpStatusCode.OK));
+
+        var response = await host.Client.PutAsync("/auth/admin/users",
+            JsonContent.Create(new KeycloakUser(
+                "u1",
+                "dev-teacher",
+                Attributes: new Dictionary<string, string[]>
+                {
+                    ["tenant_id"] = [TenantId],
+                    ["teacher_id"] = [TeacherId],
+                }), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        bodies.Should().ContainSingle();
+        using var body = JsonDocument.Parse(bodies[0]);
+        body.RootElement.GetProperty("id").GetString().Should().Be("u1");
+        var attributes = body.RootElement.GetProperty("attributes");
+        attributes.GetProperty("tenant_id").ValueKind.Should().Be(JsonValueKind.Array);
+        attributes.GetProperty("teacher_id")[0].GetString().Should().Be(TeacherId);
+
+        var record = AuditRecords(host).Should().ContainSingle().Which;
+        Field(record, "Action").Should().Be("user.updated");
+        Field(record, "Target").Should().Be("u1");
+    }
+
+    [TestMethod]
+    public async Task ResetPassword_EmitsAudit_AndNoPasswordLeaks()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Put, $"{AdminBase}/users/u1/reset-password", HttpStatusCode.NoContent, null));
+
+        var response = await host.Client.PutAsync("/auth/admin/users/u1/reset-password",
+            JsonContent.Create(new AdminUserEndpoints.ResetPasswordRequest("S3cret!"), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // The endpoint's response (204: empty) plus the audit record must not carry the secret.
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("S3cret!");
+
+        var record = AuditRecords(host).Should().ContainSingle().Which;
+        Field(record, "Action").Should().Be("user.password-reset");
+        Field(record, "Target").Should().Be("u1");
+        record.State.Keys.Should().NotContain(
+            key => key.Contains("password", StringComparison.OrdinalIgnoreCase),
+            "the audit record names the mutation kind, never the secret itself."
+            + " (The Admin REST request to Keycloak necessarily carries the value — that is the call, not a leak.)");
+    }
+
+    [TestMethod]
+    public async Task ResetPassword_BlankPassword_Is400_AndNoAudit()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+
+        var response = await host.Client.PutAsync("/auth/admin/users/u1/reset-password",
+            JsonContent.Create(new AdminUserEndpoints.ResetPasswordRequest(""), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        AuditRecords(host).Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task ListRealmRoles_ReturnsRoles()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Get, $"{AdminBase}/roles", HttpStatusCode.OK, """[{"id":"r1","name":"user-admin"}]"""));
+
+        var response = await host.Client.GetAsync("/auth/admin/roles");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = await response.Content.ReadAsStringAsync();
+        json.Should().Contain("user-admin");
+        AuditRecords(host).Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task AssignRoles_EmitsRoleAssigned_OnePerRole()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Post, $"{AdminBase}/users/u1/role-mappings/realm", HttpStatusCode.NoContent, null));
+
+        var response = await host.Client.PostAsync("/auth/admin/users/u1/role-mappings",
+            JsonContent.Create(new AdminRoleEndpoints.RoleMappingRequest(
+                [new KeycloakRole("r1", UserAdmin), new KeycloakRole("r2", PlatformAdmin)]), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var records = AuditRecords(host);
+        records.Count.Should().Be(2, "one audit record PER role granted");
+        records.Select(r => Field(r, "Action")).Should().OnlyContain(a => a == "role.assigned");
+        records.Select(r => Field(r, "Role")).Should().BeEquivalentTo(UserAdmin, PlatformAdmin);
+        records.Select(r => Field(r, "Actor")).Should().OnlyContain(a => a == TeacherId);
+        records.Select(r => Field(r, "Target")).Should().OnlyContain(t => t == "u1");
+    }
+
+    [TestMethod]
+    public async Task UnassignRoles_EmitsRoleUnassigned_OnePerRole()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+        StubAdmin(host, (HttpMethod.Delete, $"{AdminBase}/users/u1/role-mappings/realm", HttpStatusCode.NoContent, null));
+
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/auth/admin/users/u1/role-mappings")
+        {
+            Content = JsonContent.Create(new AdminRoleEndpoints.RoleMappingRequest(
+                [new KeycloakRole("r1", UserAdmin), new KeycloakRole("r2", PlatformAdmin)]), options: WebJson),
+        };
+        var response = await host.Client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var records = AuditRecords(host);
+        records.Count.Should().Be(2);
+        records.Select(r => Field(r, "Action")).Should().OnlyContain(a => a == "role.unassigned");
+        records.Select(r => Field(r, "Role")).Should().BeEquivalentTo(UserAdmin, PlatformAdmin);
+    }
+
+    [TestMethod]
+    public async Task AssignRoles_EmptyList_Is400_AndNoAudit()
+    {
+        await using var host = await AuthEndpointTestHost.StartAsync();
+        AuthorizeAsAdmin(host);
+
+        var response = await host.Client.PostAsync("/auth/admin/users/u1/role-mappings",
+            JsonContent.Create(new AdminRoleEndpoints.RoleMappingRequest([]), options: WebJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        AuditRecords(host).Should().BeEmpty();
+    }
+}

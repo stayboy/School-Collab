@@ -20,6 +20,16 @@ public static class FeatureFlagKeys
     public const string DisableOIDCAuth = "FEATURE:DisableOIDCAuth";
 
     /// <summary>
+    /// Toggles <b>which login UI</b> a Blazor host presents (spec D4/D5): OFF (default)
+    /// keeps Keycloak's hosted page via the standard OIDC code flow; ON forwards the
+    /// challenge to the prefab auth portal's login form, which exchanges credentials
+    /// through the auth service (D6 handshake). Pure UI toggle — read once at startup by
+    /// <c>AddAuthAndTenancy</c> to select the policy scheme's forward-challenge target;
+    /// authentication, validation and authorization are identical in both states.
+    /// </summary>
+    public const string DisableKeycloakLoginUi = "FEATURE:DisableKeycloakLoginUi";
+
+    /// <summary>
     /// Enables the AI chat assistant on the Coded Values landing page.
     /// </summary>
     public const string EnableCodedValuesAiChat = "FEATURE:EnableCodedValuesAiChat";
