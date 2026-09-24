@@ -117,7 +117,7 @@ files only carry values that genuinely belong to that single service
 | `postgres-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | Superuser password for the local Postgres container. **Pinned** so the persisted volume keeps working across runs. |
 | `rabbitmq-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | `RABBITMQ_DEFAULT_PASS` for the local RabbitMQ container. Pinned for the same reason as Postgres. |
 | `outbox-exchange-settings` | Aspire parameter | `settings` | Outbox topic exchange name for the Settings bounded context. Injected as `Outbox__ExchangeName` into `settings-api`. |
-| `outbox-exchange-assignments` | Aspire parameter | `assignments` | Outbox topic exchange name for the Assignments bounded context. Injected as `Outbox__ExchangeName` into `assignments-api`. |
+| `outbox-exchange-assignments` | Aspire parameter | `assignments` | Outbox topic exchange name for the Assignments bounded context. Injected as `Outbox__ExchangeName` into `assignments-api` and `assignments-worker` (the worker's `AddAssignmentsCore` registers the shared outbox dispatcher too), and as `RabbitMq__Subscriber__ExchangeName` into `assignments-worker`. |
 | `outbox-exchange-students` | Aspire parameter | `students` | Outbox topic exchange name for the Students bounded context. Injected as `Outbox__ExchangeName` into `students-api` and `students-worker`. |
 | `ai-default-provider` | Aspire parameter | `openrouter` | Active AI provider name — `ollama` (local) or `openrouter` (cloud). Injected as `codedvalue-ai-provider`. |
 | `ollama-endpoint` | Aspire parameter | `http://localhost:11434/v1` | Local Ollama OpenAI-compatible endpoint. Injected as `Ollama__Endpoint`. |
@@ -149,13 +149,21 @@ files only carry values that genuinely belong to that single service
 The AppHost registers `assignments-worker` (`SchoolCollab.Assignments.Worker`) with
 `WithReference(assignmentsDb, rabbit, settingsApi, studentsApi)` and
 `WaitFor(rabbit) + WaitForCompletion(migrator)`. It does **not** add a `Parameters:`
-entry: it reuses the existing `outbox-exchange-assignments` parameter, injected as
-`RabbitMq__Subscriber__ExchangeName = assignments` so the worker subscribes to the
-same assignments exchange that `assignments-api` publishes `AssignmentPublishedIntegrationEvent`
-to. The Published handler kicks one reminder-sweep pass; the sweeps read policy
-(`settings-api`) and contacts (`students-api`) through the same named-
-HTTP-client service-discovery wires as `assignments-api`. The worker's local
-`appsettings.json` carries only the RabbitMq subscriber defaults (see §11).
+entry: it reuses the existing `outbox-exchange-assignments` parameter, injected **twice** —
+as `Outbox__ExchangeName = assignments`, because the worker's `Program.cs` calls
+`AddAssignmentsCore`, which unconditionally registers the shared `OutboxDispatcher` whose
+`OutboxOptions` are validated at startup (without this the host dies with
+`OptionsValidationException: ExchangeName must be set in the 'Outbox' configuration
+section`) — and as `RabbitMq__Subscriber__ExchangeName = assignments` so the worker
+subscribes to the same assignments exchange that `assignments-api` publishes
+`AssignmentPublishedIntegrationEvent` to. The Published handler kicks one reminder-sweep
+pass; the sweeps read policy (`settings-api`) and contacts (`students-api`) through the
+same named-HTTP-client service-discovery wires as `assignments-api`.
+The worker deliberately does **not** receive the `smtp-*` parameters: it only *queues*
+`NotificationLog` rows, and the drain that sends them — the only component that resolves
+`IEmailSender` — is the API-side `NotificationDispatchSweepService` in `assignments-api`,
+which already carries them. The worker's local `appsettings.json` carries only the RabbitMq
+subscriber defaults (see §11).
 
 **Where to set them:**
 
