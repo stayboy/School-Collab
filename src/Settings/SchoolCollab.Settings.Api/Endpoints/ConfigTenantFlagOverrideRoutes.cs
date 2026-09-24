@@ -9,7 +9,7 @@ namespace SchoolCollab.Settings.Api.Endpoints;
 
 public static class ConfigTenantFlagOverrideRoutes
 {
-    public static RouteGroupBuilder MapConfigTenantOverrideRoutes(this RouteGroupBuilder group, bool requireFlagAdmin)
+    public static RouteGroupBuilder MapConfigTenantOverrideRoutes(this RouteGroupBuilder group)
     {
         // ── List tenant overrides for a flag ──
         group.MapGet("/flags/{key}/overrides", async (
@@ -37,7 +37,7 @@ public static class ConfigTenantFlagOverrideRoutes
             }
             catch (KeyNotFoundException) { return Results.NotFound(); }
             catch (ArgumentException ex) { return Results.BadRequest(new { ex.Message }); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         // ── Delete a tenant override ──
         group.MapDelete("/flags/{key}/overrides/{tenantId:guid}", async (
@@ -49,7 +49,7 @@ public static class ConfigTenantFlagOverrideRoutes
         {
             try { await handler.HandleAsync(new DeleteTenantFlagOverride(key, tenantId, reason), ct); return Results.NoContent(); }
             catch (KeyNotFoundException) { return Results.NotFound(); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         return group;
     }
