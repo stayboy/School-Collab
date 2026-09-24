@@ -1,0 +1,342 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 6c787f94..c70d4a51 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -125,7 +125,7 @@ files only carry values that genuinely belong to that single service
+ | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
+ | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
+ | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
+-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). See §5. |
++| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5. |
+ | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
+ | `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
+ | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
+@@ -348,6 +348,16 @@ re-imports on the next container recreate:
+   URI — because a presence-only guard would stay green while a portal client quietly reintroduced
+   the design D16 removed.
+ 
++**The portal's credential posture (spec AC11, D12/D17), restated for logout option (ii).** The
++portal holds no credential that **grants or extends access** — no access token, no refresh token,
++no cookie-signing or other key material, no client or service-account secret — and performs no
++direct HTTP call to `settings-api`/`students-api`; every identity, privilege and token-bearing read
++is mediated by the auth service. `DELETE /auth/session/{id}` returns the **fully-built
++`end_session` URL carrying `id_token_hint` + `post_logout_redirect_uri`** (spec D13, option (ii)):
++the portal clears its session cookie, 302s the browser to that URL, and treats the returned URL as
++an **opaque string — never parsed, logged or persisted**. The `id_token_hint` in that URL is a
++logout hint over an already-spent token, not a bearer credential, so it does not breach AC11.
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+@@ -363,7 +373,10 @@ Three keys distribute the auth portal's URLs (round B `keycloak-ui-auth`, spec D
+ plan-review P2-5). None of them is an AppHost parameter: each is derived from the
+ `auth-portal` resource's Aspire HTTP endpoint, so the live URL is resolved at launch exactly
+ like the Keycloak endpoint fan-out (the AppHost writes the endpoint reference expression, e.g.
+-the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded**.
++the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded** — the
++endpoint expression stays the single source of every value, and the port that expression resolves
++to is *pinned* (below) exactly where the committed realm import needs it to be knowable without a
++run.
+ 
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+@@ -384,6 +397,41 @@ unset key — and therefore the dev plain-`http` endpoints, where a `Secure` coo
+ sent — leaves it off. Nothing else configures it, so a production deployment reached over HTTPS
+ gets the flag from the base URL it already sets here.
+ 
++### Round B — the post-logout landing URI (`Auth:PostLogoutRedirectUri`)
++
++The logout target of spec D13 option (ii). `DELETE /auth/session/{id}` answers with the
++fully-built `end_session` URL whose `post_logout_redirect_uri` parameter is this value — the
++**portal's own landing URI**. Keycloak matches `post_logout_redirect_uri` **exactly**, so this
++key's value and the realm's registered `postLogoutRedirectUris` entry must be the same string,
++trailing slash included (a wildcard broadens the allowlist and was rejected).
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `Auth:PostLogoutRedirectUri` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | The portal landing URI the auth service places in `post_logout_redirect_uri`, fanned **only** to the `auth` service as `Auth__PostLogoutRedirectUri` from the portal's Aspire endpoint expression (`$"{authPortal.GetEndpoint("http")}/"`, resolved to `http://localhost:5700/`). Like `Auth:AppCallbackPrefixes` it has **no code fallback**: `AuthServiceOptions.FirstValidationError` rejects a blank value at launch and names the key, because a guessed URI makes every logout fail **after** the local session has already been revoked — a rejection the portal can no longer act on. |
++
++**The portal's host port is pinned to `5700`** — `Program.cs`,
++`AddUvicornApp("auth-portal", …).WithHttpEndpoint(port: 5700, targetPort: 5700, name: "http")`.
++This is why the pin exists rather than a literal in the realm: `school-collab-realm.json` is a
++committed static import (Keycloak cannot read an endpoint expression), so the fanned value and the
++realm literal can only agree **by construction** if the port is fixed — and an `AddUvicornApp`
++resource, unlike the Blazor hosts above (`5300/7300`, `5400/7400`, `55458/55459`), carries no
++`launchSettings.json` to fix it. The pin **updates** the Uvicorn integration's own `http` endpoint
++in place (it never adds a second annotation — `GetEndpoint("http")` is resolved by name
++throughout), and `targetPort` is pinned with it because `AddUvicornApp` starts the process with
++`--port {endpoint TargetPort}`. `AppHostRealmImportArchitectureTests` reads the pinned port back
++out of `Program.cs` and holds the realm literal to it, so the two cannot drift silently.
++**Not claimed:** that the portal's *effective* runtime URL is `5700` — the dev-host pin is not
++observable by any hermetic test in this round (recorded as an owner-gated residual).
++
++**The realm's post-logout allowlist.** `school-collab-client` carries a `postLogoutRedirectUris`
++block: the four Blazor `/signout-callback-oidc` landings (`5300`/`7300` http + https for `admin`,
++`5400`/`7400` for `families`) **plus** the portal landing `http://localhost:5700/`. A **portal**
++URL is legitimate here even though D16 forbids a portal `redirectUris` entry (see the D16 bullet
++above): a post-logout URI is delivered nothing — the browser is only sent there after Keycloak has
++ended the session — whereas a redirect URI is exactly where the authorization response lands, and
++the portal redeems no authorization code (AC12). The D16 negative assertion stays green and is
++scoped to `redirectUris` only.
++
+ ### Round B — the per-app callback allowlist (`Auth:AppCallbackPrefixes`, `AuthPortal:AppCallbackPrefixes`)
+ 
+ The redirect-target allowlist (spec §14, plan-review P1-3). A one-time handshake code is minted
+@@ -469,6 +517,14 @@ When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-co
+ the OIDC + JwtBearer registration is replaced with `TestAuthHandler`, which auto-authenticates
+ every request as a test user without Keycloak — intended for local development / CI only.
+ 
++**Carve-out (D16).** One host is exempt: the `auth` service is itself an OIDC **relying party**
++(its passkey `/complete` endpoint reads the cookie ticket the OIDC handler signs on
++`/signin-oidc`), so it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy` and therefore
++still registers the **relying-party pipeline — cookie + OIDC** — even when the flag is ON.
++`TestAuth` remains the **default** scheme there (requests still authenticate as the test user);
++the carve-out is additive. Every other consumer's dev pipeline is unchanged. See round
++`keycloak-logout-oidc` D16.
++
+ **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
+ 
+ ```json
+@@ -569,7 +625,7 @@ flags moved to the Config service.
+ 
+ | Flag | Default | Consumers |
+ | :--- | :--- | :--- |
+-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
++| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`. The `auth` service also runs with this flag ON (`src/SchoolCollab.Auth/appsettings.json`) **and is the one host with a dev carve-out**: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
+@@ -966,6 +1022,7 @@ matching env-var form:
+ | `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
+ | `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
+ | `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
++| `Auth:PostLogoutRedirectUri` | `Auth__PostLogoutRedirectUri` |
+ | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
+ | `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
+ | `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 0bf7cafa..aaf38c83 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -408,6 +408,23 @@ WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
+ // IResourceBuilder<ProjectResource> and this resource is a Python app.
+ var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
+     .WithUv()
++    // D13 option (ii) / plan-review P1-1: pin the portal's host port so that
++    // `authPortal.GetEndpoint("http")` deterministically resolves to `http://localhost:5700`.
++    // The realm import carries the post-logout landing URI as a committed LITERAL
++    // (`postLogoutRedirectUris: "http://localhost:5700/"`) because Keycloak matches
++    // `post_logout_redirect_uri` exactly, and the auth service receives that same URI as
++    // `Auth__PostLogoutRedirectUri` from the endpoint expression below — the two can only agree
++    // by construction if the port is pinned. An AddUvicornApp resource has no
++    // launchSettings.json (unlike the fixed Blazor dev ports 5300/7300/5400/7400, which is why
++    // those can be literals in the realm), so the pin lives here.
++    // This UPDATEs the toolkit-created `http` endpoint in place — Aspire's WithEndpoint overload
++    // updates an existing endpoint of the same name (null means "don't change") — and must never
++    // add a second annotation: GetEndpoint("http") is resolved against this same name below
++    // (AuthPortal__PublicBaseUrl, Auth__Portal__BootstrapRedirectUrl, Auth__AppCallbackPrefixes,
++    // Auth__Portal__LoginUrl ×2). `targetPort` is passed as well (the mailpit precedent at the
++    // top of this file): AddUvicornApp launches uvicorn with `--port {endpoint TargetPort}`, so a
++    // host-only pin would leave the process bound to a random target port.
++    .WithHttpEndpoint(port: 5700, targetPort: 5700, name: "http")
+     // The portal's only upstream: WithReference injects the services__auth__http__0 discovery
+     // env var the typed client resolves (B2's AuthApiClient).
+     .WithReference(auth)
+@@ -429,6 +446,16 @@ authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes", appCa
+ // code there and holds no token (AC11/AC12).
+ auth = auth.WithEnvironment("Auth__Portal__BootstrapRedirectUrl", $"{authPortal.GetEndpoint("http")}/bootstrap");
+ 
++// D13 option (ii): the URI the auth service puts in the `post_logout_redirect_uri` query
++// parameter of the end_session URL it hands back to the portal. It is the portal's own landing
++// URI, so it is fanned from the portal's endpoint expression — resolved to
++// `http://localhost:5700/` by the port pin above — and NOT as a hardcoded literal, while the
++// realm's committed `postLogoutRedirectUris` literal must equal it exactly (trailing slash
++// included; AppHostRealmImportArchitectureTests cross-checks the literal against the pinned
++// port). The auth service is the only consumer: it is what builds the URL, and it validates the
++// key at startup.
++auth = auth.WithEnvironment("Auth__PostLogoutRedirectUri", $"{authPortal.GetEndpoint("http")}/");
++
+ // B5b: the enforced allowlist. The portal's bootstrap redemption URI is appended from the
+ // portal's endpoint expression (never a hardcoded port) so the D16 bootstrap code — which is
+ // URI-bound like every other one-time code — satisfies the same allowlist the apps' callbacks do.
+diff --git a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+index 7057c05a..c02f2c8c 100644
+--- a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
++++ b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+@@ -49,6 +49,13 @@
+         "https://localhost:55458/signin-oidc",
+         "http://localhost:55459/signin-oidc"
+       ],
++      "postLogoutRedirectUris": [
++        "http://localhost:5300/signout-callback-oidc",
++        "https://localhost:7300/signout-callback-oidc",
++        "http://localhost:5400/signout-callback-oidc",
++        "https://localhost:7400/signout-callback-oidc",
++        "http://localhost:5700/"
++      ],
+       "webOrigins": [
+         "http://localhost:5300",
+         "https://localhost:7300",
+diff --git a/src/SchoolCollab.AuthPortal/app.py b/src/SchoolCollab.AuthPortal/app.py
+index 756473e5..0f91f9f6 100644
+--- a/src/SchoolCollab.AuthPortal/app.py
++++ b/src/SchoolCollab.AuthPortal/app.py
+@@ -797,10 +797,15 @@ async def logout(
+     """D13 (spec §9): revoke the session server-side, clear the cookie, go to Keycloak's logout.
+ 
+     The auth service revokes the refresh token itself and answers with the fully-built
+-    ``end_session`` URL, because the portal holds neither the id token nor the ability to sign
+-    one (D12/AC11). Note that under the parent's option (iii) the auth service may later perform
+-    this browser-facing redirect itself, with ``id_token_hint`` in a ``Location`` header; this
+-    route then redirects to the auth service's logout endpoint instead of to a URL it received.
++    ``end_session`` URL carrying ``id_token_hint`` and ``post_logout_redirect_uri``, because the
++    portal holds neither the id token nor the ability to sign one (D12/AC11). Option (ii) is the
++    adjudicated shape: the auth service builds that URL and this route redirects the browser to
++    what it received — the browser-facing Keycloak redirect stays the auth service's job.
++
++    The received URL is OPAQUE to the portal: it is 302'd byte-for-byte into ``Location`` and is
++    never parsed, re-encoded, logged or persisted (re-encoding would break Keycloak's exact match
++    on ``post_logout_redirect_uri`` and turn a working logout into an unregistered-target
++    rejection). Only the session cookie is cleared alongside it.
+ 
+     Every outcome clears the portal's cookie — a logout that leaves a cookie behind is the one
+     thing this route must never do. A failed revocation still clears it and says so: the local
+diff --git a/src/SchoolCollab.AuthPortal/tests/test_session_routes.py b/src/SchoolCollab.AuthPortal/tests/test_session_routes.py
+index 0b27034e..3fea75fd 100644
+--- a/src/SchoolCollab.AuthPortal/tests/test_session_routes.py
++++ b/src/SchoolCollab.AuthPortal/tests/test_session_routes.py
+@@ -475,7 +475,15 @@ def test_logout_revokes_the_session_and_redirects_to_the_end_session_url(
+ ) -> None:
+     _portal_environment(monkeypatch)
+     seen: list[httpx.Request] = []
+-    end_session_url = "https://keycloak.test/realms/school-collab/protocol/openid-connect/logout"
++    # D13 option (ii): the auth service builds the end-session URL with both parameters — the id
++    # token hint and the registered portal landing URI. The portal must forward it VERBATIM: the
++    # encoded `post_logout_redirect_uri` below is exactly what Keycloak matches byte-for-byte, so
++    # any parse-then-rebuild or re-encode would break the logout.
++    end_session_url = (
++        "https://keycloak.test/realms/school-collab/protocol/openid-connect/logout"
++        "?id_token_hint=eyJhbGciOiJSUzI1NiJ9.hint-value.sig"
++        "&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A5700%2F"
++    )
+ 
+     def handler(request: httpx.Request) -> httpx.Response:
+         seen.append(request)
+@@ -493,6 +501,10 @@ def test_logout_revokes_the_session_and_redirects_to_the_end_session_url(
+         portal_app.app.dependency_overrides.clear()
+ 
+     assert response.status_code == 302
++    # Both parameters really are in the stubbed URL, so the byte-identity assertion below is not
++    # passing over a parameter-free string.
++    assert "id_token_hint=" in end_session_url
++    assert "post_logout_redirect_uri=" in end_session_url
+     assert response.headers["location"] == end_session_url
+     assert f'{portal_app.SESSION_COOKIE_NAME}=""' in _set_cookie(response)
+     # The revocation is the auth service's job: the portal never touches Keycloak's endpoints.
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+index 2288392b..bfb3d36c 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+@@ -1,4 +1,6 @@
++using System.Globalization;
+ using System.Text.Json;
++using System.Text.RegularExpressions;
+ using FluentAssertions;
+ using Microsoft.VisualStudio.TestTools.UnitTesting;
+ 
+@@ -240,6 +242,56 @@ public class AppHostRealmImportArchitectureTests
+             "the auth service's HTTP dev launch profile must also be able to complete the ceremony.");
+     }
+ 
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_RegistersPostLogoutRedirectUris_IncludingThePinnedPortalLanding()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("postLogoutRedirectUris", out var uris).Should().BeTrue(
++            "D13 option (ii) puts `post_logout_redirect_uri` in the end-session URL the auth service builds; "
++            + "Keycloak matches it against the client's registered postLogoutRedirectUris, so without this "
++            + "block every logout is rejected after the portal has already cleared its cookie.");
++        uris.ValueKind.Should().Be(JsonValueKind.Array);
++        var list = uris.EnumerateArray()
++            .Where(u => u.ValueKind == JsonValueKind.String)
++            .Select(u => u.GetString())
++            .Where(u => u is not null)
++            .Cast<string>()
++            .ToArray();
++
++        // The four per-app /signout-callback-oidc landings — the same four literals redirectUris
++        // already carries for the admin (5300/7300) and families (5400/7400) dev profiles.
++        list.Should().Contain(new[]
++            {
++                "http://localhost:5300/signout-callback-oidc",
++                "https://localhost:7300/signout-callback-oidc",
++                "http://localhost:5400/signout-callback-oidc",
++                "https://localhost:7400/signout-callback-oidc",
++            },
++            "the four Blazor hosts land on their own /signout-callback-oidc page after a Keycloak sign-out, "
++            + "so each must be registered as a post-logout target.");
++
++        // Plan-review P1-1: the portal landing literal and the AppHost's pinned portal port are the
++        // same fact stated twice — the realm is a committed static file, the fan-out is an endpoint
++        // expression — so the guard reads the port out of Program.cs and holds the literal to it.
++        // An AddUvicornApp resource has no launchSettings.json (unlike the Blazor ports above), which
++        // is why the pin exists at all; Keycloak matches post_logout_redirect_uri EXACTLY, so a
++        // wildcard is not an option and a drifted literal would break logout at runtime only.
++        var pinnedPortalPort = PinnedAuthPortalHostPort();
++        list.Should().Contain($"http://localhost:{pinnedPortalPort}/",
++            "the auth service receives this very portal landing URI as Auth__PostLogoutRedirectUri, derived "
++            + "from the portal's pinned Aspire endpoint — trailing slash included.");
++
++        // Why a PORTAL URL is legitimate here although D16 — asserted just below by
++        // RealmImportFile_DeclaresNoPortalOidcClient_AndNoPortalRedirectUri — forbids a portal entry in
++        // redirectUris: a post-logout URI is handed NOTHING. The browser is sent there after Keycloak has
++        // already ended the session, so no authorization code, token or other code-bearing value ever
++        // reaches it, while a redirect URI is exactly where the code/token-bearing response is delivered.
++        // This entry therefore does not narrow D16's rationale (the portal holds no token and redeems no
++        // authorization code) and the negative assertion must stay green — it scans redirectUris only.
++    }
++
+     [TestMethod]
+     public void RealmImportFile_DeclaresNoPortalOidcClient_AndNoPortalRedirectUri()
+     {
+@@ -374,6 +426,38 @@ public class AppHostRealmImportArchitectureTests
+         throw new InvalidOperationException($"Realm file has no service-account user with serviceAccountClientId '{clientId}'.");
+     }
+ 
++    /// <summary>The host port pinned on the AppHost's <c>auth-portal</c> resource
++    /// (<c>.WithHttpEndpoint(port: …, targetPort: …, name: "http")</c>), which is what makes
++    /// <c>GetEndpoint("http")</c> — and therefore the fanned <c>Auth__PostLogoutRedirectUri</c> —
++    /// deterministically <c>http://localhost:{port}/</c>. THROWS when the pin is absent, so the
++    /// realm-vs-AppHost agreement assertion can never pass vacuously (the file's other helpers
++    /// follow the same fail-loud rule).</summary>
++    private static int PinnedAuthPortalHostPort()
++    {
++        var program = ReadAppHostFile("Program.cs");
++        var portalResource = program.IndexOf("""AddUvicornApp("auth-portal""", StringComparison.Ordinal);
++        if (portalResource < 0)
++        {
++            throw new InvalidOperationException(
++                "Program.cs declares no AddUvicornApp(\"auth-portal\", …) resource, so the portal's pinned host port cannot be read.");
++        }
++
++        // Scoped to the first pin AFTER the portal's own creation call: Program.cs carries other pinned
++        // host ports (mailpit's 8025 is also named "http"), so an unscoped scan would compare the realm
++        // against a port that has nothing to do with the portal.
++        var pin = Regex.Match(
++            program[portalResource..],
++            """\.WithHttpEndpoint\(port: (?<port>\d+)[^)]*name: "http"\)""");
++        if (!pin.Success)
++        {
++            throw new InvalidOperationException(
++                "The auth-portal resource pins no host port (no `.WithHttpEndpoint(port: …, name: \"http\")` on its chain), "
++                + "so its landing URI cannot AGREE with the realm's postLogoutRedirectUris literal.");
++        }
++
++        return int.Parse(pin.Groups["port"].Value, CultureInfo.InvariantCulture);
++    }
++
+     private static string ReadAppHostFile(string name)
+         => File.ReadAllText(Path.Combine(FindAppHostDir(), name));
+ 

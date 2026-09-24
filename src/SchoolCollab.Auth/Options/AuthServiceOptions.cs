@@ -11,7 +11,8 @@ namespace SchoolCollab.Auth.Options;
 /// service-account credential the later passes consume; pass 3a extends this
 /// class with the timing values (one-time-code and portal-session TTLs, rate-limit
 /// window/permit); round B pass B5b adds the per-app callback allowlist
-/// (<see cref="AppCallbackPrefixes"/>).
+/// (<see cref="AppCallbackPrefixes"/>); the `keycloak-logout-oidc` round's pass 3 adds the post-logout landing
+/// URI (<see cref="PostLogoutRedirectUri"/>).
 /// </summary>
 public sealed class AuthServiceOptions
 {
@@ -49,6 +50,22 @@ public sealed class AuthServiceOptions
     /// </para>
     /// </summary>
     public string AppCallbackPrefixes { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The portal's post-logout landing URI (spec §9 / D13 option ii): the
+    /// <c>post_logout_redirect_uri</c> the auth service puts on the built <c>end_session</c> URL
+    /// (<see cref="SchoolCollab.Auth.Providers.KeycloakAuthProvider.BuildEndSessionUrl"/>).
+    /// Keycloak matches it against the client's registered <c>postLogoutRedirectUris</c>
+    /// <b>exactly</b> — trailing slash included, no wildcard — so this value and the realm literal
+    /// must be spelled identically (the AppHost pins the portal's host port for that reason).
+    /// <para>
+    /// There is deliberately <b>no safe default</b>, exactly like <see cref="AppCallbackPrefixes"/>:
+    /// an empty or absent value is a startup failure (<see cref="FirstValidationError"/>), never a
+    /// guessed fallback. A wrong guess would only surface at logout time, after the local session
+    /// is already gone, as a Keycloak rejection the portal cannot act on.
+    /// </para>
+    /// </summary>
+    public string PostLogoutRedirectUri { get; set; } = string.Empty;
 
     /// <summary>
     /// Rate-limit window for the credential endpoint <c>POST /auth/exchange</c>
@@ -99,6 +116,15 @@ public sealed class AuthServiceOptions
         {
             return "Auth:AppCallbackPrefixes must list at least one allowed app callback "
                 + "(semicolon-separated scheme+host+port+path prefixes) — see AuthServiceOptions.";
+        }
+
+        // Round B pass 3 (D13 option ii): the post-logout landing URI has no safe default either.
+        // Keycloak matches it against the realm's registered postLogoutRedirectUris, so a guessed
+        // value makes every logout fail after the session is already gone — fail closed at launch.
+        if (string.IsNullOrWhiteSpace(options.PostLogoutRedirectUri))
+        {
+            return "Auth:PostLogoutRedirectUri must be the portal's registered post-logout "
+                + "landing URI (see AuthServiceOptions).";
         }
 
         // Timing values carry defaults, so these guards are range checks, not

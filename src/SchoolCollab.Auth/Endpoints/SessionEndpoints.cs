@@ -18,9 +18,11 @@ namespace SchoolCollab.Auth.Endpoints;
 /// <para>
 /// The DELETE revokes **server-side** (Keycloak refresh-token revocation, then the custody entry is
 /// gone) and returns only the built <c>end_session</c> URL for the portal to redirect the browser
-/// to. This <b>supersedes round A's refresh-token-return contract</b> (owner-adjudicated under
-/// AC11): the portal must never receive a token, so it cannot perform the revocation itself — the
-/// auth service does.
+/// to: <c>id_token_hint</c> + <c>post_logout_redirect_uri</c>, both built in custody. The portal
+/// treats that URL as **opaque** — it 302s the browser to it and never parses, logs or persists it
+/// — and its hint is a logout hint, not a credential (AC11's carve-out). This <b>supersedes round
+/// A's refresh-token-return contract</b> (owner-adjudicated under AC11): the portal must never
+/// receive a token, so it cannot perform the revocation itself — the auth service does.
 /// </para>
 /// </summary>
 public static class SessionEndpoints
@@ -36,8 +38,10 @@ public static class SessionEndpoints
         IReadOnlyList<string> Roles,
         int ExpiresInSeconds);
 
-    /// <summary>Logout body (D13): the fully-built <c>end_session</c> URL, built in custody
-    /// because the portal holds neither the id token nor the ability to sign one.</summary>
+    /// <summary>Logout body (D13 option ii): the fully-built <c>end_session</c> URL —
+    /// <c>id_token_hint</c> + <c>post_logout_redirect_uri</c> — built in custody because the portal
+    /// holds neither the id token nor the registered landing URI. It is OPAQUE to the portal: the
+    /// portal 302s the browser to it and never parses, logs or persists it.</summary>
     public sealed record DeleteSessionResponse(string EndSessionUrl);
 
     /// <summary>
@@ -80,7 +84,8 @@ public static class SessionEndpoints
 
     /// <summary>
     /// Logs the session out (D13): custody drops the session, the refresh token is revoked at
-    /// Keycloak server-side, and the caller receives the <c>end_session</c> URL — never a token.
+    /// Keycloak server-side, and the caller receives the built <c>end_session</c> URL
+    /// (<c>id_token_hint</c> + <c>post_logout_redirect_uri</c>) — never a token of any other kind.
     /// An unknown session is <c>session_not_found</c> (the portal treats it as already logged out).
     /// </summary>
     public static async Task<IResult> Delete(

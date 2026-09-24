@@ -125,7 +125,7 @@ files only carry values that genuinely belong to that single service
 | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
 | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). See §5. |
+| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5. |
 | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
 | `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
 | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
@@ -348,6 +348,16 @@ re-imports on the next container recreate:
   URI — because a presence-only guard would stay green while a portal client quietly reintroduced
   the design D16 removed.
 
+**The portal's credential posture (spec AC11, D12/D17), restated for logout option (ii).** The
+portal holds no credential that **grants or extends access** — no access token, no refresh token,
+no cookie-signing or other key material, no client or service-account secret — and performs no
+direct HTTP call to `settings-api`/`students-api`; every identity, privilege and token-bearing read
+is mediated by the auth service. `DELETE /auth/session/{id}` returns the **fully-built
+`end_session` URL carrying `id_token_hint` + `post_logout_redirect_uri`** (spec D13, option (ii)):
+the portal clears its session cookie, 302s the browser to that URL, and treats the returned URL as
+an **opaque string — never parsed, logged or persisted**. The `id_token_hint` in that URL is a
+logout hint over an already-spent token, not a bearer credential, so it does not breach AC11.
+
 | Key | Default | Description |
 | :--- | :--- | :--- |
 | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
@@ -363,7 +373,10 @@ Three keys distribute the auth portal's URLs (round B `keycloak-ui-auth`, spec D
 plan-review P2-5). None of them is an AppHost parameter: each is derived from the
 `auth-portal` resource's Aspire HTTP endpoint, so the live URL is resolved at launch exactly
 like the Keycloak endpoint fan-out (the AppHost writes the endpoint reference expression, e.g.
-the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded**.
+the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded** — the
+endpoint expression stays the single source of every value, and the port that expression resolves
+to is *pinned* (below) exactly where the committed realm import needs it to be knowable without a
+run.
 
 | Key | Default | Description |
 | :--- | :--- | :--- |
@@ -383,6 +396,41 @@ this key's scheme rather than hardcoded either way: an `https` base URL sets the
 unset key — and therefore the dev plain-`http` endpoints, where a `Secure` cookie would never be
 sent — leaves it off. Nothing else configures it, so a production deployment reached over HTTPS
 gets the flag from the base URL it already sets here.
+
+### Round B — the post-logout landing URI (`Auth:PostLogoutRedirectUri`)
+
+The logout target of spec D13 option (ii). `DELETE /auth/session/{id}` answers with the
+fully-built `end_session` URL whose `post_logout_redirect_uri` parameter is this value — the
+**portal's own landing URI**. Keycloak matches `post_logout_redirect_uri` **exactly**, so this
+key's value and the realm's registered `postLogoutRedirectUris` entry must be the same string,
+trailing slash included (a wildcard broadens the allowlist and was rejected).
+
+| Key | Default | Description |
+| :--- | :--- | :--- |
+| `Auth:PostLogoutRedirectUri` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | The portal landing URI the auth service places in `post_logout_redirect_uri`, fanned **only** to the `auth` service as `Auth__PostLogoutRedirectUri` from the portal's Aspire endpoint expression (`$"{authPortal.GetEndpoint("http")}/"`, resolved to `http://localhost:5700/`). Like `Auth:AppCallbackPrefixes` it has **no code fallback**: `AuthServiceOptions.FirstValidationError` rejects a blank value at launch and names the key, because a guessed URI makes every logout fail **after** the local session has already been revoked — a rejection the portal can no longer act on. |
+
+**The portal's host port is pinned to `5700`** — `Program.cs`,
+`AddUvicornApp("auth-portal", …).WithHttpEndpoint(port: 5700, targetPort: 5700, name: "http")`.
+This is why the pin exists rather than a literal in the realm: `school-collab-realm.json` is a
+committed static import (Keycloak cannot read an endpoint expression), so the fanned value and the
+realm literal can only agree **by construction** if the port is fixed — and an `AddUvicornApp`
+resource, unlike the Blazor hosts above (`5300/7300`, `5400/7400`, `55458/55459`), carries no
+`launchSettings.json` to fix it. The pin **updates** the Uvicorn integration's own `http` endpoint
+in place (it never adds a second annotation — `GetEndpoint("http")` is resolved by name
+throughout), and `targetPort` is pinned with it because `AddUvicornApp` starts the process with
+`--port {endpoint TargetPort}`. `AppHostRealmImportArchitectureTests` reads the pinned port back
+out of `Program.cs` and holds the realm literal to it, so the two cannot drift silently.
+**Not claimed:** that the portal's *effective* runtime URL is `5700` — the dev-host pin is not
+observable by any hermetic test in this round (recorded as an owner-gated residual).
+
+**The realm's post-logout allowlist.** `school-collab-client` carries a `postLogoutRedirectUris`
+block: the four Blazor `/signout-callback-oidc` landings (`5300`/`7300` http + https for `admin`,
+`5400`/`7400` for `families`) **plus** the portal landing `http://localhost:5700/`. A **portal**
+URL is legitimate here even though D16 forbids a portal `redirectUris` entry (see the D16 bullet
+above): a post-logout URI is delivered nothing — the browser is only sent there after Keycloak has
+ended the session — whereas a redirect URI is exactly where the authorization response lands, and
+the portal redeems no authorization code (AC12). The D16 negative assertion stays green and is
+scoped to `redirectUris` only.
 
 ### Round B — the per-app callback allowlist (`Auth:AppCallbackPrefixes`, `AuthPortal:AppCallbackPrefixes`)
 
@@ -468,6 +516,14 @@ production secret.
 When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-configuration-service)),
 the OIDC + JwtBearer registration is replaced with `TestAuthHandler`, which auto-authenticates
 every request as a test user without Keycloak — intended for local development / CI only.
+
+**Carve-out (D16).** One host is exempt: the `auth` service is itself an OIDC **relying party**
+(its passkey `/complete` endpoint reads the cookie ticket the OIDC handler signs on
+`/signin-oidc`), so it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy` and therefore
+still registers the **relying-party pipeline — cookie + OIDC** — even when the flag is ON.
+`TestAuth` remains the **default** scheme there (requests still authenticate as the test user);
+the carve-out is additive. Every other consumer's dev pipeline is unchanged. See round
+`keycloak-logout-oidc` D16.
 
 **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
 
@@ -569,7 +625,7 @@ flags moved to the Config service.
 
 | Flag | Default | Consumers |
 | :--- | :--- | :--- |
-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
+| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`. The `auth` service also runs with this flag ON (`src/SchoolCollab.Auth/appsettings.json`) **and is the one host with a dev carve-out**: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
 | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
 | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
 | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
@@ -966,6 +1022,7 @@ matching env-var form:
 | `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
 | `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
 | `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
+| `Auth:PostLogoutRedirectUri` | `Auth__PostLogoutRedirectUri` |
 | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
 | `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
 | `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
@@ -30,7 +31,8 @@ public class AuthWiringTests
     private static ServiceProvider Build(
         bool disableOidc,
         bool disableKeycloakLoginUi = false,
-        string? portalLoginUrl = null)
+        string? portalLoginUrl = null,
+        bool requireOidcRelyingParty = false)
     {
         var settings = new Dictionary<string, string?>
         {
@@ -58,7 +60,7 @@ public class AuthWiringTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddDistributedMemoryCache();
-        services.AddAuthAndTenancy(configuration);
+        services.AddAuthAndTenancy(configuration, requireOidcRelyingParty);
         return services.BuildServiceProvider();
     }
 
@@ -178,6 +180,55 @@ public class AuthWiringTests
         (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
             .Should().NotBeNull(
                 "the OIDC handler stays registered with the flag ON — the passkey/bootstrap path (D16) and the auth service's own flow still use it");
+    }
+
+    [TestMethod]
+    public async Task TestAuthMode_WithOidcRelyingPartyOptIn_RegistersCookieAndOidc_AndKeepsTestAuthDefault()
+    {
+        await using var provider = Build(disableOidc: true, requireOidcRelyingParty: true);
+        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
+
+        (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
+            .Should().NotBeNull(
+                "D16: the auth service IS the relying party — its /signin-oidc callback and its passkey bootstrap need the OIDC handler even with the dev bypass ON");
+
+        // The load-bearing composition assertion: /complete reads the ticket BY SCHEME NAME
+        // (PasskeyEndpoints.cs:164, CookieAuthenticationDefaults.AuthenticationScheme), which is also
+        // AddOpenIdConnect's default SignInScheme. A misnamed .AddCookie("Other") leaves /complete
+        // failing closed and must NOT satisfy this guard.
+        (await schemes.GetSchemeAsync(CookieAuthenticationDefaults.AuthenticationScheme))
+            .Should().NotBeNull(
+                "the RP pipeline must register the DEFAULT cookie scheme by name — the scheme the OIDC handler signs into and /complete reads");
+
+        // The interface projection of AuthenticationOptions.DefaultScheme
+        // (DefaultAuthenticateScheme ?? DefaultScheme) — the same pin the sibling
+        // TestAuthMode test uses.
+        (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name.Should().Be(
+            TestAuthExtensions.TestAuthScheme,
+            "the carve-out is additive: requests still authenticate as the test user by default (TestAuth stays the default scheme)");
+    }
+
+    [TestMethod]
+    public async Task NonOptInHosts_DevPipelineIsSchemeForSchemeUnchanged()
+    {
+        await using var provider = Build(disableOidc: true);
+        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
+
+        var registered = (await schemes.GetAllSchemesAsync()).Select(s => s.Name).ToArray();
+
+        (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
+            .Should().BeNull(
+                $"the RP pipeline is opt-in — hoisting its registration out of the parameter would give every consumer host an OIDC scheme in dev (registered: {string.Join(", ", registered)})");
+
+        (await schemes.GetSchemeAsync(CookieAuthenticationDefaults.AuthenticationScheme))
+            .Should().BeNull(
+                $"no cookie scheme may appear in a non-opted-in consumer's dev pipeline (registered: {string.Join(", ", registered)})");
+
+        // The interface projection of AuthenticationOptions.DefaultScheme
+        // (DefaultAuthenticateScheme ?? DefaultScheme).
+        (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name.Should().Be(
+            TestAuthExtensions.TestAuthScheme,
+            "the five unedited call sites keep TestAuth as their default scheme — this is the direction that pins them");
     }
 
     [TestMethod]

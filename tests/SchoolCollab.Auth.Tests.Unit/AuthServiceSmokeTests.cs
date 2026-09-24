@@ -49,8 +49,11 @@ public class AuthServiceSmokeTests
             },
             // Round B pass B5b: AppCallbackPrefixes is a required key (no safe default — an empty
             // allowlist must fail the start rather than deny/fail open mid-request), so a
-            // "complete configuration" fixture has to carry it.
+            // "complete configuration" fixture has to carry it. Pass 3 adds the same class of
+            // required key: PostLogoutRedirectUri (the end_session URL's post_logout_redirect_uri,
+            // which Keycloak matches exactly).
             AppCallbackPrefixes = "http://localhost:5300/signin-handshake",
+            PostLogoutRedirectUri = "http://localhost:5700/",
         };
 
         AuthServiceOptions.FirstValidationError(options).Should().BeNull();

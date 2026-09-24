@@ -797,10 +797,15 @@ async def logout(
     """D13 (spec §9): revoke the session server-side, clear the cookie, go to Keycloak's logout.
 
     The auth service revokes the refresh token itself and answers with the fully-built
-    ``end_session`` URL, because the portal holds neither the id token nor the ability to sign
-    one (D12/AC11). Note that under the parent's option (iii) the auth service may later perform
-    this browser-facing redirect itself, with ``id_token_hint`` in a ``Location`` header; this
-    route then redirects to the auth service's logout endpoint instead of to a URL it received.
+    ``end_session`` URL carrying ``id_token_hint`` and ``post_logout_redirect_uri``, because the
+    portal holds neither the id token nor the ability to sign one (D12/AC11). Option (ii) is the
+    adjudicated shape: the auth service builds that URL and this route redirects the browser to
+    what it received — the browser-facing Keycloak redirect stays the auth service's job.
+
+    The received URL is OPAQUE to the portal: it is 302'd byte-for-byte into ``Location`` and is
+    never parsed, re-encoded, logged or persisted (re-encoding would break Keycloak's exact match
+    on ``post_logout_redirect_uri`` and turn a working logout into an unregistered-target
+    rejection). Only the session cookie is cleared alongside it.
 
     Every outcome clears the portal's cookie — a logout that leaves a cookie behind is the one
     thing this route must never do. A failed revocation still clears it and says so: the local

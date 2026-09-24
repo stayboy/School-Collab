@@ -1,0 +1,356 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 6c787f94..60496ea1 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -125,7 +125,7 @@ files only carry values that genuinely belong to that single service
+ | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
+ | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
+ | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
+-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). See §5. |
++| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5. |
+ | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
+ | `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
+ | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
+@@ -348,6 +348,16 @@ re-imports on the next container recreate:
+   URI — because a presence-only guard would stay green while a portal client quietly reintroduced
+   the design D16 removed.
+ 
++**The portal's credential posture (spec AC11, D12/D17), restated for logout option (ii).** The
++portal holds no credential that **grants or extends access** — no access token, no refresh token,
++no cookie-signing or other key material, no client or service-account secret — and performs no
++direct HTTP call to `settings-api`/`students-api`; every identity, privilege and token-bearing read
++is mediated by the auth service. `DELETE /auth/session/{id}` returns the **fully-built
++`end_session` URL carrying `id_token_hint` + `post_logout_redirect_uri`** (spec D13, option (ii)):
++the portal clears its session cookie, 302s the browser to that URL, and treats the returned URL as
++an **opaque string — never parsed, logged or persisted**. The `id_token_hint` in that URL is a
++logout hint over an already-spent token, not a bearer credential, so it does not breach AC11.
++
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+ | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
+@@ -469,6 +479,14 @@ When `FEATURE:DisableOIDCAuth` is enabled (see [§5](#5-featureflags--central-co
+ the OIDC + JwtBearer registration is replaced with `TestAuthHandler`, which auto-authenticates
+ every request as a test user without Keycloak — intended for local development / CI only.
+ 
++**Carve-out (D16).** One host is exempt: the `auth` service is itself an OIDC **relying party**
++(its passkey `/complete` endpoint reads the cookie ticket the OIDC handler signs on
++`/signin-oidc`), so it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy` and therefore
++still registers the **relying-party pipeline — cookie + OIDC** — even when the flag is ON.
++`TestAuth` remains the **default** scheme there (requests still authenticate as the test user);
++the carve-out is additive. Every other consumer's dev pipeline is unchanged. See round
++`keycloak-logout-oidc` D16.
++
+ **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
+ 
+ ```json
+@@ -569,7 +587,7 @@ flags moved to the Config service.
+ 
+ | Flag | Default | Consumers |
+ | :--- | :--- | :--- |
+-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
++| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`. The `auth` service also runs with this flag ON (`src/SchoolCollab.Auth/appsettings.json`) **and is the one host with a dev carve-out**: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
+diff --git a/src/SchoolCollab.Auth/Program.cs b/src/SchoolCollab.Auth/Program.cs
+index f4304d19..81c80036 100644
+--- a/src/SchoolCollab.Auth/Program.cs
++++ b/src/SchoolCollab.Auth/Program.cs
+@@ -18,7 +18,11 @@ builder.Services.AddAuthServices();
+ // Shared auth/tenancy: registers the OIDC + JwtBearer schemes (or TestAuth when
+ // FEATURE:DisableOIDCAuth is on), the tenant bridge and ICurrentUser. The same
+ // Auth:Keycloak:* env vars the options above validate are consumed here.
+-builder.Services.AddAuthAndTenancy(builder.Configuration);
++// D16: the auth service IS the OIDC relying party — its passkey /complete endpoint reads the
++// cookie-scheme ticket the OIDC handler signs on /signin-oidc — so it opts into the RP pipeline
++// even in dev. FEATURE:DisableOIDCAuth spares the consumer hosts, not the RP; TestAuth remains the
++// default scheme here. This is the SOLE call site passing requireOidcRelyingParty.
++builder.Services.AddAuthAndTenancy(builder.Configuration, requireOidcRelyingParty: true);
+ 
+ // Fixed-window rate limiter for the credential exchange (spec §14, plan-review P1-5,
+ // service side). The registration lives in AuthServiceExtensions.AddAuthRateLimiting
+diff --git a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+index 7a6c8300..56ee5d17 100644
+--- a/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
++++ b/src/SchoolCollab.Core/Auth/AuthTenancyExtensions.cs
+@@ -39,11 +39,23 @@ public static class AuthTenancyExtensions
+     /// Adds cookie + OpenID Connect authentication using Keycloak and wires the current tenant
+     /// from token claims into <see cref="ITenantProvider"/> via <see cref="TenantClaimsTransformation"/>.
+     /// When <c>FEATURE:DisableOIDCAuth</c> is enabled (typically in Development), replaces OIDC with
+-    /// <see cref="TestAuthHandler"/>.
++    /// <see cref="TestAuthHandler"/> — unless <paramref name="requireOidcRelyingParty"/> opts the host
++    /// into the relying-party pipeline.
+     /// </summary>
++    /// <param name="requireOidcRelyingParty">
++    /// Dev-mode carve-out (D16, round <c>keycloak-logout-oidc</c>): with
++    /// <c>FEATURE:DisableOIDCAuth</c> ON, additionally register the OIDC relying-party pipeline
++    /// (default cookie scheme + OIDC, sharing the one options configurator with the real-auth branch)
++    /// while <see cref="TestAuthExtensions.TestAuthScheme"/> stays the default scheme. Set only by the
++    /// <c>auth</c> service: it IS the relying party, and its passkey <c>/complete</c> endpoint reads the
++    /// cookie-scheme ticket the OIDC handler signs on <c>/signin-oidc</c>, so the dev bypass must spare
++    /// the RP itself. Left <c>false</c>, every other consumer's dev pipeline is unchanged. Registration
++    /// performs no network I/O (Keycloak metadata discovery is lazy, on the first challenge).
++    /// </param>
+     public static IServiceCollection AddAuthAndTenancy(
+         this IServiceCollection services,
+-        IConfiguration configuration)
++        IConfiguration configuration,
++        bool requireOidcRelyingParty = false)
+     {
+         // Tenant context storage (AsyncLocal-backed provider shared per process).
+         // Register via the shared tenancy helper so core modules can also resolve
+@@ -79,16 +91,32 @@ public static class AuthTenancyExtensions
+ 
+         if (disableOIDC)
+         {
+-            services
++            var devAuthentication = services
+                 .AddAuthentication(TestAuthExtensions.TestAuthScheme)
+                 .AddTestAuth();
++
++            if (requireOidcRelyingParty)
++            {
++                // D16: the auth service is the relying party — the dev bypass spares the
++                // consumers, not the RP. Additive only: TestAuth stays the DEFAULT scheme, and
++                // the challenge-routing policy scheme, JwtBearer and the portal-redirect handler
++                // are deliberately NOT registered here (the RP's own flow goes through the OIDC
++                // scheme's default SignInScheme, not a challenge policy). Same options
++                // configurator as the real-auth branch, so the two cannot drift.
++                var (rpAuthority, rpClientId) = ReadKeycloakClientSettings(configuration);
++
++                devAuthentication
++                    .AddCookie()
++                    .AddOpenIdConnect(options => ConfigureKeycloakOpenIdConnect(
++                        options,
++                        configuration,
++                        rpAuthority,
++                        rpClientId));
++            }
+         }
+         else
+         {
+-            var keycloakAuthority = configuration["Auth:Keycloak:Authority"]
+-                ?? "https://keycloak.local/realms/school-collab";
+-            var keycloakClientId = configuration["Auth:Keycloak:ClientId"]
+-                ?? "school-collab-client";
++            var (keycloakAuthority, keycloakClientId) = ReadKeycloakClientSettings(configuration);
+ 
+             // D4/D5: which login UI the Blazor hosts present. Read ONCE here at startup —
+             // the challenge target is baked into the policy scheme below, the same
+@@ -115,41 +143,11 @@ public static class AuthTenancyExtensions
+                         : OpenIdConnectDefaults.AuthenticationScheme;
+                 })
+                 .AddCookie()
+-                .AddOpenIdConnect(options =>
+-                {
+-                    options.Authority = keycloakAuthority;
+-                    options.ClientId = keycloakClientId;
+-                    options.ClientSecret = configuration["Auth:Keycloak:ClientSecret"]
+-                        ?? "secret";
+-                    options.ResponseType = "code";
+-                    options.SaveTokens = true;
+-
+-                    // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
+-                    // protocol mapper emits a flat `roles` claim on the ID token, and the
+-                    // handler's DEFAULT inbound mapping (MapInboundClaims=true — nothing in the
+-                    // repo overrides it) renames that claim to ClaimTypes.Role. Pinning the
+-                    // MAPPED type here is what makes [Authorize(Roles=...)]/RequireRole resolve
+-                    // from the claim that actually survives. Pinning the literal "roles" was
+-                    // PROVEN ineffective (pass-3d corrective pass: the round's /auth/admin gate
+-                    // rejected every authenticated caller under the default mapping until the
+-                    // pin was corrected; 12 gate tests failed with the literal pin). Must stay
+-                    // identical to the JwtBearer value below (cookie/bearer parity).
+-                    options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
+-
+-                    // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
+-                    // an http:// authority is rejected unless metadata HTTPS is relaxed.
+-                    // Production MUST keep this true (default) — gate on the dev flag.
+-                    options.RequireHttpsMetadata = false;
+-
+-                    // The tenant/teacher values reach the cookie identity via the KEYCLOAK ID
+-                    // TOKEN, not via ClaimActions. The realm's protocol mappers enable
+-                    // id.token.claim=true, and the OIDC handler copies every id_token claim onto
+-                    // the ClaimsPrincipal by default. ClaimActions would only shape the userinfo
+-                    // payload, and GetClaimsFromUserInfoEndpoint defaults to false — so the four
+-                    // MapJsonKey calls would be inert. We deliberately do NOT enable the userinfo
+-                    // fetch: it would add a network round-trip for data the id_token already carries.
+-                    options.GetClaimsFromUserInfoEndpoint = false;
+-                })
++                .AddOpenIdConnect(options => ConfigureKeycloakOpenIdConnect(
++                    options,
++                    configuration,
++                    keycloakAuthority,
++                    keycloakClientId))
+                 .AddJwtBearer(options =>
+                 {
+                     options.Authority = keycloakAuthority;
+@@ -157,7 +155,7 @@ public static class AuthTenancyExtensions
+                     // realm's oidc-audience-mapper emits aud=clientId on the access token.
+                     options.Audience = keycloakClientId;
+ 
+-                    // D9 parity with the OIDC path: the same claim travels on the access token
++                    // D9 parity with the shared OIDC options configurator: the same claim travels on the access token
+                     // and the same default inbound mapping renames it to ClaimTypes.Role, so the
+                     // pinned type stays identical to the OIDC value above and bearer roles
+                     // resolve exactly like cookie roles. (Same corrective-pass evidence as the
+@@ -166,7 +164,7 @@ public static class AuthTenancyExtensions
+ 
+                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority) —
+                     // production MUST keep this false (default). Same dev-gating note as the
+-                    // OIDC branch above.
++                    // shared OIDC options configurator (ConfigureKeycloakOpenIdConnect).
+                     options.RequireHttpsMetadata = false;
+ 
+                     // NOTE (P1-2): the bearer path does NOT use ClaimActions — the JwtBearer
+@@ -194,6 +192,64 @@ public static class AuthTenancyExtensions
+         return services;
+     }
+ 
++    /// <summary>
++    /// The Keycloak client settings the OIDC registration needs, with the dev defaults that let
++    /// registration succeed when no Keycloak configuration is present. One spelling: both the
++    /// real-auth branch and the <c>requireOidcRelyingParty</c> carve-out read them here.
++    /// </summary>
++    private static (string Authority, string ClientId) ReadKeycloakClientSettings(
++        IConfiguration configuration)
++        => (configuration["Auth:Keycloak:Authority"]
++                ?? "https://keycloak.local/realms/school-collab",
++            configuration["Auth:Keycloak:ClientId"]
++                ?? "school-collab-client");
++
++    /// <summary>
++    /// The single spelling of the Keycloak OpenID Connect options, consumed by BOTH the real-auth
++    /// branch and the dev <c>requireOidcRelyingParty</c> carve-out so the two pipelines cannot
++    /// drift. Reads configuration only — no network I/O at registration; Keycloak metadata
++    /// discovery happens lazily on the first challenge.
++    /// </summary>
++    private static void ConfigureKeycloakOpenIdConnect(
++        OpenIdConnectOptions options,
++        IConfiguration configuration,
++        string authority,
++        string clientId)
++    {
++        options.Authority = authority;
++        options.ClientId = clientId;
++        options.ClientSecret = configuration["Auth:Keycloak:ClientSecret"]
++            ?? "secret";
++        options.ResponseType = "code";
++        options.SaveTokens = true;
++
++        // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
++        // protocol mapper emits a flat `roles` claim on the ID token, and the
++        // handler's DEFAULT inbound mapping (MapInboundClaims=true — nothing in the
++        // repo overrides it) renames that claim to ClaimTypes.Role. Pinning the
++        // MAPPED type here is what makes [Authorize(Roles=...)]/RequireRole resolve
++        // from the claim that actually survives. Pinning the literal "roles" was
++        // PROVEN ineffective (pass-3d corrective pass: the round's /auth/admin gate
++        // rejected every authenticated caller under the default mapping until the
++        // pin was corrected; 12 gate tests failed with the literal pin). Must stay
++        // identical to the JwtBearer value (cookie/bearer parity).
++        options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
++
++        // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
++        // an http:// authority is rejected unless metadata HTTPS is relaxed.
++        // Production MUST keep this true (default) — gate on the dev flag.
++        options.RequireHttpsMetadata = false;
++
++        // The tenant/teacher values reach the cookie identity via the KEYCLOAK ID
++        // TOKEN, not via ClaimActions. The realm's protocol mappers enable
++        // id.token.claim=true, and the OIDC handler copies every id_token claim onto
++        // the ClaimsPrincipal by default. ClaimActions would only shape the userinfo
++        // payload, and GetClaimsFromUserInfoEndpoint defaults to false — so the four
++        // MapJsonKey calls would be inert. We deliberately do NOT enable the userinfo
++        // fetch: it would add a network round-trip for data the id_token already carries.
++        options.GetClaimsFromUserInfoEndpoint = false;
++    }
++
+     private static bool IsFlagEnabled(IConfiguration configuration, string featureKey)
+     {
+         var value = configuration[$"FeatureFlags:{featureKey}"]
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+index 8e080318..beb8abaa 100644
+--- a/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/AuthWiringTests.cs
+@@ -1,6 +1,7 @@
+ using System.Security.Claims;
+ using FluentAssertions;
+ using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
+ using Microsoft.AspNetCore.Authentication.JwtBearer;
+ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+ using Microsoft.Extensions.Configuration;
+@@ -30,7 +31,8 @@ public class AuthWiringTests
+     private static ServiceProvider Build(
+         bool disableOidc,
+         bool disableKeycloakLoginUi = false,
+-        string? portalLoginUrl = null)
++        string? portalLoginUrl = null,
++        bool requireOidcRelyingParty = false)
+     {
+         var settings = new Dictionary<string, string?>
+         {
+@@ -58,7 +60,7 @@ public class AuthWiringTests
+         var services = new ServiceCollection();
+         services.AddLogging();
+         services.AddDistributedMemoryCache();
+-        services.AddAuthAndTenancy(configuration);
++        services.AddAuthAndTenancy(configuration, requireOidcRelyingParty);
+         return services.BuildServiceProvider();
+     }
+ 
+@@ -180,6 +182,55 @@ public class AuthWiringTests
+                 "the OIDC handler stays registered with the flag ON — the passkey/bootstrap path (D16) and the auth service's own flow still use it");
+     }
+ 
++    [TestMethod]
++    public async Task TestAuthMode_WithOidcRelyingPartyOptIn_RegistersCookieAndOidc_AndKeepsTestAuthDefault()
++    {
++        await using var provider = Build(disableOidc: true, requireOidcRelyingParty: true);
++        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
++
++        (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
++            .Should().NotBeNull(
++                "D16: the auth service IS the relying party — its /signin-oidc callback and its passkey bootstrap need the OIDC handler even with the dev bypass ON");
++
++        // The load-bearing composition assertion: /complete reads the ticket BY SCHEME NAME
++        // (PasskeyEndpoints.cs:164, CookieAuthenticationDefaults.AuthenticationScheme), which is also
++        // AddOpenIdConnect's default SignInScheme. A misnamed .AddCookie("Other") leaves /complete
++        // failing closed and must NOT satisfy this guard.
++        (await schemes.GetSchemeAsync(CookieAuthenticationDefaults.AuthenticationScheme))
++            .Should().NotBeNull(
++                "the RP pipeline must register the DEFAULT cookie scheme by name — the scheme the OIDC handler signs into and /complete reads");
++
++        // The interface projection of AuthenticationOptions.DefaultScheme
++        // (DefaultAuthenticateScheme ?? DefaultScheme) — the same pin the sibling
++        // TestAuthMode test uses.
++        (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name.Should().Be(
++            TestAuthExtensions.TestAuthScheme,
++            "the carve-out is additive: requests still authenticate as the test user by default (TestAuth stays the default scheme)");
++    }
++
++    [TestMethod]
++    public async Task NonOptInHosts_DevPipelineIsSchemeForSchemeUnchanged()
++    {
++        await using var provider = Build(disableOidc: true);
++        var schemes = provider.GetRequiredService<IAuthenticationSchemeProvider>();
++
++        var registered = (await schemes.GetAllSchemesAsync()).Select(s => s.Name).ToArray();
++
++        (await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme))
++            .Should().BeNull(
++                $"the RP pipeline is opt-in — hoisting its registration out of the parameter would give every consumer host an OIDC scheme in dev (registered: {string.Join(", ", registered)})");
++
++        (await schemes.GetSchemeAsync(CookieAuthenticationDefaults.AuthenticationScheme))
++            .Should().BeNull(
++                $"no cookie scheme may appear in a non-opted-in consumer's dev pipeline (registered: {string.Join(", ", registered)})");
++
++        // The interface projection of AuthenticationOptions.DefaultScheme
++        // (DefaultAuthenticateScheme ?? DefaultScheme).
++        (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name.Should().Be(
++            TestAuthExtensions.TestAuthScheme,
++            "the five unedited call sites keep TestAuth as their default scheme — this is the direction that pins them");
++    }
++
+     [TestMethod]
+     public async Task TestAuthMode_RegistersNoLoginUiPolicyScheme()
+     {

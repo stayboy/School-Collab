@@ -102,8 +102,11 @@ public sealed record ProviderRevocation(bool Found);
 /// <summary>
 /// Result of a logout (spec §9 / D13): whether a live session was found, and — when one was —
 /// the fully-built Keycloak <c>end_session</c> URL the portal redirects the browser to.
-/// <see cref="EndSessionUrl"/> carries no token (see
-/// <see cref="KeycloakAuthProvider.BuildEndSessionUrl"/>).
+/// <see cref="EndSessionUrl"/> carries <c>id_token_hint</c> + <c>post_logout_redirect_uri</c>
+/// (D13 option ii) and is <b>opaque to the portal</b>: it 302s the browser to it and never parses,
+/// logs or persists it. The hint is the ONE token-shaped value in it — a logout hint, not a
+/// bearer credential (see <see cref="KeycloakAuthProvider.BuildEndSessionUrl"/>); no other token
+/// travels.
 /// </summary>
 public sealed record ProviderLogout(bool Found, string? EndSessionUrl = null);
 
@@ -177,9 +180,11 @@ public interface IAuthProvider
 
     /// <summary>
     /// Logout (spec §9 / D13): drops the custody entry, revokes the refresh token at Keycloak
-    /// **server-side**, and returns the fully-built <c>end_session</c> URL for the portal to
-    /// redirect the browser to. Revocation at Keycloak is defense-in-depth and best-effort — the
-    /// local session is gone either way — and no token is ever returned.
+    /// **server-side**, and returns the fully-built <c>end_session</c> URL (<c>id_token_hint</c> +
+    /// <c>post_logout_redirect_uri</c>, D13 option ii) for the portal to redirect the browser to —
+    /// built in custody, because the portal holds neither the id token nor the registered landing
+    /// URI. Revocation at Keycloak is defense-in-depth and best-effort — the local session is gone
+    /// either way — and no token is ever returned as data.
     /// </summary>
     Task<ProviderLogout> LogoutAsync(
         string sessionId,

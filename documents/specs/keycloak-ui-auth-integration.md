@@ -53,8 +53,12 @@ What does **not** exist is the UI end:
   auth portal in this spec — the auth portal is built as its own project so they can adopt it later.
 - No OIDC back-channel logout (deferred, §16).
 - No runtime realm-role CRUD — role *definitions* stay declarative in the realm import (D11).
-- The `FEATURE:DisableOIDCAuth` / `TestAuthHandler` dev bypass stays exactly as-is; this spec's flag
-  is orthogonal to it and **never** disables auth (D4).
+- The `FEATURE:DisableOIDCAuth` / `TestAuthHandler` dev bypass stays as-is for every **consuming**
+  host; this spec's flag is orthogonal to it and **never** disables auth (D4). The sole carve-out is
+  the **auth service**, which registers the OIDC **relying-party pipeline** (cookie + OIDC, with
+  `TestAuth` still the default scheme) via an explicit `requireOidcRelyingParty` opt-in — D16 makes
+  the auth service *the* relying party, so the bypass spares *consumers* from Keycloak without
+  stripping the relying party of its challenge ability. *(Lands in pass 2.)*
 - No changes to existing bounded contexts (settings/students/assignments) beyond consuming their
   existing read-only registries for pickers (§8).
 
@@ -117,8 +121,8 @@ flowchart TB
 | **D9** | Keycloak **realm roles** are the single role model (e.g. `user-admin`, `platform-admin`), declared in the realm import, assigned via the admin UI. A `User Realm Role` mapper emits a flat `roles` claim on **both** ID and access tokens; `TokenValidationParameters.RoleClaimType = "roles"` is set on the OIDC **and** JwtBearer handlers. The auth service's Direct-Grant path builds the identical claims shape | Roles live in the IdP; `[Authorize(Roles=…)]` works immediately and ASP.NET Core policies are a later, zero-Keycloak-change additive layer; claim parity keeps flag-ON/OFF sessions indistinguishable |
 | **D10** | "Claims" = the Keycloak user attributes the realm mappers expose (`tenant_id`, `tenant_name`, `tenant_type`, `teacher_id`), edited via the admin UI through the auth service | Those attributes *are* the claims the APIs consume; there is no second claims store |
 | **D11** | Admin surface v1: user list/create/edit (attributes, credential reset), role **assignment** from the existing role set, claims/attributes editor. Realm-role **definitions** stay declarative in the realm import; runtime role CRUD is a later extension | Declarative role definitions stay reviewable and guarded by the realm-import architecture tests |
-| **D12** | Portal session: a minimal **opaque session-id cookie** (HttpOnly, SameSite=Lax) — an unguessable random id carrying **no signature and no key material in Python**; the portal treats it as a routing hint only, and the auth service validates the session server-side on every identity or privilege-bearing call. Keycloak tokens for that session are stored **server-side in the auth service**; the portal uses them only via mediated auth-service endpoints (D17). Tokens never live in the browser or in Python state | Single custody point (D7); nothing sensitive in browser or Python state — not even a cookie-signing key (settled 2026-09-22: a signed cookie saves no hops over an opaque id and adds a Python secret) |
-| **D13** | Logout = standard **OIDC RP-initiated logout**: the portal logout page clears its session; the auth service revokes the refresh token and returns the **fully-built `end_session` URL** (`id_token_hint` + `post_logout_redirect_uri`) — the id token never leaves C# custody — and the portal redirects the browser to it; Blazor hosts use the OIDC handler's SignOut. Each app clears its own cookie; Keycloak kills the central SSO session. Back-channel logout deferred | Uses the standard mechanism; revocation is defense-in-depth; the portal cannot build `end_session` itself because it never holds the id token (D12) |
+| **D12** | Portal session: a minimal **opaque session-id cookie** (HttpOnly, SameSite=Lax) — an unguessable random id carrying **no signature and no key material in Python**; the portal treats it as a routing hint only, and the auth service validates the session server-side on every identity or privilege-bearing call. Keycloak tokens for that session are stored **server-side in the auth service**; the portal uses them only via mediated auth-service endpoints (D17). Tokens never live in the browser or in Python state — with one named carve-out: a spent-token logout hint, the `id_token_hint` in the RP-initiated `end_session` URL (D13, option ii), present transiently as an opaque response field the portal never parses, logs or persists and in the browser's `end_session` URL, is not a credential the portal *holds*; the invariant that survives is **no token that grants or extends access** | Single custody point (D7); nothing credential-bearing in browser or Python state — not even a cookie-signing key (settled 2026-09-22: a signed cookie saves no hops over an opaque id and adds a Python secret); the only browser-visible token-shaped material is the spent-token `id_token_hint` logout hint (D13, option ii) |
+| **D13** | Logout = standard **OIDC RP-initiated logout, settled as option (ii)**: the portal logout page clears its session; the auth service revokes the refresh token and returns the **fully-built `end_session` URL carrying `id_token_hint` + `post_logout_redirect_uri`**; the portal directs (302s) the browser to that URL and treats it as an **opaque string — never parsed, logged or persisted**. Blazor hosts use the OIDC handler's SignOut. Each app clears its own cookie; Keycloak kills the central SSO session. Back-channel logout deferred. **Option (iii)** — the auth service performing the browser-facing redirect itself — is **owner-rejected**; **option (iv)**, a permanently token-free logout, is the only shape that would keep the hint out of the browser URL | Uses the standard mechanism; revocation is defense-in-depth; the portal cannot *build* `end_session` itself because it never holds the id token (D12) — it only forwards the URL the auth service built, as an opaque value. (ii) settled by the owner; (iii) rejected, (iv) recorded |
 | **D14** | Passwordless = passkeys on Keycloak 26.4+ (D3): WebAuthn Passwordless Policy "Enable Passkeys" ON; required action `WebAuthn Register Passwordless` enabled. The custom form keeps passwordless available via a **"Sign in with passkey"** button that hands off into the standard OIDC code flow — so passwordless works under **both** flag states; the custom UI replaces only the password path; the OIDC return is handled per **D16** (the auth service is the relying party) | WebAuthn cannot run inside a custom form; the hybrid handoff preserves R2 under both states |
 | **D15** | **Provider seam**: Keycloak is the only auth provider now; the portal-facing operations (authenticate, session create/read/revoke, claims, refresh, logout) sit behind one interface in `SchoolCollab.Auth` with the Keycloak implementation behind it. Other IdPs (per-environment dev/beta/prod variance) are **future, additive implementations** — environment routing is configuration, not code. The Keycloak **Admin REST** surface stays explicitly Keycloak-specific (it *is* a Keycloak admin API); D3/D9/AC3 unchanged | Owner ruling 2026-09-22: keep Keycloak, defer other IdPs, structure for easy later integration. The portal→auth-service contract **is** the seam — the portal never learns which IdP is behind it |
 | **D16** | **Passkey-path session bootstrap**: the portal's passkey button hands off into the standard OIDC code flow with the **auth service as the relying party** — its `redirect_uri`, never the portal's; the portal gets **no OIDC client in the realm**. The auth service completes the exchange in C# custody, creates the portal session, then redirects the browser to the portal with a **single-use, short-TTL, URI-bound bootstrap code** (same primitive as D6); the portal redeems it for its opaque session id. If the sign-in began at a gated Blazor page, the D6 one-time-code handshake to that app's callback continues from the same completed exchange | A portal-side code exchange would put tokens in Python (AC9); the auth service is already the custodian (D7) and the bootstrap primitive already exists (round A's `OneTimeCodeStore`) |
@@ -244,17 +248,25 @@ Keycloak unreachable) degrade to error cards, mirroring the portals pattern
   signature, no key material in Python (D12); the portal treats it as a routing hint and the auth
   service validates the session server-side on every identity or privilege-bearing call. Keycloak
   tokens for that session live server-side in the auth service; the portal uses them only through
-  mediated auth-service endpoints (D17). Tokens never reach the browser or Python state.
+  mediated auth-service endpoints (D17). Tokens never reach the browser or Python state — with one
+  named carve-out: a spent-token logout hint, the `id_token_hint` in the RP-initiated
+  `end_session` URL (D13, option ii), present transiently as an opaque response field the portal
+  never parses, logs or persists and in the browser's `end_session` URL, is not a credential the
+  portal *holds*; the invariant that survives is **no token that grants or extends access**.
 - **Session read & lifecycle (D18):** the portal renders from the claim set as **data** (tenant,
   `teacher_id`, `roles`) fetched from a session read — never tokens; the auth service refreshes
   tokens transparently in custody, and a failed refresh returns a distinct `session ended` status
   → the portal clears its cookie and renders an AC10 error card.
-- **Logout:** RP-initiated. The portal logout page clears its session cookie; the auth service
-  revokes the session's refresh token at Keycloak's revocation endpoint and returns the
-  fully-built `end_session` URL (`id_token_hint` + `post_logout_redirect_uri` — the id token
-  never leaves C# custody); the portal redirects the browser to it. Blazor hosts sign
-  out through the OIDC handler's `SignOut` (same `end_session` URL with their own post-logout
-  URI). Each app clears its own cookie on the way out; Keycloak terminates the central SSO session.
+- **Logout (D13, option ii):** RP-initiated. The portal logout page clears its session cookie; the
+  auth service revokes the session's refresh token at Keycloak's revocation endpoint and returns
+  the **fully-built `end_session` URL carrying `id_token_hint` + `post_logout_redirect_uri`**; the
+  portal 302s the browser to that URL and treats it as an **opaque string — never parsed, logged or
+  persisted**. Building the URL stays in C# custody: the portal only forwards it. Option (iii) (the
+  auth service performs the browser-facing redirect) is **owner-rejected**; option (iv) (a
+  permanently token-free logout) is the only shape that would keep the hint out of the browser URL.
+  Blazor hosts sign out through the OIDC handler's `SignOut` (same `end_session` URL with their own
+  post-logout URI). Each app clears its own cookie on the way out; Keycloak terminates the central
+  SSO session.
 - **Deferred:** OIDC back-channel logout (§16).
 
 ## 10. The feature flag (D4, D5)
@@ -413,9 +425,9 @@ bind-mount parity. Realm additions must respect all three.
 | AC6 | `[Authorize(Roles = "user-admin")]` (and a policy of the same shape) succeeds for a user holding the role and fails otherwise, identically on the cookie and bearer paths |
 | AC7 | The flag is a pure UI toggle: with it **ON**, authorization, validation and tenancy behave exactly as with it **OFF** |
 | AC8 | All Keycloak config is declarative in `school-collab-realm.json` (image 26.4+, roles, service-account client, `User Realm Role` mapper, passkeys policy) and `AppHostRealmImportArchitectureTests` stays green |
-| AC9 | No credential, client secret, service-account secret, or Keycloak token is ever present in the browser or in Python state |
+| AC9 | No credential, client secret, service-account secret, or Keycloak token is ever present in the browser or in Python state — with one named carve-out: a spent-token logout hint, the `id_token_hint` in the RP-initiated `end_session` URL (D13, option ii), present transiently as an opaque response field the portal never parses, logs or persists and in the browser's `end_session` URL, is not a credential the portal *holds*; the invariant that survives is **no token that grants or extends access** |
 | AC10 | The auth portal degrades fail-closed: auth-service/Keycloak outages render prefab error cards at HTTP 200, never raw 500s |
-| AC11 | The portal holds **no credential of any kind** — no Keycloak token, no API token, no cookie-signing key, no client secret — and performs no direct HTTP call to `settings-api`/`students-api`; every identity, privilege and token-bearing read is mediated by the auth service (D12, D15, D17) |
+| AC11 | The portal holds no credential that grants or extends access — no access token, no refresh token, no cookie-signing or other key material, no client or service-account secret — and performs no direct HTTP call to `settings-api`/`students-api`; every identity, privilege and token-bearing read is mediated by the auth service. The `id_token_hint` in the RP-initiated `end_session` URL is a logout hint over an already-spent token, not a bearer credential (D13, option ii) |
 | AC12 | The flag-ON passkey path establishes a portal session without any authorization code or token reaching Python: the OIDC return lands on the auth service (D16) and the portal receives only a single-use bootstrap code, redeemable once for its session id |
 | AC13 | A one-time code is issued **only** for a callback matching the per-app allowlist — on **both** the password and passkey paths — and a non-allowlisted `return_uri` is rejected with **no code in the response** (fail-closed); the portal re-validates `return_uri` before rendering |
 

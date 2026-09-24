@@ -475,7 +475,15 @@ def test_logout_revokes_the_session_and_redirects_to_the_end_session_url(
 ) -> None:
     _portal_environment(monkeypatch)
     seen: list[httpx.Request] = []
-    end_session_url = "https://keycloak.test/realms/school-collab/protocol/openid-connect/logout"
+    # D13 option (ii): the auth service builds the end-session URL with both parameters — the id
+    # token hint and the registered portal landing URI. The portal must forward it VERBATIM: the
+    # encoded `post_logout_redirect_uri` below is exactly what Keycloak matches byte-for-byte, so
+    # any parse-then-rebuild or re-encode would break the logout.
+    end_session_url = (
+        "https://keycloak.test/realms/school-collab/protocol/openid-connect/logout"
+        "?id_token_hint=eyJhbGciOiJSUzI1NiJ9.hint-value.sig"
+        "&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A5700%2F"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -493,6 +501,10 @@ def test_logout_revokes_the_session_and_redirects_to_the_end_session_url(
         portal_app.app.dependency_overrides.clear()
 
     assert response.status_code == 302
+    # Both parameters really are in the stubbed URL, so the byte-identity assertion below is not
+    # passing over a parameter-free string.
+    assert "id_token_hint=" in end_session_url
+    assert "post_logout_redirect_uri=" in end_session_url
     assert response.headers["location"] == end_session_url
     assert f'{portal_app.SESSION_COOKIE_NAME}=""' in _set_cookie(response)
     # The revocation is the auth service's job: the portal never touches Keycloak's endpoints.

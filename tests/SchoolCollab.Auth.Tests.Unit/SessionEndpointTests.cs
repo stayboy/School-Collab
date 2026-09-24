@@ -19,8 +19,11 @@ namespace SchoolCollab.Auth.Tests.Unit;
 /// distinct <c>session_ended</c> state on <c>410</c> — deliberately NOT the unknown-session
 /// <c>404</c> and never a 2xx — while an unreachable Keycloak is <c>upstream_unreachable</c>,
 /// because D18's state must mean "revoked/expired", never "the IdP was down"; and DELETE revokes
-/// server-side and returns only the built <c>end_session</c> URL (round A's refresh-token-return
-/// contract is superseded under AC11). Every response body is scanned RAW for tokens.
+/// server-side and returns only the built <c>end_session</c> URL — opaque to the portal, carrying
+/// <c>id_token_hint</c> + <c>post_logout_redirect_uri</c> (round A's refresh-token-return contract
+/// is superseded under AC11). Every response body is scanned VALUE-based for the access- and
+/// refresh-token values, which must never travel; the id token's value appears only as the logout
+/// hint inside that opaque URL (AC11's carve-out).
 /// <para>
 /// The refresh/refresh-rejection cases run the endpoint directly under a fake clock with a
 /// scripted <see cref="HttpMessageHandler"/>: the hosted path cannot be made to reach Keycloak
@@ -38,6 +41,10 @@ public class SessionEndpointTests
     /// <summary>The custody ID token's payload IS the claim source (D9), so the fixture is a real
     /// three-segment JWT whose payload carries the pinned contract.</summary>
     private static readonly string IdToken = JwtWithClaims(tenantName: "Dev School", roles: ["user-admin"]);
+
+    /// <summary>The portal's registered post-logout landing URI — the same literal the composed host
+    /// configures and the realm registers (Keycloak matches it exactly, trailing slash included).</summary>
+    internal const string PostLogoutRedirectUri = "http://localhost:5700/";
 
     private const string UnknownSessionId =
         "0000000000000000000000000000000000000000000000000000000000000000";
@@ -234,7 +241,7 @@ public class SessionEndpointTests
     // ── Logout (D13) ────────────────────────────────────────────────────────────────────────
 
     [TestMethod]
-    public async Task Delete_RevokesServerSide_AndReturnsTheEndSessionUrl_WithNoTokenInBody()
+    public async Task Delete_RevokesServerSide_AndReturnsTheOpaqueEndSessionUrl_WithBothParameters()
     {
         await using var host = await AuthEndpointTestHost.StartAsync();
         var sessionId = SeedSession(host);
@@ -244,21 +251,31 @@ public class SessionEndpointTests
 
         delete.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await delete.Content.ReadAsStringAsync();
+        var getBody = await getAfter.Content.ReadAsStringAsync();
         var endSessionUrl = JsonDocument.Parse(body).RootElement.GetProperty("endSessionUrl").GetString();
 
         endSessionUrl.Should().Contain("/protocol/openid-connect/logout");
-        endSessionUrl.Should().Contain("client_id=school-collab-client");
 
-        // AC11 / B-E: NO token in ANY response body — including DELETE. Round A handed the refresh
-        // token to the caller so the PORTAL could revoke it at Keycloak; this pass revokes it in
-        // custody instead, and the id token never leaves the service (D13). This is the assertion
-        // change that supersedes round A's contract (owner-adjudicated).
-        // Value-based again (the reviewer's precision point): the three seeded token VALUES are
-        // what must never travel. The body legitimately carries the end_session URL, whose
-        // parameter NAMES are the OIDC vocabulary, not tokens.
+        // D13 option (ii): the URL carries BOTH parameters, and the hint IS the seeded custody id
+        // token. This value-based pair replaced the retired `client_id=…` / `NotContain(IdToken)`
+        // assertions; the retired client_id-only shape must be gone, not merely supplemented.
+        endSessionUrl.Should().Contain($"id_token_hint={IdToken}",
+            "the hint is the custody id token itself.");
+        endSessionUrl.Should().Contain(
+            $"post_logout_redirect_uri={Uri.EscapeDataString(PostLogoutRedirectUri)}",
+            "the landing URI is escaped into the query, as Keycloak's exact match requires.");
+        endSessionUrl.Should().NotContain("client_id=", "the client_id-only fallback shape is retired.");
+
+        // AC11 / K-F, VALUE-based over EVERY response body: the access- and refresh-token values
+        // never appear anywhere. The id token's value is the ONE token-shaped value that travels —
+        // and it travels exactly once, inside this opaque URL, never as a field of its own.
         body.Should().NotContain(AccessToken);
         body.Should().NotContain(RefreshToken);
-        body.Should().NotContain(IdToken);
+        getBody.Should().NotContain(AccessToken);
+        getBody.Should().NotContain(RefreshToken);
+        getBody.Should().NotContain(IdToken, "the GET body carries the claim set as data, never a token.");
+        body.Split(IdToken).Should().HaveCount(2,
+            "the logout hint appears exactly once — in the opaque end_session URL.");
 
         // The local session is gone either way — even though this host's Keycloak is unreachable
         // (its authority is a closed loopback port), so the revocation call failed best-effort.
@@ -335,6 +352,7 @@ public class SessionEndpointTests
             },
             OneTimeCodeTtl = TimeSpan.FromSeconds(60),
             PortalSessionTtl = TimeSpan.FromMinutes(30),
+            PostLogoutRedirectUri = SessionEndpointTests.PostLogoutRedirectUri,
         });
 
         var httpClient = new HttpClient(handler);
