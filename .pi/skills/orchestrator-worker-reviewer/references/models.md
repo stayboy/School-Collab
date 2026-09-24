@@ -10,12 +10,12 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) |
 |---|---|---|
-| Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` |
-| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` |
-| Reviewer | `ollama-cloud/kimi-k2.7-code` (owner default 2026-09-22) | `cline-pass/deepseek-v4.1-flash` |
+| Orchestrator | `ollama-cloud/glm-5.3-flash` (owner 2026-09-22, **Option A**) | `cline-pass/glm-5.3` |
+| Worker | `ollama-cloud/deepseek-v4.1-flash` (owner 2026-09-22, **Option A**) | `cline-pass/deepseek-v4-flash` |
+| Reviewer | `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | `cline-pass/deepseek-v4.1-flash` |
 | Plan reviewer (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
-| Escalator (blocked-pass rework) | the round's reviewer model | the round's reviewer model |
+| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22 — pinned; **under Option A this coincides with the Tier-3 reviewer, so an escalated rework and its verifier share a model — the light tier already does this by design, and the owner has not ruled**); otherwise the round's reviewer model | the round's reviewer model |
 | Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
 
 **Opting into clinepass from pi:** pass `clinepass/cline-pass/<id>` in every
@@ -28,8 +28,8 @@ header. **Pick one provider per round; never mix providers mid-round.**
 | Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
 |---|---|---|---|---|
 | **Solo** | the single agent plans + implements + checks its own work | — | — | ask the user first (solo rule below) |
-| **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `kimi-k2.7-code` | the reviewer/orchestrator **must differ** from the worker's model |
-| **Tier 3** | `deepseek-v4-flash-0731` | `glm-5.3-flash` | `kimi-k2.7-code` | full ladder + UI tester `minimax-m3`; **plan-review on full rounds = `glm-5.3:cloud`** (lean = the reviewer model) |
+| **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `kimi-k2.7-code` | the reviewer/orchestrator **must differ** from the worker's model — **Option A: Tier 3 now uses this same set** |
+| **Tier 3** | `deepseek-v4.1-flash` | `glm-5.3-flash` | `kimi-k2.7-code` | **Option A (owner 2026-09-22): identical to the light tier** + UI tester `minimax-m3`; **plan-review on full rounds = `glm-5.3:cloud`** (lean = the reviewer model); **escalator = `kimi-k2.7-code`** (pinned — coincides with the reviewer) |
 
 Clinepass equivalents: light worker `cline-pass/deepseek-v4.1-flash`, light
 orchestrator/reviewer `cline-pass/glm-5.3-flash` (ollama profile:
@@ -47,7 +47,13 @@ Solo never dispatches an orchestrator or reviewer of its own.
 Resolve ids at dispatch time with `subagent({ action: "models" })` and copy exact
 `provider/id` strings; bare ids resolve only when unique. The `ollama*` ladder has
 drifted historically (the `ollama-cloud` provider hosts the modern ids) — verify
-the ids rather than assuming them.
+the ids rather than assuming them. **Known trap (2026-09-22):** the pi-profile Tier-3 worker id is
+`ollama-cloud/deepseek-v4-flash:0731` — a **COLON** before `0731`. The hyphenated
+`deepseek-v4-flash-0731` is the *clinepass* spelling and does NOT exist on `ollama-cloud`; dispatching
+it fails at launch with `Unknown subagent model '...' in the active Pi model registry` and writes
+nothing. These tables printed the hyphenated form until this was corrected. Resolve against the
+registry (`subagent({ action: "models" })`, or `~/.pi/agent/models-store.json` → the provider block)
+before every dispatch.
 
 ### Defaults and overrides — precedence, highest first
 
@@ -58,13 +64,12 @@ the ids rather than assuming them.
 3. **The profile already recorded in the round doc** (resumed/continuing rounds).
 4. **The skill default: the pi `ollama` profile**, per tier — subject to the
    **per-mode model sets** above (solo / light / Tier 3), owner-overridden
-   2026-09-16; the pi-profile reviewer default was replaced 2026-09-22). Light
-   mode: worker `deepseek-v4.1-flash`, orchestrator `glm-5.3-flash`, reviewer
+   2026-09-16; the pi-profile reviewer default was replaced 2026-09-22 and
+   **Option A was applied 2026-09-22**). Light and Tier 3 now run the SAME set:
+   worker `deepseek-v4.1-flash`, orchestrator `glm-5.3-flash`, reviewer
    `kimi-k2.7-code` — deliberately different models so the verifier never
-   shares the implementer's model. Tier 3 keeps the standard ladder
-   (`glm-5.3-flash` orchestrator, `deepseek-v4-flash-0731` worker,
-   `kimi-k2.7-code` reviewer); lean rounds use the same ladder — only
-   the accept-run is skipped. **Plan-review (step 2b):** full rounds run
+   shares the implementer's model. Tier 3 differs only by the UI tester and the
+   full-round `glm-5.3:cloud` plan-review; lean rounds skip the accept-run. **Plan-review (step 2b):** full rounds run
    `glm-5.3:cloud`, lean rounds run the reviewer model; either is subject to a
    user-named override (item 1).
 5. **Cline**: always `clinepass` (cannot resolve `ollama` ids) — an exception,
@@ -105,7 +110,8 @@ Cline cannot resolve pi's `ollama/<id>:cloud` ids — its session provider is
 ## Escalation ladder (build-escalation pattern, SKILL.md step 3)
 
 When a worker pass times out / stalls / hangs: the escalation EXECUTOR is the
-round's reviewer model, dispatched through a write-capable shell
+round's reviewer model (Tier 3 full: `kimi-k2.7-code`, pinned by owner
+2026-09-22 — not derived from the reviewer), dispatched through a write-capable shell
 (`worker`/`delegate` — never the read-only `reviewer` shell), and the escalated
 work is then statically re-verified by the HIGHER model **of the same profile**
 (`ollama/glm-5.3:cloud`, or `clinepass/cline-pass/glm-5.3`).
@@ -142,8 +148,8 @@ round-trips (or roles) a task does not need.
 
 Round doc line 1 records which provider ran the round, e.g.:
 
-- `Provider: pi (models: glm-5.3-flash, deepseek-v4-flash-0731, kimi-k2.7-code, minimax-m3)`
-- `Provider: pi, full Tier 3 (models: glm-5.3-flash orchestrator, glm-5.3 plan-review, deepseek-v4-flash-0731 worker, kimi-k2.7-code reviewer, minimax-m3 tester)`
+- `Provider: pi (models: kimi-k2.7-code, deepseek-v4.1-flash, glm-5.3-flash, minimax-m3)`
+- `Provider: pi, full Tier 3, Option A (models: glm-5.3-flash orchestrator, glm-5.3 plan-review, deepseek-v4.1-flash worker, kimi-k2.7-code reviewer, kimi-k2.7-code escalator, minimax-m3 tester)`
 - `Provider: pi/clinepass (models: glm-5.3, deepseek-v4-flash-0731, deepseek-v4.1-flash, minimax-m3)`
 - `Provider: Cline/clinepass (models: glm-5.3, deepseek-v4-flash, kimi-k2.7-code, minimax-m3)`
 
