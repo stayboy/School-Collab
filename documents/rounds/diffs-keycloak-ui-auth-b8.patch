@@ -1,0 +1,2688 @@
+diff --git a/SchoolCollab.slnx b/SchoolCollab.slnx
+index a699c217..0abddc12 100644
+--- a/SchoolCollab.slnx
++++ b/SchoolCollab.slnx
+@@ -7,6 +7,7 @@
+   <Folder Name="/src/">
+     <Project Path="src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj" />
+     <Project Path="src/SchoolCollab.Admin/SchoolCollab.Admin.csproj" />
++    <Project Path="src/SchoolCollab.Auth/SchoolCollab.Auth.csproj" />
+     <Project Path="src/SchoolCollab.Core/SchoolCollab.Core.csproj" />
+     <Project Path="src/SchoolCollab.Families/SchoolCollab.Families.csproj" />
+     <Project Path="src/SchoolCollab.MigrationService/SchoolCollab.MigrationService.csproj" />
+@@ -27,6 +28,29 @@
+     <Project Path="src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj" />
+     <Project Path="src/Assignments/SchoolCollab.Assignments.Worker/SchoolCollab.Assignments.Worker.csproj" />
+   </Folder>
++  <Folder Name="/src/SchoolCollab.AuthPortal/">
++    <File Path="src/SchoolCollab.AuthPortal/app.py" />
++    <File Path="src/SchoolCollab.AuthPortal/pyproject.toml" />
++    <File Path="src/SchoolCollab.AuthPortal/uv.lock" />
++  </Folder>
++  <Folder Name="/src/SchoolCollab.AuthPortal/api/">
++    <File Path="src/SchoolCollab.AuthPortal/api/__init__.py" />
++    <File Path="src/SchoolCollab.AuthPortal/api/auth_api_client.py" />
++    <File Path="src/SchoolCollab.AuthPortal/api/dto.py" />
++    <File Path="src/SchoolCollab.AuthPortal/api/errors.py" />
++  </Folder>
++  <Folder Name="/src/SchoolCollab.AuthPortal/tests/">
++    <File Path="src/SchoolCollab.AuthPortal/tests/test_app_callback_allowlist.py" />
++    <File Path="src/SchoolCollab.AuthPortal/tests/test_app_routes.py" />
++    <File Path="src/SchoolCollab.AuthPortal/tests/test_auth_api_client.py" />
++    <File Path="src/SchoolCollab.AuthPortal/tests/test_login_view.py" />
++    <File Path="src/SchoolCollab.AuthPortal/tests/test_session_routes.py" />
++  </Folder>
++  <Folder Name="/src/SchoolCollab.AuthPortal/views/">
++    <File Path="src/SchoolCollab.AuthPortal/views/__init__.py" />
++    <File Path="src/SchoolCollab.AuthPortal/views/errors.py" />
++    <File Path="src/SchoolCollab.AuthPortal/views/login.py" />
++  </Folder>
+   <Folder Name="/src/SchoolCollab.Portals/">
+     <File Path="src/SchoolCollab.Portals/app.py" />
+     <File Path="src/SchoolCollab.Portals/pyproject.toml" />
+@@ -66,6 +90,7 @@
+   </Folder>
+   <Folder Name="/tests/">
+     <Project Path="tests/SchoolCollab.Admin.Tests.Unit/SchoolCollab.Admin.Tests.Unit.csproj" />
++    <Project Path="tests/SchoolCollab.Auth.Tests.Unit/SchoolCollab.Auth.Tests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.ArchitectureTests.Unit/SchoolCollab.ArchitectureTests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.Assignments.Api.Tests.Unit/SchoolCollab.Assignments.Api.Tests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.Assignments.Tests.Integration/SchoolCollab.Assignments.Tests.Integration.csproj" />
+diff --git a/src/SchoolCollab.AuthPortal/app.py b/src/SchoolCollab.AuthPortal/app.py
+new file mode 100644
+index 00000000..d273557d
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/app.py
+@@ -0,0 +1,929 @@
++"""School-Collab auth portal — the prefab login/logout/challenge and admin surfaces (spec §3, D1).
++
++The Python counterpart of ``src/SchoolCollab.Portals`` (see
++``documents/solution/portals-service-client-pattern.md``): a deliberately thin FastAPI app that
++owns only the app object, the lifespan-owned HTTP client, the dependency seam and the routes.
++Service calls live in ``api/`` (typed auth-service client + DTOs + errors); Prefab component
++trees live in ``views/`` (the sign-in surface and the fail-closed cards).
++
++The portal talks to **one** upstream — the auth service — and holds **no credential of any kind**:
++no Keycloak token, no API token, no cookie-signing key, no client secret (D12/D17, AC11). Its
++session cookie is an opaque id the auth service validates server-side on every identity-bearing
++call, and every identity read is a mediated auth-service call whose response is data only.
++
++Routes:
++    GET /        -> the portal index: the resolved auth-service endpoint, the session state (a
++                    mediated session read, D18) and this portal's live route table. Always HTTP 200
++                    (AC10 — a page, never a traceback).
++    GET /login   -> the prefab sign-in page for an **allowlisted** ``return_uri`` (spec §5.2,
++                    AC13): a ``return_uri`` outside ``AuthPortal:AppCallbackPrefixes`` renders
++                    the AC10 card instead. Each render issues a one-time antiforgery token.
++    POST /login  -> the form's own route: one-time antiforgery token + JSON-only body, then
++                    credentials -> ``/auth/exchange`` -> the opaque session cookie -> HTTP 200
++                    ``{"redirect_uri": "<validated return_uri>?code=…"}``, which the prefab
++                    renderer navigates the current tab to. A refusal or a failure answers with
++                    the same shape pointing at this portal's own error-card page (AC10).
++    GET /bootstrap -> the D16 passkey landing: redeems the single-use bootstrap code for this
++                    portal's session cookie and 302s onward (the app's callback when a Blazor
++                    page originated the sign-in, else the portal landing).
++    GET /logout  -> D13: revoke the session at the auth service, clear the cookie, and redirect
++                    the browser to the returned ``end_session`` URL.
++    GET /health  -> JSON diagnostics: the resolved base URL and the env var that supplied it, the
++                    last auth-service call's outcome, and the discovery error when there is one.
++
++The portal holds **no credential** on any of these paths: the session cookie is an opaque id the
++auth service validates server-side, the antiforgery token is a random string this process stores
++itself (no signing key, D12), and every identity read is a mediated auth-service call whose
++response is data only. ``lifespan`` tolerates a missing auth-service endpoint at boot: the process
++starts, ``/health`` explains the state, and each route renders a degraded card — far more useful in
++a dev loop than an app that refuses to start.
++"""
++
++from __future__ import annotations
++
++import html
++import json
++import logging
++import os
++import secrets
++from collections.abc import AsyncIterator, Mapping, Sequence
++from contextlib import asynccontextmanager
++from dataclasses import dataclass, field
++from datetime import datetime, timedelta, timezone
++from typing import Any
++from urllib.parse import quote, urlencode, urlsplit
++
++import httpx
++from fastapi import Depends, FastAPI, Request, Response
++from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
++from fastapi.routing import APIRoute
++
++from api import (
++    AuthApiClient,
++    AuthServiceEndpoint,
++    PortalApiError,
++    ServiceDiscoveryError,
++    SessionData,
++    SessionEndedError,
++    SessionNotFoundError,
++    resolve_auth_service_endpoint,
++)
++from views.errors import (
++    RETURN_URI_NOT_ALLOWED_CODE,
++    build_error_card,
++    build_invalid_return_uri_card,
++    build_session_ended_card,
++    code_for_error,
++)
++from views.login import (
++    ANTIFORGERY_FIELD,
++    LOGIN_PATH,
++    PASSWORD_FIELD,
++    RETURN_URI_FIELD,
++    USERNAME_FIELD,
++    build_login_view,
++)
++
++logger = logging.getLogger("auth-portal")
++
++HTTP_TIMEOUT_SECONDS = 10.0
++
++#: The opaque portal session cookie (D12). An unguessable id and nothing else — no signature, no
++#: key material in Python, and never logged or echoed.
++SESSION_COOKIE_NAME = "school_collab_portal_session"
++
++#: The auth service's D16 passkey handoff (B6's ``PasskeyEndpoints.LoginPath``) — the button on
++#: the login page navigates the browser here, so the ceremony happens in Keycloak with the auth
++#: service as the relying party and no code or token can land in Python (AC12).
++PASSKEY_LOGIN_PATH = "/auth/passkey/login"
++
++#: The query parameter carrying the app callback on the passkey handoff (B6's pin).
++PASSKEY_APP_REDIRECT_PARAMETER = "app_redirect_uri"
++
++#: This portal's D16 bootstrap landing — the URI the auth service binds its bootstrap code to
++#: (``Auth:Portal:BootstrapRedirectUrl`` = ``{portal endpoint}/bootstrap``, B3/B6). The portal
++#: sends the identical, normalized spelling when it redeems the code.
++BOOTSTRAP_PATH = "/bootstrap"
++
++#: D13 logout (spec §9): revoke at the auth service, then send the browser to its end-session URL.
++LOGOUT_PATH = "/logout"
++
++#: This portal's own browser-facing base URL and its app-callback allowlist — both fanned out by
++#: the AppHost (B3/B5b). The allowlist copy deliberately excludes this portal's bootstrap URI:
++#: it is not a ``return_uri`` the portal itself should accept.
++PUBLIC_BASE_URL_KEY = "AuthPortal__PublicBaseUrl"
++APP_CALLBACK_PREFIXES_KEY = "AuthPortal__AppCallbackPrefixes"
++
++#: How long an issued login-form antiforgery token stays usable, and how many may live at once
++#: (spec §14). The cap keeps an anonymous page-render flood from growing the process unbounded.
++ANTIFORGERY_TTL_SECONDS = 600
++MAX_LIVE_ANTIFORGERY_TOKENS = 512
++
++#: The only schemes an app callback may use — a configured ``ftp://``/``file://`` entry is
++#: malformed, not an alternative transport (the auth service's matcher draws the same line).
++_HTTP_SCHEMES = {"http": 80, "https": 443}
++
++# FastAPI's own documentation routes: the route table reports the portal's routes, not these.
++_DOC_ROUTE_PATHS = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"})
++
++
++class AntiforgeryTokenStore:
++    """The login form's one-time tokens, held in this process's memory only (spec §14).
++
++    Each login-page render mints a random token and stores it here; ``POST /login`` requires one
++    and consumes it, so a body replayed from a page the user never loaded — or a second submit of
++    the same page — cannot sign anyone in. Nothing is signed: the token is a random string this
++    process happens to remember, which is why there is **no signing key in Python** (D12).
++
++    Expiry and a live cap keep the store bounded: the issuing page is anonymous, and an
++    unbounded dictionary fed by unauthenticated GETs is a memory DoS.
++    """
++
++    def __init__(self, *, ttl_seconds: int = ANTIFORGERY_TTL_SECONDS) -> None:
++        self._ttl = timedelta(seconds=ttl_seconds)
++        self._tokens: dict[str, datetime] = {}
++
++    def issue(self) -> str:
++        """Mint and store a token for the page about to render."""
++        self._sweep()
++        token = secrets.token_urlsafe(32)
++        self._tokens[token] = datetime.now(timezone.utc) + self._ttl
++        return token
++
++    def consume(self, token: str | None) -> bool:
++        """Whether ``token`` was issued and is unexpired — consuming it either way.
++
++        Single use by construction: the token is removed before its validity is judged, so a
++        replay of a *valid* token is rejected just like an unknown one.
++        """
++        if not token:
++            return False
++        expires_at = self._tokens.pop(token, None)
++        return expires_at is not None and expires_at > datetime.now(timezone.utc)
++
++    def _sweep(self) -> None:
++        now = datetime.now(timezone.utc)
++        for token, expires_at in list(self._tokens.items()):
++            if expires_at <= now:
++                del self._tokens[token]
++
++        # Insertion order is age order: the oldest tokens go first once the cap is reached.
++        for token in list(self._tokens)[: max(0, len(self._tokens) - MAX_LIVE_ANTIFORGERY_TOKENS)]:
++            del self._tokens[token]
++
++
++@dataclass(frozen=True)
++class AppCallbackPrefix:
++    """One configured app callback: scheme, host, port and a normalized path."""
++
++    scheme: str
++    host: str
++    port: int
++    path: str
++
++
++@dataclass
++class AuthPortalState:
++    """Per-process portal state — no module-level mutable globals."""
++
++    http: httpx.AsyncClient | None = None
++    endpoint: AuthServiceEndpoint | None = None
++    last_call: dict[str, Any] = field(default_factory=dict)
++    discovery_error: str | None = None
++    antiforgery: AntiforgeryTokenStore = field(default_factory=AntiforgeryTokenStore)
++
++
++def _describe(error: PortalApiError) -> str:
++    """A card-ready description that keeps the error's class name visible."""
++    return f"{type(error).__name__}: {error}"
++
++
++def _try_resolve() -> tuple[AuthServiceEndpoint | None, str | None]:
++    try:
++        return resolve_auth_service_endpoint(), None
++    except ServiceDiscoveryError as error:
++        return None, _describe(error)
++
++
++def _resolved_endpoint(state: AuthPortalState) -> AuthServiceEndpoint:
++    """The auth-service endpoint, retrying discovery when startup resolution failed.
++
++    Raises :class:`ServiceDiscoveryError` when the AppHost has not injected the variable.
++    """
++    if state.endpoint is None:
++        state.endpoint = resolve_auth_service_endpoint()
++        state.discovery_error = None
++    return state.endpoint
++
++
++def _record_call(
++    state: AuthPortalState,
++    *,
++    call: str,
++    endpoint: AuthServiceEndpoint,
++    error: PortalApiError | None = None,
++) -> None:
++    """Record what the last auth-service call was and how it went (the ``/health`` diagnostic)."""
++    state.last_call = {
++        "status": "ok" if error is None else "error",
++        "call": call,
++        "base_url": endpoint.base_url,
++        "env_var": endpoint.env_var,
++    }
++    if error is not None:
++        state.last_call["error"] = _describe(error)
++
++
++def _public_base_url() -> str | None:
++    """This portal's own browser-facing base URL, or ``None`` when it is not configured."""
++    configured = os.environ.get(PUBLIC_BASE_URL_KEY)
++    return configured.strip().rstrip("/") if configured and configured.strip() else None
++
++
++def portal_bootstrap_uri() -> str | None:
++    """The URI the auth service binds its D16 bootstrap code to (B6's normalization).
++
++    ``Auth:Portal:BootstrapRedirectUrl`` is the portal's Aspire endpoint plus ``/bootstrap``, and
++    the redemption's ``redirectUri`` must be that exact spelling — so this is built from the same
++    base URL the AppHost fanned out, not from the request.
++    """
++    base_url = _public_base_url()
++    return f"{base_url}{BOOTSTRAP_PATH}" if base_url else None
++
++
++def parse_app_callback_prefixes(configured: str | None) -> tuple[AppCallbackPrefix, ...]:
++    """Parse a semicolon-separated app-callback allowlist (the B5b spelling).
++
++    The portal's Python mirror of the auth service's ``AppCallbackAllowlist``: an entry that is
++    blank, unparseable, not http(s), hostless, carrying userinfo, or carrying a query/fragment of
++    its own grants nothing and is dropped. An empty result denies every candidate — fail-closed,
++    so an unconfigured portal renders the card rather than redirecting anywhere.
++    """
++    if not configured or not configured.strip():
++        return ()
++
++    prefixes: list[AppCallbackPrefix] = []
++    for entry in configured.split(";"):
++        entry = entry.strip()
++        if not entry:
++            continue
++        # A configured entry carrying a query or fragment could never be matched (matching
++        # ignores both), so it is malformed rather than a wider rule.
++        split = urlsplit(entry)
++        if split.query or split.fragment:
++            continue
++        uri = _split_uri(entry)
++        if uri is not None:
++            scheme, host, port, path = uri
++            prefixes.append(AppCallbackPrefix(scheme, host, port, _normalized_path(path)))
++    return tuple(prefixes)
++
++
++def configured_app_callback_prefixes() -> tuple[AppCallbackPrefix, ...]:
++    """The portal's own copy of the allowlist, read from the AppHost-injected environment."""
++    return parse_app_callback_prefixes(os.environ.get(APP_CALLBACK_PREFIXES_KEY))
++
++
++def is_allowed_app_callback(
++    redirect_uri: str | None, prefixes: Sequence[AppCallbackPrefix]
++) -> bool:
++    """Whether ``redirect_uri`` may receive a sign-in code (spec §14, AC13).
++
++    An absolute http(s) URI without userinfo whose scheme, host and port equal a configured
++    prefix and whose path is that prefix's path exactly or a ``/``-delimited extension of it.
++    The query and fragment are ignored: the Blazor callbacks are minted as
++    ``{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=…``, so the nested ``ReturnUrl``
++    must not break the match while the destination stays pinned. Anything else — a relative
++    path, an unparseable value, a blank one, an empty allowlist — returns ``False``.
++    """
++    candidate = _split_uri(redirect_uri)
++    if candidate is None:
++        return False
++
++    scheme, host, port, path = candidate
++    return any(
++        prefix.scheme == scheme
++        and prefix.host == host
++        and prefix.port == port
++        and (path == prefix.path or path.startswith(prefix.path + "/"))
++        for prefix in prefixes
++    )
++
++
++def _split_uri(value: str | None) -> tuple[str, str, int, str] | None:
++    """``(scheme, host, port, path)`` for a usable http(s) URI, else ``None``.
++
++    Component-wise on a parsed URI, never a substring test on the caller's text:
++    ``http://evil.example/?next=http://localhost:5300/signin-handshake`` contains an allowlisted
++    prefix but reaches an attacker host. The port is the scheme's default when it is omitted, so
++    ``http://host/x`` and ``http://host:80/x`` are one destination.
++
++    The path is compared **as written** (no percent-decoding) and a path carrying a ``.``/``..``
++    segment is refused outright. Both rules are the fail-closed half of the same point: a spelling
++    a downstream decoder resolves differently must not borrow a prefix's trust. Measured against
++    .NET (the C# copy's parser): ``Uri.AbsolutePath`` keeps ``%2F``/``%73`` escaped — so the C#
++    matcher also refuses those — but it *resolves* dot segments, so it sees
++    ``/signin-handshake/../evil`` as ``/evil`` and refuses it too. Refusing both spellings here is
++    the equivalent outcome without re-implementing RFC 3986 ``remove_dot_segments``; the only
++    spelling this refuses that the C# copy would resolve-and-accept is ``/signin-handshake/./x``,
++    which is a narrower (never a wider) target set.
++    """
++    if not value or not value.strip():
++        return None
++
++    try:
++        split = urlsplit(value.strip())
++        scheme = split.scheme.lower()
++        if scheme not in _HTTP_SCHEMES:
++            return None
++        host = split.hostname
++        if not host or split.username is not None or split.password is not None:
++            return None
++        port = split.port if split.port is not None else _HTTP_SCHEMES[scheme]
++    except ValueError:
++        # A malformed port, an unbracketed IPv6 literal, ...: malformed matches nothing.
++        return None
++
++    path = split.path or "/"
++    if any(segment in (".", "..") for segment in path.split("/")):
++        return None
++
++    return scheme, host, port, path
++
++
++def _normalized_path(path: str) -> str:
++    """A configured entry's path without a trailing slash (``/x/`` and ``/x`` are one prefix)."""
++    return path.rstrip("/") if path.rstrip("/") else "/"
++
++
++def _with_code(uri: str, code: str) -> str:
++    """``uri`` plus a one-time code as a query parameter.
++
++    The app callbacks already carry a ``ReturnUrl`` query (B1/B4), so the separator has to be
++    chosen rather than assumed — the same rule the auth service applies when it 302s here.
++    """
++    separator = "&" if "?" in uri else "?"
++    return f"{uri}{separator}code={quote(code, safe='')}"
++
++
++def _set_session_cookie(response: Response, session_id: str) -> None:
++    """Set the opaque D12 session cookie: an id, ``HttpOnly``, ``SameSite=Lax`` and — over HTTPS
++    — ``Secure``.
++
++    ``Secure`` follows the scheme of this portal's configured browser-facing base URL
++    (``AuthPortal:PublicBaseUrl``, the AppHost's fan-out) rather than being hardcoded either way:
++    D12 pins ``HttpOnly`` + ``SameSite=Lax``, the dev endpoints are plain ``http`` where a
++    ``Secure`` cookie would never be sent, and a production deployment reached over ``https``
++    must not ship without it. An unset base URL leaves it off, like dev.
++    """
++    response.set_cookie(
++        SESSION_COOKIE_NAME,
++        session_id,
++        path="/",
++        httponly=True,
++        samesite="lax",
++        secure=_public_base_url_is_https(),
++    )
++
++
++def _public_base_url_is_https() -> bool:
++    """Whether this portal is configured to be reached over HTTPS (the ``Secure`` flag's rule)."""
++    base_url = _public_base_url()
++    return bool(base_url) and urlsplit(base_url).scheme.lower() == "https"
++
++
++def _clear_session_cookie(response: Response) -> None:
++    """Drop the portal's session cookie (logout, and every state where it is already dead)."""
++    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
++
++
++def _signed_out_response(location: str) -> RedirectResponse:
++    """Send the browser onward with the session cookie cleared."""
++    response = RedirectResponse(location, status_code=302)
++    _clear_session_cookie(response)
++    return response
++
++
++def _text_field(payload: Mapping[str, Any], name: str) -> str | None:
++    """One string field of a JSON request body (``None`` when absent or not a string)."""
++    value = payload.get(name)
++    return value.strip() if isinstance(value, str) and value.strip() else None
++
++
++@asynccontextmanager
++async def lifespan(application: FastAPI) -> AsyncIterator[None]:
++    """Create the pooled HTTP client once, and tolerate a missing endpoint at boot."""
++    state = AuthPortalState()
++    state.endpoint, state.discovery_error = _try_resolve()
++    if state.discovery_error:
++        logger.error("auth service discovery failed at startup: %s", state.discovery_error)
++    else:
++        logger.info("auth portal wired to %s", state.endpoint.label)  # type: ignore[union-attr]
++
++    state.http = httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS)
++    application.state.auth_portal = state
++    try:
++        yield
++    finally:
++        await state.http.aclose()
++
++
++app = FastAPI(title="School-Collab auth portal", lifespan=lifespan)
++
++
++def _portal_state(request: Request) -> AuthPortalState:
++    """The process state, created lazily if the lifespan never ran."""
++    state: AuthPortalState | None = getattr(request.app.state, "auth_portal", None)
++    if state is None:
++        state = AuthPortalState(http=httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS))
++        request.app.state.auth_portal = state
++    return state
++
++
++async def get_auth_api_client(request: Request) -> AuthApiClient:
++    """FastAPI dependency: the typed client for the auth service.
++
++    Discovery is retried here when it failed at startup (the AppHost may inject the variable
++    later), and this is the seam the tests override with a stubbed transport via
++    ``app.dependency_overrides``. The routes that must map a discovery failure to their own card
++    call this function directly instead of depending on it.
++    """
++    state = _portal_state(request)
++    endpoint = _resolved_endpoint(state)  # raises ServiceDiscoveryError
++    assert state.http is not None  # created in the lifespan (or lazily above)
++    return AuthApiClient(state.http, endpoint)
++
++
++def _route_table(application: FastAPI) -> list[tuple[str, str]]:
++    """This portal's live routes, read from the app itself — never a hand-maintained list."""
++    routes = {
++        (method, route.path)
++        for route in application.routes
++        if isinstance(route, APIRoute) and route.path not in _DOC_ROUTE_PATHS
++        for method in route.methods
++    }
++    return sorted(routes, key=lambda entry: (entry[1], entry[0]))
++
++
++def _render_index(
++    *,
++    endpoint: AuthServiceEndpoint | None,
++    discovery_error: str | None,
++    session: SessionData | None,
++    session_error: str | None,
++    route_table: list[tuple[str, str]],
++) -> str:
++    """The portal index: wiring, session state and the route table, escaped and card-friendly."""
++    if discovery_error:
++        service_line = f"<strong>unresolved</strong> — {html.escape(discovery_error)}"
++    elif endpoint is not None:
++        service_line = html.escape(endpoint.label)
++    else:
++        service_line = "not resolved"
++
++    if session is not None:
++        roles = ", ".join(session.roles) or "none"
++        session_line = (
++            f"Signed in as {html.escape(session.teacher_id or 'unknown')} "
++            f"({html.escape(session.tenant_name or 'no tenant')}) — roles: {html.escape(roles)}"
++        )
++    elif session_error:
++        session_line = html.escape(session_error)
++    else:
++        session_line = "Not signed in."
++
++    route_rows = "\n".join(
++        f"      <li><code>{html.escape(method)} {html.escape(path)}</code></li>"
++        for method, path in route_table
++    )
++
++    return f"""<!DOCTYPE html>
++<html lang="en">
++  <head>
++    <meta charset="utf-8" />
++    <title>School-Collab auth portal</title>
++  </head>
++  <body>
++    <h1>School-Collab auth portal</h1>
++    <p>This process holds no credential: credentials and tokens stay in the auth service (AC11).</p>
++    <h2>Auth service</h2>
++    <p>{service_line}</p>
++    <h2>Session</h2>
++    <p>{session_line}</p>
++    <h2>Routes</h2>
++    <ul>
++{route_rows}
++    </ul>
++  </body>
++</html>
++"""
++
++
++@app.get("/", response_class=HTMLResponse)
++async def portal_index(
++    request: Request,
++    client: AuthApiClient = Depends(get_auth_api_client),
++) -> HTMLResponse:
++    """The portal index, including the session state read from the auth service (D18)."""
++    state = _portal_state(request)
++    session_id = request.cookies.get(SESSION_COOKIE_NAME)
++    session: SessionData | None = None
++    session_error: str | None = None
++
++    if session_id:
++        try:
++            session = await client.read_session(session_id)
++            _record_call(state, call="read_session", endpoint=client.endpoint)
++        except SessionEndedError as error:
++            # D18: a failed refresh is not a degraded page, it is a *dead* session. Clearing the
++            # cookie and rendering the card is the whole point — leaving the cookie in place only
++            # produces the "signed in but nothing works" state D18 rules out.
++            _record_call(state, call="read_session", endpoint=client.endpoint, error=error)
++            logger.warning("portal index: the session ended; clearing the cookie")
++            response = HTMLResponse(
++                build_session_ended_card(
++                    detail=_describe(error), endpoint_label=client.endpoint.label
++                ).html()
++            )
++            _clear_session_cookie(response)
++            return response
++        except SessionNotFoundError as error:
++            # The same treatment for the code the auth service uses for a cookie it does not know
++            # (revoked elsewhere, or a restarted service): B5 documents it as "already logged
++            # out", and the cookie can only fail every subsequent call.
++            _record_call(state, call="read_session", endpoint=client.endpoint, error=error)
++            logger.warning("portal index: unknown session id; clearing the cookie")
++            response = HTMLResponse(
++                build_error_card(
++                    code="session_not_found",
++                    detail=_describe(error),
++                    endpoint_label=client.endpoint.label,
++                ).html()
++            )
++            _clear_session_cookie(response)
++            return response
++        except PortalApiError as error:
++            # A degraded session read (auth service/Keycloak down) is page state, never a 500
++            # (AC10): the index still renders, with the failure named.
++            session_error = _describe(error)
++            _record_call(state, call="read_session", endpoint=client.endpoint, error=error)
++            logger.warning("portal index degraded: %s", error)
++
++    return HTMLResponse(
++        _render_index(
++            endpoint=client.endpoint,
++            discovery_error=state.discovery_error,
++            session=session,
++            session_error=session_error,
++            route_table=_route_table(request.app),
++        )
++    )
++
++
++@app.get(LOGIN_PATH, response_class=HTMLResponse)
++async def login_page(
++    request: Request,
++    return_uri: str | None = None,
++    error: str | None = None,
++) -> HTMLResponse:
++    """The prefab sign-in page, or the AC10 card for a ``return_uri`` the portal will not honor.
++
++    The ``return_uri`` is validated **before the form renders** (spec §14, AC13): a crafted
++    ``/login?return_uri=attacker`` link must be a page, not a redirect, and the value must never
++    reach the submit body. ``error`` is a bounded code from a refused or failed submit — the
++    page the login form navigates back to (see :func:`login_submit`), so a failure is a real
++    card at HTTP 200 rather than a lost fetch response.
++    """
++    state = _portal_state(request)
++
++    if not is_allowed_app_callback(return_uri, configured_app_callback_prefixes()):
++        logger.warning("login page refused a return_uri outside the app-callback allowlist")
++        return HTMLResponse(build_invalid_return_uri_card().html())
++
++    return HTMLResponse(
++        build_login_view(
++            antiforgery_token=state.antiforgery.issue(),
++            return_uri=return_uri,
++            passkey_login_url=_passkey_login_url(state),
++            error_code=error,
++        ).html()
++    )
++
++
++@app.post(LOGIN_PATH)
++async def login_submit(
++    request: Request,
++    client: AuthApiClient = Depends(get_auth_api_client),
++) -> Response:
++    """The form's own route: antiforgery, then credentials -> ``/auth/exchange`` -> the session.
++
++    Fail-closed, in this order and for these reasons (spec §14):
++
++    * **JSON only.** A cross-site page cannot POST ``application/json`` without a CORS preflight,
++      which this portal never answers (no CORS policy for foreign origins) — so the media type
++      is the first guard, ahead of any parsing.
++    * **A one-time antiforgery token**, minted with the page render and consumed here. It is
++      required and single-use, and there is no signing key anywhere in Python (D12).
++    * **The ``return_uri`` is re-validated against the portal's own allowlist** before it is used
++      at all; an invalid one is refused without an upstream call and never appears in the reply.
++
++    Success answers HTTP 200 ``{"redirect_uri": "<validated return_uri>?code=…"}`` and sets the
++    opaque session cookie; the renderer navigates the current tab to that URL. A refusal or a
++    failure answers the same shape pointing at this portal's own card page — the browser must
++    never be sent to a URL this route could not vouch for, and the prefab `Fetch` action cannot
++    consume a 302 (it would follow it cross-origin, dropping cookies and burning the code).
++    """
++    state = _portal_state(request)
++
++    # TRANSPORT GUARDS, deliberately not AC10 cards. These three refusals (wrong media type,
++    # unparseable body, missing/spent antiforgery token) happen *before* anything the portal
++    # could describe as a sign-in outcome: they are a malformed or forged request being turned
++    # away, so they answer with a non-2xx status and a machine code, not with the page-shaped
++    # failure the AC10 cards render. A caller that gets one of these is not a user looking at a
++    # form — it is a request the portal will not read. Everything from the credential exchange
++    # onward *is* a user-visible outcome and answers 200 with the card page (see `_login_failure`).
++    if not _is_json_request(request):
++        logger.warning("login POST refused: content type was not application/json")
++        return JSONResponse({"error": "unsupported_media_type"}, status_code=415)
++
++    payload = await _json_object(request)
++    if payload is None:
++        return JSONResponse({"error": "invalid_body"}, status_code=400)
++
++    if not state.antiforgery.consume(_text_field(payload, ANTIFORGERY_FIELD)):
++        logger.warning("login POST refused: missing or already-used antiforgery token")
++        return JSONResponse({"error": "antiforgery_rejected"}, status_code=400)
++
++    return_uri = _text_field(payload, RETURN_URI_FIELD)
++    if not is_allowed_app_callback(return_uri, configured_app_callback_prefixes()):
++        logger.warning("login POST refused a return_uri outside the app-callback allowlist")
++        return _login_failure(RETURN_URI_NOT_ALLOWED_CODE, return_uri=None)
++
++    username = _text_field(payload, USERNAME_FIELD)
++    password = _text_field(payload, PASSWORD_FIELD)
++    if not username or not password:
++        # The form's own `required`/model constraints cover the browser path; a hand-made call
++        # gets the same card without costing an upstream round trip.
++        return _login_failure("credentials_missing", return_uri=return_uri)
++
++    try:
++        # The identical string goes to the auth service, which binds the one-time code to it
++        # (round A's redemption compares it exactly, and the app redeems with its own spelling).
++        result = await client.exchange(username, password, return_uri)
++    except PortalApiError as error:
++        logger.warning("login POST failed: %s", error)
++        _record_call(state, call="exchange", endpoint=client.endpoint, error=error)
++        return _login_failure(code_for_error(error), return_uri=return_uri)
++
++    if not result.code or not result.session_id:
++        # A "success" without a code or a session id cannot sign anyone in, and must not be
++        # turned into a redirect that carries nothing (the DTOs tolerate a shape drift).
++        logger.error("login POST: the exchange returned no code or session id")
++        return _login_failure("unusable_response", return_uri=return_uri)
++
++    _record_call(state, call="exchange", endpoint=client.endpoint)
++    logger.info("login POST: exchanged credentials for a portal session")
++    response = JSONResponse({"redirect_uri": _with_code(return_uri, result.code)})
++    _set_session_cookie(response, result.session_id)
++    return response
++
++
++@app.get(BOOTSTRAP_PATH)
++async def bootstrap_redemption(
++    request: Request,
++    client: AuthApiClient = Depends(get_auth_api_client),
++    code: str | None = None,
++) -> Response:
++    """The D16 passkey landing: redeem the single-use bootstrap code for this portal's session.
++
++    Reached by a **top-level browser navigation** (the auth service's 302 after the WebAuthn
++    ceremony), so this is a real 302 onward — unlike the form's fetch-submitted route. The
++    ``redirectUri`` sent is this portal's bootstrap URI in the auth service's own normalized
++    spelling, which is what the code was bound to; the response carries no token (AC12).
++
++    A Blazor-originated sign-in also brings the D6 continuation (that app's callback plus a
++    one-time code), which the portal hands onward. Those values are re-validated against this
++    portal's allowlist before anything redirects — the auth service validated the persisted
++    value at issuance, and this is the portal's own half of the same rule.
++    """
++    state = _portal_state(request)
++    bootstrap_uri = portal_bootstrap_uri()
++    if bootstrap_uri is None:
++        logger.error("bootstrap redemption refused: %s is not configured", PUBLIC_BASE_URL_KEY)
++        return HTMLResponse(build_error_card(code="bootstrap_unconfigured").html())
++
++    if not code:
++        return HTMLResponse(build_error_card(code="bootstrap_code_missing").html())
++
++    try:
++        redemption = await client.redeem_bootstrap_code(code, bootstrap_uri)
++    except PortalApiError as error:
++        logger.warning("bootstrap redemption failed: %s", error)
++        _record_call(state, call="redeem_bootstrap_code", endpoint=client.endpoint, error=error)
++        return _bootstrap_card(code_for_error(error), endpoint=client.endpoint, error=error)
++
++    app_redirect_uri = redemption.app_redirect_uri
++    app_code = redemption.app_code
++
++    if app_redirect_uri is None and app_code is None:
++        # A sign-in that began at the portal itself needs only its session id.
++        target = "/"
++    elif app_redirect_uri and app_code:
++        if not is_allowed_app_callback(app_redirect_uri, configured_app_callback_prefixes()):
++            logger.error("bootstrap redemption refused a non-allowlisted continuation target")
++            return _bootstrap_card(RETURN_URI_NOT_ALLOWED_CODE, endpoint=client.endpoint)
++        target = _with_code(app_redirect_uri, app_code)
++    else:
++        # Half a continuation cannot sign the app in, and must not be redirected to as if it
++        # could: the auth service issues the D6 code and callback together (D16).
++        logger.error("bootstrap redemption: the continuation was incomplete")
++        return _bootstrap_card("unusable_response", endpoint=client.endpoint)
++
++    _record_call(state, call="redeem_bootstrap_code", endpoint=client.endpoint)
++    logger.info("bootstrap redemption: portal session established")
++    response = RedirectResponse(target, status_code=302)
++    _set_session_cookie(response, redemption.session_id)
++    return response
++
++
++@app.get(LOGOUT_PATH)
++async def logout(
++    request: Request,
++    client: AuthApiClient = Depends(get_auth_api_client),
++) -> Response:
++    """D13 (spec §9): revoke the session server-side, clear the cookie, go to Keycloak's logout.
++
++    The auth service revokes the refresh token itself and answers with the fully-built
++    ``end_session`` URL, because the portal holds neither the id token nor the ability to sign
++    one (D12/AC11). Note that under the parent's option (iii) the auth service may later perform
++    this browser-facing redirect itself, with ``id_token_hint`` in a ``Location`` header; this
++    route then redirects to the auth service's logout endpoint instead of to a URL it received.
++
++    Every outcome clears the portal's cookie — a logout that leaves a cookie behind is the one
++    thing this route must never do. A failed revocation still clears it and says so: the local
++    sign-in is over, and the Keycloak session's fate must not be hidden.
++    """
++    state = _portal_state(request)
++    session_id = request.cookies.get(SESSION_COOKIE_NAME)
++
++    if not session_id:
++        # Nothing to revoke: the browser is signed out already.
++        return _signed_out_response("/")
++
++    try:
++        revocation = await client.revoke_session(session_id)
++    except SessionNotFoundError as error:
++        # The auth service already forgot this session: locally signed out, nothing to redirect to.
++        _record_call(state, call="revoke_session", endpoint=client.endpoint, error=error)
++        return _signed_out_response("/")
++    except PortalApiError as error:
++        logger.warning("logout failed: %s", error)
++        _record_call(state, call="revoke_session", endpoint=client.endpoint, error=error)
++        return _logout_card(
++            code_for_error(error), detail=_describe(error), endpoint=client.endpoint
++        )
++
++    if not revocation.end_session_url:
++        logger.error("logout: the revocation returned no end_session URL")
++        return _logout_card("unusable_response", endpoint=client.endpoint)
++
++    _record_call(state, call="revoke_session", endpoint=client.endpoint)
++    logger.info("logout: session revoked; redirecting the browser to Keycloak's end-session URL")
++    return _signed_out_response(revocation.end_session_url)
++
++
++def _login_failure(code: str, *, return_uri: str | None) -> JSONResponse:
++    """A refused or failed `POST /login`: HTTP 200 and the portal's own error-card URL.
++
++    AC10 makes a sign-in failure a **page** at HTTP 200, and the renderer can only get there by
++    navigating — so the body names this portal's ``/login`` with the bounded code, which renders
++    the card. ``return_uri`` is only carried when it already passed validation, so a rejected
++    address is never reflected back into a URL the browser will visit.
++    """
++    parameters = {"error": code}
++    if return_uri:
++        parameters[RETURN_URI_FIELD] = return_uri
++    return JSONResponse({"redirect_uri": f"{LOGIN_PATH}?{urlencode(parameters)}"})
++
++
++def _bootstrap_card(
++    code: str,
++    *,
++    endpoint: AuthServiceEndpoint | None,
++    error: PortalApiError | None = None,
++) -> HTMLResponse:
++    """The card a bootstrap redemption renders — before any cookie is set and any 302 emitted."""
++    return HTMLResponse(
++        build_error_card(
++            code=code,
++            detail=_describe(error) if error else None,
++            endpoint_label=endpoint.label if endpoint else None,
++        ).html()
++    )
++
++
++def _logout_card(
++    code: str,
++    *,
++    detail: str | None = None,
++    endpoint: AuthServiceEndpoint | None = None,
++) -> HTMLResponse:
++    """The card a failed logout renders, with the cookie cleared: the local sign-out stands."""
++    response = HTMLResponse(
++        build_error_card(
++            code=code, detail=detail, endpoint_label=endpoint.label if endpoint else None
++        ).html()
++    )
++    _clear_session_cookie(response)
++    return response
++
++
++def _passkey_login_url(state: AuthPortalState) -> str | None:
++    """The auth service's D16 passkey handoff for a portal-initiated sign-in (B6's pin).
++
++    The ``app_redirect_uri`` is this portal's bootstrap URI: the one portal URL the auth
++    service's allowlist carries (B3), and — sharing the bootstrap URL's origin — the value B6
++    recognises as the portal's *own* sign-in, so no D6 continuation is issued for it. Without a
++    configured base URL (or a resolvable auth service) there is nothing allowlistable to hand
++    off to, so the login page omits the button.
++    """
++    bootstrap_uri = portal_bootstrap_uri()
++    if bootstrap_uri is None:
++        return None
++
++    try:
++        endpoint = _resolved_endpoint(state)
++    except ServiceDiscoveryError:
++        return None
++
++    return (
++        f"{endpoint.base_url}{PASSKEY_LOGIN_PATH}"
++        f"?{PASSKEY_APP_REDIRECT_PARAMETER}={quote(bootstrap_uri, safe='')}"
++    )
++
++
++def _is_json_request(request: Request) -> bool:
++    """Whether the request declares a JSON body (spec §14's first CSRF guard)."""
++    content_type = request.headers.get("content-type", "")
++    media_type = content_type.split(";", 1)[0].strip().lower()
++    return media_type == "application/json"
++
++
++async def _json_object(request: Request) -> Mapping[str, Any] | None:
++    """The request body as a JSON object, or ``None`` when it is not one."""
++    try:
++        payload = json.loads(await request.body())
++    except (ValueError, UnicodeDecodeError):
++        return None
++    return payload if isinstance(payload, Mapping) else None
++
++
++@app.exception_handler(ServiceDiscoveryError)
++async def on_discovery_error(request: Request, error: ServiceDiscoveryError) -> Response:
++    """A missing auth-service endpoint is a page-level degraded state, never a 500.
++
++    The failure arrives while a route's client dependency is being resolved — before any route
++    body runs — so mapping it to that route's own card has to happen here, by path. The index
++    keeps its established degraded page; the sign-in routes each answer in the shape their
++    caller expects (the form's fetch needs the JSON hand-off, not an HTML page).
++    """
++    state = _portal_state(request)
++    state.discovery_error = _describe(error)
++    state.last_call = {"error": state.discovery_error}
++    logger.error("auth portal degraded: %s", error)
++    code = code_for_error(error)
++
++    if request.url.path == LOGIN_PATH and request.method == "POST":
++        return _login_failure(code, return_uri=None)
++
++    if request.url.path == BOOTSTRAP_PATH:
++        return HTMLResponse(build_error_card(code=code, detail=state.discovery_error).html())
++
++    if request.url.path == LOGOUT_PATH:
++        if not request.cookies.get(SESSION_COOKIE_NAME):
++            # Nothing to revoke, so nothing to report: the browser is signed out already.
++            return _signed_out_response("/")
++        return _logout_card(code, detail=state.discovery_error)
++
++    return HTMLResponse(
++        _render_index(
++            endpoint=None,
++            discovery_error=state.discovery_error,
++            session=None,
++            session_error=None,
++            route_table=_route_table(request.app),
++        )
++    )
++
++
++@app.get("/health")
++def health(request: Request) -> dict[str, Any]:
++    """Diagnostics: the resolved endpoint, the last auth-service call, and any discovery error."""
++    state = _portal_state(request)
++    return {
++        "status": "ok" if state.endpoint else "degraded",
++        "auth_base_url": state.endpoint.base_url if state.endpoint else None,
++        "auth_env_var": state.endpoint.env_var if state.endpoint else None,
++        "last_call": state.last_call,
++        "discovery_error": state.discovery_error,
++    }
+diff --git a/src/SchoolCollab.AuthPortal/tests/test_app_callback_allowlist.py b/src/SchoolCollab.AuthPortal/tests/test_app_callback_allowlist.py
+new file mode 100644
+index 00000000..612b55ea
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/tests/test_app_callback_allowlist.py
+@@ -0,0 +1,228 @@
++"""The portal's copy of the app-callback allowlist — the attack-vector suite (spec §14, AC13).
++
++The portal holds a second, independent copy of the matcher the auth service enforces at code
++issuance (B5b's ``AppCallbackAllowlist``): the same rule written twice, in two languages, against
++two failure modes. This module is that copy's **proof**, and it deliberately walks the *same
++vectors* as the C# suite (``tests/SchoolCollab.Auth.Tests.Unit/AppCallbackAllowlistTests.cs``) so
++the two implementations can be diffed row by row: the test names mirror the C# ones
++(``IsAllowed_RejectsASuffixAppendedToAnAllowlistedPath`` →
++``test_is_allowed_rejects_a_suffix_appended_to_an_allowlisted_path``), and each vector class the
++C# suite pins has a counterpart here.
++
++The axes are the ones the security fix turns on: an allowlisted callback passes (including the
++Blazor hosts' nested ``ReturnUrl`` query), scheme + host + port + path must **all** match (a
++substring or loose-prefix implementation cannot pass this suite), an attacker URI in any spelling
++is denied, malformed input on either side grants nothing, and an empty allowlist denies everything
++rather than failing open.
++
++Two vectors are additions of this copy, both in the fail-closed direction, and both labelled where
++they appear: a percent-encoded path spelling and a dot-segment path spelling. ``.NET``'s
++``Uri.AbsolutePath`` keeps percent escapes (so the C# matcher also refuses them) but *resolves* dot
++segments (so it refuses ``/signin-handshake/../evil`` as ``/evil``); refusing both spellings here
++reaches the same outcome without re-implementing RFC 3986 ``remove_dot_segments``.
++"""
++
++from __future__ import annotations
++
++import pytest
++
++from app import is_allowed_app_callback, parse_app_callback_prefixes
++
++#: The admin host's handshake callback — the spelling B1's challenge handler and B4's
++#: ``BuildCallbackUri`` mint (launch profile ``http://localhost:5300``).
++ADMIN_CALLBACK = "http://localhost:5300/signin-handshake"
++
++#: The admin host's https scheme spelling (``https://localhost:7300``).
++ADMIN_CALLBACK_HTTPS = "https://localhost:7300/signin-handshake"
++
++#: The portal's own D16 bootstrap redemption URI — the second kind of allowlisted target the
++#: AppHost appends (derived from the portal's Aspire endpoint, never hardcoded there). Note it is
++#: in the *auth service's* copy only; the portal's copy must not treat it as a ``return_uri``.
++PORTAL_BOOTSTRAP = "http://localhost:9091/bootstrap"
++
++CONFIGURED = f"{ADMIN_CALLBACK};{ADMIN_CALLBACK_HTTPS};{PORTAL_BOOTSTRAP}"
++
++
++def _allowed(candidate: str | None, configured: str | None = CONFIGURED) -> bool:
++    """Whether ``candidate`` may receive a code, under ``configured`` (both parsed as one rule)."""
++    return is_allowed_app_callback(candidate, parse_app_callback_prefixes(configured))
++
++
++def test_is_allowed_accepts_an_allowlisted_callback_ignoring_the_query() -> None:
++    # The Blazor hosts mint `{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=<escaped>`
++    # (B1's challenge handler and B4's BuildCallbackUri share the spelling), so the query half —
++    # including a nested ReturnUrl that itself looks like a URL — must be ignored, not treated as
++    # a mismatch. This is the shape B8 hands to the auth service and to the browser verbatim.
++    assert _allowed(f"{ADMIN_CALLBACK}?ReturnUrl=%2Fstudents%3Fpage%3D2")
++
++
++def test_is_allowed_accepts_an_allowlisted_callback_without_any_query() -> None:
++    assert _allowed(ADMIN_CALLBACK)
++
++
++def test_is_allowed_accepts_the_portals_bootstrap_redemption_uri() -> None:
++    assert _allowed(PORTAL_BOOTSTRAP)
++
++
++def test_is_allowed_accepts_a_path_extension_of_an_allowlisted_path() -> None:
++    # Path PREFIX matching at a segment boundary: scheme/host/port bind the code's destination,
++    # and a deeper path on an allowlisted origin stays on that origin.
++    assert _allowed(f"{ADMIN_CALLBACK}/continuation")
++
++
++def test_is_allowed_accepts_a_trailing_slash_spelling_of_an_allowlisted_path() -> None:
++    # `/signin-handshake/` and `/signin-handshake` are the same resource, in both directions: the
++    # entry's trailing slash is normalized, so it cannot build a `//` comparison that matches
++    # nothing.
++    assert _allowed(f"{ADMIN_CALLBACK}/")
++
++    trailing_slash_entry = f"{ADMIN_CALLBACK}/"
++    assert _allowed(ADMIN_CALLBACK, trailing_slash_entry)
++    assert _allowed(f"{ADMIN_CALLBACK}/continuation", trailing_slash_entry)
++
++
++def test_is_allowed_rejects_a_suffix_appended_to_an_allowlisted_path() -> None:
++    # DISCRIMINATION: a plain `path.startswith(prefix.path)` accepts every one of these — `-evil`
++    # and `X` are appended with no `/` boundary, so they are DIFFERENT resources on the
++    # allowlisted origin that would otherwise inherit the callback's trust.
++    assert not _allowed(f"{ADMIN_CALLBACK}-evil")
++    assert not _allowed(f"{ADMIN_CALLBACK}X")
++    assert not _allowed(f"{ADMIN_CALLBACK}-evil?ReturnUrl=%2F")
++    assert not _allowed(f"{PORTAL_BOOTSTRAP}-evil")
++
++
++def test_is_allowed_rejects_userinfo_on_the_candidate() -> None:
++    # `http://attacker@localhost:5300/signin-handshake` parses with host=localhost and a userinfo
++    # part the browser hides, so a userinfo-carrying target is never the allowlisted callback even
++    # though its scheme/host/port/path all match.
++    assert not _allowed("http://attacker@localhost:5300/signin-handshake")
++    assert not _allowed("http://attacker:secret@localhost:5300/signin-handshake")
++    assert not _allowed("http://attacker@localhost:5300/signin-handshake?ReturnUrl=%2F")
++
++
++def test_is_allowed_skips_configured_entries_carrying_userinfo() -> None:
++    # DISCRIMINATION, entry direction: the entry's userinfo is not one of the compared components,
++    # so an entry that were merely *kept* would still grant the clean candidate host=localhost,
++    # port=5300, path=/signin-handshake. Dropping it is what makes the list below deny.
++    userinfo_only = "http://attacker@localhost:5300/signin-handshake"
++    assert not _allowed(ADMIN_CALLBACK, userinfo_only)
++    assert not _allowed(ADMIN_CALLBACK_HTTPS, userinfo_only)
++
++    # ... and dropping it keeps the other entries working, without becoming a host-wide grant.
++    mixed = f"{userinfo_only};{ADMIN_CALLBACK}"
++    assert _allowed(ADMIN_CALLBACK, mixed)
++    assert not _allowed(ADMIN_CALLBACK_HTTPS, mixed)
++
++
++def test_is_allowed_rejects_a_host_that_merely_contains_an_allowlisted_prefix() -> None:
++    # Each of these contains an allowlisted prefix as a substring but delivers the code somewhere
++    # else — a loose-substring implementation would accept every one of them.
++    assert not _allowed("http://attacker.example/?next=http://localhost:5300/signin-handshake")
++    assert not _allowed("http://attacker.example#http://localhost:5300/signin-handshake")
++    assert not _allowed("http://localhost.attacker.example:5300/signin-handshake")
++    assert not _allowed("http://attacker.example/signin-handshake")
++
++
++def test_is_allowed_requires_the_exact_scheme_host_and_port() -> None:
++    assert not _allowed("https://localhost:5300/signin-handshake")  # the admin callback is http
++    assert not _allowed("http://localhost:5400/signin-handshake")  # another app's port
++    assert not _allowed("http://localhost/signin-handshake")  # implicit 80 is not 5300
++    assert not _allowed("http://localhost:5301/signin-handshake")  # one port off is another origin
++
++
++def test_is_allowed_requires_an_allowlisted_path() -> None:
++    assert not _allowed("http://localhost:5300/login")  # only the handshake callback takes a code
++    assert not _allowed("http://localhost:5300/")  # the origin alone is not a callback
++    assert not _allowed("http://localhost:9091/session")  # the portal's path is /bootstrap
++
++
++def test_is_allowed_treats_the_explicit_default_port_as_the_absent_one() -> None:
++    # A URI normalizes the default port, so an entry written without one still matches a candidate
++    # that spells it out — and still cannot match a non-default port. Both schemes, both ways.
++    assert _allowed("http://callback.example:80/signin-handshake", "http://callback.example/signin-handshake")
++    assert not _allowed("http://callback.example:8080/signin-handshake", "http://callback.example/signin-handshake")
++    assert _allowed("https://callback.example:443/signin-handshake", "https://callback.example/signin-handshake")
++    assert not _allowed("https://callback.example:8443/signin-handshake", "https://callback.example/signin-handshake")
++
++
++def test_is_allowed_is_case_insensitive_for_scheme_and_host_but_not_for_the_path() -> None:
++    # The scheme and the host are folded (both `Uri` and `urlsplit` lowercase them); the path is
++    # NOT — a case-insensitive path compare would widen the target set to spellings the app does
++    # not serve.
++    assert _allowed("HTTP://LOCALHOST:5300/signin-handshake")
++    assert not _allowed("http://localhost:5300/SIGNIN-HANDSHAKE")
++
++
++def test_is_allowed_rejects_a_bare_origin_entry_for_a_deeper_path() -> None:
++    # A configured entry with no path is the root path (`/`), and the boundary rule applies to it
++    # like every other entry: it matches the origin's root and nothing deeper.
++    root_entry = "http://localhost:5300"
++    assert _allowed("http://localhost:5300", root_entry)
++    assert _allowed("http://localhost:5300/", root_entry)
++    assert not _allowed(ADMIN_CALLBACK, root_entry)
++
++
++@pytest.mark.parametrize(
++    "candidate",
++    [
++        None,
++        "",
++        "   ",
++        "/signin-handshake",
++        "not a uri at all",
++        "ftp://localhost:5300/signin-handshake",
++        "file:///signin-handshake",
++        "http:///signin-handshake",
++        "http://localhost:notaport/signin-handshake",
++    ],
++)
++def test_is_allowed_denies_malformed_candidates(candidate: str | None) -> None:
++    """An unparseable, relative, hostless, portless-by-typo or non-http(s) target never passes."""
++    assert not _allowed(candidate)
++
++
++def test_is_allowed_skips_malformed_entries_without_widening_or_disabling_the_list() -> None:
++    # The malformed entries (an unparseable token, a blank entry, a non-http(s) scheme, and an
++    # entry carrying its own query — which could never match, since the candidate's query is
++    # ignored) grant nothing; the valid entry still works.
++    mixed = f"not a uri; ;ftp://localhost:5300/signin-handshake;{ADMIN_CALLBACK}?ReturnUrl=x;{ADMIN_CALLBACK}"
++
++    assert _allowed(ADMIN_CALLBACK, mixed)
++    assert _allowed(f"{ADMIN_CALLBACK}?ReturnUrl=x", mixed)
++    assert not _allowed("ftp://localhost:5300/signin-handshake", mixed)
++    assert not _allowed("http://attacker.example/signin-handshake", mixed)
++
++
++@pytest.mark.parametrize("configured", [None, "", "   ", ";;", "; ;"])
++def test_is_allowed_denies_everything_when_the_allowlist_is_empty_or_blank(
++    configured: str | None,
++) -> None:
++    # DISCRIMINATION (the fail-open defect this control exists to prevent): an allowlist that
++    # resolves to no usable entry must deny every candidate. An implementation that skips the
++    # match when nothing is configured would mint a code for ANY caller-supplied URI — the crafted
++    # `return_uri=attacker` link would work again.
++    assert not _allowed(ADMIN_CALLBACK, configured)
++    assert not _allowed("http://attacker.example/signin-handshake", configured)
++    assert not _allowed(f"{ADMIN_CALLBACK}?ReturnUrl=%2Fstudents", configured)
++
++
++def test_is_allowed_rejects_a_percent_encoded_path_spelling() -> None:
++    # This copy's addition. `%2F` would decode to a path separator and `%73` to an `s`, so an
++    # implementation that decodes before comparing could match a spelling whose effective
++    # destination differs from the allowlisted path. Neither is compared decoded: the raw path is
++    # used, so both are refused (measured: .NET's Uri keeps both escapes in AbsolutePath, so the
++    # C# copy refuses them too — this is parity, not extra strictness).
++    assert not _allowed(f"{ADMIN_CALLBACK}%2Fevil")
++    assert not _allowed("http://localhost:5300/%73ignin-handshake")
++
++
++def test_is_allowed_rejects_a_dot_segment_path_spelling() -> None:
++    # This copy's addition, and the fail-closed replacement for .NET's dot-segment resolution:
++    # measured, `Uri.AbsolutePath` for `/signin-handshake/../evil` is `/evil`, which the C# matcher
++    # refuses. Python's `urlsplit` leaves the raw path, and a plain boundary check would read
++    # `/signin-handshake/../evil` as a deeper path under the prefix — accepting a spelling whose
++    # resolved destination is a *different* resource on the allowlisted origin. Refusing any
++    # dot-segment spelling lands on the C# outcome without re-implementing RFC 3986.
++    assert not _allowed(f"{ADMIN_CALLBACK}/../evil")
++    assert not _allowed(f"{ADMIN_CALLBACK}/./continuation")
++    assert not _allowed("http://localhost:5300/../signin-handshake")
+diff --git a/src/SchoolCollab.AuthPortal/tests/test_login_view.py b/src/SchoolCollab.AuthPortal/tests/test_login_view.py
+new file mode 100644
+index 00000000..8e8dc535
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/tests/test_login_view.py
+@@ -0,0 +1,188 @@
++"""The prefab sign-in surface's own contract: the form model, the reactive fields and the two
++actions the page hands the renderer (B8; spec §5.2/§5.3, §14).
++
++These assertions are made against the **tree the renderer receives** — the ``prefab:initial-data``
++JSON the page embeds — not against Python objects, so a component's serialized field names
++(``onSubmit``, ``inputType``, ``invalid``, ``inputType=password``) are what is pinned.
++"""
++
++from __future__ import annotations
++
++import json
++import re
++from collections.abc import Iterator
++from typing import Any
++
++from pydantic import SecretStr
++
++from views.errors import card_copy
++from views.login import (
++    ANTIFORGERY_FIELD,
++    LOGIN_PATH,
++    NAVIGATE_HANDLER,
++    PASSWORD_FIELD,
++    RETURN_URI_FIELD,
++    USERNAME_FIELD,
++    LoginFormModel,
++    build_login_view,
++)
++
++CALLBACK = "http://localhost:5300/signin-handshake?ReturnUrl=%2Fadmin"
++TOKEN = "antiforgery-token-1"
++PASSKEY_URL = (
++    "http://localhost:5301/auth/passkey/login"
++    "?app_redirect_uri=http%3A%2F%2Flocalhost%3A5400%2Fbootstrap"
++)
++
++_DATA_PATTERN = re.compile(
++    r'<script id="prefab:initial-data" type="application/json">(.*?)</script>', re.S
++)
++
++
++def _page(**overrides: Any) -> str:
++    arguments: dict[str, Any] = {
++        "antiforgery_token": TOKEN,
++        "return_uri": CALLBACK,
++        "passkey_login_url": PASSKEY_URL,
++    }
++    arguments.update(overrides)
++    return build_login_view(**arguments).html()
++
++
++def _wire(page: str) -> dict[str, Any]:
++    match = _DATA_PATTERN.search(page)
++    assert match is not None, "the page must embed the prefab tree it renders"
++    return json.loads(match.group(1).replace("\\/", "/"))
++
++
++def _components(node: Any) -> Iterator[dict[str, Any]]:
++    if isinstance(node, dict):
++        if isinstance(node.get("type"), str):
++            yield node
++        for value in node.values():
++            yield from _components(value)
++    elif isinstance(node, list):
++        for item in node:
++            yield from _components(item)
++
++
++def _of_type(page: str, component_type: str) -> list[dict[str, Any]]:
++    return [
++        component
++        for component in _components(_wire(page))
++        if component["type"] == component_type
++    ]
++
++
++def test_login_form_model_pins_the_credential_constraints() -> None:
++    fields = LoginFormModel.model_fields
++
++    assert set(fields) == {USERNAME_FIELD, PASSWORD_FIELD}
++    assert fields[USERNAME_FIELD].is_required()
++    assert fields[PASSWORD_FIELD].is_required()
++    # SecretStr is what makes Form.from_model emit a password input rather than a text field.
++    assert fields[PASSWORD_FIELD].annotation is SecretStr
++    # The bounds the inputs carry come from the model, so the model is the one definition.
++    assert fields[USERNAME_FIELD].metadata and fields[PASSWORD_FIELD].metadata
++
++
++def test_login_form_renders_a_password_input_with_reactive_field_errors() -> None:
++    page = _page()
++
++    password_inputs = [
++        component
++        for component in _of_type(page, "Input")
++        if component["inputType"] == "password"
++    ]
++    assert len(password_inputs) == 1
++    assert password_inputs[0]["name"] == PASSWORD_FIELD
++    assert password_inputs[0]["required"] is True
++    assert password_inputs[0]["minLength"] == 1
++    assert password_inputs[0]["maxLength"] == 256
++
++    # One reactive Field per credential, each with the FieldError it reveals when the bound
++    # state is empty — the label/control/error grouping prefab documents.
++    invalid_expressions = sorted(
++        component["invalid"] for component in _of_type(page, "Field")
++    )
++    assert invalid_expressions == [f"{{{{ !{PASSWORD_FIELD} }}}}", f"{{{{ !{USERNAME_FIELD} }}}}"]
++    assert len(_of_type(page, "FieldError")) == 2
++
++
++def test_login_form_submits_json_to_the_portals_own_route_with_the_one_time_token() -> None:
++    page = _page()
++
++    forms = _of_type(page, "Form")
++    assert len(forms) == 1
++    submit = forms[0]["onSubmit"]
++
++    assert submit["action"] == "fetch"
++    assert submit["method"] == "POST"
++    # The portal's own route, never the auth service and never Keycloak (D6/D7).
++    assert submit["url"] == LOGIN_PATH
++    assert submit["body"] == {
++        USERNAME_FIELD: f"{{{{ {USERNAME_FIELD} }}}}",
++        PASSWORD_FIELD: f"{{{{ {PASSWORD_FIELD} }}}}",
++        ANTIFORGERY_FIELD: TOKEN,
++        RETURN_URI_FIELD: CALLBACK,
++    }
++    # The response's redirect_uri is what moves the browser: `Fetch` follows redirects, so the
++    # route answers 200 JSON and this handler navigates the current tab.
++    assert submit["onSuccess"] == {
++        "action": "callHandler",
++        "handler": NAVIGATE_HANDLER,
++        "arguments": {"url": "{{ $result.redirect_uri }}"},
++    }
++    assert submit["onError"]["action"] == "showToast"
++
++
++def test_login_page_registers_the_single_in_tab_navigation_handler() -> None:
++    page = _page()
++
++    assert NAVIGATE_HANDLER in page, "the renderer needs the handler the actions name"
++    assert "window.location.assign" in page
++
++
++def test_login_page_hands_the_passkey_button_to_the_auth_service_handoff() -> None:
++    page = _page()
++
++    passkey_buttons = [
++        component
++        for component in _of_type(page, "Button")
++        if component["label"] == "Sign in with passkey"
++    ]
++    assert len(passkey_buttons) == 1
++    assert passkey_buttons[0]["onClick"] == {
++        "action": "callHandler",
++        "handler": NAVIGATE_HANDLER,
++        "arguments": {"url": PASSKEY_URL},
++    }
++
++
++def test_login_page_omits_the_passkey_button_without_the_portals_base_url() -> None:
++    page = _page(passkey_login_url=None)
++
++    assert "Sign in with passkey" not in page
++    assert "AuthPortal:PublicBaseUrl" in page, "the page says why passkey sign-in is unavailable"
++
++
++def test_login_page_renders_the_bounded_failure_copy_for_a_refused_submit() -> None:
++    page = _page(error_code="invalid_credentials")
++
++    title, message = card_copy("invalid_credentials")
++    alerts = _of_type(page, "Alert")
++    assert len(alerts) == 1
++    assert alerts[0]["variant"] == "destructive"
++    assert [component["content"] for component in _of_type(page, "AlertTitle")] == [title]
++    assert [component["content"] for component in _of_type(page, "AlertDescription")] == [message]
++
++
++def test_login_page_never_renders_an_unknown_error_code() -> None:
++    page = _page(error_code="<script>alert(1)</script>")
++
++    # The code is a dictionary key, never page content: an unknown one degrades to the generic
++    # copy instead of being echoed.
++    assert "alert(1)" not in page
++    title, message = card_copy(None)
++    assert [component["content"] for component in _of_type(page, "AlertTitle")] == [title]
++    assert [component["content"] for component in _of_type(page, "AlertDescription")] == [message]
+diff --git a/src/SchoolCollab.AuthPortal/tests/test_session_routes.py b/src/SchoolCollab.AuthPortal/tests/test_session_routes.py
+new file mode 100644
+index 00000000..0b27034e
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/tests/test_session_routes.py
+@@ -0,0 +1,609 @@
++"""Route-level tests for sign-in, the session cookie, bootstrap redemption and logout (B8).
++
++Uses FastAPI's ``TestClient`` plus ``app.dependency_overrides`` — no container, no Docker, no
++Keycloak: the whole chain route -> typed client -> stub transport -> page/redirect is covered the
++way B2's route tests are. The stub records every request, because the wire contract *is* the
++assertion: the ``redirectUri`` the portal sends, the ``redirect_uri`` it redirects to, and the
++cookie it sets are all pinned here.
++"""
++
++from __future__ import annotations
++
++import json
++import re
++from collections.abc import Callable
++
++import httpx
++import pytest
++from fastapi.testclient import TestClient
++
++import app as portal_app
++from api import AuthApiClient, AuthServiceEndpoint
++
++STUB_ENDPOINT = AuthServiceEndpoint(service="auth", base_url="http://auth.test", env_var="test")
++
++#: The app callback B1's challenge handler mints (path + the nested ReturnUrl query), which the
++#: portal must hand to the auth service byte-for-byte.
++CALLBACK = "http://localhost:5300/signin-handshake?ReturnUrl=%2Fadmin"
++
++PORTAL_BASE_URL = "http://localhost:5400"
++PORTAL_BOOTSTRAP_URI = f"{PORTAL_BASE_URL}/bootstrap"
++ALLOWLIST = "http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake"
++
++ATTACKER = "https://attacker.example/signin-handshake"
++
++Handler = Callable[[httpx.Request], httpx.Response]
++
++_TOKEN_PATTERN = re.compile(r'"antiforgery_token":"([^"]+)"')
++
++
++def _json_response(payload: object, status_code: int = 200) -> httpx.Response:
++    return httpx.Response(
++        status_code, json=payload, headers={"content-type": "application/json"}
++    )
++
++
++def _stub_override(handler: Handler):
++    """A dependency override serving ``handler`` from a MockTransport, recording requests."""
++
++    async def override() -> AuthApiClient:
++        return AuthApiClient(
++            httpx.AsyncClient(transport=httpx.MockTransport(handler)), STUB_ENDPOINT
++        )
++
++    return override
++
++
++def _portal_environment(monkeypatch: pytest.MonkeyPatch) -> None:
++    """The AppHost's fan-out for this portal (B3/B5b), as the routes read it."""
++    monkeypatch.setenv("services__auth__http__0", "http://auth.test")
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++    monkeypatch.setenv(portal_app.APP_CALLBACK_PREFIXES_KEY, ALLOWLIST)
++
++
++def _set_cookie(response: httpx.Response) -> str:
++    return response.headers.get("set-cookie", "")
++
++
++def _exchange_handler(seen: list[httpx.Request]) -> Handler:
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        return _json_response(
++            {"code": "one-time-code", "sessionId": "session-9", "expiresInSeconds": 300}
++        )
++
++    return handler
++
++
++def test_login_post_exchanges_credentials_and_names_the_validated_return_uri(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        _exchange_handler(seen)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            token = _TOKEN_PATTERN.search(
++                client.get("/login", params={"return_uri": CALLBACK}).text
++            )
++            assert token is not None
++            response = client.post(
++                "/login",
++                json={
++                    "username": "teacher-7",
++                    "password": "hunter2",
++                    "antiforgery_token": token.group(1),
++                    "return_uri": CALLBACK,
++                },
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    # The browser is told where to go — the app callback carrying the one-time code. The
++    # callback already carries a query, so the code is appended rather than assumed.
++    assert response.json() == {"redirect_uri": f"{CALLBACK}&code=one-time-code"}
++    cookie = _set_cookie(response)
++    assert f"{portal_app.SESSION_COOKIE_NAME}=session-9" in cookie
++    assert "httponly" in cookie.lower() and "samesite=lax" in cookie.lower()
++
++    # The auth service got the credentials and the *identical* return_uri (round A's redemption
++    # binds the code to that exact string).
++    assert len(seen) == 1
++    assert str(seen[0].url) == "http://auth.test/auth/exchange"
++    assert json.loads(seen[0].content) == {
++        "username": "teacher-7",
++        "password": "hunter2",
++        "redirectUri": CALLBACK,
++    }
++
++
++def test_login_post_requires_a_one_time_antiforgery_token(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        _exchange_handler(seen)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            without = client.post(
++                "/login",
++                json={"username": "u", "password": "p", "return_uri": CALLBACK},
++            )
++            token = _TOKEN_PATTERN.search(
++                client.get("/login", params={"return_uri": CALLBACK}).text
++            )
++            assert token is not None
++            body = {
++                "username": "u",
++                "password": "p",
++                "antiforgery_token": token.group(1),
++                "return_uri": CALLBACK,
++            }
++            first = client.post("/login", json=body)
++            replay = client.post("/login", json=body)
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert without.status_code == 400
++    assert without.json() == {"error": "antiforgery_rejected"}
++    assert _set_cookie(without) == "" and "redirect_uri" not in without.json()
++
++    assert first.status_code == 200
++    # Single use: the token is consumed by the attempt, so a replayed body is refused.
++    assert replay.status_code == 400
++    assert replay.json() == {"error": "antiforgery_rejected"}
++    assert _set_cookie(replay) == ""
++    assert len(seen) == 1  # the replay never reached the auth service
++
++
++def test_login_post_requires_a_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        _exchange_handler(seen)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            token = _TOKEN_PATTERN.search(
++                client.get("/login", params={"return_uri": CALLBACK}).text
++            )
++            assert token is not None
++            # What a cross-site HTML form posts: no CORS preflight can make it application/json,
++            # which is why the media type is checked ahead of everything else (spec §14).
++            response = client.post(
++                "/login",
++                content=f"username=u&password=p&antiforgery_token={token.group(1)}",
++                headers={"content-type": "application/x-www-form-urlencoded"},
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 415
++    assert response.json() == {"error": "unsupported_media_type"}
++    assert _set_cookie(response) == ""
++    assert seen == []
++
++
++def test_login_post_refuses_a_non_allowlisted_return_uri_without_redirecting_to_it(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        _exchange_handler(seen)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            token = _TOKEN_PATTERN.search(
++                client.get("/login", params={"return_uri": CALLBACK}).text
++            )
++            assert token is not None
++            response = client.post(
++                "/login",
++                json={
++                    "username": "u",
++                    "password": "p",
++                    "antiforgery_token": token.group(1),
++                    "return_uri": ATTACKER,
++                },
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    # The only URL the browser is ever sent to is the portal's own card page: the rejected
++    # address is neither redirected to nor reflected back.
++    assert response.json() == {"redirect_uri": "/login?error=return_uri_not_allowed"}
++    assert ATTACKER not in response.text
++    assert _set_cookie(response) == ""
++    assert seen == []  # refused before the credential exchange, so no code was ever minted
++
++
++def test_login_get_renders_the_card_for_a_non_allowlisted_return_uri(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++
++    with TestClient(portal_app.app) as client:
++        response = client.get("/login", params={"return_uri": ATTACKER})
++
++    assert response.status_code == 200  # a page, never a redirect and never a 500
++    assert "Return address refused" in response.text
++    assert ATTACKER not in response.text
++    assert "antiforgery_token" not in response.text  # no form, so no token to spend
++
++
++def test_login_post_renders_the_card_page_for_a_refused_submit(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response({"error": "invalid_credentials"}, 401)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            token = _TOKEN_PATTERN.search(
++                client.get("/login", params={"return_uri": CALLBACK}).text
++            )
++            assert token is not None
++            response = client.post(
++                "/login",
++                json={
++                    "username": "u",
++                    "password": "wrong",
++                    "antiforgery_token": token.group(1),
++                    "return_uri": CALLBACK,
++                },
++            )
++            card = client.get("/login", params={"return_uri": CALLBACK, "error": "invalid_credentials"})
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    assert response.json()["redirect_uri"].startswith("/login?")
++    assert "invalid_credentials" in response.json()["redirect_uri"]
++    assert _set_cookie(response) == ""
++    # ... and that page is the AC10 card the user actually sees.
++    assert card.status_code == 200
++    assert "The username or password was not recognized." in card.text
++
++
++def test_login_page_hands_passkey_sign_in_to_the_auth_service_with_the_portals_own_origin(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++
++    with TestClient(portal_app.app) as client:
++        page = client.get("/login", params={"return_uri": CALLBACK}).text
++
++    # B6's pin: the portal's own bootstrap URI — the one portal URL the auth service's allowlist
++    # carries, and (sharing its origin) the value it treats as the portal's own sign-in.
++    expected = (
++        f"http://auth.test{portal_app.PASSKEY_LOGIN_PATH}"
++        f"?{portal_app.PASSKEY_APP_REDIRECT_PARAMETER}="
++        "http%3A%2F%2Flocalhost%3A5400%2Fbootstrap"
++    )
++    assert expected in page
++
++
++def test_login_page_omits_the_passkey_button_without_the_portals_base_url(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    monkeypatch.delenv(portal_app.PUBLIC_BASE_URL_KEY, raising=False)
++
++    with TestClient(portal_app.app) as client:
++        page = client.get("/login", params={"return_uri": CALLBACK}).text
++
++    assert "Sign in with passkey" not in page
++    assert "AuthPortal:PublicBaseUrl" in page
++
++
++def test_bootstrap_redeems_the_code_with_the_portals_own_uri_and_continues_to_the_app(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        return _json_response(
++            {
++                "sessionId": "session-9",
++                "appRedirectUri": CALLBACK,
++                "appCode": "app-code",
++            }
++        )
++
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(handler)
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/bootstrap", params={"code": "boot-code"}, follow_redirects=False
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 302
++    # The D6 continuation the auth service returned, handed onward to the originating app.
++    assert response.headers["location"] == f"{CALLBACK}&code=app-code"
++    assert f"{portal_app.SESSION_COOKIE_NAME}=session-9" in _set_cookie(response)
++
++    # B6's normalized spelling, exactly: the URI the bootstrap code was bound to.
++    assert json.loads(seen[0].content) == {
++        "code": "boot-code",
++        "redirectUri": PORTAL_BOOTSTRAP_URI,
++    }
++
++
++def test_bootstrap_sends_a_portal_own_sign_in_to_the_portal_landing(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response({"sessionId": "session-9"})
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/bootstrap", params={"code": "boot-code"}, follow_redirects=False
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 302
++    assert response.headers["location"] == "/"
++    assert f"{portal_app.SESSION_COOKIE_NAME}=session-9" in _set_cookie(response)
++
++
++def test_bootstrap_renders_a_card_when_the_code_is_rejected(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response({"error": "invalid_code"}, 404)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/bootstrap", params={"code": "used"}, follow_redirects=False
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    assert "Sign-in handoff rejected" in response.text
++    assert _set_cookie(response) == ""
++
++
++def test_bootstrap_refuses_a_continuation_target_outside_the_allowlist(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response(
++            {"sessionId": "session-9", "appRedirectUri": ATTACKER, "appCode": "app-code"}
++        )
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/bootstrap", params={"code": "boot-code"}, follow_redirects=False
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    # Defense in depth: the auth service validated the persisted target, and the portal does not
++    # redirect a browser anywhere it cannot vouch for either.
++    assert response.status_code == 200
++    assert "Return address refused" in response.text
++    assert ATTACKER not in response.text
++    assert _set_cookie(response) == ""
++
++
++def test_bootstrap_renders_a_card_when_the_portals_base_url_is_not_configured(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    monkeypatch.delenv(portal_app.PUBLIC_BASE_URL_KEY, raising=False)
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: seen.append(request) or _json_response({"sessionId": "session-9"})
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get("/bootstrap", params={"code": "boot-code"})
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    assert "Passkey sign-in unavailable" in response.text
++    assert seen == []  # nothing to redeem against: the code is bound to a URI we cannot name
++
++
++def test_session_ended_clears_the_cookie_and_renders_the_card(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response({"error": "session_ended"}, 410)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/", headers={"cookie": f"{portal_app.SESSION_COOKIE_NAME}=session-9"}
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    assert "Session ended" in response.text
++    assert "Your sign-in expired or was revoked." in response.text
++    assert "session-9" not in response.text  # the opaque id is never echoed back
++    cleared = _set_cookie(response)
++    assert f'{portal_app.SESSION_COOKIE_NAME}=""' in cleared
++    assert "max-age=0" in cleared.lower()
++
++
++def test_index_clears_the_cookie_when_the_session_is_unknown(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response({"error": "session_not_found"}, 404)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/", headers={"cookie": f"{portal_app.SESSION_COOKIE_NAME}=stale"}
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    assert "Session no longer valid" in response.text
++    assert f'{portal_app.SESSION_COOKIE_NAME}=""' in _set_cookie(response)
++
++
++def test_logout_revokes_the_session_and_redirects_to_the_end_session_url(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++    end_session_url = "https://keycloak.test/realms/school-collab/protocol/openid-connect/logout"
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        return _json_response({"endSessionUrl": end_session_url})
++
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(handler)
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/logout",
++                headers={"cookie": f"{portal_app.SESSION_COOKIE_NAME}=session-9"},
++                follow_redirects=False,
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 302
++    assert response.headers["location"] == end_session_url
++    assert f'{portal_app.SESSION_COOKIE_NAME}=""' in _set_cookie(response)
++    # The revocation is the auth service's job: the portal never touches Keycloak's endpoints.
++    assert [(request.method, str(request.url)) for request in seen] == [
++        ("DELETE", "http://auth.test/auth/session/session-9")
++    ]
++
++
++def test_logout_without_a_session_lands_on_the_portal_and_clears_the_cookie(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: seen.append(request) or _json_response({"endSessionUrl": "http://x"})
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get("/logout", follow_redirects=False)
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 302
++    assert response.headers["location"] == "/"
++    assert seen == []
++
++
++def test_logout_renders_a_card_when_the_auth_service_cannot_revoke(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        lambda request: _json_response({"error": "upstream_unreachable"}, 502)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            response = client.get(
++                "/logout",
++                headers={"cookie": f"{portal_app.SESSION_COOKIE_NAME}=session-9"},
++                follow_redirects=False,
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    # Fail-closed: the local sign-out stands and says so — never a silent half-logout.
++    assert response.status_code == 200
++    assert "Identity provider unavailable" in response.text
++    assert f'{portal_app.SESSION_COOKIE_NAME}=""' in _set_cookie(response)
++
++
++def test_login_page_reports_the_unconfigured_allowlist_as_a_refusal(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _portal_environment(monkeypatch)
++    monkeypatch.delenv(portal_app.APP_CALLBACK_PREFIXES_KEY, raising=False)
++
++    with TestClient(portal_app.app) as client:
++        page = client.get("/login", params={"return_uri": CALLBACK})
++
++    # No allowlist is deny-everything, not accept-everything: the portal renders the card.
++    assert page.status_code == 200
++    assert "Return address refused" in page.text
++    assert "antiforgery_token" not in page.text
++
++
++def _sign_in_and_read_the_cookie(monkeypatch: pytest.MonkeyPatch) -> str:
++    """Sign in through the form and return the raw `Set-Cookie` header the portal sent."""
++    seen: list[httpx.Request] = []
++    portal_app.app.dependency_overrides[portal_app.get_auth_api_client] = _stub_override(
++        _exchange_handler(seen)
++    )
++    try:
++        with TestClient(portal_app.app) as client:
++            token = _TOKEN_PATTERN.search(
++                client.get("/login", params={"return_uri": CALLBACK}).text
++            )
++            assert token is not None
++            response = client.post(
++                "/login",
++                json={
++                    "username": "u",
++                    "password": "p",
++                    "antiforgery_token": token.group(1),
++                    "return_uri": CALLBACK,
++                },
++            )
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++    assert response.status_code == 200
++    return _set_cookie(response)
++
++
++def test_session_cookie_has_no_secure_flag_over_http(monkeypatch: pytest.MonkeyPatch) -> None:
++    # The dev endpoints are plain http, where a Secure cookie would never be sent back: the flag
++    # follows the configured scheme rather than a constant.
++    _portal_environment(monkeypatch)
++
++    cookie = _sign_in_and_read_the_cookie(monkeypatch)
++
++    assert f"{portal_app.SESSION_COOKIE_NAME}=session-9" in cookie
++    assert "secure" not in cookie.lower()
++
++
++def test_session_cookie_is_secure_over_https(monkeypatch: pytest.MonkeyPatch) -> None:
++    # A production deployment reached over https must not ship a cookie the browser would also
++    # send over http.
++    _portal_environment(monkeypatch)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, "https://portal.school-collab.example")
++
++    cookie = _sign_in_and_read_the_cookie(monkeypatch)
++
++    assert f"{portal_app.SESSION_COOKIE_NAME}=session-9" in cookie
++    assert "secure" in cookie.lower()
+diff --git a/src/SchoolCollab.AuthPortal/views/__init__.py b/src/SchoolCollab.AuthPortal/views/__init__.py
+new file mode 100644
+index 00000000..060a6e3c
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/views/__init__.py
+@@ -0,0 +1,44 @@
++"""Prefab UI component trees for the auth portal surfaces.
++
++Views are pure functions: data in (DTOs + endpoint metadata), ``PrefabApp``
++out. No HTTP, no environment reads, no cookie handling — that keeps prefab-ui's
++0.x churn and the route layer's concerns isolated from each other (the same
++split ``src/SchoolCollab.Portals/views`` uses).
++
++* :mod:`views.login` — the password form, the passkey handoff button and the
++  in-tab navigation the renderer performs after a submit.
++* :mod:`views.errors` — the fail-closed AC10 cards (D18 ``session ended``, an
++  invalid ``return_uri``, and every typed auth-service failure).
++"""
++
++from views.errors import (
++    build_error_card,
++    build_invalid_return_uri_card,
++    build_session_ended_card,
++    card_copy,
++    code_for_error,
++)
++from views.login import (
++    ANTIFORGERY_FIELD,
++    LOGIN_PATH,
++    PASSWORD_FIELD,
++    RETURN_URI_FIELD,
++    USERNAME_FIELD,
++    LoginFormModel,
++    build_login_view,
++)
++
++__all__ = [
++    "ANTIFORGERY_FIELD",
++    "LOGIN_PATH",
++    "PASSWORD_FIELD",
++    "RETURN_URI_FIELD",
++    "USERNAME_FIELD",
++    "LoginFormModel",
++    "build_error_card",
++    "build_invalid_return_uri_card",
++    "build_login_view",
++    "build_session_ended_card",
++    "card_copy",
++    "code_for_error",
++]
+diff --git a/src/SchoolCollab.AuthPortal/views/errors.py b/src/SchoolCollab.AuthPortal/views/errors.py
+new file mode 100644
+index 00000000..c25705cd
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/views/errors.py
+@@ -0,0 +1,206 @@
++"""The auth portal's fail-closed error cards (AC10, D18 — spec §5.2 step 6, §5.4, §14).
++
++Every degraded state is a Prefab page rendered at **HTTP 200**: the auth service or Keycloak
++being down, a session whose refresh failed, a rejected ``return_uri``, a refused handoff code.
++The portal never shows a raw 500, a traceback or a half-working page — and it never redirects a
++browser to an address it could not validate.
++
++Three named builders, one shared copy table:
++
++* :func:`build_error_card` — the general AC10 card, keyed by a **bounded** failure code;
++* :func:`build_session_ended_card` — the D18 card a failed token refresh gets (the portal clears
++  its cookie and renders this instead of a page that would fail every call);
++* :func:`build_invalid_return_uri_card` — the card a ``return_uri`` outside
++  ``AuthPortal:AppCallbackPrefixes`` gets, so a crafted login link is a page and never an open
++  redirect (spec §14, AC13).
++
++The copy is keyed by code, never by upstream text: :func:`code_for_error` reduces a typed portal
++error to one of this table's keys and everything else to ``unusable_response``, so an
++unrecognized failure can never echo a body, a token or an attacker-supplied string into a page.
++
++**These cards are for sign-in outcomes, not for malformed requests.** A request the portal refuses
++to read at all — a non-JSON content type, an unparseable body, a missing or already-spent
++antiforgery token — is answered by the route with a non-2xx status and a machine code (415/400)
++instead, because there is no user-visible sign-in state to describe and no page to render for a
++caller that is not the form.
++"""
++
++from __future__ import annotations
++
++from prefab_ui.app import PrefabApp
++from prefab_ui.components import Badge, Card, CardContent, Column, H3, Muted, Row
++
++from api import ApiResponseError, AuthServiceError, PortalApiError
++
++#: The card every unrecognized failure degrades to.
++UNUSABLE_RESPONSE_CODE = "unusable_response"
++
++#: The portal's own refusal of a ``return_uri`` outside its app-callback allowlist (spec §14).
++RETURN_URI_NOT_ALLOWED_CODE = "return_uri_not_allowed"
++
++#: The D18 code a failed token refresh surfaces as (``SessionEndpoints``, 410 Gone).
++SESSION_ENDED_CODE = "session_ended"
++
++#: Code -> (card title, card copy). One table, so a code and its wording cannot drift apart.
++CARD_COPY: dict[str, tuple[str, str]] = {
++    "invalid_credentials": (
++        "Sign-in failed",
++        "The username or password was not recognized.",
++    ),
++    "credentials_missing": (
++        "Sign-in incomplete",
++        "Enter both a username and a password.",
++    ),
++    "disabled_user": (
++        "Account disabled",
++        "This account is disabled. Ask an administrator to re-enable it.",
++    ),
++    "keycloak_unreachable": (
++        "Identity provider unavailable",
++        "Keycloak could not be reached, so nothing was signed in. Try again in a moment.",
++    ),
++    "upstream_unreachable": (
++        "Identity provider unavailable",
++        "Keycloak could not be reached, so nothing was signed in. Try again in a moment.",
++    ),
++    RETURN_URI_NOT_ALLOWED_CODE: (
++        "Return address refused",
++        "This portal signs in apps whose callback is on its allowlist, and this return address "
++        "is not one of them. No sign-in code was issued - start again from the app you were "
++        "signing in to.",
++    ),
++    "redirect_uri_not_allowed": (
++        "Return address refused",
++        "The auth service refused this return address at code issuance, so no sign-in code "
++        "exists. Start again from the app you were signing in to.",
++    ),
++    "redirect_uri_required": (
++        "Return address missing",
++        "No app callback was supplied, so no sign-in code could be issued.",
++    ),
++    SESSION_ENDED_CODE: (
++        "Session ended",
++        "Your sign-in expired or was revoked. Sign in again to continue.",
++    ),
++    "session_not_found": (
++        "Session no longer valid",
++        "This portal's session cookie was already stale - it has been cleared. Sign in again "
++        "to continue.",
++    ),
++    "invalid_code": (
++        "Sign-in handoff rejected",
++        "The one-time sign-in code was already used, or it has expired.",
++    ),
++    "code_expired": (
++        "Sign-in handoff rejected",
++        "The one-time sign-in code has expired.",
++    ),
++    "redirect_uri_mismatch": (
++        "Sign-in handoff rejected",
++        "The one-time sign-in code was issued for a different return address.",
++    ),
++    "bootstrap_unconfigured": (
++        "Passkey sign-in unavailable",
++        "This portal's own browser-facing base URL is not configured, so the passkey handoff "
++        "cannot be completed.",
++    ),
++    "bootstrap_code_missing": (
++        "Sign-in handoff rejected",
++        "The browser arrived without a sign-in handoff code.",
++    ),
++    UNUSABLE_RESPONSE_CODE: (
++        "Sign-in unavailable",
++        "The auth service answered with something this portal could not use. Nothing was "
++        "signed in.",
++    ),
++}
++
++#: The generic copy, used for any code outside :data:`CARD_COPY` — including a hand-edited
++#: ``?error=`` query value on the login page.
++_GENERIC_COPY: tuple[str, str] = (
++    "Sign-in unavailable",
++    "The auth portal could not complete this step. Nothing was signed in.",
++)
++
++
++def card_copy(code: str | None) -> tuple[str, str]:
++    """The card title and copy for a bounded failure code (unknown codes degrade generically)."""
++    return CARD_COPY.get(code or "", _GENERIC_COPY)
++
++
++def code_for_error(error: PortalApiError) -> str:
++    """The bounded card code for a typed portal failure.
++
++    An auth-service failure carries its own ``error`` code; anything else (a transport failure, a
++    non-JSON or token-shaped body, service discovery) is the portal's ``unusable_response``.
++
++    ``ApiResponseError`` is the one case that needs care: the client builds its ``detail`` itself
++    as ``HTTP <status>: <code>`` from the body's ``error`` field — never from a raw upstream body
++    — so scanning that bounded text for one of our own codes is safe, and it is what surfaces
++    B5b's ``redirect_uri_not_allowed`` (the auth service's own refusal, which a caller outside
++    this portal's validation can still hit) as its own card instead of a generic one.
++    """
++    if isinstance(error, AuthServiceError):
++        return error.code
++    if isinstance(error, ApiResponseError):
++        for code in CARD_COPY:
++            if code in error.detail:
++                return code
++    return UNUSABLE_RESPONSE_CODE
++
++
++def build_error_card(
++    *,
++    code: str | None,
++    detail: str | None = None,
++    endpoint_label: str | None = None,
++) -> PrefabApp:
++    """The AC10 card for a failure code — a page at HTTP 200, never a 500 and never a redirect.
++
++    ``detail`` is the typed error's own ``str()``: a class name plus the portal's bounded message
++    (no token, no upstream body), kept visible for the dev loop the way the ward portal's error
++    view keeps it. ``endpoint_label`` names the auth service the portal looked for.
++    """
++    title, message = card_copy(code)
++
++    with PrefabApp(title=f"School-Collab auth portal - {title}", css_class="p-6") as application:
++        with Column(gap=4):
++            H3("School-Collab auth portal")
++            with Row(gap=2):
++                Badge(title, variant="default")
++                if code:
++                    Badge(code, variant="default")
++            with Card():
++                with CardContent():
++                    with Column(gap=2):
++                        Muted(message)
++                        if detail:
++                            Muted(detail)
++                        if endpoint_label:
++                            Muted(f"Auth service: {endpoint_label}")
++    return application
++
++
++def build_session_ended_card(
++    *,
++    detail: str | None = None,
++    endpoint_label: str | None = None,
++) -> PrefabApp:
++    """The D18 card a session read renders once the refresh is known to have failed.
++
++    The route clears the session cookie alongside this card: the failure means the cookie can
++    only produce a broken page, and hiding that is the "signed in but nothing works" state D18
++    rules out.
++    """
++    return build_error_card(
++        code=SESSION_ENDED_CODE, detail=detail, endpoint_label=endpoint_label
++    )
++
++
++def build_invalid_return_uri_card(*, detail: str | None = None) -> PrefabApp:
++    """The card an app callback outside ``AuthPortal:AppCallbackPrefixes`` gets (spec §14, AC13).
++
++    The rejected value is deliberately **not** echoed: it is attacker-chosen text, and the auth
++    service's own rejection bodies do not echo it either.
++    """
++    return build_error_card(code=RETURN_URI_NOT_ALLOWED_CODE, detail=detail)
+diff --git a/src/SchoolCollab.AuthPortal/views/login.py b/src/SchoolCollab.AuthPortal/views/login.py
+new file mode 100644
+index 00000000..7d14394d
+--- /dev/null
++++ b/src/SchoolCollab.AuthPortal/views/login.py
+@@ -0,0 +1,226 @@
++"""The prefab sign-in surface — the password form, the passkey handoff and the in-tab handoff
++(spec §5.2, §5.3, §5.4, §14).
++
++One page, three things a browser needs:
++
++* a **model-driven form** (`Form.from_model`) whose fields come from :class:`LoginFormModel`, so
++  the credential input's type, label and constraints have exactly one definition;
++* the **reactive `Field`/`FieldError`** pattern on each field (prefab's documented validation
++  display), so a blank username/password is explained where the input is, without a round trip;
++* the **"Sign in with passkey"** button, which hands off to the auth service's D16 relying-party
++  ceremony (the portal has no OIDC client, so no code or token can land in Python — AC12).
++
++**Submission.** The form posts JSON to *this portal's* `POST /login` with the built-in
++`Fetch.post` action — never to the auth service, never to Keycloak. The route answers with HTTP
++200 and `{"redirect_uri": "<where the browser must go next>"}` (the validated `return_uri` plus
++the one-time code on success; the portal's own error-card page on a refusal), and the renderer
++then moves the browser **in the tab the user started in**.
++
++Why the JSON hand-off instead of a 302: `Fetch` follows redirects and has no redirect option, so
++a 302 to the app callback would be fetched as a cross-origin request — no cookies, `Set-Cookie`
++dropped, CORS-blocked — consuming the one-time code without signing anyone in. The in-tab
++navigation is performed by one registered renderer handler (`js_actions`), which both the form
++and the passkey button use so there is a single navigation mechanism on the page.
++
++**Every value that reaches the browser's address bar is server-validated first**: the
++`return_uri` is checked against `AuthPortal:AppCallbackPrefixes` before this tree renders, and
++the failure body is a same-origin error page.
++"""
++
++from __future__ import annotations
++
++from pydantic import BaseModel, SecretStr
++from pydantic import Field as ModelField
++from prefab_ui.actions import CallHandler, Fetch, ShowToast
++from prefab_ui.app import PrefabApp
++from prefab_ui.components import (
++    Alert,
++    AlertDescription,
++    AlertTitle,
++    Button,
++    Card,
++    CardContent,
++    Column,
++    Field,
++    FieldError,
++    Form,
++    H3,
++    Muted,
++    Separator,
++    defer,
++    insert,
++)
++from prefab_ui.rx import Rx
++
++from views.errors import card_copy
++
++#: The portal's own login route. The form's `Fetch.post` target and the FastAPI route in
++#: ``app.py`` are one contract, so the path is defined once — here — and the route imports it.
++LOGIN_PATH = "/login"
++
++#: The JSON body field names `POST /login` parses (app.py reads exactly these).
++USERNAME_FIELD = "username"
++PASSWORD_FIELD = "password"
++ANTIFORGERY_FIELD = "antiforgery_token"
++RETURN_URI_FIELD = "return_uri"
++
++#: The one renderer JS action that navigates the current tab. prefab-ui 0.20.2's built-in
++#: actions cover state, toasts and fetch, and its only navigation is `openLink` — which opens a
++#: *new* tab, leaving the tab the user started in without the session this flow just created.
++NAVIGATE_HANDLER = "navigate"
++NAVIGATE_HANDLER_JS = "(args) => { window.location.assign(args.arguments.url); }"
++
++#: The argument name the handler reads (`CallHandler.arguments`).
++NAVIGATE_URL_ARGUMENT = "url"
++
++
++class LoginFormModel(BaseModel):
++    """The credential form's fields and their constraints (spec §5.2).
++
++    ``SecretStr`` is what makes ``Form.from_model`` emit ``Input(input_type="password")``, so the
++    credential can never render as a plain text field; ``min_length`` becomes the input's own
++    constraint and the form model's fields are the single definition of both labels and bounds.
++    """
++
++    username: str = ModelField(
++        title="Username",
++        description="School-Collab username",
++        min_length=1,
++        max_length=256,
++    )
++    password: SecretStr = ModelField(
++        title="Password",
++        description="School-Collab password",
++        min_length=1,
++        max_length=256,
++    )
++
++
++def build_login_view(
++    *,
++    antiforgery_token: str,
++    return_uri: str,
++    passkey_login_url: str | None,
++    error_code: str | None = None,
++) -> PrefabApp:
++    """The sign-in page for one render.
++
++    ``antiforgery_token`` is the one-time token the route just issued and stored server-side;
++    it travels into the submit body, so the server can require the exact page it handed out.
++    ``error_code`` is a bounded failure code (see ``views.errors.card_copy``) rendered as an
++    alert above the form — the card a refused or failed submit lands on.
++    """
++    with PrefabApp(
++        title="Sign in - School-Collab",
++        css_class="p-6",
++        js_actions={NAVIGATE_HANDLER: NAVIGATE_HANDLER_JS},
++    ) as application:
++        with Column(gap=4):
++            H3("Sign in to School-Collab")
++            Muted(
++                "Your credentials go to the auth service through this portal, which holds no "
++                "token of yours in return."
++            )
++            if error_code is not None:
++                _notice(error_code)
++            with Card():
++                with CardContent():
++                    with Form(on_submit=_submit_action(antiforgery_token, return_uri)):
++                        _credential_fields()
++                        Button("Sign in")
++            _passkey_section(passkey_login_url)
++    return application
++
++
++def _notice(error_code: str) -> None:
++    """The alert a refused or failed sign-in renders above the form (AC10 at HTTP 200)."""
++    title, message = card_copy(error_code)
++    with Alert(variant="destructive"):
++        AlertTitle(title)
++        AlertDescription(message)
++
++
++def _submit_action(antiforgery_token: str, return_uri: str) -> Fetch:
++    """The form's submit: `Fetch.post` to the portal's own route, then navigate to its answer.
++
++    The body names the two inputs by the state keys the renderer binds them to, carries the
++    one-time antiforgery token and the validated ``return_uri`` verbatim (the route sends the
++    identical string to the auth service, which binds the handshake code to it).
++    """
++    return Fetch.post(
++        LOGIN_PATH,
++        body={
++            USERNAME_FIELD: _template(USERNAME_FIELD),
++            PASSWORD_FIELD: _template(PASSWORD_FIELD),
++            ANTIFORGERY_FIELD: antiforgery_token,
++            RETURN_URI_FIELD: return_uri,
++        },
++        on_success=CallHandler(
++            NAVIGATE_HANDLER,
++            arguments={NAVIGATE_URL_ARGUMENT: _template("$result.redirect_uri")},
++        ),
++        on_error=ShowToast(_template("$error"), variant="error"),
++    )
++
++
++def _credential_fields() -> None:
++    """The model's fields, each in a reactive `Field` with its `FieldError`.
++
++    ``Form.from_model(..., fields_only=True)`` generates the labeled inputs (label, placeholder,
++    constraints, password type) from :class:`LoginFormModel`; they are generated detached so each
++    one can be adopted by a ``Field``, whose reactive ``invalid`` expression turns the label and
++    input red and reveals the ``FieldError`` the moment the bound state is empty.
++    """
++    with defer():
++        generated = Form.from_model(LoginFormModel, fields_only=True)
++
++    for name, component in zip(LoginFormModel.model_fields, generated, strict=True):
++        with Field(invalid=Rx(f"!{name}")):
++            insert(component)
++            FieldError(_field_error_text(name))
++
++
++def _field_error_text(name: str) -> str:
++    """The `FieldError` message for a blank field, named from the model's own title."""
++    title = LoginFormModel.model_fields[name].title or name
++    return f"Enter your {title.lower()}."
++
++
++def _passkey_section(passkey_login_url: str | None) -> None:
++    """The D16 passkey handoff (spec §5.3) — or, without the portal's own base URL, why not.
++
++    The button hands off to the auth service's ceremony with *this portal's* bootstrap URL as the
++    ``app_redirect_uri``: it is the one portal URL the auth service's allowlist carries, and a
++    target sharing the bootstrap URL's origin is recognised there as the portal's own sign-in, so
++    no D6 continuation is issued for it. Without a configured base URL there is no allowlistable
++    target to hand off to, so the button is omitted rather than pointed at a URL that must fail.
++    """
++    if passkey_login_url is None:
++        Muted(
++            "Passkey sign-in is unavailable: this portal's own base URL "
++            "(AuthPortal:PublicBaseUrl) is not configured."
++        )
++        return
++
++    Separator()
++    Button(
++        "Sign in with passkey",
++        variant="outline",
++        on_click=CallHandler(
++            NAVIGATE_HANDLER, arguments={NAVIGATE_URL_ARGUMENT: passkey_login_url}
++        ),
++    )
++    Muted(
++        "Passkeys run in Keycloak's own page: this portal never sees the credential, and the "
++        "auth service completes the ceremony."
++    )
++
++
++def _template(expression: str) -> str:
++    """A prefab template for ``expression`` — ``{{ expression }}``.
++
++    The renderer resolves it against the page's component state and the action context
++    (``$result``/``$error``), which is how the submit body reads the inputs and how the success
++    action learns where to navigate.
++    """
++    return "{{ " + expression + " }}"
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+index 56651af7..8f7e0e49 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+@@ -9,8 +9,9 @@ namespace SchoolCollab.ArchitectureTests.Unit;
+ /// <c>SchoolCollab.slnx</c>.
+ ///
+ /// <para>
+-/// The portal (<c>src/SchoolCollab.Portals/</c>) is Python, launched by the AppHost through
+-/// <c>AddUvicornApp</c>, so it contributes no project to the solution. It is surfaced in the
++/// The portal projects (<c>src/SchoolCollab.Portals/</c> and <c>src/SchoolCollab.AuthPortal/</c>)
++/// are Python, launched by the AppHost through
++/// <c>AddUvicornApp</c>, so they contribute no project to the solution. They are surfaced in the
+ /// Visual Studio solution view as explicit solution items instead — and <b>.slnx has no
+ /// globbing support</b> (Visual Studio's FAQ: "globbing is not currently supported"; the PR
+ /// that would have added it was closed), so every file is a hand-maintained
+@@ -30,34 +31,72 @@ public class PortalsSolutionItemsArchitectureTests
+ {
+     private const string PortalFolderPrefix = "src/SchoolCollab.Portals/";
+ 
++    private const string AuthPortalFolderPrefix = "src/SchoolCollab.AuthPortal/";
++
++    /// <summary>
++    /// Every portal project whose Python files must appear as explicit solution items. The walk
++    /// and both solution-item assertions follow from this list — adding a portal project means
++    /// adding its prefix here once, not re-deriving the guard.
++    /// </summary>
++    private static readonly string[] PortalFolderPrefixes = [PortalFolderPrefix, AuthPortalFolderPrefix];
++
++    /// <summary>
++    /// The same projects spelled the way solution folder nodes are: a node's name is the folder
++    /// path with a leading slash ("src/SchoolCollab.Portals/" on disk is
++    /// "/src/SchoolCollab.Portals/" in the solution view).
++    /// </summary>
++    private static readonly string[] PortalFolderNodePrefixes =
++        [.. PortalFolderPrefixes.Select(prefix => "/" + prefix)];
++
+     private static readonly string RepoRoot = FindRepoRoot();
+ 
+-    private static readonly string[] SolutionFileItems = ParseSolutionFileItems();
++    /// <summary>
++    /// The ward portal's solution items. Its reviewed-set tripwire pins exactly this array, so the
++    /// pin stays scoped to <c>src/SchoolCollab.Portals/</c> while the assertions above cover every
++    /// portal project.
++    /// </summary>
++    private static readonly string[] SolutionFileItems = ParseSolutionFileItems(PortalFolderPrefix);
++
++    private static readonly string[] AllPortalSolutionFileItems = ParseSolutionFileItems(PortalFolderPrefixes);
+ 
+-    private static readonly string[] PortalSolutionFolderNodes = ParsePortalSolutionFolderNodes();
++    /// <summary>
++    /// The solution folder nodes of <b>every</b> portal project. B8's amendment: this used to walk
++    /// <c>src/SchoolCollab.Portals/</c> alone, so the auth portal's nodes — which only exist once
++    /// its <c>views/</c> package does — were pinned nowhere and a missing/mistyped node would ship
++    /// unguarded. Both prefixes now feed one list, mirroring <see cref="AllPortalSolutionFileItems"/>.
++    /// </summary>
++    private static readonly string[] AllPortalSolutionFolderNodes = ParsePortalSolutionFolderNodes();
+ 
+     private static readonly string[] PortalSourceFiles = EnumeratePortalSourceFiles();
+ 
+     [TestMethod]
+     public void EveryPortalFile_IsListedInTheSolution()
+     {
+-        // Anti-vacuity: with an empty walk the assertion below would pass trivially.
++        // Anti-vacuity: with an empty walk — or one that reaches only one of the portal projects —
++        // the assertion below would pass trivially for whichever project it missed.
+         PortalSourceFiles.Should().NotBeEmpty(
+-            "src/SchoolCollab.Portals should exist and hold the portal's Python sources");
++            "every portal project should exist and hold its Python sources");
+ 
+-        var listed = SolutionFileItems.ToHashSet(StringComparer.OrdinalIgnoreCase);
++        foreach (var prefix in PortalFolderPrefixes)
++        {
++            PortalSourceFiles.Should().Contain(
++                file => file.StartsWith(prefix, StringComparison.OrdinalIgnoreCase),
++                $"the on-disk walk must reach {prefix}");
++        }
++
++        var listed = AllPortalSolutionFileItems.ToHashSet(StringComparer.OrdinalIgnoreCase);
+         var unlisted = PortalSourceFiles.Where(file => !listed.Contains(file)).ToArray();
+ 
+         unlisted.Should().BeEmpty(
+             "every portal file belongs in the solution view, and .slnx has no glob support — "
+-            + "add each one as a <File> under /src/SchoolCollab.Portals/<package>/. Unlisted: "
++            + "add each one as a <File> under /src/SchoolCollab.<Portal>/<package>/. Unlisted: "
+             + string.Join(", ", unlisted));
+     }
+ 
+     [TestMethod]
+     public void EveryPortalSolutionItem_ExistsOnDisk()
+     {
+-        var missing = SolutionFileItems
++        var missing = AllPortalSolutionFileItems
+             .Where(item => !File.Exists(Path.Combine(RepoRoot, item.Replace('/', Path.DirectorySeparatorChar))))
+             .ToArray();
+ 
+@@ -95,43 +134,56 @@ public class PortalsSolutionItemsArchitectureTests
+     public void PortalSolutionFolderNodes_MirrorThePackageLayout()
+     {
+         // The solution view nests by path prefix, so a single flat folder node would hide the
+-        // api/views/tests split the refactor introduced.
+-        PortalSolutionFolderNodes.Should().BeEquivalentTo(
++        // api/views/tests split — and a node the .slnx forgot to rename would leave the portal's
++        // files ungrouped. Both portal projects are pinned, because a node that is missing is
++        // exactly as invisible as a node that is wrong.
++        AllPortalSolutionFolderNodes.Should().BeEquivalentTo(
+             [
++                "/src/SchoolCollab.AuthPortal/",
++                "/src/SchoolCollab.AuthPortal/api/",
++                "/src/SchoolCollab.AuthPortal/tests/",
++                "/src/SchoolCollab.AuthPortal/views/",
+                 "/src/SchoolCollab.Portals/",
+                 "/src/SchoolCollab.Portals/api/",
+                 "/src/SchoolCollab.Portals/tests/",
+                 "/src/SchoolCollab.Portals/views/",
+             ],
+-            "the portal's solution folder nodes should mirror its package layout.");
++            "each portal's solution folder nodes should mirror its package layout.");
+     }
+ 
+     private static string ReadSolutionFile() => File.ReadAllText(Path.Combine(RepoRoot, "SchoolCollab.slnx"));
+ 
+-    private static string[] ParseSolutionFileItems() =>
++    private static string[] ParseSolutionFileItems(params string[] prefixes) =>
+         [.. Regex.Matches(ReadSolutionFile(), "<File\\s+Path=\"([^\"]+)\"")
+             .Select(match => match.Groups[1].Value.Replace('\\', '/'))
+-            .Where(path => path.StartsWith(PortalFolderPrefix, StringComparison.OrdinalIgnoreCase))
++            .Where(path => prefixes.Any(prefix =>
++                path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
+ 
+     private static string[] ParsePortalSolutionFolderNodes() =>
+         [.. Regex.Matches(ReadSolutionFile(), "<Folder\\s+Name=\"([^\"]+)\"")
+             .Select(match => match.Groups[1].Value.Replace('\\', '/'))
+-            .Where(name => name.StartsWith("/src/SchoolCollab.Portals/", StringComparison.OrdinalIgnoreCase))
++            .Where(name => PortalFolderNodePrefixes.Any(prefix =>
++                name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)];
+ 
+     private static string[] EnumeratePortalSourceFiles()
+     {
+-        var portalDirectory = Path.Combine(RepoRoot, "src", "SchoolCollab.Portals");
+-        if (!Directory.Exists(portalDirectory))
++        var files = new List<string>();
++        foreach (var prefix in PortalFolderPrefixes)
+         {
+-            return [];
++            var portalDirectory = Path.Combine(RepoRoot, prefix.Replace('/', Path.DirectorySeparatorChar));
++            if (!Directory.Exists(portalDirectory))
++            {
++                continue;
++            }
++
++            files.AddRange(Directory.EnumerateFiles(portalDirectory, "*", SearchOption.AllDirectories)
++                .Select(path => Path.GetRelativePath(RepoRoot, path).Replace('\\', '/'))
++                .Where(IsPortalSourceFile));
+         }
+ 
+-        return [.. Directory.EnumerateFiles(portalDirectory, "*", SearchOption.AllDirectories)
+-            .Select(path => Path.GetRelativePath(RepoRoot, path).Replace('\\', '/'))
+-            .Where(IsPortalSourceFile)
+-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
++        return [.. files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
+     }
+ 
+     private static bool IsPortalSourceFile(string relativePath)

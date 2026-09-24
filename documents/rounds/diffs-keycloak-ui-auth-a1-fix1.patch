@@ -1,0 +1,271 @@
+diff --git a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+index 3a962299..381c977e 100644
+--- a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
++++ b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+@@ -4,6 +4,29 @@
+   "sslRequired": "external",
+   "registrationAllowed": false,
+   "loginWithEmailAllowed": false,
++  "roles": {
++    "realm": [
++      { "name": "user-admin" },
++      { "name": "platform-admin" }
++    ]
++  },
++  "requiredActions": [
++    {
++      "alias": "webauthn-register-passwordless",
++      "name": "Webauthn Register Passwordless",
++      "providerId": "webauthn-register-passwordless",
++      "enabled": true,
++      "defaultAction": false,
++      "priority": 70,
++      "config": {}
++    }
++  ],
++  "webAuthnPolicyPasswordlessRpEntityName": "school-collab",
++  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256", "RS256"],
++  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
++  "webAuthnPolicyPasswordlessRequireResidentKey": "yes",
++  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
++  "webAuthnPolicyPasswordlessPasskeysEnabled": true,
+   "clients": [
+     {
+       "clientId": "school-collab-client",
+@@ -14,6 +37,22 @@
+       "directAccessGrantsEnabled": true,
+       "protocol": "openid-connect",
+       "secret": "dev-only-school-collab-client-secret",
++      "redirectUris": [
++        "http://localhost:5300/signin-oidc",
++        "https://localhost:7300/signin-oidc",
++        "http://localhost:5300/signout-callback-oidc",
++        "https://localhost:7300/signout-callback-oidc",
++        "http://localhost:5400/signin-oidc",
++        "https://localhost:7400/signin-oidc",
++        "http://localhost:5400/signout-callback-oidc",
++        "https://localhost:7400/signout-callback-oidc"
++      ],
++      "webOrigins": [
++        "http://localhost:5300",
++        "https://localhost:7300",
++        "http://localhost:5400",
++        "https://localhost:7400"
++      ],
+       "protocolMappers": [
+         {
+           "name": "tenant-id",
+@@ -76,8 +115,31 @@
+             "access.token.claim": true,
+             "id.token.claim": true
+           }
++        },
++        {
++          "name": "roles",
++          "protocol": "openid-connect",
++          "protocolMapper": "oidc-usermodel-realm-role-mapper",
++          "config": {
++            "claim.name": "roles",
++            "jsonType.label": "String",
++            "access.token.claim": true,
++            "id.token.claim": true,
++            "userinfo.token.claim": true,
++            "multivalued": true
++          }
+         }
+       ]
++    },
++    {
++      "clientId": "school-collab-auth-admin",
++      "name": "School Collab Auth Admin (service account)",
++      "enabled": true,
++      "publicClient": false,
++      "standardFlowEnabled": false,
++      "directAccessGrantsEnabled": false,
++      "serviceAccountsEnabled": true,
++      "secret": "dev-only-school-collab-auth-admin-secret"
+     }
+   ],
+   "users": [
+@@ -101,6 +163,14 @@
+         "tenant_type": ["School"],
+         "teacher_id": ["00000000-0000-0000-0000-000000000003"]
+       }
++    },
++    {
++      "username": "service-account-school-collab-auth-admin",
++      "enabled": true,
++      "serviceAccountClientId": "school-collab-auth-admin",
++      "clientRoles": {
++        "realm-management": ["view-users", "manage-users", "view-realm", "manage-realm"]
++      }
+     }
+   ]
+ }
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+index 540096e4..c742cf01 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostRealmImportArchitectureTests.cs
+@@ -81,6 +81,105 @@ public class AppHostRealmImportArchitectureTests
+             "the bind-mount target must point at the derived realm filename under /opt/keycloak/data/import/ (the only dir --import-realm scans).");
+     }
+ 
++    [TestMethod]
++    public void RealmImportFile_DeclaresTheTwoRealmRoles()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        doc.RootElement.TryGetProperty("roles", out var roles).Should().BeTrue(
++            "the realm import must declare a top-level `roles` object (spec §11.2).");
++        roles.TryGetProperty("realm", out var realmRoles).Should().BeTrue(
++            "realm roles must live under `roles.realm`.");
++
++        var names = realmRoles.EnumerateArray()
++            .Where(r => r.ValueKind == JsonValueKind.Object && r.TryGetProperty("name", out _))
++            .Select(r => r.GetProperty("name").GetString())
++            .ToArray();
++
++        names.Should().Contain(new[] { "user-admin", "platform-admin" },
++            "the realm must declare the two realm roles the auth service gates on (spec §11.2).");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_DeclaresTheServiceAccountClient()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var realmRoot = doc.RootElement;
++        var client = FindClient(realmRoot, "school-collab-auth-admin");
++
++        client.TryGetProperty("serviceAccountsEnabled", out var sa).Should().BeTrue(
++            "the admin service-account client must enable service accounts.");
++        sa.ValueKind.Should().Be(JsonValueKind.True,
++            "serviceAccountsEnabled must be true for the client_credentials grant (spec §11.3).");
++        client.TryGetProperty("secret", out var secret).Should().BeTrue();
++        secret.ValueKind.Should().Be(JsonValueKind.String, "the service-account client must carry a secret.");
++
++        // The realm-management grant lives as clientRoles on the service-account USER entry
++        // (username `service-account-<clientId>`), not on the client representation:
++        // ClientRepresentation has no clientRoles property, and Keycloak's realm import silently
++        // drops unknown properties — a client-side block would leave the first Admin REST call
++        // with 403 (diff-review P1, round keycloak-ui-auth).
++        var saUser = FindServiceAccountUser(realmRoot, "school-collab-auth-admin");
++        saUser.TryGetProperty("clientRoles", out var clientRoles).Should().BeTrue(
++            "the service-account user entry must carry the realm-management grant (diff-review P1).");
++        clientRoles.TryGetProperty("realm-management", out var rm).Should().BeTrue(
++            "the grant must target the realm-management client roles.");
++        rm.ValueKind.Should().Be(JsonValueKind.Array, "realm-management must be an array of role names.");
++        var granted = rm.EnumerateArray()
++            .Where(r => r.ValueKind == JsonValueKind.String)
++            .Select(r => r.GetString())
++            .Where(r => r is not null)
++            .Cast<string>()
++            .ToArray();
++        granted.Should().BeEquivalentTo(new[] { "view-users", "manage-users", "view-realm", "manage-realm" },
++            "the service account must be granted EXACTLY the least-privilege realm-management quartet (spec §16.2) — an exact-set assertion so silent privilege creep or a dropped role cannot pass the guard.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_HasRolesMapperOnBothTokenPaths()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue();
++        var rolesMapper = mappers.EnumerateArray().FirstOrDefault(m =>
++            m.ValueKind == JsonValueKind.Object
++            && m.TryGetProperty("protocolMapper", out var pm)
++            && pm.ValueKind == JsonValueKind.String
++            && pm.GetString() == "oidc-usermodel-realm-role-mapper");
++
++        rolesMapper.ValueKind.Should().Be(JsonValueKind.Object,
++            "school-collab-client must carry a realm-role mapper emitting the `roles` claim.");
++        rolesMapper.GetProperty("config").TryGetProperty("access.token.claim", out var atc).Should().BeTrue();
++        atc.ValueKind.Should().Be(JsonValueKind.True,
++            "the bearer path reads `roles` from the access token, so access.token.claim must be true.");
++        rolesMapper.GetProperty("config").TryGetProperty("id.token.claim", out var itc).Should().BeTrue();
++        itc.ValueKind.Should().Be(JsonValueKind.True,
++            "the cookie path reads `roles` from the ID token, so id.token.claim must be true.");
++    }
++
++    [TestMethod]
++    public void RealmImportFile_SchoolCollabClient_HasRedirectUrisAndWebOrigins()
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
++        var client = FindClient(doc.RootElement, "school-collab-client");
++
++        client.TryGetProperty("redirectUris", out var uris).Should().BeTrue();
++        uris.ValueKind.Should().Be(JsonValueKind.Array);
++        var list = uris.EnumerateArray()
++            .Where(u => u.ValueKind == JsonValueKind.String)
++            .Select(u => u.GetString())
++            .Where(u => u is not null)
++            .Cast<string>()
++            .ToArray();
++        list.Should().HaveCountGreaterThan(0, "the OIDC code flow cannot complete without registered redirect URIs.");
++        list.Should().Contain(u => u.Contains("localhost:5300") && u.Contains("/signin-oidc"));
++        list.Should().Contain(u => u.Contains("localhost:5400") && u.Contains("/signin-oidc"));
++
++        client.TryGetProperty("webOrigins", out var origins).Should().BeTrue();
++        origins.ValueKind.Should().Be(JsonValueKind.Array);
++        origins.GetArrayLength().Should().BeGreaterThan(0);
++    }
++
+     // ── Helpers ─────────────────────────────────────────────────────────
+ 
+     /// <summary>Resolves the single realm candidate anywhere in the AppHost dir
+@@ -122,6 +221,56 @@ public class AppHostRealmImportArchitectureTests
+         return realm.GetString()!;
+     }
+ 
++    /// <summary>Resolves the named client from an already-parsed realm document root. THROWS when the
++    /// client is missing, so a renamed/removed client cannot pass the assertions vacuously. The caller
++    /// owns the <see cref="JsonDocument"/> lifetime (a returned <see cref="JsonElement"/> is invalid
++    /// after its document is disposed).</summary>
++    private static JsonElement FindClient(JsonElement realmRoot, string clientId)
++    {
++        if (!realmRoot.TryGetProperty("clients", out var clients) || clients.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidOperationException("Realm file has no 'clients' array.");
++        }
++
++        foreach (var client in clients.EnumerateArray())
++        {
++            if (client.ValueKind == JsonValueKind.Object
++                && client.TryGetProperty("clientId", out var id)
++                && id.ValueKind == JsonValueKind.String
++                && id.GetString() == clientId)
++            {
++                return client;
++            }
++        }
++
++        throw new InvalidOperationException($"Realm file has no client with clientId '{clientId}'.");
++    }
++
++    /// <summary>Resolves the service-account USER entry for the named client (username convention
++    /// `service-account-{clientId}`, identified by its `serviceAccountClientId` property — the shape
++    /// an admin-console realm export produces for a client with a role grant). THROWS when missing,
++    /// so a dropped grant entry cannot pass the assertions vacuously.</summary>
++    private static JsonElement FindServiceAccountUser(JsonElement realmRoot, string clientId)
++    {
++        if (!realmRoot.TryGetProperty("users", out var users) || users.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidOperationException("Realm file has no 'users' array.");
++        }
++
++        foreach (var user in users.EnumerateArray())
++        {
++            if (user.ValueKind == JsonValueKind.Object
++                && user.TryGetProperty("serviceAccountClientId", out var sac)
++                && sac.ValueKind == JsonValueKind.String
++                && sac.GetString() == clientId)
++            {
++                return user;
++            }
++        }
++
++        throw new InvalidOperationException($"Realm file has no service-account user with serviceAccountClientId '{clientId}'.");
++    }
++
+     private static string ReadAppHostFile(string name)
+         => File.ReadAllText(Path.Combine(FindAppHostDir(), name));
+ 

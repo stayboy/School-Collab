@@ -132,14 +132,17 @@ files only carry values that genuinely belong to that single service
 | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
 | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
 | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
+| `feature-flag-disable-keycloak-login-ui` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:DisableKeycloakLoginUi` (round B `keycloak-ui-auth`, spec §10 / D4/D5). Injected as `FeatureFlags__FEATURE__DisableKeycloakLoginUi` into all four consumers — `admin`, `families`, `auth` and `auth-portal`. It selects **which login UI renders**: OFF (default) = Keycloak's hosted page via the standard OIDC code flow; ON = the prefab auth portal's login form. A pure UI toggle — validation and authorization are identical in both states — and it is read **at startup** (auth pipelines are registered once, exactly like `FEATURE:DisableOIDCAuth`), so it is **not** a Settings/Config-service flag. See §5. |
+| `app-callback-prefixes` | Aspire parameter (`AddParameter` inline default) | `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake` | Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist a one-time handshake code may be minted for. Fanned to the `auth` service as `Auth__AppCallbackPrefixes` (**plus** the portal's bootstrap redemption URI, appended from the portal's Aspire endpoint — no hardcoded port) and to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The auth service rejects a blank value at start (`ValidateOnStart`), so the list can never be empty in a running deployment. See §4. |
 | `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
 | `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
 | `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
 | `smtp-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-smtp-password` (dev-only, `appsettings.Development.json`) | Optional SMTP password, paired with `smtp-user`. Injected as `Smtp__Password`; read as `Smtp:Password`. A **dev-only** default is committed in `appsettings.Development.json`; a relay that requires auth supplies the real value via user-secrets / env-var, which override it. **Never commit a production secret.** |
 | `smtp-from-address` | Aspire parameter | `no-reply@schoolcollab.local` | From address used when a rendered message carries none. Injected as `Smtp__FromAddress`; read as `Smtp:FromAddress`. |
-| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, and `admin`. See §4. |
+| `keycloak-client-id` | Aspire parameter | `school-collab-client` | OpenID Connect client ID of the Keycloak dev container's `school-collab-client` client. Injected as `Auth__Keycloak__ClientId` into `assignments-api`, `students-api`, `settings-api`, `admin`, and the `auth` service. See §4. |
 | `keycloak-admin-password` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-keycloak-admin` (dev-only, `appsettings.Development.json`) | Bootstrap admin password (`KC_BOOTSTRAP_ADMIN_PASSWORD`) for the `keycloak` dev container. A **dev-only** default is committed in `appsettings.Development.json`, so a plain `aspire run` starts Keycloak without prompting; a non-dev value comes from user-secrets (`Parameters:keycloak-admin-password`) or env-var `Parameters__keycloak_admin_password`, which override it (production never loads the Development file). One of the two parameters AC#4 needs; see §4. |
-| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the four hosts above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
+| `keycloak-client-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-client-secret` (dev-only, `appsettings.Development.json`) | OpenID Connect client secret for `school-collab-client`, injected as `Auth__Keycloak__ClientSecret` into the same five hosts as `keycloak-client-id` above. The committed dev-only default **must equal the realm file's client `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects client authentication. A user-secrets / env-var value overrides it; production supplies a real secret store value. The other of the two parameters AC#4 needs; see §4. |
+| `keycloak-auth-admin-secret` | Aspire **secret** parameter (`AddParameter(name, secret: true)`) | `dev-only-school-collab-auth-admin-secret` (dev-only, `appsettings.Development.json`) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin` in the realm import. Injected as `Auth__Keycloak__ServiceAccountClientSecret`; read as `Auth:Keycloak:ServiceAccountClientSecret`. Consumed by the `auth` service only. The committed dev-only default **must equal the realm file's `school-collab-auth-admin` `secret`** — `AppHostDevParameterDefaultsArchitectureTests` guards the parity, because a mismatch surfaces only when Keycloak rejects the client_credentials grant on the first admin call. A user-secrets / env-var value overrides it; production supplies a real secret-store value. See §4. |
 
 **`assignments-worker` (E3 / ar-19) wired in `Program.cs`, no new parameter.**
 
@@ -289,10 +292,10 @@ See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-
 ## 4. `Auth:Keycloak` — OIDC authentication
 
 Wired by `SchoolCollab.Core.Auth.AuthTenancyExtensions.AddAuthAndTenancy(IConfiguration)`
-(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.2`)
+(used by every API + Admin). The AppHost ships a **Keycloak dev container** (`quay.io/keycloak/keycloak:26.4.7` — 26.4+ for official passkey support)
 that imports the committed `src/AppHost/SchoolCollab.AppHost/school-collab-realm.json` realm
 (`school-collab`) and fanned the `Auth:Keycloak:*` values onto `assignments-api`, `students-api`,
-`settings-api`, and `admin`.
+`settings-api`, `admin`, and the `auth` service.
 
 The realm import file is **DEV-ONLY — its credentials are for local/dev use only**:
 `dev-teacher` / `dev-only-password`, and the `school-collab-client` secret
@@ -303,8 +306,8 @@ Teacher `…0003`), so a dev login resolves to real backing rows on first boot.
 
 **Readiness gate (ar-21).** The keycloak container sets `KC_HEALTH_ENABLED=true`, declares a
 management endpoint (targetPort 9000) and binds an HTTP readiness health check
-(`/health/ready`) to it. All four `Auth:Keycloak:*` consuming hosts — `assignments-api`,
-`students-api`, `settings-api`, and `admin` — `.WaitFor(keycloak)`, so none of them fetches
+(`/health/ready`) to it. All five `Auth:Keycloak:*` consuming hosts — `assignments-api`,
+`students-api`, `settings-api`, `admin`, and the `auth` service — `.WaitFor(keycloak)`, so none of them fetches
 OIDC metadata / validates the issuer while the realm import is still in progress (Keycloak
 does not fully start until the import completes).
 
@@ -312,11 +315,87 @@ does not fully start until the import completes).
 file re-imports on every container recreate — edit the realm and recreate the container to
 pick it up; no `docker volume rm` is needed.
 
+**Realm additions (round A, keycloak-ui-auth)** — all declarative in `school-collab-realm.json`, so they re-import automatically: the realm roles `user-admin` and `platform-admin`; a `User Realm Role` protocol mapper on `school-collab-client` emitting a flat `roles` claim on the ID, access **and** userinfo tokens (this is what `RoleClaimType = ClaimTypes.Role` in `AuthTenancyExtensions` resolves to after the handlers' default inbound claim mapping renames the flat `roles` claim — on both the cookie and bearer paths); the service-account client `school-collab-auth-admin` (`serviceAccountsEnabled`, granted `realm-management` `view-users`/`manage-users`/`view-realm`/`manage-realm`) that the auth service uses for the Keycloak Admin REST API; registered `redirectUris` + `webOrigins` for the two Blazor hosts (`admin` 5300/7300, `families` 5400/7400 — the OIDC code flow could never complete before these existed, plan-review P2); and the realm-level WebAuthn **Passwordless Policy** with the passkeys toggle (`webAuthnPolicyPasswordlessPasskeysEnabled`) plus the `Webauthn Register Passwordless` required action (`spec §6/§11.5`).
+
+**Realm additions (round B pass B6, keycloak-ui-auth)** — again purely declarative, so the file
+re-imports on the next container recreate:
+
+- **The auth service's own `/signin-oidc` redirect URIs, in both dev schemes** —
+  `https://localhost:55458/signin-oidc` and `http://localhost:55459/signin-oidc`
+  (`src/SchoolCollab.Auth/Properties/launchSettings.json`'s
+  `applicationUrl: "https://localhost:55458;http://localhost:55459"`), matching round A's
+  per-host both-scheme registration. On the round-B passkey path (D16) the **auth service is the
+  OIDC relying party**: it starts the ceremony, Keycloak runs the WebAuthn ceremony, and the
+  authorization response returns to *this* service's `/signin-oidc` — so those URIs must be
+  registered or the ceremony cannot complete on either launch profile.
+- **No portal OIDC client and no portal redirect URI anywhere in the realm (D16).** The portal
+  performs no OIDC code flow at all: its password login is the prefab form → `POST /auth/exchange`,
+  and its passkey login is the bootstrap handoff. The realm's `clients` set is therefore exactly
+  `school-collab-client` (the apps' client) + `school-collab-auth-admin` (the admin service
+  account), and no portal URL — least of all the portal's `/bootstrap` route — appears in any
+  `redirectUris`: the bootstrap code reaches the portal as a **one-time bootstrap code** in a
+  redirect from the auth service, never as an authorization code it could exchange for a token
+  (AC12). `AppHostRealmImportArchitectureTests` asserts **both halves** — the two auth-service
+  URIs are present, *and* the client set is exactly those two with no portal URL in any redirect
+  URI — because a presence-only guard would stay green while a portal client quietly reintroduced
+  the design D16 removed.
+
 | Key | Default | Description |
 | :--- | :--- | :--- |
 | `Auth:Keycloak:Authority` | `https://keycloak.local/realms/school-collab` | OIDC issuer URL (Keycloak realm URL). Under Aspire this is the Keycloak container's HTTP endpoint reference-expression (resolved to its live URL at launch). **IDX10205 caveat:** when you mint a token by hand (below), send the request to the **same host form** as this value — if `Authority` is the dev container's `http://...` URL, hit the `http://` token endpoint (not `https://`), otherwise token validation rejects the token with IDX10205 (mismatched issuer). |
 | `Auth:Keycloak:ClientId` | `school-collab-client` | OpenID Connect client ID (`keycloak-client-id` AppHost parameter). |
 | `Auth:Keycloak:ClientSecret` | `dev-only-school-collab-client-secret` (dev-only) | OpenID Connect client secret. The code fallback is the literal `"secret"` (a pre-ar-20 placeholder still present in `AuthTenancyExtensions`); **dev** uses the committed dev-only default for `Parameters:keycloak-client-secret` in `appsettings.Development.json`, which **must equal** the realm file's client `secret` (guarded); **production** MUST substitute a real secret-store value — no production secret is committed. |
+| `Auth:Keycloak:ServiceAccountClientSecret` | `dev-only-school-collab-auth-admin-secret` (dev-only) | Service-account secret for the Keycloak Admin REST client `school-collab-auth-admin`, bound from the AppHost's `keycloak-auth-admin-secret` parameter. **No code fallback** — the auth service validates its options on start (`ValidateOnStart`), so a missing or blank value fails the host fast at launch instead of 401-ing on the first admin call. **dev** uses the committed dev-only default for `Parameters:keycloak-auth-admin-secret`, which **must equal** the realm file's `school-collab-auth-admin` `secret` (guarded); **production** MUST substitute a real secret-store value. Consumed by the `auth` service only. |
+
+The `auth` service also carries four tunables, each with a safe default and each validated on start: `Auth:OneTimeCodeTtl` (60 s — the single-use code's lifetime; a long TTL would defeat the one-time-code mitigation), `Auth:PortalSessionTtl` (8 h — how long a portal session may live), and the credential-endpoint rate-limit pair `Auth:CredentialEndpointRateLimitWindow` (1 min) / `Auth:CredentialEndpointRateLimitPermits` (5). These are ordinary appsettings/env keys rather than AppHost parameters, so no dev default is committed for them; the §11 table below carries their env-var forms.
+
+### Round B — the auth portal's URLs (`Auth:Portal:*`, `AuthPortal:PublicBaseUrl`)
+
+Three keys distribute the auth portal's URLs (round B `keycloak-ui-auth`, spec D1/D5/D16;
+plan-review P2-5). None of them is an AppHost parameter: each is derived from the
+`auth-portal` resource's Aspire HTTP endpoint, so the live URL is resolved at launch exactly
+like the Keycloak endpoint fan-out (the AppHost writes the endpoint reference expression, e.g.
+the login URL's `{authPortal.GetEndpoint("http")}/login`) and **no port is hardcoded**.
+
+| Key | Default | Description |
+| :--- | :--- | :--- |
+| `Auth:Portal:LoginUrl` | _none — **fails closed (401)**_ | The portal's login page URL. Read at startup by the `PortalRedirect` challenge handler that `AddAuthAndTenancy` registers when `FEATURE:DisableKeycloakLoginUi` is ON, and fanned **only** to the two browser-facing Blazor hosts (`admin`, `families`) as `Auth__Portal__LoginUrl`. With the flag ON and this key unset the handler answers **401** — it never emits a blank redirect and never falls back to Keycloak's hosted page (the UI the flag turned off). |
+| `Auth:Portal:BootstrapRedirectUrl` | _none_ | The portal route the **auth service** 302s the browser to after the D16 passkey ceremony, carrying the single-use bootstrap code. Fanned **only** to the `auth` service as `Auth__Portal__BootstrapRedirectUrl` — the auth service is the OIDC relying party, so it is the component that performs the redirect. |
+| `AuthPortal:PublicBaseUrl` | _none_ | The portal's own browser-facing base URL (its Aspire endpoint), fanned only to the `auth-portal` resource as `AuthPortal__PublicBaseUrl` so the portal can build its own URLs. |
+
+**The auth service deliberately does NOT receive `Auth:Portal:LoginUrl`.** That absence is what
+makes its own flag-ON challenge fail closed with 401: the auth service hosts no browser-facing
+login UI, so it must not redirect a browser. `AppHostLoginUiFlagWiringArchitectureTests` asserts
+both halves — the fan-out to the two Blazor hosts *and* the absence on `auth` (a presence-only
+check would pass with the URL leaked onto the service).
+
+**The portal's session cookie carries `Secure` when `AuthPortal:PublicBaseUrl` is `https`.** The
+D12 session cookie is always `HttpOnly` + `SameSite=Lax`, and its `Secure` flag is conditional on
+this key's scheme rather than hardcoded either way: an `https` base URL sets the flag, while an
+unset key — and therefore the dev plain-`http` endpoints, where a `Secure` cookie would never be
+sent — leaves it off. Nothing else configures it, so a production deployment reached over HTTPS
+gets the flag from the base URL it already sets here.
+
+### Round B — the per-app callback allowlist (`Auth:AppCallbackPrefixes`, `AuthPortal:AppCallbackPrefixes`)
+
+The redirect-target allowlist (spec §14, plan-review P1-3). A one-time handshake code is minted
+**only** for a redirect target that matches a configured entry: identical scheme, host and port,
+and a path that starts with the entry's path. The query and fragment are ignored, so the Blazor
+hosts' real callback spelling — `{scheme}://{host}{pathBase}/signin-handshake?ReturnUrl=<escaped>`
+— matches while the code's destination stays pinned. Without it, a crafted
+`portal/login?return_uri=attacker` link would deliver an **attacker-redeemable** code carrying the
+victim's claim set: URI binding is defenceless when the attacker chooses the URI.
+
+| Key | Default | Description |
+| :--- | :--- | :--- |
+| `Auth:AppCallbackPrefixes` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | Semicolon-separated allowlist of exact callback prefixes, read by the auth service as `Auth__AppCallbackPrefixes`. Enforced at **code issuance** — `/auth/exchange` rejects a non-allowlisted `RedirectUri` (`redirect_uri_not_allowed`, 400) before the credential exchange, so no code exists for an attacker URI (`AppCallbackAllowlist`, fail-closed/default-deny: a malformed entry matches nothing, an empty list matches nothing). Dev value (the AppHost parameter `app-callback-prefixes`, plus the portal's bootstrap URI appended from its Aspire endpoint): `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake;{auth-portal endpoint}/bootstrap`. The four handshake forms are the `admin` (5300/7300) and `families` (5400/7400) launch-profile origins; the bootstrap URI is the D16 redemption target the passkey path's one-time code is bound to. Production must list the real app origins. |
+| `AuthPortal:AppCallbackPrefixes` | _none_ | The portal's own copy of the same list (the four Blazor handshake callbacks only — never its own bootstrap URI), fanned to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The portal validates `return_uri` against it before rendering the form or redirecting; that check is defense-in-depth + UX — the load-bearing enforcement is the auth service's, so a portal bug cannot mint an attacker-redeemable code. |
+
+There is deliberately **no safe default** for `Auth:AppCallbackPrefixes`: a hardcoded non-empty
+fallback would make production fail *open*, and an unvalidated empty list would look like a login
+outage. The shared validator (`AuthServiceOptions.FirstValidationError`, the same function
+`AddAuthServiceOptions` wires into `.Validate(...).ValidateOnStart()`) therefore rejects a blank
+value at launch and names the key.
 
 > 🔐 **Secrets.** `ClientSecret` and the Keycloak bootstrap admin password are the most
 > sensitive values here. Use one of:
@@ -486,6 +565,7 @@ flags moved to the Config service.
 | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
 | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
 | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
+| `FEATURE:DisableKeycloakLoginUi` | `false` | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag** (auth schemes are registered once, so a startup read is the only correct one). AppHost parameter `feature-flag-disable-keycloak-login-ui`, fanned to `SchoolCollab.Admin` + `SchoolCollab.Families` (the browser-facing challenges that redirect to the portal), the `auth` service (its own startup read; without `Auth:Portal:LoginUrl` there it fails closed with 401) and the `auth-portal` Python app. See §4 for the three portal-URL keys. |
 
 ### Setting a flag
 
@@ -828,6 +908,7 @@ matching env-var form:
 | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
 | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
 | `Parameters:feature-flag-require-assignment-approval` | `Parameters__feature_flag_require_assignment_approval` |
+| `Parameters:feature-flag-disable-keycloak-login-ui` | `Parameters__feature_flag_disable_keycloak_login_ui` |
 | `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
 | `Parameters:assignment-file-store-root` | `Parameters__assignment_file_store_root` |
 | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
@@ -841,6 +922,8 @@ matching env-var form:
 | `Parameters:keycloak-client-id` | `Parameters__keycloak_client_id` |
 | `Parameters:keycloak-admin-password` | `Parameters__keycloak_admin_password` |
 | `Parameters:keycloak-client-secret` | `Parameters__keycloak_client_secret` |
+| `Parameters:keycloak-auth-admin-secret` | `Parameters__keycloak_auth_admin_secret` |
+| `Parameters:app-callback-prefixes` | `Parameters__app_callback_prefixes` |
 | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
 | `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
 | `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
@@ -870,7 +953,18 @@ matching env-var form:
 | `Auth:Keycloak:Authority` | `Auth__Keycloak__Authority` |
 | `Auth:Keycloak:ClientId` | `Auth__Keycloak__ClientId` |
 | `Auth:Keycloak:ClientSecret` | `Auth__Keycloak__ClientSecret` |
+| `Auth:Keycloak:ServiceAccountClientSecret` | `Auth__Keycloak__ServiceAccountClientSecret` |
+| `Auth:OneTimeCodeTtl` | `Auth__OneTimeCodeTtl` |
+| `Auth:PortalSessionTtl` | `Auth__PortalSessionTtl` |
+| `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
+| `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
 | `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
+| `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
+| `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
+| `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
+| `AuthPortal:PublicBaseUrl` | `AuthPortal__PublicBaseUrl` |
+| `Auth:AppCallbackPrefixes` | `Auth__AppCallbackPrefixes` |
+| `AuthPortal:AppCallbackPrefixes` | `AuthPortal__AppCallbackPrefixes` |
 | `Promotion:CronExpression` | `Promotion__CronExpression` |
 | `Promotion:PollInterval` | `Promotion__PollInterval` |
 | `Promotion:ErrorDelay` | `Promotion__ErrorDelay` |
@@ -906,9 +1000,18 @@ Before deploying, verify:
       `appsettings.Development.json` dev defaults (this one, `keycloak-admin-password`,
       `smtp-user`, `smtp-password`) are never loaded in production and must not be relied
       on there.
+- [ ] **`Parameters:keycloak-auth-admin-secret`** — the Keycloak Admin REST
+      service-account secret — is sourced from a secret store in production; its
+      `appsettings.Development.json` dev default must not be relied on.
 - [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
       (or omitted) in production. The flag is sourced from the AppHost
       `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
+- [ ] **`Parameters:feature-flag-disable-keycloak-login-ui`** is `false` (or omitted) in
+      production unless the prefab auth portal is actually deployed there: with it ON, `admin`,
+      `families` and the `auth` service challenge the portal instead of Keycloak's hosted page,
+      so the three portal-URL keys in §4 (`Auth:Portal:LoginUrl` on the two Blazor hosts,
+      `Auth:Portal:BootstrapRedirectUrl` on `auth`) must resolve to browser-reachable URLs —
+      otherwise every unauthenticated gated page fails closed with 401.
 - [ ] **OIDC `Authority`** points to the production Keycloak realm.
 - [ ] **Outbox `ExchangeName`** values match the consumer subscriptions
       for each bounded context (`Parameters:outbox-exchange-*`).

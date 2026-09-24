@@ -1,0 +1,22 @@
+[project]
+name = "school-collab-auth-portal"
+version = "0.0.0"
+description = "Prefab-UI auth portal: the login/logout/challenge surfaces and the tenant-user/role/claims admin UI, as a pure HTTP consumer of the SchoolCollab.Auth service. See documents/specs/keycloak-ui-auth-integration.md"
+requires-python = ">=3.10"
+dependencies = [
+    "prefab-ui==0.20.2",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+]
+
+# Dev-only: the client/route tests use httpx.MockTransport + FastAPI's TestClient,
+# so they need neither a server, nor Docker, nor Keycloak.
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# The typed client is async; `auto` lets the async tests stay undecorated.
+asyncio_mode = "auto"

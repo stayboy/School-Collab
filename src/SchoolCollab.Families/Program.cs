@@ -75,6 +75,12 @@ builder.Services.AddFluentUIComponents();
 // F1 — the Families Http client against the Assignments API (service discovery).
 builder.Services.AddFamiliesModule();
 
+// B4 — the flag-ON portal handshake (spec §5.2 / D6), mirroring the Admin host: the typed
+// redemption client against the auth service plus this host's /signin-handshake, /login and
+// /logout routes. The literal base address sits at the call site so CrossModuleWiringTests can
+// match it to the .WithReference(auth) the AppHost puts on this host (B3).
+builder.Services.AddPortalHandshake("https+http://auth");
+
 // WS-E1 (ar-14-deep-links): cached, DB-backed runtime feature-flag client (resolves
 // FEATURE:EnableDeepLinks tenant-isolated from the Settings FeatureFlag aggregate with
 // an IConfiguration fallback). Replaces the config-only IFeatureFlagService installed by
@@ -135,6 +141,12 @@ var razorComponents = app.MapRazorComponents<App>()
 if (!disableOIDC)
 {
     razorComponents.RequireAuthorization();
+
+    // B4 — same conditional shape as the authorization gate above: the handshake group needs the
+    // OIDC cookie + challenge schemes, which only exist in the real-auth branch (with TestAuth
+    // there is no portal login, no OIDC sign-out and nothing to redeem). The routes are additive —
+    // with the login-UI flag OFF the challenge path stays today's OIDC behaviour (AC7).
+    app.MapPortalHandshakeEndpoints();
 }
 
 // WS-E1 (ar-14-deep-links): the repo's first public token-auth route group — mapped

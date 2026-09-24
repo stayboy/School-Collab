@@ -7,6 +7,7 @@
   <Folder Name="/src/">
     <Project Path="src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj" />
     <Project Path="src/SchoolCollab.Admin/SchoolCollab.Admin.csproj" />
+    <Project Path="src/SchoolCollab.Auth/SchoolCollab.Auth.csproj" />
     <Project Path="src/SchoolCollab.Core/SchoolCollab.Core.csproj" />
     <Project Path="src/SchoolCollab.Families/SchoolCollab.Families.csproj" />
     <Project Path="src/SchoolCollab.MigrationService/SchoolCollab.MigrationService.csproj" />
@@ -26,6 +27,33 @@
     <Project Path="src/Assignments/SchoolCollab.Assignments.Contracts/SchoolCollab.Assignments.Contracts.csproj" />
     <Project Path="src/Assignments/SchoolCollab.Assignments.Core/SchoolCollab.Assignments.Core.csproj" />
     <Project Path="src/Assignments/SchoolCollab.Assignments.Worker/SchoolCollab.Assignments.Worker.csproj" />
+  </Folder>
+  <Folder Name="/src/SchoolCollab.AuthPortal/">
+    <File Path="src/SchoolCollab.AuthPortal/app.py" />
+    <File Path="src/SchoolCollab.AuthPortal/pyproject.toml" />
+    <File Path="src/SchoolCollab.AuthPortal/uv.lock" />
+  </Folder>
+  <Folder Name="/src/SchoolCollab.AuthPortal/api/">
+    <File Path="src/SchoolCollab.AuthPortal/api/__init__.py" />
+    <File Path="src/SchoolCollab.AuthPortal/api/admin_api_client.py" />
+    <File Path="src/SchoolCollab.AuthPortal/api/auth_api_client.py" />
+    <File Path="src/SchoolCollab.AuthPortal/api/dto.py" />
+    <File Path="src/SchoolCollab.AuthPortal/api/errors.py" />
+  </Folder>
+  <Folder Name="/src/SchoolCollab.AuthPortal/tests/">
+    <File Path="src/SchoolCollab.AuthPortal/tests/test_admin_views.py" />
+    <File Path="src/SchoolCollab.AuthPortal/tests/test_app_callback_allowlist.py" />
+    <File Path="src/SchoolCollab.AuthPortal/tests/test_app_routes.py" />
+    <File Path="src/SchoolCollab.AuthPortal/tests/test_auth_api_client.py" />
+    <File Path="src/SchoolCollab.AuthPortal/tests/test_login_view.py" />
+    <File Path="src/SchoolCollab.AuthPortal/tests/test_session_routes.py" />
+  </Folder>
+  <Folder Name="/src/SchoolCollab.AuthPortal/views/">
+    <File Path="src/SchoolCollab.AuthPortal/views/__init__.py" />
+    <File Path="src/SchoolCollab.AuthPortal/views/admin_roles.py" />
+    <File Path="src/SchoolCollab.AuthPortal/views/admin_users.py" />
+    <File Path="src/SchoolCollab.AuthPortal/views/errors.py" />
+    <File Path="src/SchoolCollab.AuthPortal/views/login.py" />
   </Folder>
   <Folder Name="/src/SchoolCollab.Portals/">
     <File Path="src/SchoolCollab.Portals/app.py" />
@@ -66,6 +94,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SchoolCollab.Admin.Tests.Unit/SchoolCollab.Admin.Tests.Unit.csproj" />
+    <Project Path="tests/SchoolCollab.Auth.Tests.Unit/SchoolCollab.Auth.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.ArchitectureTests.Unit/SchoolCollab.ArchitectureTests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Assignments.Api.Tests.Unit/SchoolCollab.Assignments.Api.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Assignments.Tests.Integration/SchoolCollab.Assignments.Tests.Integration.csproj" />

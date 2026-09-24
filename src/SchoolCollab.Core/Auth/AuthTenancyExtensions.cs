@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -22,6 +23,17 @@ public static class AuthTenancyExtensions
     /// default <see cref="AuthenticationOptions.DefaultScheme"/> instead.
     /// </summary>
     public const string BearerScheme = "Bearer";
+
+    /// <summary>
+    /// The challenge-routing policy scheme (round B, design P1-2). Registered as
+    /// <see cref="AuthenticationOptions.DefaultChallengeScheme"/> in the OIDC branch so that
+    /// <c>AddOpenIdConnect</c> no longer challenges Keycloak unconditionally: the scheme
+    /// forwards the challenge to <see cref="OpenIdConnectDefaults.AuthenticationScheme"/> when
+    /// <c>FEATURE:DisableKeycloakLoginUi</c> is OFF (today's behaviour, unchanged) and to
+    /// <see cref="PortalRedirectChallengeHandler.SchemeName"/> when it is ON. The target is
+    /// chosen once, at startup (D5) — auth pipelines are fixed at startup.
+    /// </summary>
+    public const string LoginUiChallengeScheme = "LoginUiChallenge";
 
     /// <summary>
     /// Adds cookie + OpenID Connect authentication using Keycloak and wires the current tenant
@@ -78,12 +90,29 @@ public static class AuthTenancyExtensions
             var keycloakClientId = configuration["Auth:Keycloak:ClientId"]
                 ?? "school-collab-client";
 
+            // D4/D5: which login UI the Blazor hosts present. Read ONCE here at startup —
+            // the challenge target is baked into the policy scheme below, the same
+            // "pipeline fixed at startup" posture as DisableOIDCAuth above. It only re-routes
+            // the challenge; validation/authorization stay identical in both states.
+            var disableKeycloakLoginUi = IsFlagEnabled(
+                configuration,
+                FeatureFlagKeys.DisableKeycloakLoginUi);
+
             // Authentication + authorization
-            services
+            var authentication = services
                 .AddAuthentication(options =>
                 {
                     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-                    options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+                    // Not OpenIdConnect directly: the policy scheme below forwards to the
+                    // scheme the login-UI flag selected. OFF is today's OIDC challenge
+                    // (the forward target is the OIDC scheme).
+                    options.DefaultChallengeScheme = LoginUiChallengeScheme;
+                })
+                .AddPolicyScheme(LoginUiChallengeScheme, "Login UI challenge routing", policy =>
+                {
+                    policy.ForwardChallenge = disableKeycloakLoginUi
+                        ? PortalRedirectChallengeHandler.SchemeName
+                        : OpenIdConnectDefaults.AuthenticationScheme;
                 })
                 .AddCookie()
                 .AddOpenIdConnect(options =>
@@ -94,6 +123,18 @@ public static class AuthTenancyExtensions
                         ?? "secret";
                     options.ResponseType = "code";
                     options.SaveTokens = true;
+
+                    // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
+                    // protocol mapper emits a flat `roles` claim on the ID token, and the
+                    // handler's DEFAULT inbound mapping (MapInboundClaims=true — nothing in the
+                    // repo overrides it) renames that claim to ClaimTypes.Role. Pinning the
+                    // MAPPED type here is what makes [Authorize(Roles=...)]/RequireRole resolve
+                    // from the claim that actually survives. Pinning the literal "roles" was
+                    // PROVEN ineffective (pass-3d corrective pass: the round's /auth/admin gate
+                    // rejected every authenticated caller under the default mapping until the
+                    // pin was corrected; 12 gate tests failed with the literal pin). Must stay
+                    // identical to the JwtBearer value below (cookie/bearer parity).
+                    options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
 
                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
                     // an http:// authority is rejected unless metadata HTTPS is relaxed.
@@ -116,6 +157,13 @@ public static class AuthTenancyExtensions
                     // realm's oidc-audience-mapper emits aud=clientId on the access token.
                     options.Audience = keycloakClientId;
 
+                    // D9 parity with the OIDC path: the same claim travels on the access token
+                    // and the same default inbound mapping renames it to ClaimTypes.Role, so the
+                    // pinned type stays identical to the OIDC value above and bearer roles
+                    // resolve exactly like cookie roles. (Same corrective-pass evidence as the
+                    // OIDC comment.)
+                    options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
+
                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority) —
                     // production MUST keep this false (default). Same dev-gating note as the
                     // OIDC branch above.
@@ -127,6 +175,18 @@ public static class AuthTenancyExtensions
                     // mappers with access.token.claim=true), so ICurrentUser reads the same
                     // claim shape from a bearer token as from the OIDC cookie. No mapping here.
                 });
+
+            if (disableKeycloakLoginUi)
+            {
+                // Registered only with the flag ON: with it OFF the policy scheme forwards to
+                // OIDC and this handler is unreachable, keeping the OFF pipeline identical to
+                // the pre-flag one. The login URL is a startup read of Auth:Portal:LoginUrl
+                // (env-var Auth__Portal__LoginUrl) fanned to the browser-facing hosts only;
+                // absent here it makes the handler fail closed with 401.
+                authentication.AddScheme<PortalRedirectChallengeOptions, PortalRedirectChallengeHandler>(
+                    PortalRedirectChallengeHandler.SchemeName,
+                    options => options.LoginUrl = configuration["Auth:Portal:LoginUrl"]);
+            }
         }
 
         services.AddAuthorization();

@@ -1,0 +1,651 @@
+diff --git a/src/SchoolCollab.Auth/Endpoints/ExchangeEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/ExchangeEndpoints.cs
+new file mode 100644
+index 00000000..ab870311
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/ExchangeEndpoints.cs
+@@ -0,0 +1,85 @@
++using System.Threading;
++using Microsoft.AspNetCore.Http;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// <c>POST /auth/exchange</c> — the flag-ON handshake's credential step (spec §5.2 / D6),
++/// called **server-to-server by the portal inside the AppHost network, never from a browser**
++/// (spec §14 trust boundary). It exchanges Keycloak credentials (Direct Grant) for a server-side
++/// portal session plus a single-use handshake code bound to the originating app's redirect URI.
++/// The code entry carries the session reference (spec §5.2 step 4), so the app that
++/// redeems the code resolves the claims from the code alone — it never receives or holds
++/// a session id or a token.
++/// The success response carries NO token: only the opaque session id and the one-time code. The
++/// token set lives solely in <see cref="PortalSessionStore"/> (D12) and never reaches a response
++/// body, a log line or an exception message (D7 / AC9).
++/// </summary>
++public static class ExchangeEndpoints
++{
++    /// <summary>Request body for <c>POST /auth/exchange</c>. <c>RedirectUri</c> is the
++    /// originating app's URI the one-time code is bound to (the redemption must supply
++    /// the identical value).</summary>
++    public sealed record ExchangeRequest(string Username, string Password, string RedirectUri);
++
++    /// <summary>Success body. Token-free by design: only the single-use code and the opaque
++    /// session id the caller needs to redeem and to revoke the session later.</summary>
++    public sealed record ExchangeResponse(string Code, string SessionId, int ExpiresInSeconds);
++
++    /// <summary>
++    /// Handles the exchange. The Direct-Grant failure taxonomy (pass 3a) is surfaced so the
++    /// portal can present the right message; <c>Detail</c> is Keycloak's own
++    /// <c>error_description</c> when the body parses, otherwise a short bounded message —
++    /// never the raw upstream body and never a token.
++    /// </summary>
++    public static async Task<IResult> Exchange(
++        ExchangeRequest request,
++        DirectGrantExchanger exchanger,
++        PortalSessionStore sessions,
++        OneTimeCodeStore codes,
++        CancellationToken cancellationToken)
++    {
++        if (string.IsNullOrWhiteSpace(request.RedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_required" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        var result = await exchanger.ExchangeAsync(request.Username, request.Password, cancellationToken);
++        if (!result.IsSuccess)
++        {
++            return result.Status switch
++            {
++                DirectGrantStatus.InvalidCredentials => Results.Json(
++                    new { error = "invalid_credentials", detail = result.Detail },
++                    statusCode: StatusCodes.Status401Unauthorized),
++                DirectGrantStatus.DisabledUser => Results.Json(
++                    new { error = "disabled_user", detail = result.Detail },
++                    statusCode: StatusCodes.Status403Forbidden),
++                _ => Results.Json(
++                    new { error = "keycloak_unreachable", detail = result.Detail },
++                    statusCode: StatusCodes.Status502BadGateway),
++            };
++        }
++
++        // The token set exists ONLY in the custody store; the caller receives the opaque
++        // session id plus the single-use code — never a token. Keycloak's ROPC + openid
++        // response always carries all three tokens, so a "success" that omits id_token or
++        // refresh_token is a malformed endpoint (same family as a 200 with no access_token)
++        // and must not seed a custody entry that redemption or logout could never use.
++        if (result.IdToken is null || result.RefreshToken is null)
++        {
++            return Results.Json(
++                new { error = "keycloak_unreachable", detail = "the token endpoint omitted id_token or refresh_token" },
++                statusCode: StatusCodes.Status502BadGateway);
++        }
++
++        var sessionId = sessions.Create(
++            result.AccessToken!, result.RefreshToken, result.IdToken, result.ExpiresInSeconds);
++        var code = codes.Create(request.RedirectUri, sessionId);
++
++        return Results.Ok(new ExchangeResponse(code, sessionId, result.ExpiresInSeconds));
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs b/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs
+new file mode 100644
+index 00000000..ad98ffc9
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/DirectGrantExchanger.cs
+@@ -0,0 +1,201 @@
++using System.Net;
++using System.Text.Json;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Outcome of a Direct-Grant exchange (spec §5.2 / D6).</summary>
++public enum DirectGrantStatus
++{
++    Success,
++    InvalidCredentials,
++    DisabledUser,
++    KeycloakUnreachable,
++}
++
++/// <summary>
++/// Result of <see cref="DirectGrantExchanger.ExchangeAsync"/>. The tokens are
++/// present only on <see cref="IsSuccess"/> and must be handed to the session
++/// custody store — they never appear in an HTTP response body, a log line or an
++/// exception message (D7 / AC9).
++/// </summary>
++public sealed record DirectGrantResult(
++    DirectGrantStatus Status,
++    string? AccessToken = null,
++    string? RefreshToken = null,
++    string? IdToken = null,
++    int ExpiresInSeconds = 0,
++    string? Detail = null)
++{
++    public bool IsSuccess => Status == DirectGrantStatus.Success;
++
++    /// <summary>Builds a success result from the token endpoint's 200 JSON payload.</summary>
++    public static DirectGrantResult SuccessFromTokenJson(string json)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(json);
++            var root = document.RootElement;
++            var accessToken = GetString(root, "access_token");
++            if (accessToken is null)
++            {
++                // A 200 without an access token is a malformed endpoint, not a
++                // credential failure: fail toward "unreachable" rather than
++                // letting an empty token be stored.
++                return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable,
++                    Detail: "the token endpoint returned 200 with no access_token");
++            }
++
++            return new DirectGrantResult(
++                DirectGrantStatus.Success,
++                AccessToken: accessToken,
++                RefreshToken: GetString(root, "refresh_token"),
++                IdToken: GetString(root, "id_token"),
++                ExpiresInSeconds: GetInt(root, "expires_in"));
++        }
++        catch (JsonException)
++        {
++            return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable,
++                Detail: "the token endpoint returned a non-JSON 200 response");
++        }
++    }
++
++    /// <summary>
++    /// Classifies a non-success token response. Credential failures are the 400/401
++    /// family; everything else (5xx, redirects, other errors) fails toward
++    /// <see cref="DirectGrantStatus.KeycloakUnreachable"/> so a healthy caller never
++    /// mistakes an endpoint outage for a bad password.
++    /// </summary>
++    public static DirectGrantResult ClassifyFailure(HttpStatusCode status, string body)
++    {
++        var description = TryGetErrorDescription(body);
++        if (description is null)
++        {
++            // BOUNDED fallback (pass-3c P2-4): when error_description is absent or the body is
++            // not JSON, do NOT reflect the raw upstream body to the caller — a proxy error page
++            // could echo far more than a diagnostic (and could carry attacker-influenced text
++            // into a later response). A short static message keeps the classification without
++            // the reflection.
++            description =
++                "the token endpoint returned an error response without a parseable error_description";
++        }
++
++        if (status is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized)
++        {
++            return ContainsAccountDisabled(description)
++                ? new DirectGrantResult(DirectGrantStatus.DisabledUser, Detail: description)
++                : new DirectGrantResult(DirectGrantStatus.InvalidCredentials, Detail: description);
++        }
++
++        return new DirectGrantResult(DirectGrantStatus.KeycloakUnreachable, Detail: description);
++    }
++
++    /// <summary>Convenience for transport failures (no HTTP response was received).</summary>
++    public static DirectGrantResult Unreachable() => new(DirectGrantStatus.KeycloakUnreachable);
++
++    private static bool ContainsAccountDisabled(string description)
++        // Broad match is deliberate (P1 fix): Keycloak 26.4's canonical disabled-account
++        // error_description is "Account is disabled, contact your administrator."
++        // (accountDisabledMessage) — it does NOT contain the substring "account disabled"
++        // because of the intervening "is ", so a narrower match misclassifies a disabled
++        // user as InvalidCredentials. The "is not fully set up" phrase catches the
++        // not-fully-provisioned variant. The brute-force lockout message
++        // ("Invalid username or password.") contains no "disabled" and must stay classified
++        // as InvalidCredentials deliberately (no user enumeration).
++        => description.Contains("disabled", StringComparison.OrdinalIgnoreCase)
++           || description.Contains("is not fully set up", StringComparison.OrdinalIgnoreCase);
++
++    private static string? TryGetErrorDescription(string body)
++    {
++        try
++        {
++            using var document = JsonDocument.Parse(body);
++            return document.RootElement.TryGetProperty("error_description", out var description)
++                ? description.GetString()
++                : null;
++        }
++        catch (JsonException)
++        {
++            return null;
++        }
++    }
++
++    private static string? GetString(JsonElement root, string name)
++        => root.TryGetProperty(name, out var value) ? value.GetString() : null;
++
++    private static int GetInt(JsonElement root, string name)
++        => root.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : 0;
++}
++
++/// <summary>
++/// Performs the OAuth2 Resource Owner Password Credentials (Direct Grant) exchange
++/// against Keycloak's token endpoint (spec §5.2 / D6). The confidential client
++/// secret stays server-side for the lifetime of the request; the returned token
++/// set is handed to the session custody store, never to a response body.
++/// </summary>
++public sealed class DirectGrantExchanger
++{
++    private readonly HttpClient _httpClient;
++    private readonly AuthServiceOptions _options;
++
++    public DirectGrantExchanger(HttpClient httpClient, IOptions<AuthServiceOptions> options)
++    {
++        _httpClient = httpClient;
++        _options = options.Value;
++    }
++
++    public async Task<DirectGrantResult> ExchangeAsync(
++        string username,
++        string password,
++        CancellationToken cancellationToken = default)
++    {
++        if (string.IsNullOrWhiteSpace(username) || password is null)
++        {
++            // No exchange is attempted for a blank credential pair: fail the same
++            // way Keycloak would, without ever sending an empty password.
++            return new DirectGrantResult(DirectGrantStatus.InvalidCredentials,
++                Detail: "username or password was blank");
++        }
++
++        var endpoint = new Uri($"{_options.Keycloak.Authority.TrimEnd('/')}/protocol/openid-connect/token");
++
++        using var form = new FormUrlEncodedContent(new Dictionary<string, string>(StringComparer.Ordinal)
++        {
++            ["grant_type"] = "password",
++            ["client_id"] = _options.Keycloak.ClientId,
++            ["client_secret"] = _options.Keycloak.ClientSecret,
++            ["username"] = username,
++            ["password"] = password,
++        });
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await _httpClient.PostAsync(endpoint, form, cancellationToken);
++        }
++        catch (HttpRequestException)
++        {
++            // Network failure / TLS / DNS: the endpoint did not answer at all.
++            return DirectGrantResult.Unreachable();
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // Caller cancellation is not a Keycloak failure — rethrow, never swallow.
++            throw;
++        }
++        catch (OperationCanceledException)
++        {
++            // HttpClient timeout: the token endpoint did not answer in time.
++            return DirectGrantResult.Unreachable();
++        }
++
++        using (response)
++        {
++            var body = await response.Content.ReadAsStringAsync(cancellationToken);
++            return response.IsSuccessStatusCode
++                ? DirectGrantResult.SuccessFromTokenJson(body)
++                : DirectGrantResult.ClassifyFailure(response.StatusCode, body);
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/RedeemEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/RedeemEndpointTests.cs
+new file mode 100644
+index 00000000..c13cd72b
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/RedeemEndpointTests.cs
+@@ -0,0 +1,217 @@
++using System.Net;
++using System.Net.Http.Json;
++using System.Text;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// <c>POST /auth/redeem</c> coverage (pass 3c step 4): the happy path returns the CLAIM SET
++/// ONLY (AC9 — the guarantee pass 3b handed forward), the request contract carries no session id
++/// (the defect the parent corrected in 3c), a replayed code is rejected, TTL expiry is honoured,
++/// a redirect-URI mismatch is consumed as misuse, and unknown codes are 404. The happy and
++/// pipeline cases run through the real Kestrel host with a synthetically-minted ID token; the
++/// clock-dependent case (TTL expiry) invokes the endpoint directly under a fake TimeProvider,
++/// because the host's code TTL is 20 seconds of real time.
++/// ALSO HOSTS the shared <see cref="FakeTimeProvider"/> and <see cref="EndpointTestSupport"/>
++/// helpers used by <see cref="SessionEndpointTests"/>'s clock-dependent case.
++/// </summary>
++[TestClass]
++public class RedeemEndpointTests
++{
++    private const string RedirectUri = "http://localhost:5300/signin-oidc";
++
++    /// <summary>The realm mappers' claim names (school-collab-realm.json <c>claim.name</c>
++    /// values), carried by a SYNTHETIC UNSIGNED ID token. Round A's redeem path decodes only the
++    /// JWT payload (documented in <see cref="RedeemEndpoints"/>), so a fixture matching the
++    /// realm-mapper contract is valid here: it is a claim-SHAPE fixture (D9), NOT a claim of
++    /// live parity — full signature/issuer/audience validation and live parity remain the
++    /// round's cold-start/round-B checks.
++    /// </summary>
++    private static readonly string SyntheticIdToken = "header."
++        + Convert.ToBase64String(Encoding.UTF8.GetBytes(
++            """{"tenant_id":"00000000-0000-0000-0000-000000000002","tenant_name":"Dev School","tenant_type":"School","teacher_id":"00000000-0000-0000-0000-000000000003","roles":["user-admin"]}""")).TrimEnd('=')
++        + ".signature";
++
++    private static JsonContent Request(string code, string redirectUri = RedirectUri) =>
++        JsonContent.Create(new RedeemEndpoints.RedeemRequest(code, redirectUri),
++            options: new JsonSerializerOptions(JsonSerializerDefaults.Web));
++
++    /// <summary>Seeds a live session plus a bound single-use code through the host's REAL
++    /// stores, and returns the values needed for the no-token-in-body scan.</summary>
++    private static async Task<(string Code, string AccessToken, string RefreshToken, string IdToken)> SeedRedemptionAsync(
++        AuthEndpointTestHost host)
++    {
++        var sessions = host.Services.GetRequiredService<PortalSessionStore>();
++        var codes = host.Services.GetRequiredService<OneTimeCodeStore>();
++        const string access = "seeded_access_token";
++        const string refresh = "seeded_refresh_token";
++        var sessionId = sessions.Create(access, refresh, SyntheticIdToken, 3600);
++        var code = codes.Create(RedirectUri, sessionId);
++        return (code, access, refresh, SyntheticIdToken);
++    }
++
++    [TestMethod]
++    public async Task Redeem_HappyPath_ReturnsTheClaimSetOnly_NoTokenInBody()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var (code, access, refresh, idToken) = await SeedRedemptionAsync(host);
++
++        // The calling app holds ONLY the code and its own redirect URI — no session id anywhere
++        // (D6 / spec §5.2 step 5). Success therefore proves the code alone resolves the claims.
++        var response = await host.Client.PostAsync("/auth/redeem", Request(code));
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++
++        var json = await response.Content.ReadAsStringAsync();
++        using var doc = JsonDocument.Parse(json);
++        doc.RootElement.GetProperty("tenantId").GetString().Should().Be("00000000-0000-0000-0000-000000000002");
++        doc.RootElement.GetProperty("tenantName").GetString().Should().Be("Dev School");
++        doc.RootElement.GetProperty("tenantType").GetString().Should().Be("School");
++        doc.RootElement.GetProperty("teacherId").GetString().Should().Be("00000000-0000-0000-0000-000000000003");
++        var roles = doc.RootElement.GetProperty("roles");
++        roles.GetArrayLength().Should().Be(1);
++        roles[0].GetString().Should().Be("user-admin");
++
++        // AC9: no secret or token in ANY response body. Scan the RAW serialized JSON for every
++        // seeded token value AND for token-shaped property names — typed deserialization alone
++        // could never catch a token field the DTO does not model.
++        json.Should().NotContain(access);
++        json.Should().NotContain(refresh);
++        json.Should().NotContain(idToken);
++        json.Should().NotContain("access_token");
++        json.Should().NotContain("refresh_token");
++        json.Should().NotContain("id_token");
++        // The redeem response is the CLAIM SET; the session id travels with the portal's own
++        // signed cookie and must never appear in this body (P2-3). Same raw-scan protection as
++        // the token names, so a SessionId field added to the response record fails this test.
++        json.Should().NotContain("sessionId");
++    }
++
++    [TestMethod]
++    public void RedeemRequest_ContractHasNoSessionIdField()
++    {
++        // The pass-3c contract defect the parent corrected: the redeemer is the calling Blazor
++        // app, which receives ONLY the one-time code (D6, spec §5.2 steps 4-5), so the request
++        // type must not expose a session field — the code entry carries the reference. Pinned
++        // by reflection so a future SessionId field cannot creep back in.
++        typeof(RedeemEndpoints.RedeemRequest).GetProperties().Should().HaveCount(2);
++        typeof(RedeemEndpoints.RedeemRequest).GetProperty("SessionId").Should().BeNull();
++    }
++
++    [TestMethod]
++    public async Task Redeem_ReplayOfAConsumedCode_Is404()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var (code, _, _, _) = await SeedRedemptionAsync(host);
++
++        var first = await host.Client.PostAsync("/auth/redeem", Request(code));
++        var second = await host.Client.PostAsync("/auth/redeem", Request(code));
++
++        first.StatusCode.Should().Be(HttpStatusCode.OK);
++        // DISCRIMINATION: the second call can only see InvalidCode if the first redemption
++        // REALLY removed the entry atomically — this fails if redemption leaves the entry or
++        // returns success twice.
++        second.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await second.Content.ReadAsStringAsync()).Should().Contain("invalid_code");
++    }
++
++    [TestMethod]
++    public async Task Redeem_RedirectUriMismatch_ConsumesTheCodeAsMisuse()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var (code, _, _, _) = await SeedRedemptionAsync(host);
++
++        var mismatch = await host.Client.PostAsync("/auth/redeem", Request(code, "http://evil.example/callback"));
++        // The TRUE holder then retries with the correct URI.
++        var retry = await host.Client.PostAsync("/auth/redeem", Request(code));
++
++        mismatch.StatusCode.Should().Be(HttpStatusCode.BadRequest);
++        (await mismatch.Content.ReadAsStringAsync()).Should().Contain("redirect_uri_mismatch");
++        // The mismatched attempt was CONSUMED as misuse (D6 anti-probe posture), so even the
++        // legitimate holder's retry is now rejected. Both statuses together prove
++        // reject-AND-consume — the first alone would not.
++        retry.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task Redeem_UnknownCode_Is404()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var response = await host.Client.PostAsync("/auth/redeem", Request("deadbeefdeadbeef"));
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("invalid_code");
++    }
++
++    [TestMethod]
++    public async Task Redeem_TtlExpiredCode_Is400()
++    {
++        // Direct invocation under a controlling clock: through the host the code TTL is 20 real
++        // seconds, which no test should sleep for. The store is built under the SAME fake clock
++        // it uses internally, so expiry (code TTL 20 s) is deterministic and instant. The
++        // session TTL defaults to 30 min, so the code really is the thing that expired.
++        var clock = new FakeTimeProvider();
++        var options = EndpointTestSupport.OptionsFor(codeTtl: TimeSpan.FromSeconds(20));
++        var codes = new OneTimeCodeStore(clock, options);
++        var sessions = new PortalSessionStore(clock, options);
++        var sessionId = sessions.Create("seeded_access_token", "seeded_refresh_token", SyntheticIdToken, 3600);
++        var code = codes.Create(RedirectUri, sessionId);
++
++        clock.Now = clock.Now.AddSeconds(21);
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            RedeemEndpoints.Redeem(
++                new RedeemEndpoints.RedeemRequest(code, RedirectUri), codes, sessions, new ClaimSetFactory()));
++
++        status.Should().Be(400);
++        body.Should().Contain("code_expired");
++    }
++}
++
++/// <summary>Controllable clock for the TTL cases the host cannot reach without sleeping. The
++/// stores use <c>TimeProvider.GetUtcNow()</c> exclusively, so overriding that one method fully
++/// controls expiry.</summary>
++internal sealed class FakeTimeProvider : TimeProvider
++{
++    public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
++    public override DateTimeOffset GetUtcNow() => Now;
++}
++
++/// <summary>Shared construction/execution helpers for the direct-invocation endpoint tests.</summary>
++internal static class EndpointTestSupport
++{
++    public static IOptions<AuthServiceOptions> OptionsFor(TimeSpan? codeTtl = null, TimeSpan? sessionTtl = null) =>
++        new OptionsWrapper<AuthServiceOptions>(new AuthServiceOptions
++        {
++            OneTimeCodeTtl = codeTtl ?? TimeSpan.FromSeconds(60),
++            PortalSessionTtl = sessionTtl ?? TimeSpan.FromMinutes(30),
++        });
++
++    /// <summary>Executes an <see cref="IResult"/> against a bare <see cref="DefaultHttpContext"/>
++    /// and returns the status plus the serialized body — used to run the endpoint methods
++    /// directly (no HTTP host) when a controllable clock is required. A minimal provider is
++    /// wired so the Json result serializers can resolve their options (a bare context has none).</summary>
++    public static async Task<(int Status, string Body)> ExecuteAsync(IResult result)
++    {
++        var context = new DefaultHttpContext();
++        var services = new ServiceCollection();
++        services.AddSingleton<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>(
++            Microsoft.Extensions.Options.Options.Create(new Microsoft.AspNetCore.Http.Json.JsonOptions()));
++        services.AddSingleton<ILoggerFactory>((ILoggerFactory)Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
++        context.RequestServices = services.BuildServiceProvider();
++        context.Response.Body = new MemoryStream();
++        await result.ExecuteAsync(context);
++        context.Response.Body.Position = 0;
++        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
++        return (context.Response.StatusCode, body);
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/SessionEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/SessionEndpointTests.cs
+new file mode 100644
+index 00000000..d857f7f0
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/SessionEndpointTests.cs
+@@ -0,0 +1,124 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// <c>GET</c> / <c>DELETE /auth/session/{id}</c> coverage (pass 3c step 4 / spec §5.4 / D12):
++/// custody reads carry DERIVED, non-token data only (AC9); DELETE revokes the session and — as
++/// the PLAN-MANDATED exemption to the no-token-in-a-body rule — returns the refresh token to the
++/// calling portal for Keycloak revocation (AC4's service-side half); unknown and expired
++/// sessions are 404. The expired case runs the endpoint directly under a fake clock because the
++/// host's session TTL is 30 minutes of real time.
++/// </summary>
++[TestClass]
++public class SessionEndpointTests
++{
++    private const string AccessToken = "seeded_access_token";
++    private const string RefreshToken = "seeded_refresh_token";
++
++    /// <summary>Any three-segment JWT-shape string is fine for GET/DELETE (no decoding happens
++    /// on these paths) — it only needs to be non-empty so the custody entry is well-formed.</summary>
++    private const string IdToken = "header.eyJzdWIiOiJzZXNzaW9uLWZpeHR1cmUifQ.signature";
++
++    private const string UnknownSessionId =
++        "0000000000000000000000000000000000000000000000000000000000000000";
++
++    private static string SeedSession(AuthEndpointTestHost host) =>
++        host.Services.GetRequiredService<PortalSessionStore>()
++            .Create(AccessToken, RefreshToken, IdToken, 3600);
++
++    [TestMethod]
++    public async Task Get_ReturnsDerivedDataOnly_NoTokenInBody()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = SeedSession(host);
++
++        var response = await host.Client.GetAsync($"/auth/session/{sessionId}");
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        var json = await response.Content.ReadAsStringAsync();
++        using var doc = JsonDocument.Parse(json);
++        doc.RootElement.GetProperty("sessionId").GetString().Should().Be(sessionId);
++        doc.RootElement.GetProperty("expiresInSeconds").GetInt32().Should().Be(3600);
++        doc.RootElement.TryGetProperty("expiresAtUtc", out _).Should().BeTrue();
++
++        // AC9: the custody read exposes derived data ONLY. Scanning the RAW body — not the typed
++        // DTO — catches a token field added to the response payload later.
++        json.Should().NotContain(AccessToken);
++        json.Should().NotContain(RefreshToken);
++        json.Should().NotContain("access_token");
++        json.Should().NotContain("refresh_token");
++        json.Should().NotContain("id_token");
++    }
++
++    [TestMethod]
++    public async Task Get_UnknownSession_Is404()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var response = await host.Client.GetAsync($"/auth/session/{UnknownSessionId}");
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task Delete_RevokesAndReturnsTheRefreshToken_ThenGone()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = SeedSession(host);
++
++        var delete = await host.Client.DeleteAsync($"/auth/session/{sessionId}");
++        var getAfter = await host.Client.GetAsync($"/auth/session/{sessionId}");
++
++        delete.StatusCode.Should().Be(HttpStatusCode.OK);
++        var body = await delete.Content.ReadAsStringAsync();
++        JsonDocument.Parse(body).RootElement.GetProperty("refreshToken").GetString().Should().Be(RefreshToken);
++
++        // The refresh token is the PLAN-MANDATED exemption to the no-token-in-a-response-body
++        // rule (AC4 service-side half): the DELETE is called server-to-server by the portal,
++        // which forwards the value to Keycloak's revocation endpoint during logout. It is
++        // PINNED explicitly here so the exemption stays deliberate — if a change stops
++        // returning it, logout revocation breaks without any test noticing.
++
++        // ...and it is the ONLY token allowed out (P2-2 — reviewed into the pass): the session's
++        // access and id tokens must not travel with it. Raw-body scans, mirroring the redeem tests,
++        // so a token-shaped field added to DeleteSessionResponse fails this test.
++        body.Should().NotContain(AccessToken);
++        body.Should().NotContain(IdToken);
++        body.Should().NotContain("access_token");
++        body.Should().NotContain("id_token");
++
++        getAfter.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task Delete_UnknownSession_Is404()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var response = await host.Client.DeleteAsync($"/auth/session/{UnknownSessionId}");
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task Get_ExpiredSession_Is404()
++    {
++        // The host's PortalSessionTtl is 30 minutes of real time — direct invocation under the
++        // fake clock keeps this instant and deterministic. PortalSessionStore.Get treats an
++        // expired session as absent (it is also swept), and the endpoint surfaces that as 404.
++        var clock = new FakeTimeProvider();
++        var options = EndpointTestSupport.OptionsFor(sessionTtl: TimeSpan.FromMinutes(30));
++        var sessions = new PortalSessionStore(clock, options);
++        var sessionId = sessions.Create(AccessToken, RefreshToken, IdToken, 3600);
++
++        clock.Now = clock.Now.AddMinutes(31);
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(SessionEndpoints.Get(sessionId, sessions));
++
++        status.Should().Be(404);
++        body.Should().Contain("session_not_found");
++    }
++}

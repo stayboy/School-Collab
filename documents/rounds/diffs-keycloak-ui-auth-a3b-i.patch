@@ -1,0 +1,487 @@
+diff --git a/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs b/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
+new file mode 100644
+index 00000000..65fb1a35
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
+@@ -0,0 +1,111 @@
++using System.IO;
++using System.Text.Json;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>The portal-facing claim set (spec §5.4 / D9). ONE shape, ONE factory: the Direct-Grant
++/// handshake path and the realm-mapper-driven paths must not drift apart, so the claim names here
++/// ARE the mapper contract pinned by the realm import (school-collab-realm.json).</summary>
++public sealed record PortalClaims(
++    string TenantId,
++    string TenantName,
++    string TenantType,
++    string TeacherId,
++    IReadOnlyList<string> Roles);
++
++/// <summary>
++/// Builds the claim set from a decoded Keycloak token payload. The caller owns token validation
++/// and JWT decoding; this class is purely about claim SHAPE, so a single fixture pins both paths
++/// to the same names (D9). The tenant/teacher claims are REQUIRED — a session without them cannot
++/// bind to a tenant, so a missing claim fails fast naming the claim rather than degrading.
++/// <c>roles</c> is multivalued (the realm's <c>User Realm Role</c> mapper sets
++/// <c>multivalued: true</c>); its absence means no roles.
++/// </summary>
++public sealed class ClaimSetFactory
++{
++    // These names are the realm mapper contract — changing the realm mappers or these constants
++    // without the other is exactly the drift D9 forbids (school-collab-realm.json mappers:
++    // tenant-id → tenant_id, tenant-name → tenant_name, tenant-type → tenant_type,
++    // teacher-id → teacher_id, roles → roles).
++    public const string TenantIdClaim = "tenant_id";
++    public const string TenantNameClaim = "tenant_name";
++    public const string TenantTypeClaim = "tenant_type";
++    public const string TeacherIdClaim = "teacher_id";
++    public const string RolesClaim = "roles";
++
++    /// <summary>
++    /// <paramref name="payload"/> must be a JSON object — a decoded token payload (the ID token
++    /// on the handshake path; the same shape the realm's attribute and role mappers emit on both
++    /// paths).
++    /// </summary>
++    /// <exception cref="InvalidDataException">The payload is not an object, a required
++    /// tenant/teacher claim is missing or not textual, or <c>roles</c> is malformed.</exception>
++    public PortalClaims Build(JsonElement payload)
++    {
++        if (payload.ValueKind != JsonValueKind.Object)
++        {
++            throw new InvalidDataException("the token payload must be a JSON object.");
++        }
++
++        var tenantId = GetRequiredString(payload, TenantIdClaim);
++        var tenantName = GetRequiredString(payload, TenantNameClaim);
++        var tenantType = GetRequiredString(payload, TenantTypeClaim);
++        var teacherId = GetRequiredString(payload, TeacherIdClaim);
++        var roles = GetRoles(payload);
++
++        return new PortalClaims(tenantId, tenantName, tenantType, teacherId, roles);
++    }
++
++    private static string GetRequiredString(JsonElement payload, string claim)
++    {
++        if (!payload.TryGetProperty(claim, out var value))
++        {
++            throw new InvalidDataException(
++                $"the token payload is missing the required '{claim}' claim — the realm mapper "
++                + "contract (school-collab-realm.json) provides it on both the ID and access tokens.");
++        }
++
++        // The realm's attribute mappers are NOT multivalued, so the token carries a plain JSON
++        // string; a single-element array is accepted defensively in case a mapper is ever flipped.
++        if (value.ValueKind == JsonValueKind.String)
++        {
++            return value.GetString() ?? string.Empty;
++        }
++
++        if (value.ValueKind == JsonValueKind.Array
++            && value.GetArrayLength() == 1
++            && value[0].ValueKind == JsonValueKind.String)
++        {
++            return value[0].GetString() ?? string.Empty;
++        }
++
++        throw new InvalidDataException(
++            $"the '{claim}' claim must be a string (or a single-element string array), was {value.ValueKind}.");
++    }
++
++    private static IReadOnlyList<string> GetRoles(JsonElement payload)
++    {
++        if (!payload.TryGetProperty(RolesClaim, out var value))
++        {
++            return Array.Empty<string>();
++        }
++
++        if (value.ValueKind != JsonValueKind.Array)
++        {
++            throw new InvalidDataException(
++                $"the '{RolesClaim}' claim must be an array of strings (the realm mapper sets "
++                + "multivalued: true), was {value.ValueKind}.");
++        }
++
++        var roles = new List<string>(value.GetArrayLength());
++        foreach (var item in value.EnumerateArray())
++        {
++            if (item.ValueKind != JsonValueKind.String)
++            {
++                throw new InvalidDataException($"the '{RolesClaim}' claim contains a non-string entry.");
++            }
++            roles.Add(item.GetString() ?? string.Empty);
++        }
++        return roles;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Services/PortalSessionStore.cs b/src/SchoolCollab.Auth/Services/PortalSessionStore.cs
+new file mode 100644
+index 00000000..324d2196
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Services/PortalSessionStore.cs
+@@ -0,0 +1,112 @@
++using System.Collections.Concurrent;
++using System.Security.Cryptography;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Auth.Options;
++
++namespace SchoolCollab.Auth.Services;
++
++/// <summary>Server-side custody record for one portal session (spec §5.4 / D12). The token set
++/// lives ONLY here, in the service's memory: the store has NO serialized shape, so no token ever
++/// reaches a response body (AC9) — the pass-3c endpoint DTOs carry only derived, non-token data.</summary>
++public sealed record PortalSessionEntry(
++    string AccessToken,
++    string RefreshToken,
++    string IdToken,
++    int ExpiresInSeconds,
++    DateTimeOffset ExpiresAtUtc);
++
++/// <summary>
++/// Outcome of a revocation. The refresh token is handed to the CALLER only, so the caller can
++/// send it to Keycloak's revocation endpoint (logout) — it is not a response payload and never
++/// leaves the service.
++/// </summary>
++public sealed record PortalSessionRevocation(bool Found, string? RefreshToken = null);
++
++/// <summary>
++/// In-memory portal-session custody (spec §5.4 / D12): opaque session id → token set, served
++/// only server-side, TTL-bounded on the injected <see cref="TimeProvider"/> (never wall-clock).
++/// Round A's store is single-instance and deliberately NOT restart-durable — the plan claims
++/// neither property; durable/multi-instance custody is a later round's concern. Revocation
++/// deletes the entry and exposes its refresh token for Keycloak revocation (logout flow).
++/// </summary>
++public sealed class PortalSessionStore
++{
++    private readonly ConcurrentDictionary<string, PortalSessionEntry> _sessions = new(StringComparer.Ordinal);
++    private readonly TimeProvider _timeProvider;
++    private readonly TimeSpan _ttl;
++
++    // Bounded housekeeping (the pass-3a review standard for OneTimeCodeStore, applied here so the
++    // finding does not repeat): an expired-but-never-revoked session is swept opportunistically
++    // on Create — once per SweepEveryNCreates creates and whenever the live count passes
++    // MaxLiveSessions. A swept entry is already past its TTL (Get would reject it anyway), so no
++    // live custody is ever evicted, and the sweep uses value-compared removal so it cannot remove
++    // an entry a concurrent Get/Revoke just consumed. Live entries are never evicted.
++    private const int MaxLiveSessions = 1024;
++    private const int SweepEveryNCreates = 256;
++    private long _createdCount;
++
++    public PortalSessionStore(TimeProvider timeProvider, IOptions<AuthServiceOptions> options)
++    {
++        _timeProvider = timeProvider;
++        _ttl = options.Value.PortalSessionTtl;
++    }
++
++    /// <summary>Stores a token set under a fresh opaque session id (64 hex chars = 256 bits of
++    /// entropy, never derived from the tokens) and returns that id — the only value a caller ever
++    /// holds. (Pass 3b-brief: session ids are to be 256-bit — note OneTimeCodeStore's
++    /// GetHexString(32) is 128-bit; the pass-3a review's "256 bits" claim for it was inaccurate.)</summary>
++    public string Create(string accessToken, string refreshToken, string idToken, int expiresInSeconds)
++    {
++        var sessionId = RandomNumberGenerator.GetHexString(64);
++        _sessions[sessionId] = new PortalSessionEntry(
++            accessToken, refreshToken, idToken, expiresInSeconds, _timeProvider.GetUtcNow() + _ttl);
++
++        var created = Interlocked.Increment(ref _createdCount);
++        if (created % SweepEveryNCreates == 0 || _sessions.Count > MaxLiveSessions)
++        {
++            SweepExpired();
++        }
++
++        return sessionId;
++    }
++
++    /// <summary>Reads a live session (custody access for the host). An expired session is treated
++    /// as absent and removed opportunistically.</summary>
++    public PortalSessionEntry? Get(string sessionId)
++    {
++        if (!_sessions.TryGetValue(sessionId, out var entry))
++        {
++            return null;
++        }
++
++        if (entry.ExpiresAtUtc <= _timeProvider.GetUtcNow())
++        {
++            _sessions.TryRemove(new KeyValuePair<string, PortalSessionEntry>(sessionId, entry));
++            return null;
++        }
++
++        return entry;
++    }
++
++    /// <summary>Deletes a session and hands its refresh token to the caller for Keycloak
++    /// revocation (logout, spec §5.4 / round-B AC-G). An already-gone or already-swept session
++    /// reports <see cref="PortalSessionRevocation.Found"/> = false.</summary>
++    public PortalSessionRevocation Revoke(string sessionId)
++    {
++        return _sessions.TryRemove(sessionId, out var entry)
++            ? new PortalSessionRevocation(Found: true, entry.RefreshToken)
++            : new PortalSessionRevocation(Found: false);
++    }
++
++    private void SweepExpired()
++    {
++        var now = _timeProvider.GetUtcNow();
++        foreach (var (key, entry) in _sessions)
++        {
++            if (entry.ExpiresAtUtc <= now)
++            {
++                _sessions.TryRemove(new KeyValuePair<string, PortalSessionEntry>(key, entry));
++            }
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/ClaimSetFactoryTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/ClaimSetFactoryTests.cs
+new file mode 100644
+index 00000000..bef62806
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/ClaimSetFactoryTests.cs
+@@ -0,0 +1,103 @@
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Claim-set shape coverage (plan step 6): claim names EXACTLY as the realm's protocol mappers
++/// emit them (school-collab-realm.json), multivalued roles, required tenant/teacher binding.
++/// Fixture-driven — this file deliberately does NOT claim live parity with a running Keycloak:
++/// decoding and validating a real token is a runtime/cold-start concern, not a shape test
++/// (the plan's honesty note for pass 3b).
++/// </summary>
++[TestClass]
++public class ClaimSetFactoryTests
++{
++    // The fixture mirrors what the realm's attribute + `User Realm Role` mappers emit as claims
++    // in a token payload (school-collab-realm.json): tenant_id / tenant_name / tenant_type /
++    // teacher_id / roles, with roles multivalued.
++    private const string DevSchoolTokenPayload = """
++        {
++          "tenant_id": "00000000-0000-0000-0000-000000000002",
++          "tenant_name": "Dev School",
++          "tenant_type": "School",
++          "teacher_id": "00000000-0000-0000-0000-000000000003",
++          "roles": ["user-admin"]
++        }
++        """;
++
++    private static JsonElement Payload(string json) => JsonDocument.Parse(json).RootElement;
++
++    [TestMethod]
++    public void Build_ReadsClaimNamesExactlyAsTheRealmMappersEmitThem()
++    {
++        var claims = new ClaimSetFactory().Build(Payload(DevSchoolTokenPayload));
++
++        claims.TenantId.Should().Be("00000000-0000-0000-0000-000000000002",
++            "the claim name must match the realm mapper contract (tenant-id → tenant_id).");
++        claims.TenantName.Should().Be("Dev School");
++        claims.TenantType.Should().Be("School");
++        claims.TeacherId.Should().Be("00000000-0000-0000-0000-000000000003");
++    }
++
++    [TestMethod]
++    public void Build_ReadsRolesAsAMultivaluedClaim()
++    {
++        var claims = new ClaimSetFactory().Build(Payload("""
++            { "tenant_id": "t", "tenant_name": "n", "tenant_type": "School", "teacher_id": "x", "roles": ["user-admin", "platform-admin"] }
++            """));
++
++        claims.Roles.Should().Equal(new[] { "user-admin", "platform-admin" },
++            "the realm's User Realm Role mapper emits `roles` as a multivalued claim; order is preserved.");
++    }
++
++    [TestMethod]
++    public void Build_WithNoRolesClaim_ProducesNoRoles()
++    {
++        var claims = new ClaimSetFactory().Build(Payload("""
++            { "tenant_id": "t", "tenant_name": "n", "tenant_type": "School", "teacher_id": "x" }
++            """));
++
++        claims.Roles.Should().BeEmpty(
++            "an absent `roles` claim must not throw — absence can only mean no realm roles.");
++    }
++
++    [TestMethod]
++    public void Build_AcceptsPlainStringValues_AsTheNonMultivaluedMappersEmit()
++    {
++        // The realm's attribute mappers are NOT multivalued, so a token carries a plain JSON string.
++        var claims = new ClaimSetFactory().Build(Payload("""
++            { "tenant_id": "t1", "tenant_name": "One", "tenant_type": "Organization", "teacher_id": "te", "roles": [] }
++            """));
++
++        claims.TenantId.Should().Be("t1");
++        claims.TenantName.Should().Be("One");
++        claims.TenantType.Should().Be("Organization");
++        claims.TeacherId.Should().Be("te");
++    }
++
++    [TestMethod]
++    public void Build_MissingRequiredClaim_FailsFastNamingTheClaim()
++    {
++        var factory = new ClaimSetFactory();
++
++        var act = () => factory.Build(Payload("""
++            { "tenant_name": "n", "tenant_type": "School", "teacher_id": "x", "roles": [] }
++            """));
++
++        act.Should().Throw<System.IO.InvalidDataException>().WithMessage("*'tenant_id'*",
++            "a session without tenant binding cannot be served — the failure must name the missing claim.");
++    }
++
++    [TestMethod]
++    public void Build_NonObjectPayload_FailsFast()
++    {
++        var factory = new ClaimSetFactory();
++
++        var act = () => factory.Build(Payload("\"just-a-string\""));
++
++        act.Should().Throw<System.IO.InvalidDataException>();
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionStoreTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionStoreTests.cs
+new file mode 100644
+index 00000000..0ff708d7
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionStoreTests.cs
+@@ -0,0 +1,137 @@
++using FluentAssertions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// Portal-session custody coverage (plan step 6): round-trip, TTL expiry on the fake clock,
++/// revocation exposing the refresh token, opaque ids, and bounded eviction. Note the
++/// "no token in a serialized response shape" boundary (AC9): the store itself is NEVER
++/// serialized — token custody stays in the service's memory, and the response-shape guard is
++/// enforced at the pass-3c endpoint layer (SessionEndpoints), where the tests for that live.
++/// </summary>
++[TestClass]
++public class PortalSessionStoreTests
++{
++    private sealed class FakeTimeProvider : TimeProvider
++    {
++        public DateTimeOffset Now { get; set; } = new(2026, 9, 22, 12, 0, 0, TimeSpan.Zero);
++
++        public override DateTimeOffset GetUtcNow() => Now;
++    }
++
++    private static PortalSessionStore CreateStore(FakeTimeProvider clock, out AuthServiceOptions options)
++    {
++        options = new AuthServiceOptions { PortalSessionTtl = TimeSpan.FromMinutes(1) };
++        // Fully-qualified on purpose: `SchoolCollab.Auth.Options` (the namespace) shadows the
++        // static type — the repo precedent (OneTimeCodeStoreTests) does the same.
++        return new PortalSessionStore(clock, Microsoft.Extensions.Options.Options.Create(options));
++    }
++
++    [TestMethod]
++    public void Create_ReturnsOpaqueSessionId_AndGetRoundTripsTheTokenSet()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var id = store.Create("access-token", "refresh-token", "id-token", 300);
++
++        id.Should().MatchRegex("^[0-9A-F]{64}$",
++            "session ids are 64 hex chars = 256 bits of entropy (GetHexString(64)), opaque and never derived from the tokens.");
++
++        var entry = store.Get(id);
++        entry.Should().NotBeNull();
++        entry!.AccessToken.Should().Be("access-token");
++        entry.RefreshToken.Should().Be("refresh-token");
++        entry.IdToken.Should().Be("id-token");
++        entry.ExpiresInSeconds.Should().Be(300);
++    }
++
++    [TestMethod]
++    public void Get_AfterTtlExpiry_IsAbsentAndCleanedUp()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var id = store.Create("a", "r", "i", 300);
++
++        clock.Now = clock.Now.AddMinutes(2); // past the 1-minute TTL
++
++        store.Get(id).Should().BeNull("an expired session must not be served.");
++
++        store.Revoke(id).Found.Should().BeFalse("Get already consumed the expired entry.");
++    }
++
++    [TestMethod]
++    public void Revoke_DeletesTheSession_AndExposesItsRefreshToken()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var id = store.Create("a", "the-refresh-token", "i", 300);
++
++        var first = store.Revoke(id);
++
++        first.Found.Should().BeTrue();
++        first.RefreshToken.Should().Be("the-refresh-token",
++            "revocation hands the refresh token to the caller so it can be sent to Keycloak's revocation endpoint (logout).");
++
++        store.Get(id).Should().BeNull("revocation deletes the entry.");
++        store.Revoke(id).Found.Should().BeFalse("a second revocation finds nothing.");
++    }
++
++    [TestMethod]
++    public void Revoke_UnknownSession_IsNotFound()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++
++        var revoke = store.Revoke("00000000000000000000000000000000");
++
++        revoke.Found.Should().BeFalse();
++        revoke.RefreshToken.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void Create_PeriodicSweep_ReclaimsExpiredNeverRevokedSessions()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var abandoned = store.Create("a", "r", "i", 300);
++
++        clock.Now = clock.Now.AddHours(1); // far past the 1-minute TTL; will never be revoked
++
++        for (var i = 0; i < 256; i++)
++        {
++            store.Create("a", "r", "i", 300);
++        }
++
++        store.Revoke(abandoned).Found.Should().BeFalse(
++            "the periodic sweep must remove the expired, never-revoked session — Found=true here "
++            + "would mean the dead entry was never reclaimed.");
++    }
++
++    [TestMethod]
++    public void Create_CapDrivenSweep_KeepsTheStoreBounded()
++    {
++        var clock = new FakeTimeProvider();
++        var store = CreateStore(clock, out _);
++        var first = store.Create("a", "r", "i", 300);
++
++        // Fill past the 1024 cap with the clock standing still (all still live, so the sweeps
++        // have nothing expired to remove yet — live entries must never be evicted).
++        for (var i = 1; i < 1100; i++)
++        {
++            store.Create("a", "r", "i", 300);
++        }
++
++        // Expire everything issued so far, then issue one more: the count is still past the cap,
++        // so the sweep runs and reclaims the expired entries.
++        clock.Now = clock.Now.AddHours(1);
++        var live = store.Create("a", "r", "i", 300);
++
++        store.Revoke(live).Found.Should().BeTrue("the post-expiry create must still succeed as a live session.");
++        store.Revoke(first).Found.Should().BeFalse(
++            "the cap-driven sweep must have reclaimed the expired entries — the store must not grow without bound.");
++    }
++}

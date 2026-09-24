@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- No PackageReference in round A: the rate limiter (pass 3c) and everything
+         else are framework-provided. Directory.Packages.props stays untouched. -->
+    <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+    <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>
