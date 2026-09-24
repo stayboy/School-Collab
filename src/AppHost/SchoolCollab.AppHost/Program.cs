@@ -408,6 +408,23 @@ WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
 // IResourceBuilder<ProjectResource> and this resource is a Python app.
 var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
     .WithUv()
+    // D13 option (ii) / plan-review P1-1: pin the portal's host port so that
+    // `authPortal.GetEndpoint("http")` deterministically resolves to `http://localhost:5700`.
+    // The realm import carries the post-logout landing URI as a committed LITERAL
+    // (`postLogoutRedirectUris: "http://localhost:5700/"`) because Keycloak matches
+    // `post_logout_redirect_uri` exactly, and the auth service receives that same URI as
+    // `Auth__PostLogoutRedirectUri` from the endpoint expression below — the two can only agree
+    // by construction if the port is pinned. An AddUvicornApp resource has no
+    // launchSettings.json (unlike the fixed Blazor dev ports 5300/7300/5400/7400, which is why
+    // those can be literals in the realm), so the pin lives here.
+    // This UPDATEs the toolkit-created `http` endpoint in place — Aspire's WithEndpoint overload
+    // updates an existing endpoint of the same name (null means "don't change") — and must never
+    // add a second annotation: GetEndpoint("http") is resolved against this same name below
+    // (AuthPortal__PublicBaseUrl, Auth__Portal__BootstrapRedirectUrl, Auth__AppCallbackPrefixes,
+    // Auth__Portal__LoginUrl ×2). `targetPort` is passed as well (the mailpit precedent at the
+    // top of this file): AddUvicornApp launches uvicorn with `--port {endpoint TargetPort}`, so a
+    // host-only pin would leave the process bound to a random target port.
+    .WithHttpEndpoint(port: 5700, targetPort: 5700, name: "http")
     // The portal's only upstream: WithReference injects the services__auth__http__0 discovery
     // env var the typed client resolves (B2's AuthApiClient).
     .WithReference(auth)
@@ -428,6 +445,16 @@ authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes", appCa
 // reaches the auth service only (plan-review P2-5). The portal redeems the single-use bootstrap
 // code there and holds no token (AC11/AC12).
 auth = auth.WithEnvironment("Auth__Portal__BootstrapRedirectUrl", $"{authPortal.GetEndpoint("http")}/bootstrap");
+
+// D13 option (ii): the URI the auth service puts in the `post_logout_redirect_uri` query
+// parameter of the end_session URL it hands back to the portal. It is the portal's own landing
+// URI, so it is fanned from the portal's endpoint expression — resolved to
+// `http://localhost:5700/` by the port pin above — and NOT as a hardcoded literal, while the
+// realm's committed `postLogoutRedirectUris` literal must equal it exactly (trailing slash
+// included; AppHostRealmImportArchitectureTests cross-checks the literal against the pinned
+// port). The auth service is the only consumer: it is what builds the URL, and it validates the
+// key at startup.
+auth = auth.WithEnvironment("Auth__PostLogoutRedirectUri", $"{authPortal.GetEndpoint("http")}/");
 
 // B5b: the enforced allowlist. The portal's bootstrap redemption URI is appended from the
 // portal's endpoint expression (never a hardcoded port) so the D16 bootstrap code — which is

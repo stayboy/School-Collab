@@ -328,27 +328,50 @@ public sealed class KeycloakAuthProvider : IAuthProvider, ISessionTokenAccessor
             await RevokeAtKeycloakAsync(revocation.RefreshToken, cancellationToken);
         }
 
-        return new ProviderLogout(Found: true, BuildEndSessionUrl());
+        // `Found` means the entry was live, and a live entry always carries an id token
+        // (PortalSessionEntry.IdToken is non-nullable) — the null case is the unknown/expired
+        // session returned above. The hint comes from THIS revocation record, so there is no
+        // second read of custody that could race the delete.
+        return new ProviderLogout(Found: true, BuildEndSessionUrl(revocation.IdToken!));
     }
 
     /// <summary>
-    /// The fully-built <c>end_session</c> URL the portal redirects the browser to (D13).
+    /// The fully-built <c>end_session</c> URL the portal redirects the browser to (D13 option (ii)).
     /// </summary>
+    /// <param name="idToken">The revoked custody entry's id token — the <c>id_token_hint</c> that
+    /// tells Keycloak which SSO session to end.</param>
     /// <remarks>
-    /// Token-free by construction — and the reason is now an owner adjudication, not a reading of
-    /// AC11 over D13: the round restores D13 by having the **auth service perform the browser-facing
-    /// logout redirect itself**, carrying <c>id_token_hint</c> + <c>post_logout_redirect_uri</c> in a
-    /// <c>Location</c> header. The id token then never enters a response body (AC11 holds) and never
-    /// reaches Python state (the portal only follows a redirect). That endpoint and the realm's
-    /// post-logout redirect URI are pass **B6**'s work — this pass returns the token-free URL only.
-    /// Keycloak accepts <c>client_id</c> when <c>id_token_hint</c> is absent, so this URL still
-    /// terminates the session; it is the fallback shape, not the round's final logout flow.
+    /// <para>
+    /// <b>Option (ii), owner-adjudicated over option (iii)'s auth-service redirect endpoint:</b>
+    /// the URL is built here, in custody, and returned to the portal, which 302s the browser to it
+    /// and <b>treats it as opaque</b> — it never parses, logs or persists it. A second endpoint in
+    /// this service would add a hop and a new browser-facing surface for a URL that the standard
+    /// OIDC flow already defines, and the portal can build neither parameter itself (it holds no id
+    /// token and does not know the registered landing URI).
+    /// </para>
+    /// <para>
+    /// The hint is the ONE token-shaped value that legitimately travels to the browser, and the
+    /// reason is AC11's carve-out: it is a <b>logout hint</b>, not a bearer credential — it cannot
+    /// authenticate anything, and Keycloak only uses it to identify the SSO session to end. It
+    /// appears nowhere else: no response body carries it except inside this opaque URL, and this
+    /// service never logs it. Both parameters are <see cref="Uri.EscapeDataString"/>-encoded, so
+    /// the landing URI's delimiters cannot break the query; Keycloak matches
+    /// <c>post_logout_redirect_uri</c> against the client's registered
+    /// <c>postLogoutRedirectUris</c> **exactly**, which is why <see cref="AuthServiceOptions.PostLogoutRedirectUri"/>
+    /// is validated at startup with no code fallback.
+    /// </para>
+    /// <para>
+    /// The retired shape carried <c>client_id</c> only (Keycloak accepts it when the hint is
+    /// absent): it terminates the local session but cannot reliably end the central SSO session,
+    /// so it is not the round's logout flow.
+    /// </para>
     /// </remarks>
-    public string BuildEndSessionUrl()
+    public string BuildEndSessionUrl(string idToken)
     {
         var authority = _options.Keycloak.Authority.TrimEnd('/');
-        var clientId = Uri.EscapeDataString(_options.Keycloak.ClientId);
-        return $"{authority}{LogoutPath}?client_id={clientId}";
+        var hint = Uri.EscapeDataString(idToken);
+        var postLogoutRedirectUri = Uri.EscapeDataString(_options.PostLogoutRedirectUri);
+        return $"{authority}{LogoutPath}?id_token_hint={hint}&post_logout_redirect_uri={postLogoutRedirectUri}";
     }
 
     /// <summary>

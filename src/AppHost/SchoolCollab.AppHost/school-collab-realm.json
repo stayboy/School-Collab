@@ -49,6 +49,13 @@
         "https://localhost:55458/signin-oidc",
         "http://localhost:55459/signin-oidc"
       ],
+      "postLogoutRedirectUris": [
+        "http://localhost:5300/signout-callback-oidc",
+        "https://localhost:7300/signout-callback-oidc",
+        "http://localhost:5400/signout-callback-oidc",
+        "https://localhost:7400/signout-callback-oidc",
+        "http://localhost:5700/"
+      ],
       "webOrigins": [
         "http://localhost:5300",
         "https://localhost:7300",

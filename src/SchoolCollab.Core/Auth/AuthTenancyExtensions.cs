@@ -39,11 +39,23 @@ public static class AuthTenancyExtensions
     /// Adds cookie + OpenID Connect authentication using Keycloak and wires the current tenant
     /// from token claims into <see cref="ITenantProvider"/> via <see cref="TenantClaimsTransformation"/>.
     /// When <c>FEATURE:DisableOIDCAuth</c> is enabled (typically in Development), replaces OIDC with
-    /// <see cref="TestAuthHandler"/>.
+    /// <see cref="TestAuthHandler"/> — unless <paramref name="requireOidcRelyingParty"/> opts the host
+    /// into the relying-party pipeline.
     /// </summary>
+    /// <param name="requireOidcRelyingParty">
+    /// Dev-mode carve-out (D16, round <c>keycloak-logout-oidc</c>): with
+    /// <c>FEATURE:DisableOIDCAuth</c> ON, additionally register the OIDC relying-party pipeline
+    /// (default cookie scheme + OIDC, sharing the one options configurator with the real-auth branch)
+    /// while <see cref="TestAuthExtensions.TestAuthScheme"/> stays the default scheme. Set only by the
+    /// <c>auth</c> service: it IS the relying party, and its passkey <c>/complete</c> endpoint reads the
+    /// cookie-scheme ticket the OIDC handler signs on <c>/signin-oidc</c>, so the dev bypass must spare
+    /// the RP itself. Left <c>false</c>, every other consumer's dev pipeline is unchanged. Registration
+    /// performs no network I/O (Keycloak metadata discovery is lazy, on the first challenge).
+    /// </param>
     public static IServiceCollection AddAuthAndTenancy(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool requireOidcRelyingParty = false)
     {
         // Tenant context storage (AsyncLocal-backed provider shared per process).
         // Register via the shared tenancy helper so core modules can also resolve
@@ -79,16 +91,32 @@ public static class AuthTenancyExtensions
 
         if (disableOIDC)
         {
-            services
+            var devAuthentication = services
                 .AddAuthentication(TestAuthExtensions.TestAuthScheme)
                 .AddTestAuth();
+
+            if (requireOidcRelyingParty)
+            {
+                // D16: the auth service is the relying party — the dev bypass spares the
+                // consumers, not the RP. Additive only: TestAuth stays the DEFAULT scheme, and
+                // the challenge-routing policy scheme, JwtBearer and the portal-redirect handler
+                // are deliberately NOT registered here (the RP's own flow goes through the OIDC
+                // scheme's default SignInScheme, not a challenge policy). Same options
+                // configurator as the real-auth branch, so the two cannot drift.
+                var (rpAuthority, rpClientId) = ReadKeycloakClientSettings(configuration);
+
+                devAuthentication
+                    .AddCookie()
+                    .AddOpenIdConnect(options => ConfigureKeycloakOpenIdConnect(
+                        options,
+                        configuration,
+                        rpAuthority,
+                        rpClientId));
+            }
         }
         else
         {
-            var keycloakAuthority = configuration["Auth:Keycloak:Authority"]
-                ?? "https://keycloak.local/realms/school-collab";
-            var keycloakClientId = configuration["Auth:Keycloak:ClientId"]
-                ?? "school-collab-client";
+            var (keycloakAuthority, keycloakClientId) = ReadKeycloakClientSettings(configuration);
 
             // D4/D5: which login UI the Blazor hosts present. Read ONCE here at startup —
             // the challenge target is baked into the policy scheme below, the same
@@ -115,41 +143,11 @@ public static class AuthTenancyExtensions
                         : OpenIdConnectDefaults.AuthenticationScheme;
                 })
                 .AddCookie()
-                .AddOpenIdConnect(options =>
-                {
-                    options.Authority = keycloakAuthority;
-                    options.ClientId = keycloakClientId;
-                    options.ClientSecret = configuration["Auth:Keycloak:ClientSecret"]
-                        ?? "secret";
-                    options.ResponseType = "code";
-                    options.SaveTokens = true;
-
-                    // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
-                    // protocol mapper emits a flat `roles` claim on the ID token, and the
-                    // handler's DEFAULT inbound mapping (MapInboundClaims=true — nothing in the
-                    // repo overrides it) renames that claim to ClaimTypes.Role. Pinning the
-                    // MAPPED type here is what makes [Authorize(Roles=...)]/RequireRole resolve
-                    // from the claim that actually survives. Pinning the literal "roles" was
-                    // PROVEN ineffective (pass-3d corrective pass: the round's /auth/admin gate
-                    // rejected every authenticated caller under the default mapping until the
-                    // pin was corrected; 12 gate tests failed with the literal pin). Must stay
-                    // identical to the JwtBearer value below (cookie/bearer parity).
-                    options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
-
-                    // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
-                    // an http:// authority is rejected unless metadata HTTPS is relaxed.
-                    // Production MUST keep this true (default) — gate on the dev flag.
-                    options.RequireHttpsMetadata = false;
-
-                    // The tenant/teacher values reach the cookie identity via the KEYCLOAK ID
-                    // TOKEN, not via ClaimActions. The realm's protocol mappers enable
-                    // id.token.claim=true, and the OIDC handler copies every id_token claim onto
-                    // the ClaimsPrincipal by default. ClaimActions would only shape the userinfo
-                    // payload, and GetClaimsFromUserInfoEndpoint defaults to false — so the four
-                    // MapJsonKey calls would be inert. We deliberately do NOT enable the userinfo
-                    // fetch: it would add a network round-trip for data the id_token already carries.
-                    options.GetClaimsFromUserInfoEndpoint = false;
-                })
+                .AddOpenIdConnect(options => ConfigureKeycloakOpenIdConnect(
+                    options,
+                    configuration,
+                    keycloakAuthority,
+                    keycloakClientId))
                 .AddJwtBearer(options =>
                 {
                     options.Authority = keycloakAuthority;
@@ -157,7 +155,7 @@ public static class AuthTenancyExtensions
                     // realm's oidc-audience-mapper emits aud=clientId on the access token.
                     options.Audience = keycloakClientId;
 
-                    // D9 parity with the OIDC path: the same claim travels on the access token
+                    // D9 parity with the shared OIDC options configurator: the same claim travels on the access token
                     // and the same default inbound mapping renames it to ClaimTypes.Role, so the
                     // pinned type stays identical to the OIDC value above and bearer roles
                     // resolve exactly like cookie roles. (Same corrective-pass evidence as the
@@ -166,7 +164,7 @@ public static class AuthTenancyExtensions
 
                     // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority) —
                     // production MUST keep this false (default). Same dev-gating note as the
-                    // OIDC branch above.
+                    // shared OIDC options configurator (ConfigureKeycloakOpenIdConnect).
                     options.RequireHttpsMetadata = false;
 
                     // NOTE (P1-2): the bearer path does NOT use ClaimActions — the JwtBearer
@@ -192,6 +190,64 @@ public static class AuthTenancyExtensions
         services.AddAuthorization();
 
         return services;
+    }
+
+    /// <summary>
+    /// The Keycloak client settings the OIDC registration needs, with the dev defaults that let
+    /// registration succeed when no Keycloak configuration is present. One spelling: both the
+    /// real-auth branch and the <c>requireOidcRelyingParty</c> carve-out read them here.
+    /// </summary>
+    private static (string Authority, string ClientId) ReadKeycloakClientSettings(
+        IConfiguration configuration)
+        => (configuration["Auth:Keycloak:Authority"]
+                ?? "https://keycloak.local/realms/school-collab",
+            configuration["Auth:Keycloak:ClientId"]
+                ?? "school-collab-client");
+
+    /// <summary>
+    /// The single spelling of the Keycloak OpenID Connect options, consumed by BOTH the real-auth
+    /// branch and the dev <c>requireOidcRelyingParty</c> carve-out so the two pipelines cannot
+    /// drift. Reads configuration only — no network I/O at registration; Keycloak metadata
+    /// discovery happens lazily on the first challenge.
+    /// </summary>
+    private static void ConfigureKeycloakOpenIdConnect(
+        OpenIdConnectOptions options,
+        IConfiguration configuration,
+        string authority,
+        string clientId)
+    {
+        options.Authority = authority;
+        options.ClientId = clientId;
+        options.ClientSecret = configuration["Auth:Keycloak:ClientSecret"]
+            ?? "secret";
+        options.ResponseType = "code";
+        options.SaveTokens = true;
+
+        // D9: Keycloak is the sole source of roles. The realm's `User Realm Role`
+        // protocol mapper emits a flat `roles` claim on the ID token, and the
+        // handler's DEFAULT inbound mapping (MapInboundClaims=true — nothing in the
+        // repo overrides it) renames that claim to ClaimTypes.Role. Pinning the
+        // MAPPED type here is what makes [Authorize(Roles=...)]/RequireRole resolve
+        // from the claim that actually survives. Pinning the literal "roles" was
+        // PROVEN ineffective (pass-3d corrective pass: the round's /auth/admin gate
+        // rejected every authenticated caller under the default mapping until the
+        // pin was corrected; 12 gate tests failed with the literal pin). Must stay
+        // identical to the JwtBearer value (cookie/bearer parity).
+        options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
+
+        // DEV-ONLY for the ar-20 Keycloak dev container (http:// authority):
+        // an http:// authority is rejected unless metadata HTTPS is relaxed.
+        // Production MUST keep this true (default) — gate on the dev flag.
+        options.RequireHttpsMetadata = false;
+
+        // The tenant/teacher values reach the cookie identity via the KEYCLOAK ID
+        // TOKEN, not via ClaimActions. The realm's protocol mappers enable
+        // id.token.claim=true, and the OIDC handler copies every id_token claim onto
+        // the ClaimsPrincipal by default. ClaimActions would only shape the userinfo
+        // payload, and GetClaimsFromUserInfoEndpoint defaults to false — so the four
+        // MapJsonKey calls would be inert. We deliberately do NOT enable the userinfo
+        // fetch: it would add a network round-trip for data the id_token already carries.
+        options.GetClaimsFromUserInfoEndpoint = false;
     }
 
     private static bool IsFlagEnabled(IConfiguration configuration, string featureKey)

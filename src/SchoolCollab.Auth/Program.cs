@@ -18,7 +18,11 @@ builder.Services.AddAuthServices();
 // Shared auth/tenancy: registers the OIDC + JwtBearer schemes (or TestAuth when
 // FEATURE:DisableOIDCAuth is on), the tenant bridge and ICurrentUser. The same
 // Auth:Keycloak:* env vars the options above validate are consumed here.
-builder.Services.AddAuthAndTenancy(builder.Configuration);
+// D16: the auth service IS the OIDC relying party — its passkey /complete endpoint reads the
+// cookie-scheme ticket the OIDC handler signs on /signin-oidc — so it opts into the RP pipeline
+// even in dev. FEATURE:DisableOIDCAuth spares the consumer hosts, not the RP; TestAuth remains the
+// default scheme here. This is the SOLE call site passing requireOidcRelyingParty.
+builder.Services.AddAuthAndTenancy(builder.Configuration, requireOidcRelyingParty: true);
 
 // Fixed-window rate limiter for the credential exchange (spec §14, plan-review P1-5,
 // service side). The registration lives in AuthServiceExtensions.AddAuthRateLimiting

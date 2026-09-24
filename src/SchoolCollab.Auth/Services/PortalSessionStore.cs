@@ -20,18 +20,29 @@ public sealed record PortalSessionEntry(
     DateTimeOffset AccessTokenExpiresAtUtc);
 
 /// <summary>
-/// Outcome of a revocation. The refresh token is handed to the CALLER only, so the caller can
-/// send it to Keycloak's revocation endpoint (logout) — it is not a response payload and never
-/// leaves the service.
+/// Outcome of a revocation. Both tokens are handed to the CALLER only — the refresh token so the
+/// caller can send it to Keycloak's revocation endpoint (logout), and the id token as the
+/// <c>id_token_hint</c> of the <c>end_session</c> URL the caller builds (D13 option ii). Neither
+/// is a response payload and neither ever leaves the service as data.
 /// </summary>
-public sealed record PortalSessionRevocation(bool Found, string? RefreshToken = null);
+/// <param name="Found">Whether a live session was found and removed.</param>
+/// <param name="RefreshToken">The revoked session's refresh token, or <c>null</c> when no live
+/// session was found.</param>
+/// <param name="IdToken">The revoked session's id token — the logout hint's source, returned to
+/// the in-service caller for that ONE purpose and never serialized into a portal response
+/// (D12 / AC11) — or <c>null</c> when no live session was found.</param>
+public sealed record PortalSessionRevocation(
+    bool Found,
+    string? RefreshToken = null,
+    string? IdToken = null);
 
 /// <summary>
 /// In-memory portal-session custody (spec §5.4 / D12): opaque session id → token set, served
 /// only server-side, TTL-bounded on the injected <see cref="TimeProvider"/> (never wall-clock).
 /// Round A's store is single-instance and deliberately NOT restart-durable — the plan claims
 /// neither property; durable/multi-instance custody is a later round's concern. Revocation
-/// deletes the entry and exposes its refresh token for Keycloak revocation (logout flow).
+/// deletes the entry and exposes its refresh token (Keycloak revocation) and id token (the
+/// logout <c>id_token_hint</c>) to the in-service caller.
 /// <para>
 /// Round B (D18) adds <see cref="ReplaceTokens"/> so a transparent refresh can swap the token set
 /// **in place**: the session id and the session's absolute expiry survive, and the store stays the
@@ -168,13 +179,16 @@ public sealed class PortalSessionStore
         return entry;
     }
 
-    /// <summary>Deletes a session and hands its refresh token to the caller for Keycloak
-    /// revocation (logout, spec §5.4 / round-B AC-G). An already-gone or already-swept session
-    /// reports <see cref="PortalSessionRevocation.Found"/> = false.</summary>
+    /// <summary>Deletes a session and hands its refresh token and id token to the caller — the
+    /// refresh token for Keycloak revocation, the id token as the logout's <c>id_token_hint</c>
+    /// (logout, spec §5.4 / round-B AC-G / D13 option ii) — in ONE call, so the caller needs no
+    /// second read of custody (which would race the delete and return nothing for an expired
+    /// entry). An already-gone or already-swept session reports
+    /// <see cref="PortalSessionRevocation.Found"/> = false and carries neither token.</summary>
     public PortalSessionRevocation Revoke(string sessionId)
     {
         return _sessions.TryRemove(sessionId, out var entry)
-            ? new PortalSessionRevocation(Found: true, entry.RefreshToken)
+            ? new PortalSessionRevocation(Found: true, entry.RefreshToken, entry.IdToken)
             : new PortalSessionRevocation(Found: false);
     }
 

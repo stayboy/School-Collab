@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -241,6 +243,56 @@ public class AppHostRealmImportArchitectureTests
     }
 
     [TestMethod]
+    public void RealmImportFile_SchoolCollabClient_RegistersPostLogoutRedirectUris_IncludingThePinnedPortalLanding()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-client");
+
+        client.TryGetProperty("postLogoutRedirectUris", out var uris).Should().BeTrue(
+            "D13 option (ii) puts `post_logout_redirect_uri` in the end-session URL the auth service builds; "
+            + "Keycloak matches it against the client's registered postLogoutRedirectUris, so without this "
+            + "block every logout is rejected after the portal has already cleared its cookie.");
+        uris.ValueKind.Should().Be(JsonValueKind.Array);
+        var list = uris.EnumerateArray()
+            .Where(u => u.ValueKind == JsonValueKind.String)
+            .Select(u => u.GetString())
+            .Where(u => u is not null)
+            .Cast<string>()
+            .ToArray();
+
+        // The four per-app /signout-callback-oidc landings — the same four literals redirectUris
+        // already carries for the admin (5300/7300) and families (5400/7400) dev profiles.
+        list.Should().Contain(new[]
+            {
+                "http://localhost:5300/signout-callback-oidc",
+                "https://localhost:7300/signout-callback-oidc",
+                "http://localhost:5400/signout-callback-oidc",
+                "https://localhost:7400/signout-callback-oidc",
+            },
+            "the four Blazor hosts land on their own /signout-callback-oidc page after a Keycloak sign-out, "
+            + "so each must be registered as a post-logout target.");
+
+        // Plan-review P1-1: the portal landing literal and the AppHost's pinned portal port are the
+        // same fact stated twice — the realm is a committed static file, the fan-out is an endpoint
+        // expression — so the guard reads the port out of Program.cs and holds the literal to it.
+        // An AddUvicornApp resource has no launchSettings.json (unlike the Blazor ports above), which
+        // is why the pin exists at all; Keycloak matches post_logout_redirect_uri EXACTLY, so a
+        // wildcard is not an option and a drifted literal would break logout at runtime only.
+        var pinnedPortalPort = PinnedAuthPortalHostPort();
+        list.Should().Contain($"http://localhost:{pinnedPortalPort}/",
+            "the auth service receives this very portal landing URI as Auth__PostLogoutRedirectUri, derived "
+            + "from the portal's pinned Aspire endpoint — trailing slash included.");
+
+        // Why a PORTAL URL is legitimate here although D16 — asserted just below by
+        // RealmImportFile_DeclaresNoPortalOidcClient_AndNoPortalRedirectUri — forbids a portal entry in
+        // redirectUris: a post-logout URI is handed NOTHING. The browser is sent there after Keycloak has
+        // already ended the session, so no authorization code, token or other code-bearing value ever
+        // reaches it, while a redirect URI is exactly where the code/token-bearing response is delivered.
+        // This entry therefore does not narrow D16's rationale (the portal holds no token and redeems no
+        // authorization code) and the negative assertion must stay green — it scans redirectUris only.
+    }
+
+    [TestMethod]
     public void RealmImportFile_DeclaresNoPortalOidcClient_AndNoPortalRedirectUri()
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
@@ -372,6 +424,42 @@ public class AppHostRealmImportArchitectureTests
         }
 
         throw new InvalidOperationException($"Realm file has no service-account user with serviceAccountClientId '{clientId}'.");
+    }
+
+    /// <summary>The host port pinned on the AppHost's <c>auth-portal</c> resource
+    /// (<c>.WithHttpEndpoint(port: …, targetPort: …, name: "http")</c>), which is what makes
+    /// <c>GetEndpoint("http")</c> — and therefore the fanned <c>Auth__PostLogoutRedirectUri</c> —
+    /// deterministically <c>http://localhost:{port}/</c>. THROWS when the pin is absent, so the
+    /// realm-vs-AppHost agreement assertion can never pass vacuously (the file's other helpers
+    /// follow the same fail-loud rule).</summary>
+    private static int PinnedAuthPortalHostPort()
+    {
+        var program = ReadAppHostFile("Program.cs");
+        var portalResource = program.IndexOf("""AddUvicornApp("auth-portal""", StringComparison.Ordinal);
+        if (portalResource < 0)
+        {
+            throw new InvalidOperationException(
+                "Program.cs declares no AddUvicornApp(\"auth-portal\", …) resource, so the portal's pinned host port cannot be read.");
+        }
+
+        // Scoped to the portal's OWN creation statement — from `AddUvicornApp("auth-portal"` to that
+        // statement's terminating `;` — not merely to everything after it. Program.cs carries other
+        // pinned `name: "http"` host ports (mailpit's 8025), and a resource created later on another
+        // chain could otherwise be matched instead. It fails loud below when the statement ends without a
+        // pin, so the pin must stay on this chain and moving it becomes a visible guard failure rather
+        // than a silent mis-read.
+        var statementEnd = program.IndexOf(';', portalResource);
+        var pin = Regex.Match(
+            statementEnd < 0 ? program[portalResource..] : program[portalResource..statementEnd],
+            """\.WithHttpEndpoint\(port: (?<port>\d+)[^)]*name: "http"\)""");
+        if (!pin.Success)
+        {
+            throw new InvalidOperationException(
+                "The auth-portal resource pins no host port (no `.WithHttpEndpoint(port: …, name: \"http\")` on its chain), "
+                + "so its landing URI cannot AGREE with the realm's postLogoutRedirectUris literal.");
+        }
+
+        return int.Parse(pin.Groups["port"].Value, CultureInfo.InvariantCulture);
     }
 
     private static string ReadAppHostFile(string name)

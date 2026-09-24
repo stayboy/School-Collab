@@ -98,6 +98,11 @@ public sealed class AuthEndpointTestHost : IAsyncDisposable
             // entry is the admin host's real handshake callback — the value the exchange tests
             // post as RedirectUri.
             ["Auth:AppCallbackPrefixes"] = "http://localhost:5300/signin-handshake",
+            // Pass 3: AuthServiceOptions.PostLogoutRedirectUri is startup-validated too (the
+            // end_session URL's post_logout_redirect_uri must be the portal's registered landing
+            // URI), so the composed host cannot start without it. The value is the literal the
+            // realm registers (Keycloak matches it exactly, trailing slash included).
+            ["Auth:PostLogoutRedirectUri"] = "http://localhost:5700/",
             ["Auth:OneTimeCodeTtl"] = "00:00:20",
             ["Auth:PortalSessionTtl"] = "00:30:00",
             ["Auth:CredentialEndpointRateLimitWindow"] = "00:00:20",

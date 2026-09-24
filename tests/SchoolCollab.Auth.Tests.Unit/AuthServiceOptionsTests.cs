@@ -11,7 +11,9 @@ namespace SchoolCollab.Auth.Tests.Unit;
 /// values carry safe defaults, and the range guards on them reject misconfiguration.
 /// Round B pass B5b adds the per-app callback allowlist's presence guard
 /// (<c>Auth:AppCallbackPrefixes</c>) — the key has no safe default, so a blank value must
-/// fail the startup validation instead of failing open at request time.
+/// fail the startup validation instead of failing open at request time. Round B pass 3 adds the
+/// same class of guard for <c>Auth:PostLogoutRedirectUri</c>, whose value Keycloak matches
+/// against the realm's registered <c>postLogoutRedirectUris</c>.
 /// </summary>
 [TestClass]
 public class AuthServiceOptionsTests
@@ -20,6 +22,9 @@ public class AuthServiceOptionsTests
     /// (spec §14 / plan-review P1-3). A single valid entry is enough for the validator.</summary>
     private const string CallbackPrefixes =
         "http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake";
+
+    /// <summary>The portal's registered post-logout landing URI (spec §9 / D13 option ii).</summary>
+    private const string PostLogoutRedirectUri = "http://localhost:5700/";
 
     private static AuthServiceOptions Valid()
         => new()
@@ -32,6 +37,7 @@ public class AuthServiceOptionsTests
                 ServiceAccountClientSecret = "a-service-account-secret",
             },
             AppCallbackPrefixes = CallbackPrefixes,
+            PostLogoutRedirectUri = PostLogoutRedirectUri,
         };
 
     [DataTestMethod]
@@ -90,6 +96,26 @@ public class AuthServiceOptionsTests
         failure.Should().NotBeNull();
         failure.Should().Contain("Auth:AppCallbackPrefixes",
             "the failing key must be named so an operator can fix the AppHost parameter/env var.");
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("   ")]
+    public void Validator_RejectsEmptyPostLogoutRedirectUri(string configuredUri)
+    {
+        // DISCRIMINATION: without the presence guard the service starts with no post-logout landing
+        // URI and builds an end_session URL Keycloak rejects — after the local session is already
+        // gone. There is deliberately no code fallback: a guessed host would fail the exact match
+        // in the realm's postLogoutRedirectUris at logout time, which is exactly the late, silent
+        // failure the guard replaces.
+        var options = Valid();
+        options.PostLogoutRedirectUri = configuredUri;
+
+        var failure = AuthServiceOptions.FirstValidationError(options);
+
+        failure.Should().NotBeNull();
+        failure.Should().Contain("Auth:PostLogoutRedirectUri",
+            "the failing key must be named so an operator can fix the AppHost fan-out (Auth__PostLogoutRedirectUri).");
     }
 
     [TestMethod]

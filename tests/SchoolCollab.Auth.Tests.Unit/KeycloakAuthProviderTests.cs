@@ -13,8 +13,10 @@ namespace SchoolCollab.Auth.Tests.Unit;
 /// The D15 provider seam (pass B5): every portal-facing operation routes through the ONE
 /// <see cref="IAuthProvider"/> implementation, with round A's failure taxonomy preserved
 /// (authenticate), custody kept opaque (session create/read/revoke), the D18 refresh lifecycle
-/// distinguished from an outage, and a token-free D13 logout. No response record of the seam can
-/// carry a token — the shapes are asserted structurally as well as behaviourally (AC11).
+/// distinguished from an outage, and a D13 logout whose only token-shaped material is the
+/// <c>id_token_hint</c> logout hint inside the opaque <c>end_session</c> URL. No response record of
+/// the seam can carry a token — the shapes are asserted structurally as well as behaviourally
+/// (AC11).
 /// </summary>
 [TestClass]
 public class KeycloakAuthProviderTests
@@ -279,7 +281,7 @@ public class KeycloakAuthProviderTests
     }
 
     [TestMethod]
-    public async Task Logout_RevokesServerSide_AndReturnsATokenFreeEndSessionUrl()
+    public async Task Logout_RevokesServerSide_AndReturnsTheEndSessionUrlWithHintAndPostLogoutRedirectUri()
     {
         var handler = new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         var (provider, sessions, _) = SessionEndpointTests.BuildProvider(new SessionEndpointTests.FakeTimeProvider(), handler);
@@ -289,17 +291,51 @@ public class KeycloakAuthProviderTests
 
         logout.Found.Should().BeTrue();
         logout.EndSessionUrl.Should().StartWith("http://localhost:1/realms/school-collab/protocol/openid-connect/logout?");
-        logout.EndSessionUrl.Should().Contain("client_id=school-collab-client");
 
-        // D13 read against AC11: the URL is built in custody and carries NO credential at all —
-        // neither the id token (which is why id_token_hint is deliberately absent) nor a refresh
-        // token (the round-A exemption is closed: the SERVICE revokes, the portal never sees one).
+        // D13 option (ii): the URL carries BOTH parameters — id_token_hint and
+        // post_logout_redirect_uri — and the hint IS the custody id token. This value equality is
+        // the discriminating assertion: the retired client_id-only shape, or a hint read from
+        // anywhere but the revoked entry, fails it.
+        QueryParameter(logout.EndSessionUrl!, "id_token_hint")
+            .Should().Be(ClaimBearingIdToken, "the hint is the revoked custody entry's id token.");
+        QueryParameter(logout.EndSessionUrl!, "post_logout_redirect_uri")
+            .Should().Be(SessionEndpointTests.PostLogoutRedirectUri,
+                "the portal's registered landing URI, decoded back out of the opaque URL.");
+
+        // Both parameters are encoded on the wire: the landing URI's delimiters are escaped, and
+        // its raw form appears nowhere (an unescaped ':'/'/' would split the query).
+        logout.EndSessionUrl.Should().Contain(
+            $"post_logout_redirect_uri={Uri.EscapeDataString(SessionEndpointTests.PostLogoutRedirectUri)}");
+        logout.EndSessionUrl.Should().NotContain(SessionEndpointTests.PostLogoutRedirectUri);
+
+        // The hint is the ONLY token-shaped value in the URL: the access- and refresh-token VALUES
+        // never travel (AC11 / K-F), and the retired client_id-only parameter is gone.
         logout.EndSessionUrl.Should().NotContain(AccessToken);
         logout.EndSessionUrl.Should().NotContain(RefreshToken);
-        logout.EndSessionUrl.Should().NotContain(ClaimBearingIdToken);
+        logout.EndSessionUrl.Should().NotContain("client_id=");
 
         handler.LastRequestUri!.AbsolutePath.Should().Be("/realms/school-collab/protocol/openid-connect/revoke");
         sessions.Get(sessionId).Should().BeNull();
+    }
+
+    [TestMethod]
+    public void Revoke_HandsTheCustodyIdTokenToTheInServiceCaller()
+    {
+        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
+            new SessionEndpointTests.FakeTimeProvider(),
+            new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)));
+        var sessionId = sessions.Create(AccessToken, RefreshToken, ClaimBearingIdToken, 300);
+
+        var revocation = sessions.Revoke(sessionId);
+
+        // The logout URL's hint comes from THIS record (D13 option ii) — no second read of custody,
+        // which would race the delete and come back empty for an expired entry.
+        revocation.IdToken.Should().Be(ClaimBearingIdToken,
+            "the revocation record carries the id token for the caller that builds the end_session URL.");
+        revocation.RefreshToken.Should().Be(RefreshToken, "the caller still revokes the refresh token at Keycloak.");
+
+        // The portal-facing seam is unchanged (D15): a revoke exposes only `Found`, never a token.
+        provider.RevokeSession(sessionId).Found.Should().BeFalse();
     }
 
     [TestMethod]
@@ -329,6 +365,24 @@ public class KeycloakAuthProviderTests
 
         logout.Found.Should().BeFalse();
         logout.EndSessionUrl.Should().BeNull();
+    }
+
+    /// <summary>The decoded value of one query parameter of the built <c>end_session</c> URL — so
+    /// the assertions are about the actual hint/landing values, not about their encoded spelling.
+    /// <c>null</c> when the parameter is absent.</summary>
+    private static string? QueryParameter(string url, string name)
+    {
+        var query = new Uri(url).Query.TrimStart('?');
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=', StringComparison.Ordinal);
+            if (separator > 0 && pair[..separator] == name)
+            {
+                return Uri.UnescapeDataString(pair[(separator + 1)..]);
+            }
+        }
+
+        return null;
     }
 
     // ── the seam's shapes (AC11, structural) ────────────────────────────────────────────────

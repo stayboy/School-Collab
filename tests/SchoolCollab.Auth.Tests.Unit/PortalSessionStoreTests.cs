@@ -8,8 +8,9 @@ namespace SchoolCollab.Auth.Tests.Unit;
 
 /// <summary>
 /// Portal-session custody coverage (plan step 6): round-trip, TTL expiry on the fake clock,
-/// revocation exposing the refresh token, opaque ids, bounded eviction, and round B's in-place
-/// token replacement (D18: the single custody source of truth after a transparent refresh). Note the
+/// revocation exposing the refresh token and the id token (D13 option ii's logout hint), opaque
+/// ids, bounded eviction, and round B's in-place token replacement (D18: the single custody source
+/// of truth after a transparent refresh). Note the
 /// "no token in a serialized response shape" boundary (AC9): the store itself is NEVER
 /// serialized — token custody stays in the service's memory, and the response-shape guard is
 /// enforced at the pass-3c endpoint layer (SessionEndpoints), where the tests for that live.
@@ -61,28 +62,34 @@ public class PortalSessionStoreTests
 
         store.Get(id).Should().BeNull("an expired session must not be served.");
 
-        store.Revoke(id).Found.Should().BeFalse("Get already consumed the expired entry.");
+        var revoke = store.Revoke(id);
+        revoke.Found.Should().BeFalse("Get already consumed the expired entry.");
+        revoke.RefreshToken.Should().BeNull();
+        revoke.IdToken.Should().BeNull("an expired session yields no revocation and no logout hint.");
     }
 
     [TestMethod]
-    public void Revoke_DeletesTheSession_AndExposesItsRefreshToken()
+    public void Revoke_DeletesTheSession_AndExposesItsRefreshTokenAndIdToken()
     {
         var clock = new FakeTimeProvider();
         var store = CreateStore(clock, out _);
-        var id = store.Create("a", "the-refresh-token", "i", 300);
+        var id = store.Create("a", "the-refresh-token", "the-id-token", 300);
 
         var first = store.Revoke(id);
 
         first.Found.Should().BeTrue();
         first.RefreshToken.Should().Be("the-refresh-token",
             "revocation hands the refresh token to the caller so it can be sent to Keycloak's revocation endpoint (logout).");
+        first.IdToken.Should().Be("the-id-token",
+            "the same record carries the id token — the end_session URL's id_token_hint (D13 option ii) — "
+            + "to the in-service caller only, with no second read of custody.");
 
         store.Get(id).Should().BeNull("revocation deletes the entry.");
         store.Revoke(id).Found.Should().BeFalse("a second revocation finds nothing.");
     }
 
     [TestMethod]
-    public void Revoke_UnknownSession_IsNotFound()
+    public void Revoke_UnknownSession_IsNotFound_WithNeitherToken()
     {
         var clock = new FakeTimeProvider();
         var store = CreateStore(clock, out _);
@@ -91,6 +98,7 @@ public class PortalSessionStoreTests
 
         revoke.Found.Should().BeFalse();
         revoke.RefreshToken.Should().BeNull();
+        revoke.IdToken.Should().BeNull("an unknown session has no hint to carry.");
     }
 
     [TestMethod]
@@ -122,6 +130,8 @@ public class PortalSessionStoreTests
         var revocation = store.Revoke(id);
         revocation.Found.Should().BeTrue();
         revocation.RefreshToken.Should().Be("refresh-b");
+        revocation.IdToken.Should().Be("id-b",
+            "the hint comes from the set the store now holds — the rotated one, not the exchanged one.");
         store.Get(id).Should().BeNull();
     }
 
