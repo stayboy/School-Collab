@@ -70,7 +70,7 @@ before every dispatch.
    `kimi-k2.7-code` — deliberately different models so the verifier never
    shares the implementer's model. Tier 3 differs only by the UI tester and the
    full-round `glm-5.3:cloud` plan-review; lean rounds skip the accept-run. **Plan-review (step 2b):** full rounds run
-   `glm-5.3:cloud`, lean rounds run the reviewer model; either is subject to a
+   `glm-5.3:cloud`, lean rounds run **`deepseek-v4.1-flash`** (owner 2026-09-24 — the worker's model, an explicit guardrail exception; the diff review stays on the round's reviewer model, `kimi-k2.7-code`); either is subject to a
    user-named override (item 1).
 5. **Cline**: always `clinepass` (cannot resolve `ollama` ids) — an exception,
    not an override.
@@ -139,7 +139,7 @@ agent definitions via `agent: "<name>"` (builtin
 |---|---|
 | 1 | Worker model only — no orchestrator/reviewer/tester models at all |
 | 2 | Worker + reviewer code specialist |
-| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **full → `glm-5.3:cloud`**, lean → the round's reviewer model |
+| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **full → `glm-5.3:cloud`**, lean → **`deepseek-v4.1-flash`** (owner 2026-09-24) |
 
 Rationale: tiers exist to keep simple tasks cheap — never pay for model
 round-trips (or roles) a task does not need.

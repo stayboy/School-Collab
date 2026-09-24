@@ -503,3 +503,7 @@ testerr.txt
 testout.txt
 ci-artifacts/
 .pytest_cache/
+
+# Round / agent scratch — never commit
+.session-state.md
+brainstorms/
