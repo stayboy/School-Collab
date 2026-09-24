@@ -13,7 +13,9 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 ///        must attach <c>AddHttpMessageHandler&lt;BearerForwardingDelegatingHandler&gt;</c>, and the
 ///        <c>Assignments.Worker</c> client must NOT (the carved-out residual is pinned);</item>
 ///   <item>every group the hops target must opt into the Bearer scheme — exactly five blocks in
-///        <c>StudentEndpoints.cs</c> and one per Settings.Api <c>*Endpoints.cs</c> file;</item>
+///        <c>StudentEndpoints.cs</c> and one per Settings.Api <c>*Endpoints.cs</c> file (the Settings
+///        flag-write and tenant-override routes carry no gate of their own — the <c>/api/config</c>
+///        group opt-in covers them);</item>
 ///   <item>both <c>Assignments.Api</c> clients must carry <c>AllowAutoRedirect = false</c>
 ///        (row-7's discriminating source assertion — a scripted handler test cannot prove it).</item>
 /// </list>
@@ -67,7 +69,7 @@ public class BearerForwardingWiringArchitectureTests
     }
 
     [TestMethod]
-    public void BearerOptIn_PerGroup_StudentsAndSettings()
+    public void BearerOptIn_PerGroup_StudentsAndSettings_NoRouteLevelFlagGate()
     {
         var studentsEndpoints = Read("src", "Students", "SchoolCollab.Students.Api", "StudentEndpoints.cs");
 
@@ -80,11 +82,29 @@ public class BearerForwardingWiringArchitectureTests
                 .Should().Be(1, $"{settingsFile} must opt its {settingsFile.Replace(".cs", "")} group into the Bearer scheme.");
         }
 
-        // ar-24 item 8: ConfigFlagRoutes opts in via the NAMED "flag_admin" policy, so the
-        // scheme is added at policy registration in the Settings Program.cs, not in the routes file.
+        // The Settings flag-write and tenant-override routes carry NO route-level gate: the
+        // unsatisfiable "flag_admin" role policy is gone, and the /api/config group opt-in above
+        // is what makes those routes authenticated + bearer-eligible. These absence counts are the
+        // non-vacuity guard — re-adding a route-level gate must fail this test.
+        var flagRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigFlagRoutes.cs");
+        var overrideRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigTenantFlagOverrideRoutes.cs");
+
         Read("src", "Settings", "SchoolCollab.Settings.Api", "Program.cs")
-            .Should().Contain("flag_admin", "non-vacuity: the named flag_admin policy must still exist")
-            .And.Contain(OptIn, "the flag_admin policy must add the Bearer scheme so forwarded flag-admin bearer calls are accepted.");
+            .Should().NotContain("flag_admin",
+                "the Settings host must register no flag_admin policy — the role policy was removed (owner ruling 2026-09-24).");
+
+        Count(flagRoutes, "ApplyAdminPolicy").Should().Be(0,
+            "the flag write routes must not re-acquire a route-level admin policy; the /api/config group opt-in carries them.");
+        Count(overrideRoutes, "ApplyAdminPolicy").Should().Be(0,
+            "the tenant-override write routes must not re-acquire a route-level admin policy; the /api/config group opt-in carries them.");
+        Count(flagRoutes, "RequireAuthorization").Should().Be(0,
+            "a route-level authorization call on a flag route would bypass the /api/config group opt-in and its Bearer scheme choice.");
+        Count(overrideRoutes, "RequireAuthorization").Should().Be(0,
+            "a route-level authorization call on a tenant-override route would bypass the /api/config group opt-in and its Bearer scheme choice.");
+
+        // ConfigEndpoints.cs's single bearer opt-in — the /api/config group policy that now carries the
+        // flag-write and tenant-override routes — is already asserted by the SettingsEndpointFiles loop
+        // above (ConfigEndpoints.cs is in that array), so it is deliberately not asserted a second time.
     }
 
     [TestMethod]

@@ -1,0 +1,258 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 6c787f94..6a6b6bcc 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -491,8 +491,13 @@ forwards the inbound request's `Authorization` header through `BearerForwardingD
+ 
+ - **Assignments**: the `/assignments` and `/students` groups opt into Bearer (`AssignmentEndpoints.cs`).
+ - **Students**: all five groups opt in (`StudentEndpoints.cs`) — incl. **`/teachers`** (the directory check calls it).
+-- **Settings**: 10 sites — the 8 `*Endpoints.cs` groups, `Endpoints/ConfigResolveRoutes.cs` (tenant reads),
+-  and the **`flag_admin` policy** (`Program.cs`) which now adds `AddAuthenticationSchemes(Bearer)` (role claim kept).
++- **Settings**: 9 sites — the 8 `*Endpoints.cs` groups and `Endpoints/ConfigResolveRoutes.cs` (tenant reads).
++  The `/api/config` group (`ConfigEndpoints.cs`) opts in through the group-level policy, and that group
++  now also carries the flag-write (`Endpoints/ConfigFlagRoutes.cs`) and tenant-override
++  (`Endpoints/ConfigTenantFlagOverrideRoutes.cs`) routes — there is **no** `flag_admin` role policy:
++  flag writes are authenticated-bearer-only, like the API's other write groups. Accepted trade-off:
++  under OIDC any authenticated bearer user may write global flags. Proper roles/policies for flag
++  administration are **deferred by the owner to a later discussion (2026-09-24)**.
+ 
+ **Named residuals (post-flip, not fixed this round):** `Assignments.Worker`→settings/students 401s (no caller
+ token; client-credentials barred by the no-new-secrets gate) **and the identically-unattached
+diff --git a/src/Settings/SchoolCollab.Settings.Api/ConfigEndpoints.cs b/src/Settings/SchoolCollab.Settings.Api/ConfigEndpoints.cs
+index f12a84f2..0d0f290b 100644
+--- a/src/Settings/SchoolCollab.Settings.Api/ConfigEndpoints.cs
++++ b/src/Settings/SchoolCollab.Settings.Api/ConfigEndpoints.cs
+@@ -10,18 +10,20 @@ public static class ConfigEndpoints
+     /// <summary>
+     /// Maps the FeatureFlag aggregate endpoints under <c>/api/config</c> (CRUD,
+     /// audit, tenant overrides) plus the consumer-facing resolve routes at
+-    /// <c>/api/features/{global|tenantId}</c>. In OIDC-disabled dev, write
+-    /// endpoints skip the role policy (TestAuth has no role). See
++    /// <c>/api/features/{global|tenantId}</c>. When OIDC is enabled, the whole
++    /// <c>/api/config</c> group — including the flag-write and tenant-override
++    /// routes — is protected by the group-level bearer opt-in below; under
++    /// TestAuth (dev) the group stays open. See
+     /// documents/solution/settings-context-merge-spec.md §8.
+     /// </summary>
+     public static WebApplication MapConfigEndpoints(this WebApplication app, IFeatureFlagService featureFlags)
+     {
+         var oidcEnabled = !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth);
+-        var requireFlagAdmin = oidcEnabled; // skip the role policy in dev (TestAuth has no role)
+ 
+         var group = app.MapGroup("/api/config");
+ 
+-        // Reads (flags, audit) are bearer-gated when OIDC is on; open under TestAuth in dev.
++        // Reads and writes (flags, audit, tenant overrides) are bearer-gated when OIDC is on;
++        // open under TestAuth in dev.
+         if (oidcEnabled)
+         {
+             group.RequireAuthorization(policy => policy
+@@ -30,8 +32,8 @@ public static class ConfigEndpoints
+         }
+ 
+         group
+-            .MapConfigFlagRoutes(requireFlagAdmin)
+-            .MapConfigTenantOverrideRoutes(requireFlagAdmin)
++            .MapConfigFlagRoutes()
++            .MapConfigTenantOverrideRoutes()
+             .MapConfigAuditRoutes();
+ 
+         app.MapConfigResolveRoutes(oidcEnabled);
+diff --git a/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigFlagRoutes.cs b/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigFlagRoutes.cs
+index 1eb88cfa..3998c3f3 100644
+--- a/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigFlagRoutes.cs
++++ b/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigFlagRoutes.cs
+@@ -9,7 +9,7 @@ namespace SchoolCollab.Settings.Api.Endpoints;
+ 
+ public static class ConfigFlagRoutes
+ {
+-    public static RouteGroupBuilder MapConfigFlagRoutes(this RouteGroupBuilder group, bool requireFlagAdmin)
++    public static RouteGroupBuilder MapConfigFlagRoutes(this RouteGroupBuilder group)
+     {
+         // ── Create ──
+         group.MapPost("/flags", async (
+@@ -30,7 +30,7 @@ public static class ConfigFlagRoutes
+             {
+                 return Results.Conflict(new { ex.Message });
+             }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         // ── List ──
+         group.MapGet("/flags", async (
+@@ -64,7 +64,7 @@ public static class ConfigFlagRoutes
+             }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+             catch (ArgumentException ex) { return Results.BadRequest(new { ex.Message }); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         // ── Set enabled ──
+         group.MapPut("/flags/{key}/enabled", async (
+@@ -79,20 +79,20 @@ public static class ConfigFlagRoutes
+                 return Results.NoContent();
+             }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         // ── Archive / Unarchive ──
+         group.MapPost("/flags/{key}/archive", async (string key, [FromBody] ReasonRequest req, [FromServices] ICommandHandler<ArchiveFeatureFlag> handler, CancellationToken ct) =>
+         {
+             try { await handler.HandleAsync(new ArchiveFeatureFlag(key, req.Reason), ct); return Results.NoContent(); }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         group.MapPost("/flags/{key}/unarchive", async (string key, [FromBody] ReasonRequest req, [FromServices] ICommandHandler<UnarchiveFeatureFlag> handler, CancellationToken ct) =>
+         {
+             try { await handler.HandleAsync(new UnarchiveFeatureFlag(key, req.Reason), ct); return Results.NoContent(); }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         // ── Delete / Recover ──
+         group.MapDelete("/flags/{key}", async (
+@@ -103,13 +103,13 @@ public static class ConfigFlagRoutes
+         {
+             try { await handler.HandleAsync(new DeleteFeatureFlag(key, reason), ct); return Results.NoContent(); }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         group.MapPost("/flags/{key}/recover", async (string key, [FromBody] ReasonRequest req, [FromServices] ICommandHandler<RecoverFeatureFlag> handler, CancellationToken ct) =>
+         {
+             try { await handler.HandleAsync(new RecoverFeatureFlag(key, req.Reason), ct); return Results.NoContent(); }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         return group;
+     }
+@@ -119,14 +119,3 @@ public static class ConfigFlagRoutes
+     public sealed record SetEnabledRequest(bool IsEnabled, string Reason);
+     public sealed record ReasonRequest(string Reason);
+ }
+-
+-internal static class AdminPolicyExtensions
+-{
+-    /// <summary>
+-    /// Applies the <c>flag_admin</c> role policy to a write endpoint when OIDC auth
+-    /// is enabled. In dev (TestAuth) the policy is skipped so the admin UI stays
+-    /// usable; reads stay cookie-gated.
+-    /// </summary>
+-    public static RouteHandlerBuilder ApplyAdminPolicy(this RouteHandlerBuilder builder, bool requireFlagAdmin) =>
+-        requireFlagAdmin ? builder.RequireAuthorization("flag_admin") : builder.RequireAuthorization();
+-}
+diff --git a/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigTenantFlagOverrideRoutes.cs b/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigTenantFlagOverrideRoutes.cs
+index dec436cc..0f157924 100644
+--- a/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigTenantFlagOverrideRoutes.cs
++++ b/src/Settings/SchoolCollab.Settings.Api/Endpoints/ConfigTenantFlagOverrideRoutes.cs
+@@ -9,7 +9,7 @@ namespace SchoolCollab.Settings.Api.Endpoints;
+ 
+ public static class ConfigTenantFlagOverrideRoutes
+ {
+-    public static RouteGroupBuilder MapConfigTenantOverrideRoutes(this RouteGroupBuilder group, bool requireFlagAdmin)
++    public static RouteGroupBuilder MapConfigTenantOverrideRoutes(this RouteGroupBuilder group)
+     {
+         // ── List tenant overrides for a flag ──
+         group.MapGet("/flags/{key}/overrides", async (
+@@ -37,7 +37,7 @@ public static class ConfigTenantFlagOverrideRoutes
+             }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+             catch (ArgumentException ex) { return Results.BadRequest(new { ex.Message }); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         // ── Delete a tenant override ──
+         group.MapDelete("/flags/{key}/overrides/{tenantId:guid}", async (
+@@ -49,7 +49,7 @@ public static class ConfigTenantFlagOverrideRoutes
+         {
+             try { await handler.HandleAsync(new DeleteTenantFlagOverride(key, tenantId, reason), ct); return Results.NoContent(); }
+             catch (KeyNotFoundException) { return Results.NotFound(); }
+-        }).ApplyAdminPolicy(requireFlagAdmin);
++        });
+ 
+         return group;
+     }
+diff --git a/src/Settings/SchoolCollab.Settings.Api/Program.cs b/src/Settings/SchoolCollab.Settings.Api/Program.cs
+index 5792da35..9fbce03e 100644
+--- a/src/Settings/SchoolCollab.Settings.Api/Program.cs
++++ b/src/Settings/SchoolCollab.Settings.Api/Program.cs
+@@ -1,4 +1,3 @@
+-using Microsoft.AspNetCore.Authorization;
+ using Microsoft.Extensions.DependencyInjection.Extensions;
+ using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.Features;
+@@ -41,14 +40,6 @@ builder.Services.AddHttpContextAccessor();
+ builder.Services.RemoveAll<IActorAccessor>();
+ builder.Services.AddSingleton<IActorAccessor, ClaimsPrincipalActorAccessor>();
+ 
+-// The flag_admin role policy gates write endpoints when OIDC is enabled.
+-builder.Services.AddAuthorization(options =>
+-{
+-    options.AddPolicy("flag_admin", policy => policy
+-        .RequireClaim("role", "flag_admin")
+-        .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
+-});
+-
+ builder.Services.AddOpenApi();
+ 
+ var app = builder.Build();
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs
+index 71aa0340..985b31ea 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs
+@@ -13,7 +13,9 @@ namespace SchoolCollab.ArchitectureTests.Unit;
+ ///        must attach <c>AddHttpMessageHandler&lt;BearerForwardingDelegatingHandler&gt;</c>, and the
+ ///        <c>Assignments.Worker</c> client must NOT (the carved-out residual is pinned);</item>
+ ///   <item>every group the hops target must opt into the Bearer scheme — exactly five blocks in
+-///        <c>StudentEndpoints.cs</c> and one per Settings.Api <c>*Endpoints.cs</c> file;</item>
++///        <c>StudentEndpoints.cs</c> and one per Settings.Api <c>*Endpoints.cs</c> file (the Settings
++///        flag-write and tenant-override routes carry no gate of their own — the <c>/api/config</c>
++///        group opt-in covers them);</item>
+ ///   <item>both <c>Assignments.Api</c> clients must carry <c>AllowAutoRedirect = false</c>
+ ///        (row-7's discriminating source assertion — a scripted handler test cannot prove it).</item>
+ /// </list>
+@@ -67,7 +69,7 @@ public class BearerForwardingWiringArchitectureTests
+     }
+ 
+     [TestMethod]
+-    public void BearerOptIn_PerGroup_StudentsAndSettings()
++    public void BearerOptIn_PerGroup_StudentsAndSettings_NoRouteLevelFlagGate()
+     {
+         var studentsEndpoints = Read("src", "Students", "SchoolCollab.Students.Api", "StudentEndpoints.cs");
+ 
+@@ -80,11 +82,28 @@ public class BearerForwardingWiringArchitectureTests
+                 .Should().Be(1, $"{settingsFile} must opt its {settingsFile.Replace(".cs", "")} group into the Bearer scheme.");
+         }
+ 
+-        // ar-24 item 8: ConfigFlagRoutes opts in via the NAMED "flag_admin" policy, so the
+-        // scheme is added at policy registration in the Settings Program.cs, not in the routes file.
++        // The Settings flag-write and tenant-override routes carry NO route-level gate: the
++        // unsatisfiable "flag_admin" role policy is gone, and the /api/config group opt-in above
++        // is what makes those routes authenticated + bearer-eligible. These absence counts are the
++        // non-vacuity guard — re-adding a route-level gate must fail this test.
++        var flagRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigFlagRoutes.cs");
++        var overrideRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigTenantFlagOverrideRoutes.cs");
++
+         Read("src", "Settings", "SchoolCollab.Settings.Api", "Program.cs")
+-            .Should().Contain("flag_admin", "non-vacuity: the named flag_admin policy must still exist")
+-            .And.Contain(OptIn, "the flag_admin policy must add the Bearer scheme so forwarded flag-admin bearer calls are accepted.");
++            .Should().NotContain("flag_admin",
++                "the Settings host must register no flag_admin policy — the role policy was removed (owner ruling 2026-09-24).");
++
++        Count(flagRoutes, "ApplyAdminPolicy").Should().Be(0,
++            "the flag write routes must not re-acquire a route-level admin policy; the /api/config group opt-in carries them.");
++        Count(overrideRoutes, "ApplyAdminPolicy").Should().Be(0,
++            "the tenant-override write routes must not re-acquire a route-level admin policy; the /api/config group opt-in carries them.");
++        Count(flagRoutes, "RequireAuthorization").Should().Be(0,
++            "a route-level authorization call on a flag route would bypass the /api/config group opt-in and its Bearer scheme choice.");
++        Count(overrideRoutes, "RequireAuthorization").Should().Be(0,
++            "a route-level authorization call on a tenant-override route would bypass the /api/config group opt-in and its Bearer scheme choice.");
++
++        OptInCount(Read("src", "Settings", "SchoolCollab.Settings.Api", "ConfigEndpoints.cs")).Should().Be(1,
++            "ConfigEndpoints.cs must keep exactly one bearer opt-in: the /api/config group policy that now carries the flag-write and tenant-override routes.");
+     }
+ 
+     [TestMethod]

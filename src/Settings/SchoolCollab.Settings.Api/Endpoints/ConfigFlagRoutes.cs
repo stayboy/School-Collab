@@ -9,7 +9,7 @@ namespace SchoolCollab.Settings.Api.Endpoints;
 
 public static class ConfigFlagRoutes
 {
-    public static RouteGroupBuilder MapConfigFlagRoutes(this RouteGroupBuilder group, bool requireFlagAdmin)
+    public static RouteGroupBuilder MapConfigFlagRoutes(this RouteGroupBuilder group)
     {
         // ── Create ──
         group.MapPost("/flags", async (
@@ -30,7 +30,7 @@ public static class ConfigFlagRoutes
             {
                 return Results.Conflict(new { ex.Message });
             }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         // ── List ──
         group.MapGet("/flags", async (
@@ -64,7 +64,7 @@ public static class ConfigFlagRoutes
             }
             catch (KeyNotFoundException) { return Results.NotFound(); }
             catch (ArgumentException ex) { return Results.BadRequest(new { ex.Message }); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         // ── Set enabled ──
         group.MapPut("/flags/{key}/enabled", async (
@@ -79,20 +79,20 @@ public static class ConfigFlagRoutes
                 return Results.NoContent();
             }
             catch (KeyNotFoundException) { return Results.NotFound(); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         // ── Archive / Unarchive ──
         group.MapPost("/flags/{key}/archive", async (string key, [FromBody] ReasonRequest req, [FromServices] ICommandHandler<ArchiveFeatureFlag> handler, CancellationToken ct) =>
         {
             try { await handler.HandleAsync(new ArchiveFeatureFlag(key, req.Reason), ct); return Results.NoContent(); }
             catch (KeyNotFoundException) { return Results.NotFound(); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         group.MapPost("/flags/{key}/unarchive", async (string key, [FromBody] ReasonRequest req, [FromServices] ICommandHandler<UnarchiveFeatureFlag> handler, CancellationToken ct) =>
         {
             try { await handler.HandleAsync(new UnarchiveFeatureFlag(key, req.Reason), ct); return Results.NoContent(); }
             catch (KeyNotFoundException) { return Results.NotFound(); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         // ── Delete / Recover ──
         group.MapDelete("/flags/{key}", async (
@@ -103,13 +103,13 @@ public static class ConfigFlagRoutes
         {
             try { await handler.HandleAsync(new DeleteFeatureFlag(key, reason), ct); return Results.NoContent(); }
             catch (KeyNotFoundException) { return Results.NotFound(); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         group.MapPost("/flags/{key}/recover", async (string key, [FromBody] ReasonRequest req, [FromServices] ICommandHandler<RecoverFeatureFlag> handler, CancellationToken ct) =>
         {
             try { await handler.HandleAsync(new RecoverFeatureFlag(key, req.Reason), ct); return Results.NoContent(); }
             catch (KeyNotFoundException) { return Results.NotFound(); }
-        }).ApplyAdminPolicy(requireFlagAdmin);
+        });
 
         return group;
     }
@@ -118,15 +118,4 @@ public static class ConfigFlagRoutes
     public sealed record UpdateFlagRequest(string Name, string? Description, string Reason);
     public sealed record SetEnabledRequest(bool IsEnabled, string Reason);
     public sealed record ReasonRequest(string Reason);
-}
-
-internal static class AdminPolicyExtensions
-{
-    /// <summary>
-    /// Applies the <c>flag_admin</c> role policy to a write endpoint when OIDC auth
-    /// is enabled. In dev (TestAuth) the policy is skipped so the admin UI stays
-    /// usable; reads stay cookie-gated.
-    /// </summary>
-    public static RouteHandlerBuilder ApplyAdminPolicy(this RouteHandlerBuilder builder, bool requireFlagAdmin) =>
-        requireFlagAdmin ? builder.RequireAuthorization("flag_admin") : builder.RequireAuthorization();
 }

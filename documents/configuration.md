@@ -491,8 +491,13 @@ forwards the inbound request's `Authorization` header through `BearerForwardingD
 
 - **Assignments**: the `/assignments` and `/students` groups opt into Bearer (`AssignmentEndpoints.cs`).
 - **Students**: all five groups opt in (`StudentEndpoints.cs`) — incl. **`/teachers`** (the directory check calls it).
-- **Settings**: 10 sites — the 8 `*Endpoints.cs` groups, `Endpoints/ConfigResolveRoutes.cs` (tenant reads),
-  and the **`flag_admin` policy** (`Program.cs`) which now adds `AddAuthenticationSchemes(Bearer)` (role claim kept).
+- **Settings**: 9 sites — the 8 `*Endpoints.cs` groups and `Endpoints/ConfigResolveRoutes.cs` (tenant reads).
+  The `/api/config` group (`ConfigEndpoints.cs`) opts in through the group-level policy, and that group
+  now also carries the flag-write (`Endpoints/ConfigFlagRoutes.cs`) and tenant-override
+  (`Endpoints/ConfigTenantFlagOverrideRoutes.cs`) routes — there is **no** `flag_admin` role policy:
+  flag writes are authenticated-bearer-only, like the API's other write groups. Accepted trade-off:
+  under OIDC any authenticated bearer user may write global flags. Proper roles/policies for flag
+  administration are **deferred by the owner to a later discussion (2026-09-24)**.
 
 **Named residuals (post-flip, not fixed this round):** `Assignments.Worker`→settings/students 401s (no caller
 token; client-credentials barred by the no-new-secrets gate) **and the identically-unattached

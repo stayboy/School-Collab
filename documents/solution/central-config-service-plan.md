@@ -57,8 +57,16 @@ is **gating the AI chat on the CodedValues landing page** via
    one-line migration if String/Number/Json kinds are needed.
 6. **Audit is local + transactional**, not via the outbox: `FeatureFlagAuditor`
    writes `FlagAuditEntry` in the same `SaveChanges` transaction as the mutation.
-7. **`flag_admin` OIDC role** gates write endpoints; read endpoints are
-   cookie-authed; `GET /api/features/global` is allow-anonymous for consumer
+7. **~~`flag_admin` OIDC role~~ gates write endpoints — SUPERSEDED 2026-09-24 (round `flag-admin-gate`).**
+   The role policy was **removed**, because it could never be satisfied: the realm issues no `flag_admin`
+   role (only `user-admin` / `platform-admin`), and the policy required a claim **named** `role` while the
+   realm's mapper emits `roles`, which the OIDC handler's default inbound mapping renames to
+   `ClaimTypes.Role`. So under OIDC **every** flag write 403'd, and in dev the policy was skipped entirely
+   (`requireFlagAdmin = oidcEnabled`) — an accidental deny-all in one state and a no-op in the other.
+   Write endpoints are now **authenticated-bearer-only** via the `/api/config` group opt-in, like the
+   rest of the Settings API; **proper roles and policies for flag administration are deferred to a later
+   owner discussion (2026-09-24)**. Read endpoints are bearer-gated by that same group policy when OIDC is
+   on; `GET /api/features/global` is allow-anonymous for consumer
    startup. Read endpoints return only `Key` + `IsEnabled` (no value payloads).
 8. **Seed flag**: `FEATURE:EnableCodedValuesAiChat` (Boolean, default `true`).
    This is the first real consumer and the Playwright smoke target.
