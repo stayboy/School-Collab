@@ -342,8 +342,9 @@ user instruction):
 commit (and the related PR/stack steps per this policy), the mechanical
 git/gh execution — staging the named change set, the commit, `gh stack`
 unstack/init/submit, and `gh pr` operations — is delegated to a lightweight
-subagent running `ollama/deepseek-v4-flash:0731-cloud` (pi provider; Cline
-equivalent: `cline-pass/deepseek-v4-flash`). The parent agent shows and
+subagent running `ollama-cloud/deepseek-v4.1-flash` (pi provider; Cline
+equivalent: `cline-pass/deepseek-v4.1-flash`; owner 2026-09-25 — replaces
+`deepseek-v4-flash:0731`, removed by the ollama provider). The parent agent shows and
 confirms the change set, then hands the execution to that agent. Every gate
 in this policy (explicit authorization for each action, the change-set
 review, `SCHOOLCOLLAB_ALLOW_PUSH=1` for pushes, no merge without
