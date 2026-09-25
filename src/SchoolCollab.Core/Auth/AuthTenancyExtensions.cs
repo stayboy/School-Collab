@@ -3,9 +3,11 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Core.Features;
 
@@ -81,7 +83,24 @@ public static class AuthTenancyExtensions
         // the shared IDistributedCache (Redis in dev) so the selection made in the
         // admin shell propagates to every API host's TestAuthHandler. Only consulted
         // by TestAuthHandler, which is registered solely when DisableOIDCAuth is on.
-        services.TryAddSingleton<IDevTenantSelection, DevTenantSelection>();
+        //
+        // Registered through a FACTORY rather than as an implementation type. A type
+        // registration is a hard CONSTRUCTOR dependency, so the container cannot build
+        // it without an IDistributedCache — yet this shared helper is also called by a
+        // host that legitimately has none: SchoolCollab.Auth registers no cache (it is
+        // not a tenant-scoped data host and never reads the switcher). Under
+        // ValidateOnBuild (the Development default) that turned an unused, OPTIONAL
+        // dependency into a startup crash — "Unable to resolve service for type
+        // IDistributedCache while attempting to activate DevTenantSelection" at
+        // builder.Build() — so the auth service could not start in Development AT ALL.
+        // The factory resolves late, which also makes it order-independent: the data
+        // hosts register their cache AFTER this call. No cache present degrades to the
+        // documented "no tenant selected" posture, which TestAuthHandler already falls
+        // back from (it reads the value as `Guid?` and only overrides on HasValue).
+        services.TryAddSingleton<IDevTenantSelection>(sp =>
+            sp.GetService<IDistributedCache>() is { } cache
+                ? new DevTenantSelection(cache, sp.GetRequiredService<ILogger<DevTenantSelection>>())
+                : NullDevTenantSelection.Instance);
 
         // Register configuration and feature flag service only if not already registered
         services.AddSingleton<IConfiguration>(configuration);

@@ -243,22 +243,36 @@ public class AppHostRealmImportArchitectureTests
     }
 
     [TestMethod]
-    public void RealmImportFile_SchoolCollabClient_RegistersPostLogoutRedirectUris_IncludingThePinnedPortalLanding()
+    public void RealmImportFile_SchoolCollabClient_RegistersThePostLogoutRedirectUrisAttribute_IncludingThePinnedPortalLanding()
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
         var client = FindClient(doc.RootElement, "school-collab-client");
 
-        client.TryGetProperty("postLogoutRedirectUris", out var uris).Should().BeTrue(
+        // Keycloak reads the allowlist from the client ATTRIBUTE `post.logout.redirect.uris`, with the
+        // URIs `##`-separated. A top-level `postLogoutRedirectUris` array — this file's first shape —
+        // is not among ClientRepresentation's known properties, so `start-dev --import-realm` aborts
+        // with `Unrecognized field "postLogoutRedirectUris"`, the container exits 1, and everything
+        // gated on WaitFor(keycloak) silently never starts. The negative half of this guard below is
+        // therefore load-bearing: it pins the shape that actually imports.
+        client.TryGetProperty("attributes", out var attributes).Should().BeTrue(
+            "the post-logout allowlist must live in the client's `attributes` map — the only shape "
+            + "Keycloak 26.4.7's realm importer accepts.");
+        attributes.TryGetProperty("post.logout.redirect.uris", out var urisAttribute).Should().BeTrue(
             "D13 option (ii) puts `post_logout_redirect_uri` in the end-session URL the auth service builds; "
-            + "Keycloak matches it against the client's registered postLogoutRedirectUris, so without this "
-            + "block every logout is rejected after the portal has already cleared its cookie.");
-        uris.ValueKind.Should().Be(JsonValueKind.Array);
-        var list = uris.EnumerateArray()
-            .Where(u => u.ValueKind == JsonValueKind.String)
-            .Select(u => u.GetString())
-            .Where(u => u is not null)
-            .Cast<string>()
+            + "Keycloak matches it against `attributes[\"post.logout.redirect.uris\"]`, so without this "
+            + "entry every logout is rejected after the portal has already cleared its cookie.");
+        urisAttribute.ValueKind.Should().Be(JsonValueKind.String);
+        var list = (urisAttribute.GetString() ?? string.Empty)
+            .Split("##", StringSplitOptions.RemoveEmptyEntries)
+            .Select(u => u.Trim())
+            .Where(u => u.Length > 0)
             .ToArray();
+
+        client.TryGetProperty("postLogoutRedirectUris", out _).Should().BeFalse(
+            "a top-level `postLogoutRedirectUris` array is an UNKNOWN field to Keycloak 26.4.7's "
+            + "ClientRepresentation: `--import-realm` fails the WHOLE realm with `Unrecognized field "
+            + "\"postLogoutRedirectUris\"`, Keycloak exits 1, and every resource gated on "
+            + "WaitFor(keycloak) never starts. The allowlist belongs in `attributes` (asserted above).");
 
         // The four per-app /signout-callback-oidc landings — the same four literals redirectUris
         // already carries for the admin (5300/7300) and families (5400/7400) dev profiles.
@@ -427,14 +441,19 @@ public class AppHostRealmImportArchitectureTests
     }
 
     /// <summary>The host port pinned on the AppHost's <c>auth-portal</c> resource
-    /// (<c>.WithHttpEndpoint(port: …, targetPort: …, name: "http")</c>), which is what makes
+    /// (<c>.WithHttpEndpoint(port: …, name: "http")</c>), which is what makes
     /// <c>GetEndpoint("http")</c> — and therefore the fanned <c>Auth__PostLogoutRedirectUri</c> —
     /// deterministically <c>http://localhost:{port}/</c>. THROWS when the pin is absent, so the
     /// realm-vs-AppHost agreement assertion can never pass vacuously (the file's other helpers
     /// follow the same fail-loud rule).</summary>
     private static int PinnedAuthPortalHostPort()
     {
-        var program = ReadAppHostFile("Program.cs");
+        // Line comments are stripped FIRST: the pin is located inside the slice from the resource
+        // creation to that statement's terminating `;`, so a `;` occurring inside a comment between
+        // the two (e.g. "(`##`-separated; a top-level …)") would end the slice early and make this
+        // fail-loud helper fail for the WRONG reason — reporting "pins no host port" for a pin that
+        // is present. Same rule as AppHostEndpointPortingArchitectureTests.StripLineComments.
+        var program = StripLineComments(ReadAppHostFile("Program.cs"));
         var portalResource = program.IndexOf("""AddUvicornApp("auth-portal""", StringComparison.Ordinal);
         if (portalResource < 0)
         {
@@ -461,6 +480,16 @@ public class AppHostRealmImportArchitectureTests
 
         return int.Parse(pin.Groups["port"].Value, CultureInfo.InvariantCulture);
     }
+
+    /// <summary>Drops <c>//</c> line comments — mirrors the strip the other Program.cs-scanning
+    /// guards use, so punctuation inside a comment can never influence a source-scanning
+    /// assertion.</summary>
+    private static string StripLineComments(string source)
+        => string.Join('\n', source.Split('\n').Select(line =>
+        {
+            var commentAt = line.IndexOf("//", StringComparison.Ordinal);
+            return commentAt < 0 ? line : line[..commentAt];
+        }));
 
     private static string ReadAppHostFile(string name)
         => File.ReadAllText(Path.Combine(FindAppHostDir(), name));
