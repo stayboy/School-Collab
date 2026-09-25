@@ -166,6 +166,15 @@ var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assig
 // consumers (admin, families, auth, auth-portal).
 var disableKeycloakLoginUi = builder.AddParameter("feature-flag-disable-keycloak-login-ui");
 
+// Startup auth-mode switch (documents/specs/startup-flag-governance.md). Read at
+// REGISTRATION time by AddAuthAndTenancy (IsFlagEnabled) — auth schemes are fixed at
+// startup, so it is NOT a Config-service flag. The committed base default "false" is
+// fail-closed: a publish must never bake TestAuth into a manifest. The dev "true" lives in
+// appsettings.Development.json Parameters, beside the Keycloak dev secrets — this repo's
+// proven home for dev-only values. Fanned below to exactly the six hosts that call
+// AddAuthAndTenancy.
+var disableOidcAuth = builder.AddParameter("feature-flag-disable-oidc-auth");
+
 // Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist — the redirect
 // targets a one-time handshake code may be minted for. ONE parameter holds the browser-facing
 // apps' callbacks (the four Blazor hosts' /signin-handshake route, in both launch-profile
@@ -218,11 +227,13 @@ var openRouterApiKey        = builder.AddParameter("openrouter-api-key", secret:
 // Feature flags used to be a per-service env-var fanned out from here. Runtime,
 // mutable, tenant-overridable flags are now owned by the central Settings
 // FeatureFlag aggregate (see documents/solution/settings-context-merge-spec.md).
-// The one flag that remains deployment-time — FEATURE:DisableOIDCAuth, a startup
-// auth-mode switch — is read by each consumer from its own appsettings.json
-// (dev default "true") or the FeatureFlags__FEATURE__DisableOIDCAuth env var in
-// production. It is NOT managed as a Config flag because ASP.NET Core auth
-// schemes are registered once at startup and cannot be flipped at runtime.
+// Startup auth-mode switches are NOT Config flags (ASP.NET Core auth schemes are
+// registered once at startup and cannot be flipped at runtime) — they are AppHost
+// parameters fanned out from here, exactly like FEATURE:DisableKeycloakLoginUi below.
+// FEATURE:DisableOIDCAuth follows the same two-value pattern: the committed base default
+// ("false") is fail-closed so a publish can never bake TestAuth into a manifest, while the
+// dev "true" lives in appsettings.Development.json beside the Keycloak dev secrets. See
+// documents/specs/startup-flag-governance.md.
 
 // ── Assignments bounded context ──
 
@@ -252,6 +263,7 @@ var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settin
     .WithReference(rabbit)
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", settingsOutboxExchange)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -294,6 +306,7 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
     .WithEnvironment("Students__UseLocalCodedValueProjection", useLocalCodedValueProjection)
     .WithEnvironment("Students__PeriodActivationToleranceDays", periodActivationToleranceDays)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -320,6 +333,7 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithEnvironment("Assignments__AttachmentUpload__MaxTotalSizeBytes", assignmentUploadMaxTotalBytes)
     .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WithEnvironment("Smtp__Host", smtpHost)
     .WithEnvironment("Smtp__Port", smtpPort)
     .WithEnvironment("Smtp__User", smtpUser)
@@ -393,6 +407,7 @@ var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
     .WithReference(settingsApi)
     .WithReference(studentsApi)
     .WithEnvironment("Auth__Keycloak__ServiceAccountClientSecret", keycloakAuthAdminSecret)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     // D5: the auth service reads the login-UI flag at startup (its own AddAuthAndTenancy must
     // know the flag), but it deliberately does NOT receive Auth:Portal:LoginUrl — the
     // browser-facing login URL stays off this host, so the flag-ON challenge here fails closed
@@ -481,6 +496,7 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     // matching reference exists — without it the handshake dies with "No such host is known".
     .WithReference(auth)
     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     // D4/D5: the Blazor host's login-UI flag + the portal login URL the flag-ON challenge
     // redirects to. The URL reaches the two browser-facing hosts only (plan-review P2-5).
     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
@@ -501,8 +517,8 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
 // F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
 // Option B, a separate host rather than routes on Admin). Depends on the
 // Assignments API for its ward-facing endpoints. Its auth-mode switch
-// (FEATURE:DisableOIDCAuth) is read from its own appsettings.json (dev default
-// "true" = TestAuth) — no AppHost flag param needed, mirroring the Admin note.
+// (FEATURE:DisableOIDCAuth) arrives as the AppHost parameter fanned to all six
+// AddAuthAndTenancy consumers (documents/specs/startup-flag-governance.md).
 builder.AddProject<Projects.SchoolCollab_Families>("families")
     .WithReference(assignmentsApi)
     // WS-E1 (ar-14-deep-links): the Families host resolves the runtime
@@ -515,6 +531,7 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
     .WithReference(auth)
     // D4/D5: same flag + portal login URL fan-out as admin.
     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
+    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
     .WaitFor(assignmentsApi);
 

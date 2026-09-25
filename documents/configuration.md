@@ -125,7 +125,7 @@ files only carry values that genuinely belong to that single service
 | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
 | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5. |
+| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` (base) / `true` (dev-only, `appsettings.Development.json`) | The startup auth-mode switch: replaces Keycloak OIDC with `TestAuthHandler` so local development needs no login. Fanned as `FeatureFlags__FEATURE__DisableOIDCAuth` to the **six** hosts that call `AddAuthAndTenancy` — `settings-api`, `students-api`, `assignments-api`, `admin`, `families` and the `auth` service. Read at **registration** time (`AddAuthAndTenancy` → `IsFlagEnabled`), so it is **not** a Config-service flag. The committed **base default is fail-closed** (`false`): a publish must never bake `TestAuth` into a manifest — a missing env var must mean OIDC, not a fake identity. The dev `true` is committed in the AppHost's own `appsettings.Development.json`, so `aspire run` (a Development run) still resolves TestAuth exactly as before. **Publish caveat:** run `aspire publish` in a non-Development environment, or the Development-file value is what gets baked. **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5 and `documents/specs/startup-flag-governance.md`. |
 | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
 | `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
 | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
@@ -596,13 +596,16 @@ Assignments.Api named clients so a real-auth 302-challenge surfaces as a non-2xx
 >   for the merge history), managed via the admin UI at `/config-flags`,
 >   resolved by `ConfigFeatureFlagService` with a HybridCache L1/L2 +
 >   `IConfiguration` fallback. Every mutation is audited.
-> - **`FEATURE:DisableOIDCAuth`** remains a *deployment-time startup auth-mode
->   switch*: it is **no longer** an AppHost `Parameters:` value. Each consumer
->   carries it in its own `appsettings.json` (`FeatureFlags:FEATURE:DisableOIDCAuth`,
->   dev default `"true"`) and production overrides it via the env var
->   `FeatureFlags__FEATURE__DisableOIDCAuth=false`. It is read from
->   `IConfiguration` directly at startup (auth schemes are registered once and
->   cannot be flipped at runtime), so it is **not** a Config-service flag.
+> - **Startup auth-mode switches** (`FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi`)
+>   are *deployment-time* reads: auth schemes are registered once at startup and cannot be
+>   flipped at runtime, so they are **not** Config-service flags. Each is an AppHost
+>   `Parameters:` value fanned out with `WithEnvironment` (see `feature-flag-disable-oidc-auth`
+>   and `feature-flag-disable-keycloak-login-ui` in §2), with a **fail-closed** committed base
+>   default and the dev posture in the AppHost's own `appsettings.Development.json`.
+>   **No per-host `appsettings*.json` may carry one**: an env-var fan-out silently masks such a
+>   copy (env vars outrank appsettings), so the scatter was removed and is now guarded by
+>   `AppHostStartupFlagWiringArchitectureTests` — adopted 2026-09-25, see
+>   [`specs/startup-flag-governance.md`](./specs/startup-flag-governance.md).
 
 The historical AppHost-`Parameters:` description below is retained for context
 but is **superseded** by the two-kind model above.
@@ -638,16 +641,19 @@ time via a `TenantFeatureFlagOverride` row, without changing the global default.
 
 Feature flags were previously **centralised in the AppHost** under
 `Parameters:feature-flag-*` and fanned out to each consumer via
-`WithEnvironment("FeatureFlags__FEATURE__...", param)`. That
-`feature-flag-disable-oidc-auth` parameter has been removed; `DisableOIDCAuth`
-now lives in each consumer's `appsettings.json` as described above. Runtime
-flags moved to the Config service.
+`WithEnvironment("FeatureFlags__FEATURE__...", param)`. The *runtime* half of that model was
+superseded by the Config service (see above). The *deployment-time* half was **reinstated**
+on 2026-09-25: `FEATURE:DisableOIDCAuth` had briefly lived in each consumer's
+`appsettings.json`, which left six copies with no single flip point, hid a fail-open
+production default, and contradicted the repo rule against scattering flag values — see
+[`specs/startup-flag-governance.md`](./specs/startup-flag-governance.md) for the adopted
+restoration and its guards.
 
 ### Introduced flags
 
 | Flag | Default | Consumers |
 | :--- | :--- | :--- |
-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`. The `auth` service also runs with this flag ON (`src/SchoolCollab.Auth/appsettings.json`) **and is the one host with a dev carve-out**: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
+| `FEATURE:DisableOIDCAuth` | `false` (base; dev `true`) | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag.** Fanned to the six hosts that call `AddAuthAndTenancy`: `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Admin`, `SchoolCollab.Families` and the `auth` service. The `auth` service is the one host with a dev carve-out: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so with the flag ON it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
 | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
 | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
 | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
@@ -655,20 +661,31 @@ flags moved to the Config service.
 
 ### Setting a flag
 
-In a developer / CI environment, override the AppHost `Parameters:`
-value via user-secrets (preferred) or env-var:
+**Runtime flags** are set in the admin UI at `/config-flags` (or the `/api/config/*`
+endpoints) — they are DB-backed and tenant-overridable, so there is nothing to edit in the
+repo for a normal toggle.
+
+**Deployment-time startup switches** are AppHost parameters. In a developer environment,
+override the AppHost `Parameters:` value via user-secrets (preferred) or env-var:
 
 ```bash
 cd src/AppHost/SchoolCollab.AppHost
 # dev-only override
+# NOTE the value you override TO: the committed default is fail-closed (`false`),
+# so `true` is what re-enables the local TestAuth bypass.
 dotnet user-secrets set "Parameters:feature-flag-disable-oidc-auth" "true"
 ```
 
-Or directly edit the default in
-`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:`.
-That file is the canonical record of every flag's default value and
-**must** be updated in the same PR that adds a new flag — see
+The committed values live in the AppHost's own configuration:
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:` is the canonical
+record of every **deployment-time parameter default** (fail-closed for a startup switch),
+and `appsettings.Development.json` under `Parameters:` carries the dev-only posture. Both
+**must** be updated in the same PR that adds a parameter — see
 [`.github/copilot/rules/configuration-documentation.md`](../.github/copilot/rules/configuration-documentation.md).
+
+For an **ad-hoc standalone host run** — `dotnet run` on one host, with no AppHost, which is
+the only place a parameter is fanned from — set the flag directly:
+`FeatureFlags__FEATURE__DisableOIDCAuth=true` (or `false`).
 
 > 📝 The `:` in the flag key is intentional. `FeatureFlagService.CollectFlags`
 > recurses into nested sections, so `FEATURE:DisableOIDCAuth` surfaces as
@@ -1045,7 +1062,7 @@ matching env-var form:
 | `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
 | `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
 | `Auth:PostLogoutRedirectUri` | `Auth__PostLogoutRedirectUri` |
-| `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
+| `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE__DisableOIDCAuth` |
 | `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
 | `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
 | `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |

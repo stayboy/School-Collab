@@ -28,14 +28,31 @@ document is the authority for the Config bounded context. See also
 ## Deployment-time flags (rare)
 
 Use only for genuine startup decisions that cannot be deferred to runtime
-(e.g. `FEATURE:DisableOIDCAuth`).
+(e.g. `FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi`). The pattern is the
+**AppHost parameter** — one write-point, fanned out; the adopted design, its evidence and its
+guards are in [`startup-flag-governance.md`](../specs/startup-flag-governance.md).
 
-1. Add the value to each consumer's `appsettings.json`
-   (`FeatureFlags:FEATURE:<Area>`), with the dev default.
-2. Production overrides it via the env var
-   `FeatureFlags__FEATURE__<Area>=<true|false>`.
-3. Consumers read it via `IConfiguration` (directly for startup decisions, or
-   through `ConfigurationFeatureFlagService`).
+1. Declare it once in the AppHost — `builder.AddParameter("feature-flag-<name>")` in
+   `src/AppHost/SchoolCollab.AppHost/Program.cs`.
+2. Commit **two** values in the AppHost's own configuration:
+   - `appsettings.json` → `Parameters:feature-flag-<name>` = `"false"` — **fail-closed**,
+     because this is what `aspire publish` bakes into a deployment manifest;
+   - `appsettings.Development.json` → `Parameters:feature-flag-<name>` = `"true"` — the dev
+     posture, beside the other dev-only values (the Keycloak dev secrets set the precedent).
+   (Two values, one parameter: the env var outranks both, so a real deployment can still
+   override deliberately.)
+3. Fan it out to **exactly** the hosts that read it —
+   `.WithEnvironment("FeatureFlags__FEATURE__<Name>", param)`.
+4. Consumers read it via `IConfiguration` (`AddAuthAndTenancy` does, at registration time) or
+   through `ConfigurationFeatureFlagService`.
+5. Guard it: **no** per-host `appsettings*.json` may carry the key (an env-var fan-out
+   silently masks such a copy), and the fan-out set must be exact — see
+   `AppHostStartupFlagWiringArchitectureTests` (Guard A + Guard B) for the template.
+
+Dev overrides go to user-secrets on the **AppHost** project
+(`dotnet user-secrets set "Parameters:feature-flag-<name>" "true"`). A standalone host run
+(`dotnet run` without the AppHost — the only place a parameter is fanned from) sets
+`FeatureFlags__FEATURE__<Name>=<true|false>` directly.
 
 ## Runtime feature flags (the common case)
 

@@ -1,0 +1,768 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index f1eb1752..39efb2f8 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -248,7 +248,11 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
+   Scrutor assembly scanning.
+ - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
+ - **API Endpoint Grouping**: All API endpoints must be grouped using an extension method (e.g., `MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)`). Do not define routes inline in `Program.cs`. Authorization requirements on these groups should be conditional based on `IFeatureFlagService` (e.g., `FEATURE:DisableOIDCAuth`).
+-- **Feature Flags**: Feature flags are centralized in the AppHost's `Parameters:` block (see `src/AppHost/SchoolCollab.AppHost/appsettings.json`) and fanned out to consumers via `WithEnvironment("FeatureFlags__FEATURE__...", param)`. Each flag should also be mapped onto the consumer sites in `documents/configuration.md` §2. Do not scatter flag values across individual service `appsettings.json` files or rely on the `SchoolCollab.Config` HTTP overlay (it was removed — see `documents/solution/centralized-feature-flags-implementation.superseded.md`).
++- **Feature Flags**: there are **two kinds**, each with exactly one write-point — read `documents/solution/feature-flag-workflow.md` before adding one.
++  - **Runtime, mutable, tenant-overridable flags** (e.g. `FEATURE:EnableCodedValuesAiChat`) are owned by the central **Config service** (`settings-api` + `config-db`, admin UI `/config-flags`, audited, tenant-overridable) — **not** the AppHost.
++  - **Deployment-time startup switches** (e.g. `FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi` — read once at process start, so they can never be Config flags) live in the AppHost's `Parameters:` block (see `src/AppHost/SchoolCollab.AppHost/appsettings.json`) and are fanned out via `WithEnvironment("FeatureFlags__FEATURE__...", param)`, with the dev posture committed in the AppHost's own `appsettings.Development.json`.
++  - A startup switch's committed **base default is fail-closed** (a publish must never bake a dev bypass into a manifest), and `appsettings.json` under `Parameters:` is the canonical record of every deployment-time parameter default — update it in the same PR that adds one. Adopted design, evidence and guards: `documents/specs/startup-flag-governance.md`.
++  - Each flag must also be mapped onto the consumer sites in `documents/configuration.md` §2. **Never scatter a flag value across individual service `appsettings.json` files** — an env-var fan-out silently masks such a copy, which is exactly why the startup switches are guarded by `AppHostStartupFlagWiringArchitectureTests` — and do not rely on the `SchoolCollab.Config` HTTP overlay (it was removed — see `documents/solution/centralized-feature-flags-implementation.superseded.md`).
+ 
+ ---
+ 
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 51190e35..9de0cb26 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -125,7 +125,7 @@ files only carry values that genuinely belong to that single service
+ | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
+ | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
+ | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
+-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin` (not `families` — the Families host carries its own dev default in its `appsettings.json`; see §5). **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5. |
++| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` (base) / `true` (dev-only, `appsettings.Development.json`) | The startup auth-mode switch: replaces Keycloak OIDC with `TestAuthHandler` so local development needs no login. Fanned as `FeatureFlags__FEATURE__DisableOIDCAuth` to the **six** hosts that call `AddAuthAndTenancy` — `settings-api`, `students-api`, `assignments-api`, `admin`, `families` and the `auth` service. Read at **registration** time (`AddAuthAndTenancy` → `IsFlagEnabled`), so it is **not** a Config-service flag. The committed **base default is fail-closed** (`false`): a publish must never bake `TestAuth` into a manifest — a missing env var must mean OIDC, not a fake identity. The dev `true` is committed in the AppHost's own `appsettings.Development.json`, so `aspire run` (a Development run) still resolves TestAuth exactly as before. **Publish caveat:** run `aspire publish` in a non-Development environment, or the Development-file value is what gets baked. **Carve-out (D16, round `keycloak-logout-oidc`):** the `auth` service opts into the OIDC **relying-party pipeline** (cookie + OIDC) even when this flag is ON, via `AddAuthAndTenancy(..., requireOidcRelyingParty: true)` — it IS the relying party — with `TestAuth` still its **default** scheme; every other consumer's dev pipeline is unchanged. See §5 and `documents/specs/startup-flag-governance.md`. |
+ | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
+ | `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
+ | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
+@@ -596,13 +596,16 @@ Assignments.Api named clients so a real-auth 302-challenge surfaces as a non-2xx
+ >   for the merge history), managed via the admin UI at `/config-flags`,
+ >   resolved by `ConfigFeatureFlagService` with a HybridCache L1/L2 +
+ >   `IConfiguration` fallback. Every mutation is audited.
+-> - **`FEATURE:DisableOIDCAuth`** remains a *deployment-time startup auth-mode
+->   switch*: it is **no longer** an AppHost `Parameters:` value. Each consumer
+->   carries it in its own `appsettings.json` (`FeatureFlags:FEATURE:DisableOIDCAuth`,
+->   dev default `"true"`) and production overrides it via the env var
+->   `FeatureFlags__FEATURE__DisableOIDCAuth=false`. It is read from
+->   `IConfiguration` directly at startup (auth schemes are registered once and
+->   cannot be flipped at runtime), so it is **not** a Config-service flag.
++> - **Startup auth-mode switches** (`FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi`)
++>   are *deployment-time* reads: auth schemes are registered once at startup and cannot be
++>   flipped at runtime, so they are **not** Config-service flags. Each is an AppHost
++>   `Parameters:` value fanned out with `WithEnvironment` (see `feature-flag-disable-oidc-auth`
++>   and `feature-flag-disable-keycloak-login-ui` in §2), with a **fail-closed** committed base
++>   default and the dev posture in the AppHost's own `appsettings.Development.json`.
++>   **No per-host `appsettings*.json` may carry one**: an env-var fan-out silently masks such a
++>   copy (env vars outrank appsettings), so the scatter was removed and is now guarded by
++>   `AppHostStartupFlagWiringArchitectureTests` — adopted 2026-09-25, see
++>   [`specs/startup-flag-governance.md`](./specs/startup-flag-governance.md).
+ 
+ The historical AppHost-`Parameters:` description below is retained for context
+ but is **superseded** by the two-kind model above.
+@@ -638,16 +641,19 @@ time via a `TenantFeatureFlagOverride` row, without changing the global default.
+ 
+ Feature flags were previously **centralised in the AppHost** under
+ `Parameters:feature-flag-*` and fanned out to each consumer via
+-`WithEnvironment("FeatureFlags__FEATURE__...", param)`. That
+-`feature-flag-disable-oidc-auth` parameter has been removed; `DisableOIDCAuth`
+-now lives in each consumer's `appsettings.json` as described above. Runtime
+-flags moved to the Config service.
++`WithEnvironment("FeatureFlags__FEATURE__...", param)`. The *runtime* half of that model was
++superseded by the Config service (see above). The *deployment-time* half was **reinstated**
++on 2026-09-25: `FEATURE:DisableOIDCAuth` had briefly lived in each consumer's
++`appsettings.json`, which left six copies with no single flip point, hid a fail-open
++production default, and contradicted the repo rule against scattering flag values — see
++[`specs/startup-flag-governance.md`](./specs/startup-flag-governance.md) for the adopted
++restoration and its guards.
+ 
+ ### Introduced flags
+ 
+ | Flag | Default | Consumers |
+ | :--- | :--- | :--- |
+-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`. The `auth` service also runs with this flag ON (`src/SchoolCollab.Auth/appsettings.json`) **and is the one host with a dev carve-out**: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
++| `FEATURE:DisableOIDCAuth` | `false` (base; dev `true`) | **Deployment-time AppHost parameter fan-out — not a Settings/Config-service flag.** Fanned to the six hosts that call `AddAuthAndTenancy`: `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Admin`, `SchoolCollab.Families` and the `auth` service. The `auth` service is the one host with a dev carve-out: it passes `requireOidcRelyingParty: true` to `AddAuthAndTenancy`, so with the flag ON it still registers the OIDC **relying-party pipeline (cookie + OIDC)** — it IS the relying party (D16) — while `TestAuth` stays its default scheme. Every other consumer's dev pipeline is unchanged. |
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+ | `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
+@@ -655,21 +661,32 @@ flags moved to the Config service.
+ 
+ ### Setting a flag
+ 
+-In a developer / CI environment, override the AppHost `Parameters:`
+-value via user-secrets (preferred) or env-var:
++**Runtime flags** are set in the admin UI at `/config-flags` (or the `/api/config/*`
++endpoints) — they are DB-backed and tenant-overridable, so there is nothing to edit in the
++repo for a normal toggle.
++
++**Deployment-time startup switches** are AppHost parameters. In a developer environment,
++override the AppHost `Parameters:` value via user-secrets (preferred) or env-var:
+ 
+ ```bash
+ cd src/AppHost/SchoolCollab.AppHost
+ # dev-only override
++# NOTE the value you override TO: the committed default is fail-closed (`false`),
++# so `true` is what re-enables the local TestAuth bypass.
+ dotnet user-secrets set "Parameters:feature-flag-disable-oidc-auth" "true"
+ ```
+ 
+-Or directly edit the default in
+-`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:`.
+-That file is the canonical record of every flag's default value and
+-**must** be updated in the same PR that adds a new flag — see
++The committed values live in the AppHost's own configuration:
++`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:` is the canonical
++record of every **deployment-time parameter default** (fail-closed for a startup switch),
++and `appsettings.Development.json` under `Parameters:` carries the dev-only posture. Both
++**must** be updated in the same PR that adds a parameter — see
+ [`.github/copilot/rules/configuration-documentation.md`](../.github/copilot/rules/configuration-documentation.md).
+ 
++For an **ad-hoc standalone host run** — `dotnet run` on one host, with no AppHost, which is
++the only place a parameter is fanned from — set the flag directly:
++`FeatureFlags__FEATURE__DisableOIDCAuth=true` (or `false`).
++
+ > 📝 The `:` in the flag key is intentional. `FeatureFlagService.CollectFlags`
+ > recurses into nested sections, so `FEATURE:DisableOIDCAuth` surfaces as
+ > the dotted key `FEATURE:DisableOIDCAuth` — keep the colon when adding new
+@@ -1045,7 +1062,7 @@ matching env-var form:
+ | `Auth:CredentialEndpointRateLimitWindow` | `Auth__CredentialEndpointRateLimitWindow` |
+ | `Auth:CredentialEndpointRateLimitPermits` | `Auth__CredentialEndpointRateLimitPermits` |
+ | `Auth:PostLogoutRedirectUri` | `Auth__PostLogoutRedirectUri` |
+-| `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE:DisableOIDCAuth` |
++| `FeatureFlags:FEATURE:DisableOIDCAuth` | `FeatureFlags__FEATURE__DisableOIDCAuth` |
+ | `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
+ | `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
+ | `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
+diff --git a/documents/solution/feature-flag-workflow.md b/documents/solution/feature-flag-workflow.md
+index 8ca668ec..385d6dd1 100644
+--- a/documents/solution/feature-flag-workflow.md
++++ b/documents/solution/feature-flag-workflow.md
+@@ -28,14 +28,31 @@ document is the authority for the Config bounded context. See also
+ ## Deployment-time flags (rare)
+ 
+ Use only for genuine startup decisions that cannot be deferred to runtime
+-(e.g. `FEATURE:DisableOIDCAuth`).
+-
+-1. Add the value to each consumer's `appsettings.json`
+-   (`FeatureFlags:FEATURE:<Area>`), with the dev default.
+-2. Production overrides it via the env var
+-   `FeatureFlags__FEATURE__<Area>=<true|false>`.
+-3. Consumers read it via `IConfiguration` (directly for startup decisions, or
+-   through `ConfigurationFeatureFlagService`).
++(e.g. `FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi`). The pattern is the
++**AppHost parameter** — one write-point, fanned out; the adopted design, its evidence and its
++guards are in [`startup-flag-governance.md`](../specs/startup-flag-governance.md).
++
++1. Declare it once in the AppHost — `builder.AddParameter("feature-flag-<name>")` in
++   `src/AppHost/SchoolCollab.AppHost/Program.cs`.
++2. Commit **two** values in the AppHost's own configuration:
++   - `appsettings.json` → `Parameters:feature-flag-<name>` = `"false"` — **fail-closed**,
++     because this is what `aspire publish` bakes into a deployment manifest;
++   - `appsettings.Development.json` → `Parameters:feature-flag-<name>` = `"true"` — the dev
++     posture, beside the other dev-only values (the Keycloak dev secrets set the precedent).
++   (Two values, one parameter: the env var outranks both, so a real deployment can still
++   override deliberately.)
++3. Fan it out to **exactly** the hosts that read it —
++   `.WithEnvironment("FeatureFlags__FEATURE__<Name>", param)`.
++4. Consumers read it via `IConfiguration` (`AddAuthAndTenancy` does, at registration time) or
++   through `ConfigurationFeatureFlagService`.
++5. Guard it: **no** per-host `appsettings*.json` may carry the key (an env-var fan-out
++   silently masks such a copy), and the fan-out set must be exact — see
++   `AppHostStartupFlagWiringArchitectureTests` (Guard A + Guard B) for the template.
++
++Dev overrides go to user-secrets on the **AppHost** project
++(`dotnet user-secrets set "Parameters:feature-flag-<name>" "true"`). A standalone host run
++(`dotnet run` without the AppHost — the only place a parameter is fanned from) sets
++`FeatureFlags__FEATURE__<Name>=<true|false>` directly.
+ 
+ ## Runtime feature flags (the common case)
+ 
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 1fa5d69e..691f0794 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -166,6 +166,15 @@ var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assig
+ // consumers (admin, families, auth, auth-portal).
+ var disableKeycloakLoginUi = builder.AddParameter("feature-flag-disable-keycloak-login-ui");
+ 
++// Startup auth-mode switch (documents/specs/startup-flag-governance.md). Read at
++// REGISTRATION time by AddAuthAndTenancy (IsFlagEnabled) — auth schemes are fixed at
++// startup, so it is NOT a Config-service flag. The committed base default "false" is
++// fail-closed: a publish must never bake TestAuth into a manifest. The dev "true" lives in
++// appsettings.Development.json Parameters, beside the Keycloak dev secrets — this repo's
++// proven home for dev-only values. Fanned below to exactly the six hosts that call
++// AddAuthAndTenancy.
++var disableOidcAuth = builder.AddParameter("feature-flag-disable-oidc-auth");
++
+ // Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist — the redirect
+ // targets a one-time handshake code may be minted for. ONE parameter holds the browser-facing
+ // apps' callbacks (the four Blazor hosts' /signin-handshake route, in both launch-profile
+@@ -218,11 +227,13 @@ var openRouterApiKey        = builder.AddParameter("openrouter-api-key", secret:
+ // Feature flags used to be a per-service env-var fanned out from here. Runtime,
+ // mutable, tenant-overridable flags are now owned by the central Settings
+ // FeatureFlag aggregate (see documents/solution/settings-context-merge-spec.md).
+-// The one flag that remains deployment-time — FEATURE:DisableOIDCAuth, a startup
+-// auth-mode switch — is read by each consumer from its own appsettings.json
+-// (dev default "true") or the FeatureFlags__FEATURE__DisableOIDCAuth env var in
+-// production. It is NOT managed as a Config flag because ASP.NET Core auth
+-// schemes are registered once at startup and cannot be flipped at runtime.
++// Startup auth-mode switches are NOT Config flags (ASP.NET Core auth schemes are
++// registered once at startup and cannot be flipped at runtime) — they are AppHost
++// parameters fanned out from here, exactly like FEATURE:DisableKeycloakLoginUi below.
++// FEATURE:DisableOIDCAuth follows the same two-value pattern: the committed base default
++// ("false") is fail-closed so a publish can never bake TestAuth into a manifest, while the
++// dev "true" lives in appsettings.Development.json beside the Keycloak dev secrets. See
++// documents/specs/startup-flag-governance.md.
+ 
+ // ── Assignments bounded context ──
+ 
+@@ -252,6 +263,7 @@ var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settin
+     .WithReference(rabbit)
+     .WithReference(redis)
+     .WithEnvironment("Outbox__ExchangeName", settingsOutboxExchange)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+     .WaitFor(rabbit)
+     .WaitFor(redis)
+     .WaitForCompletion(migrator);
+@@ -294,6 +306,7 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
+     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
+     .WithEnvironment("Students__UseLocalCodedValueProjection", useLocalCodedValueProjection)
+     .WithEnvironment("Students__PeriodActivationToleranceDays", periodActivationToleranceDays)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+     .WaitFor(rabbit)
+     .WaitFor(redis)
+     .WaitForCompletion(migrator);
+@@ -320,6 +333,7 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
+     .WithEnvironment("Assignments__AttachmentUpload__MaxTotalSizeBytes", assignmentUploadMaxTotalBytes)
+     .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
+     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+     .WithEnvironment("Smtp__Host", smtpHost)
+     .WithEnvironment("Smtp__Port", smtpPort)
+     .WithEnvironment("Smtp__User", smtpUser)
+@@ -393,6 +407,7 @@ var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
+     .WithReference(settingsApi)
+     .WithReference(studentsApi)
+     .WithEnvironment("Auth__Keycloak__ServiceAccountClientSecret", keycloakAuthAdminSecret)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+     // D5: the auth service reads the login-UI flag at startup (its own AddAuthAndTenancy must
+     // know the flag), but it deliberately does NOT receive Auth:Portal:LoginUrl — the
+     // browser-facing login URL stays off this host, so the flag-ON challenge here fails closed
+@@ -481,6 +496,7 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+     // matching reference exists — without it the handshake dies with "No such host is known".
+     .WithReference(auth)
+     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+     // D4/D5: the Blazor host's login-UI flag + the portal login URL the flag-ON challenge
+     // redirects to. The URL reaches the two browser-facing hosts only (plan-review P2-5).
+     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
+@@ -501,8 +517,8 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
+ // F1 (slice 2b) — the Families ward/guardian surface app (owner decision:
+ // Option B, a separate host rather than routes on Admin). Depends on the
+ // Assignments API for its ward-facing endpoints. Its auth-mode switch
+-// (FEATURE:DisableOIDCAuth) is read from its own appsettings.json (dev default
+-// "true" = TestAuth) — no AppHost flag param needed, mirroring the Admin note.
++// (FEATURE:DisableOIDCAuth) arrives as the AppHost parameter fanned to all six
++// AddAuthAndTenancy consumers (documents/specs/startup-flag-governance.md).
+ builder.AddProject<Projects.SchoolCollab_Families>("families")
+     .WithReference(assignmentsApi)
+     // WS-E1 (ar-14-deep-links): the Families host resolves the runtime
+@@ -515,6 +531,7 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
+     .WithReference(auth)
+     // D4/D5: same flag + portal login URL fan-out as admin.
+     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
++    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+     .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
+     .WaitFor(assignmentsApi);
+ 
+diff --git a/src/AppHost/SchoolCollab.AppHost/appsettings.Development.json b/src/AppHost/SchoolCollab.AppHost/appsettings.Development.json
+index 3b68812c..8bdd17d3 100644
+--- a/src/AppHost/SchoolCollab.AppHost/appsettings.Development.json
++++ b/src/AppHost/SchoolCollab.AppHost/appsettings.Development.json
+@@ -6,6 +6,7 @@
+     }
+   },
+   "Parameters": {
++    "feature-flag-disable-oidc-auth": "true",
+     "keycloak-admin-password": "dev-only-keycloak-admin",
+     "keycloak-client-secret": "dev-only-school-collab-client-secret",
+     "keycloak-auth-admin-secret": "dev-only-school-collab-auth-admin-secret",
+diff --git a/src/AppHost/SchoolCollab.AppHost/appsettings.json b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+index e1a5b249..cc704fa4 100644
+--- a/src/AppHost/SchoolCollab.AppHost/appsettings.json
++++ b/src/AppHost/SchoolCollab.AppHost/appsettings.json
+@@ -23,6 +23,7 @@
+     "assignment-upload-allowed-extensions": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv",
+     "feature-flag-require-assignment-approval": "false",
+     "feature-flag-disable-keycloak-login-ui": "false",
++    "feature-flag-disable-oidc-auth": "false",
+     "smtp-host": "localhost",
+     "smtp-port": "1025",
+     "smtp-from-address": "no-reply@schoolcollab.local",
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/appsettings.json b/src/Assignments/SchoolCollab.Assignments.Api/appsettings.json
+index 0036d113..ec04bc12 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/appsettings.json
++++ b/src/Assignments/SchoolCollab.Assignments.Api/appsettings.json
+@@ -5,10 +5,5 @@
+       "Microsoft.AspNetCore": "Warning"
+     }
+   },
+-  "AllowedHosts": "*",
+-  "FeatureFlags": {
+-    "FEATURE": {
+-      "DisableOIDCAuth": "true"
+-    }
+-  }
++  "AllowedHosts": "*"
+ }
+\ No newline at end of file
+diff --git a/src/SchoolCollab.Admin/appsettings.json b/src/SchoolCollab.Admin/appsettings.json
+index 9ca1f22d..77dc4125 100644
+--- a/src/SchoolCollab.Admin/appsettings.json
++++ b/src/SchoolCollab.Admin/appsettings.json
+@@ -8,7 +8,6 @@
+   "AllowedHosts": "*",
+   "FeatureFlags": {
+     "FEATURE": {
+-      "DisableOIDCAuth": "true",
+       "EnableCodedValuesAiChat": "true",
+       "EnableGradeLevelSetupOnEnrollDialog": "true",
+       "EnableEnrollmentValidation": "false",
+diff --git a/src/SchoolCollab.Auth/appsettings.json b/src/SchoolCollab.Auth/appsettings.json
+index 1990e489..10f68b8c 100644
+--- a/src/SchoolCollab.Auth/appsettings.json
++++ b/src/SchoolCollab.Auth/appsettings.json
+@@ -5,8 +5,5 @@
+       "Microsoft.AspNetCore": "Warning"
+     }
+   },
+-  "AllowedHosts": "*",
+-  "FeatureFlags": {
+-    "FEATURE:DisableOIDCAuth": "true"
+-  }
++  "AllowedHosts": "*"
+ }
+diff --git a/src/SchoolCollab.Families/appsettings.json b/src/SchoolCollab.Families/appsettings.json
+index 2c6b3b47..228b6345 100644
+--- a/src/SchoolCollab.Families/appsettings.json
++++ b/src/SchoolCollab.Families/appsettings.json
+@@ -6,13 +6,8 @@
+     }
+   },
+   "AllowedHosts": "*",
+-  // F1 (slice 2b) — the Families host mirrors Admin's startup auth-mode switch:
+-  // FEATURE:DisableOIDCAuth is a *startup* switch (auth schemes are registered
+-  // once at process start and cannot be flipped at runtime). Dev default "true"
+-  // runs TestAuth; production overrides via FeatureFlags__FEATURE__DisableOIDCAuth.
+   "FeatureFlags": {
+     "FEATURE": {
+-      "DisableOIDCAuth": "true",
+       // WS-E1 (ar-14-deep-links): cold-start dev fallback for the runtime public
+       // deep-link landing flag (the DB-backed /config-flags row is authoritative; this
+       // only covers the case where the Settings API is unreachable). Default OFF.
+diff --git a/src/Settings/SchoolCollab.Settings.Api/appsettings.json b/src/Settings/SchoolCollab.Settings.Api/appsettings.json
+index 1990e489..10f68b8c 100644
+--- a/src/Settings/SchoolCollab.Settings.Api/appsettings.json
++++ b/src/Settings/SchoolCollab.Settings.Api/appsettings.json
+@@ -5,8 +5,5 @@
+       "Microsoft.AspNetCore": "Warning"
+     }
+   },
+-  "AllowedHosts": "*",
+-  "FeatureFlags": {
+-    "FEATURE:DisableOIDCAuth": "true"
+-  }
++  "AllowedHosts": "*"
+ }
+diff --git a/src/Students/SchoolCollab.Students.Api/appsettings.json b/src/Students/SchoolCollab.Students.Api/appsettings.json
+index b4053335..dd91c317 100644
+--- a/src/Students/SchoolCollab.Students.Api/appsettings.json
++++ b/src/Students/SchoolCollab.Students.Api/appsettings.json
+@@ -8,7 +8,6 @@
+   "AllowedHosts": "*",
+   "FeatureFlags": {
+     "FEATURE": {
+-      "DisableOIDCAuth": "true",
+       "EnableEnrollmentValidation": "false"
+     }
+   },
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AppHostStartupFlagWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostStartupFlagWiringArchitectureTests.cs
+new file mode 100644
+index 00000000..61af83de
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AppHostStartupFlagWiringArchitectureTests.cs
+@@ -0,0 +1,382 @@
++using System.Text;
++using System.Text.Json;
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Features;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Guards the startup-switch governance adopted 2026-09-25
++/// (<c>documents/specs/startup-flag-governance.md</c>, grill Q1–Q6). Two invariants that no
++/// build or unit test can see, because they live in configuration rather than in code:
++/// <list type="number">
++///   <item><b>Guard A</b> — no per-host <c>appsettings*.json</c> (base or environment-specific)
++///        carries either startup switch, in any shape. A per-host copy would be <b>silently
++///        masked</b> by the AppHost's fanned env var (env vars outrank appsettings) while
++///        silently governing every standalone run — the failure mode that made
++///        <c>FEATURE:DisableOIDCAuth</c> live in six files with no single flip point;</item>
++///   <item><b>Guard B</b> — <c>FEATURE:DisableOIDCAuth</c> is declared as an AppHost parameter
++///        with a <b>fail-closed</b> committed base default (<c>"false"</c>, so a publish can
++///        never bake <c>TestAuth</c> into a manifest), a Development-file dev posture
++///        (<c>"true"</c>, beside the Keycloak dev secrets — the repo's proven home for
++///        dev-only values), and is fanned out to <b>exactly</b> the six hosts that call
++///        <c>AddAuthAndTenancy</c>.</item>
++/// </list>
++/// <para>
++/// The read itself is untouched (<c>AuthTenancyExtensions.IsFlagEnabled</c>, registration time)
++/// — this round governs <i>where the value is written</i>, never when or how it is read. The
++/// resource-block parser, <c>ReadParameters</c> helper and non-vacuity pattern are mirrored
++/// from <see cref="AppHostLoginUiFlagWiringArchitectureTests"/> (the login-UI flag's guard),
++/// so the two switches are held to the same standard by the same means.
++/// </para>
++/// </summary>
++[TestClass]
++public class AppHostStartupFlagWiringArchitectureTests
++{
++    private const string OidcFlagParameterName = "feature-flag-disable-oidc-auth";
++
++    /// <summary>The fan-out literal — pins the env-var spelling AND the parameter variable.</summary>
++    private const string OidcFlagFanOut =
++        """WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)""";
++
++    /// <summary>The six hosts that call <c>AddAuthAndTenancy</c> — and no others. auth-portal,
++    /// the two workers and the migrator are verified non-consumers (the portal holds no OIDC
++    /// client; the workers/migrator never register auth).</summary>
++    private static readonly string[] OidcFlagConsumers =
++        ["admin", "assignments-api", "auth", "families", "settings-api", "students-api"];
++
++    /// <summary>The two deployment-time startup switches. Runtime <c>Enable*</c> flags are
++    /// deliberately OUT of scope: their per-host cold-start fallbacks are a different,
++    /// documented mechanism (the Config service is authoritative at runtime).</summary>
++    private static readonly string[] StartupSwitchKeys =
++        [FeatureFlagKeys.DisableOIDCAuth, FeatureFlagKeys.DisableKeycloakLoginUi];
++
++    /// <summary>Families' appsettings carries <c>//</c> comments, and the JSON configuration
++    /// provider accepts them — so the parser must skip them too, or Guard A would throw on a
++    /// legitimate file.</summary>
++    private static readonly JsonDocumentOptions DocumentOptions = new()
++    {
++        CommentHandling = JsonCommentHandling.Skip,
++        AllowTrailingCommas = true,
++    };
++
++    private static readonly Regex CreatedResource = new(
++        """^\s*(?:var\s+)?(?:(?<variable>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*)?builder\.(?:AddProject<Projects\.[A-Za-z0-9_]+>|AddUvicornApp)\("(?<resource>[^"]+)"[,)]""",
++        RegexOptions.Compiled);
++
++    private static readonly Regex ReassignedResource = new(
++        @"^\s*(?<alias>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<target>[A-Za-z_][A-Za-z0-9_]*)\.", RegexOptions.Compiled);
++
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    private static readonly string AppHostDir =
++        Path.Combine(RepoRoot, "src", "AppHost", "SchoolCollab.AppHost");
++
++    private static readonly string AppHostProgramPath = Path.Combine(AppHostDir, "Program.cs");
++
++    private static readonly string AppHostSettingsPath = Path.Combine(AppHostDir, "appsettings.json");
++
++    private static readonly string AppHostDevelopmentSettingsPath =
++        Path.Combine(AppHostDir, "appsettings.Development.json");
++
++    /// <summary>The whole comment-stripped <c>Program.cs</c> — used for the exact-count
++    /// assertion that pins the fan-out to a total number of call sites.</summary>
++    private static readonly string Program = StripLineComments(File.ReadAllText(AppHostProgramPath));
++
++    private static readonly IReadOnlyList<ResourceBlock> Blocks = ParseResourceBlocks(Program);
++
++    /// <summary>Every <c>src/**/appsettings*.json</c> — base AND environment-specific —
++    /// excluding build output. Enumerated once; Guard A asserts it is non-empty.</summary>
++    private static readonly IReadOnlyList<string> PerHostAppSettings = FindPerHostAppSettings();
++
++    [TestMethod]
++    public void StartupSwitches_AreAbsentFromEveryPerHostAppsettings()
++    {
++        var violations = new List<string>();
++
++        foreach (var path in PerHostAppSettings)
++        {
++            using var doc = JsonDocument.Parse(File.ReadAllText(path), DocumentOptions);
++
++            foreach (var key in StartupSwitchKeys)
++            {
++                var occurrence = FindStartupSwitchOccurrence(doc.RootElement, key);
++                if (occurrence is not null)
++                {
++                    violations.Add($"{Path.GetRelativePath(RepoRoot, path)} → {occurrence}");
++                }
++            }
++        }
++
++        violations.Should().BeEmpty(
++            "a startup switch lives in the AppHost parameter and reaches hosts through "
++            + "WithEnvironment (documents/specs/startup-flag-governance.md). A per-host "
++            + "appsettings copy is SILENTLY MASKED by the fanned env var inside the AppHost "
++            + "(env vars outrank appsettings) while silently governing every standalone run — "
++            + "that is exactly how FEATURE:DisableOIDCAuth ended up in six files with no single "
++            + "flip point. Set the value in <AppHost>/appsettings.json (fail-closed default) or "
++            + "<AppHost>/appsettings.Development.json (dev posture) instead.");
++    }
++
++    [TestMethod]
++    public void StartupFlagParameter_IsDeclaredWithFailClosedDefault_AndFannedOutToExactlyTheSixConsumers()
++    {
++        Program.Should().Contain($"""AddParameter("{OidcFlagParameterName}")""",
++            "a Parameters: entry is not evidence the parameter exists — the round-A lesson "
++            + "(keycloak-auth-admin-secret shipped a default and docs with no declaration).");
++
++        ReadParameters(AppHostSettingsPath).Should()
++            .ContainKey(OidcFlagParameterName)
++            .WhoseValue.Should().Be("false",
++                "the committed default is FAIL-CLOSED: a publish must never bake TestAuth into a "
++                + "manifest, and a missing env var must mean OIDC rather than a fake identity.");
++
++        ReadParameters(AppHostDevelopmentSettingsPath).Should()
++            .ContainKey(OidcFlagParameterName)
++            .WhoseValue.Should().Be("true",
++                "the dev posture is unchanged: `aspire run` is a Development run, so it must "
++                + "resolve TestAuth exactly as before adoption (the Playwright suites document "
++                + "that assumption). The value lives beside the Keycloak dev secrets.");
++
++        var consumers = Blocks
++            .Where(block => block.Source.Contains(OidcFlagFanOut, StringComparison.Ordinal))
++            .Select(block => block.ResourceName)
++            .OrderBy(name => name, StringComparer.Ordinal)
++            .ToArray();
++
++        consumers.Should().BeEquivalentTo(OidcFlagConsumers,
++            "the startup auth-mode switch is read at registration time by exactly the six hosts "
++            + "that call AddAuthAndTenancy — a new consumer must be a conscious decision, and a "
++            + "silently dropped fan-out makes that host fall back to OIDC in dev.");
++
++        // A whole-file count, so a fan-out written OUTSIDE any resource block (or into one the
++        // block parser did not recognise) cannot slip past the per-block assertion above.
++        Count(Program, OidcFlagFanOut).Should().Be(OidcFlagConsumers.Length,
++            "each of the six consumers must receive the flag via the AppHost parameter — not a "
++            + "literal and not a seventh call site.");
++    }
++
++    [TestMethod]
++    public void Scan_ActuallyFoundTheAppHostResources_AndThePerHostSettingsFiles()
++    {
++        // Non-vacuity, twice over: every assertion above is per-resource or per-file, so a
++        // parser that matched nothing would pass while inspecting empty collections.
++        PerHostAppSettings.Should().HaveCountGreaterThanOrEqualTo(10,
++            "the repo declares appsettings for every host plus several environment-specific "
++            + "files; fewer means the scan found no real files.");
++
++        PerHostAppSettings.Should().Contain(
++            Path.Combine(RepoRoot, "src", "SchoolCollab.Auth", "appsettings.json"),
++            "the auth host's base settings must be among the scanned files — it is the file that "
++            + "carried the scattered copy this round removed.");
++
++        Blocks.Select(block => block.ResourceName)
++            .Should().Contain(OidcFlagConsumers)
++            .And.Contain(["auth-portal", "migrator"]);
++
++        foreach (var name in OidcFlagConsumers)
++        {
++            Block(name).Source.Should().Contain("WithEnvironment(",
++                $"the '{name}' block must have absorbed its fluent continuation lines.");
++        }
++    }
++
++    // ── Helpers ─────────────────────────────────────────────────────────
++
++    private sealed record ResourceBlock(string ResourceName, string Source);
++
++    /// <summary>
++    /// Finds a startup switch in <paramref name="root"/>, in any shape the configuration
++    /// provider resolves to <c>FeatureFlags:FEATURE:&lt;Name&gt;</c>: the nested object
++    /// (<c>FeatureFlags.FEATURE.&lt;Name&gt;</c>), the flat colon key
++    /// (<c>FeatureFlags."FEATURE:&lt;Name&gt;"</c> — the shape Auth and Settings.Api used),
++    /// the root-level joined key, or the bare flag key (<c>IsFlagEnabled</c> falls back to it).
++    /// Returns the offending path for the failure message, or <see langword="null"/>.
++    /// </summary>
++    private static string? FindStartupSwitchOccurrence(JsonElement root, string featureKey)
++    {
++        if (root.ValueKind != JsonValueKind.Object)
++        {
++            return null;
++        }
++
++        var shortName = featureKey["FEATURE:".Length..];
++
++        if (root.TryGetProperty($"FeatureFlags:{featureKey}", out _))
++        {
++            return $"FeatureFlags:{featureKey}";
++        }
++
++        if (root.TryGetProperty(featureKey, out _))
++        {
++            return featureKey;
++        }
++
++        if (!root.TryGetProperty("FeatureFlags", out var flags) || flags.ValueKind != JsonValueKind.Object)
++        {
++            return null;
++        }
++
++        if (flags.TryGetProperty(featureKey, out _))
++        {
++            return $"FeatureFlags:\"{featureKey}\"";
++        }
++
++        if (flags.TryGetProperty("FEATURE", out var feature)
++            && feature.ValueKind == JsonValueKind.Object
++            && feature.TryGetProperty(shortName, out _))
++        {
++            return $"FeatureFlags:FEATURE:{shortName}";
++        }
++
++        return null;
++    }
++
++    private static IReadOnlyList<string> FindPerHostAppSettings()
++        => [.. Directory
++            .EnumerateFiles(Path.Combine(RepoRoot, "src"), "appsettings*.json", SearchOption.AllDirectories)
++            .Where(path => !path.Contains(
++                    $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
++                && !path.Contains(
++                    $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
++                && !path.Contains(
++                    $"{Path.DirectorySeparatorChar}.venv{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
++                && !path.Contains(
++                    $"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
++            .OrderBy(path => path, StringComparer.Ordinal)];
++
++    /// <summary>
++    /// Splits the AppHost source into per-resource blocks: the block opens on the resource's
++    /// creation call, absorbs the fluent lines that follow, and absorbs later
++    /// <c>name = name.…</c> reassignments of the same alias. A non-fluent statement closes the
++    /// block. Mirrors <c>AppHostLoginUiFlagWiringArchitectureTests.ParseResourceBlocks</c>.
++    /// </summary>
++    private static IReadOnlyList<ResourceBlock> ParseResourceBlocks(string program)
++    {
++        var sources = new Dictionary<string, StringBuilder>(StringComparer.Ordinal);
++        var aliasToResource = new Dictionary<string, string>(StringComparer.Ordinal);
++        string? open = null;
++
++        foreach (var rawLine in program.Split('\n'))
++        {
++            var line = rawLine.TrimEnd('\r');
++
++            if (string.IsNullOrWhiteSpace(line))
++            {
++                continue;
++            }
++
++            var created = CreatedResource.Match(line);
++            if (created.Success)
++            {
++                var resource = created.Groups["resource"].Value;
++                var variable = created.Groups["variable"].Success
++                    ? created.Groups["variable"].Value
++                    : null;
++
++                if (variable is not null)
++                {
++                    aliasToResource[variable] = resource;
++                }
++
++                sources[resource] = new StringBuilder(line);
++                open = resource;
++                continue;
++            }
++
++            var reassigned = ReassignedResource.Match(line);
++            if (reassigned.Success)
++            {
++                var alias = reassigned.Groups["alias"].Value;
++                var isSelfReassignment = alias == reassigned.Groups["target"].Value;
++
++                if (isSelfReassignment && aliasToResource.TryGetValue(alias, out var resource))
++                {
++                    sources[resource].Append('\n').Append(line);
++                    open = resource;
++                }
++                else
++                {
++                    open = null;
++                }
++
++                continue;
++            }
++
++            if (line.TrimStart().StartsWith('.'))
++            {
++                if (open is not null)
++                {
++                    sources[open].Append('\n').Append(line);
++                }
++
++                continue;
++            }
++
++            open = null;
++        }
++
++        return [.. sources.Select(entry => new ResourceBlock(entry.Key, entry.Value.ToString()))];
++    }
++
++    private static ResourceBlock Block(string resourceName)
++        => Blocks.SingleOrDefault(block => block.ResourceName == resourceName)
++            ?? throw new InvalidOperationException(
++                $"The AppHost Program.cs has no resource block named '{resourceName}'. Known blocks: "
++                + string.Join(", ", Blocks.Select(block => block.ResourceName).OrderBy(name => name, StringComparer.Ordinal)));
++
++    private static int Count(string source, string needle)
++    {
++        var count = 0;
++        var index = 0;
++        while ((index = source.IndexOf(needle, index, StringComparison.Ordinal)) != -1)
++        {
++            count++;
++            index += needle.Length;
++        }
++
++        return count;
++    }
++
++    /// <summary>Reads a file's <c>Parameters</c> section as a key → value map. THROWS when the
++    /// section is absent, so a missing block cannot make the assertions pass vacuously.</summary>
++    private static Dictionary<string, string> ReadParameters(string path)
++    {
++        using var doc = JsonDocument.Parse(File.ReadAllText(path), DocumentOptions);
++        if (!doc.RootElement.TryGetProperty("Parameters", out var parameters)
++            || parameters.ValueKind != JsonValueKind.Object)
++        {
++            throw new InvalidOperationException($"{path} has no object 'Parameters' section.");
++        }
++
++        return parameters.EnumerateObject()
++            .ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty, StringComparer.Ordinal);
++    }
++
++    /// <summary>
++    /// Removes trailing <c>//</c> comments before parsing, so a comment naming a config key can
++    /// neither satisfy nor break a substring assertion. No string literal in the file contains
++    /// <c>//</c> (URLs are built from endpoint expressions).
++    /// </summary>
++    private static string StripLineComments(string source)
++        => string.Join('\n', source.Split('\n').Select(line =>
++        {
++            var commentAt = line.IndexOf("//", StringComparison.Ordinal);
++            return commentAt >= 0 ? line[..commentAt] : line;
++        }));
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repo root (src/AppHost/SchoolCollab.AppHost) from " + AppContext.BaseDirectory);
++    }
++}
