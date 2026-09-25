@@ -351,6 +351,15 @@ review, `SCHOOLCOLLAB_ALLOW_PUSH=1` for pushes, no merge without
 instruction) applies unchanged to the agent's steps; the agent reports the
 staged paths, commit SHA, and PR links back.
 
+**Keep delegate briefs short and bounded.** Multi-minute waits (CI polling,
+sleeps) belong in the **parent**, which survives an interrupted call or a
+compaction; hand the subagent only the quick git/gh legs (stage/commit/push/PR,
+or merge + pull). A brief containing a poll is the fragile shape: on 2026-09-25 a
+delegate was aborted mid-poll by a session compaction, and only its
+already-completed steps (commit, push, PR) had persisted. Recover by reading the
+live state (`git log`, `git ls-remote`, `gh pr view`, `gh pr checks`) and resuming
+from the first unfinished step — never by re-running the whole brief.
+
 **Local commit/push hold (the enforcement layer for commits):** Do not
 commit, push, open a PR, or merge without an explicit user instruction
 ("commit", "push", "open a PR", "merge"). When the user asks to commit,

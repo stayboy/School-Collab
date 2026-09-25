@@ -55,9 +55,16 @@ public sealed class AuthServiceOptions
     /// The portal's post-logout landing URI (spec §9 / D13 option ii): the
     /// <c>post_logout_redirect_uri</c> the auth service puts on the built <c>end_session</c> URL
     /// (<see cref="SchoolCollab.Auth.Providers.KeycloakAuthProvider.BuildEndSessionUrl"/>).
-    /// Keycloak matches it against the client's registered <c>postLogoutRedirectUris</c>
+    /// Keycloak matches it against the client's registered post-logout redirect URIs
     /// <b>exactly</b> — trailing slash included, no wildcard — so this value and the realm literal
     /// must be spelled identically (the AppHost pins the portal's host port for that reason).
+    /// <para>
+    /// In the realm import that list is the client attribute
+    /// <c>attributes["post.logout.redirect.uris"]</c>, <c>##</c>-separated — <b>not</b> a top-level
+    /// <c>postLogoutRedirectUris</c> field: Keycloak 26.4's <c>ClientRepresentation</c> rejects that
+    /// field as unrecognized and the entire import fails, so re-adding it breaks auth startup (see
+    /// <c>documents/solution/keycloak-realm-post-logout-uris-import-fix.md</c>).
+    /// </para>
     /// <para>
     /// There is deliberately <b>no safe default</b>, exactly like <see cref="AppCallbackPrefixes"/>:
     /// an empty or absent value is a startup failure (<see cref="FirstValidationError"/>), never a
@@ -119,8 +126,10 @@ public sealed class AuthServiceOptions
         }
 
         // Round B pass 3 (D13 option ii): the post-logout landing URI has no safe default either.
-        // Keycloak matches it against the realm's registered postLogoutRedirectUris, so a guessed
-        // value makes every logout fail after the session is already gone — fail closed at launch.
+        // Keycloak matches it exactly against the realm's registered post-logout redirect URIs (the
+        // client attribute "post.logout.redirect.uris", not a top-level postLogoutRedirectUris
+        // field — see the property doc), so a guessed value makes every logout fail after the
+        // session is already gone — fail closed at launch.
         if (string.IsNullOrWhiteSpace(options.PostLogoutRedirectUri))
         {
             return "Auth:PostLogoutRedirectUri must be the portal's registered post-logout "
