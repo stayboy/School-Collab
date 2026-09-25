@@ -47,13 +47,18 @@ Solo never dispatches an orchestrator or reviewer of its own.
 Resolve ids at dispatch time with `subagent({ action: "models" })` and copy exact
 `provider/id` strings; bare ids resolve only when unique. The `ollama*` ladder has
 drifted historically (the `ollama-cloud` provider hosts the modern ids) — verify
-the ids rather than assuming them. **Known trap (2026-09-22):** the pi-profile Tier-3 worker id is
-`ollama-cloud/deepseek-v4-flash:0731` — a **COLON** before `0731`. The hyphenated
-`deepseek-v4-flash-0731` is the *clinepass* spelling and does NOT exist on `ollama-cloud`; dispatching
-it fails at launch with `Unknown subagent model '...' in the active Pi model registry` and writes
-nothing. These tables printed the hyphenated form until this was corrected. Resolve against the
-registry (`subagent({ action: "models" })`, or `~/.pi/agent/models-store.json` → the provider block)
-before every dispatch.
+the ids rather than assuming them. **Removed model (owner 2026-09-25):** `deepseek-v4-flash:0731` has been **removed by
+the ollama provider** and must no longer be dispatched on any seat — it was already retired
+from the worker seat by Option A (2026-09-22), and the git/gh-execution delegate model named
+in `AGENTS.md` moved to `ollama-cloud/deepseek-v4.1-flash` with it. Historical round docs may
+still name it — they record what ran; never rewrite them. **Known trap (2026-09-22, retained
+for its lesson):** its pi-profile id spelled a **COLON** before `0731`
+(`ollama-cloud/deepseek-v4-flash:0731`); the hyphenated `deepseek-v4-flash-0731` was the
+*clinepass* spelling and did NOT exist on `ollama-cloud` — dispatching a misspelled id fails
+at launch with `Unknown subagent model '...' in the active Pi model registry` and writes
+nothing. The lesson outlives the model: resolve every id against the registry
+(`subagent({ action: "models" })`, or `~/.pi/agent/models-store.json` → the provider block)
+before every dispatch — a stale local store can still list a model the provider has removed.
 
 ### Defaults and overrides — precedence, highest first
 
