@@ -84,3 +84,33 @@ internal sealed class DevTenantSelection(
             tenantId.Value, Key);
     }
 }
+
+/// <summary>
+/// The <see cref="IDevTenantSelection"/> used when the host registered no
+/// <see cref="IDistributedCache"/> at all. The dev tenant switcher is a
+/// convenience of the tenant-scoped DEV hosts, so a host without a cache loses
+/// the switcher — never its ability to start.
+/// </summary>
+/// <remarks>
+/// It behaves exactly like the real store with nothing selected: reads return
+/// <see langword="null"/> ("no selection") and writes are discarded.
+/// <see cref="TestAuthHandler"/> already reads the value as <c>Guid?</c> and only
+/// overrides its configured default on <c>HasValue</c>, so this is the same
+/// request outcome as the service being absent — the reason a host without a
+/// cache needs no cache registration just to satisfy DI.
+/// </remarks>
+internal sealed class NullDevTenantSelection : IDevTenantSelection
+{
+    /// <summary>The shared instance — this implementation is stateless.</summary>
+    public static NullDevTenantSelection Instance { get; } = new();
+
+    private NullDevTenantSelection()
+    {
+    }
+
+    public Task<Guid?> GetSelectedTenantIdAsync(CancellationToken ct = default)
+        => Task.FromResult<Guid?>(null);
+
+    public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
+        => Task.CompletedTask;
+}

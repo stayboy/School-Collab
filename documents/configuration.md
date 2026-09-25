@@ -402,7 +402,8 @@ gets the flag from the base URL it already sets here.
 The logout target of spec D13 option (ii). `DELETE /auth/session/{id}` answers with the
 fully-built `end_session` URL whose `post_logout_redirect_uri` parameter is this value — the
 **portal's own landing URI**. Keycloak matches `post_logout_redirect_uri` **exactly**, so this
-key's value and the realm's registered `postLogoutRedirectUris` entry must be the same string,
+key's value and the realm's registered post-logout allowlist
+(`school-collab-client` → `attributes["post.logout.redirect.uris"]`) must be the same string,
 trailing slash included (a wildcard broadens the allowlist and was rejected).
 
 | Key | Default | Description |
@@ -410,27 +411,43 @@ trailing slash included (a wildcard broadens the allowlist and was rejected).
 | `Auth:PostLogoutRedirectUri` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | The portal landing URI the auth service places in `post_logout_redirect_uri`, fanned **only** to the `auth` service as `Auth__PostLogoutRedirectUri` from the portal's Aspire endpoint expression (`$"{authPortal.GetEndpoint("http")}/"`, resolved to `http://localhost:5700/`). Like `Auth:AppCallbackPrefixes` it has **no code fallback**: `AuthServiceOptions.FirstValidationError` rejects a blank value at launch and names the key, because a guessed URI makes every logout fail **after** the local session has already been revoked — a rejection the portal can no longer act on. |
 
 **The portal's host port is pinned to `5700`** — `Program.cs`,
-`AddUvicornApp("auth-portal", …).WithHttpEndpoint(port: 5700, targetPort: 5700, name: "http")`.
+`AddUvicornApp("auth-portal", …).WithHttpEndpoint(port: 5700, name: "http")`.
 This is why the pin exists rather than a literal in the realm: `school-collab-realm.json` is a
 committed static import (Keycloak cannot read an endpoint expression), so the fanned value and the
 realm literal can only agree **by construction** if the port is fixed — and an `AddUvicornApp`
 resource, unlike the Blazor hosts above (`5300/7300`, `5400/7400`, `55458/55459`), carries no
 `launchSettings.json` to fix it. The pin **updates** the Uvicorn integration's own `http` endpoint
 in place (it never adds a second annotation — `GetEndpoint("http")` is resolved by name
-throughout), and `targetPort` is pinned with it because `AddUvicornApp` starts the process with
-`--port {endpoint TargetPort}`. `AppHostRealmImportArchitectureTests` reads the pinned port back
+throughout), and **only the host port is pinned**: uvicorn binds the endpoint's target port (Aspire
+allocates it at run time when unspecified) and Aspire proxies `5700` onto it. A **host-port-only** pin
+is required here — Aspire rejects a proxied endpoint whose `port` and `targetPort` carry the same
+value on a **non-container** resource (it has no distinct pair to proxy) at `Run()`, so this pin must
+*not* copy Mailpit's equal-valued pins at `Program.cs:41-42`, which are legal only because Mailpit is
+a container. `AppHostEndpointPortingArchitectureTests` pins that rule (plus this resource's own
+host-port-only shape) and carries a whole-file endpoint inventory; `AppHostRealmImportArchitectureTests` reads the pinned port back
 out of `Program.cs` and holds the realm literal to it, so the two cannot drift silently.
-**Not claimed:** that the portal's *effective* runtime URL is `5700` — the dev-host pin is not
-observable by any hermetic test in this round (recorded as an owner-gated residual).
+**Observed, not hermetic:** a manual `dotnet run --project src/AppHost/SchoolCollab.AppHost` proves
+what no test in this repo can — `DistributedApplication.Run()` completes (the crash that motivated
+the host-port-only pin is gone) and host port `5700` listens. A *response* from the portal still
+needs the whole topology (Keycloak → auth → portal), so the smoke run stays an owner-gated
+procedure rather than a CI check; `AppHostEndpointPortingArchitectureTests` guards the declaration
+statically in the meantime.
 
-**The realm's post-logout allowlist.** `school-collab-client` carries a `postLogoutRedirectUris`
-block: the four Blazor `/signout-callback-oidc` landings (`5300`/`7300` http + https for `admin`,
-`5400`/`7400` for `families`) **plus** the portal landing `http://localhost:5700/`. A **portal**
-URL is legitimate here even though D16 forbids a portal `redirectUris` entry (see the D16 bullet
-above): a post-logout URI is delivered nothing — the browser is only sent there after Keycloak has
-ended the session — whereas a redirect URI is exactly where the authorization response lands, and
-the portal redeems no authorization code (AC12). The D16 negative assertion stays green and is
-scoped to `redirectUris` only.
+**The realm's post-logout allowlist.** `school-collab-client` registers the four Blazor
+`/signout-callback-oidc` landings (`5300`/`7300` http + https for `admin`, `5400`/`7400` for
+`families`) **plus** the portal landing `http://localhost:5700/` in the client attribute
+`attributes["post.logout.redirect.uris"]`, **`##`-separated** — the shape Keycloak's realm importer
+actually accepts as of `26.4.7`. A **top-level** `postLogoutRedirectUris` array is **not** among
+`ClientRepresentation`'s known properties: `start-dev --import-realm` then aborts the WHOLE realm
+with `Unrecognized field "postLogoutRedirectUris"`, Keycloak exits `1`, and every resource gated on
+`WaitFor(keycloak)` — the auth service, and behind it the portal — never starts, while the AppHost
+itself looks healthy. A **portal** URL is legitimate here even though D16 forbids a portal
+`redirectUris` entry (see the D16 bullet above): a post-logout URI is delivered nothing — the
+browser is only sent there after Keycloak has ended the session — whereas a redirect URI is exactly
+where the authorization response lands, and the portal redeems no authorization code (AC12). The D16
+negative assertion stays green and is scoped to `redirectUris` only.
+`AppHostRealmImportArchitectureTests` pins **both** halves — the attribute present, the rejected
+top-level field absent — so this regression fails statically instead of at container start.
 
 ### Round B — the per-app callback allowlist (`Auth:AppCallbackPrefixes`, `AuthPortal:AppCallbackPrefixes`)
 
