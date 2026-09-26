@@ -9,8 +9,10 @@
 @inherits DialogShellBase<JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>
 @using System.ComponentModel.DataAnnotations
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Core.Features
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject IFeatureFlagService FeatureFlags
 
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
@@ -39,7 +41,7 @@
         </FluentStack>
 
         <DialogShellFooter Saving="Saving"
-                           Error="Error"
+                           Error="@Error"
                            SubmitText="Join"
                            SavingText="Joining…"
                            OnCancel="HandleCancelAsync" />
@@ -87,6 +89,19 @@
         _loadingGroups = true;
         try
         {
+            // Defense in depth. The Activity Groups section that opens this dialog is
+            // already gated by FEATURE:EnableActivityGroups (Students/Detail.razor —
+            // the *student* detail page, not GradeLevels/Detail.razor), but
+            // /activity-groups is only mapped when the flag is on — so if the flag is
+            // off (or flipped between open and load) say so plainly instead of
+            // surfacing a raw 404 as the dialog's error.
+            if (!await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups))
+            {
+                _availableGroups = new();
+                Error = "Activity groups are not enabled for this tenant.";
+                return;
+            }
+
             // All groups, then current memberships to exclude + capacity check.
             var all = await Api.ListActivityGroupsAsync();
             var current = await Api.ListStudentGroupsAsync(Model.StudentId);

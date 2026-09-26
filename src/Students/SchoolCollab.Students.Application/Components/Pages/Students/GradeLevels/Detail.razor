@@ -1,4 +1,4 @@
-@page "/students/grade-levels/{Id:guid}"
+﻿@page "/students/grade-levels/{Id:guid}"
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Constants
@@ -89,7 +89,7 @@
                                          EmptyMessage="No subjects assigned to this curriculum yet."
                                          Loading="@(_curriculum is null)"
                                          ItemTextSelector="t => t.Name"
-                                         ItemMetaSelector="@(t => [ $"{t.StrandCount} strands", $"{t.LessonCount} lessons" ])"
+                                         ItemMetaSelector="SubjectMeta"
                                          ItemOnClick="t => OpenTopicEditAsync(t)"
                                          ItemKeySelector="t => t.TopicId"
                                          OnItemActionBlocked="OnTopicEditBlocked"
@@ -272,6 +272,50 @@
         public Guid? PeriodId { get; init; }
     }
 
+    /// <summary>
+    /// Period id → display name. The delivery period lives on the bridge row, so the
+    /// Subjects card needs this to render "Term 1" instead of a GUID prefix.
+    /// </summary>
+    private Dictionary<Guid, string> _periodNames = new();
+
+    /// <summary>
+    /// All bridge rows for one topic on this grade. A subject can be delivered in
+    /// several terms at once, so this is a LIST and is never keyed by TopicId
+    /// (see subject-topic-delivery-periods.md §1 and §8).
+    /// </summary>
+    private List<AssignedTopic> PeriodsForTopic(Guid topicId) =>
+        _assignedTopics.Where(a => a.TopicId == topicId).ToList();
+
+    /// <summary>
+    /// The subject's delivery periods as one label: every term it runs in, or
+    /// "Whole academic year" for a year-spanning (null) assignment.
+    /// </summary>
+    private string DeliveryPeriodLabel(Guid topicId)
+    {
+        var rows = PeriodsForTopic(topicId);
+        if (rows.Count == 0) return "Whole academic year";
+
+        var labels = rows
+            .Select(a => a.PeriodId is { } pid
+                ? (_periodNames.TryGetValue(pid, out var n) ? n : pid.ToString()[..8])
+                : "Whole academic year")
+            .Distinct()
+            .ToArray();
+
+        return string.Join(" · ", labels);
+    }
+
+    /// <summary>
+    /// Card meta line: the delivery period first (it is the field the card was
+    /// previously blind to), then the strand/lesson counts.
+    /// </summary>
+    private string[] SubjectMeta(GradeTopicCurriculumDto t) =>
+    [
+        DeliveryPeriodLabel(t.TopicId),
+        $"{t.StrandCount} strands",
+        $"{t.LessonCount} lessons",
+    ];
+
     private TopicDto[] _unassignedTopics =>
         _catalog.Values
             .Where(t => _assignedTopics.All(a => a.TopicId != t.Id))
@@ -334,6 +378,20 @@
                 _genderName = (await CodedValuesApi.GetByIdAsync(gid, ct))?.Name;
             }
 
+            // Period display names for the Subjects card's delivery-period chip.
+            // Best-effort: without it the card falls back to a GUID prefix.
+            try
+            {
+                _periodNames = (await Api.ListPeriodsAsync(ct) ?? [])
+                    .ToDictionary(p => p.Id, p => p.Name);
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogWarning(ex, "Could not load period names for the grade detail page");
+                _periodNames = new();
+            }
+
             var assignments = await Api.ListGradeTopicsByGradeAsync(Id, ct: ct) ?? [];
             _assignedTopics = assignments
                 .Select(a => new AssignedTopic
@@ -346,7 +404,14 @@
                 })
                 .OrderBy(t => t.Name)
                 .ToList();
-            _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id, ct: ct) ?? [];
+            // Dedupe: the curriculum query filters by DATE only, not by period, so
+            // a subject delivered in two terms comes back as two identical rows.
+            // Deduplicated here so the card shows one row (and one Count) per
+            // subject, with the periods resolved from _assignedTopics above.
+            _curriculum = (await Api.ListGradeTopicCurriculumByGradeAsync(Id, ct: ct) ?? [])
+                .GroupBy(t => t.TopicId)
+                .Select(g => g.First())
+                .ToArray();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -682,31 +747,59 @@
                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
                 { GradeTopicsDialog.AssignKey, new Func<Guid, Task>(AssignTopicAsync) },
                 { GradeTopicsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
-                { GradeTopicsDialog.AssignmentByKeyKey, _assignedTopics.ToDictionary(a => a.TopicId, a => new GradeTopicsDialog.AssignedTopicRef(a.TopicId, a.AssignmentId, a.PeriodId)) },
-                { GradeTopicsDialog.EditPeriodKey, new Func<Guid, Task>(EditAssignmentPeriodAsync) },
+                // GROUPED, not ToDictionary(a => a.TopicId, ...): a subject can be
+                // delivered in several terms, which yields several bridge rows for
+                // the same topic. ToDictionary threw ArgumentException on the
+                // duplicate key, breaking "View all subjects" — the only surface
+                // where periods were editable.
+                { GradeTopicsDialog.AssignmentByKeyKey, _assignedTopics
+                    .GroupBy(a => a.TopicId)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Select(a => new GradeTopicsDialog.AssignedTopicRef(a.TopicId, a.AssignmentId, a.PeriodId)).ToList()) },
+                { GradeTopicsDialog.PeriodNamesKey, _periodNames },
+                { GradeTopicsDialog.EditPeriodKey, new Func<Guid, Task>(EditTopicPeriodsAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
         await ReloadAssignedTopicsAsync();
     }
 
-    private async Task EditAssignmentPeriodAsync(Guid assignmentId)
+    /// <summary>
+    /// Opens the topic-scoped delivery-period editor for a subject on this grade.
+    /// One dialog manages the whole SET of periods (several terms, the academic
+    /// year, or year-spanning) because a subject is a single topic with one bridge
+    /// row per period — a single-value picker cannot represent that
+    /// (subject-topic-delivery-periods.md §5).
+    /// </summary>
+    private async Task EditTopicPeriodsAsync(Guid topicId)
     {
-        if (_disposed) return;
-        var assignment = _assignedTopics.FirstOrDefault(a => a.AssignmentId == assignmentId);
-        if (assignment is null) return;
+        if (_disposed || _grade is null) return;
+
+        var rows = PeriodsForTopic(topicId);
+        var name = rows.FirstOrDefault()?.Name
+                   ?? (_catalog.TryGetValue(topicId, out var t) ? t.Name : "this subject");
+
+        var model = new TopicPeriodsEditDialog.TopicPeriodsEditModel
+        {
+            GradeLevelId = Id,
+            TopicId = topicId,
+            TopicName = name,
+            Rows = rows
+                .Select(a => new TopicPeriodsEditDialog.TopicPeriodRow
+                {
+                    AssignmentId = a.AssignmentId,
+                    PeriodId = a.PeriodId,
+                })
+                .ToList(),
+        };
+
         var result = await DialogService.ShowShellDialogAsync<
-            TopicAssignmentPeriodEditDialog,
-            TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditModel,
-            TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditResult>(
-            new TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditModel
-            {
-                AssignmentId = assignment.AssignmentId,
-                GradeLevelId = Id,
-                CurrentPeriodId = assignment.PeriodId,
-            },
-            "Edit subject period",
-            DialogSize.Medium);
+            TopicPeriodsEditDialog,
+            TopicPeriodsEditDialog.TopicPeriodsEditModel,
+            TopicPeriodsEditDialog.TopicPeriodsEditResult>(
+            model, $"Delivery periods · {name}", DialogSize.Medium);
+
         if (_disposed || result is null) return;
         await ReloadAssignedTopicsAsync();
     }
@@ -745,7 +838,12 @@
             })
             .OrderBy(t => t.Name)
             .ToList();
-        _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id) ?? [];
+        // Same date-only/period-blind duplication as the initial load — dedupe so
+        // the card never shows a subject twice after a mutation.
+        _curriculum = (await Api.ListGradeTopicCurriculumByGradeAsync(Id) ?? [])
+            .GroupBy(t => t.TopicId)
+            .Select(g => g.First())
+            .ToArray();
 
         // This is invoked from child components (the kebab menu, the grade topics
         // dialog) whose events re-render THEMSELVES, not this page. Without this,
@@ -797,6 +895,7 @@
         new List<RowAction>
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
+            RowAction.Callback("Edit periods", () => EditTopicPeriodsAsync(topic.TopicId), FluentIcons.Calendar),
 
             RowAction.Separator(),
             RowAction.Callback(
