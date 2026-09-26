@@ -3,9 +3,11 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Core.Features
 @using SchoolCollab.Assignments.Application.Helpers
 @inject AssignmentsApiClient Api
 @inject StudentsApiClient StudentsApi
+@inject IFeatureFlagService FeatureFlags
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
 @implements IDisposable
@@ -181,20 +183,24 @@
                                 <p class="wizard-card-desc">Target specific grade levels or classes.</p>
                             </li>
 
-                            <li class="@GetCardClass(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)"
-                                @onclick="() => _selectedTargetAudience = TargetAudienceTypeDto.SelectedGroups"
-                                @onkeydown="OnCardKeydown"
-                                role="radio" tabindex="0"
-                                aria-checked="@(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)">
-                                <div class="wizard-card-check">
-                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
-                                </div>
-                                <div class="wizard-card-icon">
-                                    <FluentIcon Icon="@(Icons.Regular.Size24.PeopleTeam)" />
-                                </div>
-                                <h4>@EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGroups)</h4>
-                                <p class="wizard-card-desc">Assign to specific student groups or sections.</p>
-                            </li>
+                            @* SelectedGroups is only reachable when activity groups exist: /activity-groups
+                               is unmapped otherwise, so the card would offer a target whose options never load. *@
+                            <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
+                                <li class="@GetCardClass(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)"
+                                    @onclick="() => _selectedTargetAudience = TargetAudienceTypeDto.SelectedGroups"
+                                    @onkeydown="OnCardKeydown"
+                                    role="radio" tabindex="0"
+                                    aria-checked="@(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)">
+                                    <div class="wizard-card-check">
+                                        <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
+                                    </div>
+                                    <div class="wizard-card-icon">
+                                        <FluentIcon Icon="@(Icons.Regular.Size24.PeopleTeam)" />
+                                    </div>
+                                    <h4>@EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGroups)</h4>
+                                    <p class="wizard-card-desc">Assign to specific student groups or sections.</p>
+                                </li>
+                            </FeatureFlagGate>
                         </ul>
                     </section>
 
@@ -579,22 +585,22 @@
                     .Select(gl => new GradeLevelOption(gl.Id.ToString(), gl.Name))
                     .ToArray();
             }
-
-            var groups = await StudentsApi.ListActivityGroupsAsync(ct);
-            if (groups is not null)
-            {
-                _activityGroupOptions = groups
-                    .Where(g => g.IsActive)
-                    .OrderBy(g => g.Name)
-                    .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
-                    .ToArray();
-            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load grade levels");
+        }
+
+        // Activity groups back ONLY the SelectedGroups target audience, which is
+        // itself gated by FEATURE:EnableActivityGroups. /activity-groups is only
+        // mapped when that flag is on, so loading it here used to 404 for most
+        // tenants and take down the grade-level load in the same try block. Load it
+        // last, isolated, and only when the flag is on.
+        if (!_disposed)
+        {
+            await LoadActivityGroupsAsync(ct);
         }
 
         // WS-C1 (spec §7 Q1): pre-fill the guardian-signature checkbox from
@@ -607,6 +613,43 @@
         // guidance textarea is disabled when the tenant locked the prompt.
         // Best-effort + fail-open (the /signature-default precedent).
         await LoadAiPromptPolicyAsync();
+    }
+
+    /// <summary>
+    /// Loads the activity groups backing the SelectedGroups target audience. Off
+    /// flag = the target is not offered at all (the card is wrapped in a
+    /// <c>FeatureFlagGate</c>), so this is a normal no-op rather than an error.
+    /// Every failure is contained here so it can never affect the grade-level path.
+    /// </summary>
+    private async Task LoadActivityGroupsAsync(CancellationToken ct)
+    {
+        _activityGroupOptions = [];
+        _selectedGroupIds.Clear();
+
+        try
+        {
+            if (!await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups, ct))
+            {
+                return;
+            }
+
+            var groups = await StudentsApi.ListActivityGroupsAsync(ct);
+            if (groups is null) return;
+
+            _activityGroupOptions = groups
+                .Where(g => g.IsActive)
+                .OrderBy(g => g.Name)
+                .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
+                .ToArray();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load activity groups; the SelectedGroups target is unavailable");
+            _activityGroupOptions = [];
+            _selectedGroupIds.Clear();
+        }
     }
 
     /// <summary>
