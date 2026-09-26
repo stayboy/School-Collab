@@ -106,6 +106,7 @@
     <Project Path="tests/SchoolCollab.Settings.Tests.Playwright/SchoolCollab.Settings.Tests.Playwright.csproj" />
     <Project Path="tests/SchoolCollab.Settings.Tests.Unit/SchoolCollab.Settings.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Students.Api.Tests.Unit/SchoolCollab.Students.Api.Tests.Unit.csproj" />
+    <Project Path="tests/SchoolCollab.Students.Tests.Integration/SchoolCollab.Students.Tests.Integration.csproj" />
     <Project Path="tests/SchoolCollab.Students.Tests.Playwright/SchoolCollab.Students.Tests.Playwright.csproj" />
     <Project Path="tests/SchoolCollab.Students.Tests.Unit/SchoolCollab.Students.Tests.Unit.csproj" />
   </Folder>

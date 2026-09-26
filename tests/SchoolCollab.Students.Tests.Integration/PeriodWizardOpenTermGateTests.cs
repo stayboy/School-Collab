@@ -124,7 +124,7 @@ public class PeriodWizardOpenTermGateTests
             {
                 new PeriodDto(
                     Guid.NewGuid(), "STALE FAKE", new DateOnly(2000, 1, 1), new DateOnly(2000, 12, 31),
-                    "Draft", null, null, "None", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                    "Draft", null, null, "None", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
             };
             // Tagged "students" so the handler's RemoveByTagAsync("students") clears it.
             await cache.SetAsync(
