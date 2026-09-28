@@ -1419,6 +1419,91 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("student_transfer_audit_entries", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.SubjectEnrollmentException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("ActivityGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_group_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<int>("Division")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("division");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<Guid?>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_subject_enrollment_exceptions");
+
+                    b.HasIndex("ActivityGroupId")
+                        .HasDatabaseName("ix_subject_enrollment_exceptions_activity_group_id");
+
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_subject_enrollment_exceptions_grade_level_id");
+
+                    b.HasIndex("TopicId")
+                        .HasDatabaseName("ix_subject_enrollment_exceptions_topic_id");
+
+                    b.HasIndex("TenantId", "ActivityGroupId", "TopicId", "Division")
+                        .HasDatabaseName("ix_subject_enrollment_exceptions_tenant_group_topic_division");
+
+                    b.HasIndex("TenantId", "GradeLevelId", "TopicId", "Division")
+                        .HasDatabaseName("ix_subject_enrollment_exceptions_tenant_grade_topic_division");
+
+                    b.ToTable("subject_enrollment_exceptions", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Teacher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1993,6 +2078,28 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasForeignKey("ParentPeriodId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .HasConstraintName("fk_periods_periods_parent_period_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.SubjectEnrollmentException", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.ActivityGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ActivityGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_subject_enrollment_exceptions_activity_groups_activity_grou");
+
+                    b.HasOne("SchoolCollab.Students.Core.Domain.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_subject_enrollment_exceptions_grade_levels_grade_level_id");
+
+                    b.HasOne("SchoolCollab.Students.Core.Domain.Topic", null)
+                        .WithMany()
+                        .HasForeignKey("TopicId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_subject_enrollment_exceptions_subjects_topic_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherActivityAssignment", b =>

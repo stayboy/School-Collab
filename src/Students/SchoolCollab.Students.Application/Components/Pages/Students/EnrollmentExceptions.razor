@@ -1,0 +1,1031 @@
+@page "/students/enrollment-exceptions"
+@using System.Globalization
+@using SchoolCollab.Core.Features
+@using SchoolCollab.Students.Core.Domain
+@using EnrollmentExceptionDto = SchoolCollab.Students.Core.DTOs.SubjectEnrollmentExceptionDto
+@inject StudentsApiClient Api
+@inject IFeatureFlagService FeatureFlags
+@inject VisibleTenantService VisibleTenant
+@inject ILogger<EnrollmentExceptions> Logger
+@implements IDisposable
+
+@*  EnrollmentExceptions — the ONE place subject enrollment exceptions are edited
+    (subject-period-exception-model.md v3 §5.1). Every other surface (the Topics
+    landing, the grade-detail Subjects card, the View-all dialog) only carries a
+    count badge and a kebab that navigates HERE with the owner + topic pre-selected
+    (§5.2).
+
+    Shape: an owner (a grade level OR an activity group — the group side gated by
+    FEATURE:EnableActivityGroups), the owner's exceptions as a list narrowed to the
+    single subject the entry point named (with a "Show all" way back out, because
+    every kebab that lands here is per-subject), and an add panel that writes
+    IMMEDIATELY. There is no form model and no Save control: an
+    exception is one row the server owns, so a "submit" would either lie or persist
+    something else (§5.1).
+
+    An exception is a period PART (`Terms`/`Semesters`/`None` — descriptive only,
+    never matched against dates, §0 decision 9) plus a nullable date span, at least
+    one bound. Zero exceptions is the NORMAL state, so the empty list is plain
+    prose, not a warning (§5.4). Filtered-to-a-subject-and-empty is a DIFFERENT
+    state and says so in its own words: "this subject has no exception" is not
+    "the owner has none".
+*@
+
+<PageTitle>Enrollment exceptions</PageTitle>
+
+<div class="exceptions-page">
+    <h1 class="page-title">Enrollment exceptions</h1>
+    <p class="hint">
+        A subject is offered on every date unless an exception says otherwise. An exception records
+        the period part and the date span the subject is <strong>not</strong> offered in.
+    </p>
+
+    @if (!_isRealTenant)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">Select a tenant to manage enrollment exceptions.</FluentMessageBar>
+    }
+    else
+    {
+        @* Owner selection, mirroring the Topics landing's owner toggle. *@
+        <div class="owner-bar">
+            <DropdownComponent TItem="OwnerTypeOption" TValue="string"
+                              Items="@_ownerTypeOptions"
+                              @bind-SelectedValue="_ownerType"
+                              @bind-SelectedValue:after="OnOwnerTypeChangedAsync"
+                              OptionText="@(o => o.Label)"
+                              OptionValue="@(o => o.Value)"
+                              Label="Owner"
+                              Width="FieldWidth.W3" />
+
+            @if (_ownerType == ActivityGroupOwner)
+            {
+                <DropdownComponent TItem="ActivityGroupDto" TValue="Guid?"
+                                  Items="@_activityGroups"
+                                  @bind-SelectedValue="_selectedActivityGroupId"
+                                  @bind-SelectedValue:after="OnOwnerChangedAsync"
+                                  OptionText="@(g => g.Name)"
+                                  OptionValue="@(g => g.Id)"
+                                  Placeholder="Select an activity group"
+                                  Label="Activity Group"
+                                  Width="FieldWidth.W5" />
+            }
+            else
+            {
+                <DropdownComponent TItem="GradeLevelDto" TValue="Guid?"
+                                  Items="@_gradeLevels"
+                                  @bind-SelectedValue="_selectedGradeLevelId"
+                                  @bind-SelectedValue:after="OnOwnerChangedAsync"
+                                  OptionText="@(g => g.Name)"
+                                  OptionValue="@(g => g.Id)"
+                                  Placeholder="Select a grade level"
+                                  Label="Grade Level"
+                                  Width="FieldWidth.W5" />
+            }
+        </div>
+
+        @if (!HasOwner)
+        {
+            <p class="owner-prompt">Select a grade level or an activity group to manage its enrollment exceptions.</p>
+        }
+        else
+        {
+            <section class="exceptions-section" aria-label="Enrollment exceptions">
+                <div class="section-head">
+                    <h2 class="section-title">@OwnerName</h2>
+                    @* The count badge counts the OWNER's set, filter or not: it belongs to the
+                       owner's heading, and under a filter it is what tells the reader the rows
+                       below are a subset — the filter bar says WHICH subset. *@
+                    @if (_exceptions is { Length: > 0 })
+                    {
+                        <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                            @EnrollmentExceptionLabels.FormatCount(_exceptions.Length)
+                        </FluentBadge>
+                    }
+                </div>
+
+                @if (_exceptions is null)
+                {
+                    <FluentProgressRing aria-label="Loading enrollment exceptions" />
+                }
+                else if (_loadError is not null)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+                }
+                else
+                {
+                    @if (FilterTopicName is { } filterName)
+                    {
+                        @* The rows below are ONE subject's. Every entry point that lands here
+                           is per-subject (§5.2), so the page must say so AND offer the way
+                           back out — a reader must never take a single subject's rows for the
+                           owner's whole set. In the page's own vocabulary: a stealth text
+                           button, next to the sentence that needs it. No dialog. *@
+                        <div class="filter-bar">
+                            @* role="status" + aria-live: filtering is a transition the user must be
+                               told about — the rows (and sometimes the empty state below) change
+                               without a navigation. *@
+                            <span class="filter-note" role="status" aria-live="polite">Showing exceptions for <strong>@filterName</strong> only.</span>
+                            <FluentButton Appearance="Appearance.Stealth"
+                                          Class="show-all"
+                                          Title="Stop filtering by subject and list every subject's exceptions"
+                                          OnClick="ShowAll">Show all</FluentButton>
+                        </div>
+                    }
+
+                    @if (VisibleExceptions.Length > 0)
+                    {
+                        <div class="exceptions-list">
+                            @foreach (var exception in VisibleExceptions)
+                            {
+                                <div class="exception-row" @key="exception.Id">
+                                    <span class="exception-topic">@TopicName(exception.TopicId)</span>
+                                    <FluentBadge Appearance="Appearance.Neutral" Title="Period part">
+                                        @PartLabel(exception.Division)
+                                    </FluentBadge>
+                                    <span class="exception-span">@SpanLabel(exception.StartDate, exception.EndDate)</span>
+                                    @if (!string.IsNullOrWhiteSpace(exception.Reason))
+                                    {
+                                        <span class="exception-reason" title="Reason">@exception.Reason</span>
+                                    }
+                                    <FluentButton Appearance="Appearance.Stealth"
+                                                  Class="exception-remove"
+                                                  IconStart="@FluentIcons.Delete"
+                                                  Title="Remove this exception"
+                                                  aria-label="@($"Remove exception for {TopicName(exception.TopicId)}")"
+                                                  Disabled="@_busy"
+                                                  OnClick="@(() => RemoveAsync(exception))" />
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (FilterTopicName is { } filteredToName)
+                    {
+                        @* The OTHER empty state, and the reason it exists: this is not "the
+                           owner has none" — it is "this one subject is unimpeded", which is
+                           what the entry point asked about. Plain prose either way (FR-ED-14
+                           dissolved): never a warning. *@
+                        <p class="exceptions-empty" role="status" aria-live="polite">No exceptions for @(filteredToName) — this subject is offered on every date.</p>
+                    }
+                    else
+                    {
+                        @* Zero exceptions is the expected state (FR-ED-14 dissolved): no warning. *@
+                        <p class="exceptions-empty" role="status" aria-live="polite">No exceptions — every subject is offered on every date.</p>
+                    }
+                }
+
+                @* Add panel — immediate write, no form model, no Save button. *@
+                <div class="add-panel">
+                    <div class="add-row">
+                        <DropdownComponent TItem="SubjectDto" TValue="Guid?"
+                                          Items="@_topics"
+                                          @bind-SelectedValue="_selectedTopicId"
+                                          @bind-SelectedValue:after="OnAddInputChangedAsync"
+                                          OptionText="@(t => t.Name)"
+                                          OptionValue="@(t => t.Id)"
+                                          Placeholder="Pick a subject"
+                                          Label="Subject"
+                                          Width="FieldWidth.W5" />
+
+                        @* The parts this owner's rule permits: OOD-1's divisions for a
+                           grade-owned exception (FR-57 constrains nothing), the group's
+                           EnrollmentSpan-required division for a group-owned one (FR-56). *@
+                        <DropdownComponent TItem="DivisionOption" TValue="AcademicYearDivision"
+                                          Items="@_divisionOptions"
+                                          @bind-SelectedValue="_division"
+                                          @bind-SelectedValue:after="OnDivisionChangedAsync"
+                                          OptionText="@(d => d.Label)"
+                                          OptionValue="@(d => d.Value)"
+                                          Label="Period part"
+                                          Width="FieldWidth.W4" />
+
+                        @if (SpanPeriods.Length > 0)
+                        {
+                            @* The term/semester picker resolves to THAT part's dates and fills
+                               the two date fields below; it is pure convenience, the dates are
+                               what travel. *@
+                            <DropdownComponent TItem="PeriodDto" TValue="Guid?"
+                                              Items="@SpanPeriods"
+                                              @bind-SelectedValue="_spanPeriodId"
+                                              @bind-SelectedValue:after="OnSpanPeriodPickedAsync"
+                                              OptionText="@(p => p.Name)"
+                                              OptionValue="@(p => p.Id)"
+                                              Placeholder="Fill the dates from a period"
+                                              Label="@PartLabel(_division)"
+                                              Width="FieldWidth.W4" />
+                        }
+                    </div>
+
+                    <div class="add-row">
+                        @* The group gives the visible "Span" header a programmatic association with
+                           the two date fields it names, so the header is not orphaned text. *@
+                        <div class="span-group" role="group" aria-label="Span">
+                            <span class="add-label">Span</span>
+                            <div class="date-field">
+                                <FluentDatePicker Id="exception-start-date"
+                                                  @bind-Value="_startDate"
+                                                  @bind-Value:after="OnSpanChangedAsync"
+                                                  Placeholder="Any date before"
+                                                  Label="From"
+                                                  Class="w-3" />
+                                <FluentButton Appearance="Appearance.Stealth"
+                                              Class="clear-date"
+                                              Title="Clear the start date — the exception then starts on any date before its end"
+                                              aria-label="Clear start date"
+                                              Disabled="@(_startDate is null)"
+                                              OnClick="@(() => ClearStartAsync())">Clear</FluentButton>
+                            </div>
+                            <div class="date-field">
+                                <FluentDatePicker Id="exception-end-date"
+                                                  @bind-Value="_endDate"
+                                                  @bind-Value:after="OnSpanChangedAsync"
+                                                  Placeholder="Any date after"
+                                                  Label="To"
+                                                  Class="w-3" />
+                                <FluentButton Appearance="Appearance.Stealth"
+                                              Class="clear-date"
+                                              Title="Clear the end date — the exception then runs on indefinitely"
+                                              aria-label="Clear end date"
+                                              Disabled="@(_endDate is null)"
+                                              OnClick="@(() => ClearEndAsync())">Clear</FluentButton>
+                            </div>
+                        </div>
+                        <FluentTextField @bind-Value="_reason" Label="Reason (optional)" Placeholder="Why?" Class="w-5" />
+
+                        <FluentButton Appearance="Appearance.Accent"
+                                      Class="add-exception"
+                                      IconStart="@FluentIcons.Add"
+                                      Title="Add this exception"
+                                      Disabled="@(!CanAdd)"
+                                      OnClick="AddAsync">Add exception</FluentButton>
+                    </div>
+
+                    @if (_addError is not null)
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error">@_addError</FluentMessageBar>
+                    }
+                    else if (_alreadyExcepted is true)
+                    {
+                        <p class="add-note">
+                            This subject is already excepted on @AnchorDateLabel — the server will reject an identical span.
+                        </p>
+                    }
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private const string GradeLevelOwner = "GradeLevel";
+    private const string ActivityGroupOwner = "ActivityGroup";
+
+    /// <summary>A choice on the owner-type toggle. The value is the owner KIND, the
+    /// label what the user reads.</summary>
+    public sealed record OwnerTypeOption(string Value, string Label);
+
+    /// <summary>A choice on the period-part picker (§8 Q11 / OOD-1). The value is the
+    /// <see cref="AcademicYearDivision"/> stored with the exception; the label is what
+    /// the user reads — <c>None</c> is labelled honestly instead of reading as a magic
+    /// value.</summary>
+    public sealed record DivisionOption(AcademicYearDivision Value, string Label);
+
+    /// <summary>Pre-selects the owner from the entry-point navigation (spec §5.2 row 1:
+    /// the landing's kebab lands HERE with owner + topic pre-selected).</summary>
+    [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
+
+    /// <summary>The group-owned form of the same pre-selection (spec §5.2 row 1, Q1).</summary>
+    [SupplyParameterFromQuery] public Guid? ActivityGroupId { get; set; }
+
+    /// <summary>The subject pre-selected in the add panel.</summary>
+    [SupplyParameterFromQuery] public Guid? TopicId { get; set; }
+
+    private static readonly OwnerTypeOption[] GradeOwnerOnly =
+        [new(GradeLevelOwner, "Grade Level")];
+
+    private OwnerTypeOption[] _ownerTypeOptions = GradeOwnerOnly;
+    private string? _ownerType = GradeLevelOwner;
+
+    private GradeLevelDto[] _gradeLevels = [];
+    private ActivityGroupDto[] _activityGroups = [];
+    private Guid? _selectedGradeLevelId;
+    private Guid? _selectedActivityGroupId;
+
+    /// <summary>
+    /// Mirrors <c>FEATURE:EnableActivityGroups</c>. The <c>/activity-groups</c> route
+    /// group is only mapped when the flag is on, so an off flag simply means the group
+    /// owner side is not offered (§5.1) — never a page-level failure.
+    /// </summary>
+    private bool _activityGroupsEnabled;
+
+    /// <summary>The owner's subjects — the add panel's picker, and the source of the
+    /// names shown in the list (an exception carries only a <c>TopicId</c>).</summary>
+    private SubjectDto[] _topics = [];
+
+    /// <summary>
+    /// The listed subject the LIST is filtered to — the entry point's per-subject view
+    /// (§5.2 row 1: every kebab that lands here names one). Null means the owner's whole
+    /// set: no query subject, a subject this owner does not list, or a cleared filter.
+    /// </summary>
+    private Guid? _filterTopicId;
+
+    /// <summary>The tenant's period hierarchy: it decides which period parts exist
+    /// (OOD-1) and which periods a term/semester picker can offer.</summary>
+    private PeriodDto[] _periods = [];
+
+    private DivisionOption[] _divisionOptions = [new(AcademicYearDivision.None, "Not term-scoped")];
+
+    private EnrollmentExceptionDto[]? _exceptions;
+    private string? _loadError;
+
+    /// <summary>
+    /// The rows the list shows: the owner's whole set, or — when the page was entered for
+    /// one subject (<see cref="_filterTopicId"/>) — only that subject's rows. The filter is
+    /// applied HERE, not by narrowing the request: the page has to know the owner's whole
+    /// set anyway (the count badge is the owner's, and clearing the filter must not need a
+    /// round trip).
+    /// </summary>
+    private EnrollmentExceptionDto[] VisibleExceptions => _filterTopicId is { } topicId
+        ? [.. (_exceptions ?? []).Where(e => e.TopicId == topicId)]
+        : _exceptions ?? [];
+
+    /// <summary>
+    /// The subject the list is filtered to, named — the filtered view's own context, so one
+    /// subject's rows are never left looking like the owner's whole set. Only ever a subject
+    /// the owner lists (see <see cref="ApplyPendingTopicSelection"/>), so
+    /// <see cref="TopicName"/>'s "no longer listed" fallback is unreachable here.
+    /// </summary>
+    private string? FilterTopicName => _filterTopicId is { } topicId ? TopicName(topicId) : null;
+
+    // ── Add-panel state (no form model — these are the values of one immediate write) ──
+    private Guid? _selectedTopicId;
+
+    /// <summary>
+    /// The subject the query string named, held until the owner's subject list has
+    /// loaded. <see cref="ApplyQuerySelection"/> cannot set
+    /// <see cref="_selectedTopicId"/> directly: the owner-data load clears the stale
+    /// list first, and the subject picker's reset path (see
+    /// <c>DropdownComponent.OnParametersSet</c>) then fires <c>null</c> back into the
+    /// bound field — losing the pre-selection on an in-page query change.
+    /// </summary>
+    private Guid? _pendingTopicId;
+
+    private AcademicYearDivision _division = AcademicYearDivision.None;
+    private Guid? _spanPeriodId;
+    private DateTime? _startDate;
+    private DateTime? _endDate;
+    private string? _reason;
+    private string? _addError;
+
+    /// <summary>True when the picked span's anchor date is already excepted for the
+    /// picked subject — the pickers' <c>/check</c> answer. Null = not (yet) known or the
+    /// check could not run; false = known not excepted.</summary>
+    private bool? _alreadyExcepted;
+
+    private bool _busy;
+    private bool _isRealTenant;
+    private bool _loaded;
+    private string? _loadedQueryKey;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private bool HasOwner => _ownerType == ActivityGroupOwner
+        ? _activityGroupsEnabled && _selectedActivityGroupId is not null
+        : _selectedGradeLevelId is not null;
+
+    /// <summary>The selected owner's name — the section's heading, so the list is never
+    /// context-free.</summary>
+    private string OwnerName => _ownerType == ActivityGroupOwner
+        ? SelectedGroup?.Name ?? "Activity group"
+        : _gradeLevels.FirstOrDefault(g => g.Id == _selectedGradeLevelId)?.Name ?? "Grade level";
+
+    /// <summary>The selected activity group, when that is the owner AND its definition is
+    /// loaded — the group's <see cref="EnrollmentSpan"/> is what FR-56 keys the
+    /// permitted period part on.</summary>
+    private ActivityGroupDto? SelectedGroup => _ownerType == ActivityGroupOwner
+        ? _activityGroups.FirstOrDefault(g => g.Id == _selectedActivityGroupId)
+        : null;
+
+    private Guid? OwnerGradeLevelId => _ownerType == ActivityGroupOwner ? null : _selectedGradeLevelId;
+
+    private Guid? OwnerActivityGroupId => _ownerType == ActivityGroupOwner ? _selectedActivityGroupId : null;
+
+    /// <summary>
+    /// The tenant's periods for the CURRENT part. Empty for "not term-scoped" (nothing
+    /// to pick — the span is free dates) and for a part this tenant has no periods for.
+    /// </summary>
+    private PeriodDto[] SpanPeriods => _division == AcademicYearDivision.None
+        ? []
+        : [.. _periods
+            .Where(p => IsDivision(p, _division))
+            .OrderBy(p => p.StartDate)];
+
+    /// <summary>
+    /// A write happens only when it can be complete: a subject, and at least one span
+    /// bound (the entity invariant — neither bound would mean "never offered", a
+    /// different concept). The server re-checks; this only keeps the affordance honest.
+    /// </summary>
+    private bool CanAdd => !_busy
+        && _selectedTopicId is not null
+        && (_startDate is not null || _endDate is not null);
+
+    /// <summary>The date the pickers' containment check runs against — the first bound
+    /// the exception has, mirroring the server's rule for a one-bound span.</summary>
+    private DateOnly? SpanAnchor => ToDateOnly(_startDate) ?? ToDateOnly(_endDate);
+
+    private string? AnchorDateLabel => SpanAnchor is { } d ? d.ToString("d MMM yyyy", CultureInfo.InvariantCulture) : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant) return;
+
+        Logger.LogInformation("Loading enrollment exceptions page");
+        ApplyQuerySelection();
+
+        try
+        {
+            _gradeLevels = await Api.ListGradeLevelsAsync(token) ?? [];
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade levels");
+            _loadError = ex.Message;
+            _exceptions = [];
+            return;
+        }
+
+        if (_disposed) return;
+
+        // The feature flag decides whether the group side exists at all, so it must be
+        // resolved BEFORE a ?activityGroupId= pre-selection can be honoured.
+        await LoadActivityGroupsAsync(token);
+        if (_disposed) return;
+
+        // No owner named by the entry point: mirror the Topics landing and start on the
+        // first grade level rather than on an empty page.
+        if (_ownerType == GradeLevelOwner && _selectedGradeLevelId is null && _gradeLevels.Length > 0)
+        {
+            _selectedGradeLevelId = _gradeLevels[0].Id;
+        }
+
+        await LoadOwnerDataAsync(token);
+
+        _loaded = true;
+        _loadedQueryKey = QueryKey();
+    }
+
+    /// <summary>
+    /// Re-applies the query-string pre-selection when the SAME page instance is reused
+    /// for a different query string (Blazor retains the instance when the route's page
+    /// type is unchanged). Guarded on <see cref="_loaded"/> so the single
+    /// <c>OnParametersSet</c> pass that follows the first load cannot double-fetch.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_loaded || _disposed) return;
+        if (QueryKey() == _loadedQueryKey) return;
+
+        _loadedQueryKey = QueryKey();
+        ApplyQuerySelection();
+        await LoadOwnerDataAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    private string QueryKey() => $"{GradeLevelId}|{ActivityGroupId}|{TopicId}";
+
+    /// <summary>
+    /// Reads the entry point's query string (§5.2 row 1 / N4): the owner — grade or
+    /// group — and the subject, so the navigation lands pre-selected. Called before the
+    /// first load and again if the query string changes. The subject is parked in
+    /// <see cref="_pendingTopicId"/> and applied by
+    /// <see cref="ApplyPendingTopicSelection"/> once the owner's list has loaded.
+    /// </summary>
+    private void ApplyQuerySelection()
+    {
+        if (ActivityGroupId is { } activityGroupId)
+        {
+            _ownerType = ActivityGroupOwner;
+            _selectedActivityGroupId = activityGroupId;
+            _selectedGradeLevelId = null;
+        }
+        else if (GradeLevelId is { } gradeLevelId)
+        {
+            _ownerType = GradeLevelOwner;
+            _selectedGradeLevelId = gradeLevelId;
+            _selectedActivityGroupId = null;
+        }
+
+        _pendingTopicId = TopicId;
+    }
+
+    /// <summary>
+    /// Lands the query string's subject, now that the owner's list is known: it must resolve
+    /// to a listed subject, and it is applied HERE rather than when the query was read
+    /// because the picker resets a selection its items no longer contain. The query is the
+    /// selection's only source, so a query naming no subject (or naming one this owner does
+    /// not list) leaves nothing selected.
+    ///
+    /// <para>The same resolved subject is the LIST's filter: the entry point is per-subject
+    /// (§5.2 row 1), so the rows it came to see are that subject's. Both are derived from the
+    /// one query subject and from the owner's own list, which is why they are set together —
+    /// a subject the add panel may not arm (P2-1) is one the list may not filter to. An
+    /// owner change re-enters here with no pending subject, so switching owner clears the
+    /// filter (the new owner may not even list that subject).
+    /// </summary>
+    private void ApplyPendingTopicSelection()
+    {
+        Guid? resolvedTopicId = _pendingTopicId is { } topicId && _topics.Any(t => t.Id == topicId)
+            ? topicId
+            : null;
+
+        _selectedTopicId = resolvedTopicId;
+        _filterTopicId = resolvedTopicId;
+        _pendingTopicId = null;
+    }
+
+    /// <summary>
+    /// Clears the subject filter — the way out of a per-subject list, so a page that landed
+    /// for ONE subject is never a dead end. The query string is deliberately left as it was:
+    /// the filter belongs to this view, and the URL stays the record of how the page was
+    /// entered (a fresh navigation from a kebab applies the filter again).
+    /// </summary>
+    private void ShowAll() => _filterTopicId = null;
+
+    /// <summary>
+    /// Loads the activity groups backing the group owner side. <c>/activity-groups</c> is
+    /// only mapped when <c>FEATURE:EnableActivityGroups</c> is on, so an off flag is a
+    /// normal state (the group side is simply unavailable), not an error. Every failure
+    /// path is contained here so it cannot escalate into a page-level load failure.
+    /// </summary>
+    private async Task LoadActivityGroupsAsync(CancellationToken token)
+    {
+        try
+        {
+            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(
+                FeatureFlagKeys.EnableActivityGroups, token);
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not resolve FEATURE:EnableActivityGroups; the group owner side stays hidden");
+            _activityGroupsEnabled = false;
+        }
+
+        if (!_activityGroupsEnabled)
+        {
+            // Never leave the page parked on an owner side whose option is not rendered.
+            _ownerTypeOptions = GradeOwnerOnly;
+            if (_ownerType == ActivityGroupOwner)
+            {
+                _ownerType = GradeLevelOwner;
+                _selectedActivityGroupId = null;
+            }
+            return;
+        }
+
+        try
+        {
+            _activityGroups = await Api.ListActivityGroupsAsync(token) ?? [];
+            if (_disposed) return;
+            _activityGroups = [.. _activityGroups.OrderBy(g => g.Name)];
+            _ownerTypeOptions = [.. GradeOwnerOnly, new OwnerTypeOption(ActivityGroupOwner, "Activity Group")];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load activity groups; the group owner side is unavailable");
+            _activityGroupsEnabled = false;
+            _activityGroups = [];
+            _ownerTypeOptions = GradeOwnerOnly;
+            if (_ownerType == ActivityGroupOwner)
+            {
+                _ownerType = GradeLevelOwner;
+                _selectedActivityGroupId = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Loads the current owner's subjects and exceptions, then the tenant's periods.
+    ///
+    /// <para>The exceptions and their subjects ARE the page, so a failure there is
+    /// surfaced. The periods only widen the part and span pickers, so a failure there
+    /// degrades them (free dates still work) instead of blanking the list.</para>
+    ///
+    /// <para>Every exit consumes the query string's subject
+    /// (<see cref="ApplyPendingTopicSelection"/>): this load is the one that decides
+    /// whether it can be landed.</para>
+    /// </summary>
+    private async Task LoadOwnerDataAsync(CancellationToken token)
+    {
+        _exceptions = null;
+        _loadError = null;
+        _addError = null;
+        _alreadyExcepted = null;
+        _topics = [];
+
+        if (!HasOwner)
+        {
+            _exceptions = [];
+            ApplyPendingTopicSelection();
+            return;
+        }
+
+        try
+        {
+            var exceptions = await Api.ListSubjectEnrollmentExceptionsAsync(
+                gradeLevelId: OwnerGradeLevelId, activityGroupId: OwnerActivityGroupId, ct: token);
+            var topics = _ownerType == ActivityGroupOwner
+                ? await Api.ListSubjectsByGroupAsync(_selectedActivityGroupId!.Value, effectiveDate: null, ct: token)
+                : await Api.ListSubjectsByGradeAsync(_selectedGradeLevelId!.Value, token);
+
+            if (_disposed) return;
+            _exceptions = exceptions ?? [];
+            _topics = [.. (topics ?? []).OrderBy(t => t.Name)];
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load enrollment exceptions for {GradeLevelId}/{ActivityGroupId}",
+                OwnerGradeLevelId, OwnerActivityGroupId);
+            _loadError = ex.Message;
+            _exceptions = [];
+            ApplyPendingTopicSelection();
+            return;
+        }
+
+        ApplyPendingTopicSelection();
+        await LoadPeriodsAsync(token);
+    }
+
+    /// <summary>
+    /// Loads the tenant's periods — best effort and self-contained: they widen the part
+    /// picker (OOD-1) and decide which periods a term/semester picker can offer. A
+    /// failure leaves free dates only, and the server validator remains the gate.
+    /// </summary>
+    private async Task LoadPeriodsAsync(CancellationToken token)
+    {
+        try
+        {
+            _periods = await Api.ListPeriodsAsync(token) ?? [];
+            if (_disposed) return;
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not load the tenant's periods; the part picker offers free dates only");
+            _periods = [];
+        }
+
+        _divisionOptions = BuildDivisionOptions();
+        KeepDivisionOffered();
+    }
+
+    /// <summary>
+    /// The period parts the picker may offer this owner — §5.1's "filtered by the
+    /// owner's rule (§4.2)":
+    ///
+    /// <para>A group-owned exception must match the group's
+    /// <see cref="EnrollmentSpan"/> (FR-56: <c>Termly</c>→Terms,
+    /// <c>Semester</c>→Semesters, everything else→None), so exactly ONE part is on
+    /// offer and "not term-scoped" appears only when <c>None</c> is that part. A
+    /// grade-owned exception is unconstrained (FR-57), so the parts on offer are the
+    /// ones the tenant actually has (OOD-1) plus an explicit, honestly-labelled "not
+    /// term-scoped". A group whose definition is not loaded is treated as a grade —
+    /// the server validator stays the gate.</para>
+    /// </summary>
+    private DivisionOption[] BuildDivisionOptions()
+    {
+        if (SelectedGroup is { } group)
+        {
+            var required = RequiredDivision(group.Span);
+            return [new(required, PartLabel(required))];
+        }
+
+        var options = new List<DivisionOption>(3);
+        if (_periods.Any(p => IsDivision(p, AcademicYearDivision.Terms)))
+        {
+            options.Add(new(AcademicYearDivision.Terms, "Term"));
+        }
+        if (_periods.Any(p => IsDivision(p, AcademicYearDivision.Semesters)))
+        {
+            options.Add(new(AcademicYearDivision.Semesters, "Semester"));
+        }
+        options.Add(new(AcademicYearDivision.None, "Not term-scoped"));
+        return [.. options];
+    }
+
+    /// <summary>
+    /// The FR-56 division a group's <see cref="EnrollmentSpan"/> requires — the same
+    /// mapping as <c>TopicAssignmentPeriodValidator.ValidateGroupExceptionDivisionAsync</c>.
+    /// </summary>
+    private static AcademicYearDivision RequiredDivision(string span) => span switch
+    {
+        nameof(EnrollmentSpan.Termly) => AcademicYearDivision.Terms,
+        nameof(EnrollmentSpan.Semester) => AcademicYearDivision.Semesters,
+        _ => AcademicYearDivision.None
+    };
+
+    /// <summary>
+    /// Keeps the picked part inside what this owner's rule permits: a part that is no
+    /// longer on offer (the owner changed, or the tenant has no periods of it) falls
+    /// back to the honest one — "not term-scoped" when it is permitted, otherwise the
+    /// only part the owner's rule allows.
+    /// </summary>
+    private void KeepDivisionOffered()
+    {
+        if (_divisionOptions.Any(o => o.Value == _division))
+        {
+            return;
+        }
+
+        _division = _divisionOptions.FirstOrDefault(o => o.Value == AcademicYearDivision.None, _divisionOptions[0]).Value;
+        _spanPeriodId = null;
+    }
+
+    private static bool IsDivision(PeriodDto period, AcademicYearDivision division) =>
+        string.Equals(period.Division, division.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    private async Task OnOwnerTypeChangedAsync()
+    {
+        if (_disposed) return;
+        ClearAddSelection();
+        await LoadOwnerDataAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    private async Task OnOwnerChangedAsync()
+    {
+        if (_disposed) return;
+        ClearAddSelection();
+        await LoadOwnerDataAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    /// <summary>The picked subject changed: only the pickers' pre-write check follows.</summary>
+    private async Task OnAddInputChangedAsync() => await RefreshExceptedHintAsync();
+
+    /// <summary>The picked part changed: the term/semester picker's options follow it,
+    /// so a period from the previous part must not linger.</summary>
+    private async Task OnDivisionChangedAsync()
+    {
+        _spanPeriodId = null;
+        await RefreshExceptedHintAsync();
+    }
+
+    /// <summary>
+    /// The term/semester picker resolved to a period: fill the two date fields from
+    /// THAT period's dates. The period is a convenience for the dates — the dates are
+    /// what travel to the server, and each stays independently clearable afterwards.
+    /// </summary>
+    private async Task OnSpanPeriodPickedAsync()
+    {
+        if (_spanPeriodId is { } periodId
+            && SpanPeriods.FirstOrDefault(p => p.Id == periodId) is { } period)
+        {
+            _startDate = period.StartDate.ToDateTime(TimeOnly.MinValue);
+            _endDate = period.EndDate.ToDateTime(TimeOnly.MinValue);
+        }
+        await RefreshExceptedHintAsync();
+    }
+
+    private async Task OnSpanChangedAsync() => await RefreshExceptedHintAsync();
+
+    private async Task ClearStartAsync()
+    {
+        _startDate = null;
+        await RefreshExceptedHintAsync();
+    }
+
+    private async Task ClearEndAsync()
+    {
+        _endDate = null;
+        await RefreshExceptedHintAsync();
+    }
+
+    /// <summary>
+    /// Asks the server (<c>GET /students/enrollment-exceptions/check</c>) whether the
+    /// picked subject is already excepted on the span's anchor date, and shows the
+    /// answer as a hint. Best effort by design: a check that cannot run leaves the hint
+    /// absent and never blocks the write — the server is the gate (a duplicate is still
+    /// a 409, and its message is surfaced).
+    /// </summary>
+    private async Task RefreshExceptedHintAsync()
+    {
+        _alreadyExcepted = null;
+
+        if (!_isRealTenant || _selectedTopicId is not { } topicId || SpanAnchor is not { } onDate)
+        {
+            return;
+        }
+        if (OwnerGradeLevelId is null && OwnerActivityGroupId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _alreadyExcepted = await Api.IsSubjectExceptedAsync(
+                topicId,
+                onDate,
+                gradeLevelId: OwnerGradeLevelId,
+                activityGroupId: OwnerActivityGroupId,
+                ct: _loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not check whether topic {TopicId} is already excepted on {OnDate}", topicId, onDate);
+            _alreadyExcepted = null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the exception immediately — no form, no Save. The list is then re-read so
+    /// it shows the server's own answer rather than a hopeful local append, and the
+    /// server's message for a 409/422 is surfaced verbatim.
+    /// </summary>
+    private async Task AddAsync()
+    {
+        if (!CanAdd || _selectedTopicId is not { } topicId)
+        {
+            return;
+        }
+
+        _busy = true;
+        _addError = null;
+
+        try
+        {
+            await Api.CreateSubjectEnrollmentExceptionAsync(new CreateSubjectEnrollmentExceptionRequest(
+                GradeLevelId: OwnerGradeLevelId,
+                ActivityGroupId: OwnerActivityGroupId,
+                TopicId: topicId,
+                Division: _division,
+                StartDate: ToDateOnly(_startDate),
+                EndDate: ToDateOnly(_endDate),
+                Reason: string.IsNullOrWhiteSpace(_reason) ? null : _reason.Trim()));
+
+            if (_disposed) return;
+
+            // The list may be filtered to the one subject the entry point named (§5.2 row 1).
+            // A write for a DIFFERENT subject lands OUTSIDE that filter, so the re-read below
+            // would show a list the new row is not in — a successful write that reads as a
+            // no-op. The filter therefore goes, and the row the user just wrote is the row they
+            // see (owner decision Q2(a)). Only on SUCCESS: a rejected write (409/422) leaves the
+            // filter alone, because the user is still on the subject they came for.
+            if (_filterTopicId is { } filteredTopicId && filteredTopicId != topicId)
+            {
+                _filterTopicId = null;
+            }
+
+            // The span was consumed by this write; clearing it keeps the next add honest.
+            _startDate = null;
+            _endDate = null;
+            _spanPeriodId = null;
+            _reason = null;
+            _alreadyExcepted = null;
+            await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create an enrollment exception for topic {TopicId}", topicId);
+            _addError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync(EnrollmentExceptionDto exception)
+    {
+        if (_busy) return;
+        _busy = true;
+        _addError = null;
+
+        try
+        {
+            await Api.RemoveSubjectEnrollmentExceptionAsync(exception.Id);
+            if (_disposed) return;
+            await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to remove enrollment exception {ExceptionId}", exception.Id);
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Re-reads one owner's exceptions; the list, the count and the hint all
+    /// follow from it.</summary>
+    private async Task LoadExceptionsAsync(CancellationToken token)
+    {
+        try
+        {
+            var exceptions = await Api.ListSubjectEnrollmentExceptionsAsync(
+                gradeLevelId: OwnerGradeLevelId, activityGroupId: OwnerActivityGroupId, ct: token);
+            if (_disposed) return;
+            _exceptions = exceptions ?? [];
+            _loadError = null;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload enrollment exceptions");
+            _loadError = ex.Message;
+        }
+    }
+
+    private void ClearAddSelection()
+    {
+        _selectedTopicId = null;
+        _spanPeriodId = null;
+        _startDate = null;
+        _endDate = null;
+        _reason = null;
+        _addError = null;
+        _alreadyExcepted = null;
+    }
+
+    private static DateOnly? ToDateOnly(DateTime? value) =>
+        value is { } date ? DateOnly.FromDateTime(date.Date) : null;
+
+    /// <summary>
+    /// The listed subject's name. Resolved from the owner's own subject list — an
+    /// exception carries only a <c>TopicId</c> — and falls back to a neutral label when
+    /// the subject is no longer listed for the owner (the exception still exists and
+    /// must stay removable; its list is never keyed by <c>TopicId</c>, since one subject
+    /// legitimately carries several rows).
+    /// </summary>
+    private string TopicName(Guid topicId) =>
+        _topics.FirstOrDefault(t => t.Id == topicId)?.Name ?? "A subject no longer listed here";
+
+    /// <summary>The period part: the vocabulary the user reads, never the enum member.</summary>
+    private static string PartLabel(string division) => division switch
+    {
+        nameof(AcademicYearDivision.Terms) => "Term",
+        nameof(AcademicYearDivision.Semesters) => "Semester",
+        _ => "—"
+    };
+
+    private static string PartLabel(AcademicYearDivision division) => division switch
+    {
+        AcademicYearDivision.Terms => "Term",
+        AcademicYearDivision.Semesters => "Semester",
+        _ => "Not term-scoped"
+    };
+
+    /// <summary>
+    /// The span in words (§5.1): <c>1–14 Mar 2027</c>, <c>from 1 Mar 2027</c> (open
+    /// start), <c>to 14 Mar 2027</c> (open end). An exception is never unbounded on both
+    /// sides, so the dash is unreachable in practice — kept so a malformed row renders
+    /// quietly instead of throwing.
+    /// </summary>
+    private static string SpanLabel(DateOnly? start, DateOnly? end)
+    {
+        if (start is { } s && end is { } e)
+        {
+            return s.Year == e.Year && s.Month == e.Month
+                ? $"{s.Day}–{e.Day} {Month(e)}"
+                : $"{Day(s)} – {Day(e)}";
+        }
+        if (start is { } openStart)
+        {
+            return $"from {Day(openStart)}";
+        }
+        if (end is { } openEnd)
+        {
+            return $"to {Day(openEnd)}";
+        }
+        return "—";
+    }
+
+    private static string Day(DateOnly date) => date.ToString("d MMM yyyy", CultureInfo.InvariantCulture);
+
+    private static string Month(DateOnly date) => date.ToString("MMM yyyy", CultureInfo.InvariantCulture);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

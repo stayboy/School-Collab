@@ -154,7 +154,8 @@ public class GradeLevelDetailPageTests : BunitContext
         string assignmentsJson = "[]",
         string studentsJson = "[]",
         string curriculumJson = "[]",
-        string streamsJson = "[]")
+        string streamsJson = "[]",
+        string exceptionsJson = "[]")
     {
         var auth = new MutableAuthenticationStateProvider { User = CreateUser(realTenant: true) };
         var handler = new ScriptedHandler();
@@ -165,9 +166,10 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK, assignmentsJson);
         handler.Map("GET", $"/students/by-grade/{gradeId}", HttpStatusCode.OK, studentsJson);
         handler.Map("GET", $"/students/grade-levels/{gradeId}/curriculum", HttpStatusCode.OK, curriculumJson);
-        // Period names for the Subjects card's delivery-period chip.
-        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.NotFound, "{}");
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsForChip());
+        // Enrollment exceptions for the Subjects card's count badge and the "View all
+        // subjects" dialog (the span lives on the exception — the bridge row carries no
+        // period meaning at all).
+        handler.Map("/students/enrollment-exceptions", HttpStatusCode.OK, exceptionsJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
         // Grade streams (GRSTREAMS) for the Streams card.
@@ -197,28 +199,32 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     /// <summary>
-    /// The two sub-terms the multi-term regression test resolves by name. Fixed
-    /// ids so the test can reference them.
+    /// The two exception spans the multi-exception regression test seeds. Fixed so the
+    /// test can assert the COUNT is derived from them; the span bounds also prove the
+    /// card no longer renders a period NAME from a period join.
     /// </summary>
-    public static readonly Guid ChipTerm1Id = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    public static readonly Guid ChipTerm2Id = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    public static readonly DateOnly ChipSpan1Start = new(2027, 1, 1);
+    public static readonly DateOnly ChipSpan1End = new(2027, 3, 31);
+    public static readonly DateOnly ChipSpan2Start = new(2027, 4, 1);
+    public static readonly DateOnly ChipSpan2End = new(2027, 6, 30);
 
-    private static string PeriodsForChip() =>
-        JsonSerializer.Serialize(new[]
+    /// <summary>One enrollment exception: a period part plus the date span the subject is
+    /// NOT offered for (subject-period-exception-model.md v3 §2.1).</summary>
+    private static Dictionary<string, object?> ExceptionJson(
+        Guid id, Guid gradeId, Guid topicId, string division, DateOnly startDate, DateOnly endDate) =>
+        new()
         {
-            new Dictionary<string, object?>
-            {
-                ["id"] = ChipTerm1Id, ["name"] = "Term 1", ["startDate"] = "2026-02-01", ["endDate"] = "2026-06-30",
-                ["status"] = "Active", ["parentPeriodId"] = (Guid?)null, ["nextPeriodId"] = (Guid?)null,
-                ["division"] = "Terms", ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            },
-            new Dictionary<string, object?>
-            {
-                ["id"] = ChipTerm2Id, ["name"] = "Term 2", ["startDate"] = "2026-07-01", ["endDate"] = "2026-12-20",
-                ["status"] = "Active", ["parentPeriodId"] = (Guid?)null, ["nextPeriodId"] = (Guid?)null,
-                ["division"] = "Terms", ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            },
-        });
+            ["id"] = id,
+            ["gradeLevelId"] = gradeId,
+            ["activityGroupId"] = (Guid?)null,
+            ["topicId"] = topicId,
+            ["division"] = division,
+            ["startDate"] = startDate.ToString("yyyy-MM-dd"),
+            ["endDate"] = endDate.ToString("yyyy-MM-dd"),
+            ["reason"] = (string?)null,
+            ["createdAt"] = DateTimeOffset.UnixEpoch,
+            ["updatedAt"] = DateTimeOffset.UnixEpoch,
+        };
 
     private static string GradeJson(Guid gradeId, string name = "Grade 5", bool blocked = false) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -254,13 +260,6 @@ public class GradeLevelDetailPageTests : BunitContext
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         };
-
-    /// <summary>Same assignment with an explicit delivery period (null = year-spanning).</summary>
-    private static Dictionary<string, object?> WithPeriod(Dictionary<string, object?> assignment, Guid? periodId)
-    {
-        assignment["periodId"] = periodId;
-        return assignment;
-    }
 
     /// <summary>One row of the grade's curriculum endpoint (topic + strand/lesson counts).</summary>
     private static Dictionary<string, object?> CurriculumJson(
@@ -380,14 +379,22 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_TopicsCard_SubjectRunningInTwoTerms_ShowsBothPeriods_AndViewAllDoesNotCrash()
+    public void Detail_TopicsCard_SubjectWithTwoExceptions_ShowsTheCount_AndViewAllDoesNotCrash()
     {
-        // REGRESSION: a subject delivered in two terms has TWO bridge rows for the
-        // same topic. The page used to build the GradeTopicsDialog's assignment map
-        // with ToDictionary(a => a.TopicId, ...), which throws ArgumentException on
-        // the duplicate key — so "View all subjects" (the only surface where
-        // periods were editable) blew up exactly when the multi-term feature was
-        // being used.
+        // REWRITTEN to the exception model (subject-period-exception-model.md v3 §5.2).
+        //
+        // The old version of this test seeded TWO bridge rows for one (grade, topic)
+        // and asserted both periods rendered from them. That premise is unreachable in
+        // a real database: the filtered unique index
+        // ix_topic_assignments_tenant_grade_topic_unique allows at most ONE bridge row
+        // per (tenant, grade, topic). The multi-span case is now expressed the way the
+        // schema can actually hold it — one bridge row (the subject IS offered) plus one
+        // exception per span it is NOT offered in — and the card renders a COUNT badge.
+        //
+        // The crash this test used to guard is now STRUCTURAL: the page hands the dialog
+        // a topic→count map built with GroupBy(...).ToDictionary(g => g.Key, g => g.Count()),
+        // so a repeated topic key cannot throw. The guard survives as the assertion that
+        // the View-all dialog opens at all with two exceptions on one subject.
         var gradeId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
 
@@ -400,33 +407,31 @@ public class GradeLevelDetailPageTests : BunitContext
                 ["name"] = "Mathematics", ["description"] = (string?)null,
                 ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
             } }),
+            // ONE bridge row — the subject is offered in this grade.
             assignmentsJson: JsonSerializer.Serialize(new[]
             {
-                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), ChipTerm1Id),
-                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), ChipTerm2Id),
+                AssignmentJson(Guid.NewGuid(), topicId, gradeId),
             }),
-            // The date-only curriculum query returns the topic once per term.
-            curriculumJson: JsonSerializer.Serialize(new[]
+            curriculumJson: JsonSerializer.Serialize(new[] { CurriculumJson(topicId) }),
+            // TWO exceptions — the spans it is not offered for.
+            exceptionsJson: JsonSerializer.Serialize(new[]
             {
-                CurriculumJson(topicId),
-                CurriculumJson(topicId),
+                ExceptionJson(Guid.NewGuid(), gradeId, topicId, "Terms", ChipSpan1Start, ChipSpan1End),
+                ExceptionJson(Guid.NewGuid(), gradeId, topicId, "Semesters", ChipSpan2Start, ChipSpan2End),
             }));
 
         var cut = Render<DialogHost>(p => p
             .AddChildContent<Detail>(x => x.Add(d => d.Id, gradeId)));
 
-        // One card row for one subject, even though it runs in two terms.
+        // One card row for one subject, even though it carries two exceptions.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
 
-        // Both terms resolve to names on the card meta line, not a GUID prefix.
-        cut.Markup.Should().Contain("Term 1");
-        cut.Markup.Should().Contain("Term 2");
-        cut.Markup.Should().NotContain(ChipTerm1Id.ToString()[..8],
-            "the delivery period must be shown as a name, not a raw GUID prefix");
+        // The card shows a COUNT badge — never a period name, never a span list.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("2 exceptions"));
 
-        // The kebab exposes the topic-scoped period editor.
-        cut.Find("fluent-button[title=\"Actions for Mathematics\"]").Click();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit periods"));
+        // The exceptions are READ-ONLY here: the kebab NAVIGATES to the management page
+        // (see the source-wiring test), and the row's own actions are covered by
+        // Detail_TopicsCard_Row_HasKebab_WithActions.
 
         // The crash itself: this used to throw before the dialog ever opened.
         cut.FindAll("fluent-anchor")
@@ -434,6 +439,8 @@ public class GradeLevelDetailPageTests : BunitContext
             .Click();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topic actions"),
             TimeSpan.FromSeconds(5));
+        cut.Markup.Should().Contain("2 exceptions",
+            "the subject's exception count renders in the View-all dialog too");
     }
 
     [TestMethod]
@@ -1020,11 +1027,32 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("ItemTextSelector=\"t => t.Name\"", "Subjects card binds the topic name");
         source.Should().Contain("ItemMetaSelector=\"SubjectMeta\"", "Subjects card binds the meta selector");
         source.Should().Contain("private string[] SubjectMeta(", "SubjectMeta renders the meta line parts");
-        source.Should().Contain("DeliveryPeriodLabel(t.TopicId)",
-            "the meta line must lead with the delivery period (Rev. 6 FR-55) — the card used to be period-blind");
-        source.Should().Contain("\"Edit periods\"", "the card kebab exposes the period editor");
+        // TRAP REPLACEMENT (i), intent-preserving: v1 asserted the card sourced its
+        // per-period label from the (now retired) label helper. That label concept
+        // dissolved into a COUNT badge, so the surviving intent — "the card's meta line
+        // leads with this subject's enrollment exceptions" — is asserted at its new
+        // source: the per-topic exception count feeding the badge.
+        source.Should().Contain("ExceptionCount(t.TopicId)",
+            "the meta line leads with the subject's exception COUNT badge");
+        source.Should().Contain("EnrollmentExceptionLabels.FormatCount(exceptionCount)",
+            "the badge text is rendered from that count by the ONE shared count formatter");
+        // TRAP REPLACEMENT (ii), intent-preserving: v1 asserted the card carried NO
+        // "Enrollment exceptions" editor. The guard's intent ("no inline editor; the
+        // affordance navigates") survives under the new mechanism — the kebab action is a
+        // NAVIGATING RowAction.Navigate carrying owner + topic, and it carries no callback
+        // at all, so no editor can be opened from the card.
+        source.Should().Contain("RowAction.Navigate(\"Enrollment exceptions\"",
+            "the card's exceptions affordance NAVIGATES to the management page");
+        source.Should().Contain("/students/enrollment-exceptions?gradeLevelId=",
+            "the navigation target carries the owner + topic so the page lands pre-selected");
+        source.Should().NotContain("RowAction.Callback(\"Enrollment exceptions\"",
+            "M3: wiring the exceptions affordance as a callback (which could open an editor) must fail this test");
         source.Should().Contain("ItemOnClick=\"t => OpenTopicEditAsync(t)\"", "Subjects card name opens the topic edit dialog");
         source.Should().Contain("ItemKeySelector=\"t => t.TopicId\"", "Subjects card opts into the central edit-key guard (TopicId)");
+        source.Should().Contain("GradeTopicsDialog.ExceptionCountsByTopicKey",
+            "the View-all dialog receives the subject's exception COUNTS");
+        source.Should().Contain(".ToDictionary(g => g.Key, g => g.Count())",
+            "counts are grouped per topic: a repeat can no longer collide on a topic key");
         source.Should().Contain("OnItemActionBlocked=\"OnTopicEditBlocked\"", "Subjects card surfaces the guard block");
         source.Should().Contain("ItemNameTitle=\"Edit topic\"", "Subjects card advertises the edit affordance");
 

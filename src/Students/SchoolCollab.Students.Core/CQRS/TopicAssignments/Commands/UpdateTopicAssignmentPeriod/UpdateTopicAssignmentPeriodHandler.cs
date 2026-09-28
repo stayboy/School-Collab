@@ -14,6 +14,13 @@ namespace SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicA
 /// reusing the exact creation-time period validation (FR-56/57) via the shared
 /// <see cref="TopicAssignmentPeriodValidator"/>. Works for both the grade and
 /// activity-group subtype through the TPH root.
+///
+/// <para><b>DEPRECATED (2026-09-26)</b> — subject-period-exception-model.md. The
+/// bridge row no longer carries period meaning: availability is "bridge exists AND
+/// no <see cref="Domain.SubjectEnrollmentException"/> on the active period". The route
+/// (<c>PUT /topic-assignments/{id}/period</c>) and this handler stay functional for
+/// wire compatibility but no UI calls them any more. This is the only remaining
+/// caller of the FR-56/57 bridge validators.</para>
 /// </summary>
 public sealed class UpdateTopicAssignmentPeriodHandler(
     StudentsDbContext db,
@@ -42,7 +49,7 @@ public sealed class UpdateTopicAssignmentPeriodHandler(
                 throw new InvalidOperationException($"Unknown topic assignment subtype '{assignment.GetType().Name}'.");
         }
 
-        assignment.UpdatePeriod(command.PeriodId);
+        assignment.UpdatePeriod(command.PeriodId); // DEPRECATED write path — kept for wire compatibility only.
         await db.SaveChangesAsync(ct);
         await cache.RemoveByTagAsync("students", ct);
 

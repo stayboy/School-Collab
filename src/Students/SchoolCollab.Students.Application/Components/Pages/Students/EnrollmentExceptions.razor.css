@@ -1,0 +1,185 @@
+/* EnrollmentExceptions page (subject-period-exception-model.md v3 §5.1).
+   Scoped to this component; every ::deep rule below targets a <fluent-button>,
+   which the FluentButton child component renders in ANOTHER scope. No inline
+   <style> — CSS isolation only. */
+
+.exceptions-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+}
+
+.page-title {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+.hint {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9em;
+}
+
+.owner-bar {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.owner-prompt {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}
+
+.exceptions-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 1px solid var(--neutral-stroke-rest, rgba(0, 0, 0, 0.08));
+    border-radius: 6px;
+    padding: 0.75rem 1rem 1rem;
+}
+
+.section-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.section-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* The filtered view's own line: which subject the rows below belong to, plus the
+   way back to the owner's whole set. */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.25rem 0;
+}
+
+.filter-note {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9em;
+}
+
+/* ::deep because <fluent-button> is rendered by the FluentButton child component
+   in another scope. */
+::deep .show-all {
+    min-height: 2rem;
+    padding: 0 0.5rem;
+}
+
+.exceptions-empty {
+    margin: 0.25rem 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}
+
+.exceptions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.exception-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--neutral-stroke-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.exception-row:last-child {
+    border-bottom: none;
+}
+
+/* 12rem is the PREFERRED column width, not a floor. As a flex-basis it still
+   gives the list its stable two-column grid, while min-width: 0 lets the column
+   shrink and overflow-wrap: anywhere breaks a long subject name INSIDE the row.
+   A min-width floor would do the opposite: .exception-row is flex-wrap: nowrap
+   (the default), so a floor pushes the row out of the section instead. */
+.exception-topic {
+    font-weight: 600;
+    flex: 0 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.exception-span {
+    flex: 0 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.exception-reason {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+    overflow-wrap: anywhere;
+}
+
+/* Icon-only FluentButtons need a square footprint; ::deep because
+   <fluent-button> is rendered by the FluentButton child component in another
+   scope. */
+::deep .exception-remove {
+    margin-left: auto;
+    min-width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+}
+
+.add-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--neutral-stroke-rest, rgba(0, 0, 0, 0.08));
+}
+
+/* flex-start, not flex-end: the row mixes labelled composites (the dropdowns,
+   the two date pickers, the reason field) with single-line siblings (the "Span"
+   header, the Add button). Tops align — every composite's label line on one line,
+   its input below — and the tall ones hang below. Per-child align-self overrides
+   are deliberately absent: see the repo's flex-row-input-alignment skill. */
+.add-row {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+/* The "Span" header with the two date fields it names. The group is what makes the
+   visible header programmatic rather than orphaned text; flex-start keeps the
+   header on the same label line as the pickers' own From/To labels. */
+.span-group {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.add-label {
+    font-weight: 600;
+}
+
+.date-field {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.25rem;
+}
+
+::deep .clear-date {
+    min-height: 2rem;
+    padding: 0 0.5rem;
+}
+
+.add-note {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9em;
+}

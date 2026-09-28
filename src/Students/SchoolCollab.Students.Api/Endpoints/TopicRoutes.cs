@@ -95,14 +95,13 @@ public static class TopicRoutes
         group.MapGet($"{prefix}/by-grade/{{gradeLevelId:guid}}", async (
             Guid gradeLevelId,
             DateOnly? effectiveDate,
-            Guid? periodId,
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopicsByGrade, SchoolCollab.Students.Core.DTOs.TopicDto[]> handler,
             CancellationToken ct) =>
         {
             try
             {
                 var topics = await handler.HandleAsync(
-                    new ListTopicsByGrade(gradeLevelId, effectiveDate, periodId), ct);
+                    new ListTopicsByGrade(gradeLevelId, effectiveDate), ct);
                 return Results.Ok(topics);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

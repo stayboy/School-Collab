@@ -33,6 +33,29 @@ result, not the journey.
 
 Do not emit empty shell commands or placeholder comments as output.
 
+### Posing questions and decisions
+
+When you need a decision from the user — a design choice, a scope call, an
+ambiguous requirement — **use the `grill-me` skill** rather than asking ad hoc:
+
+- Map the decision as a **design tree** and ask the whole **frontier** — every
+  decision whose prerequisites are already settled — in **one round**.
+- Number each question and **always attach a recommended answer** with its
+  trade-offs and cost. Never ask a bare "what do you think?" or present options
+  without a recommendation.
+- **Resolve facts yourself first**: read the repo, run the search, inspect the
+  migration. Never ask the user for something the codebase, config, or docs can
+  answer — surface what you found, then ask the decision.
+- A question whose answer depends on another **still-open** question belongs to a
+  **later** round, not this one. Asking it now is a guess wearing a question mark.
+- **Never act on the plan** until the frontier is empty and the user has
+  confirmed — then summarise the settled decisions and anything explicitly
+  deferred.
+
+Applies to plan/spec pressure-testing and to any request that hides several
+decisions. It does not apply to a single factual question, where a direct
+question is cheaper.
+
 ---
 
 ## Skill discovery (read first)

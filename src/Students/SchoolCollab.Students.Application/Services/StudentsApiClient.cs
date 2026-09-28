@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Notifications;
@@ -416,6 +417,22 @@ public record AssignActivityGroupTopicRequest(
     Guid? PeriodId = null);
 
 public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
+
+/// <summary>
+/// Creates a subject enrollment exception on exactly one owner — a grade level or an
+/// activity group (subject-period-exception-model.md v3). Mirrors the server-side
+/// <c>CreateSubjectEnrollmentException</c> command (<c>POST /students/enrollment-exceptions</c>);
+/// the body carries a period <b>part</b> plus a span and <b>no</b> period id, and
+/// <paramref name="Reason"/> is optional free text.
+/// </summary>
+public record CreateSubjectEnrollmentExceptionRequest(
+    Guid? GradeLevelId,
+    Guid? ActivityGroupId,
+    Guid TopicId,
+    AcademicYearDivision Division,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null,
+    string? Reason = null);
 
 public record AssignStudentTopicRequest(
     Guid StudentId,
@@ -1118,18 +1135,15 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
 
-    public async Task<SubjectDto[]?> ListSubjectsByGradeAsync(Guid gradeLevelId, Guid? periodId = null, CancellationToken ct = default)
-    {
-        var url = periodId.HasValue
-            ? $"/students/subjects/by-grade/{gradeLevelId}?periodId={periodId}"
-            : $"/students/subjects/by-grade/{gradeLevelId}";
-        return await _http.GetFromJsonAsync<SubjectDto[]>(url, ct);
-    }
+    public async Task<SubjectDto[]?> ListSubjectsByGradeAsync(Guid gradeLevelId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<SubjectDto[]>($"/students/subjects/by-grade/{gradeLevelId}", ct);
 
     /// <summary>
     /// Lists topics assigned to a grade that are effective on the given date
     /// (spec FR-58). The backend filters by the topic assignment's effective
-    /// <c>[StartDate, EndDate]</c> window and Rev. 6 <c>PeriodId</c>.
+    /// <c>[StartDate, EndDate]</c> window. The bridge no longer carries period
+    /// meaning, so there is no period query parameter (subject-period-exception-model.md
+    /// v3 §8 Q5).
     /// </summary>
     public async Task<SubjectDto[]?> ListSubjectsByGradeEffectiveAsync(Guid gradeLevelId, DateOnly? effectiveDate, CancellationToken ct = default)
     {
@@ -1142,7 +1156,7 @@ public sealed class StudentsApiClient : IContactsClient
     /// <summary>
     /// Lists topics assigned to an activity group that are effective on the
     /// given date (spec FR-58). The backend filters by the topic assignment's
-    /// effective <c>[StartDate, EndDate]</c> window and Rev. 6 <c>PeriodId</c>.
+    /// effective <c>[StartDate, EndDate]</c> window; there is no period parameter.
     /// </summary>
     public async Task<SubjectDto[]?> ListSubjectsByGroupAsync(Guid activityGroupId, DateOnly? effectiveDate, CancellationToken ct = default)
     {
@@ -1620,6 +1634,127 @@ public sealed class StudentsApiClient : IContactsClient
         (await _http.PutAsJsonAsync($"/students/topic-assignments/{id}/period",
             new UpdateTopicAssignmentPeriodRequest(periodId), ct)).EnsureSuccessStatusCode();
 
+    // ── Subject enrollment exceptions ─────────────────────────────────────────
+    // subject-period-exception-model.md v3 §6: the bridge row means the subject is
+    // offered; an exception is the explicit declaration ("teacher on leave in Term 3",
+    // "closed 1–14 March"). The body carries a period PART plus a date span — never a
+    // period instance id.
+
+    /// <summary>
+    /// Lists a subject's enrollment exceptions for one owner (grade or activity group),
+    /// optionally narrowed to a single topic.
+    /// </summary>
+    public async Task<SubjectEnrollmentExceptionDto[]?> ListSubjectEnrollmentExceptionsAsync(
+        Guid? gradeLevelId = null,
+        Guid? activityGroupId = null,
+        Guid? topicId = null,
+        CancellationToken ct = default)
+    {
+        var parts = new List<string>(3);
+        if (gradeLevelId is { } g) parts.Add($"gradeLevelId={g:D}");
+        if (activityGroupId is { } a) parts.Add($"activityGroupId={a:D}");
+        if (topicId is { } t) parts.Add($"topicId={t:D}");
+        var url = parts.Count == 0 ? "/students/enrollment-exceptions" : $"/students/enrollment-exceptions?{string.Join('&', parts)}";
+        return await _http.GetFromJsonAsync<SubjectEnrollmentExceptionDto[]>(url, ct);
+    }
+
+    /// <summary>
+    /// Asks whether a subject is already excepted on a date — the pickers' check
+    /// (<c>GET /students/enrollment-exceptions/check</c>, subject-period-exception-model.md
+    /// v3 §6). Accepts <b>either</b> owner form, mirroring the list route, so both sides of
+    /// the management page's owner toggle can ask.
+    ///
+    /// <para>Containment only: an exception whose span contains
+    /// <paramref name="onDate"/> counts, one whose span does not is irrelevant. The caller
+    /// uses it to warn before a write — the server remains the gate (a duplicate is still a
+    /// 409).</para>
+    /// </summary>
+    public async Task<bool> IsSubjectExceptedAsync(
+        Guid topicId,
+        DateOnly onDate,
+        Guid? gradeLevelId = null,
+        Guid? activityGroupId = null,
+        CancellationToken ct = default)
+    {
+        var parts = new List<string>(3);
+        if (gradeLevelId is { } g) parts.Add($"gradeLevelId={g:D}");
+        if (activityGroupId is { } a) parts.Add($"activityGroupId={a:D}");
+        parts.Add($"topicId={topicId:D}");
+        parts.Add($"onDate={onDate:yyyy-MM-dd}");
+
+        var result = await _http.GetFromJsonAsync<ExceptionCheckResponse>(
+            $"/students/enrollment-exceptions/check?{string.Join('&', parts)}", ct);
+        return result?.Excepted ?? false;
+    }
+
+    /// <summary>
+    /// Creates an exception. The server answers 409 when the same
+    /// (owner, topic, division, span) is already excepted, and 422 when the span or the
+    /// owner's FR-56 division rule rejects it — the response body carries the server's
+    /// own message, so THAT sentence is what travels on the exception (§5.1).
+    /// </summary>
+    public async Task<Guid> CreateSubjectEnrollmentExceptionAsync(CreateSubjectEnrollmentExceptionRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/enrollment-exceptions", req, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            // Raw JSON behind a status code is not an answer a user can act on, and the
+            // body read below is the only place the server's sentence exists.
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                ServerMessage(body)
+                    ?? $"CreateSubjectEnrollmentException failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    /// <summary>
+    /// The server's own sentence out of a failed response body: a rejected write answers
+    /// <c>{"message":"…"}</c> (also seen as <c>{"Message":…}</c> and, from ProblemDetails,
+    /// <c>detail</c>), and the page shows it verbatim. Null when the body is not a JSON
+    /// object or carries none of the three — the caller then falls back to the status text.
+    /// </summary>
+    private static string? ServerMessage(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            foreach (var name in ServerMessagePropertyNames)
+            {
+                if (document.RootElement.TryGetProperty(name, out var value)
+                    && value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(value.GetString()))
+                {
+                    return value.GetString();
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
+    }
+
+    private static readonly string[] ServerMessagePropertyNames = ["message", "Message", "detail"];
+
+    /// <summary>Removes an exception. Idempotent — removing a gone exception is a 204.</summary>
+    public async Task RemoveSubjectEnrollmentExceptionAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/enrollment-exceptions/{id}", ct)).EnsureSuccessStatusCode();
+
     // ── Student Subject Assignments ──────────────────────────────────────────
 
     public async Task<StudentTopicAssignmentDto[]?> ListStudentTopicsByStudentAsync(Guid studentId, Guid periodId, CancellationToken ct = default) =>
@@ -1950,6 +2085,9 @@ public sealed class StudentsApiClient : IContactsClient
     // ── Helper ──────────────────────────────────────────────────────────────
 
     private sealed record IdResponse(Guid Id);
+
+    /// <summary>Response shape of the enrollment-exceptions <c>/check</c> route (§6).</summary>
+    private sealed record ExceptionCheckResponse(bool Excepted);
 
     /// <summary>Response shape of the atomic create endpoint (FR-C4): the created
     /// year id plus the ids of any sub-periods created in the same unit of work.</summary>

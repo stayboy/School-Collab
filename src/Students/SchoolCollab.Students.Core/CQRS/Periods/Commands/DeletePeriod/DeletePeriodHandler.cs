@@ -13,8 +13,13 @@ namespace SchoolCollab.Students.Core.CQRS.Periods.Commands.DeletePeriod;
 /// first so a failure leaves zero partial deletions (NFR-D1): the Draft-only domain
 /// guard (FR-D2), the all-Draft sub-period guard for a top-level year (FR-D3), and the
 /// FR-D6 dangling-link housekeeping. The single <c>Remove(year)</c> relies on the
-/// already-declared EF <c>OnDelete(DeleteBehavior.Cascade)</c> for sub-period rows —
-/// no per-row removal is implemented here.
+/// already-declared EF <c>OnDelete(DeleteBehavior.Cascade)</c> for sub-period rows — no
+/// per-row removal is implemented here.
+///
+/// <para>v1's subject-block guard (P2-10) is <b>reverted</b>: an exception is a period
+/// part plus a date span and never references a period
+/// (subject-period-exception-model.md v3 §0 decision 7), so nothing can be orphaned and
+/// there is nothing to refuse the delete for.</para>
 /// </summary>
 public sealed class DeletePeriodHandler(
     IPeriodRepository repository,
@@ -38,17 +43,17 @@ public sealed class DeletePeriodHandler(
         // Aborts before any removal and names the blocking row (AC-D3). This load also
         // serves the client-cascade: the sub-periods are tracked, so the single
         // Remove(year) below cascades to them in the same SaveChanges.
-        if (period.ParentPeriodId is null)
+        var subPeriods = period.ParentPeriodId is null
+            ? await repository.GetSubPeriodsAsync(command.Id, cancellationToken)
+            : [];
+
+        var subBlocker = subPeriods.FirstOrDefault(sp => sp.Status != PeriodStatus.Draft);
+        if (subBlocker is not null)
         {
-            var subs = await repository.GetSubPeriodsAsync(command.Id, cancellationToken);
-            var blocker = subs.FirstOrDefault(sp => sp.Status != PeriodStatus.Draft);
-            if (blocker is not null)
-            {
-                throw new PeriodNotDeletableException(
-                    $"Cannot delete academic year '{period.Name}': sub-period '{blocker.Name}' " +
-                    $"is {blocker.Status} and is still in use. A year can only be deleted while " +
-                    "every sub-period is Draft.");
-            }
+            throw new PeriodNotDeletableException(
+                $"Cannot delete academic year '{period.Name}': sub-period '{subBlocker.Name}' " +
+                $"is {subBlocker.Status} and is still in use. A year can only be deleted while " +
+                "every sub-period is Draft.");
         }
 
         // FR-D6 (SHOULD): clear dangling NextPeriodId links on surviving Draft periods.

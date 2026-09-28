@@ -142,4 +142,32 @@ public class ListTopicsByGradeHandlerTests
 
         result.Should().BeEmpty();
     }
+
+    [TestMethod]
+    public async Task BridgeRowCarryingAnIgnoredPeriodId_DoesNotFilterTheListing()
+    {
+        // Q5's replacement coverage (subject-period-exception-model.md v3 §8 Q5): the
+        // retired whitelist read path matched the bridge's PeriodId EXACTLY, so a row
+        // pinned to a period only appeared for that period's query. The bridge now
+        // carries no period meaning, so a row with a (legacy, ignored) PeriodId is
+        // listed like any other.
+        //
+        // GUARD, not a discriminator (F5): the retired handler filter applied only when
+        // the QUERY supplied a PeriodId, so this test passes pre-round too. The
+        // discriminator is the API-level `?periodId=` half in
+        // EnrollmentExceptionAvailabilityEndpointTests.
+        using var s = new StudentsTestScope("subjects-ignored-period-id");
+        var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+        var mathId = await SeedTopicAsync(s, Guid.NewGuid(), "MATH", "Mathematics", 1);
+
+        // A legacy pinned row: PeriodId is set but carries no meaning any more.
+        s.Db.GradeTopicAssignments.Add(
+            GradeTopicAssignment.Create(glId, mathId, Today(), periodId: Guid.NewGuid()));
+        await s.Db.SaveChangesAsync();
+
+        var result = await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId));
+
+        result.Should().ContainSingle(x => x.Code == "MATH",
+            "M5: re-adding a period filter to the listing must fail this test");
+    }
 }

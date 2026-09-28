@@ -28,6 +28,7 @@ public static class StudentEndpoints
             .MapPeriodRoutes()
             .MapEnrollmentRoutes()
             .MapTopicAssignmentRoutes()
+            .MapEnrollmentExceptionRoutes()
             .MapStudentTopicAssignmentRoutes()
             .MapStudentGuardianRoutes();   // G2: inherits RequireAuthorization from studentsGroup
 

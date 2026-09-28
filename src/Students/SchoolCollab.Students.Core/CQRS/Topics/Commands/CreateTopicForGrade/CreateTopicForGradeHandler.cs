@@ -17,6 +17,9 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 /// bridge. Assignments are <b>date-based, not period-bound</b>: the bridge row is
 /// opened today (<see cref="DateOnly"/>) and left open-ended (<c>EndDate = null</c>)
 /// so the topic stays assigned across multiple years unless blocked/archived.
+///
+/// <para><b>DEPRECATED (2026-09-26)</b> — the command's <c>PeriodId</c> is accepted
+/// for back-compat and ignored (subject-period-exception-model.md).</para>
 /// </summary>
 public sealed class CreateTopicForGradeHandler(
     ITopicRepository topicRepository,
@@ -43,9 +46,9 @@ public sealed class CreateTopicForGradeHandler(
         var gradeLevel = await gradeLevelRepository.GetAsync(command.GradeLevelId, cancellationToken)
             ?? throw new GradeLevelNotFoundException(command.GradeLevelId);
 
-        // 1b. Rev. 6 FR-57: a grade-owned topic's PeriodId, when set, must be an
-        //     AcademicYear or a Term/Semester within the active academic year.
-        await ValidatePeriodAsync(command.PeriodId, cancellationToken);
+        // 1b. DEPRECATED (2026-09-26): the FR-57 PeriodId validation is retired for
+        //     this path — command.PeriodId is accepted for back-compat and ignored
+        //     (subject-period-exception-model.md). See ValidatePeriodAsync below.
 
         // 2. The bridge is date-based, not period-bound. A new assignment opens
         //    today and stays open-ended (EndDate = null), so no current period is
@@ -107,16 +110,17 @@ public sealed class CreateTopicForGradeHandler(
         subject.ClearDomainEvents();
 
         // 4. Retain GradeTopicAssignment as the M:N bridge between the topic and
-        //    its grade level, effective from today and open-ended. Idempotent: skip
-        //    only if an active (unended) assignment already exists for this
-        //    grade/topic with the SAME effective period scope (Rev. 6 FR-55/57).
-        //    A differently-scoped request (e.g. a Term when a year-spanning
-        //    assignment exists) creates a new assignment carrying the requested
-        //    PeriodId — the domain permits multiple bridge rows per (grade, topic).
+        //    its grade level, effective from today and open-ended and PERIOD-LESS.
+        //    Idempotent: skip only if an active (unended) assignment already exists for
+        //    this grade/topic. The guard is no longer period-scoped (the requested
+        //    PeriodId is ignored), which matches the database reality:
+        //    ix_topic_assignments_tenant_grade_topic_unique permits AT MOST ONE bridge
+        //    row per (tenant, grade, topic) — the retired "N bridge rows, one per
+        //    delivery period" premise was never representable.
         var existingAssignments = await assignmentRepository
             .ListByGradeLevelAsync(command.GradeLevelId, today, cancellationToken);
 
-        if (!existingAssignments.Any(a => a.TopicId == subject.Id && a.PeriodId == command.PeriodId))
+        if (!existingAssignments.Any(a => a.TopicId == subject.Id))
         {
             var assignment = GradeTopicAssignment.Create(
                     command.GradeLevelId,
@@ -124,7 +128,7 @@ public sealed class CreateTopicForGradeHandler(
                     today,
                     endDate: null,
                     topicStrandId: null,
-                    periodId: command.PeriodId)
+                    periodId: null)
                 .WithTenant(tenantProvider);
 
             await assignmentRepository.AddAsync(assignment, cancellationToken);
@@ -136,7 +140,7 @@ public sealed class CreateTopicForGradeHandler(
         else
         {
             logger.LogInformation(
-                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} with the same period scope — skipping",
+                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} — skipping",
                 command.GradeLevelId, subject.Id);
         }
 
@@ -151,6 +155,15 @@ public sealed class CreateTopicForGradeHandler(
             subject.UpdatedAt);
     }
 
+    /// <summary>
+    /// RETIRED (2026-09-26) — subject-period-exception-model.md. The bridge row no
+    /// longer carries a period, so this path is no longer called by
+    /// <see cref="HandleAsync"/>; it is retained (uncalled) only so the retired rule
+    /// is still greppable next to the code that replaced it. It has <b>no</b>
+    /// exception-side successor: a grade-owned <c>SubjectEnrollmentException</c> is
+    /// unconstrained (v3 §4.2 FR-57) — any Division and any span is accepted, because
+    /// a grade has no window and no period reference left to bound against.
+    /// </summary>
     private async Task ValidatePeriodAsync(Guid? periodId, CancellationToken cancellationToken)
     {
         if (periodId is null)

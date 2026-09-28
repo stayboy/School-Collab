@@ -72,7 +72,7 @@
            CodedValueDropdown picker section and the topic fields below. *@
         <div class="topic-fields-section">
             <FormRow Label="Owner" For="topic-create-owner">
-                <FluentSelect TOption="string" @bind-Value="Model.OwnerType" @bind-Value:after="OnOwnerTypeChangedAsync" Id="topic-create-owner" Style="flex:1; min-width:0">
+                <FluentSelect TOption="string" @bind-Value="Model.OwnerType" Id="topic-create-owner" Style="flex:1; min-width:0">
                     <FluentOption Value="GradeLevel">Grade Level</FluentOption>
                     @if (_activityGroupsEnabled)
                     {
@@ -105,25 +105,6 @@
                     </FluentMessageBar>
                 }
             }
-
-            <FormRow Label="Period (optional)" For="topic-create-period">
-                @if (_filteredPeriods.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
-                        @_periodHint
-                    </FluentMessageBar>
-                }
-                else
-                {
-                    <FluentSelect TOption="string" @bind-Value="_periodIdText" Id="topic-create-period" Style="flex:1; min-width:0">
-                        <FluentOption Value="">— Current period —</FluentOption>
-                        @foreach (var p in _filteredPeriods)
-                        {
-                            <FluentOption Value="@p.Id.ToString()">@p.Name</FluentOption>
-                        }
-                    </FluentSelect>
-                }
-            </FormRow>
 
             <TopicFormFields Model="Model"
                              Mode="@(_editing ? TopicFormFields.TopicFormMode.Edit : TopicFormFields.TopicFormMode.Display)"
@@ -168,7 +149,6 @@
     private bool _duplicateCodedValue;
     private bool _groupDuplicateCodedValue;
     private string _activityGroupIdText = "";
-    private string _periodIdText = "";
     private ActivityGroupDto[] _activityGroups = [];
 
     /// <summary>
@@ -178,37 +158,17 @@
     /// from opening or the grade-level owner from working.
     /// </summary>
     private bool _activityGroupsEnabled;
-    private PeriodDto[] _periods = [];
     private SubjectDto[] _groupExistingTopics = [];
-    private Guid? _activeYearId;
 
     /// <summary>
     /// The activity group currently selected in the group picker (or null when
     /// none is selected / the id does not resolve). Used to display the group's
-    /// enrollment span (FR-56) and mirrors <see cref="FilterPeriodsForGroup"/>'s
-    /// lookup.
+    /// enrollment span (FR-56).
     /// </summary>
     private ActivityGroupDto? SelectedGroup =>
         Guid.TryParse(_activityGroupIdText, out var id)
             ? _activityGroups.FirstOrDefault(g => g.Id == id)
             : null;
-
-    /// <summary>
-    /// Periods offered to the user, filtered to those valid for the chosen owner
-    /// (spec FR-56/57): grade-owned topics may target the active academic year or
-    /// a Term/Semester within it; group-owned topics must match the group's
-    /// <see cref="ActivityGroupDto.Span"/> (Termly→Term, Semester→Semester,
-    /// WholeAcademicYear→AcademicYear; OpenEnded/DateRange carry no period).
-    /// </summary>
-    private PeriodDto[] _filteredPeriods =>
-        Model.OwnerType == "ActivityGroup"
-            ? FilterPeriodsForGroup()
-            : FilterPeriodsForGrade();
-
-    private string _periodHint =>
-        Model.OwnerType == "ActivityGroup"
-            ? "This group's enrollment span carries no period — the topic is delivered on a date-based window."
-            : "No active academic year is open — the topic is delivered year-spanning.";
 
     // Snapshot of the pre-edit values so Cancel can revert the user's edits.
     private string _origName = string.Empty;
@@ -253,9 +213,6 @@
 
         /// <summary>The activity group the new topic is wired to (when <see cref="OwnerType"/> is <c>ActivityGroup</c>).</summary>
         public Guid? ActivityGroupId { get; set; }
-
-        /// <summary>Optional period to align the topic assignment to (Rev. 6).</summary>
-        public Guid? PeriodId { get; set; }
     }
 
     protected override string SubmitText => "Create";
@@ -292,10 +249,6 @@
             _activityGroupIdText = "";
         }
 
-        _periods = await Api.ListPeriodsAsync() ?? [];
-        var activeYear = await Api.GetActiveAcademicYearAsync();
-        _activeYearId = activeYear?.Id;
-
         if (_activityGroupsEnabled && Model.ActivityGroupId.HasValue)
         {
             _activityGroupIdText = Model.ActivityGroupId.Value.ToString();
@@ -304,19 +257,10 @@
             // pre-seeded with an activity group (e.g. from Subjects.razor).
             _ = LoadGroupExistingTopicsAsync();
         }
-        if (Model.PeriodId.HasValue)
-            _periodIdText = Model.PeriodId.Value.ToString();
-    }
-
-    private void OnOwnerTypeChangedAsync()
-    {
-        // Re-filter the period options for the new owner; clear an invalid selection.
-        _periodIdText = "";
     }
 
     private void OnActivityGroupChangedAsync()
     {
-        _periodIdText = "";
         _groupDuplicateCodedValue = false;
         _ = LoadGroupExistingTopicsAsync();
     }
@@ -349,44 +293,6 @@
 
         _groupDuplicateCodedValue = Model.CodedValueId is { } id
             && _groupExistingTopics.Any(t => t.CodedValueId == id);
-    }
-
-    private PeriodDto[] FilterPeriodsForGrade()
-    {
-        // Grade-owned: top-level academic year, or a Term/Semester within the active year.
-        return _periods
-            .Where(p => p.ParentPeriodId is null
-                || (_activeYearId.HasValue && p.ParentPeriodId == _activeYearId.Value))
-            .ToArray();
-    }
-
-    private PeriodDto[] FilterPeriodsForGroup()
-    {
-        if (!Guid.TryParse(_activityGroupIdText, out var groupId))
-            return [];
-        var group = _activityGroups.FirstOrDefault(g => g.Id == groupId);
-        if (group is null)
-            return [];
-
-        // WholeAcademicYear targets any top-level academic year (any division).
-        if (group.Span == "WholeAcademicYear")
-            return _periods.Where(p => p.ParentPeriodId is null).ToArray();
-
-        var requiredDivision = group.Span switch
-        {
-            "Termly" => "Terms",
-            "Semester" => "Semesters",
-            _ => null // OpenEnded / DateRange carry no period.
-        };
-        if (requiredDivision is null)
-            return [];
-
-        // Termly/Semester groups target sub-periods of the active academic year
-        // when the active year is known. Fall back to any matching sub-period if
-        // the active-year lookup fails (degraded state), so the user still sees
-        // options and the server validator is the final gate.
-        return _periods.Where(p => p.Division == requiredDivision
-            && (!_activeYearId.HasValue || p.ParentPeriodId == _activeYearId.Value)).ToArray();
     }
 
     /// <summary>Switches from display mode to edit mode, snapshotting the
@@ -519,8 +425,13 @@
         // atomic call. Code is optional — the server generates it from the name
         // when blank. A brand-new topic is created; existing topics are never
         // renamed by this flow.
-        Guid? periodId = Guid.TryParse(_periodIdText, out var pid) ? pid : null;
-
+        //
+        // No period is sent: the period picker was removed in the
+        // subject-period-blocks round. A bridge row means "this topic is offered
+        // for this owner" and carries no period meaning any more — the period
+        // is now an EXCEPTION (a SubjectEnrollmentException, managed in
+        // TopicEditDialog). The wire contract still accepts PeriodId for
+        // back-compat; the server ignores it.
         if (model.OwnerType == "ActivityGroup")
         {
             if (!Guid.TryParse(_activityGroupIdText, out var groupId))
@@ -541,7 +452,7 @@
             var topicId = await Api.CreateTopicAsync(new CreateTopicRequest(
                 resolvedCvId ?? Guid.Empty, effectiveCode ?? "", model.Name.Trim(), model.DisplayOrder));
             await Api.AssignActivityGroupTopicAsync(new AssignActivityGroupTopicRequest(
-                groupId, topicId, DateOnly.FromDateTime(DateTime.UtcNow), null, periodId));
+                groupId, topicId, DateOnly.FromDateTime(DateTime.UtcNow), null));
             return await Api.GetTopicByIdAsync(topicId);
         }
 
@@ -550,8 +461,7 @@
             resolvedCvId,
             effectiveCode,
             model.Name.Trim(),
-            model.DisplayOrder,
-            periodId));
+            model.DisplayOrder));
         return topic;
     }
 }

@@ -36,10 +36,10 @@ public class UpdateTopicAssignmentPeriodTests
         NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private static AssignGradeTopicHandler NewAssignGrade(StudentsTestScope s) => new(
-        s.GradeTopicAssignments, s.Periods, s.Cache, NullLogger<AssignGradeTopicHandler>.Instance);
+        s.GradeTopicAssignments, s.Cache, NullLogger<AssignGradeTopicHandler>.Instance);
 
     private static AssignActivityGroupTopicHandler NewAssignGroup(StudentsTestScope s) => new(
-        new ActivityGroupTopicAssignmentRepository(s.Db), s.ActivityGroups, s.Periods, s.Cache,
+        new ActivityGroupTopicAssignmentRepository(s.Db), s.Cache,
         NullLogger<AssignActivityGroupTopicHandler>.Instance);
 
     private static UpdateTopicAssignmentPeriodHandler NewUpdate(StudentsTestScope s) => new(
