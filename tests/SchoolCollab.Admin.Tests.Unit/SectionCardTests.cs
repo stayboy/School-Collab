@@ -119,6 +119,23 @@ public class SectionCardTests : BunitContext
     }
 
     [TestMethod]
+    public void Renders_ItemNameSuffix_Next_To_The_Item_Name_Not_In_The_Meta_Line()
+    {
+        var cut = RenderCard(new[] { new TestItem("Mathematics", new[] { "2 strands" }) }, p => p
+            .Add(x => x.ItemNameSuffix, (TestItem i) => (RenderFragment)(b =>
+                b.AddMarkupContent(0, $"<span class=\"test-name-suffix\">{i.Name} badge</span>"))));
+
+        // The suffix rides in the SAME row as the name — which is the whole point of the slot
+        // (a count badge "next to the subject", §5.2) — and not among the meta-line parts.
+        var row = cut.Find(".item-name-row");
+        row.QuerySelector(".item-name").Should().NotBeNull("the item name is in the row");
+        row.QuerySelector(".test-name-suffix").Should().NotBeNull(
+            "the suffix renders inside the name row, directly beside the item name");
+        cut.Find(".item-meta").TextContent.Should().NotContain("badge",
+            "the suffix is not a meta-line part");
+    }
+
+    [TestMethod]
     public void Renders_ItemMetaSelector_With_Pipe_Separator()
     {
         var cut = RenderCard(new[] { new TestItem("Math", new[] { "2 strands", "3 lessons" }) });

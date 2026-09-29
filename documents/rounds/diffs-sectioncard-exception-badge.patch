@@ -1,0 +1,243 @@
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor
+index a8f00399..9522d733 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor
+@@ -95,6 +95,24 @@
+                                          ItemKeySelector="t => t.TopicId"
+                                          OnItemActionBlocked="OnTopicEditBlocked"
+                                          ItemNameTitle="Edit topic">
++                                @* The exception count sits NEXT TO the subject name (spec §5.2),
++                                   as a real badge — not as one more part of the meta line, where
++                                   it read as another strand/lesson statistic. Rendered only
++                                   when the subject carries an exception; the absence of a
++                                   badge is the normal state. The kebab is unchanged. *@
++                                <ItemNameSuffix Context="t">
++                                    @if (ExceptionCount(t.TopicId) is var exceptionCount and > 0)
++                                    {
++                                        @* "SubjectText (2)": the COUNT is the badge, the parens are plain
++                                           text, and the wrapper keeps the whole token ONE flex item — the name
++                                           row is a flex container with a gap, so a bare ( badge ) would gain
++                                           spaces around each piece. Kept on one line for the same reason:
++                                           no whitespace text node may land between the pieces.
++                                           Red (Color.Red) is the danger signal: an exception is the
++                                           subject NOT being offered, i.e. a restriction, not a highlight. *@
++                                        <span class="item-name-count">(<FluentBadge Color="Color.Red" Title="@EnrollmentExceptionLabels.FormatCount(exceptionCount)">@exceptionCount</FluentBadge>)</span>
++                                    }
++                                </ItemNameSuffix>
+                                 <ItemActions Context="t">
+                                     <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
+                                                     UseMenuService="false"
+@@ -290,22 +308,13 @@
+     private int ExceptionCount(Guid topicId) => _exceptions.Count(x => x.TopicId == topicId);
+ 
+     /// <summary>
+-    /// Card meta line: the exception count badge first (only when there are exceptions —
+-    /// the absence of one is the normal state), then the strand/lesson counts.
++    /// Card meta line: the strand/lesson counts. The enrollment-exception count is NOT
++    /// here — it is a BADGE rendered next to the subject NAME by <c>ItemNameSuffix</c>,
++    /// because a count mixed into the strand/lesson text reads as one more statistic,
++    /// while the spec asks for a badge "next to the subject" (§5.2).
+     /// </summary>
+-    private string[] SubjectMeta(GradeTopicCurriculumDto t)
+-    {
+-        var exceptionCount = ExceptionCount(t.TopicId);
+-        var meta = new List<string>(3);
+-        if (exceptionCount > 0)
+-        {
+-            meta.Add(EnrollmentExceptionLabels.FormatCount(exceptionCount));
+-        }
+-
+-        meta.Add($"{t.StrandCount} strands");
+-        meta.Add($"{t.LessonCount} lessons");
+-        return [.. meta];
+-    }
++    private string[] SubjectMeta(GradeTopicCurriculumDto t) =>
++        [$"{t.StrandCount} strands", $"{t.LessonCount} lessons"];
+ 
+     /// <summary>
+     /// The dedicated management page's URL for one of this grade's subjects, with the
+@@ -376,9 +385,9 @@
+                 _genderName = (await CodedValuesApi.GetByIdAsync(gid, ct))?.Name;
+             }
+ 
+-            // Enrollment exceptions for the Subjects card's meta line (an exception names
+-            // the period part and the span a subject is NOT offered in — the bridge row
+-            // keeps no period meaning).
++            // Enrollment exceptions for the Subjects card's name badge (an exception
++            // names the period part and the span a subject is NOT offered in — the bridge
++            // row keeps no period meaning).
+             // Best-effort: without them the card reads as "offered in every period".
+             await ReloadExceptionsAsync(ct);
+ 
+@@ -749,7 +758,7 @@
+     }
+ 
+     /// <summary>
+-    /// Reloads the grade's enrollment exceptions. The Subjects card's meta line and
++    /// Reloads the grade's enrollment exceptions. The Subjects card's name BADGE and
+     /// the "View all subjects" dialog both render them as a read-only count.
+     /// Best-effort: a failure leaves the card with no exception badge rather than
+     /// breaking the page.
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionLabels.cs b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionLabels.cs
+index b81f4a8d..a0273f7f 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionLabels.cs
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionLabels.cs
+@@ -3,7 +3,7 @@ namespace SchoolCollab.Students.Application.Components.Students;
+ /// <summary>
+ /// The single spelling of an enrollment-exception <b>count</b> across the surfaces
+ /// that show one (subject-period-exception-model.md v3 §5.2): the Topics landing's
+-/// column badge, the grade-detail card's meta line, the View-all dialog's row badge,
++/// column badge, the grade-detail card's name badge, the View-all dialog's row badge,
+ /// and the management page's own list badge.
+ ///
+ /// <para>Introduced because the count text had been inlined at three call sites when
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor
+index 0384b4f8..d11a7a44 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor
+@@ -43,6 +43,7 @@
+                 {
+                     <div class="section-card__item">
+                         <div class="section-card__item-main">
++                            <div class="item-name-row">
+                             @if (ItemTextSelector is { } textSel)
+                             {
+                                 if (ItemHrefSelector is { } hrefSel && hrefSel(item) is { } href)
+@@ -64,6 +65,11 @@
+                                     <span class="item-name">@textSel(item)</span>
+                                 }
+                             }
++                            @if (ItemNameSuffix is { } nameSuffix)
++                            {
++                                @nameSuffix(item)
++                            }
++                            </div>
+                             @if (ItemMetaSelector is { } metaSel && metaSel(item) is { } metaItems)
+                             {
+                                 <div class="item-meta">
+@@ -174,6 +180,14 @@
+     /// </summary>
+     [Parameter] public Func<TItem, string[]?>? ItemMetaSelector { get; set; }
+ 
++    /// <summary>
++    /// Optional markup rendered immediately AFTER the item name, on the same line
++    /// (e.g. a count badge). A <see cref="RenderFragment{T}"/> rather than a selector:
++    /// the caller owns the markup, so there is no string to format. Ignored when
++    /// <see cref="ItemTemplate"/> is used.
++    /// </summary>
++    [Parameter] public RenderFragment<TItem>? ItemNameSuffix { get; set; }
++
+     /// <summary>
+     /// Returns the navigation URL for each item; when set, the item name renders
+     /// as a real hypertext link that navigates to this URL.
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor.css b/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor.css
+index 24b9b290..d898705a 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor.css
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor.css
+@@ -106,6 +106,20 @@
+     padding: 0;
+     justify-content: flex-start;
+ }
++/* The name and its optional suffix (e.g. an exception-count badge) share ONE row, so
++   the badge sits directly beside the subject text. `flex` replaces .item-name's
++   `width: 100%` so the name takes the remaining space and the suffix follows it. */
++.item-name-row {
++    display: flex;
++    align-items: center;
++    gap: 0.5rem;
++    min-width: 0;
++}
++.item-name-row .item-name {
++    flex: 1 1 auto;
++    width: auto;
++    min-width: 0;
++}
+ .item-meta {
+     color: var(--neutral-foreground-hint, #6b6b6b);
+     font-size: 0.82em;
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelDetailPageTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelDetailPageTests.cs
+index 791aca8e..3b0a0dea 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelDetailPageTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelDetailPageTests.cs
+@@ -426,8 +426,22 @@ public class GradeLevelDetailPageTests : BunitContext
+         // One card row for one subject, even though it carries two exceptions.
+         cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
+ 
+-        // The card shows a COUNT badge — never a period name, never a span list.
+-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("2 exceptions"));
++        // The card shows a COUNT BADGE next to the subject NAME — never a period name, never a
++        // span list, and no longer buried in the strand/lesson meta line (v7 follow-up: a count
++        // among the strand/lesson text read as one more statistic, not as the spec's badge).
++        cut.WaitForAssertion(() =>
++        {
++            var nameRow = cut.FindAll(".item-name-row")
++                .Single(r => r.QuerySelector("fluent-badge") is not null);
++            nameRow.QuerySelector(".item-name")!.TextContent.Trim().Should().Be("Mathematics",
++                "the badge rides beside the subject NAME");
++            nameRow.QuerySelector("fluent-badge")!.TextContent.Trim().Should().Be("2",
++                "the badge carries the COUNT alone — the shared formatter is the tooltip");
++            nameRow.QuerySelector(".item-name-count")!.TextContent.Trim().Should().Be("(2)",
++                "the row reads SubjectText (2)");
++            nameRow.ParentElement!.QuerySelector(".item-meta")!.TextContent.Should().NotContain("exception",
++                "the count is a badge beside the name, not a meta-line statistic");
++        });
+ 
+         // The exceptions are READ-ONLY here: the kebab NAVIGATES to the management page
+         // (see the source-wiring test), and the row's own actions are covered by
+@@ -439,7 +453,7 @@ public class GradeLevelDetailPageTests : BunitContext
+             .Click();
+         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topic actions"),
+             TimeSpan.FromSeconds(5));
+-        cut.Markup.Should().Contain("2 exceptions",
++        cut.Find(".topic-dialog").TextContent.Should().Contain("2 exceptions",
+             "the subject's exception count renders in the View-all dialog too");
+     }
+ 
+@@ -1029,11 +1043,15 @@ public class GradeLevelDetailPageTests : BunitContext
+         source.Should().Contain("private string[] SubjectMeta(", "SubjectMeta renders the meta line parts");
+         // TRAP REPLACEMENT (i), intent-preserving: v1 asserted the card sourced its
+         // per-period label from the (now retired) label helper. That label concept
+-        // dissolved into a COUNT badge, so the surviving intent — "the card's meta line
+-        // leads with this subject's enrollment exceptions" — is asserted at its new
+-        // source: the per-topic exception count feeding the badge.
++        // dissolved into a COUNT badge, and the badge now sits NEXT TO THE SUBJECT NAME
++        // (spec §5.2) via the SectionCard ItemNameSuffix slot — not in the meta line,
++        // where it read as one more strand/lesson statistic. The intent — "the card shows
++        // this subject's enrollment-exception count" — is asserted at its new source: the
++        // per-topic count feeding the badge.
++        source.Should().Contain("<ItemNameSuffix Context=\"t\">",
++            "the card wires the badge into the shared next-to-the-name slot");
+         source.Should().Contain("ExceptionCount(t.TopicId)",
+-            "the meta line leads with the subject's exception COUNT badge");
++            "the badge is fed by the subject's per-topic exception COUNT");
+         source.Should().Contain("EnrollmentExceptionLabels.FormatCount(exceptionCount)",
+             "the badge text is rendered from that count by the ONE shared count formatter");
+         // TRAP REPLACEMENT (ii), intent-preserving: v1 asserted the card carried NO
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/SectionCardTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/SectionCardTests.cs
+index 0f6f2d37..1e3a5c38 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/SectionCardTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/SectionCardTests.cs
+@@ -118,6 +118,23 @@ public class SectionCardTests : BunitContext
+             "with no href/click the item name renders as a plain span, not an anchor");
+     }
+ 
++    [TestMethod]
++    public void Renders_ItemNameSuffix_Next_To_The_Item_Name_Not_In_The_Meta_Line()
++    {
++        var cut = RenderCard(new[] { new TestItem("Mathematics", new[] { "2 strands" }) }, p => p
++            .Add(x => x.ItemNameSuffix, (TestItem i) => (RenderFragment)(b =>
++                b.AddMarkupContent(0, $"<span class=\"test-name-suffix\">{i.Name} badge</span>"))));
++
++        // The suffix rides in the SAME row as the name — which is the whole point of the slot
++        // (a count badge "next to the subject", §5.2) — and not among the meta-line parts.
++        var row = cut.Find(".item-name-row");
++        row.QuerySelector(".item-name").Should().NotBeNull("the item name is in the row");
++        row.QuerySelector(".test-name-suffix").Should().NotBeNull(
++            "the suffix renders inside the name row, directly beside the item name");
++        cut.Find(".item-meta").TextContent.Should().NotContain("badge",
++            "the suffix is not a meta-line part");
++    }
++
+     [TestMethod]
+     public void Renders_ItemMetaSelector_With_Pipe_Separator()
+     {

@@ -426,8 +426,22 @@ public class GradeLevelDetailPageTests : BunitContext
         // One card row for one subject, even though it carries two exceptions.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
 
-        // The card shows a COUNT badge — never a period name, never a span list.
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("2 exceptions"));
+        // The card shows a COUNT BADGE next to the subject NAME — never a period name, never a
+        // span list, and no longer buried in the strand/lesson meta line (v7 follow-up: a count
+        // among the strand/lesson text read as one more statistic, not as the spec's badge).
+        cut.WaitForAssertion(() =>
+        {
+            var nameRow = cut.FindAll(".item-name-row")
+                .Single(r => r.QuerySelector("fluent-badge") is not null);
+            nameRow.QuerySelector(".item-name")!.TextContent.Trim().Should().Be("Mathematics",
+                "the badge rides beside the subject NAME");
+            nameRow.QuerySelector("fluent-badge")!.TextContent.Trim().Should().Be("2",
+                "the badge carries the COUNT alone — the shared formatter is the tooltip");
+            nameRow.QuerySelector(".item-name-count")!.TextContent.Trim().Should().Be("(2)",
+                "the row reads SubjectText (2)");
+            nameRow.ParentElement!.QuerySelector(".item-meta")!.TextContent.Should().NotContain("exception",
+                "the count is a badge beside the name, not a meta-line statistic");
+        });
 
         // The exceptions are READ-ONLY here: the kebab NAVIGATES to the management page
         // (see the source-wiring test), and the row's own actions are covered by
@@ -439,7 +453,7 @@ public class GradeLevelDetailPageTests : BunitContext
             .Click();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topic actions"),
             TimeSpan.FromSeconds(5));
-        cut.Markup.Should().Contain("2 exceptions",
+        cut.Find(".topic-dialog").TextContent.Should().Contain("2 exceptions",
             "the subject's exception count renders in the View-all dialog too");
     }
 
@@ -1029,11 +1043,15 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("private string[] SubjectMeta(", "SubjectMeta renders the meta line parts");
         // TRAP REPLACEMENT (i), intent-preserving: v1 asserted the card sourced its
         // per-period label from the (now retired) label helper. That label concept
-        // dissolved into a COUNT badge, so the surviving intent — "the card's meta line
-        // leads with this subject's enrollment exceptions" — is asserted at its new
-        // source: the per-topic exception count feeding the badge.
+        // dissolved into a COUNT badge, and the badge now sits NEXT TO THE SUBJECT NAME
+        // (spec §5.2) via the SectionCard ItemNameSuffix slot — not in the meta line,
+        // where it read as one more strand/lesson statistic. The intent — "the card shows
+        // this subject's enrollment-exception count" — is asserted at its new source: the
+        // per-topic count feeding the badge.
+        source.Should().Contain("<ItemNameSuffix Context=\"t\">",
+            "the card wires the badge into the shared next-to-the-name slot");
         source.Should().Contain("ExceptionCount(t.TopicId)",
-            "the meta line leads with the subject's exception COUNT badge");
+            "the badge is fed by the subject's per-topic exception COUNT");
         source.Should().Contain("EnrollmentExceptionLabels.FormatCount(exceptionCount)",
             "the badge text is rendered from that count by the ONE shared count formatter");
         // TRAP REPLACEMENT (ii), intent-preserving: v1 asserted the card carried NO

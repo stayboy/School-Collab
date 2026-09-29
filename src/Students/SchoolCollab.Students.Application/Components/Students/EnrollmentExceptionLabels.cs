@@ -3,7 +3,7 @@ namespace SchoolCollab.Students.Application.Components.Students;
 /// <summary>
 /// The single spelling of an enrollment-exception <b>count</b> across the surfaces
 /// that show one (subject-period-exception-model.md v3 §5.2): the Topics landing's
-/// column badge, the grade-detail card's meta line, the View-all dialog's row badge,
+/// column badge, the grade-detail card's name badge, the View-all dialog's row badge,
 /// and the management page's own list badge.
 ///
 /// <para>Introduced because the count text had been inlined at three call sites when
