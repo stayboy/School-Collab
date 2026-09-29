@@ -555,24 +555,25 @@ public class SubjectsLandingPageTests : BunitContext
     {
         var source = ReadSubjectsSource();
 
-        source.Should().Contain("?activityGroupId=",
-            "Q1: a group-owned row navigates with the GROUP owner pre-selected — the action is not grade-only");
-        source.Should().Contain("RowAction.Navigate(\"Enrollment exceptions\"",
-            "the affordance navigates to the management page instead of opening an editor");
+        source.Should().Contain("OwnerType = \"ActivityGroup\"",
+            "Q1: a group-owned row opens the dialog scoped to the GROUP owner — the action is not grade-only");
+        source.Should().Contain("RowAction.Callback(\"Enrollment exceptions\"",
+            "the affordance opens the management dialog instead of navigating to a page");
         source.Should().MatchRegex(
-            @"if \(ExceptionPageUrl\(row\.Id\) is \{ \} exceptionsUrl\)\s*\{\s*actions\.Add\(RowAction\.Navigate\(",
+            @"if \(EnrollmentExceptionsScope\(row\) is not null\)\s*\{\s*actions\.Add\(RowAction\.Callback\(",
             "Q1: the action is gated on a RESOLVABLE OWNER, never on the owner type — a group-owned row gets it too");
     }
 
     /// <summary>
     /// <b>Replaces</b> v1's <c>EnrollmentExceptionsAction_OpensTheBlocksDialogForThatRow</c>.
-    /// Invoking the action must take the user to the dedicated management page FOR THAT
-    /// ROW: owner and topic travel in the URL so the page lands pre-selected (spec §5.2).
-    /// Nothing opens inline — the action is a navigating <see cref="RowAction.Navigate"/>,
-    /// which has no callback at all, so no editor can be opened from the card.
+    /// Invoking the action must take the user to the exception editor FOR THAT ROW: owner and
+    /// topic travel as the dialog's locked scope, so the dialog lands on exactly that subject
+    /// (spec §5.2, v8 §5.1). Nothing opens inline — the action is a
+    /// <see cref="RowAction.Callback"/>, which carries no href at all, so the retired page's
+    /// URL cannot come back.
     /// </summary>
     [TestMethod]
-    public void EnrollmentExceptionsAction_NavigatesToThePageForThatRow()
+    public void EnrollmentExceptionsAction_OpensTheDialogForThatRow()
     {
         var gradeId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
@@ -588,11 +589,13 @@ public class SubjectsLandingPageTests : BunitContext
 
         var action = SingleRowActions(harness.Cut).First(a => a.Label == "Enrollment exceptions");
 
-        action.Href.Should().Be(
-            $"/students/enrollment-exceptions?gradeLevelId={gradeId}&topicId={topicId:D}",
-            "the kebab NAVIGATES with the owner + topic pre-selected — no editor opens on the card");
-        action.OnClick.Should().BeNull(
-            "a navigating action carries no callback, so no dialog path exists from here");
+        action.Href.Should().BeNull(
+            "the affordance no longer navigates — the /students/enrollment-exceptions page was retired (D1)");
+        action.OnClick.Should().NotBeNull(
+            "the kebab OPENS the EnrollmentExceptionsDialog scoped to this owner + subject (D7)");
+
+        ReadSubjectsSource().Should().Contain("EnrollmentExceptionsDialog",
+            "the call site opens the dialog rather than pointing at a URL");
     }
 
     /// <summary>

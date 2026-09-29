@@ -1,6 +1,6 @@
 # Spec: Subject Enrollment Exceptions (decouple subject availability from the period lifecycle)
 
-> **Status:** **v6 — bulk sequence selection + the span HIDDEN when it is derived, 2026-09-29 — decisions 17–19 LOCKED and IMPLEMENTED.** **v5 — the part is CHOSEN, and the position is persisted 2026-09-28.** v1
+> **Status:** **v8 — the management PAGE becomes a DIALOG, 2026-09-29 — decisions D1–D9 LOCKED and IMPLEMENTED.** **v7 — the span belongs to the free window and an unbacked position is disabled, 2026-09-30.** **v6 — bulk sequence selection + the span HIDDEN when it is derived, 2026-09-29 — decisions 17–19 LOCKED and IMPLEMENTED.** **v5 — the part is CHOSEN, and the position is persisted 2026-09-28.** v1
 > (period-only "blocks", grade-only UI) was implemented through phase 1 and reviewed CLOSED.
 > v2 widened it to date windows and activity groups; **v3 removed the `PeriodId` dependency
 > entirely** — an exception is expressed as a **period part** (term / semester) plus a
@@ -19,6 +19,15 @@
 > the add form's Position control a **multi-select** (several sequences written in one action) and
 > **hides the date span whenever it is derived** from a period. Decisions **17–19** (§0) amend §5.1,
 > §6 and §10 — see **§11**. Route **A** needs **no migration**.
+> **v8 (2026-09-29) is LOCKED and IMPLEMENTED — a surface change only, no migration and no**
+> **API change**: the dedicated `/students/enrollment-exceptions` page is **retired (D1, no
+> redirect)** and its list + add form move into the **`EnrollmentExceptionsDialog`**, opened from the
+> three subject-row surfaces (§5.2). The dialog's **scope is locked** to one owner + one subject
+> (D5), so the page's owner toggle, its Grade-Level/Subject filter row and its query-string
+> pre-selection are **retired with it** (§5.3). **v8 amends §5.1 and §5.2 only** — the entity, the
+> invariants, the availability predicate, the FR-56/57/58 validation and the API surface are
+> **unchanged**, and **§11.7's v7 rules carry into the dialog unchanged** (the part is CHOSEN, the
+> range belongs to `Any date` alone, and a position with no period behind it renders DISABLED).
 > **Owner:** Students context (`SchoolCollab.Students.Core` / `.Api` / `.Application`)
 > **Cross-context impact:** `SchoolCollab.Assignments.Core` — FR-58 and `ITopicAssignmentLookup`
 > **Supersedes:** the `GradeTopicAssignment.PeriodId` whitelist semantics from
@@ -419,39 +428,70 @@ resolution, no id set.
 
 ---
 
-## 5. Surfaces — one management page, thin entry points
+## 5. Surfaces — one management dialog, thin entry points
 
-### 5.1 The page (primary, and the only place exceptions are edited)
+### 5.1 The dialog (primary, and the only place exceptions are edited)
 
-`EnrollmentExceptions` page under Students, owner-aware. **Redesigned in v4** (owner review of
-the shipped v3 page, which was reported clumsy and duplicative). The thesis: **one subject
-per view, and one control owns it.**
+`EnrollmentExceptionsDialog` under Students, **opened from** the three subject-row surfaces (§5.2).
+**v8 (2026-09-29, owner decisions D1–D9)** retired the dedicated
+`/students/enrollment-exceptions` page and moved its list + add form into this dialog: the page's
+owner toggle, its `Grade Level` + `Subject` filter row and its `?gradeLevelId=` / `?activityGroupId=`
+/ `?topicId=` query-string pre-selection were exactly the chrome the dialog exists to delete.
+**No redirect** — the retired URL 404s (the states that went with it are recorded in §5.3).
 
-- **The filter row — `Grade Level` + `Subject`, on one line (decision 11).** This row is
-  the page's only subject control, and it is the page's scope: the list, the count badge and
-  the add form all describe exactly the subject it names.
-  - `Grade Level` mirrors the Topics landing's owner toggle — a grade level **or** an
-    activity group (the group side gated by `FEATURE:EnableActivityGroups`), rendered in
-    the same slot.
-  - `Subject` lists the owner's subjects plus an **"All subjects"** option. Choosing
-    "All subjects" *is* the reset — there is no separate "Show all" button, because a filter
-    is reset by changing the filter. It is the owner's **whole set**, so it lists every row
-    (see the empty states below).
-  - With no subject in scope the add section is **closed**, not merely disarmed: the add
-    section's subject IS the filter's, so with "All subjects" there is nothing to write for.
-  - Arriving from an entry point (§5.2) with `?gradeLevelId=` / `?activityGroupId=` /
-    `?topicId=` pre-selects the row; the subject is only applied once the owner's subject list
-    has loaded, so a subject the owner does not list leaves the row unscoped rather than
-    filtering to nothing.
-- **List**: subject, the **period part** (`Term` / `Semester` / `Any date` — decision 14), the
-  span in words (`Term 3`, `1–14 Mar 2027`, `1 Mar 2027 – 30 Jun 2027`, `from 1 Mar 2027`,
-  `to 14 Mar 2027`), the optional reason, and a delete control. When a subject is in scope
-  the subject column is redundant with the filter and is **omitted**; the row shows part,
-  span, reason, delete. Open-start spans lead (the widest span first).
-- **Add**: the subject comes from the filter (**defaulted**, decision 11) and is shown in the
-  add section's heading ("Add exception for *Mathematics*") — **not** a second dropdown.
-  With "All subjects" in force the add section renders a prompt instead of a form: *"Choose a
-  subject above to add an exception for."*
+The thesis is v4's — **one subject per view** — but the scope is now **LOCKED and supplied by the
+call site (D5)**: the dialog opens for ONE owner + ONE subject, both rendered **read-only**, and the
+reader chooses only the part, the position, the span and the reason.
+
+- **Scope (locked, D5).** The dialog's model carries an owner kind (`GradeLevel` or
+  `ActivityGroup`, D6), an owner id, an owner name, a topic id and a topic name. The group side
+  keeps its `FEATURE:EnableActivityGroups` gate **at the call site** (the Topics landing's owner
+  toggle) — **no new flag**. There is **no owner toggle and no subject picker**: the dialog's own
+  title names the subject (`Enrollment exceptions — Mathematics`) and the owner renders as a
+  read-only description beside the subject heading.
+- **Two regions, both always visible (D2)** — the subject's exception list on top, the add form
+  below, separated by a `border-top` on the add region (`dialog-ui` §2 — a CSS `border-top`, never a
+  `FluentDivider`/`<hr>`). No mode swap, no `SideDrawer`.
+- **List**: the **period part** (`Term` / `Semester` / `Any date` — decision 14), the
+  span in words (`1–14 Mar 2027`, `1 Mar 2027 – 30 Jun 2027`, `from 1 Mar 2027`,
+  `to 14 Mar 2027`), the optional reason, and a delete control. The subject column is
+  **omitted** — the dialog is already one subject, so the name belongs to the heading, not to
+  every row. Open-start spans lead (the widest span first). The list is read with the locked
+  scope's `topicId`, so it shows that subject's rows and nothing else.
+- **Add (D3/D4).** The add form IS the shared shell's
+  `<EditForm OnValidSubmit="HandleSubmitAsync">` (`DialogShellBase`, `dialog-ui` §1–§4), so
+  **`Add exception` is the shell footer's own submit** — with the §2 `border-top` separator and the
+  footer's error bar — and the heading names only the REGION ("Add exception"): the dialog's own
+  title already names the subject, so repeating it in the heading said nothing (amendment below).
+  **`SubmitAsync` returns `null` on success after re-reading the list**, which
+  keeps the dialog OPEN: it is a management surface, not a single-shot form. `Error` is set **only
+  on failure** (D3), and the server's own sentence is what it carries (D8, decision 12).
+  - **The add form is GATED behind an action (amendment, owner request 2026-09-29).** With a
+    NON-EMPTY list the entry fields render **disabled** — greyed in place, never collapsed — and the
+    add region's heading row carries an outlined **`+ Add exception`** trigger. Clicking it **arms**
+    the form and the trigger disappears, so it is never on screen beside an armed form (and never
+    competes with the footer's own `Add exception`). An **empty** list is armed by *construction*
+    (there is nothing to read and adding is the only thing left to do), so it renders no trigger at
+    all; a list that is still **loading** is deliberately not armed. A **successful** add clears every
+    entry field it consumed — the ticked positions, both range ends, the reason — and returns the
+    division to the default the dialog opens on, then re-derives the gate, so deleting the last row
+    re-arms the form with no special case. A **rejected** write changes none of that: the reader keeps
+    the part and the sequence they chose (D8). `Disabled` on a position still ALSO means "no period
+    backs it" (v7, decision 21) — arming the form never makes an unbacked position selectable — and
+    the "Choose a position to add an exception" note stays silent while the form is gated, because
+    its advice is not yet reachable.
+  - **An armed form carries its own escape (`Reset`) — amendment, owner request 2026-09-29.**
+    Where the trigger sat, an armed form offers an outlined **`Reset`**: it abandons the pending add —
+    discarding the chosen part, the ticked sequences, both range ends and the reason through the
+    **same one clear a consumed write uses** (a single `ClearAddForm`, never a second copy, so a
+    post-add clear and a Reset clear cannot drift apart) — then re-derives the gate. It writes
+    **nothing** and leaves the dialog **open**. `Reset` is the trigger's exact inverse —
+    `ShowAddReset => _addTriggered && _exceptions is { Length: > 0 }` — so the two are never on screen
+    together. The list-length clause is **load-bearing, not decorative**: a reader can arm the form and
+    then remove the LAST row, so without it the Reset survives onto an empty list — where the form is
+    live by *construction* (F1's first clause) and there is genuinely nothing to cancel. A removal that
+    empties the list also disarms the flag outright, so it cannot outlive the row set it was armed
+    against.
   - **"Fill from" — the part is CHOSEN (decision 16, reversing 13).** A dropdown of
     `Term` / `Semester` / `Any date`: the divisions the tenant has periods for plus the free
     window for a grade owner, and exactly the one division FR-56 permits for a group owner.
@@ -478,47 +518,78 @@ per view, and one control owns it.**
     chosen: each span is then DERIVED from its own position's period and kept **silent** (v6 §11.2 —
     no read-only text either). It stays removed even when no position is ticked yet; that state is a
     pre-write state, named by the add section's note, not a reason to bring the pickers back.
-    The **period instance picker is gone entirely** — the page has no period selection any more,
+    The **period instance picker is gone entirely** — the dialog has no period selection any more,
     only a division and a set of sequences.
   - The layout is the house form primitive (`FormRow`) with the label **beneath** its input
     (round owner decisions **Q3/Q7**, 2026-09-28 — an optional parameter on the shared
     `FormRow`), which replaces v4's floating read-only part badge and the
     `margin-top` nudge that kept it on the row's label line.
   - Optional **reason**, then **Add exception** — which posts ONE request carrying one item per
-    ticked sequence, each with its own span and ordinal.
-- **Empty states are normal prose, never a warning**, and there are exactly **two**, because
-  there is only one distinction that matters — *is a subject in scope?* "All subjects" is not
-  a third case: it is the owner's **whole set**, so it lists everything. (An earlier draft of
-  this section specified a third state that PROMPTED instead of listing when "All subjects"
-  was chosen and the owner had rows — which would have made the option hide the very set it
-  promises to show. Corrected here and in the implementation.)
-  1. *No subject in scope, owner has none* — "No exceptions — every subject is offered on
-     every date."
-  2. *A subject is in scope and has none* — "No exceptions for **Mathematics** — this subject
-     is offered on every date." The owner's default sentence would be **false** here (the owner
-     may well have an exception, just not this subject's), which is why the two cannot be one.
-- **Immediate write.** No Save button, no form model — a submit-shaped page here would either
-  lie or silently persist something else. A successful write re-reads the list; a 409/422
-  surfaces the server's sentence verbatim.
-- **The count badge counts the OWNER's total**, not the filtered rows, and is shown only
-  when that total is non-zero. Under a subject filter it is what tells the reader the rows
-  below are a subset.
+    ticked sequence, each with its own span and ordinal. A successful write re-reads the list
+    (so the rows are the server's answer, not a hopeful local append) and the dialog stays open; a
+    409/422 surfaces the server's sentence verbatim in the footer's error bar and keeps the
+    reader's part and sequence, so a retry is one click.
+- **One empty state, because the scope is fixed (D5).** A subject is ALWAYS in scope, so the
+  sentence is always the subject-scoped one: "No exceptions for **Mathematics** — this subject is
+  offered on every date." It is plain prose (zero exceptions is the NORMAL state, FR-ED-14
+  dissolved), never a warning. The page's *owner-wide* variant ("No exceptions — every subject is
+  offered on every date") and its *no-subject-selected* branch are **retired with the filter that
+  produced them** (§5.3).
+- **Immediate write, in shell form.** There is no Save control of the dialog's own: the write IS
+  the shell's submit (D3), shaped as "Add exception", and the list is a management region beside it.
+  A success returns `null` and stays open; a 409/422 surfaces the server's sentence verbatim.
+- **The count badge counts the SUBJECT's rows**, and is shown only when that count is non-zero.
+  The dialog is scoped to one subject, so there is no wider set for a badge to qualify: the badge
+  and the list are the same set.
 
-### 5.2 Entry points (thin — badge + navigation only)
+### 5.2 Entry points (thin — badge + dialog only)
+
+Every entry point is a **`RowAction.Callback`** (D7) that opens the `EnrollmentExceptionsDialog`
+with the owner + subject as its locked scope; **no surface carries a list, an inline editor or a
+link to an exception page**. `SectionCard` is untouched — it already takes `Actions` as a parameter.
 
 | Surface | What it shows |
 |---|---|
-| **Topics landing** (`/students/subjects`) | per-row **count badge**; the kebab's **"Enrollment exceptions"** action navigates to the page with owner + topic pre-selected. Owner gate **widened to include activity groups** (owner-confirmed 2026-09-26 — the v1 grade-only rationale is void because exceptions now have group owners, and the landing already resolves `ActivityGroupId` per row). |
-| **Activity groups landing / details** | ⏸ **DEFERRED (owner sign-off 2026-09-26) — not in this round.** These two pages render **no subject list** (verified: every `topic\|subject` hit is a `catch (Exception ex)`), so this row presupposes a surface that does not exist. The group side remains fully reachable via the management page's owner toggle (§5.1). Revisit only if a per-subject surface is added there. |
-| **Grade-detail Subjects card** (`GradeLevels/Detail.razor`) | a **count badge** next to the subject (`2 exceptions`) plus a kebab that **navigates**. **No list, no inline editor.** |
-| **`GradeTopicsDialog`** (View all subjects) | the same count badge and navigating action. |
+| **Topics landing** (`/students/subjects`) | per-row **count badge**; the kebab's **"Enrollment exceptions"** action **opens the dialog** scoped to the owner in force + that row's subject, and reloads the landing on close so the badge reflects what the dialog wrote. Owner gate **widened to include activity groups** (owner-confirmed 2026-09-26 — the v1 grade-only rationale is void because exceptions now have group owners, and the landing already resolves `ActivityGroupId` per row); a row with no resolvable owner still gets **no action** (nothing to attach an exception to). |
+| **Activity groups landing / details** | ⏸ **DEFERRED (owner sign-off 2026-09-26) — not in this round.** These two pages render **no subject list** (verified: every `topic\|subject` hit is a `catch (Exception ex)`), so this row presupposes a surface that does not exist. The group side remains fully reachable from the **Topics landing** (its owner toggle lists group-owned rows, whose kebab opens the dialog scoped to the group). Revisit only if a per-subject surface is added there. |
+| **Grade-detail Subjects card** (`GradeLevels/Detail.razor`) | a **count badge** next to the subject (`2 exceptions`) plus a kebab that **opens the dialog** scoped to this grade + subject, then reloads the grade's exception counts on close. **No list, no inline editor.** |
+| **`GradeTopicsDialog`** (View all subjects) | the same count badge and the same dialog-opening action, following this dialog's own precedent of opening Strands/Teachers from a `RowAction.Callback` (its `Func<Guid, Task>` callback hands the dialog a topic id, which the page resolves to the scope). |
 
 > **Why a badge rather than v1's descriptive label** (owner decision): listing
 > exceptions on the card makes a complex UI; a count badge is scannable and the kebab
 > takes you to the detail. `Offered in every period` therefore **disappears** from the
 > card — the absence of a badge is the normal state.
 
-### 5.3 Retired in v3
+### 5.3 Retired surfaces
+
+**Retired in v8 — the page and its chrome (2026-09-29, D1–D9):**
+
+- **`EnrollmentExceptions.razor` + `.razor.css`** — the dedicated
+  `/students/enrollment-exceptions` page, **deleted (D1)**. **No redirect**: the URL 404s, per the
+  spec's own precedent for a surface that no longer exists (§8 Q5 removed the dead `?periodId=`
+  filter rather than leave a deprecated no-op). The `@page` route is gone with the file.
+- **The page's chrome and the states that only existed for it** — retired because the dialog's
+  scope is locked (D5), not because the behaviour changed:
+  - the **owner toggle** (grade level / activity group) and its `_activityGroupsEnabled`
+    `FEATURE:EnableActivityGroups` gate — the flag gate stays **at the call site** (D6);
+  - the **`Subject` filter row** and the **"All subjects"** option, with the two behaviours that
+    hung off it (the *closed* add section and its *"Choose a subject above…"* prompt);
+  - the **owner prompt** ("Select a grade level or an activity group…"), which was the landing
+    state of a page that could have no owner;
+  - the **query-string pre-selection** (`?gradeLevelId=` / `?activityGroupId=` / `?topicId=` and
+    its `_loadedQueryKey` re-application) — the scope now arrives on the dialog's model;
+  - the page's `<h1>` / `PageTitle` / hint line, and the **owner-wide empty state**
+    ("No exceptions — every subject is offered on every date") that only a whole-set view could
+    produce;
+  - the affordances that pointed at the page (`RowAction.Navigate("Enrollment exceptions", …)`
+    on all three surfaces, and `GradeTopicsDialog`'s `ExceptionPageUrlKey` / `ExceptionPageUrl`) —
+    replaced by `RowAction.Callback` + `OpenEnrollmentExceptionsKey` / `OpenEnrollmentExceptions`, so
+    the kebab OPENS the dialog instead of navigating away.
+- **Nothing else moved**: `SectionCard.razor(.css)` is untouched (it takes `Actions` as a
+  parameter), and the API surface, the entity, the validation and `EnrollmentExceptionLabels` are
+  as v7 left them.
+
+**Retired in v3:**
 
 - **`SubjectBlocksDialog`** (v1) — replaced by the page; its body becomes the page's
   list section.
@@ -540,7 +611,7 @@ per view, and one control owns it.**
 
 `RequiresEnrollment` (`subject-enrollment-requirement-flag.md`) decides *who* may
 receive work, on the same Subjects card and topic edit dialog. It does **not** touch
-this page; see that spec §8 (FR-ER-25/FR-ER-27).
+this spec's surfaces; see that spec §8 (FR-ER-25/FR-ER-27).
 
 ---
 
@@ -552,7 +623,7 @@ method on the students group chain**, never inline in `Program.cs`.
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/students/enrollment-exceptions?gradeLevelId={id}` | list a grade's exceptions (or `?activityGroupId={id}`), optional `&topicId={id}` |
-| `GET` | `/students/enrollment-exceptions/check?gradeLevelId={id}&topicId={id}&onDate={date}` — **or** `?activityGroupId={id}&topicId={id}&onDate={date}` | is this topic excepted on this date (pickers) — accepts **either** owner form, mirroring the list route, so both sides of the owner toggle (§5.1) have a check |
+| `GET` | `/students/enrollment-exceptions/check?gradeLevelId={id}&topicId={id}&onDate={date}` — **or** `?activityGroupId={id}&topicId={id}&onDate={date}` | is this topic excepted on this date (the dialog's pickers/hint) — accepts **either** owner form, mirroring the list route, so both owner kinds (§5.1) can ask |
 | `POST` | `/students/enrollment-exceptions` | create — `division` + `startDate`/`endDate` (at least one bound) + optional `ordinal` (v5: the chosen position; **422** on a free window, and never consulted by availability or by the duplicate check) |
 | `DELETE` | `/students/enrollment-exceptions/{id}` | remove (idempotent soft delete) |
 

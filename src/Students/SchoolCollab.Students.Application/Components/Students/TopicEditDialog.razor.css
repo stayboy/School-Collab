@@ -28,5 +28,5 @@
     border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
 }
 
-/* Enrollment exceptions moved to the EnrollmentExceptions management page
-   (subject-period-exception-model.md §5) — this dialog is topic-only. */
+/* Enrollment exceptions moved to the EnrollmentExceptionsDialog
+   (subject-period-exception-model.md v8 §5) — this dialog is topic-only. */

@@ -85,8 +85,8 @@
             @if (exceptionCount > 0)
             {
                 @* Count badge only (spec §5.2 row 1): zero exceptions renders NO badge —
-                   the absence of an exception is the normal state. The kebab navigates
-                   to the management page; nothing is edited on this grid. *@
+                   the absence of an exception is the normal state. The kebab opens the
+                   EnrollmentExceptionsDialog; nothing is edited on this grid. *@
                 <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
                     @EnrollmentExceptionLabels.FormatCount(exceptionCount)
                 </FluentBadge>
@@ -109,7 +109,7 @@
     /// <summary>
     /// The current owner's exception count per TopicId. The exceptions — not the
     /// retired bridge <c>PeriodId</c> whitelist — are what the grid's
-    /// "Enrollment exceptions" column counts (subject-period-exception-model.md v3 §5.2).
+    /// "Enrollment exceptions" column counts (subject-period-exception-model.md v8 §5.2).
     /// Grouped by TopicId and reduced to a count, never keyed: one subject may carry
     /// several exceptions (a Term span and a plain window, say).
     /// </summary>
@@ -365,7 +365,7 @@
                 if (_disposed) return;
                 // Owner gate WIDENED (spec §5.2 row 1, owner-confirmed 2026-09-26): an
                 // activity group owns exceptions just as a grade does, so its rows get
-                // the count badge and the navigating kebab too.
+                // the count badge and the kebab opening the EnrollmentExceptionsDialog too.
                 await LoadExceptionCountsAsync(activityGroupId: groupId, ct: token);
                 await ResolveNamesAsync(token);
             }
@@ -450,23 +450,63 @@
         _exceptionCountsByTopic.TryGetValue(topicId, out var count) ? count : 0;
 
     /// <summary>
-    /// The dedicated management page's URL for a row, with the owner and the topic
-    /// pre-selected (spec §5.2 row 1). Null when the row has no resolvable owner —
-    /// nothing can be excepted without one — which is the only gate left after the
-    /// owner gate was widened to grade- and group-owned rows (owner decision 2026-09-26).
+    /// The EnrollmentExceptionsDialog's scope for a row: the owner in force (grade or
+    /// group, spec §5.2 row 1) and the row's subject. Null when the row has no
+    /// resolvable owner — nothing can be excepted without one — which is the only gate
+    /// left after the owner gate was widened to grade- and group-owned rows (owner
+    /// decision 2026-09-26). The dialog is opened, not navigated to (v8 §5.1).
     /// </summary>
-    private string? ExceptionPageUrl(Guid topicId)
+    private EnrollmentExceptionsDialog.EnrollmentExceptionsModel? EnrollmentExceptionsScope(SubjectDto row)
     {
+        var topicName = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
+
         if (_ownerType == "ActivityGroup")
         {
-            return _selectedActivityGroup is { } group
-                ? $"/students/enrollment-exceptions?activityGroupId={group.Value}&topicId={topicId:D}"
+            return _selectedActivityGroup is not null
+                && Guid.TryParse(_selectedActivityGroup.Value, out var groupId)
+                ? new EnrollmentExceptionsDialog.EnrollmentExceptionsModel
+                {
+                    OwnerType = "ActivityGroup",
+                    OwnerId = groupId,
+                    OwnerName = _selectedActivityGroup.Label,
+                    TopicId = row.Id,
+                    TopicName = topicName,
+                }
                 : null;
         }
 
-        return _selectedGradeLevel is { } grade
-            ? $"/students/enrollment-exceptions?gradeLevelId={grade.Value}&topicId={topicId:D}"
+        return _selectedGradeLevel is not null
+            && Guid.TryParse(_selectedGradeLevel.Value, out var gradeId)
+            ? new EnrollmentExceptionsDialog.EnrollmentExceptionsModel
+            {
+                OwnerType = "GradeLevel",
+                OwnerId = gradeId,
+                OwnerName = _selectedGradeLevel.Label,
+                TopicId = row.Id,
+                TopicName = topicName,
+            }
             : null;
+    }
+
+    /// <summary>
+    /// Opens the EnrollmentExceptionsDialog for a row, scoped to the owner in force and
+    /// the row's subject. The landing reloads on close, so the row's exception COUNT
+    /// badge reflects what the dialog wrote rather than what it said when it opened.
+    /// </summary>
+    private async Task OpenEnrollmentExceptionsAsync(SubjectDto row)
+    {
+        if (_disposed || EnrollmentExceptionsScope(row) is not { } scope) return;
+
+        await DialogService.ShowShellDialogAsync<
+            EnrollmentExceptionsDialog,
+            EnrollmentExceptionsDialog.EnrollmentExceptionsModel,
+            EnrollmentExceptionsDialog.EnrollmentExceptionsResult>(
+            scope,
+            title: $"Enrollment exceptions — {scope.TopicName}",
+            size: DialogSize.Large);
+
+        if (_disposed) return;
+        await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
     }
 
     private async Task ResolveNamesAsync(CancellationToken token)
@@ -500,8 +540,8 @@
     /// is NEVER edited from here); Delete keeps the existing confirmation
     /// pattern. Same dialog-only pattern as GradeLevels/GradeLevelEditDialog.
     ///
-    /// "Enrollment exceptions" <b>navigates</b> to the dedicated management page with
-    /// the owner and the topic pre-selected — no editor opens on the card (spec §5.2),
+    /// "Enrollment exceptions" <b>opens</b> the EnrollmentExceptionsDialog scoped to the
+    /// owner in force and the row's subject — no editor opens on the card (spec §5.2),
     /// and it is offered for grade- <b>and</b> group-owned rows (owner decision
     /// 2026-09-26; the v1 grade-only gate is void).
     /// </summary>
@@ -515,9 +555,9 @@
 
         // Gate the control, not just the call: without a resolvable owner there is
         // nothing an exception could be attached to, so the action is not rendered.
-        if (ExceptionPageUrl(row.Id) is { } exceptionsUrl)
+        if (EnrollmentExceptionsScope(row) is not null)
         {
-            actions.Add(RowAction.Navigate("Enrollment exceptions", exceptionsUrl, FluentIcons.Calendar));
+            actions.Add(RowAction.Callback("Enrollment exceptions", () => OpenEnrollmentExceptionsAsync(row), FluentIcons.Calendar));
         }
 
         actions.Add(RowAction.Callback(

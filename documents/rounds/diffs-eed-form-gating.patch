@@ -1,0 +1,625 @@
+diff --git a/documents/specs/subject-period-exception-model.md b/documents/specs/subject-period-exception-model.md
+index 33c545bd..760bdfed 100644
+--- a/documents/specs/subject-period-exception-model.md
++++ b/documents/specs/subject-period-exception-model.md
+@@ -450,7 +450,8 @@ reader chooses only the part, the position, the span and the reason.
+   title names the subject (`Enrollment exceptions — Mathematics`) and the owner renders as a
+   read-only description beside the subject heading.
+ - **Two regions, both always visible (D2)** — the subject's exception list on top, the add form
+-  below. No mode swap, no `SideDrawer`.
++  below, separated by a `border-top` on the add region (`dialog-ui` §2 — a CSS `border-top`, never a
++  `FluentDivider`/`<hr>`). No mode swap, no `SideDrawer`.
+ - **List**: the **period part** (`Term` / `Semester` / `Any date` — decision 14), the
+   span in words (`1–14 Mar 2027`, `1 Mar 2027 – 30 Jun 2027`, `from 1 Mar 2027`,
+   `to 14 Mar 2027`), the optional reason, and a delete control. The subject column is
+@@ -460,10 +461,25 @@ reader chooses only the part, the position, the span and the reason.
+ - **Add (D3/D4).** The add form IS the shared shell's
+   `<EditForm OnValidSubmit="HandleSubmitAsync">` (`DialogShellBase`, `dialog-ui` §1–§4), so
+   **`Add exception` is the shell footer's own submit** — with the §2 `border-top` separator and the
+-  footer's error bar — and the heading names the subject it will write ("Add exception for
+-  *Mathematics*"). **`SubmitAsync` returns `null` on success after re-reading the list**, which
++  footer's error bar — and the heading names only the REGION ("Add exception"): the dialog's own
++  title already names the subject, so repeating it in the heading said nothing (amendment below).
++  **`SubmitAsync` returns `null` on success after re-reading the list**, which
+   keeps the dialog OPEN: it is a management surface, not a single-shot form. `Error` is set **only
+   on failure** (D3), and the server's own sentence is what it carries (D8, decision 12).
++  - **The add form is GATED behind an action (amendment, owner request 2026-09-29).** With a
++    NON-EMPTY list the entry fields render **disabled** — greyed in place, never collapsed — and the
++    add region's heading row carries an outlined **`+ Add exception`** trigger. Clicking it **arms**
++    the form and the trigger disappears, so it is never on screen beside an armed form (and never
++    competes with the footer's own `Add exception`). An **empty** list is armed by *construction*
++    (there is nothing to read and adding is the only thing left to do), so it renders no trigger at
++    all; a list that is still **loading** is deliberately not armed. A **successful** add clears every
++    entry field it consumed — the ticked positions, both range ends, the reason — and returns the
++    division to the default the dialog opens on, then re-derives the gate, so deleting the last row
++    re-arms the form with no special case. A **rejected** write changes none of that: the reader keeps
++    the part and the sequence they chose (D8). `Disabled` on a position still ALSO means "no period
++    backs it" (v7, decision 21) — arming the form never makes an unbacked position selectable — and
++    the "Choose a position to add an exception" note stays silent while the form is gated, because
++    its advice is not yet reachable.
+   - **"Fill from" — the part is CHOSEN (decision 16, reversing 13).** A dropdown of
+     `Term` / `Semester` / `Any date`: the divisions the tenant has periods for plus the free
+     window for a grade owner, and exactly the one division FR-56 permits for a group owner.
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor
+index 5c86dc22..f0b0707f 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor
+@@ -98,12 +98,29 @@
+             <p class="exceptions-empty" role="status" aria-live="polite">No exceptions for @Model.TopicName — this subject is offered on every date.</p>
+         }
+ 
+-        @* Add section — one form, the subject fixed by the dialog's scope (D5). *@
++        @* Add section — one form, the subject fixed by the dialog's scope (D5). The region is
++           SEPARATED from the list above by .add-panel's own CSS border-top (dialog-ui §2 — a
++           border-top, never a FluentDivider/<hr>). It is GATED while there is a list to read
++           (F1/F2): the heading row carries the trigger that arms it, and the entry fields render
++           disabled rather than collapsing. *@
+         <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+             <DataAnnotationsValidator />
+             <div class="add-panel">
+                 <div class="add-head">
+-                    <h3 class="add-title">Add exception for <strong>@Model.TopicName</strong></h3>
++                    @* The heading names the region only: the subject is already the dialog's scope
++                       title above, so repeating it here would say nothing (F6). *@
++                    <h3 class="add-title">Add exception</h3>
++                    @* The trigger (F2) — the action that arms the form while a list is being read.
++                       A FluentButton defaults to ButtonType.Button, so it cannot submit the
++                       EditForm it sits in (unlike the footer's own Add exception). *@
++                    @if (ShowAddTrigger)
++                    {
++                        <FluentButton Appearance="Appearance.Outline"
++                                      Title="Add a new exception"
++                                      OnClick="OnAddTrigger">
++                            + Add exception
++                        </FluentButton>
++                    }
+                 </div>
+ 
+                 @* One horizontal row, built in FluentUI's OWN layout primitive — per
+@@ -126,6 +143,7 @@
+                     <FormRow Label="Fill from" LabelPosition="RowLabelPosition.Below">
+                         <DropdownComponent TItem="DivisionOption" TValue="AcademicYearDivision"
+                                           Items="@DivisionOptions"
++                                          Disabled="@(!FormActive)"
+                                           @bind-SelectedValue="Division"
+                                           @bind-SelectedValue:after="OnDivisionChangedAsync"
+                                           OptionText="@(d => d.Label)"
+@@ -152,7 +170,7 @@
+                                 @foreach (var position in PositionOptions)
+                                 {
+                                     <FluentCheckbox Value="@(_positions.Contains(position))"
+-                                                    Disabled="@(!PositionIsDerivable(position))"
++                                                    Disabled="@(!FormActive || !PositionIsDerivable(position))"
+                                                     ValueChanged="@(selected => SetPositionAsync(position, selected))">
+                                         @PeriodPositionLabels.Number(position)
+                                     </FluentCheckbox>
+@@ -173,6 +191,7 @@
+                                 <FluentDatePicker Id="exception-start-date"
+                                                   @bind-Value="_startDate"
+                                                   @bind-Value:after="OnSpanChangedAsync"
++                                                  Disabled="@(!FormActive)"
+                                                   Placeholder="(any start)"
+                                                   Class="w-3" />
+                             </FormRow>
+@@ -180,6 +199,7 @@
+                                 <FluentDatePicker Id="exception-end-date"
+                                                   @bind-Value="_endDate"
+                                                   @bind-Value:after="OnSpanChangedAsync"
++                                                  Disabled="@(!FormActive)"
+                                                   Placeholder="(any end)"
+                                                   Class="w-3" />
+                             </FormRow>
+@@ -187,7 +207,7 @@
+                     }
+ 
+                     <FormRow Label="Reason (optional)" LabelPosition="RowLabelPosition.Below">
+-                        <FluentTextField @bind-Value="_reason" Placeholder="Why?" Class="w-5" />
++                        <FluentTextField @bind-Value="_reason" Placeholder="Why?" Class="w-5" Disabled="@(!FormActive)" />
+                     </FormRow>
+                 </FluentStack>
+ 
+@@ -197,10 +217,11 @@
+                         This subject is already excepted on @AnchorDateLabel — the server will reject an identical span.
+                     </p>
+                 }
+-                else if (Division != AcademicYearDivision.None && _positions.Count == 0)
++                else if (FormActive && Division != AcademicYearDivision.None && _positions.Count == 0)
+                 {
+                     @* v7: a real part arms only on a POSITION now that the range is silent, so say
+-                       so rather than leaving a disabled button unexplained. *@
++                       so rather than leaving a disabled button unexplained. Silent while the form
++                       is gated: the advice is not yet reachable, and the controls are disabled. *@
+                     <p class="add-note" role="status" aria-live="polite">
+                         Choose a position to add an exception.
+                     </p>
+@@ -215,7 +236,7 @@
+                                    SavingText="Adding..."
+                                    SubmitText="Add exception"
+                                    CancelText="Close"
+-                                   SubmitDisabled="@(!CanAdd)"
++                                   SubmitDisabled="@(!FormActive || !CanAdd)"
+                                    OnCancel="HandleCancelAsync" />
+             </div>
+         </EditForm>
+@@ -295,6 +316,13 @@
+     /// range's <c>/check</c> answer. Null = not (yet) known or the check could not run.</summary>
+     private bool? _alreadyExcepted;
+ 
++    /// <summary>
++    /// Whether the reader has ASKED to add (F1) — the trigger's answer, and the only piece of
++    /// state the gate below needs. A successful add sets it back to <c>false</c>, so the add form
++    /// returns to being derived from the list rather than switched by a mode.
++    /// </summary>
++    private bool _addTriggered;
++
+     private bool _busy;
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+@@ -535,6 +563,23 @@
+         ];
+     }
+ 
++    /// <summary>
++    /// Whether the add form is ARMED (F1) — ONE derived property, no mode flag beyond the
++    /// trigger's own: an EMPTY list is armed by construction (there is nothing to read and adding
++    /// is the only thing left to do), while a list has to be read first and needs the trigger.
++    /// A list that is still LOADING (<c>null</c>) is deliberately NOT armed, so a dialog that has
++    /// not answered yet never offers a form. Deleting the last row re-arms the form for free,
++    /// because the empty-list clause is the first one rather than a special case.
++    /// </summary>
++    private bool FormActive => _exceptions is { Length: 0 } || _addTriggered;
++
++    /// <summary>
++    /// Whether the trigger is on offer (F2): only when there is a list to read AND the form is
++    /// still gated — so it is never on screen beside an armed form, and never competes with the
++    /// footer's own <c>Add exception</c>.
++    /// </summary>
++    private bool ShowAddTrigger => _exceptions is { Length: > 0 } && !_addTriggered;
++
+     /// <summary>
+     /// A write happens only when it can be complete: EVERY item in the batch carries at least one
+     /// bound (the entity invariant — neither bound would mean "never offered", a different concept).
+@@ -579,13 +624,19 @@
+ 
+             if (_disposed) return null;
+ 
+-            // The span was consumed by this write. The position and the division are deliberately
+-            // KEPT: they name what the reader was working on ("the 3rd term"), and re-picking them
+-            // for every row of the same kind would be busywork.
++            // The entry fields were CONSUMED by this write and the form goes back to its gated
++            // state (F5): the ticked sequences, both range ends, the reason AND the chosen division
++            // are cleared — a cleared division is the default the dialog opens on — and the trigger
++            // is reset, which is what makes the disabled state DERIVED again rather than a second
++            // thing to keep in step. The list itself is re-read, so the reader sees the server's
++            // answer before deciding whether to add another one.
++            _positions.Clear();
+             _startDate = null;
+             _endDate = null;
+             _reason = null;
++            _chosenDivision = AcademicYearDivision.None;
+             _alreadyExcepted = null;
++            _addTriggered = false;
+             await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
+         }
+         catch (OperationCanceledException) { }
+@@ -628,6 +679,13 @@
+         }
+     }
+ 
++    /// <summary>
++    /// The trigger's action (F2): arm the add form. The GATE itself is derived
++    /// (<see cref="FormActive"/>), so there is no second piece of state to keep in step, and a
++    /// successful add simply sets this back to <c>false</c>.
++    /// </summary>
++    private void OnAddTrigger() => _addTriggered = true;
++
+     /// <summary>
+     /// The "Fill from" division changed. The sequences AND the typed range belong to the division
+     /// that produced them — a Terms "3rd" is not a Semesters one — so both are cleared rather than
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor.css b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor.css
+index 146a89f0..1f45b047 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor.css
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor.css
+@@ -95,6 +95,9 @@
+     padding: 0;
+ }
+ 
++/* The add region: separated from the list above by a border-top — the repo's dialog-ui §2
++   separator convention (a CSS border-top, never a <FluentDivider>/<hr>) — which is what keeps
++   "the list I am reading" and "the form I am filling" apart at a glance. */
+ .add-panel {
+     display: flex;
+     flex-direction: column;
+@@ -104,9 +107,13 @@
+     border-top: 1px solid var(--neutral-stroke-rest, rgba(0, 0, 0, 0.08));
+ }
+ 
++/* The add region's heading row: the region's name on the left, and — while the form is GATED
++   behind the trigger (EnrollmentExceptionsDialog.razor, F1/F2) — the action that arms it on the
++   right. space-between keeps the trigger at the trailing edge whether or not it is offered. */
+ .add-head {
+     display: flex;
+-    align-items: baseline;
++    align-items: center;
++    justify-content: space-between;
+     gap: 0.5rem;
+ }
+ 
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
+index b58ef8cd..7c0b7b17 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
+@@ -1,4 +1,5 @@
+ using System.Net;
++using System.Reflection;
+ using System.Text;
+ using System.Text.Json;
+ using AngleSharp.Dom;
+@@ -182,6 +183,11 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         ["updatedAt"] = DateTimeOffset.UnixEpoch,
+     };
+ 
++    /// <summary>One listed exception — the state the dialog opens in when its add form must be
++    /// read-then-armed (F1) rather than offered straight away.</summary>
++    private static string SeededExceptionJson() =>
++        ExceptionsJson(ExceptionJson(Guid.NewGuid(), TopicId, "Terms", Term1Start, Term1End));
++
+     private static string ExceptionsJson(params Dictionary<string, object?>[] rows) =>
+         JsonSerializer.Serialize(rows);
+ 
+@@ -407,6 +413,52 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         await ChoosePositionAsync(dialog, 1);
+     }
+ 
++    /// <summary>
++    /// The add region's trigger (F2), or <c>null</c> when it is not offered — either because the
++    /// list is EMPTY (nothing to read: the form is armed by construction) or because the form is
++    /// already armed. It is found by its own visible text, which is why it reads
++    /// "+ Add exception" while the footer's submit reads "Add exception".
++    /// </summary>
++    private static IElement? AddTrigger(IRenderedComponent<FluentDialogProvider> dialog) =>
++        dialog.FindAll("fluent-button").FirstOrDefault(b => b.TextContent.Trim() == "+ Add exception");
++
++    /// <summary>
++    /// Arms the add form when the dialog opened GATED (F1/F2). With a NON-EMPTY exception list the
++    /// entry fields start disabled and the add region's heading row carries the trigger, so every
++    /// test that drives the form against a seeded list has to click it first — arming is the
++    /// reader's own first action there. A no-op on an empty list (already armed) and a no-op for a
++    /// test that armed the form itself.
++    /// </summary>
++    private static void ArmAddForm(IRenderedComponent<FluentDialogProvider> dialog) =>
++        AddTrigger(dialog)?.Click();
++
++    /// <summary>
++    /// The gate the entry fields share (F3), read off the controls the dialog BINDS it to: the four
++    /// the free window shows — Fill from, both range ends and Reason. The controls never collapse,
++    /// so they are always found; only their Disabled state differs — which is what makes
++    /// <paramref name="gated"/> the one thing a caller has to say.
++    /// </summary>
++    private static void AssertFreeWindowFieldsGated(
++        IRenderedComponent<FluentDialogProvider> dialog, bool gated)
++    {
++        var state = gated ? "gated behind the trigger" : "armed";
++        DivisionPicker(dialog).Disabled.Should().Be(gated, $"Fill from is {state}");
++        DatePicker(dialog, "exception-start-date").Disabled.Should().Be(gated, $"'Not offered from' is {state}");
++        DatePicker(dialog, "exception-end-date").Disabled.Should().Be(gated, $"'Not offered to' is {state}");
++        ReasonFieldComponent(dialog).Disabled.Should().Be(gated, $"Reason is {state}");
++    }
++
++    /// <summary>The reason input as a COMPONENT, so its own <c>Disabled</c> flag can be read. Found
++    /// by its placeholder, because each <c>FluentDatePicker</c> renders an INTERNAL
++    /// <c>FluentTextField</c> of its own.</summary>
++    private static FluentTextField ReasonFieldComponent(IRenderedComponent<FluentDialogProvider> dialog) =>
++        dialog.FindComponents<FluentTextField>().Single(f => f.Instance.Placeholder == "Why?").Instance;
++
++    /// <summary>Types into the reason field through its own bound callback — the same shape every
++    /// other control in this file is driven with.</summary>
++    private static Task SetReasonAsync(IRenderedComponent<FluentDialogProvider> dialog, string value) =>
++        dialog.InvokeAsync(() => ReasonFieldComponent(dialog).ValueChanged.InvokeAsync(value));
++
+     /// <summary>
+     /// The shell footer's submit button — the dialog's write affordance. It is
+     /// <c>Type=Submit</c> with NO <c>@onclick</c>, so the form submit below is what fires
+@@ -925,6 +977,10 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+ 
+         harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
+ 
++        // The list has a row, so the dialog opened GATED (F1) — arming the form is the reader's
++        // first action here, and what this test is about is what a rejection leaves behind.
++        ArmAddForm(harness.Dialog);
++
+         await FillAddSectionAsync(harness.Dialog);
+         SubmitAdd(harness.Dialog);
+ 
+@@ -960,6 +1016,291 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+             "the check goes to the dedicated containment route");
+     }
+ 
++    // ── AC-17 (v8 amendment): the add form is gated behind an action ──────
++
++    /// <summary>
++    /// G1 — with something to READ, the form is gated: every entry field is disabled IN PLACE
++    /// (F3: greyed, never collapsed) and the trigger is the only add affordance on offer, so it
++    /// cannot compete with the footer's own <c>Add exception</c>. A grade owner opens on the free
++    /// window, so this render is the one carrying the range.
++    /// </summary>
++    [TestMethod]
++    public async Task NonEmptyList_GatesTheFreeWindowFields_AndOffersTheTrigger()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++
++        AddTrigger(harness.Dialog).Should().NotBeNull("a list to read is what puts the trigger on offer");
++        AssertFreeWindowFieldsGated(harness.Dialog, gated: true);
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().NotBeNull(
++            "and the footer's write affordance is disabled with the fields it would write");
++    }
++
++    /// <summary>
++    /// G1, the position half — a group owner opens on the one part FR-56 permits, so THIS render is
++    /// the one with the position ladder in it: while the form is gated every box is disabled,
++    /// including the 1st, whose period the fixture HAS and which v7 on its own would leave
++    /// selectable. That is the line between the two rules (F3): the gate disables the ladder, and an
++    /// armed form still answers to <c>PositionIsDerivable</c>.
++    /// </summary>
++    [TestMethod]
++    public async Task NonEmptyList_GatesThePositionLadder()
++    {
++        var harness = await RenderDialogAsync(ownerType: "ActivityGroup", exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++
++        PositionLabels(harness.Dialog).Should().BeEquivalentTo(new[] { "1st", "2nd", "3rd", "4th" },
++            "the structural ladder is still RENDERED while the form is gated — it is disabled, not hidden");
++        PositionBoxes(harness.Dialog).Select(b => b.Instance.Disabled).Should()
++            .BeEquivalentTo(new[] { true, true, true, true },
++                "an unarmed form disables the whole ladder, not only the positions v7 would");
++        DivisionPicker(harness.Dialog).Disabled.Should().BeTrue("Fill from is gated too");
++        ReasonFieldComponent(harness.Dialog).Disabled.Should().BeTrue("and so is Reason");
++        AddTrigger(harness.Dialog).Should().NotBeNull("the trigger is what arms them");
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().NotBeNull();
++    }
++
++    /// <summary>
++    /// G2 — an EMPTY list is armed by construction: there is nothing to read and adding is the only
++    /// thing left to do, so no trigger is rendered and the entry fields are live. This is the clause
++    /// that makes deleting the last row re-arm the form with no special case (F1).
++    /// </summary>
++    [TestMethod]
++    public async Task EmptyList_LeavesTheAddFormLive_AndOffersNoTrigger()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: "[]");
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exceptions-empty").Should().NotBeEmpty());
++
++        AddTrigger(harness.Dialog).Should().BeNull(
++            "an empty list has no gate to lift — the form is already the only thing to do");
++        AssertFreeWindowFieldsGated(harness.Dialog, gated: false);
++    }
++
++    /// <summary>
++    /// G3 — the trigger ARMS the form and then goes away (F2): it is never on screen beside an armed
++    /// form, and the armed form answers to the same write guard an empty list's does, so arming it is
++    /// the whole difference.
++    /// </summary>
++    [TestMethod]
++    public async Task Trigger_ArmsTheForm_AndThenDisappears()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++        var trigger = AddTrigger(harness.Dialog);
++        trigger.Should().NotBeNull("the gated form offers the action that opens it");
++
++        trigger!.Click();
++
++        harness.Dialog.WaitForAssertion(() => AddTrigger(harness.Dialog).Should()
++            .BeNull("the trigger is gone the moment the form it arms is on offer"));
++        AssertFreeWindowFieldsGated(harness.Dialog, gated: false);
++
++        await SetDateAsync(harness.Dialog, "exception-end-date", Term1End.ToDateTime(TimeOnly.MinValue));
++        harness.Dialog.WaitForAssertion(() => SubmitButton(harness.Dialog).GetAttribute("disabled").Should()
++            .BeNull("one bound is enough on an armed form, exactly as it is on an empty list"));
++    }
++
++    /// <summary>
++    /// G4, the free-window half of F5 — a successful add CLEARS the entry fields it consumed (both
++    /// range ends, the reason), returns the division to the default the dialog opens on, and puts the
++    /// form back behind the trigger. The reader's next move is then a decision rather than a stray
++    /// half-filled form.
++    /// </summary>
++    [TestMethod]
++    public async Task SuccessfulAdd_ClearsTheRangeAndReason_AndReGatesTheForm()
++    {
++        var seeded = ExceptionJson(Guid.NewGuid(), TopicId, "None", new DateOnly(2027, 5, 1), new DateOnly(2027, 5, 14));
++        var harness = await RenderDialogAsync(exceptionsJson: ExceptionsJson(seeded));
++
++        var live = new List<Dictionary<string, object?>> { seeded };
++        harness.Handler.MapDynamic("GET", GradeExceptionsUrl, HttpStatusCode.OK,
++            () => ExceptionsJson(live.ToArray()));
++        harness.Handler.MapDynamic("POST", $"{ExceptionsResource}/bulk", HttpStatusCode.Created, () =>
++        {
++            live.Add(ExceptionJson(Guid.NewGuid(), TopicId, "None", Term1Start, Term1End, reason: "Staffing"));
++            return $"{{\"ids\":[\"{Guid.NewGuid():D}\"]}}";
++        });
++
++        ArmAddForm(harness.Dialog);
++
++        // A reason is not a span: the write guard still wants one bound, so the reason alone leaves
++        // the footer disabled. Loading the form with BOTH is what makes the clearing below readable.
++        await SetReasonAsync(harness.Dialog, "Staffing");
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().NotBeNull(
++            "a reason without a bound is not a write");
++        await SetDateAsync(harness.Dialog, "exception-end-date", Term1End.ToDateTime(TimeOnly.MinValue));
++
++        harness.Dialog.WaitForAssertion(() => SubmitButton(harness.Dialog).GetAttribute("disabled")
++            .Should().BeNull("the armed form is a complete write now"));
++        SubmitAdd(harness.Dialog);
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should()
++            .HaveCount(2, "the list re-reads the server after the write"));
++
++        harness.Dialog.WaitForAssertion(() => ReasonFieldComponent(harness.Dialog).Value.Should()
++            .BeNullOrEmpty("the reason was consumed by the write"));
++        DatePicker(harness.Dialog, "exception-end-date").Value.Should().BeNull("so was the typed end");
++        DatePicker(harness.Dialog, "exception-start-date").Value.Should().BeNull("both ends are cleared, not one");
++        DivisionLabel(harness.Dialog).Should().Be("Any date",
++            "F5 returns the division to the default the dialog opens on");
++
++        harness.Dialog.WaitForAssertion(() => AssertFreeWindowFieldsGated(harness.Dialog, gated: true));
++        AddTrigger(harness.Dialog).Should().NotBeNull("and the form is behind the trigger again");
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().NotBeNull(
++            "with nothing left in the fields there is nothing to write");
++    }
++
++    /// <summary>
++    /// G4, the position half of F5 — a ticked sequence is consumed by the write. A GROUP owner is the
++    /// render where that is observable at all: FR-56 leaves it exactly one division, so the reset
++    /// cannot take the ladder off screen, and the cleared ticks are what the reader sees.
++    /// </summary>
++    [TestMethod]
++    public async Task SuccessfulAdd_ClearsTheTickedPositions_AndReGatesTheForm()
++    {
++        var seeded = ExceptionJson(Guid.NewGuid(), TopicId, "Terms", Term1Start, Term1End);
++        var harness = await RenderDialogAsync(ownerType: "ActivityGroup", exceptionsJson: ExceptionsJson(seeded));
++
++        var live = new List<Dictionary<string, object?>> { seeded };
++        harness.Handler.MapDynamic("GET", GroupExceptionsUrl, HttpStatusCode.OK,
++            () => ExceptionsJson(live.ToArray()));
++        harness.Handler.MapDynamic("POST", $"{ExceptionsResource}/bulk", HttpStatusCode.Created, () =>
++        {
++            live.Add(ExceptionJson(Guid.NewGuid(), TopicId, "Terms", Term1Start, Term1End, ordinal: 1));
++            return $"{{\"ids\":[\"{Guid.NewGuid():D}\"]}}";
++        });
++
++        ArmAddForm(harness.Dialog);
++        await ChoosePositionAsync(harness.Dialog, 1);
++
++        harness.Dialog.WaitForAssertion(() => SubmitButton(harness.Dialog).GetAttribute("disabled")
++            .Should().BeNull("the 1st term backs that sequence, so the write is complete"));
++        SubmitAdd(harness.Dialog);
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(2));
++
++        PositionBoxes(harness.Dialog).Should().OnlyContain(b => !b.Instance.Value,
++            "the ticked sequence was consumed by the write");
++        DivisionLabel(harness.Dialog).Should().Be("Term",
++            "for a group the reset is a no-op: FR-56 leaves exactly one part to fall back to");
++        harness.Dialog.WaitForAssertion(() => PositionBoxes(harness.Dialog).Select(b => b.Instance.Disabled)
++            .Should().OnlyContain(disabled => disabled,
++                "and the form is gated again, so even the position v7 backs is disabled"));
++        AddTrigger(harness.Dialog).Should().NotBeNull();
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().NotBeNull();
++    }
++
++    /// <summary>
++    /// G4, the DIVISION half of F5 — the clause the free-window test above cannot carry. A grade
++    /// opens on the divisions its periods back PLUS <c>Any date</c>, and <c>Any date</c> is the one
++    /// in force until something chooses otherwise, so a render that never leaves it reads
++    /// <c>Any date</c> whether or not F5 resets anything. This test MOVES the part to a real one
++    /// first and ticks a sequence behind it, which leaves the default reachable only through that
++    /// reset — and, because the default part renders no ladder at all, leaves no ticked position
++    /// behind either.
++    /// </summary>
++    [TestMethod]
++    public async Task SuccessfulAdd_ReturnsTheDivisionToItsDefault_AndLeavesNoTickedPosition()
++    {
++        var seeded = ExceptionJson(Guid.NewGuid(), TopicId, "None", new DateOnly(2027, 5, 1), new DateOnly(2027, 5, 14));
++        var harness = await RenderDialogAsync(exceptionsJson: ExceptionsJson(seeded));
++
++        var live = new List<Dictionary<string, object?>> { seeded };
++        harness.Handler.MapDynamic("GET", GradeExceptionsUrl, HttpStatusCode.OK,
++            () => ExceptionsJson(live.ToArray()));
++        harness.Handler.MapDynamic("POST", $"{ExceptionsResource}/bulk", HttpStatusCode.Created, () =>
++        {
++            live.Add(ExceptionJson(Guid.NewGuid(), TopicId, "Terms", Term1Start, Term1End, ordinal: 1));
++            return $"{{\"ids\":[\"{Guid.NewGuid():D}\"]}}";
++        });
++
++        ArmAddForm(harness.Dialog);
++        await SelectDivisionAsync(harness.Dialog, AcademicYearDivision.Terms);
++        await ChoosePositionAsync(harness.Dialog, 1);
++
++        harness.Dialog.WaitForAssertion(() =>
++        {
++            DivisionLabel(harness.Dialog).Should().Be("Term",
++                "the part is OFF its default before the write — without that move the reset below is unobservable");
++            PositionBoxes(harness.Dialog)[0].Instance.Value.Should().BeTrue("and the 1st sequence is ticked");
++        });
++
++        harness.Dialog.WaitForAssertion(() => SubmitButton(harness.Dialog).GetAttribute("disabled")
++            .Should().BeNull("the 1st term backs that sequence, so the write is complete"));
++        SubmitAdd(harness.Dialog);
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(2));
++
++        DivisionLabel(harness.Dialog).Should().Be("Any date",
++            "F5 returns the division to the default the dialog opens on");
++        PositionBoxes(harness.Dialog).Should().NotContain(b => b.Instance.Value,
++            "and no ticked sequence survives the write — 'Any date' offers no sequence at all");
++    }
++
++    /// <summary>
++    /// G6 — the two regions are visually separated, and the separator is a CSS <c>border-top</c>
++    /// (dialog-ui §2), never a <c>FluentDivider</c> or an <c>&lt;hr&gt;</c>; the add region's heading
++    /// no longer repeats the subject, which the dialog's own scope title already names (F6).
++    /// </summary>
++    [TestMethod]
++    public async Task AddRegion_CarriesTheSeparator_AndItsHeadingOmitsTheSubject()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++
++        harness.Dialog.FindAll(".exceptions-list").Should().HaveCount(1, "the list is one region");
++        harness.Dialog.FindAll(".add-panel").Should().HaveCount(1, "and the add form is the other");
++        harness.Dialog.FindAll("fluent-divider").Should().BeEmpty(
++            "the separator is a CSS border-top, never a FluentDivider");
++        harness.Dialog.FindAll("hr").Should().BeEmpty("and never an <hr>");
++
++        CssRuleFor(".add-panel").Should().Contain("border-top",
++            "the add region's separator is .add-panel's own border-top (dialog-ui §2)");
++        CssRuleFor(".add-panel").Should().Contain("padding-top",
++            "and it is spaced off the list it is separated from");
++
++        var heading = harness.Dialog.Find(".add-title").TextContent.Trim();
++        heading.Should().Be("Add exception", "the heading names the region");
++        heading.Should().NotContain(SubjectName,
++            "the subject is the dialog's title and its list heading — repeating it here says nothing");
++    }
++
++    // ── Reading the dialog's own source (scoped CSS is not in the render tree) ──
++
++    /// <summary>
++    /// Reads a repo file by its repo-relative path: the test assembly runs from
++    /// tests/&lt;project&gt;/bin/&lt;config&gt;/&lt;tfm&gt;, so five levels up is the repo root — the
++    /// same resolution <c>EnrollStudentDialogFeatureFlagTests</c> uses.
++    /// </summary>
++    private static string Load(string repoRelativePath)
++    {
++        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
++        var fullPath = Path.GetFullPath(Path.Combine(
++            asmDir, "..", "..", "..", "..", "..", repoRelativePath));
++        File.Exists(fullPath).Should().BeTrue(
++            $"{repoRelativePath} should exist at '{fullPath}' — check the path resolution");
++        return File.ReadAllText(fullPath);
++    }
++
++    /// <summary>
++    /// One scoped-CSS rule, from its selector to its closing brace. A separator drawn in CSS has no
++    /// markup-level footprint, and the build does not warn when a rule loses its element
++    /// (dialog-ui §3), so this is the only place the convention can be asserted.
++    /// </summary>
++    private static string CssRuleFor(string selector)
++    {
++        var css = Load(
++            "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor.css");
++        var start = css.IndexOf($"{selector} {{", StringComparison.Ordinal);
++        start.Should().BeGreaterThanOrEqualTo(0, $"{selector} should have a rule in the dialog's scoped CSS");
++        return css[start..css.IndexOf('}', start)];
++    }
++
+     // ── Accessibility: the states that change under the reader ────────────
+ 
+     /// <summary>

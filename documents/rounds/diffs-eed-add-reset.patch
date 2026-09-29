@@ -1,0 +1,425 @@
+diff --git a/documents/specs/subject-period-exception-model.md b/documents/specs/subject-period-exception-model.md
+index 760bdfed..fc44139a 100644
+--- a/documents/specs/subject-period-exception-model.md
++++ b/documents/specs/subject-period-exception-model.md
+@@ -480,6 +480,18 @@ reader chooses only the part, the position, the span and the reason.
+     backs it" (v7, decision 21) — arming the form never makes an unbacked position selectable — and
+     the "Choose a position to add an exception" note stays silent while the form is gated, because
+     its advice is not yet reachable.
++  - **An armed form carries its own escape (`Reset`) — amendment, owner request 2026-09-29.**
++    Where the trigger sat, an armed form offers an outlined **`Reset`**: it abandons the pending add —
++    discarding the chosen part, the ticked sequences, both range ends and the reason through the
++    **same one clear a consumed write uses** (a single `ClearAddForm`, never a second copy, so a
++    post-add clear and a Reset clear cannot drift apart) — then re-derives the gate. It writes
++    **nothing** and leaves the dialog **open**. `Reset` is the trigger's exact inverse —
++    `ShowAddReset => _addTriggered && _exceptions is { Length: > 0 }` — so the two are never on screen
++    together. The list-length clause is **load-bearing, not decorative**: a reader can arm the form and
++    then remove the LAST row, so without it the Reset survives onto an empty list — where the form is
++    live by *construction* (F1's first clause) and there is genuinely nothing to cancel. A removal that
++    empties the list also disarms the flag outright, so it cannot outlive the row set it was armed
++    against.
+   - **"Fill from" — the part is CHOSEN (decision 16, reversing 13).** A dropdown of
+     `Term` / `Semester` / `Any date`: the divisions the tenant has periods for plus the free
+     window for a grade owner, and exactly the one division FR-56 permits for a group owner.
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor
+index f0b0707f..ee1f1699 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor
+@@ -121,6 +121,19 @@
+                             + Add exception
+                         </FluentButton>
+                     }
++                    @* The Reset (F7) — the armed form's own escape. It is the trigger's exact
++                       inverse in the SAME heading-row slot, so the control does not move between
++                       the two states; before it existed, the only way out of an armed form was the
++                       footer's Close, which dismisses the whole dialog. Also Type=Button, so it
++                       neither submits the form nor touches the footer's own Add exception. *@
++                    @if (ShowAddReset)
++                    {
++                        <FluentButton Appearance="Appearance.Outline"
++                                      Title="Cancel adding an exception"
++                                      OnClick="OnAddReset">
++                            Reset
++                        </FluentButton>
++                    }
+                 </div>
+ 
+                 @* One horizontal row, built in FluentUI's OWN layout primitive — per
+@@ -580,6 +593,16 @@
+     /// </summary>
+     private bool ShowAddTrigger => _exceptions is { Length: > 0 } && !_addTriggered;
+ 
++    /// <summary>
++    /// Whether the Reset is on offer (F7): shown iff the reader explicitly ARMED the form AND there
++    /// is still a list to have armed it against. Both clauses are load-bearing: the trigger needs a
++    /// list AND an unarmed form, so the two controls can never be on screen together; and the armed
++    /// flag alone can OUTLIVE its list, because a row's own Remove is gated by the busy state rather
++    /// than by the armed one, so removing the LAST row re-reads an EMPTY list under an armed form.
++    /// That list is live by construction with nothing to cancel (F1/R5), so it offers no Reset.
++    /// </summary>
++    private bool ShowAddReset => _addTriggered && _exceptions is { Length: > 0 };
++
+     /// <summary>
+     /// A write happens only when it can be complete: EVERY item in the batch carries at least one
+     /// bound (the entity invariant — neither bound would mean "never offered", a different concept).
+@@ -625,17 +648,11 @@
+             if (_disposed) return null;
+ 
+             // The entry fields were CONSUMED by this write and the form goes back to its gated
+-            // state (F5): the ticked sequences, both range ends, the reason AND the chosen division
+-            // are cleared — a cleared division is the default the dialog opens on — and the trigger
+-            // is reset, which is what makes the disabled state DERIVED again rather than a second
+-            // thing to keep in step. The list itself is re-read, so the reader sees the server's
+-            // answer before deciding whether to add another one.
+-            _positions.Clear();
+-            _startDate = null;
+-            _endDate = null;
+-            _reason = null;
+-            _chosenDivision = AcademicYearDivision.None;
+-            _alreadyExcepted = null;
++            // state (F5): ClearAddForm returns every one of them to the default the dialog opens
++            // on, and the trigger is reset, which is what makes the disabled state DERIVED again
++            // rather than a second thing to keep in step. The list itself is re-read, so the reader
++            // sees the server's answer before deciding whether to add another one.
++            ClearAddForm();
+             _addTriggered = false;
+             await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
+         }
+@@ -665,6 +682,15 @@
+             await Api.RemoveSubjectEnrollmentExceptionAsync(exception.Id);
+             if (_disposed) return;
+             await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
++
++            // The armed flag is armed AGAINST a row set. When the reload leaves none, the form left
++            // standing is the EMPTY list's own (F1), which nothing can be cancelled out of (R5), so
++            // the flag goes with the rows rather than insisting on a state the list no longer
++            // supports. With rows still left, the reader stays armed exactly as they were.
++            if (_exceptions is { Length: 0 })
++            {
++                _addTriggered = false;
++            }
+         }
+         catch (OperationCanceledException) { }
+         catch (Exception ex)
+@@ -686,6 +712,39 @@
+     /// </summary>
+     private void OnAddTrigger() => _addTriggered = true;
+ 
++    /// <summary>
++    /// The Reset's action (F7): abandon the pending add. It discards the in-progress input through
++    /// the ONE clear a consumed write also uses (<see cref="ClearAddForm"/>), then re-gates the form
++    /// by resetting the trigger — which is exactly what puts the trigger back on offer. It writes
++    /// NOTHING (no request, no submit) and closes NOTHING: the reader keeps the dialog and the list
++    /// they were reading, which is the escape an armed form otherwise has none of.
++    /// </summary>
++    private void OnAddReset()
++    {
++        if (_disposed) return;
++
++        ClearAddForm();
++        _addTriggered = false;
++    }
++
++    /// <summary>
++    /// Returns the add form's entry fields to the state the dialog opens on: the ticked sequences,
++    /// both range ends, the reason, the chosen division and the containment hint. ONE implementation
++    /// for the two ways the fields are spent — a write that consumed them
++    /// (<see cref="SubmitAsync"/>, F5) and a Reset that abandons them (<see cref="OnAddReset"/>, F7)
++    /// — so the two can never drift apart. The trigger flag is deliberately NOT part of this: a
++    /// write re-gates the form and a Reset re-gates it too, but each says so at its own call site.
++    /// </summary>
++    private void ClearAddForm()
++    {
++        _positions.Clear();
++        _startDate = null;
++        _endDate = null;
++        _reason = null;
++        _chosenDivision = AcademicYearDivision.None;
++        _alreadyExcepted = null;
++    }
++
+     /// <summary>
+     /// The "Fill from" division changed. The sequences AND the typed range belong to the division
+     /// that produced them — a Terms "3rd" is not a Semesters one — so both are cleared rather than
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
+index 7c0b7b17..7b3ac97a 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/EnrollmentExceptionsDialogTests.cs
+@@ -422,6 +422,15 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+     private static IElement? AddTrigger(IRenderedComponent<FluentDialogProvider> dialog) =>
+         dialog.FindAll("fluent-button").FirstOrDefault(b => b.TextContent.Trim() == "+ Add exception");
+ 
++    /// <summary>
++    /// The add region's Reset (F7) — the ARMED form's own escape — or <c>null</c> while the form is
++    /// gated. It is the trigger's exact inverse, so the two are never both here; an empty list (armed
++    /// by construction, with nothing to cancel) renders no Reset either. Found by its own visible
++    /// text, like the trigger.
++    /// </summary>
++    private static IElement? AddReset(IRenderedComponent<FluentDialogProvider> dialog) =>
++        dialog.FindAll("fluent-button").FirstOrDefault(b => b.TextContent.Trim() == "Reset");
++
+     /// <summary>
+     /// Arms the add form when the dialog opened GATED (F1/F2). With a NON-EMPTY exception list the
+     /// entry fields start disabled and the add region's heading row carries the trigger, so every
+@@ -1104,6 +1113,210 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+             .BeNull("one bound is enough on an armed form, exactly as it is on an empty list"));
+     }
+ 
++    /// <summary>
++    /// F7 — arming SWAPS the trigger for the Reset: exactly one of the two controls is ever in the
++    /// DOM, and the Reset takes the trigger's own slot in the heading row, so the control does not
++    /// move under the reader between the two states. A gated form offers no Reset: there is no
++    /// pending add to cancel.
++    /// </summary>
++    [TestMethod]
++    public async Task Reset_ReplacesTheTrigger_WhenTheFormIsArmed()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++        AddReset(harness.Dialog).Should().BeNull("a gated form has nothing to cancel — the trigger is the offer");
++
++        AddTrigger(harness.Dialog)!.Click();
++
++        harness.Dialog.WaitForAssertion(() => AddReset(harness.Dialog).Should()
++            .NotBeNull("the armed form offers the escape it otherwise has none of"));
++        AddTrigger(harness.Dialog).Should().BeNull("the trigger and the Reset are mutually exclusive in the DOM");
++        harness.Dialog.Find(".add-head").QuerySelectorAll("fluent-button").Select(b => b.TextContent.Trim())
++            .Should().Equal(new[] { "Reset" },
++                "and the Reset sits in the heading row's own slot — the trigger's — so nothing moves "
++                + "between the two states (the footer's Close is the only other button, and it is elsewhere)");
++    }
++
++    /// <summary>
++    /// F7/H2, the free-window half — Reset returns BOTH typed range ends and the reason to their
++    /// default and re-gates every field. The fields are moved off their defaults and asserted there
++    /// BEFORE the click, which is what makes the clears below able to fail.
++    ///
++    /// <para>No division is asserted here: a real part REMOVES the range entirely
++    /// (<c>SpanIsDerived</c>), so this render cannot both hold a typed range and be off "Any date" —
++    /// the division half of the clear is asserted where it is observable, in
++    /// <see cref="Reset_ClearsTheChosenPart_AndReGatesTheForm"/>.</para>
++    /// </summary>
++    [TestMethod]
++    public async Task Reset_ClearsTheTypedRangeAndReason_WithoutWritingAnything()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++        ArmAddForm(harness.Dialog);
++
++        var start = Term1Start.ToDateTime(TimeOnly.MinValue);
++        var end = Term1End.ToDateTime(TimeOnly.MinValue);
++        await SetDateAsync(harness.Dialog, "exception-start-date", start);
++        await SetDateAsync(harness.Dialog, "exception-end-date", end);
++        await SetReasonAsync(harness.Dialog, "Staffing");
++
++        harness.Dialog.WaitForAssertion(() =>
++        {
++            DatePicker(harness.Dialog, "exception-start-date").Value.Should().Be(start,
++                "the typed start is what the Reset has to consume");
++            DatePicker(harness.Dialog, "exception-end-date").Value.Should().Be(end,
++                "and so is the typed end");
++            ReasonFieldComponent(harness.Dialog).Value.Should().Be("Staffing", "and the reason");
++        });
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().BeNull(
++            "the form is a complete, writable exception — the Reset cancels a genuine pending add");
++
++        harness.Dialog.WaitForAssertion(() => harness.Handler.Calls
++            .Count(c => c.Url.StartsWith($"{ExceptionsResource}/check", StringComparison.Ordinal)).Should()
++            .Be(2, "one containment check per typed range end — both settled before the request count below"));
++        var callsBeforeReset = harness.Handler.Calls.Count;
++
++        AddReset(harness.Dialog)!.Click();
++
++        harness.Dialog.WaitForAssertion(() =>
++        {
++            DatePicker(harness.Dialog, "exception-start-date").Value.Should().BeNull("Reset discarded the typed start");
++            DatePicker(harness.Dialog, "exception-end-date").Value.Should().BeNull("and the typed end");
++            ReasonFieldComponent(harness.Dialog).Value.Should().BeNullOrEmpty("and the reason");
++        });
++
++        harness.Handler.Calls.Should().NotContain(c => c.Method == "POST",
++            "Reset writes nothing — in particular nothing reaches the bulk create route");
++        harness.Handler.Calls.Should().HaveCount(callsBeforeReset,
++            "and it issues no other request either: it discards in-progress input only");
++        harness.Dialog.FindAll(".exceptions-section").Should().NotBeEmpty("the dialog stays OPEN — Reset is not Close");
++        harness.Dialog.FindAll(".exception-row").Should().HaveCount(1, "and the list it was reading is untouched");
++    }
++
++    /// <summary>
++    /// F7/H2–H3, the part half — the clause the free-window test cannot carry: a grade opens on
++    /// <c>Any date</c> whether or not anything resets it, so the Reset's division reset is only
++    /// observable from a render that has MOVED to a real part first. It also re-gates the form, so
++    /// the trigger comes back and the footer's write affordance goes dead with the fields it would
++    /// write.
++    /// </summary>
++    [TestMethod]
++    public async Task Reset_ClearsTheChosenPart_AndReGatesTheForm()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++        ArmAddForm(harness.Dialog);
++        await SelectDivisionAsync(harness.Dialog, AcademicYearDivision.Terms);
++        await ChoosePositionAsync(harness.Dialog, 1);
++
++        harness.Dialog.WaitForAssertion(() =>
++        {
++            DivisionLabel(harness.Dialog).Should().Be("Term",
++                "the part is OFF its default before the Reset — without that move the reset below is unobservable");
++            PositionBoxes(harness.Dialog)[0].Instance.Value.Should().BeTrue("and a sequence is ticked");
++        });
++
++        AddReset(harness.Dialog)!.Click();
++
++        harness.Dialog.WaitForAssertion(() => DivisionLabel(harness.Dialog).Should().Be("Any date",
++            "Reset returns the division to the default the dialog opens on"));
++        PositionBoxes(harness.Dialog).Should().NotContain(b => b.Instance.Value,
++            "and no ticked sequence survives it — 'Any date' offers no sequence at all");
++        AssertFreeWindowFieldsGated(harness.Dialog, gated: true);
++        AddReset(harness.Dialog).Should().BeNull("the Reset goes away with the armed state it belonged to");
++        AddTrigger(harness.Dialog).Should().NotBeNull("and the trigger is back in its place");
++        SubmitButton(harness.Dialog).GetAttribute("disabled").Should().NotBeNull(
++            "with nothing left in the fields there is nothing to write");
++        harness.Handler.Calls.Should().NotContain(c => c.Method == "POST", "a Reset is never a write");
++    }
++
++    /// <summary>
++    /// F7/H2, the POSITION half, on the one render where the untick is observable at all: FR-56 leaves
++    /// a group owner exactly one division, so the Reset cannot take the ladder off screen — what the
++    /// reader sees is the tick itself coming off, with the part staying put.
++    /// </summary>
++    [TestMethod]
++    public async Task Reset_UnTicksTheChosenSequence_WhereTheLadderSurvivesIt()
++    {
++        var harness = await RenderDialogAsync(ownerType: "ActivityGroup", exceptionsJson: SeededExceptionJson());
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-row").Should().HaveCount(1));
++        ArmAddForm(harness.Dialog);
++        await ChoosePositionAsync(harness.Dialog, 1);
++
++        harness.Dialog.WaitForAssertion(() => PositionBoxes(harness.Dialog)[0].Instance.Value.Should()
++            .BeTrue("the 1st term is ticked before the Reset"));
++
++        AddReset(harness.Dialog)!.Click();
++
++        harness.Dialog.WaitForAssertion(() => PositionBoxes(harness.Dialog).Should().OnlyContain(b => !b.Instance.Value,
++            "the ticked sequence was abandoned, not written"));
++        PositionLabels(harness.Dialog).Should().BeEquivalentTo(new[] { "1st", "2nd", "3rd", "4th" },
++            "the ladder is still RENDERED — for a group the part cannot move, so it is the tick that changes");
++        DivisionLabel(harness.Dialog).Should().Be("Term", "and the part the group is allowed is still the one in force");
++        harness.Handler.Calls.Should().NotContain(c => c.Method == "POST");
++    }
++
++    /// <summary>
++    /// F7/H5 — an EMPTY list is armed by construction, so there is no pending add to cancel and no
++    /// Reset is rendered. The form stays live and the heading row carries its name alone.
++    /// </summary>
++    [TestMethod]
++    public async Task EmptyList_OffersNoReset()
++    {
++        var harness = await RenderDialogAsync(exceptionsJson: "[]");
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exceptions-empty").Should().NotBeEmpty());
++
++        AddReset(harness.Dialog).Should().BeNull(
++            "the form is live by construction here — there is no add to abandon");
++        AddTrigger(harness.Dialog).Should().BeNull("and no trigger either: nothing gates the form");
++        AssertFreeWindowFieldsGated(harness.Dialog, gated: false);
++        harness.Dialog.Find(".add-head").QuerySelectorAll("fluent-button").Should().BeEmpty(
++            "the heading row names the region only while nothing can be cancelled");
++    }
++
++    /// <summary>
++    /// F7/R5, the corner the fresh-open case cannot reach: the form can be ARMED while the list it was
++    /// armed against is re-read EMPTY. The row's own Remove is gated by the busy state and by nothing
++    /// else — not by the armed one — so removing the LAST row is reachable with the Reset in hand, and
++    /// the reload it triggers leaves an EMPTY list. That list is live by construction (F1), so there is
++    /// nothing left to cancel and the Reset goes with it: the form is the only thing on offer.
++    /// </summary>
++    [TestMethod]
++    public async Task ArmedForm_LosesItsReset_WhenTheLastRowIsRemoved()
++    {
++        var exceptionId = Guid.NewGuid();
++        var harness = await RenderDialogAsync(exceptionsJson: ExceptionsJson(
++            ExceptionJson(exceptionId, TopicId, "Terms", Term1Start, Term1End)));
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exception-remove").Should().HaveCount(1));
++
++        var removed = false;
++        harness.Handler.MapDynamic("GET", GradeExceptionsUrl, HttpStatusCode.OK,
++            () => removed ? "[]" : ExceptionsJson(ExceptionJson(exceptionId, TopicId, "Terms", Term1Start, Term1End)));
++        harness.Handler.MapDynamic("DELETE", $"{ExceptionsResource}/{exceptionId:D}", HttpStatusCode.NoContent,
++            () => { removed = true; return ""; });
++
++        ArmAddForm(harness.Dialog);
++        harness.Dialog.WaitForAssertion(() => AddReset(harness.Dialog).Should()
++            .NotBeNull("the armed form is what makes the Remove below reachable with a Reset in hand"));
++
++        harness.Dialog.Find(".exception-remove").Click();
++
++        harness.Dialog.WaitForAssertion(() => harness.Dialog.FindAll(".exceptions-empty").Should()
++            .NotBeEmpty("the last row is gone and the dialog falls back to its empty state"));
++
++        AddReset(harness.Dialog).Should().BeNull(
++            "R5: an empty list has nothing to cancel — the armed form's Reset does not outlive the row set "
++            + "it was armed against");
++        AddTrigger(harness.Dialog).Should().BeNull("and an empty list offers no trigger either");
++        AssertFreeWindowFieldsGated(harness.Dialog, gated: false);
++    }
++
+     /// <summary>
+     /// G4, the free-window half of F5 — a successful add CLEARS the entry fields it consumed (both
+     /// range ends, the reason), returns the division to the default the dialog opens on, and puts the
+@@ -1301,6 +1514,50 @@ public class EnrollmentExceptionsDialogTests : BunitContext
+         return css[start..css.IndexOf('}', start)];
+     }
+ 
++    /// <summary>
++    /// One method's source, from a marker inside it to the first closing brace at method
++    /// indentation. This is the only way to assert WHERE a behaviour lives — that the post-add clear
++    /// and the Reset's clear are ONE implementation rather than two copies that can drift.
++    /// </summary>
++    private static string MethodSource(string source, string marker)
++    {
++        var start = source.IndexOf(marker, StringComparison.Ordinal);
++        start.Should().BeGreaterThanOrEqualTo(0, $"`{marker}` should appear in the dialog's source");
++        var end = source.IndexOf("\n    }", start, StringComparison.Ordinal);
++        end.Should().BeGreaterThan(start, $"`{marker}` should sit in a method body that closes at method indentation");
++        return source[start..end];
++    }
++
++    /// <summary>
++    /// F7/H7 — the clear exists ONCE. The write that consumed the entry fields and the Reset that
++    /// abandons them both call <c>ClearAddForm()</c>, and the two statements a PARTIAL copy is most
++    /// likely to carry — the untick and the reason — appear nowhere but inside it: the reason is
++    /// counted across the whole component, and each caller's own body is ruled out for the untick.
++    /// A copy that inlines EITHER of those two fails here; the clear's remaining statements are
++    /// pinned behaviourally (H2/H3), not by whole-file text.
++    /// </summary>
++    [TestMethod]
++    public void Reset_AndTheSuccessPath_ShareTheOneClearImplementation()
++    {
++        var source = Load(
++            "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollmentExceptionsDialog.razor");
++
++        MethodSource(source, "private void ClearAddForm()").Should()
++            .Contain("_positions.Clear()").And.Contain("_startDate = null").And.Contain("_endDate = null")
++            .And.Contain("_reason = null").And.Contain("_chosenDivision = AcademicYearDivision.None");
++
++        MethodSource(source, "private void OnAddReset()").Should().Contain("ClearAddForm()",
++                "Reset abandons the entry fields through the ONE clear")
++            .And.NotContain("_positions.Clear()", "and carries none of the clear's statements itself");
++        MethodSource(source, "await Api.CreateSubjectEnrollmentExceptionsAsync").Should()
++            .Contain("ClearAddForm()", "and the write that consumed them calls the same method, not a copy")
++            .And.NotContain("_reason = null", "which is why the success path no longer carries the statements")
++            .And.NotContain("_positions.Clear()", "and none of the others either");
++
++        source.Split("_reason = null;").Should().HaveCount(2,
++            "the reason is cleared in exactly one place in the whole component: the shared method");
++    }
++
+     // ── Accessibility: the states that change under the reader ────────────
+ 
+     /// <summary>

@@ -7,11 +7,11 @@
    "View all" anchor (grade-detail-modern-ui-plan.md §0.4). The page owns the
    API/enrichment and passes the data + action callbacks so this dialog stays
    thin. Each row shows the subject's ENROLLMENT EXCEPTION COUNT
-   (subject-period-exception-model.md v3 §5.2), resolved from exceptions, not from
+   (subject-period-exception-model.md v8 §5.2), resolved from exceptions, not from
    the bridge row (which carries no period meaning any more) and rendered
-   READ-ONLY: the exceptions themselves are managed on the dedicated
-   EnrollmentExceptions page, which the kebab navigates to. Reuses the per-topic
-   Strands (strands + lessons, unified) / Teachers dialogs and the Remove flow
+   READ-ONLY: the exceptions themselves are managed in the
+   EnrollmentExceptionsDialog, which the kebab OPENS with this grade + topic as the
+   scope. Reuses the per-topic Strands (strands + lessons, unified) / Teachers dialogs and the Remove flow
    (RemoveTopicAsync on the page). *@
 <div class="topic-dialog">
     <div class="picker-row">
@@ -77,10 +77,10 @@
     public const string AssignKey = nameof(Assign);
     public const string OnChangedKey = nameof(OnChanged);
 
-    /// <summary>Receives the dedicated EnrollmentExceptions page URL for a topic id, so
-    /// the kebab can navigate to it with the grade owner pre-selected. Provided by the
-    /// page (which owns the API/navigation context), like the other callbacks here.</summary>
-    public const string ExceptionPageUrlKey = nameof(ExceptionPageUrl);
+    /// <summary>Receives the callback that OPENS the EnrollmentExceptionsDialog for a
+    /// topic id, scoped to this dialog's grade owner. Provided by the page (which owns
+    /// the dialog service), like the other callbacks here.</summary>
+    public const string OpenEnrollmentExceptionsKey = nameof(OpenEnrollmentExceptions);
 
     /// <summary>Topic id → how many enrollment exceptions it carries, so the row can show
     /// the count badge. A COUNT, not the exception list: the badge never lists spans, and
@@ -107,7 +107,7 @@
     private Func<Guid, Task>? Remove => Get<Func<Guid, Task>>(RemoveKey);
     private Func<Guid, Task>? Assign => Get<Func<Guid, Task>>(AssignKey);
     private Func<Task>? OnChanged => Get<Func<Task>>(OnChangedKey);
-    private Func<Guid, string>? ExceptionPageUrl => Get<Func<Guid, string>>(ExceptionPageUrlKey);
+    private Func<Guid, Task>? OpenEnrollmentExceptions => Get<Func<Guid, Task>>(OpenEnrollmentExceptionsKey);
     private Dictionary<Guid, int>? ExceptionCountsByTopic =>
         Get<Dictionary<Guid, int>>(ExceptionCountsByTopicKey);
 
@@ -141,11 +141,11 @@
             RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
         };
 
-        // NAVIGATES to the dedicated management page (spec §5.2 row 3) — the dialog
-        // shows a count only; nothing is edited inline.
-        if (ExceptionPageUrl?.Invoke(topic.TopicId) is { } exceptionsUrl)
+        // OPENS the EnrollmentExceptionsDialog (spec §5.2 row 3, v8) — the shell already
+        // owns the chrome, so the dialog shows a count only and nothing is edited inline.
+        if (OpenEnrollmentExceptions is { } openExceptions)
         {
-            actions.Add(RowAction.Navigate("Enrollment exceptions", exceptionsUrl, FluentIcons.Calendar));
+            actions.Add(RowAction.Callback("Enrollment exceptions", () => openExceptions(topic.TopicId), FluentIcons.Calendar));
         }
 
         actions.Add(RowAction.Separator());

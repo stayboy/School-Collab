@@ -1,0 +1,150 @@
+/* EnrollmentExceptionsDialog (subject-period-exception-model.md v8 §5.1).
+   Scoped to this component; every ::deep rule below targets a <fluent-button>
+   or <fluent-badge>, which those FluentUI child components render in ANOTHER
+   scope. No inline <style> — CSS isolation only.
+   Carried forward from the retired EnrollmentExceptions.razor.css: only the
+   rules whose class the dialog's markup still renders (dialog-ui §3 — the
+   page's .exceptions-page / .page-title / .hint / .owner-bar / .owner-prompt /
+   .exception-topic / .add-prompt / .add-exception / .form-actions rules are
+   gone with the chrome they styled; the add form's action row is now the
+   shared DialogShellFooter, which brings its own border-top separator). */
+
+.exceptions-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.exceptions-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 1px solid var(--neutral-stroke-rest, rgba(0, 0, 0, 0.08));
+    border-radius: 6px;
+    padding: 0.75rem 1rem 1rem;
+}
+
+.section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.section-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* The owner is the dialog's scope, made visible: the heading names the SUBJECT
+   (the dialog's title names it too), so the owner reads as a description rather
+   than as a second heading. */
+.section-owner {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9em;
+}
+
+.exceptions-empty {
+    margin: 0.25rem 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}
+
+.exceptions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+/* The list omits the subject column: the dialog is scoped to ONE subject (D5),
+   so a row is part / span / reason / remove. The span keeps the 12rem basis it
+   had when it shared the row with a subject name. */
+.exception-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--neutral-stroke-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.exception-row:last-child {
+    border-bottom: none;
+}
+
+/* 12rem is the PREFERRED column width, not a floor: as a flex-basis it still
+   gives the list its stable grid, while min-width: 0 lets the column shrink and
+   overflow-wrap: anywhere breaks a long reason INSIDE the row. */
+.exception-span {
+    flex: 0 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.exception-reason {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+    overflow-wrap: anywhere;
+}
+
+/* Icon-only FluentButtons need a square footprint; ::deep because
+   <fluent-button> is rendered by the FluentButton child component in another
+   scope. */
+::deep .exception-remove {
+    margin-left: auto;
+    min-width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+}
+
+/* The add region: separated from the list above by a border-top — the repo's dialog-ui §2
+   separator convention (a CSS border-top, never a <FluentDivider>/<hr>) — which is what keeps
+   "the list I am reading" and "the form I am filling" apart at a glance. */
+.add-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--neutral-stroke-rest, rgba(0, 0, 0, 0.08));
+}
+
+/* The add region's heading row: the region's name on the left, and — while the form is GATED
+   behind the trigger (EnrollmentExceptionsDialog.razor, F1/F2) — the action that arms it on the
+   right. space-between keeps the trigger at the trailing edge whether or not it is offered. */
+.add-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.add-title {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+/* The add form's horizontal row is a native <FluentStack ... Class="add-form"> in
+   the markup, so there is deliberately NO flex container here —
+   .github/copilot/rules/blazor-components.md requires FluentUI's built-in
+   parameters over custom CSS for spacing, alignment and layout. `add-form` is
+   the tests' DOM hook; no rule targets it. */
+
+/* The two ends of the range, kept together as one unit. The range's header is
+   COMBINED into each end's own label ("Not offered from" / "Not offered to"), so
+   the visible text costs ONE label line instead of two; the group still carries
+   `role="group"` + `aria-label` because that is what keeps the pair
+   programmatically related, and it keeps them adjacent when the row wraps.
+   Deliberately NOT converted to a <FluentStack>: FluentStack.Width defaults to
+   "100%" (v4.14.2 package doc), and inside a content-sized cell that percentage
+   is circular. */
+.span-group {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.add-note {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9em;
+}

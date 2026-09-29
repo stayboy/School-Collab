@@ -295,8 +295,8 @@
     /// subject is offered in the grade (its bridge row carries no period meaning any
     /// more), and an exception records the period part + date span it is not offered
     /// for. Loaded once per card load; the card and the "View all subjects" dialog both
-    /// render a read-only COUNT badge — the exceptions themselves are managed on the
-    /// dedicated EnrollmentExceptions page, which every affordance here navigates to.
+    /// render a read-only COUNT badge — the exceptions themselves are managed in the
+    /// EnrollmentExceptionsDialog, which every affordance here opens.
     /// </summary>
     private SubjectEnrollmentExceptionDto[] _exceptions = [];
 
@@ -317,11 +317,50 @@
         [$"{t.StrandCount} strands", $"{t.LessonCount} lessons"];
 
     /// <summary>
-    /// The dedicated management page's URL for one of this grade's subjects, with the
-    /// owner and the topic pre-selected (spec §5.2). The card never opens an editor.
+    /// Opens the EnrollmentExceptionsDialog scoped to this grade + this subject
+    /// (spec §5.2, v8 §5.1) — the card never opens an editor inline. The dialog
+    /// dismisses itself, so the grade's exception COUNT is reloaded on close: the
+    /// name badge would otherwise stay stale after an add or a remove.
     /// </summary>
-    private string ExceptionPageUrl(Guid topicId) =>
-        $"/students/enrollment-exceptions?gradeLevelId={Id}&topicId={topicId:D}";
+    private async Task OpenEnrollmentExceptionsAsync(GradeTopicCurriculumDto topic)
+    {
+        await DialogService.ShowShellDialogAsync<
+            EnrollmentExceptionsDialog,
+            EnrollmentExceptionsDialog.EnrollmentExceptionsModel,
+            EnrollmentExceptionsDialog.EnrollmentExceptionsResult>(
+            new EnrollmentExceptionsDialog.EnrollmentExceptionsModel
+            {
+                OwnerType = "GradeLevel",
+                OwnerId = Id,
+                OwnerName = _grade!.Name,
+                TopicId = topic.TopicId,
+                TopicName = topic.Name,
+            },
+            title: $"Enrollment exceptions — {topic.Name}",
+            size: DialogSize.Large);
+
+        if (_disposed) return;
+        await ReloadExceptionsAsync();
+    }
+
+    /// <summary>
+    /// The dialog's own kebab hands back a topic ID, not a row (<c>Func&lt;Guid, Task&gt;</c>,
+    /// like its other callbacks), so the row is resolved here before the dialog opens.
+    /// </summary>
+    private Task OpenEnrollmentExceptionsForTopicAsync(Guid topicId) =>
+        OpenEnrollmentExceptionsAsync(CurriculumRow(topicId));
+
+    /// <summary>The curriculum row for a topic, from the card's own loaded list — with a
+    /// name-only fallback for a topic the list has not (yet) seen, so the dialog always has
+    /// something to title itself with.</summary>
+    private GradeTopicCurriculumDto CurriculumRow(Guid topicId) =>
+        (_curriculum ?? []).FirstOrDefault(t => t.TopicId == topicId)
+        ?? new GradeTopicCurriculumDto(
+            topicId,
+            _catalog.TryGetValue(topicId, out var topic) ? topic.Name : "Subject",
+            _catalog.TryGetValue(topicId, out var withCode) ? withCode.Code : null,
+            0,
+            0);
 
     private TopicDto[] _unassignedTopics =>
         _catalog.Values
@@ -745,7 +784,7 @@
                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
                 { GradeTopicsDialog.AssignKey, new Func<Guid, Task>(AssignTopicAsync) },
                 { GradeTopicsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
-                { GradeTopicsDialog.ExceptionPageUrlKey, new Func<Guid, string>(ExceptionPageUrl) },
+                { GradeTopicsDialog.OpenEnrollmentExceptionsKey, new Func<Guid, Task>(OpenEnrollmentExceptionsForTopicAsync) },
                 // Per-topic exception COUNTS, not lists: the dialog renders a count
                 // badge only, and a count map cannot collide on a repeated topic key.
                 { GradeTopicsDialog.ExceptionCountsByTopicKey, _exceptions
@@ -871,14 +910,14 @@
     // affordance (opens the topic edit dialog, which also manages strands +
     // lessons inline); the kebab holds the secondary actions (standalone strands
     // dialog, enrollment exceptions, remove). Enrollment exceptions are NOT edited
-    // here — the kebab NAVIGATES to the dedicated EnrollmentExceptions page with the
-    // owner and topic pre-selected, and the card itself only shows the count
-    // (spec §5.2 — no list, no inline editor).
+    // on the card — the kebab OPENS the EnrollmentExceptionsDialog scoped to this
+    // grade + this subject (spec §5.2 v8, no list, no inline editor), and the card
+    // itself only shows the count.
     private IReadOnlyList<RowAction> BuildTopicRowActions(GradeTopicCurriculumDto topic) =>
         new List<RowAction>
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
-            RowAction.Navigate("Enrollment exceptions", ExceptionPageUrl(topic.TopicId), FluentIcons.Calendar),
+            RowAction.Callback("Enrollment exceptions", () => OpenEnrollmentExceptionsAsync(topic), FluentIcons.Calendar),
             RowAction.Separator(),
             RowAction.Callback(
                 "Remove",
