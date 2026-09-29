@@ -184,6 +184,23 @@ anyway; that acceptance is recorded there so it cannot later be mistaken for an 
   is decided **per sequence**, so the span inputs are shown whenever **any** chosen sequence has no
   period behind it. (§11.4)
 
+**LOCKED in v7 (2026-09-30) by the owner — the span is hidden for EVERY real part.**
+
+- **Decision 20 — the Position row and the range are mutually exclusive.** The range (the "Not
+  offered from / to" pickers) belongs to **`Any date` alone**. The moment a real part (`Term` /
+  `Semester`) is chosen, the range is **removed entirely** — v6 decision 17 hid it only when every
+  chosen sequence resolved to a period; v7 hides it **unconditionally** for a real part. `Any date`
+  still shows it, because a free window has no period to derive from.
+- **Decision 21 — an unbacked position is DISABLED, not hidden.** The ladder keeps its structural
+  SHAPE (Q5: 1st–4th, extended by any higher declared position) but a position the tenant has **no
+  period for** is rendered **disabled**, so it cannot be chosen. This replaces v6's dead-end guard
+  (§11.2's third table row) without dead-ending the form: every selectable position is backed by a
+  period, so `CanAdd` is satisfied on the choice alone and no typed bound is ever needed for a real
+  part. **This retires the Q1 "record a 3rd term before the calendar is built" write flow** — an
+  owner-accepted reversal, recorded rather than absorbed (§11.7).
+- Consequence: a real part with no position ticked is a **pre-write state**, not a write. The add
+  section says *"Choose a position to add an exception."*
+
 ---
 
 ## 1. The problem being solved
@@ -445,21 +462,22 @@ per view, and one control owns it.**
     offered only when the division names a real part). Ticking several writes **one exception per
     sequence, in ONE transaction** (v6 §11.3, decision 18), which is what makes a gapped selection
     ("1st and 3rd") a single action; a checkbox is also the one control here that can be un-picked.
-    It is **not** limited to the periods that exist: a 3rd term is on offer even when the tenant has
-    no 3rd-term period, and the dates are then typed.
+    The ladder is **structural** (Q5): 1st–4th are always rendered and a declared higher position
+    extends it. **v7 (decision 21): a position the tenant has no period for renders DISABLED** — it
+    is not hidden, so the year's shape stays visible, but it cannot be chosen, because the range is
+    silent for every real part and such an item could never be written.
     Native control, chosen by the repo's own rule (FluentUI's parameters before custom CSS):
     FluentUI 4.14.2 has no `FluentListBox` and no `FluentField`, and `FluentRadioGroup` is
     single-value, so the multi-select is a row of `FluentCheckbox` in a native `FluentStack`,
     bound through the **inherited** `Value`/`ValueChanged` — **not** `CheckState`, which is the
     three-state parameter and throws unless `ThreeState` is true.
-  - **One range input, shown only when a bound has to be TYPED** (decision 12, plus v6 §11.2
-    decision 17): a single labelled **"Not offered"** range whose ends are independently open. An
-    open end renders as **`(any start)`** / **`(any end)`** — the openness is part of the range,
-    not a separate Clear button beside it. It is **removed entirely** once every ticked sequence
-    resolves to a period: each span is then DERIVED from its own period and kept **silent** (owner
-    decision, 2026-09-29 — no read-only text either; the accepted cost is recorded in §11.2). It
-    comes back the moment any ticked sequence has no period, because that item's span falls back to
-    typed bounds and `Add exception` needs one — the guard that keeps the form reachable at all.
+  - **One range input, shown ONLY on `Any date`** (decision 12, plus v6 §11.2 decision 17 and v7
+    §11.7 decision 20): a single labelled **"Not offered"** range whose ends are independently open.
+    An open end renders as **`(any start)`** / **`(any end)`** — the openness is part of the range,
+    not a separate Clear button beside it. It is **removed entirely** the moment a real part is
+    chosen: each span is then DERIVED from its own position's period and kept **silent** (v6 §11.2 —
+    no read-only text either). It stays removed even when no position is ticked yet; that state is a
+    pre-write state, named by the add section's note, not a reason to bring the pickers back.
     The **period instance picker is gone entirely** — the page has no period selection any more,
     only a division and a set of sequences.
   - The layout is the house form primitive (`FormRow`) with the label **beneath** its input
@@ -810,6 +828,10 @@ NULL`); and an exception with a **different ordinal for the same span** is still
 > the two are coupled** — the span section's visibility is decided *per selected sequence*, so it
 > cannot be settled before the selection model is. **Route A** and the **silent** span were both
 > confirmed by the owner; §11.2 records the one cost that acceptance carries.
+>
+> **Amended by v7 (§11.7, 2026-09-30):** the per-sequence guard below is **retired**. The span now
+> belongs to `Any date` alone; a real part always hides it, and a position with no period is
+> disabled rather than given typed bounds.
 
 ### 11.1 What was asked for
 
@@ -847,6 +869,10 @@ accepted explicitly**, recorded here so it is not later mistaken for an oversigh
 The guard in the last three rows is **not optional** and is not part of the silent-vs-read-only
 question: it is what keeps the form reachable at all. Silence applies only where a span is genuinely
 derivable, which is the first two rows.
+
+> ⚠️ **SUPERSEDED by v7 (§11.7, decision 20/21).** The three guard rows above no longer describe the
+> page. v7 removes the range for **every** real part and disables an unbacked position instead, so
+> the guard's dead-end risk is designed out rather than handled. The table is kept as the v6 record.
 
 ### 11.3 Decision 18 — multi-sequence selection writes **one row per sequence**
 
@@ -942,7 +968,8 @@ the duplicate key). Integration — three tests added to
 `EnrollmentExceptionAvailabilityEndpointTests`, which already had the seed and POST helpers.
 Page — the existing `EnrollmentExceptionsPageTests` suite was migrated rather than replaced
 (14 assertions re-targeted, none deleted), and the multi-select assertion lives in
-`PositionWithNoMatchingPeriod_LeavesTheRangeEmpty_AndTakesTheTypedDates`.
+`PositionWithNoMatchingPeriod_LeavesTheRangeEmpty_AndTakesTheTypedDates` (**renamed in v7 to
+`PositionsWithoutAPeriod_AreDisabled_AndTheRangeStaysHidden`**, §11.7).
 
 **Two plan corrections, both recorded rather than quietly absorbed:**
 
@@ -954,3 +981,45 @@ Page — the existing `EnrollmentExceptionsPageTests` suite was migrated rather 
    that the valid first item leaves no row behind.
 2. **The list renders no ordinals** (§11.3), so the "contiguous run as a range" item in the plan
    above was dropped — there was nothing to render.
+
+---
+
+### 11.7 v7 — the span belongs to the free window; an unbacked position is disabled
+
+> **Status: LOCKED and IMPLEMENTED (2026-09-30) — owner decision, Solo round.** v7 completes the v6
+> direction. The owner's words: *"Position is showing as spec intended, but date range must hide
+> when position shows."* The range therefore no longer depends on whether a period happens to hold
+> the chosen position — it belongs to `Any date` alone.
+
+**Decision 20 — the Position row and the range are mutually exclusive.** With a real part
+(`Term` / `Semester`) chosen, the span section is removed ENTIRELY (still no derived-span text — v6
+decision 17's silence, which v7 keeps). `Any date` keeps the editable range in every case.
+
+| Situation | Span section |
+|---|---|
+| `Any date` (division `None`) | **Shown, editable** — the free window is the whole point |
+| Any real part (`Term` / `Semester`), with or without a position ticked | **Removed entirely** — no pickers and no derived-span text |
+
+**Decision 21 — an unbacked position is DISABLED, not hidden.** The ladder keeps its structural
+SHAPE (Q5: 1st–4th, extended by any higher declared position) but a position the tenant has **no
+period for** is rendered **disabled**. This is what makes decision 20 safe: every *selectable*
+position is backed by a period, so every item in the batch has a derived span and `CanAdd` is
+satisfied on the choice alone. v6's dead-end guard (§11.2's third row) is therefore **removed**, and
+with it the Q1 write flow it protected — "record a 3rd term before the calendar is built" is no
+longer reachable, an owner-accepted cost rather than an oversight.
+
+**Consequences for the page (implemented):**
+
+- `SpanIsDerived` is now simply `Division != AcademicYearDivision.None`.
+- `PositionIsDerivable(position)` decides each checkbox's `Disabled` state.
+- A real part with **no** position ticked is a **pre-write** state, not a write: the add section
+  renders the note *"Choose a position to add an exception."* (a polite live region) rather than
+  leaving a disabled button unexplained.
+- `BuildItems()` is unchanged in shape; a real part with no position simply produces an unbounded
+  item, which `CanAdd` rejects.
+
+**Tests.** `PositionsWithoutAPeriod_AreDisabled_AndTheRangeStaysHidden` replaces v6's
+`PositionWithNoMatchingPeriod_LeavesTheRangeEmpty_AndTakesTheTypedDates` (the reversed flow) and
+keeps the multi-select coverage via the fixture's two backed positions; `OpenEnds_…`,
+`ChosenPart_IsAControl_…` and `Positions_AreOneToFourPlusAnyHigherDeclared_…` were re-targeted to
+the disabled/v7 shape.
