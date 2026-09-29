@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -112,6 +113,57 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
             null,
             System.DateTimeOffset.UnixEpoch);
 
+    private const string GlobalPanel = ".split__panel--global";
+    private const string GradePanel = ".split__panel--grade";
+
+    /// <summary>
+    /// Runs the render queue to quiescence: a no-op work item on the renderer's own dispatcher,
+    /// which completes only after the work queued ahead of it has run. bUnit's synchronous
+    /// <c>Change</c> helper posts the event and returns before the render it causes has been
+    /// applied, so an interaction driven or read across that window is lost: the render re-assigns
+    /// the element's event-handler id, and <c>SubmitAsync</c> then compares the pre-toggle value.
+    /// </summary>
+    private static Task QuiesceAsync(IRenderedComponent<FluentDialogProvider> cut) =>
+        cut.InvokeAsync(() => { });
+
+    /// <summary>
+    /// Ticks one channel checkbox in one scope panel and does not return until the toggle is
+    /// observable through the dialog's one-way bound list: the checkbox itself re-renders as
+    /// checked, which can only be true once the dialog assigned the list it saves and re-rendered
+    /// the editor from it.
+    /// </summary>
+    private static async Task ToggleChannelAsync(
+        IRenderedComponent<FluentDialogProvider> cut, string panelSelector, string channelLabel)
+    {
+        await QuiesceAsync(cut);
+        ChannelCheckbox(cut, panelSelector, channelLabel).Change(true);
+        await QuiesceAsync(cut);
+
+        ChannelCheckbox(cut, panelSelector, channelLabel).HasAttribute("checked").Should().BeTrue(
+            $"toggling {channelLabel} in {panelSelector} must re-render it as checked, which proves the dialog applied the change");
+    }
+
+    /// <summary>
+    /// Types a time into one scope panel's time input and does not return until the input renders it
+    /// back - the same observable-bound-state proof <see cref="ToggleChannelAsync"/> makes for a
+    /// checkbox.
+    /// </summary>
+    private static async Task SetTimeAsync(
+        IRenderedComponent<FluentDialogProvider> cut, string panelSelector, string timeText)
+    {
+        await QuiesceAsync(cut);
+        cut.Find($"{panelSelector} input[type=time]").Change(timeText);
+        await QuiesceAsync(cut);
+
+        cut.Find($"{panelSelector} input[type=time]").GetAttribute("value").Should().Be(timeText,
+            $"the {panelSelector} time input must render {timeText} back, which proves the dialog applied the change");
+    }
+
+    private static IElement ChannelCheckbox(
+        IRenderedComponent<FluentDialogProvider> cut, string panelSelector, string channelLabel) =>
+        cut.FindAll($"{panelSelector} .channel-option").Single(l => l.TextContent.Contains(channelLabel))
+            .QuerySelector("input[type=checkbox]")!;
+
     [TestMethod]
     public async Task Dialog_Shows_Both_Scope_Panels_SideBySide()
     {
@@ -158,8 +210,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel--grade .channel-option").Should().NotBeEmpty());
         // Toggle SMS into the GRADE-side blocked list only.
-        cut.FindAll(".split__panel--grade .channel-option").Single(l => l.TextContent.Contains("SMS"))
-            .QuerySelector("input[type=checkbox]")!.Change(true);
+        await ToggleChannelAsync(cut, GradePanel, "SMS");
         cut.Find("form").Submit();
 
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -190,8 +241,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel--global .channel-option").Should().NotBeEmpty());
         // Add SMS to the GLOBAL-side preferred list only.
-        cut.FindAll(".split__panel--global .channel-option").Single(l => l.TextContent.Contains("SMS"))
-            .QuerySelector("input[type=checkbox]")!.Change(true);
+        await ToggleChannelAsync(cut, GlobalPanel, "SMS");
         cut.Find("form").Submit();
 
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -222,11 +272,10 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
             NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Preferred channels", DialogSize.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".channel-option").Should().NotBeEmpty());
-        // Global: Email (kept) + SMS. Grade (no override yet): WhatsApp only.
-        cut.FindAll(".split__panel--global .channel-option").Single(l => l.TextContent.Contains("SMS"))
-            .QuerySelector("input[type=checkbox]")!.Change(true);
-        cut.FindAll(".split__panel--grade .channel-option").Single(l => l.TextContent.Contains("WhatsApp"))
-            .QuerySelector("input[type=checkbox]")!.Change(true);
+        // Global: Email (kept) + SMS. Grade (no override yet): WhatsApp only. Each interaction is
+        // proven applied through its own checkbox before the next one runs, so Save sees both lists.
+        await ToggleChannelAsync(cut, GlobalPanel, "SMS");
+        await ToggleChannelAsync(cut, GradePanel, "WhatsApp");
         cut.Find("form").Submit();
 
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -256,7 +305,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
             NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Sendout time of day", DialogSize.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel--grade input[type=time]").Should().NotBeEmpty());
-        cut.Find(".split__panel--grade input[type=time]").Change("09:30");
+        await SetTimeAsync(cut, GradePanel, "09:30");
         cut.Find("form").Submit();
 
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
