@@ -147,11 +147,11 @@ public class CreateTopicForGradeHandlerTests
     }
 
     [TestMethod]
-    public async Task CreateForGrade_WithPeriodId_ScopesAssignmentToPeriod()
+    public async Task CreateForGrade_WithPeriodId_IsAcceptedAndIgnored()
     {
-        // Rev. 6 FR-55/57: a grade-owned topic's PeriodId, when set, must be an
-        // AcademicYear or a Term/Semester within the active academic year. The
-        // created assignment must carry that PeriodId (no duplicate assignment).
+        // DEPRECATED (2026-09-26, subject-period-exception-model.md): the bridge row
+        // carries no period meaning any more, so the command's PeriodId is accepted
+        // for wire compatibility and ignored — the created assignment is period-less.
         using var s = new StudentsTestScope("csfg-period");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
@@ -163,18 +163,17 @@ public class CreateTopicForGradeHandlerTests
         (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
         var assignment = await s.Db.GradeTopicAssignments.FirstAsync();
         assignment.TopicId.Should().Be(dto.Id);
-        assignment.PeriodId.Should().Be(termId);
+        assignment.PeriodId.Should().BeNull("PeriodId is accepted and ignored");
     }
 
     [TestMethod]
-    public async Task CreateForGrade_WithTermOutsideActiveYear_Throws()
+    public async Task CreateForGrade_WithTermOutsideActiveYear_IsAcceptedAndIgnored()
     {
-        // Rev. 6 EC-24: a grade topic PeriodId that is a Term outside the active
-        // academic year is rejected.
+        // The retired FR-57/EC-24 rejection no longer fires — the field is ignored.
         using var s = new StudentsTestScope("csfg-period-invalid");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
-        var termId = await SeedActiveYearAndTermAsync(s);
+        await SeedActiveYearAndTermAsync(s);
         // A second academic year (not active) with a term inside it.
         var create = new CreatePeriodHandler(
             s.Periods, s.Cache, s.Tenants,
@@ -184,17 +183,18 @@ public class CreateTopicForGradeHandlerTests
             AcademicYearDivision.Terms, ParentPeriodId: otherAy))).YearId;
         var h = NewHandler(s);
 
-        var act = async () => await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: otherTerm));
+        await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: otherTerm));
 
-        await act.Should().ThrowAsync<TopicAssignmentPeriodException>();
+        var assignment = await s.Db.GradeTopicAssignments.SingleAsync();
+        assignment.PeriodId.Should().BeNull();
     }
 
     [TestMethod]
-    public async Task CreateForGrade_ExistingAssignmentDifferentPeriod_CreatesScopedAssignment()
+    public async Task CreateForGrade_ExistingAssignment_IsIdempotentRegardlessOfPeriodId()
     {
-        // Rev. 6 FR-55/57: a request scoped to a Term when a year-spanning
-        // (PeriodId = null) assignment already exists must create a NEW assignment
-        // carrying the requested Term — the idempotency guard is period-scoped.
+        // The retired period-scoped idempotency guard is now topic-scoped, which is
+        // the database's own rule: ix_topic_assignments_tenant_grade_topic_unique
+        // permits at most one bridge row per (tenant, grade, topic).
         using var s = new StudentsTestScope("csfg-diff-period");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
@@ -205,21 +205,20 @@ public class CreateTopicForGradeHandlerTests
         var yearSpanning = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1));
         (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
 
-        // Second: same topic, now scoped to the active Term.
+        // Second: same topic, now with an (ignored) Term PeriodId.
         var scoped = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
 
         scoped.Id.Should().Be(yearSpanning.Id, "the shared topic is reused");
-        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(2, "a differently-scoped request adds a new assignment");
-        var termAssignment = await s.Db.GradeTopicAssignments.SingleAsync(a => a.PeriodId == termId);
-        termAssignment.TopicId.Should().Be(yearSpanning.Id);
-        termAssignment.GradeLevelId.Should().Be(gradeId);
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1,
+            "a second bridge row for the same (grade, topic) was never representable");
+        (await s.Db.GradeTopicAssignments.SingleAsync()).PeriodId.Should().BeNull();
     }
 
     [TestMethod]
     public async Task CreateForGrade_ExistingSamePeriod_Skips()
     {
-        // Rev. 6 FR-55/57: repeating the SAME period-scoped request must not
-        // duplicate the assignment — the guard is true idempotency.
+        // Repeating the request must not duplicate the assignment — the guard is
+        // now topic-scoped and therefore strictly stronger.
         using var s = new StudentsTestScope("csfg-same-period");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
@@ -229,9 +228,9 @@ public class CreateTopicForGradeHandlerTests
         await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
         await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
 
-        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1, "same period scope is idempotent");
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1, "same subject is idempotent");
         var assignment = await s.Db.GradeTopicAssignments.SingleAsync();
-        assignment.PeriodId.Should().Be(termId);
+        assignment.PeriodId.Should().BeNull();
     }
 
     [TestMethod]

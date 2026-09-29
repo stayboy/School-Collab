@@ -1,13 +1,11 @@
 @page "/students/subjects"
 @using SchoolCollab.Students.Application.Services
-@using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Features
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
-@using AssignmentDto = SchoolCollab.Students.Application.Services.TopicAssignmentDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject IFeatureFlagService FeatureFlags
@@ -80,8 +78,19 @@
         <TemplateColumn TGridItem="SubjectDto" Title="Name" SortBy="@_sortByName" Sortable="true">
             @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
         </TemplateColumn>
-        <TemplateColumn TGridItem="SubjectDto" Title="Delivery periods">
-            @DeliveryPeriodLabel(context.Id)
+        <TemplateColumn TGridItem="SubjectDto" Title="Enrollment exceptions">
+            @{
+                var exceptionCount = ExceptionCount(context.Id);
+            }
+            @if (exceptionCount > 0)
+            {
+                @* Count badge only (spec §5.2 row 1): zero exceptions renders NO badge —
+                   the absence of an exception is the normal state. The kebab navigates
+                   to the management page; nothing is edited on this grid. *@
+                <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                    @EnrollmentExceptionLabels.FormatCount(exceptionCount)
+                </FluentBadge>
+            }
         </TemplateColumn>
         <TemplateColumn TGridItem="SubjectDto" Title="Created">
             @context.CreatedAt.ToLocalTime().ToString("d")
@@ -92,26 +101,20 @@
 
 @code {
     [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
-    [SupplyParameterFromQuery] public Guid? PeriodId { get; set; }
 
     private GradeLevelDto[]? _gradeLevels;
     private SubjectDto[]? _items;
     private Dictionary<Guid, string> _resolvedNames = new();
 
     /// <summary>
-    /// Bridge rows (<c>GradeTopicAssignment</c>) for the selected owner, grouped
-    /// by TopicId. The delivery period lives on the bridge row, never on the
-    /// subject (<c>SubjectDto</c>), so the grid cannot show or edit periods
-    /// without this. Grouped, never keyed by TopicId — one subject may have
-    /// several rows (one per term). See subject-topic-delivery-periods.md §1, §8.
+    /// The current owner's exception count per TopicId. The exceptions — not the
+    /// retired bridge <c>PeriodId</c> whitelist — are what the grid's
+    /// "Enrollment exceptions" column counts (subject-period-exception-model.md v3 §5.2).
+    /// Grouped by TopicId and reduced to a count, never keyed: one subject may carry
+    /// several exceptions (a Term span and a plain window, say).
     /// </summary>
-    private Dictionary<Guid, List<AssignmentDto>> _assignmentsByTopic = new();
+    private Dictionary<Guid, int> _exceptionCountsByTopic = new();
 
-    /// <summary>
-    /// Period id → display name, so the grid renders "Term 1" rather than a GUID
-    /// prefix (Gap 6 — <c>PeriodLabel</c> used to return <c>pid.ToString()[..8]</c>).
-    /// </summary>
-    private Dictionary<Guid, string> _periodNames = new();
     private string _searchText = string.Empty;
     private string? _error;
     private CancellationTokenSource? _loadCts;
@@ -360,6 +363,10 @@
             {
                 _items = await Api.ListSubjectsByGroupAsync(groupId, null, token);
                 if (_disposed) return;
+                // Owner gate WIDENED (spec §5.2 row 1, owner-confirmed 2026-09-26): an
+                // activity group owns exceptions just as a grade does, so its rows get
+                // the count badge and the navigating kebab too.
+                await LoadExceptionCountsAsync(activityGroupId: groupId, ct: token);
                 await ResolveNamesAsync(token);
             }
             catch (Exception ex)
@@ -370,12 +377,6 @@
                 _items = [];
                 _resolvedNames = new();
             }
-            // Group-owned period editing is NOT offered here: it needs a group
-            // topic-assignment LIST endpoint, and only the write
-            // (AssignActivityGroupTopicAsync) exists. Rather than render a dead
-            // "Edit periods" affordance, the landing claims no group periods.
-            _assignmentsByTopic = new();
-            _periodNames = new();
             return;
         }
 
@@ -383,17 +384,17 @@
         {
             _items = [];
             _resolvedNames = new();
-            _assignmentsByTopic = new();
-            _periodNames = new();
+            _exceptionCountsByTopic = new();
             return;
         }
 
         try
         {
-            // Use the period from query param, or null to derive current period server-side
-            _items = await Api.ListSubjectsByGradeAsync(gradeLevelId, PeriodId, token);
+            // The bridge row carries no period meaning, so there is no period to pass
+            // (subject-period-exception-model.md v3 §8 Q5).
+            _items = await Api.ListSubjectsByGradeAsync(gradeLevelId, token);
             if (_disposed) return;
-            await LoadDeliveryPeriodsAsync(gradeLevelId, token);
+            await LoadExceptionCountsAsync(gradeLevelId: gradeLevelId, ct: token);
             await ResolveNamesAsync(token);
         }
         catch (Exception ex)
@@ -407,105 +408,65 @@
     }
 
     /// <summary>
-    /// Loads the owner-scoped bridge rows plus the period-name map that back the
-    /// "Delivery periods" column and the "Edit periods" action.
+    /// Loads the current owner's enrollment exceptions and reduces them to a per-topic
+    /// count, which backs the grid's count badge and its identically-labelled row action.
     ///
-    /// Best-effort and self-contained: a failure here degrades the period column
-    /// and drops the action, but must never fail the topic list, which has
-    /// already loaded by this point.
+    /// Best-effort and self-contained: a failure here degrades the column to no badge,
+    /// but must never fail the topic list, which has already loaded by this point.
     /// </summary>
-    private async Task LoadDeliveryPeriodsAsync(Guid gradeLevelId, CancellationToken token)
+    private async Task LoadExceptionCountsAsync(
+        Guid? gradeLevelId = null,
+        Guid? activityGroupId = null,
+        CancellationToken ct = default)
     {
-        _assignmentsByTopic = new();
+        _exceptionCountsByTopic = new();
         try
         {
-            var assignments = await Api.ListGradeTopicsByGradeAsync(gradeLevelId, null, token);
+            var exceptions = await Api.ListSubjectEnrollmentExceptionsAsync(
+                gradeLevelId: gradeLevelId, activityGroupId: activityGroupId, ct: ct);
             if (_disposed) return;
 
-            // Grouped, NOT keyed: a subject running in two terms is two rows.
-            _assignmentsByTopic = (assignments ?? [])
-                .Where(a => a.GradeLevelId == gradeLevelId)
-                .GroupBy(a => a.TopicId)
-                .ToDictionary(g => g.Key, g => g.ToList());
-
-            var periods = await Api.ListPeriodsAsync(token);
-            if (_disposed) return;
-            _periodNames = (periods ?? []).ToDictionary(p => p.Id, p => p.Name);
+            // Grouped, NOT keyed: a subject may carry several exceptions (a Term span
+            // and a plain window), and a flat topic-keyed dictionary would throw.
+            _exceptionCountsByTopic = (exceptions ?? [])
+                .GroupBy(e => e.TopicId)
+                .ToDictionary(g => g.Key, g => g.Count());
         }
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogWarning(ex, "Could not load delivery periods for grade {GradeId}", gradeLevelId);
-            _assignmentsByTopic = new();
-            _periodNames = new();
+            Logger.LogWarning(ex, "Could not load enrollment exceptions for owner {GradeLevelId}/{ActivityGroupId}",
+                gradeLevelId, activityGroupId);
+            _exceptionCountsByTopic = new();
         }
     }
 
     /// <summary>
-    /// The subject's delivery periods as one label: every term it runs in, joined
-    /// with " · ", or "Whole academic year" when the only row is year-spanning
-    /// (a null PeriodId = the whole academic year, per FR-55).
+    /// The subject's exception count — zero renders no badge at all, because the
+    /// absence of an exception is the normal state (spec §5.2: "Offered in every
+    /// period" disappears from the card).
     /// </summary>
-    private string DeliveryPeriodLabel(Guid topicId)
-    {
-        if (!_assignmentsByTopic.TryGetValue(topicId, out var rows) || rows.Count == 0)
-            return "Whole academic year";
-
-        var labels = rows
-            .Select(a => a.PeriodId is { } pid
-                ? (_periodNames.TryGetValue(pid, out var n) ? n : pid.ToString()[..8])
-                : "Whole academic year")
-            .Distinct()
-            .ToArray();
-
-        return string.Join(" · ", labels);
-    }
+    private int ExceptionCount(Guid topicId) =>
+        _exceptionCountsByTopic.TryGetValue(topicId, out var count) ? count : 0;
 
     /// <summary>
-    /// Opens the topic-scoped delivery-period editor for one subject on the
-    /// selected grade. The editor manages the whole SET of periods, because a
-    /// subject is one topic with N bridge rows (one per period) — a
-    /// single-value picker cannot represent a subject that runs in several terms
-    /// (subject-topic-delivery-periods.md §5).
+    /// The dedicated management page's URL for a row, with the owner and the topic
+    /// pre-selected (spec §5.2 row 1). Null when the row has no resolvable owner —
+    /// nothing can be excepted without one — which is the only gate left after the
+    /// owner gate was widened to grade- and group-owned rows (owner decision 2026-09-26).
     /// </summary>
-    private async Task EditPeriodsAsync(SubjectDto row)
+    private string? ExceptionPageUrl(Guid topicId)
     {
-        if (_disposed) return;
-        if (_selectedGradeLevel is null
-            || !Guid.TryParse(_selectedGradeLevel.Value, out var gradeLevelId))
-            return;
-
-        var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
-        var rows = _assignmentsByTopic.TryGetValue(row.Id, out var list) ? list : [];
-
-        var model = new TopicPeriodsEditDialog.TopicPeriodsEditModel
+        if (_ownerType == "ActivityGroup")
         {
-            GradeLevelId = gradeLevelId,
-            TopicId = row.Id,
-            TopicName = name,
-            Rows = rows
-                .Select(a => new TopicPeriodsEditDialog.TopicPeriodRow
-                {
-                    AssignmentId = a.Id,
-                    PeriodId = a.PeriodId,
-                })
-                .ToList(),
-        };
+            return _selectedActivityGroup is { } group
+                ? $"/students/enrollment-exceptions?activityGroupId={group.Value}&topicId={topicId:D}"
+                : null;
+        }
 
-        await DialogService.ShowShellDialogAsync<
-            TopicPeriodsEditDialog,
-            TopicPeriodsEditDialog.TopicPeriodsEditModel,
-            TopicPeriodsEditDialog.TopicPeriodsEditResult>(
-            model, $"Delivery periods · {name}", DialogSize.Medium);
-
-        if (_disposed) return;
-
-        // Reload even though the result is discarded: the editor applies rows one
-        // at a time and can leave a partial change behind when a later row fails
-        // server-side validation, so the grid must reflect whatever landed.
-        _error = null;
-        await LoadDeliveryPeriodsAsync(gradeLevelId, _loadCts?.Token ?? CancellationToken.None);
-        StateHasChanged();
+        return _selectedGradeLevel is { } grade
+            ? $"/students/enrollment-exceptions?gradeLevelId={grade.Value}&topicId={topicId:D}"
+            : null;
     }
 
     private async Task ResolveNamesAsync(CancellationToken token)
@@ -539,11 +500,10 @@
     /// is NEVER edited from here); Delete keeps the existing confirmation
     /// pattern. Same dialog-only pattern as GradeLevels/GradeLevelEditDialog.
     ///
-    /// "Edit periods" is offered ONLY for a grade owner whose bridge rows loaded.
-    /// The subject edit dialog deliberately has no period field: the period is on
-    /// the assignment, not the topic, and one subject can run in several terms
-    /// (subject-topic-delivery-periods.md §5). So this is the only way to reach
-    /// period editing from the Topics landing.
+    /// "Enrollment exceptions" <b>navigates</b> to the dedicated management page with
+    /// the owner and the topic pre-selected — no editor opens on the card (spec §5.2),
+    /// and it is offered for grade- <b>and</b> group-owned rows (owner decision
+    /// 2026-09-26; the v1 grade-only gate is void).
     /// </summary>
     private IReadOnlyList<RowAction> BuildRowActions(SubjectDto row)
     {
@@ -553,13 +513,11 @@
             RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
         };
 
-        // Gate the control, not just the call: with no owner, a group owner, or a
-        // failed period load, there is no period set to edit, so the action is
-        // not rendered at all.
-        if (_ownerType == "GradeLevel" && _assignmentsByTopic.ContainsKey(row.Id))
+        // Gate the control, not just the call: without a resolvable owner there is
+        // nothing an exception could be attached to, so the action is not rendered.
+        if (ExceptionPageUrl(row.Id) is { } exceptionsUrl)
         {
-            actions.Add(RowAction.Callback(
-                "Edit periods", () => EditPeriodsAsync(row), FluentIcons.Calendar));
+            actions.Add(RowAction.Navigate("Enrollment exceptions", exceptionsUrl, FluentIcons.Calendar));
         }
 
         actions.Add(RowAction.Callback(

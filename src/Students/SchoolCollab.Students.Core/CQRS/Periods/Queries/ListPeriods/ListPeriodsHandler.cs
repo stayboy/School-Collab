@@ -56,7 +56,8 @@ public sealed class ListPeriodsHandler(
                     p.Division.ToString(),
                     p.ActivationToleranceDays,
                     p.CreatedAt,
-                    p.UpdatedAt)).ToArray();
+                    p.UpdatedAt,
+                    Sequence: p.Sequence)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

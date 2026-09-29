@@ -23,6 +23,10 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// kebab "Edit name"). Rendered through the real
 /// <see cref="FluentDialogProvider"/> + <c>DialogService.ShowShellDialogAsync</c>
 /// pipeline. The dialog loads the current topic on mount and PUTs the rename.
+///
+/// <para>Topic-only since the "Enrollment exceptions" editor moved to the
+/// EnrollmentExceptions management page
+/// (subject-period-exception-model.md §5).</para>
 /// </summary>
 [TestClass]
 public class TopicEditDialogTests : BunitContext

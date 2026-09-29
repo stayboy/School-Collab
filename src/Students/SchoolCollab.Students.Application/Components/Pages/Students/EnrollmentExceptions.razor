@@ -1,0 +1,1291 @@
+@page "/students/enrollment-exceptions"
+@using System.Globalization
+@using SchoolCollab.Core.Features
+@using SchoolCollab.Students.Core.Domain
+@using EnrollmentExceptionDto = SchoolCollab.Students.Core.DTOs.SubjectEnrollmentExceptionDto
+@inject StudentsApiClient Api
+@inject IFeatureFlagService FeatureFlags
+@inject VisibleTenantService VisibleTenant
+@inject ILogger<EnrollmentExceptions> Logger
+@implements IDisposable
+
+@*  EnrollmentExceptions — the ONE place subject enrollment exceptions are edited
+    (subject-period-exception-model.md v5 §5.1). Every other surface (the Topics
+    landing, the grade-detail Subjects card, the View-all dialog) only carries a
+    count badge and a kebab that navigates HERE with the owner + topic pre-selected
+    (§5.2) — which is now simply the filter row's initial state.
+
+    Shape (v4 — "one subject per view, one control owns it", KEPT): a filter row of
+    Grade Level + Subject, the owner's exceptions as a list narrowed to that one
+    subject, and an add section that writes IMMEDIATELY for the SAME subject. The
+    subject is therefore represented ONCE: the add section has no subject picker,
+    and there is no "Show all" button, because "All subjects" in the filter IS the
+    reset (§0 decision 11). Q4 keeps the arrival state honest: the owner KIND is the
+    only pre-selection, so the page lands with no owner, no grade and no subject.
+
+    An exception is a period PART (descriptive only, never matched against dates,
+    §0 decision 9) plus a nullable date span, at least one bound. v5 REVERSED
+    decision 13: the part is now CHOSEN as an academic division — Term / Semester /
+    Any date — rather than derived from a picked period instance (the instance picker
+    is gone entirely), and the chosen position (1st, 2nd, 3rd, …) travels with the
+    request as the exception's ordinal, which is a LABEL beside the span and
+    deliberately allowed to disagree with it. The span is ONE range whose open ends
+    read "(any start)" / "(any end)" rather than two Clear buttons (§0 decision 12,
+    KEPT). Zero exceptions is the NORMAL state, so the empty list is plain prose, not
+    a warning (§5.4); which of the two empty states applies follows from whether a
+    subject is in scope.
+*@
+
+<PageTitle>Enrollment exceptions</PageTitle>
+
+<div class="exceptions-page">
+    <h1 class="page-title">Enrollment exceptions</h1>
+    <p class="hint">
+        A subject is offered on every date unless an exception says otherwise. An exception records
+        the period part and the date span the subject is <strong>not</strong> offered in.
+    </p>
+
+    @if (!_isRealTenant)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">Select a tenant to manage enrollment exceptions.</FluentMessageBar>
+    }
+    else
+    {
+        @* Owner selection, mirroring the Topics landing's owner toggle. *@
+        <div class="owner-bar">
+            <DropdownComponent TItem="OwnerTypeOption" TValue="string"
+                              Items="@_ownerTypeOptions"
+                              @bind-SelectedValue="_ownerType"
+                              @bind-SelectedValue:after="OnOwnerTypeChangedAsync"
+                              OptionText="@(o => o.Label)"
+                              OptionValue="@(o => o.Value)"
+                              Label="Owner"
+                              Width="FieldWidth.W3" />
+
+            @if (_ownerType == ActivityGroupOwner)
+            {
+                <DropdownComponent TItem="ActivityGroupDto" TValue="Guid?"
+                                  Items="@_activityGroups"
+                                  @bind-SelectedValue="_selectedActivityGroupId"
+                                  @bind-SelectedValue:after="OnOwnerChangedAsync"
+                                  OptionText="@(g => g.Name)"
+                                  OptionValue="@(g => g.Id)"
+                                  Placeholder="Select an activity group"
+                                  Label="Activity Group"
+                                  Width="FieldWidth.W5" />
+            }
+            else
+            {
+                <DropdownComponent TItem="GradeLevelDto" TValue="Guid?"
+                                  Items="@_gradeLevels"
+                                  @bind-SelectedValue="_selectedGradeLevelId"
+                                  @bind-SelectedValue:after="OnOwnerChangedAsync"
+                                  OptionText="@(g => g.Name)"
+                                  OptionValue="@(g => g.Id)"
+                                  Placeholder="Select a grade level"
+                                  Label="Grade Level"
+                                  Width="FieldWidth.W5" />
+            }
+
+            @if (HasOwner)
+            {
+                @* v4 decision 11: the SUBJECT filter lives here, in the same row as the
+                   owner, and it is the page's only subject control. "All subjects" IS the
+                   reset — a filter is reset by changing the filter, so there is no separate
+                   "Show all" button and no second copy of the subject in the add section.
+                   The key is a non-null sentinel because DropdownComponent.ResolveOption
+                   returns default for a null key, which would leave "All subjects"
+                   unresolvable and show the placeholder after it was chosen. *@
+                <DropdownComponent TItem="SubjectOption" TValue="Guid"
+                                  Items="@_subjectOptions"
+                                  @bind-SelectedValue="_subjectKey"
+                                  @bind-SelectedValue:after="OnSubjectChangedAsync"
+                                  OptionText="@(s => s.Label)"
+                                  OptionValue="@(s => s.Value)"
+                                  Placeholder="All subjects"
+                                  Label="Subject"
+                                  Width="FieldWidth.W5" />
+            }
+        </div>
+
+        @if (!HasOwner)
+        {
+            <p class="owner-prompt">Select a grade level or an activity group to manage its enrollment exceptions.</p>
+        }
+        else
+        {
+            <section class="exceptions-section" aria-label="Enrollment exceptions">
+                <div class="section-head">
+                    <h2 class="section-title">@OwnerName</h2>
+                    @* The count badge counts the OWNER's set, filter or not: it belongs to the
+                       owner's heading, and under a filter it is what tells the reader the rows
+                       below are a subset — the filter bar says WHICH subset. *@
+                    @if (_exceptions is { Length: > 0 })
+                    {
+                        <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                            @EnrollmentExceptionLabels.FormatCount(_exceptions.Length)
+                        </FluentBadge>
+                    }
+                </div>
+
+                @if (_exceptions is null)
+                {
+                    <FluentProgressRing aria-label="Loading enrollment exceptions" />
+                }
+                else if (_loadError is not null)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+                }
+                else
+                {
+                    @* Two empty states, because there is only one distinction that matters:
+                       is a subject in scope? "All subjects" is not a third state — it is the
+                       owner's WHOLE set, so it lists everything, and hiding it would make the
+                       option pointless. A subject in scope with no rows is NOT "the owner has
+                       none" — it says so in its own words, because the owner's default
+                       sentence would be false. *@
+                    @if (VisibleExceptions.Length > 0)
+                    {
+                        <div class="exceptions-list">
+                            @foreach (var exception in VisibleExceptions)
+                            {
+                                <div class="exception-row" @key="exception.Id">
+                                    @* The subject column would repeat what the filter already
+                                       says when a subject is in scope, so it is omitted
+                                       rather than repeated (v4 decision 11). *@
+                                    @if (SubjectInScope is null)
+                                    {
+                                        <span class="exception-topic">@TopicName(exception.TopicId)</span>
+                                    }
+                                    <FluentBadge Appearance="Appearance.Neutral" Title="Period part">
+                                        @PartLabel(DivisionOf(exception.Division))
+                                    </FluentBadge>
+                                    <span class="exception-span">@SpanLabel(exception.StartDate, exception.EndDate)</span>
+                                    @if (!string.IsNullOrWhiteSpace(exception.Reason))
+                                    {
+                                        <span class="exception-reason" title="Reason">@exception.Reason</span>
+                                    }
+                                    <FluentButton Appearance="Appearance.Stealth"
+                                                  Class="exception-remove"
+                                                  IconStart="@FluentIcons.Delete"
+                                                  Title="Remove this exception"
+                                                  aria-label="@($"Remove exception for {TopicName(exception.TopicId)}")"
+                                                  Disabled="@_busy"
+                                                  OnClick="@(() => RemoveAsync(exception))" />
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (SubjectInScope is { } scopedSubjectId)
+                    {
+                        @* Scope 2: this one subject is unimpeded. Plain prose, never a warning. *@
+                        <p class="exceptions-empty" role="status" aria-live="polite">No exceptions for @TopicName(scopedSubjectId) — this subject is offered on every date.</p>
+                    }
+                    else
+                    {
+                        @* Scope 1: zero exceptions is the expected state (FR-ED-14 dissolved). *@
+                        <p class="exceptions-empty" role="status" aria-live="polite">No exceptions — every subject is offered on every date.</p>
+                    }
+                }
+
+                @* Add section — immediate write, no form model, no Save button, and NO subject
+                   picker: the subject is the filter's, so this section acts on exactly what
+                   the list is showing (v4 decision 11). Two copies of the subject was the
+                   duplication this redesign exists to remove. *@
+                <div class="add-panel">
+                    <div class="add-head">
+                        <h3 class="add-title">
+                            @if (SubjectInScope is { } addSubjectId)
+                            {
+                                <text>Add exception for <strong>@TopicName(addSubjectId)</strong></text>
+                            }
+                            else
+                            {
+                                <text>Add an exception</text>
+                            }
+                        </h3>
+                    </div>
+
+                    @if (SubjectInScope is null)
+                    {
+                        @* "All subjects" is the owner's whole set, not a subject — so there is
+                           nothing to add for. The section names the control that fixes it
+                           rather than rendering a form that could write to the wrong subject. *@
+                        <p class="add-prompt" role="status" aria-live="polite">Choose a subject above to add an exception for.</p>
+                    }
+                    else
+                    {
+                        @* One horizontal row, built in FluentUI's OWN layout primitive — per
+                           .github/copilot/rules/blazor-components.md (“prefer FluentUI's
+                           built-in parameters over custom CSS for spacing, alignment, and
+                           layout”; “put form controls in a FluentStack ... without custom flex
+                           containers”). The native parameters that produce the row, verified
+                           against FluentStack.razor.cs @ v4.14.2:
+                             • Orientation.Horizontal    → display:flex; flex-direction:row
+                             • Wrap                       → flex-wrap: wrap
+                             • VerticalAlignment.Stretch  → align-items: stretch
+                             • Horizontal/VerticalGap     → column-gap / row-gap
+                           Stretch is the one that matters: it makes the four cells EQUAL
+                           HEIGHT, and FormRow's own `.form-row-input { flex: 1 }` then absorbs
+                           the surplus inside each cell — pinning the input to that cell's TOP
+                           and its label to the BOTTOM, which is what puts all four labels on
+                           one line. Wrap is deliberate: the row is ~980px of controls and must
+                           reflow rather than overflow on a narrow panel. `add-form` is kept
+                           purely as the DOM hook the page tests select on. *@
+                        <FluentStack Orientation="Orientation.Horizontal"
+                                     Wrap="true"
+                                     VerticalAlignment="VerticalAlignment.Stretch"
+                                     HorizontalGap="16"
+                                     VerticalGap="16"
+                                     Class="add-form">
+                            @* The part is CHOSEN, not derived (v5 §0 decision 13 reversed). It is
+                               the academic division the exception is expressed IN — Term /
+                               Semester / Any date — and it is offered only where it can be
+                               written: the divisions this tenant actually has periods for,
+                               plus "Any date" for a free window. For a group owner FR-56
+                               permits exactly ONE division, so exactly one is offered and no
+                               invalid write is reachable from the control at all. *@
+                            <FormRow Label="Fill from" LabelPosition="RowLabelPosition.Below">
+                                <DropdownComponent TItem="DivisionOption" TValue="AcademicYearDivision"
+                                                  Items="@DivisionOptions"
+                                                  @bind-SelectedValue="Division"
+                                                  @bind-SelectedValue:after="OnDivisionChangedAsync"
+                                                  OptionText="@(d => d.Label)"
+                                                  OptionValue="@(d => d.Value)"
+                                                  Width="FieldWidth.W3" />
+                            </FormRow>
+
+                            @if (PositionOptions.Length > 0)
+                            {
+                                @* The sequences are STRUCTURAL (Q1) and MULTI-SELECT (v6 §11.3):
+                                   1st–4th are always offered, extended by any higher position the
+                                   tenant has declared, and ticking several writes one exception
+                                   per sequence in ONE request. Deliberately NOT limited to the
+                                   periods that exist — a tenant with no 3rd-term period can still
+                                   record "not offered in the 3rd term" and type the dates.
+                                   Native control, checked first per the repo rule:
+                                   Microsoft.FluentUI.AspNetCore.Components 4.14.2 has no
+                                   FluentListBox and no FluentField, and FluentRadioGroup is
+                                   single-value, so the multi-select is a row of FluentCheckbox
+                                   inside a native FluentStack. The binding is the inherited
+                                   Value/ValueChanged pair — `FluentCheckbox :
+                                   FluentInputBase<bool>`, the same pair every other Fluent
+                                   input here binds through — NOT CheckState, which is the
+                                   THREE-state parameter and THROWS unless `ThreeState` is
+                                   true (verified in FluentCheckbox.razor.cs @ v4.14.2).
+                                   `Width=""` disables FluentStack's default width:100%,
+                                   which inside a content-sized cell is a circular percentage.
+                                   `role="group" aria-label="Position"` keeps the visible label
+                                   programmatic: it is the name the radio group used to carry,
+                                   so the control stays a NAMED group. *@
+                                <FormRow Label="Position" LabelPosition="RowLabelPosition.Below">
+                                    <FluentStack Orientation="Orientation.Horizontal"
+                                                 Width=""
+                                                 HorizontalGap="12"
+                                                 role="group"
+                                                 aria-label="Position">
+                                        @foreach (var position in PositionOptions)
+                                        {
+                                            <FluentCheckbox Value="@(_positions.Contains(position))"
+                                                            ValueChanged="@(selected => SetPositionAsync(position, selected))">
+                                                @PeriodPositionLabels.Number(position)
+                                            </FluentCheckbox>
+                                        }
+                                    </FluentStack>
+                                </FormRow>
+                            }
+
+                            @* The span inputs are shown ONLY when a bound has to be typed
+                               (v6 §11.2 decision 17): on `Any date`, when no sequence is chosen
+                               yet, or when ANY chosen sequence has no period behind it. When
+                               EVERY chosen sequence resolves to a period, the span is DERIVED
+                               from those periods and the inputs are removed ENTIRELY — no
+                               derived-span text either (owner decision, 2026-09-29: "keep span
+                               fully silent").
+                               The guard is NOT optional and is not part of the
+                               silent-vs-read-only question: CanAdd needs a bound, so removing
+                               the pickers for a sequence that has no period would leave the
+                               button disabled with nothing able to enable it.
+                               The ends reuse FormRow's label-below variant rather than a
+                               FluentUI parameter, because 4.14.2 has no LabelPosition type at
+                               all (absent from the package XML AND the metadata) and the
+                               version that has one offers Above | After | Before — no Below. *@
+                            @if (!SpanIsDerived)
+                            {
+                                @* One range (v4 decision 12, kept) shared by every chosen
+                                   sequence that has no period of its own. Its header is COMBINED
+                                   into each end's label (v5.3) — "Not offered from" /
+                                   "Not offered to" — so the field reads as one range for ONE
+                                   label line instead of two. `For` targets the picker's Id so
+                                   the visible label stays PROGRAMMATIC. *@
+                                <div class="span-group" role="group" aria-label="Not offered">
+                                    <FormRow Label="Not offered from" For="exception-start-date" LabelPosition="RowLabelPosition.Below">
+                                        <FluentDatePicker Id="exception-start-date"
+                                                          @bind-Value="_startDate"
+                                                          @bind-Value:after="OnSpanChangedAsync"
+                                                          Placeholder="(any start)"
+                                                          Class="w-3" />
+                                    </FormRow>
+                                    <FormRow Label="Not offered to" For="exception-end-date" LabelPosition="RowLabelPosition.Below">
+                                        <FluentDatePicker Id="exception-end-date"
+                                                          @bind-Value="_endDate"
+                                                          @bind-Value:after="OnSpanChangedAsync"
+                                                          Placeholder="(any end)"
+                                                          Class="w-3" />
+                                    </FormRow>
+                                </div>
+                            }
+
+                            <FormRow Label="Reason (optional)" LabelPosition="RowLabelPosition.Below">
+                                <FluentTextField @bind-Value="_reason" Placeholder="Why?" Class="w-5" />
+                            </FormRow>
+                        </FluentStack>
+
+                        @* The commit action sits in its own action ROW, BENEATH the field row — the
+                           repo's .form-actions convention (StudentFormFields / PeriodUpsert). It is
+                           deliberately NOT a child of .add-form: that container is the four-field
+                           row, so the button would either become a fifth cell on the same line or,
+                           as a bare child of the old stretch COLUMN, span the whole panel — which
+                           is exactly what v5 did (v4's button lived inside a flex ROW and could
+                           not). *@
+                        <div class="form-actions">
+                            <FluentButton Appearance="Appearance.Accent"
+                                          Class="add-exception"
+                                          IconStart="@FluentIcons.Add"
+                                          Title="Add this exception"
+                                          Disabled="@(!CanAdd)"
+                                          OnClick="AddAsync">Add exception</FluentButton>
+                        </div>
+
+                        @if (_addError is not null)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_addError</FluentMessageBar>
+                        }
+                        else if (_alreadyExcepted is true)
+                        {
+                            <p class="add-note">
+                                This subject is already excepted on @AnchorDateLabel — the server will reject an identical span.
+                            </p>
+                        }
+                    }
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private const string GradeLevelOwner = "GradeLevel";
+    private const string ActivityGroupOwner = "ActivityGroup";
+
+    /// <summary>
+    /// The filter's "the whole owner" key (§0 decision 11). A non-null sentinel rather than
+    /// <c>null</c>: <c>DropdownComponent.ResolveOption</c> maps a null key to <c>default</c>,
+    /// so an "All subjects" option keyed <c>null</c> would never resolve and the select would
+    /// fall back to its placeholder the instant it was chosen — the control would change the
+    /// list but never show what it is showing. <see cref="Guid.Empty"/> is never a real id.
+    /// </summary>
+    private static readonly Guid AllSubjectsKey = Guid.Empty;
+
+    /// <summary>A choice on the owner-type toggle. The value is the owner KIND, the
+    /// label what the user reads.</summary>
+    public sealed record OwnerTypeOption(string Value, string Label);
+
+    /// <summary>A choice on the SUBJECT filter (v4 decision 11). The value is a subject id,
+    /// or <see cref="AllSubjectsKey"/> for the owner's whole set; the label is what the user
+    /// reads. A record rather than <c>SubjectDto</c> because the filter needs a synthetic
+    /// "All subjects" entry that no subject list contains.</summary>
+    public sealed record SubjectOption(Guid Value, string Label);
+
+    /// <summary>A choice on the add section's "Fill from" control — the period PART the
+    /// exception is expressed in (v5: chosen, `AcademicYearDivision`). A record rather than
+    /// binding the enum directly because the LABEL has to come from the page's one part
+    /// spelling (<see cref="PartLabel"/>) rather than from the enum member's name.</summary>
+    public sealed record DivisionOption(AcademicYearDivision Value, string Label);
+
+    /// <summary>Pre-selects the owner from the entry-point navigation (spec §5.2 row 1:
+    /// the landing's kebab lands HERE with owner + topic pre-selected).</summary>
+    [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
+
+    /// <summary>The group-owned form of the same pre-selection (spec §5.2 row 1, Q1).</summary>
+    [SupplyParameterFromQuery] public Guid? ActivityGroupId { get; set; }
+
+    /// <summary>The subject pre-selected in the filter row (v4 decision 11 — the filter's
+    /// subject IS the page's subject).</summary>
+    [SupplyParameterFromQuery] public Guid? TopicId { get; set; }
+
+    private static readonly OwnerTypeOption[] GradeOwnerOnly =
+        [new(GradeLevelOwner, "Grade Level")];
+
+    private OwnerTypeOption[] _ownerTypeOptions = GradeOwnerOnly;
+    private string? _ownerType = GradeLevelOwner;
+
+    private GradeLevelDto[] _gradeLevels = [];
+    private ActivityGroupDto[] _activityGroups = [];
+    private Guid? _selectedGradeLevelId;
+    private Guid? _selectedActivityGroupId;
+
+    /// <summary>
+    /// Mirrors <c>FEATURE:EnableActivityGroups</c>. The <c>/activity-groups</c> route
+    /// group is only mapped when the flag is on, so an off flag simply means the group
+    /// owner side is not offered (§5.1) — never a page-level failure.
+    /// </summary>
+    private bool _activityGroupsEnabled;
+
+    /// <summary>The owner's subjects — the filter's options and the source of the names
+    /// shown in the list (an exception carries only a <c>TopicId</c>).</summary>
+    private SubjectDto[] _topics = [];
+
+    /// <summary>
+    /// The SUBJECT filter's key — the page's single subject state (v4 decision 11).
+    /// <see cref="AllSubjectsKey"/> means the owner's whole set, which is both the default
+    /// and the reset. v3 held two of these (<c>_filterTopicId</c> for the list,
+    /// <c>_selectedTopicId</c> for the add panel), seeded from one query value and therefore
+    /// able to drift apart; there is now only this one.
+    /// </summary>
+    private Guid _subjectKey = AllSubjectsKey;
+
+    /// <summary>
+    /// The filter's options: "All subjects" first, then the owner's own subjects. Rebuilt
+    /// wherever the owner's list is (re)loaded — see <see cref="ApplyPendingTopicSelection"/>,
+    /// the one exit every load path takes.
+    /// </summary>
+    private SubjectOption[] _subjectOptions = [new(AllSubjectsKey, "All subjects")];
+
+    /// <summary>The tenant's period hierarchy. It is the source of everything the add
+    /// section offers: which divisions exist (v5: the part is chosen, and only where the
+    /// tenant can write it) and which period a chosen position fills the range from.</summary>
+    private PeriodDto[] _periods = [];
+
+    private EnrollmentExceptionDto[]? _exceptions;
+    private string? _loadError;
+
+    /// <summary>The subject the view is scoped to, or null for the owner's whole set. This
+    /// single value is the list's filter AND the add section's subject (v4 decision 11).</summary>
+    private Guid? SubjectInScope => _subjectKey == AllSubjectsKey ? null : _subjectKey;
+
+    /// <summary>
+    /// The rows the list shows: the owner's whole set, or — when a subject is in scope
+    /// (<see cref="SubjectInScope"/>) — only that subject's rows. The filter is applied
+    /// HERE, not by narrowing the request: the page has to know the owner's whole set
+    /// anyway (the count badge is the owner's, and widening back must not need a round trip).
+    /// </summary>
+    private EnrollmentExceptionDto[] VisibleExceptions => SubjectInScope is { } topicId
+        ? [.. (_exceptions ?? []).Where(e => e.TopicId == topicId)]
+        : _exceptions ?? [];
+
+    // ── Add-section state (no form model — these are the values of one immediate write) ──
+
+    /// <summary>
+    /// The subject the query string named, held until the owner's subject list has
+    /// loaded. <see cref="ApplyQuerySelection"/> cannot set <see cref="_subjectKey"/>
+    /// directly: the owner-data load rebuilds the filter's options first, and the
+    /// dropdown's reset path (see <c>DropdownComponent.OnParametersSet</c>) then fires
+    /// <c>null</c> back into the bound field — losing the pre-selection on an in-page
+    /// query change.
+    /// </summary>
+    private Guid? _pendingTopicId;
+
+    /// <summary>
+    /// The chosen period PART (v5 — CHOSEN, not derived: decision 13 was reversed). This is
+    /// only the raw field; <see cref="Division"/> is the value the control shows and the write
+    /// sends, because for a group owner FR-56 leaves exactly one legal value and a stale one
+    /// must never survive an owner change.
+    /// </summary>
+    private AcademicYearDivision _chosenDivision = AcademicYearDivision.None;
+
+    /// <summary>
+    /// The chosen POSITIONS — 1st, 2nd, 3rd, … — as a SET (v6 §11.3 decision 18). Ticking several
+    /// writes one exception per sequence in a SINGLE request; ticking none is the documented
+    /// "this tenant has not periodised its years" flow, and the batch is then one ordinal-less
+    /// item. Positions are 1-based (the entity's invariant), so the set never holds 0.
+    /// </summary>
+    private readonly HashSet<int> _positions = [];
+
+    private DateTime? _startDate;
+    private DateTime? _endDate;
+    private string? _reason;
+    private string? _addError;
+
+    /// <summary>True when the span's anchor date is already excepted for the subject in
+    /// scope — the range's <c>/check</c> answer. Null = not (yet) known or the check could
+    /// not run; false = known not excepted.</summary>
+    private bool? _alreadyExcepted;
+
+    /// <summary>
+    /// How many positions the control offers before it starts extending: 1st–4th are always
+    /// available, and a higher one the tenant has declared extends the ladder. Mirrors the period
+    /// form's Sequence row (<c>PeriodFormFields</c>) — the same ladder for the same concept.
+    /// </summary>
+    private const int StandardPositionCount = 4;
+
+    /// <summary>
+    /// The batch this add would write: ONE ITEM PER CHOSEN SEQUENCE (v6 §11.3 decision 18), each
+    /// carrying its OWN span — the period's dates when that sequence has a period, otherwise the
+    /// typed bounds. On <c>Any date</c>, or before a sequence is ticked, the batch is the single
+    /// free window with no ordinal.
+    ///
+    /// <para>The ordinal is <b>descriptive</b>: availability never reads it (§2.3), it is not part
+    /// of the duplicate key, and it is deliberately NOT cross-checked against the span. This is the
+    /// single point where the page turns its own state into the request, so it is where that price
+    /// (Q6=B) is paid.</para>
+    /// </summary>
+    private IReadOnlyList<CreateSubjectEnrollmentExceptionItemRequest> BuildItems()
+    {
+        // A free window has no position at all, and a real part with no sequence ticked is the
+        // "not periodised" case v5 documented — both are ONE item carrying no ordinal.
+        if (Division == AcademicYearDivision.None || _positions.Count == 0)
+        {
+            return [new CreateSubjectEnrollmentExceptionItemRequest(ToDateOnly(_startDate), ToDateOnly(_endDate))];
+        }
+
+        return
+        [
+            .. _positions
+                .Order()
+                .Select(position =>
+                {
+                    var period = PeriodForPosition(Division, position);
+                    return new CreateSubjectEnrollmentExceptionItemRequest(
+                        StartDate: period?.StartDate ?? ToDateOnly(_startDate),
+                        EndDate: period?.EndDate ?? ToDateOnly(_endDate),
+                        Ordinal: position);
+                }),
+        ];
+    }
+
+    /// <summary>
+    /// True when every chosen sequence resolves to a period, so every span in the batch is DERIVED
+    /// and the reader has nothing to type (v6 §11.4 decision 19). That is exactly when the span
+    /// inputs are removed — and the reason the rule is per SEQUENCE rather than per division: one
+    /// selection may mix a 1st term that has a period with a 3rd that does not, and the second one
+    /// still needs typed bounds.
+    /// </summary>
+    private bool SpanIsDerived =>
+        Division != AcademicYearDivision.None
+        && _positions.Count > 0
+        && _positions.All(position => PeriodForPosition(Division, position) is not null);
+
+    private bool _busy;
+    private bool _isRealTenant;
+    private bool _loaded;
+    private string? _loadedQueryKey;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private bool HasOwner => _ownerType == ActivityGroupOwner
+        ? _activityGroupsEnabled && _selectedActivityGroupId is not null
+        : _selectedGradeLevelId is not null;
+
+    /// <summary>The selected owner's name — the section's heading, so the list is never
+    /// context-free.</summary>
+    private string OwnerName => _ownerType == ActivityGroupOwner
+        ? SelectedGroup?.Name ?? "Activity group"
+        : _gradeLevels.FirstOrDefault(g => g.Id == _selectedGradeLevelId)?.Name ?? "Grade level";
+
+    /// <summary>The selected activity group, when that is the owner AND its definition is
+    /// loaded — the group's <see cref="EnrollmentSpan"/> is what FR-56 keys the
+    /// permitted period part on.</summary>
+    private ActivityGroupDto? SelectedGroup => _ownerType == ActivityGroupOwner
+        ? _activityGroups.FirstOrDefault(g => g.Id == _selectedActivityGroupId)
+        : null;
+
+    private Guid? OwnerGradeLevelId => _ownerType == ActivityGroupOwner ? null : _selectedGradeLevelId;
+
+    private Guid? OwnerActivityGroupId => _ownerType == ActivityGroupOwner ? _selectedActivityGroupId : null;
+
+    /// <summary>
+    /// The divisions the add section may express the exception in (v5: the part is chosen).
+    ///
+    /// <para>For a GROUP, FR-56 permits exactly ONE — <c>Termly</c>→Terms,
+    /// <c>Semester</c>→Semesters, everything else→<c>None</c> — so the control offers exactly
+    /// that one. The rule could not be removed by making the part a control, only made
+    /// unfalsifiable: there is no way to pick an invalid division, and the server validator
+    /// stays the gate. A group whose definition has not loaded degrades to <c>None</c>, the
+    /// same default the validator's matrix uses.</para>
+    ///
+    /// <para>For a GRADE (FR-57 is unconstrained) the options are the divisions the tenant
+    /// actually has periods for, plus <c>None</c> — "Any date" is always available because a
+    /// free window is always expressible, while a Term/Semester with no periods behind it is
+    /// a part the tenant cannot fill from and would only invite a mistyped span.</para>
+    /// </summary>
+    private AcademicYearDivision[] AvailableDivisions
+    {
+        get
+        {
+            if (_ownerType == ActivityGroupOwner)
+            {
+                return [RequiredDivision(SelectedGroup?.Span ?? string.Empty)];
+            }
+
+            var divisions = new List<AcademicYearDivision>();
+            if (_periods.Any(p => IsDivision(p, AcademicYearDivision.Terms)))
+            {
+                divisions.Add(AcademicYearDivision.Terms);
+            }
+            if (_periods.Any(p => IsDivision(p, AcademicYearDivision.Semesters)))
+            {
+                divisions.Add(AcademicYearDivision.Semesters);
+            }
+            divisions.Add(AcademicYearDivision.None);
+            return [.. divisions];
+        }
+    }
+
+    /// <summary>The "Fill from" options, labelled through the page's ONE part spelling
+    /// (<see cref="PartLabel"/>), so the control and the list rows say the same words for the
+    /// same concept (decision 14, kept from v4).</summary>
+    private DivisionOption[] DivisionOptions =>
+        [.. AvailableDivisions.Select(division => new DivisionOption(division, PartLabel(division)))];
+
+    /// <summary>
+    /// The division in force: the chosen one when the current owner may write it, otherwise
+    /// the first one it may. One value for BOTH the control and the write, so a stale choice
+    /// cannot survive an owner change — <c>DropdownComponent</c> silently drops a bound value
+    /// that is absent from its items, which would leave the control blank and the write sending
+    /// a value the server rejects (FR-56).
+    /// </summary>
+    private AcademicYearDivision Division
+    {
+        get => AvailableDivisions.Contains(_chosenDivision) ? _chosenDivision : AvailableDivisions[0];
+        set => _chosenDivision = value;
+    }
+
+    /// <summary>
+    /// The positions the control offers. 1st–4th are ALWAYS offered, extended by any higher
+    /// position the tenant has declared on a period of the same division (v5 Q5) — and
+    /// deliberately NOT limited to the periods that exist (Q1): a tenant with no 3rd-term period
+    /// can still record "not offered in the 3rd term" and type the dates, which is precisely why
+    /// the position is a structural number rather than a period pick.
+    ///
+    /// <para>Empty for <c>Any date</c>: a free window has no position in a run of terms or
+    /// semesters, and the server rejects an ordinal on it (ValidateExceptionOrdinal), so the
+    /// control does not offer one.</para>
+    /// </summary>
+    private int[] PositionOptions => Division == AcademicYearDivision.None
+        ? []
+        : [.. Enumerable.Range(1, Math.Max(StandardPositionCount, HighestDeclaredPosition))];
+
+    /// <summary>The highest position the tenant has declared for the division in force, or 0
+    /// when it has declared none. Read across ALL its years, not just the current one: the
+    /// position is structural, so a 5th term existing anywhere is enough to make a 5th term
+    /// nameable here. The <c>DefaultIfEmpty</c> is load-bearing rather than defensive: a GROUP
+    /// owner is offered the one division FR-56 permits whether or not the tenant has any period
+    /// of it, so this enumeration is legitimately empty — and <c>Max</c> over an empty sequence
+    /// throws rather than returning 0.</summary>
+    private int HighestDeclaredPosition =>
+        _periods.Where(p => IsDivision(p, Division)).Select(p => p.Sequence ?? 0).DefaultIfEmpty(0).Max();
+
+    /// <summary>
+    /// A write happens only when it can be complete: a subject in scope, and EVERY item in the
+    /// batch carrying at least one bound (the entity invariant — neither bound would mean "never
+    /// offered", a different concept). The server re-checks; this only keeps the affordance honest.
+    ///
+    /// <para>This is what makes "a sequence with no period behind it" an intended flow rather than
+    /// an error: that item's span falls back to the typed bounds, so the button stays disabled until
+    /// one is typed. A sequence WITH a period needs nothing typed — its span is derived — which is
+    /// why the whole batch can be addable with the pickers hidden entirely.</para>
+    /// </summary>
+    private bool CanAdd => !_busy
+        && SubjectInScope is not null
+        && BuildItems().All(item => item.StartDate is not null || item.EndDate is not null);
+
+    /// <summary>The date the pickers' containment check runs against — the anchor of the batch's
+    /// FIRST item that has a bound, mirroring the server's rule for a one-bound span. With several
+    /// sequences the check is inherently about one of them; it is a hint, not a gate.</summary>
+    private DateOnly? SpanAnchor => BuildItems()
+        .Select(item => item.StartDate ?? item.EndDate)
+        .FirstOrDefault(onDate => onDate is not null);
+
+    private string? AnchorDateLabel => SpanAnchor is { } d ? d.ToString("d MMM yyyy", CultureInfo.InvariantCulture) : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant) return;
+
+        Logger.LogInformation("Loading enrollment exceptions page");
+        ApplyQuerySelection();
+
+        try
+        {
+            _gradeLevels = await Api.ListGradeLevelsAsync(token) ?? [];
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade levels");
+            _loadError = ex.Message;
+            _exceptions = [];
+            return;
+        }
+
+        if (_disposed) return;
+
+        // The feature flag decides whether the group side exists at all, so it must be
+        // resolved BEFORE a ?activityGroupId= pre-selection can be honoured.
+        await LoadActivityGroupsAsync(token);
+        if (_disposed) return;
+
+        // Q4: the owner KIND is the only pre-selection. Neither the grade level nor the subject
+        // is chosen for the reader, so the page lands on the owner prompt with no filter applied
+        // and no write armed — v4 defaulted to the first grade level, which silently scoped the
+        // page before anyone had asked for a scope.
+
+        await LoadOwnerDataAsync(token);
+
+        _loaded = true;
+        _loadedQueryKey = QueryKey();
+    }
+
+    /// <summary>
+    /// Re-applies the query-string pre-selection when the SAME page instance is reused
+    /// for a different query string (Blazor retains the instance when the route's page
+    /// type is unchanged). Guarded on <see cref="_loaded"/> so the single
+    /// <c>OnParametersSet</c> pass that follows the first load cannot double-fetch.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_loaded || _disposed) return;
+        if (QueryKey() == _loadedQueryKey) return;
+
+        _loadedQueryKey = QueryKey();
+        ApplyQuerySelection();
+        await LoadOwnerDataAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    private string QueryKey() => $"{GradeLevelId}|{ActivityGroupId}|{TopicId}";
+
+    /// <summary>
+    /// Reads the entry point's query string (§5.2 row 1 / N4): the owner — grade or
+    /// group — and the subject, so the navigation lands pre-selected. Called before the
+    /// first load and again if the query string changes. The subject is parked in
+    /// <see cref="_pendingTopicId"/> and applied by
+    /// <see cref="ApplyPendingTopicSelection"/> once the owner's list has loaded.
+    /// </summary>
+    private void ApplyQuerySelection()
+    {
+        if (ActivityGroupId is { } activityGroupId)
+        {
+            _ownerType = ActivityGroupOwner;
+            _selectedActivityGroupId = activityGroupId;
+            _selectedGradeLevelId = null;
+        }
+        else if (GradeLevelId is { } gradeLevelId)
+        {
+            _ownerType = GradeLevelOwner;
+            _selectedGradeLevelId = gradeLevelId;
+            _selectedActivityGroupId = null;
+        }
+
+        _pendingTopicId = TopicId;
+    }
+
+    /// <summary>
+    /// Lands the query string's subject, now that the owner's list is known: it must resolve
+    /// to a listed subject, and it is applied HERE rather than when the query was read
+    /// because the picker resets a selection its items no longer contain. The query is the
+    /// selection's only source, so a query naming no subject (or naming one this owner does
+    /// not list) leaves nothing selected.
+    ///
+    /// <para>v4: there is only ONE subject state, so there is nothing left to keep in step —
+    /// the list's scope and the add section's subject are now literally the same value. The
+    /// entry point is per-subject (§5.2 row 1), so the rows it came to see are that
+    /// subject's. An owner change re-enters here with no pending subject, so switching owner
+    /// widens back to the whole set (the new owner may not even list that subject).</para>
+    /// </summary>
+    private void ApplyPendingTopicSelection()
+    {
+        Guid? resolvedTopicId = _pendingTopicId is { } topicId && _topics.Any(t => t.Id == topicId)
+            ? topicId
+            : null;
+
+        // ONE subject state, set once. v3 assigned this same resolved value to the list
+        // filter AND the add panel's picker — the pair that could drift apart.
+        _subjectKey = resolvedTopicId ?? AllSubjectsKey;
+        _subjectOptions =
+        [
+            new(AllSubjectsKey, "All subjects"),
+            .. _topics.Select(t => new SubjectOption(t.Id, t.Name))
+        ];
+        _pendingTopicId = null;
+    }
+
+    /// <summary>
+    /// Loads the activity groups backing the group owner side. <c>/activity-groups</c> is
+    /// only mapped when <c>FEATURE:EnableActivityGroups</c> is on, so an off flag is a
+    /// normal state (the group side is simply unavailable), not an error. Every failure
+    /// path is contained here so it cannot escalate into a page-level load failure.
+    /// </summary>
+    private async Task LoadActivityGroupsAsync(CancellationToken token)
+    {
+        try
+        {
+            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(
+                FeatureFlagKeys.EnableActivityGroups, token);
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not resolve FEATURE:EnableActivityGroups; the group owner side stays hidden");
+            _activityGroupsEnabled = false;
+        }
+
+        if (!_activityGroupsEnabled)
+        {
+            // Never leave the page parked on an owner side whose option is not rendered.
+            _ownerTypeOptions = GradeOwnerOnly;
+            if (_ownerType == ActivityGroupOwner)
+            {
+                _ownerType = GradeLevelOwner;
+                _selectedActivityGroupId = null;
+            }
+            return;
+        }
+
+        try
+        {
+            _activityGroups = await Api.ListActivityGroupsAsync(token) ?? [];
+            if (_disposed) return;
+            _activityGroups = [.. _activityGroups.OrderBy(g => g.Name)];
+            _ownerTypeOptions = [.. GradeOwnerOnly, new OwnerTypeOption(ActivityGroupOwner, "Activity Group")];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load activity groups; the group owner side is unavailable");
+            _activityGroupsEnabled = false;
+            _activityGroups = [];
+            _ownerTypeOptions = GradeOwnerOnly;
+            if (_ownerType == ActivityGroupOwner)
+            {
+                _ownerType = GradeLevelOwner;
+                _selectedActivityGroupId = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Loads the current owner's subjects and exceptions, then the tenant's periods.
+    ///
+    /// <para>The exceptions and their subjects ARE the page, so a failure there is
+    /// surfaced. The periods only widen what the add section can offer, so a failure there
+    /// degrades it ("Any date" + typed dates still works) instead of blanking the list.</para>
+    ///
+    /// <para>Every exit consumes the query string's subject
+    /// (<see cref="ApplyPendingTopicSelection"/>): this load is the one that decides
+    /// whether it can be landed.</para>
+    /// </summary>
+    private async Task LoadOwnerDataAsync(CancellationToken token)
+    {
+        _exceptions = null;
+        _loadError = null;
+        _addError = null;
+        _alreadyExcepted = null;
+        _topics = [];
+
+        if (!HasOwner)
+        {
+            _exceptions = [];
+            ApplyPendingTopicSelection();
+            return;
+        }
+
+        try
+        {
+            var exceptions = await Api.ListSubjectEnrollmentExceptionsAsync(
+                gradeLevelId: OwnerGradeLevelId, activityGroupId: OwnerActivityGroupId, ct: token);
+            var topics = _ownerType == ActivityGroupOwner
+                ? await Api.ListSubjectsByGroupAsync(_selectedActivityGroupId!.Value, effectiveDate: null, ct: token)
+                : await Api.ListSubjectsByGradeAsync(_selectedGradeLevelId!.Value, token);
+
+            if (_disposed) return;
+            _exceptions = exceptions ?? [];
+            _topics = [.. (topics ?? []).OrderBy(t => t.Name)];
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load enrollment exceptions for {GradeLevelId}/{ActivityGroupId}",
+                OwnerGradeLevelId, OwnerActivityGroupId);
+            _loadError = ex.Message;
+            _exceptions = [];
+            ApplyPendingTopicSelection();
+            return;
+        }
+
+        ApplyPendingTopicSelection();
+        await LoadPeriodsAsync(token);
+    }
+
+    /// <summary>
+    /// Loads the tenant's periods — best effort and self-contained: they are the source of the
+    /// divisions the add section may express an exception in, and of the dates a chosen position
+    /// fills the range from. A failure leaves "Any date" and typed dates (still a complete,
+    /// legal write), and the server validator remains the gate.
+    /// </summary>
+    private async Task LoadPeriodsAsync(CancellationToken token)
+    {
+        try
+        {
+            _periods = await Api.ListPeriodsAsync(token) ?? [];
+            if (_disposed) return;
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not load the tenant's periods; the add section offers 'Any date' and typed dates only");
+            _periods = [];
+        }
+    }
+
+    /// <summary>
+    /// The FR-56 division a group's <see cref="EnrollmentSpan"/> requires — the same
+    /// mapping as <c>TopicAssignmentPeriodValidator.ValidateGroupExceptionDivisionAsync</c>.
+    /// v5: this is what narrows the add section's "Fill from" list to exactly one option, so
+    /// no write this control can produce breaks FR-56.
+    /// </summary>
+    private static AcademicYearDivision RequiredDivision(string span) => span switch
+    {
+        nameof(EnrollmentSpan.Termly) => AcademicYearDivision.Terms,
+        nameof(EnrollmentSpan.Semester) => AcademicYearDivision.Semesters,
+        _ => AcademicYearDivision.None
+    };
+
+    private static bool IsDivision(PeriodDto period, AcademicYearDivision division) =>
+        string.Equals(period.Division, division.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The period the chosen division + position fills the range from, or null when the tenant
+    /// has no such period — the case Q1 exists for, and NOT an error: the range is then the
+    /// reader's to type.
+    ///
+    /// <para>Several years may each hold a "3rd term" (a position is per year, §0 decision 15),
+    /// so the pick is deterministic rather than arbitrary: the one inside the tenant's ACTIVE
+    /// academic year first — the year the reader is administrating — and otherwise the
+    /// latest-starting one. The dates are a convenience either way: the SPAN is what matches
+    /// (§2.3) and the position is a label beside it, so a different year's dates are never
+    /// wrong, only less likely to be the intended ones.</para>
+    /// </summary>
+    private PeriodDto? PeriodForPosition(AcademicYearDivision division, int position)
+    {
+        if (position < 1 || division == AcademicYearDivision.None)
+        {
+            return null;
+        }
+
+        return _periods
+            .Where(p => IsDivision(p, division) && p.Sequence == position)
+            .OrderByDescending(p => p.ParentPeriodId is { } parentId
+                && _periods.Any(year => year.Id == parentId
+                    && string.Equals(year.Status, nameof(PeriodStatus.Active), StringComparison.OrdinalIgnoreCase)))
+            .ThenByDescending(p => p.StartDate)
+            .FirstOrDefault();
+    }
+
+    private async Task OnOwnerTypeChangedAsync()
+    {
+        if (_disposed) return;
+        ClearAddSelection();
+        await LoadOwnerDataAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    private async Task OnOwnerChangedAsync()
+    {
+        if (_disposed) return;
+        ClearAddSelection();
+        await LoadOwnerDataAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    /// <summary>The filter's subject changed — and it is also the add section's subject, so
+    /// this is the only subject-side event left. Only the pre-write check follows: the span
+    /// is deliberately KEPT, because a different subject can legitimately take the same
+    /// span, and dropping it would make switching subject feel like losing work.</summary>
+    private async Task OnSubjectChangedAsync() => await RefreshExceptedHintAsync();
+
+    /// <summary>
+    /// The "Fill from" division changed. The sequences AND the typed range belong to the division
+    /// that produced them — a Terms "3rd" is not a Semesters one, and dates read from a term's
+    /// period are not a semester's — so both are cleared rather than carried across. Choosing
+    /// "Any date" leaves no sequence at all (the control is not even rendered), which is what the
+    /// write needs: an ordinal on a free window is rejected by the server.
+    /// </summary>
+    private async Task OnDivisionChangedAsync()
+    {
+        if (_disposed) return;
+        _positions.Clear();
+        _startDate = null;
+        _endDate = null;
+        await RefreshExceptedHintAsync();
+    }
+
+    /// <summary>
+    /// A sequence was ticked or unticked. Unlike v5's single radio this does NOT touch the typed
+    /// range: with several sequences chosen, the typed bounds belong to the sequences that have no
+    /// period of their own, and overwriting them from one sequence's period would silently apply
+    /// that period's dates to the others (§11.4 decision 19).
+    /// </summary>
+    private async Task SetPositionAsync(int position, bool selected)
+    {
+        if (_disposed) return;
+
+        if (selected)
+        {
+            _positions.Add(position);
+        }
+        else
+        {
+            _positions.Remove(position);
+        }
+
+        await RefreshExceptedHintAsync();
+    }
+
+    private async Task OnSpanChangedAsync() => await RefreshExceptedHintAsync();
+
+    /// <summary>
+    /// Asks the server (<c>GET /students/enrollment-exceptions/check</c>) whether the
+    /// picked subject is already excepted on the span's anchor date, and shows the
+    /// answer as a hint. Best effort by design: a check that cannot run leaves the hint
+    /// absent and never blocks the write — the server is the gate (a duplicate is still
+    /// a 409, and its message is surfaced).
+    /// </summary>
+    private async Task RefreshExceptedHintAsync()
+    {
+        _alreadyExcepted = null;
+
+        if (!_isRealTenant || SubjectInScope is not { } topicId || SpanAnchor is not { } onDate)
+        {
+            return;
+        }
+        if (OwnerGradeLevelId is null && OwnerActivityGroupId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _alreadyExcepted = await Api.IsSubjectExceptedAsync(
+                topicId,
+                onDate,
+                gradeLevelId: OwnerGradeLevelId,
+                activityGroupId: OwnerActivityGroupId,
+                ct: _loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not check whether topic {TopicId} is already excepted on {OnDate}", topicId, onDate);
+            _alreadyExcepted = null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the exception immediately — no form, no Save. The list is then re-read so
+    /// it shows the server's own answer rather than a hopeful local append, and the
+    /// server's message for a 409/422 is surfaced verbatim.
+    /// </summary>
+    private async Task AddAsync()
+    {
+        if (!CanAdd || SubjectInScope is not { } topicId)
+        {
+            return;
+        }
+
+        _busy = true;
+        _addError = null;
+
+        try
+        {
+            // ONE request, one row per chosen sequence (v6 §11.3 decision 18). The server writes
+            // the batch in a single transaction, so a rejection anywhere leaves nothing behind.
+            await Api.CreateSubjectEnrollmentExceptionsAsync(new CreateSubjectEnrollmentExceptionsRequest(
+                GradeLevelId: OwnerGradeLevelId,
+                ActivityGroupId: OwnerActivityGroupId,
+                TopicId: topicId,
+                Division: Division,
+                Items: BuildItems(),
+                Reason: string.IsNullOrWhiteSpace(_reason) ? null : _reason.Trim()));
+
+            if (_disposed) return;
+
+            // No filter workaround is needed, and that is the point: the write is always for
+            // the subject IN SCOPE, so the row just written is always inside the list the
+            // re-read below fetches. v3 needed to clear the filter here precisely because
+            // the add panel could name a different subject than the list was showing.
+
+            // The span was consumed by this write; clearing it keeps the next add honest.
+            // The position and the division are deliberately KEPT: they name what the reader
+            // was working on ("the 3rd term"), and re-picking them for every row of the same
+            // kind would be busywork. Only the range — which the position re-derives — and the
+            // reason go.
+            _startDate = null;
+            _endDate = null;
+            _reason = null;
+            _alreadyExcepted = null;
+            await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create an enrollment exception for topic {TopicId}", topicId);
+            _addError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync(EnrollmentExceptionDto exception)
+    {
+        if (_busy) return;
+        _busy = true;
+        _addError = null;
+
+        try
+        {
+            await Api.RemoveSubjectEnrollmentExceptionAsync(exception.Id);
+            if (_disposed) return;
+            await LoadExceptionsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to remove enrollment exception {ExceptionId}", exception.Id);
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Re-reads one owner's exceptions; the list, the count and the hint all
+    /// follow from it.</summary>
+    private async Task LoadExceptionsAsync(CancellationToken token)
+    {
+        try
+        {
+            var exceptions = await Api.ListSubjectEnrollmentExceptionsAsync(
+                gradeLevelId: OwnerGradeLevelId, activityGroupId: OwnerActivityGroupId, ct: token);
+            if (_disposed) return;
+            _exceptions = exceptions ?? [];
+            _loadError = null;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload enrollment exceptions");
+            _loadError = ex.Message;
+        }
+    }
+
+    /// <summary>Resets the values of a half-finished write when the OWNER changes: the chosen
+    /// division and position, the span's bounds, the reason, and any error or pre-write hint.
+    ///
+    /// <para>The subject scope is deliberately NOT reset here. v3's
+    /// <c>ClearAddSelection</c> cleared a subject field on the assumption that this was what
+    /// widened the view — and a mutation check (M6) proved the line dead: every exit path of
+    /// <see cref="LoadOwnerDataAsync"/> runs <see cref="ApplyPendingTopicSelection"/>, which
+    /// resolves the scope from the (now empty) pending query subject, and the dropdown's own
+    /// reset path fires <c>default</c> — which for this sentinel IS "All subjects". Setting
+    /// it here as well would be a second place to keep in step, i.e. the duplication this
+    /// round exists to remove.</para>
+    ///
+    /// <para>The division is reset because the NEW owner may not permit the old one at all —
+    /// FR-56 leaves a group owner exactly one division — and <see cref="Division"/> coerces a
+    /// stale field to what the new owner may write, so the control and the write stay in step.
+    /// </summary>
+    private void ClearAddSelection()
+    {
+        _chosenDivision = AcademicYearDivision.None;
+        _positions.Clear();
+        _startDate = null;
+        _endDate = null;
+        _reason = null;
+        _addError = null;
+        _alreadyExcepted = null;
+    }
+
+    private static DateOnly? ToDateOnly(DateTime? value) =>
+        value is { } date ? DateOnly.FromDateTime(date.Date) : null;
+
+    /// <summary>
+    /// The listed subject's name. Resolved from the owner's own subject list — an
+    /// exception carries only a <c>TopicId</c> — and falls back to a neutral label when
+    /// the subject is no longer listed for the owner (the exception still exists and
+    /// must stay removable; its list is never keyed by <c>TopicId</c>, since one subject
+    /// legitimately carries several rows).
+    /// </summary>
+    private string TopicName(Guid topicId) =>
+        _topics.FirstOrDefault(t => t.Id == topicId)?.Name ?? "A subject no longer listed here";
+
+    /// <summary>
+    /// The period part: the vocabulary the user reads, never the enum member. ONE overload
+    /// and ONE spelling per concept (v4 decision 14) — v3 had two overloads that disagreed
+    /// for the same value ("—" in the list, "Not term-scoped" in the picker) plus two more
+    /// hard-coded literals, so one concept read four ways on a single page.
+    /// </summary>
+    private static string PartLabel(AcademicYearDivision division) => division switch
+    {
+        AcademicYearDivision.Terms => "Term",
+        AcademicYearDivision.Semesters => "Semester",
+        _ => "Any date"
+    };
+
+    /// <summary>The wire form of <see cref="PartLabel"/>'s input: the DTO carries
+    /// <c>Division</c> as a string, so a row's badge parses it once here. Unparseable or
+    /// absent division reads as "Any date" rather than throwing in a list render.</summary>
+    private static AcademicYearDivision DivisionOf(string division) =>
+        Enum.TryParse<AcademicYearDivision>(division, true, out var parsed) ? parsed : AcademicYearDivision.None;
+
+    /// <summary>
+    /// The span in words (§5.1): <c>1–14 Mar 2027</c>, <c>from 1 Mar 2027</c> (open
+    /// start), <c>to 14 Mar 2027</c> (open end). An exception is never unbounded on both
+    /// sides, so the dash is unreachable in practice — kept so a malformed row renders
+    /// quietly instead of throwing.
+    /// </summary>
+    private static string SpanLabel(DateOnly? start, DateOnly? end)
+    {
+        if (start is { } s && end is { } e)
+        {
+            return s.Year == e.Year && s.Month == e.Month
+                ? $"{s.Day}–{e.Day} {Month(e)}"
+                : $"{Day(s)} – {Day(e)}";
+        }
+        if (start is { } openStart)
+        {
+            return $"from {Day(openStart)}";
+        }
+        if (end is { } openEnd)
+        {
+            return $"to {Day(openEnd)}";
+        }
+        return "—";
+    }
+
+    private static string Day(DateOnly date) => date.ToString("d MMM yyyy", CultureInfo.InvariantCulture);
+
+    private static string Month(DateOnly date) => date.ToString("MMM yyyy", CultureInfo.InvariantCulture);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

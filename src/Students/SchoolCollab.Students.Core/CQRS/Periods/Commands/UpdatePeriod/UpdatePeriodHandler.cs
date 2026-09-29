@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Students.Core.CQRS.Periods;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -19,6 +20,11 @@ public sealed class UpdatePeriodHandler(
 
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
+
+        // ── v5 §0 decision 15: an illegal position (below 1, or on a top-level year) is a
+        //    BOUNDARY rejection, mapped to 422 like every other period shape rule — see
+        //    PeriodSequenceInvalidException.
+        PeriodSequenceGuard.EnsureDeclarable(command.Sequence, command.ParentPeriodId);
 
         // ── Identity cannot change (period-edit-parity-deactivate.md FR-E1): Division
         //    is immutable, so a top-level year can never become a sub-period and a
@@ -60,6 +66,17 @@ public sealed class UpdatePeriodHandler(
             if (command.StartDate < parent.StartDate || command.EndDate > parent.EndDate)
                 throw new PeriodContainmentException(
                     period.Division.ToString(), parent.Name, parent.StartDate, parent.EndDate);
+
+            // ── v5 §0 decision 15: one sub-period per position per year per division.
+            //    Checked here so a taken position is a 422 naming the sibling that holds
+            //    it, rather than the filtered unique index's unhandled DbUpdateException.
+            //    The row being edited is EXCLUDED: it may keep the position it holds.
+            if (command.Sequence is { } sequence)
+            {
+                await PeriodSequenceGuard.EnsureFreeAsync(
+                    repository, parentId, period.Division, sequence,
+                    excludeId: command.Id, cancellationToken);
+            }
         }
         else
         {
@@ -89,7 +106,7 @@ public sealed class UpdatePeriodHandler(
                 $"({overlapping[0].StartDate:O}–{overlapping[0].EndDate:O}).");
         }
 
-        period.Update(command.Name, command.StartDate, command.EndDate, command.ParentPeriodId, command.ActivationToleranceDays);
+        period.Update(command.Name, command.StartDate, command.EndDate, command.ParentPeriodId, command.ActivationToleranceDays, command.Sequence);
 
         try
         {

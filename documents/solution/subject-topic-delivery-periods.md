@@ -6,6 +6,35 @@
 > decision, not a defect — see §6 Gap 5). Item 8 is a product question.
 > Read this doc before touching the Subjects card or the Topics landing.
 >
+> **⚠️ SUPERSEDED (2026-09-26, `round-subject-period-blocks`) — this document
+> describes a model that no longer exists.** Availability is now the
+> **block/exception model** (`specs/subject-period-exception-model.md`): the bridge
+> `topic_assignments` row keeps **no period meaning** (`PeriodId` is retained but
+> ignored), and a subject's *delivery* is expressed as **blocks** — the periods it
+> is *not* offered in. What that means for every row below:
+>
+> - **No surface has an "Edit periods" action any more.** `TopicPeriodsEditDialog`
+>   is **deleted**; its per-row save path and the `PUT
+>   /topic-assignments/{id}/period` call it issued are gone from the UI.
+> - **Blocks are edited in one place only:** `SubjectBlocksDialog`, opened from the
+>   **Topics landing** (`/students/subjects`) via the **"Enrollment exceptions"**
+>   row action, offered for a **grade owner** only.
+> - **Grade surfaces are read-only.** The `Detail.razor` Subjects card and
+>   `GradeTopicsDialog` render a block-derived label — `Blocked in Term 1 · Term 2
+>   (archived)`, or `Offered in every period` — and expose no editor.
+> - The landing's **"Enrollment exceptions"** column shows those same block labels, and
+>   its row action of the same name opens the blocks dialog. (Header and action share
+>   the name by owner decision, 2026-09-26 — the old "Delivery periods" header
+>   described a column that no longer exists.)
+> - A subject can no longer be "delivered in several terms at once": the filtered
+>   unique index permits at most **one** bridge row per (tenant, grade, topic), so
+>   the "one subject, several rows (one per term)" premise repeated throughout this
+>   document is **unreachable**.
+>
+> Sections below are therefore an accurate record of the *period-editing era* and
+> the research that motivated the change — not of current behaviour. The governing
+> requirements are in `specs/subject-period-exception-model.md` §2, §4 and §5.
+>
 > **Folder:** `solution/` — this is technical memory (findings + decision +
 > implementation record), not the source of truth for the feature. The governing
 > requirements live in `specs/`; see [§2 Requirements provenance](#2-requirements-provenance).

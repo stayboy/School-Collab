@@ -41,7 +41,8 @@ public sealed class ListSubPeriodsHandler(
                     p.Status.ToString(),
                     p.ParentPeriodId, p.NextPeriodId,
                     p.Division.ToString(), p.ActivationToleranceDays,
-                    p.CreatedAt, p.UpdatedAt)).ToArray();
+                    p.CreatedAt, p.UpdatedAt,
+                    Sequence: p.Sequence)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

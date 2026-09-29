@@ -20,14 +20,22 @@ public sealed class ListActivityGroupTopicAssignmentsHandler(
         ListActivityGroupTopicAssignments query,
         CancellationToken cancellationToken = default)
     {
+        // Tenant captured in the request scope (lost inside the cache factory).
         var tenantId = db.CurrentTenantId;
 
+        // Date-only key — the exception predicate depends on the date alone
+        // (subject-period-exception-model.md v3 §2.3), so no active-period segment.
         return await cache.GetOrCreateAsync(
             $"activity-group:{query.ActivityGroupId}:effective:{query.EffectiveDate:yyyyMMdd}:topic-assignments",
             (db, query.ActivityGroupId, query.EffectiveDate, tenantId),
             static async (state, ct) =>
             {
                 var (db, activityGroupId, effectiveDate, tenantId) = state;
+
+                // subject-period-exception-model.md §2.3 — same date test as the grade path.
+                var exceptedTopicIds = await SubjectAvailability.ExceptedTopicIdsForGroupAsync(
+                    db, tenantId, activityGroupId, effectiveDate, ct);
+
                 var results = await db.ActivityGroupTopicAssignments
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(x => x.ActivityGroupId == activityGroupId && x.TenantId == tenantId
@@ -36,18 +44,20 @@ public sealed class ListActivityGroupTopicAssignmentsHandler(
                     .OrderBy(x => x.TopicId)
                     .ToArrayAsync(ct);
 
-                return results.Select(a => new TopicAssignmentDto(
-                    a.Id,
-                    "activity_group",
-                    null,
-                    a.ActivityGroupId,
-                    a.TopicId,
-                    a.StartDate,
-                    a.EndDate,
-                    a.TopicStrandId,
-                    a.PeriodId,
-                    a.CreatedAt,
-                    a.UpdatedAt)).ToArray();
+                return results
+                    .Where(a => !exceptedTopicIds.Contains(a.TopicId))
+                    .Select(a => new TopicAssignmentDto(
+                        a.Id,
+                        "activity_group",
+                        null,
+                        a.ActivityGroupId,
+                        a.TopicId,
+                        a.StartDate,
+                        a.EndDate,
+                        a.TopicStrandId,
+                        a.PeriodId,
+                        a.CreatedAt,
+                        a.UpdatedAt)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

@@ -6,6 +6,7 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Services
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using SubjectEnrollmentExceptionDto = SchoolCollab.Students.Core.DTOs.SubjectEnrollmentExceptionDto
 @using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
@@ -269,52 +270,49 @@
         public Guid AssignmentId { get; init; }
         public string Name { get; init; } = string.Empty;
         public string? Code { get; init; }
-        public Guid? PeriodId { get; init; }
     }
 
     /// <summary>
-    /// Period id → display name. The delivery period lives on the bridge row, so the
-    /// Subjects card needs this to render "Term 1" instead of a GUID prefix.
+    /// The grade's enrollment exceptions (subject-period-exception-model.md v3): the
+    /// subject is offered in the grade (its bridge row carries no period meaning any
+    /// more), and an exception records the period part + date span it is not offered
+    /// for. Loaded once per card load; the card and the "View all subjects" dialog both
+    /// render a read-only COUNT badge — the exceptions themselves are managed on the
+    /// dedicated EnrollmentExceptions page, which every affordance here navigates to.
     /// </summary>
-    private Dictionary<Guid, string> _periodNames = new();
+    private SubjectEnrollmentExceptionDto[] _exceptions = [];
 
     /// <summary>
-    /// All bridge rows for one topic on this grade. A subject can be delivered in
-    /// several terms at once, so this is a LIST and is never keyed by TopicId
-    /// (see subject-topic-delivery-periods.md §1 and §8).
+    /// How many exceptions one topic carries. A count, never a period list: one subject
+    /// may legitimately carry several exceptions (a Term span and a plain window), so
+    /// this reduces instead of looking one up.
     /// </summary>
-    private List<AssignedTopic> PeriodsForTopic(Guid topicId) =>
-        _assignedTopics.Where(a => a.TopicId == topicId).ToList();
+    private int ExceptionCount(Guid topicId) => _exceptions.Count(x => x.TopicId == topicId);
 
     /// <summary>
-    /// The subject's delivery periods as one label: every term it runs in, or
-    /// "Whole academic year" for a year-spanning (null) assignment.
+    /// Card meta line: the exception count badge first (only when there are exceptions —
+    /// the absence of one is the normal state), then the strand/lesson counts.
     /// </summary>
-    private string DeliveryPeriodLabel(Guid topicId)
+    private string[] SubjectMeta(GradeTopicCurriculumDto t)
     {
-        var rows = PeriodsForTopic(topicId);
-        if (rows.Count == 0) return "Whole academic year";
+        var exceptionCount = ExceptionCount(t.TopicId);
+        var meta = new List<string>(3);
+        if (exceptionCount > 0)
+        {
+            meta.Add(EnrollmentExceptionLabels.FormatCount(exceptionCount));
+        }
 
-        var labels = rows
-            .Select(a => a.PeriodId is { } pid
-                ? (_periodNames.TryGetValue(pid, out var n) ? n : pid.ToString()[..8])
-                : "Whole academic year")
-            .Distinct()
-            .ToArray();
-
-        return string.Join(" · ", labels);
+        meta.Add($"{t.StrandCount} strands");
+        meta.Add($"{t.LessonCount} lessons");
+        return [.. meta];
     }
 
     /// <summary>
-    /// Card meta line: the delivery period first (it is the field the card was
-    /// previously blind to), then the strand/lesson counts.
+    /// The dedicated management page's URL for one of this grade's subjects, with the
+    /// owner and the topic pre-selected (spec §5.2). The card never opens an editor.
     /// </summary>
-    private string[] SubjectMeta(GradeTopicCurriculumDto t) =>
-    [
-        DeliveryPeriodLabel(t.TopicId),
-        $"{t.StrandCount} strands",
-        $"{t.LessonCount} lessons",
-    ];
+    private string ExceptionPageUrl(Guid topicId) =>
+        $"/students/enrollment-exceptions?gradeLevelId={Id}&topicId={topicId:D}";
 
     private TopicDto[] _unassignedTopics =>
         _catalog.Values
@@ -378,19 +376,11 @@
                 _genderName = (await CodedValuesApi.GetByIdAsync(gid, ct))?.Name;
             }
 
-            // Period display names for the Subjects card's delivery-period chip.
-            // Best-effort: without it the card falls back to a GUID prefix.
-            try
-            {
-                _periodNames = (await Api.ListPeriodsAsync(ct) ?? [])
-                    .ToDictionary(p => p.Id, p => p.Name);
-            }
-            catch (Exception ex)
-            {
-                if (_disposed) return;
-                Logger.LogWarning(ex, "Could not load period names for the grade detail page");
-                _periodNames = new();
-            }
+            // Enrollment exceptions for the Subjects card's meta line (an exception names
+            // the period part and the span a subject is NOT offered in — the bridge row
+            // keeps no period meaning).
+            // Best-effort: without them the card reads as "offered in every period".
+            await ReloadExceptionsAsync(ct);
 
             var assignments = await Api.ListGradeTopicsByGradeAsync(Id, ct: ct) ?? [];
             _assignedTopics = assignments
@@ -400,7 +390,6 @@
                     AssignmentId = a.Id,
                     Name = _catalog.TryGetValue(a.TopicId, out var t) ? t.Name : a.TopicId.ToString()[..8],
                     Code = _catalog.TryGetValue(a.TopicId, out var tc) ? tc.Code : null,
-                    PeriodId = a.PeriodId,
                 })
                 .OrderBy(t => t.Name)
                 .ToList();
@@ -747,18 +736,12 @@
                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
                 { GradeTopicsDialog.AssignKey, new Func<Guid, Task>(AssignTopicAsync) },
                 { GradeTopicsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
-                // GROUPED, not ToDictionary(a => a.TopicId, ...): a subject can be
-                // delivered in several terms, which yields several bridge rows for
-                // the same topic. ToDictionary threw ArgumentException on the
-                // duplicate key, breaking "View all subjects" — the only surface
-                // where periods were editable.
-                { GradeTopicsDialog.AssignmentByKeyKey, _assignedTopics
-                    .GroupBy(a => a.TopicId)
-                    .ToDictionary(
-                        g => g.Key,
-                        g => g.Select(a => new GradeTopicsDialog.AssignedTopicRef(a.TopicId, a.AssignmentId, a.PeriodId)).ToList()) },
-                { GradeTopicsDialog.PeriodNamesKey, _periodNames },
-                { GradeTopicsDialog.EditPeriodKey, new Func<Guid, Task>(EditTopicPeriodsAsync) },
+                { GradeTopicsDialog.ExceptionPageUrlKey, new Func<Guid, string>(ExceptionPageUrl) },
+                // Per-topic exception COUNTS, not lists: the dialog renders a count
+                // badge only, and a count map cannot collide on a repeated topic key.
+                { GradeTopicsDialog.ExceptionCountsByTopicKey, _exceptions
+                    .GroupBy(x => x.TopicId)
+                    .ToDictionary(g => g.Key, g => g.Count()) },
             },
             DialogSize.Medium);
         if (_disposed) return;
@@ -766,42 +749,24 @@
     }
 
     /// <summary>
-    /// Opens the topic-scoped delivery-period editor for a subject on this grade.
-    /// One dialog manages the whole SET of periods (several terms, the academic
-    /// year, or year-spanning) because a subject is a single topic with one bridge
-    /// row per period — a single-value picker cannot represent that
-    /// (subject-topic-delivery-periods.md §5).
+    /// Reloads the grade's enrollment exceptions. The Subjects card's meta line and
+    /// the "View all subjects" dialog both render them as a read-only count.
+    /// Best-effort: a failure leaves the card with no exception badge rather than
+    /// breaking the page.
     /// </summary>
-    private async Task EditTopicPeriodsAsync(Guid topicId)
+    private async Task ReloadExceptionsAsync(CancellationToken ct = default)
     {
-        if (_disposed || _grade is null) return;
-
-        var rows = PeriodsForTopic(topicId);
-        var name = rows.FirstOrDefault()?.Name
-                   ?? (_catalog.TryGetValue(topicId, out var t) ? t.Name : "this subject");
-
-        var model = new TopicPeriodsEditDialog.TopicPeriodsEditModel
+        try
         {
-            GradeLevelId = Id,
-            TopicId = topicId,
-            TopicName = name,
-            Rows = rows
-                .Select(a => new TopicPeriodsEditDialog.TopicPeriodRow
-                {
-                    AssignmentId = a.AssignmentId,
-                    PeriodId = a.PeriodId,
-                })
-                .ToList(),
-        };
-
-        var result = await DialogService.ShowShellDialogAsync<
-            TopicPeriodsEditDialog,
-            TopicPeriodsEditDialog.TopicPeriodsEditModel,
-            TopicPeriodsEditDialog.TopicPeriodsEditResult>(
-            model, $"Delivery periods · {name}", DialogSize.Medium);
-
-        if (_disposed || result is null) return;
-        await ReloadAssignedTopicsAsync();
+            _exceptions = await Api.ListSubjectEnrollmentExceptionsAsync(gradeLevelId: Id, ct: ct) ?? [];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not load enrollment exceptions for grade level {Id}", Id);
+            _exceptions = [];
+        }
     }
 
     private async Task RemoveTopicAsync(Guid topicId)
@@ -834,10 +799,12 @@
                 AssignmentId = a.Id,
                 Name = _catalog.TryGetValue(a.TopicId, out var t) ? t.Name : a.TopicId.ToString()[..8],
                 Code = _catalog.TryGetValue(a.TopicId, out var tc) ? tc.Code : null,
-                PeriodId = a.PeriodId,
             })
             .OrderBy(t => t.Name)
             .ToList();
+        // The card's meta line is derived from the exceptions, and the Subjects landing
+        // can add/remove them — refresh so the card is never half-stale.
+        await ReloadExceptionsAsync();
         // Same date-only/period-blind duplication as the initial load — dedupe so
         // the card never shows a subject twice after a mutation.
         _curriculum = (await Api.ListGradeTopicCurriculumByGradeAsync(Id) ?? [])
@@ -870,18 +837,22 @@
         await dialog.Result;
     }
 
-    // Open the topic edit dialog (rename / display order). Reload the
-    // curriculum on a non-null result so the card reflects the new name.
+    // Open the topic edit dialog (rename / display order + the topic's strands).
+    // The card reloads unconditionally on close, not only on a non-null result.
     private async Task OpenTopicEditAsync(GradeTopicCurriculumDto topic)
     {
-        var updated = await DialogService.ShowShellDialogAsync<
+        await DialogService.ShowShellDialogAsync<
             TopicEditDialog,
             TopicEditDialog.TopicEditModel,
             TopicDto>(
-            new TopicEditDialog.TopicEditModel { Id = topic.TopicId, Name = topic.Name },
+            new TopicEditDialog.TopicEditModel
+            {
+                Id = topic.TopicId,
+                Name = topic.Name,
+            },
             title: $"Edit topic · {topic.Name}",
             size: DialogSize.Large);
-        if (updated is not null && !_disposed)
+        if (!_disposed)
         {
             await ReloadAssignedTopicsAsync();
         }
@@ -889,14 +860,16 @@
 
     // Row kebab for a Subjects-card preview item. The topic name is the primary
     // affordance (opens the topic edit dialog, which also manages strands +
-    // lessons inline); the kebab holds the secondary actions (standalone
-    // strands dialog, teachers, remove).
+    // lessons inline); the kebab holds the secondary actions (standalone strands
+    // dialog, enrollment exceptions, remove). Enrollment exceptions are NOT edited
+    // here — the kebab NAVIGATES to the dedicated EnrollmentExceptions page with the
+    // owner and topic pre-selected, and the card itself only shows the count
+    // (spec §5.2 — no list, no inline editor).
     private IReadOnlyList<RowAction> BuildTopicRowActions(GradeTopicCurriculumDto topic) =>
         new List<RowAction>
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
-            RowAction.Callback("Edit periods", () => EditTopicPeriodsAsync(topic.TopicId), FluentIcons.Calendar),
-
+            RowAction.Navigate("Enrollment exceptions", ExceptionPageUrl(topic.TopicId), FluentIcons.Calendar),
             RowAction.Separator(),
             RowAction.Callback(
                 "Remove",

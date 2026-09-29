@@ -58,7 +58,8 @@ public sealed class GetActiveSubPeriodHandler(
                     period.Status.ToString(),
                     period.ParentPeriodId, period.NextPeriodId,
                     period.Division.ToString(), period.ActivationToleranceDays,
-                    period.CreatedAt, period.UpdatedAt);
+                    period.CreatedAt, period.UpdatedAt,
+                    Sequence: period.Sequence);
             },
             CacheOptions,
             tags: ["students"],

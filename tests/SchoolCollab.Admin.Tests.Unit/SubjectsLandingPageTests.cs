@@ -12,7 +12,6 @@ using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Components.Landing;
 using SchoolCollab.Core.Features;
-using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Components.Pages.Students.Subjects;
 using SchoolCollab.Students.Application.Services;
 using System.Net;
@@ -48,11 +47,10 @@ public class SubjectsLandingPageTests : BunitContext
     private const string GradeLevelsUrl = "/students/grade-levels";
     private const string ActivityGroupsUrl = "/activity-groups";
     private const string CodedValuesRoleUrl = "/api/coded-values/by-parent?parentCode=SUBJECT";
-    private const string PeriodsUrl = "/students/periods";
 
-    /// <summary>Fixed ids so the period column can be asserted on by name.</summary>
-    private static readonly Guid Term1Id = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid Term2Id = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    /// <summary>Fixed span ends so the badge/span fixtures read at a glance.</summary>
+    private static readonly DateOnly SpanStart = new(2027, 1, 1);
+    private static readonly DateOnly SpanEnd = new(2027, 3, 31);
 
     public SubjectsLandingPageTests()
     {
@@ -125,48 +123,32 @@ public class SubjectsLandingPageTests : BunitContext
         }).ToArray());
 
     /// <summary>
-    /// One bridge row (<c>GradeTopicAssignment</c>). A subject running in two terms
-    /// produces TWO of these for the same topic — which is why the page groups them
-    /// instead of keying by <c>topicId</c>.
+    /// One enrollment exception (<c>SubjectEnrollmentException</c>): a period part plus
+    /// the date span the subject is NOT offered for. A subject with two exceptions is TWO
+    /// of these — which is why the page counts them per topic instead of keying by
+    /// <c>topicId</c>. The retired whitelist premise (one bridge row per delivery period)
+    /// is unreachable: the filtered unique index
+    /// <c>ix_topic_assignments_tenant_grade_topic_unique</c> allows at most ONE
+    /// bridge row per (tenant, grade, topic).
     /// </summary>
-    private static Dictionary<string, object?> AssignmentJson(Guid assignmentId, Guid topicId, Guid gradeId) =>
+    private static Dictionary<string, object?> ExceptionJson(
+        Guid topicId, string division, DateOnly? startDate, DateOnly? endDate) =>
         new()
         {
-            ["id"] = assignmentId,
-            ["audience"] = "grade",
-            ["gradeLevelId"] = gradeId,
+            ["id"] = Guid.NewGuid(),
+            ["gradeLevelId"] = (Guid?)null,
             ["activityGroupId"] = (Guid?)null,
             ["topicId"] = topicId,
-            ["startDate"] = "2026-02-01",
-            ["endDate"] = (string?)null,
-            ["topicStrandId"] = (Guid?)null,
-            ["periodId"] = (Guid?)null,
+            ["division"] = division,
+            ["startDate"] = startDate?.ToString("yyyy-MM-dd"),
+            ["endDate"] = endDate?.ToString("yyyy-MM-dd"),
+            ["reason"] = (string?)null,
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         };
 
-    private static Dictionary<string, object?> WithPeriod(Dictionary<string, object?> a, Guid? periodId)
-    {
-        a["periodId"] = periodId;
-        return a;
-    }
-
-    private static string PeriodsJson() =>
-        JsonSerializer.Serialize(new[]
-        {
-            new Dictionary<string, object?>
-            {
-                ["id"] = Term1Id, ["name"] = "Term 1", ["startDate"] = "2026-02-01", ["endDate"] = "2026-06-30",
-                ["status"] = "Active", ["parentPeriodId"] = (Guid?)null, ["nextPeriodId"] = (Guid?)null,
-                ["division"] = "Terms", ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            },
-            new Dictionary<string, object?>
-            {
-                ["id"] = Term2Id, ["name"] = "Term 2", ["startDate"] = "2026-07-01", ["endDate"] = "2026-12-20",
-                ["status"] = "Active", ["parentPeriodId"] = (Guid?)null, ["nextPeriodId"] = (Guid?)null,
-                ["division"] = "Terms", ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            },
-        });
+    /// <summary>The grade-scoped exception list the landing reads once with the grid.</summary>
+    private static string ExceptionsUrl(Guid gradeId) => $"/students/enrollment-exceptions?gradeLevelId={gradeId:D}";
 
     // ── Harness ────────────────────────────────────────────────────────────
 
@@ -267,9 +249,7 @@ public class SubjectsLandingPageTests : BunitContext
         HttpStatusCode topicsStatus = HttpStatusCode.OK,
         Guid? gradeIdOverride = null,
         Guid? topicIdOverride = null,
-        string? assignmentsJson = null,
-        string? periodsJson = null,
-        Mock<IDialogService>? dialogMock = null)
+        string? exceptionsJson = null)
     {
         var gradeId = gradeIdOverride ?? Guid.NewGuid();
         var topicId = topicIdOverride ?? Guid.NewGuid();
@@ -282,14 +262,11 @@ public class SubjectsLandingPageTests : BunitContext
             .Map($"/students/subjects/by-grade/{gradeId}", topicsStatus, topicsJson)
             .Map($"/api/coded-values/by-ids?ids={codedValueId}", HttpStatusCode.OK, CodedValuesJson((codedValueId, "Mathematics")))
             .Map(CodedValuesRoleUrl, HttpStatusCode.OK, "[]")
-            // Delivery periods. Left UNMAPPED by default (404) so a test can prove
-            // the page degrades — the topics list must survive either way.
-            .Map($"/students/topic-assignments/by-grade/{gradeId}",
-                assignmentsJson is null ? HttpStatusCode.NotFound : HttpStatusCode.OK,
-                assignmentsJson ?? """{"message":"No route matches"}""")
-            .Map(PeriodsUrl,
-                periodsJson is null ? HttpStatusCode.NotFound : HttpStatusCode.OK,
-                periodsJson ?? """{"message":"No route matches"}""");
+            // Enrollment exceptions. Left UNMAPPED by default (404) so a test can
+            // prove the page degrades — the topics list must survive either way.
+            .Map(ExceptionsUrl(gradeId),
+                exceptionsJson is null ? HttpStatusCode.NotFound : HttpStatusCode.OK,
+                exceptionsJson ?? """{"message":"No route matches"}""");
 
         if (activityGroupsStatus.HasValue)
         {
@@ -314,13 +291,6 @@ public class SubjectsLandingPageTests : BunitContext
              .Returns(activityGroupsEnabled);
         Services.AddSingleton(flags.Object);
 
-        // Registered after AddFluentUIComponents (in the ctor) so the mock wins
-        // resolution for the "Edit periods" dialog.
-        if (dialogMock is not null)
-        {
-            Services.AddSingleton(dialogMock.Object);
-        }
-
         return new Harness
         {
             Cut = Render<Subjects>(),
@@ -328,26 +298,6 @@ public class SubjectsLandingPageTests : BunitContext
             GradeId = gradeId,
             TopicId = topicId,
         };
-    }
-
-    /// <summary>Builds an <see cref="IDialogService"/> mock that captures the shell
-    /// model and reports a cancel (so the page takes its post-dialog reload path).</summary>
-    private static Mock<IDialogService> CreateCapturingDialogMock(
-        Action<DialogShellData<TopicPeriodsEditDialog.TopicPeriodsEditModel>> capture)
-    {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-
-        var mock = new Mock<IDialogService>();
-        mock.Setup(d => d.ShowDialogAsync<
-                TopicPeriodsEditDialog,
-                DialogShellData<TopicPeriodsEditDialog.TopicPeriodsEditModel>>(
-                It.IsAny<DialogShellData<TopicPeriodsEditDialog.TopicPeriodsEditModel>>(),
-                It.IsAny<DialogParameters>()))
-            .Callback<DialogShellData<TopicPeriodsEditDialog.TopicPeriodsEditModel>, DialogParameters>(
-                (data, _) => capture(data))
-            .ReturnsAsync(dialogRef.Object);
-        return mock;
     }
 
     /// <summary>
@@ -525,14 +475,23 @@ public class SubjectsLandingPageTests : BunitContext
         handler.Calls.Should().BeEmpty("no tenant means no data to request");
     }
 
-    // ── Delivery-period authoring (item 6) ──────────────────────────────────
+    // ── Enrollment exceptions (subject-period-exception-model.md v3 §5.2) ───
 
     /// <summary>
-    /// A subject delivered in two terms has TWO bridge rows. The grid must show
-    /// both period NAMES (not GUID prefixes) rather than collapsing to one row.
+    /// A subject with two exceptions is TWO rows for the same topic — not two bridge
+    /// rows. The retired whitelist premise (N bridge rows for N delivery periods) is
+    /// unreachable: the filtered unique index
+    /// <c>ix_topic_assignments_tenant_grade_topic_unique</c> allows at most ONE bridge row
+    /// per (tenant, grade, topic).
+    ///
+    /// <para><b>Replaces</b> v1's
+    /// <c>GradeOwner_SubjectBlockedInTwoTerms_ShowsBothPeriodNamesInTheColumn</c>: the
+    /// per-period label dissolved with the period vocabulary, and the column is now a
+    /// COUNT badge — "Offered in every period" (and its badge) is the absence of an
+    /// exception, which is the normal state.</para>
     /// </summary>
     [TestMethod]
-    public void GradeOwner_SubjectInTwoTerms_ShowsBothPeriodNamesInTheColumn()
+    public void GradeOwner_SubjectWithTwoExceptions_ShowsTheCountBadge()
     {
         var gradeId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
@@ -541,25 +500,28 @@ public class SubjectsLandingPageTests : BunitContext
             activityGroupsEnabled: false,
             gradeIdOverride: gradeId,
             topicIdOverride: topicId,
-            assignmentsJson: JsonSerializer.Serialize(new[]
+            exceptionsJson: JsonSerializer.Serialize(new[]
             {
-                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), Term1Id),
-                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), Term2Id),
-            }),
-            periodsJson: PeriodsJson());
+                ExceptionJson(topicId, "Terms", SpanStart, SpanEnd),
+                ExceptionJson(topicId, "None", SpanStart.AddDays(60), null),
+            }));
 
-        harness.Cut.Markup.Should().Contain("Delivery periods", "the grid gained a period column");
-        harness.Cut.Markup.Should().Contain("Term 1");
-        harness.Cut.Markup.Should().Contain("Term 2");
+        harness.Cut.Markup.Should().Contain("Enrollment exceptions",
+            "the grid column uses the exception model's vocabulary");
+        harness.Cut.Markup.Should().Contain("2 exceptions",
+            "the column is a COUNT badge derived from the exceptions");
+        harness.Cut.Markup.Should().NotContain("Blocked in",
+            "the per-period label is gone — the badge counts, it does not list");
+        harness.Cut.Markup.Should().NotContain("Offered in every period",
+            "the absence of a badge is the normal state (spec §5.2)");
     }
 
     /// <summary>
-    /// The subject edit dialog has no period field by design (the period is on the
-    /// bridge, and one subject can run in several terms), so "Edit periods" on the
-    /// landing is the ONLY way to reach period editing from here.
+    /// The subject edit dialog has no period field by design, so "Enrollment exceptions"
+    /// on the landing is the only way to reach exception management from here.
     /// </summary>
     [TestMethod]
-    public void GradeOwner_RowOffersEditPeriodsAction()
+    public void GradeOwner_RowOffersEnrollmentExceptionsAction()
     {
         var gradeId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
@@ -568,97 +530,88 @@ public class SubjectsLandingPageTests : BunitContext
             activityGroupsEnabled: false,
             gradeIdOverride: gradeId,
             topicIdOverride: topicId,
-            assignmentsJson: JsonSerializer.Serialize(new[]
+            exceptionsJson: JsonSerializer.Serialize(new[]
             {
-                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), Term1Id),
-            }),
-            periodsJson: PeriodsJson());
+                ExceptionJson(topicId, "Terms", SpanStart, SpanEnd),
+            }));
 
-        SingleRowActions(harness.Cut).Select(a => a.Label).Should().Contain("Edit periods");
-    }
-
-    /// <summary>
-    /// Gate the control, not just the call: with no bridge rows loaded there is no
-    /// period set to edit, so the action must not be rendered at all. Before this
-    /// the landing offered no period path at all — and a naive fix that added the
-    /// action unconditionally would offer a dead control instead.
-    /// </summary>
-    [TestMethod]
-    public void NoBridgeRows_RowOmitsEditPeriodsRatherThanOfferingADeadControl()
-    {
-        var harness = RenderSubjects(activityGroupsEnabled: false);
-
-        harness.Cut.Markup.Should().Contain("Mathematics", "topics still load");
         SingleRowActions(harness.Cut).Select(a => a.Label).Should()
-            .BeEquivalentTo(new[] { "Edit", "Delete" },
-                "with no bridge rows there is no period set to edit, so the action is not rendered");
+            .BeEquivalentTo(new[] { "Edit", "Enrollment exceptions", "Delete" });
     }
 
     /// <summary>
-    /// THE regression guard. The editor is seeded with ONE ROW PER BRIDGE ROW, not
-    /// one row per topic. A subject running in two terms must open with both terms
-    /// present and editable — keying by topicId (ToDictionary) would either throw
-    /// on the duplicate or silently drop a term.
+    /// <b>Q1 (owner decision 2026-09-26) — the gate is WIDENED, and this test replaces
+    /// v1's <c>NonGradeOwner_RowOmitsEnrollmentExceptionsRatherThanOfferingADeadControl</c>
+    /// which pinned the OPPOSITE.</b> An activity group owns exceptions just as a grade
+    /// does (spec §5.2 row 1), so a group-owned row must OFFER the action. The v1 test
+    /// asserted the action was gated to <c>_ownerType == "GradeLevel"</c>; that gate is
+    /// now void — asserted at the source, like the flag-gated owner option above, because
+    /// bUnit cannot switch the owner filter (the toolbar's group option is backed by a
+    /// private nested type) and FluentSelect does not materialise its children while
+    /// closed.
     /// </summary>
     [TestMethod]
-    public async Task EditPeriods_OpensEditorWithOneRowPerBridgeRow()
+    public void GroupOwner_RowOffersEnrollmentExceptionsRatherThanOmittingIt()
+    {
+        var source = ReadSubjectsSource();
+
+        source.Should().Contain("?activityGroupId=",
+            "Q1: a group-owned row navigates with the GROUP owner pre-selected — the action is not grade-only");
+        source.Should().Contain("RowAction.Navigate(\"Enrollment exceptions\"",
+            "the affordance navigates to the management page instead of opening an editor");
+        source.Should().MatchRegex(
+            @"if \(ExceptionPageUrl\(row\.Id\) is \{ \} exceptionsUrl\)\s*\{\s*actions\.Add\(RowAction\.Navigate\(",
+            "Q1: the action is gated on a RESOLVABLE OWNER, never on the owner type — a group-owned row gets it too");
+    }
+
+    /// <summary>
+    /// <b>Replaces</b> v1's <c>EnrollmentExceptionsAction_OpensTheBlocksDialogForThatRow</c>.
+    /// Invoking the action must take the user to the dedicated management page FOR THAT
+    /// ROW: owner and topic travel in the URL so the page lands pre-selected (spec §5.2).
+    /// Nothing opens inline — the action is a navigating <see cref="RowAction.Navigate"/>,
+    /// which has no callback at all, so no editor can be opened from the card.
+    /// </summary>
+    [TestMethod]
+    public void EnrollmentExceptionsAction_NavigatesToThePageForThatRow()
     {
         var gradeId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
-        var firstAssignment = Guid.NewGuid();
-        var secondAssignment = Guid.NewGuid();
-
-        DialogShellData<TopicPeriodsEditDialog.TopicPeriodsEditModel>? captured = null;
-        var dialogMock = CreateCapturingDialogMock(data => captured = data);
 
         var harness = RenderSubjects(
             activityGroupsEnabled: false,
             gradeIdOverride: gradeId,
             topicIdOverride: topicId,
-            assignmentsJson: JsonSerializer.Serialize(new[]
+            exceptionsJson: JsonSerializer.Serialize(new[]
             {
-                WithPeriod(AssignmentJson(firstAssignment, topicId, gradeId), Term1Id),
-                WithPeriod(AssignmentJson(secondAssignment, topicId, gradeId), Term2Id),
-            }),
-            periodsJson: PeriodsJson(),
-            dialogMock: dialogMock);
+                ExceptionJson(topicId, "Terms", SpanStart, SpanEnd),
+            }));
 
-        var action = SingleRowActions(harness.Cut).First(a => a.Label == "Edit periods");
-        action.OnClick.Should().NotBeNull();
-        // InvokeAsync: the handler ends in StateHasChanged, which asserts dispatcher
-        // access. A real click runs on the renderer; a direct call from the test
-        // thread does not.
-        await harness.Cut.InvokeAsync(() => action.OnClick!());
+        var action = SingleRowActions(harness.Cut).First(a => a.Label == "Enrollment exceptions");
 
-        harness.Cut.WaitForAssertion(() => captured.Should().NotBeNull(
-            "invoking 'Edit periods' must open the topic-scoped editor"));
-
-        var model = captured!.Model;
-        model.TopicId.Should().Be(topicId);
-        model.GradeLevelId.Should().Be(gradeId);
-        model.Rows.Should().HaveCount(2,
-            "a subject in two terms is two bridge rows — both must be editable, not one");
-        model.Rows.Select(r => r.AssignmentId).Should()
-            .BeEquivalentTo(new[] { (Guid?)firstAssignment, secondAssignment },
-                "each row must carry its own assignment id so save can target it");
-        model.Rows.Select(r => r.PeriodId).Should()
-            .BeEquivalentTo(new[] { (Guid?)Term1Id, Term2Id });
+        action.Href.Should().Be(
+            $"/students/enrollment-exceptions?gradeLevelId={gradeId}&topicId={topicId:D}",
+            "the kebab NAVIGATES with the owner + topic pre-selected — no editor opens on the card");
+        action.OnClick.Should().BeNull(
+            "a navigating action carries no callback, so no dialog path exists from here");
     }
 
     /// <summary>
-    /// The period load is best-effort: it runs after the topics list, so a 404 must
-    /// degrade the column and drop the action without failing the page.
+    /// The exception load is best-effort: it runs after the topics list, so a 404 must
+    /// drop the badge without failing the page. (v1's fallback text "Offered in every
+    /// period" is gone — no badge IS the fallback now.)
     /// </summary>
     [TestMethod]
-    public void DeliveryPeriodLoadFails_TopicsStillLoadAndColumnFallsBack()
+    public void ExceptionLoadFails_TopicsStillLoadAndTheBadgeIsAbsent()
     {
-        // assignmentsJson / periodsJson left null → both routes 404.
+        // exceptionsJson left null → the route 404s.
         var harness = RenderSubjects(activityGroupsEnabled: false);
 
-        harness.Cut.Markup.Should().Contain("Mathematics", "topics must survive a period-load failure");
-        harness.Cut.Markup.Should().Contain("Whole academic year", "null PeriodId = year-spanning");
-        SingleRowActions(harness.Cut).Select(a => a.Label).Should().NotContain("Edit periods");
+        harness.Cut.Markup.Should().Contain("Mathematics", "topics must survive an exception-load failure");
+        harness.Cut.Markup.Should().NotContain("1 exception",
+            "no exceptions loaded = no badge");
+        harness.Cut.Markup.Should().NotContain("Offered in every period",
+            "the v1 fallback label is retired");
         harness.Cut.FindComponents<FluentMessageBar>().Should().BeEmpty(
-            "a period-load failure is not a page-level error");
+            "an exception-load failure is not a page-level error");
     }
 }

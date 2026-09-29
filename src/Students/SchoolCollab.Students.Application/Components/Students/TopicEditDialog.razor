@@ -1,8 +1,10 @@
 @*
     TopicEditDialog — opens from the grade-detail Subjects card topic-name
-    primary affordance (and the row kebab). Edits a topic's display name,
-    code, and description, and lets the user manage the topic's strands
-    inline (via the shared StrandsEditor).
+    primary affordance. Edits a topic's display name, code, and description
+    and lets the user manage the topic's strands inline (via the shared
+    StrandsEditor). Topic-only: the subject's "Enrollment exceptions" (the
+    periods it is not offered in) moved to the EnrollmentExceptions management
+    page (subject-period-exception-model.md §5).
 
     Topic edits go through the CodedValue + tenancy-override mechanism (tcv/4):
       • the dialog loads the CodedValue backing the topic (Topic.CodedValueId)

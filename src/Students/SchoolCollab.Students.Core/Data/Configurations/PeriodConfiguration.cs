@@ -47,6 +47,11 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
         // FR-W3): nullable int; null = inherit the global default.
         builder.Property(x => x.ActivationToleranceDays);
 
+        // 1-based position of a sub-period within its year's run of the same division
+        // (subject-period-exception-model.md v5 §0 decision 15). Null for a top-level
+        // academic year, and for a sub-period whose position the tenant has not declared.
+        builder.Property(x => x.Sequence);
+
         // Self-referencing hierarchy FK: deleting an AcademicYear cascades its
         // sub-periods (EC-H1). A sub-period still cannot be hard-deleted while
         // activity-group memberships reference it (membership FK is RESTRICT).
@@ -84,6 +89,18 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
 
         builder.HasIndex(x => x.StartDate)
             .HasDatabaseName("ix_periods_start_date");
+
+        // H2.1: at most ONE sub-period may claim a given position in a given year's run of
+        // a given division — a year cannot have two 2nd terms. The filter is what makes the
+        // index correct rather than merely useful: top-level years and unpositioned
+        // sub-periods carry a NULL sequence, and Postgres treats NULLs as DISTINCT, so
+        // without the filter every such row would collide with every other (and this is
+        // the same NULL-distinct trap the exception's COALESCE expression indexes exist
+        // to work around — here the answer is a partial index, not an expression index).
+        builder.HasIndex(x => new { x.TenantId, x.ParentPeriodId, x.Division, x.Sequence })
+            .IsUnique()
+            .HasFilter("sequence IS NOT NULL")
+            .HasDatabaseName("ix_periods_tenant_parent_division_sequence");
 
         builder.Ignore(x => x.DomainEvents);
     }

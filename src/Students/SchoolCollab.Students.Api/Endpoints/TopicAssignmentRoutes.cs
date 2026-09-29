@@ -85,6 +85,11 @@ public static class TopicAssignmentRoutes
             }
         });
 
+        // ── DEPRECATED (2026-09-26) ───────────────────────────────────────────
+        // subject-period-exception-model.md: the bridge row carries no period any
+        // more, so this route is a NO-OP with respect to availability. It is kept
+        // (not removed) for wire compatibility — no UI calls it after this round.
+        // "Not offered in period P" is POST /students/enrollment-exceptions instead.
         group.MapPut("/topic-assignments/{id:guid}/period", async (
             Guid id,
             [FromBody] UpdateTopicAssignmentPeriodRequest req,

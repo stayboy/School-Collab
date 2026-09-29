@@ -45,7 +45,8 @@ public sealed class GetPeriodByIdHandler(
                     period.Division.ToString(),
                     period.ActivationToleranceDays,
                     period.CreatedAt,
-                    period.UpdatedAt);
+                    period.UpdatedAt,
+                    Sequence: period.Sequence);
             },
             CacheOptions,
             tags: ["students"],

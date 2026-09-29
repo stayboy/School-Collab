@@ -8,7 +8,8 @@
         parent panel, and the (create+edit) sub-periods section.
       • This component owns only the field rows:
           Division → Parent academic year (sub-period create only) →
-          Period name (+ optional NameActions) → Dates.
+          Sequence (sub-periods only) →
+          Period name (+ optional NameActions) → Dates → Activation tolerance.
       • Name / ParentPeriodIdText are string-based bindings; Division is
         enum-bound (AcademicYearDivision) directly on the model. The
         consuming page maps them to/from the API DTOs.
@@ -16,6 +17,7 @@
     Both the form's create state and its edit state are backed by the same
     PeriodFormModel, which implements IPeriodFormModel.
 *@
+@using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Admin.Shared.Components
@@ -48,6 +50,41 @@
                            OptionValue="@(ay => ay.Id.ToString())"
                            Disabled="true"
                            Placeholder="— Select academic year —"
+                           Width="FieldWidth.W6" />
+    </FormRow>
+}
+
+@* Sub-periods only: where this sub-period SITS in its academic year's run of the same
+   division — 1st term, 2nd term, … (subject-period-exception-model.md v5 §0 decision
+   15). Gated on the period actually HAVING a parent academic year rather than on the
+   IsSubPeriod parameter, because IsSubPeriod is only ever set on the create path: the
+   edit form loads the parent into Model.ParentPeriodIdText but leaves IsSubPeriod
+   false, and a position is precisely what an existing sub-period needs to be able to
+   change. A top-level academic year never gets this row — it is not the 1st of
+   anything, and both the entity (Period.ValidateSequence) and the filtered unique
+   index would reject a position on it.
+
+   The options are 1st–4th always, extended to whatever position this period already
+   holds or a sibling already holds (so a backfilled higher one — Q8a parses it out of the
+   name, e.g. "Term 5" — is representable: a bound value that is not among the items would
+   otherwise be silently dropped on save), MINUS every position a sibling sub-period of the
+   same year and division already holds. The subtraction is what makes the control honest:
+   a position is unique per (year, division), so offering a taken one would only produce a
+   rejected write — the API's own pre-check is the authority (PeriodSequenceGuard).
+   Deliberately NO "none" entry: an unpositioned sub-period is legal, but the model stores
+   that as null, and DropdownComponent's null-key path cannot round-trip a null option (it
+   clears the selection instead of selecting it), so the row simply starts on the
+   placeholder and stays there until a position is picked. *@
+@if (HasParentAcademicYear)
+{
+    <FormRow Label="Sequence"
+             LabelTip="Optional. Which term/semester this sub-period is — 1st, 2nd, … A position can only be held by one sub-period of the same kind in the same academic year, so positions already taken are not offered.">
+        <DropdownComponent TItem="int" TValue="int?"
+                           Items="@SequenceOptions"
+                           @bind-SelectedValue="Model.Sequence"
+                           OptionText="@SequenceOptionText"
+                           OptionValue="@(position => (int?)position)"
+                           Placeholder="— Not positioned —"
                            Width="FieldWidth.W6" />
     </FormRow>
 }
@@ -98,6 +135,12 @@
         DateTime? Start { get; set; }
         DateTime? End { get; set; }
         int? ActivationToleranceDays { get; set; }
+
+        /// <summary>Where this sub-period sits in its year's run of the same kind —
+        /// 1 for the first term/semester, 2 for the second, … (v5 §0 decision 15).
+        /// Null = not positioned, which is legal: the position is the tenant's answer
+        /// to "which term is this?", and nothing derives it.</summary>
+        int? Sequence { get; set; }
     }
 
     [Parameter, EditorRequired] public IPeriodFormModel Model { get; set; } = default!;
@@ -116,4 +159,46 @@
     /// <summary>Optional extra content rendered inside the Period name row
     /// after the text field (e.g. the create flow's Suggest/Backfill buttons).</summary>
     [Parameter] public RenderFragment? NameActions { get; set; }
+
+    /// <summary>
+    /// The positions a SIBLING sub-period already holds — same academic year (the model's
+    /// parent) and same division — which the Sequence row must therefore not offer. Supplied
+    /// by the consuming page, which is the only place holding both this row's identity and the
+    /// tenant's period list; the row being described is deliberately EXCLUDED from it, so an
+    /// edit form can keep the position it already holds without moving itself. Empty leaves the
+    /// 1st–4th ladder (plus whatever this row holds) intact.
+    /// </summary>
+    [Parameter] public IReadOnlyList<int> UnavailableSequences { get; set; } = [];
+
+    /// <summary>How many positions the Sequence row offers before it starts extending:
+    /// 1st–4th are always available, and a period that already holds a higher position
+    /// adds its own on top. Mirrors the exception page's ordinal list (v5 §0 decision 15,
+    /// Q5).</summary>
+    private const int StandardSequenceCount = 4;
+
+    /// <summary>True when the period being described has a parent academic year — i.e. it
+    /// is a sub-period, the only shape that may carry a <see cref="IPeriodFormModel.Sequence"/>.
+    /// Read from the model rather than from <see cref="IsSubPeriod"/> so it also holds in
+    /// edit mode, where the parent is loaded from the DTO and <see cref="IsSubPeriod"/> is
+    /// never set.</summary>
+    private bool HasParentAcademicYear => Guid.TryParse(Model.ParentPeriodIdText, out _);
+
+    /// <summary>The positions offered by the Sequence row: 1st–4th always, extended to the
+    /// highest position this row or a sibling already holds (so a backfilled 5th term stays
+    /// representable and the ladder keeps reaching it), minus every position a sibling
+    /// occupies.</summary>
+    private int[] SequenceOptions
+    {
+        get
+        {
+            var highestHeld = UnavailableSequences.Count == 0 ? 0 : UnavailableSequences.Max();
+            var top = Math.Max(StandardSequenceCount, Math.Max(Model.Sequence ?? 0, highestHeld));
+            return [.. Enumerable.Range(1, top).Where(position => !UnavailableSequences.Contains(position))];
+        }
+    }
+
+    /// <summary>Option text for a position — "1st term" / "2nd semester", spelled from the
+    /// period's division so the row never says "term" about a semester.</summary>
+    private string SequenceOptionText(int position) =>
+        PeriodPositionLabels.NumberAndKind(position, Model.Division);
 }

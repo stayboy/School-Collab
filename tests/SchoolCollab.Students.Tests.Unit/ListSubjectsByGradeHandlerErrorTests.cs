@@ -28,10 +28,11 @@ namespace SchoolCollab.Students.Tests.Unit;
 ///         0-row behaviour for an unknown <c>GradeLevelId</c>. The Topics
 ///         landing depends on this returning <c>[]</c>, not throwing, when
 ///         a tenant filter masks the grade or the id has a typo.</item>
-///   <item><c>PeriodIdSpecified_NoMatchingAssignment_ReturnsEmpty</c> — pin
-///         the 0-row behaviour when an explicit <c>PeriodId</c> has no
-///         assignments. Distinguishes "no assignments for this period" from
-///         "no assignments ever".</item>
+///   <item><c>PeriodIdSpecified_NoMatchingAssignment_ReturnsEmpty</c> — RETIRED
+///         (subject-period-exception-model.md v3 §8 Q5): the query no longer has a
+///         <c>PeriodId</c>, so "no assignments for this period" is no longer a state
+///         the handler can be asked about. Its replacement coverage is
+///         <c>ListSubjectsByGradeHandlerTests.BridgeRowCarryingAnIgnoredPeriodId_DoesNotFilterTheListing</c>.</item>
 /// </list>
 /// </summary>
 [TestClass]

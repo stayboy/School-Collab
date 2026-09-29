@@ -36,6 +36,23 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
     // non-null value overrides it for this period's activation window.
     public int? ActivationToleranceDays { get; private set; }
 
+    /// <summary>
+    /// Where this sub-period SITS in its academic year's run of the same division — 1 for
+    /// the first term/semester, 2 for the second, and so on. It is the tenant's answer to
+    /// "which term is this?", stored explicitly so the number is never inferred from the
+    /// name or from row order (subject-period-exception-model.md v5 §0 decision 15).
+    ///
+    /// <para><b>Only sub-periods have one.</b> A top-level academic year is not the 1st
+    /// term of anything, so its <c>sequence</c> is null. The uniqueness rule is therefore
+    /// "one 1st term, one 2nd term, … per year per division", enforced by a filtered index
+    /// on <c>(tenant_id, parent_period_id, division, sequence)</c>.</para>
+    ///
+    /// <para><b>It is descriptive, like <see cref="Division"/>.</b> Nothing in availability
+    /// matching reads it (§2.3) — the dates are the truth. Its job is to let a person say
+    /// "not offered in the 3rd term" and have the row read back that way.</para>
+    /// </summary>
+    public int? Sequence { get; private set; }
+
     public Guid? NextPeriodId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -49,13 +66,15 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         DateOnly endDate,
         AcademicYearDivision division,
         Guid? parentPeriodId = null,
-        int? activationToleranceDays = null)
+        int? activationToleranceDays = null,
+        int? sequence = null)
     {
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
         ValidateActivationTolerance(activationToleranceDays);
         ValidateHierarchy(division, parentPeriodId);
+        ValidateSequence(sequence, parentPeriodId);
 
         var now = DateTimeOffset.UtcNow;
         var period = new Period
@@ -68,6 +87,7 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
             Division = division,
             ParentPeriodId = parentPeriodId,
             ActivationToleranceDays = activationToleranceDays,
+            Sequence = sequence,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -88,7 +108,8 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         DateOnly startDate,
         DateOnly endDate,
         Guid? parentPeriodId = null,
-        int? activationToleranceDays = null)
+        int? activationToleranceDays = null,
+        int? sequence = null)
     {
         if (Status != PeriodStatus.Draft)
             throw new InvalidOperationException("Only draft periods can be updated.");
@@ -97,12 +118,14 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
         ValidateActivationTolerance(activationToleranceDays);
+        ValidateSequence(sequence, parentPeriodId);
 
         Name = name.Trim();
         StartDate = startDate;
         EndDate = endDate;
         ParentPeriodId = parentPeriodId;
         ActivationToleranceDays = activationToleranceDays;
+        Sequence = sequence;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new PeriodUpdatedEvent(Id, Name));
     }
@@ -128,6 +151,25 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
             throw new ArgumentException(
                 "Activation tolerance must be null or a non-negative number of days.",
                 nameof(activationToleranceDays));
+    }
+
+    /// <summary>
+    /// The sub-period-position invariants: a <paramref name="sequence"/>, when given, is a
+    /// 1-based position in its year's run, and only a SUB-PERIOD can carry one — a
+    /// top-level academic year is not the "1st" of anything, and letting it claim a
+    /// position would put a term-shaped ordinal on a year.
+    /// </summary>
+    private static void ValidateSequence(int? sequence, Guid? parentPeriodId)
+    {
+        if (sequence is < 1)
+            throw new ArgumentException(
+                "A period's sequence must be null or 1 or greater (it is a 1-based position: 1st term, 2nd term, …).",
+                nameof(sequence));
+
+        if (sequence.HasValue && !parentPeriodId.HasValue)
+            throw new ArgumentException(
+                "Only a sub-period can carry a sequence; a top-level academic year has no position in a run of terms or semesters.",
+                nameof(sequence));
     }
 
     /// <summary>

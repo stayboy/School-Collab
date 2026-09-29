@@ -14,8 +14,13 @@ using SchoolCollab.Students.Core.Domain.Exceptions;
 namespace SchoolCollab.Students.Tests.Unit;
 
 /// <summary>
-/// Rev. 6 topic-assignment PeriodId rules
-/// (spec activity-group-enrollment.md FR-55/56/57, AC-44..46, EC-23/24).
+/// Rev. 6 FR-55/56/57 are now <b>RETIRED on the bridge</b> — the round doc
+/// documents/specs/subject-period-exception-model.md removed the period meaning
+/// from <c>TopicAssignment</c> on 2026-09-26. These tests pin the deprecation:
+/// both create paths still accept <c>PeriodId</c> on the wire (back-compat) but
+/// ignore it, and "not offered in period P" now belongs to
+/// <c>SubjectEnrollmentException</c> (see <c>SubjectAvailabilityTests</c> /
+/// <c>CreateSubjectEnrollmentExceptionHandlerTests</c>).
 /// </summary>
 [TestClass]
 public class TopicAssignmentPeriodTests
@@ -33,10 +38,10 @@ public class TopicAssignmentPeriodTests
         NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private static AssignGradeTopicHandler NewAssignGrade(StudentsTestScope s) => new(
-        s.GradeTopicAssignments, s.Periods, s.Cache, NullLogger<AssignGradeTopicHandler>.Instance);
+        s.GradeTopicAssignments, s.Cache, NullLogger<AssignGradeTopicHandler>.Instance);
 
     private static AssignActivityGroupTopicHandler NewAssignGroup(StudentsTestScope s) => new(
-        new ActivityGroupTopicAssignmentRepository(s.Db), s.ActivityGroups, s.Periods, s.Cache,
+        new ActivityGroupTopicAssignmentRepository(s.Db), s.Cache,
         NullLogger<AssignActivityGroupTopicHandler>.Instance);
 
     /// <summary>Seeds an active academic year (and, when <paramref name="withTerm"/>
@@ -64,119 +69,129 @@ public class TopicAssignmentPeriodTests
         return (yearId, termId);
     }
 
-    // FR-57: grade topic with an AcademicYear period → allowed (year-spanning).
+    /// <summary>Creates a second, NOT-active academic year and one Term inside it.</summary>
+    private static async Task<Guid> SeedOtherYearTermAsync(StudentsTestScope s)
+    {
+        var create = NewCreatePeriod(s);
+        var otherYear = (await create.HandleAsync(new CreatePeriod(
+            "AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        return (await create.HandleAsync(new CreatePeriod(
+            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear))).YearId;
+    }
+
+    private static async Task<ActivityGroup> SeedGroupAsync(StudentsTestScope s, EnrollmentSpan span)
+    {
+        var group = ActivityGroup.Create(span + " Club", span: span);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+        return group;
+    }
+
+    // ── Grade path: PeriodId is accepted and ignored ──────────────────────────
+
     [TestMethod]
-    public async Task AssignGrade_AcademicYearPeriod_Succeeds()
+    public async Task AssignGrade_WithAcademicYearPeriodId_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-grade-year-" + Guid.NewGuid());
         var (yearId, _) = await SeedActiveYearAsync(s);
+
         var id = await NewAssignGrade(s).HandleAsync(new AssignGradeTopic(
             GradeId, TopicId, D(2026, 9, 1), PeriodId: yearId));
-        (await s.GradeTopicAssignments.GetAsync(id))!.PeriodId.Should().Be(yearId);
+
+        (await s.GradeTopicAssignments.GetAsync(id))!.PeriodId.Should().BeNull(
+            "the bridge row carries no period meaning any more (2026-09-26)");
     }
 
-    // FR-57/AC-44: grade topic with a Term within the active year → allowed.
     [TestMethod]
-    public async Task AssignGrade_TermWithinActiveYear_Succeeds()
+    public async Task AssignGrade_WithTermPeriodId_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-grade-term-" + Guid.NewGuid());
         var (_, termId) = await SeedActiveYearAsync(s);
+
         var id = await NewAssignGrade(s).HandleAsync(new AssignGradeTopic(
             GradeId, TopicId, D(2026, 9, 1), PeriodId: termId));
-        (await s.GradeTopicAssignments.GetAsync(id))!.PeriodId.Should().Be(termId);
+
+        (await s.GradeTopicAssignments.GetAsync(id))!.PeriodId.Should().BeNull();
     }
 
-    // FR-57/EC-24: grade topic with a Term outside the active year → rejected.
     [TestMethod]
-    public async Task AssignGrade_TermOutsideActiveYear_Throws()
+    public async Task AssignGrade_WithTermOutsideActiveYear_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-grade-ec24-" + Guid.NewGuid());
-        var (_, _) = await SeedActiveYearAsync(s);
-        // A second, un-activated academic year + term (outside the active year).
-        var create = NewCreatePeriod(s);
-        var otherYear = (await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
-        var otherTerm = (await create.HandleAsync(new CreatePeriod(
-            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear))).YearId;
+        await SeedActiveYearAsync(s);
+        var otherTerm = await SeedOtherYearTermAsync(s);
 
-        await FluentActions.Awaiting(() => NewAssignGrade(s).HandleAsync(
-            new AssignGradeTopic(GradeId, TopicId, D(2027, 9, 1), PeriodId: otherTerm)))
-            .Should().ThrowAsync<TopicAssignmentPeriodException>();
+        // The retired FR-57 rejection no longer fires: the field is ignored, not validated.
+        var id = await NewAssignGrade(s).HandleAsync(new AssignGradeTopic(
+            GradeId, TopicId, D(2027, 9, 1), PeriodId: otherTerm));
+
+        (await s.GradeTopicAssignments.GetAsync(id))!.PeriodId.Should().BeNull();
     }
 
-    // FR-56: Termly group topic with a Term period → allowed.
+    // ── Group path: PeriodId is accepted and ignored ──────────────────────────
+
     [TestMethod]
-    public async Task AssignGroup_TermlyGroup_TermPeriod_Succeeds()
+    public async Task AssignGroup_TermlyGroup_WithTermPeriodId_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-group-term-" + Guid.NewGuid());
         var (_, termId) = await SeedActiveYearAsync(s);
-        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        var group = await SeedGroupAsync(s, EnrollmentSpan.Termly);
 
         var id = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
             group.Id, TopicId, D(2026, 9, 1), PeriodId: termId));
-        (await new ActivityGroupTopicAssignmentRepository(s.Db).GetAsync(id))!.PeriodId.Should().Be(termId);
+
+        (await new ActivityGroupTopicAssignmentRepository(s.Db).GetAsync(id))!.PeriodId.Should().BeNull(
+            "the group write path retires the whitelist exactly as the grade path does");
     }
 
-    // FR-H14 / AC-H13: a Termly group topic with a Term of a NON-active year is rejected.
     [TestMethod]
-    public async Task AssignGroup_TermlyGroup_TermOfNonActiveYear_Throws()
+    public async Task AssignGroup_TermlyGroup_WithTermOfNonActiveYear_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-group-fr14-" + Guid.NewGuid());
-        var (_, _) = await SeedActiveYearAsync(s);
-        // A second, un-activated academic year + term (outside the active year).
-        var create = NewCreatePeriod(s);
-        var otherYear = (await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
-        var otherTerm = (await create.HandleAsync(new CreatePeriod(
-            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear))).YearId;
-        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        await SeedActiveYearAsync(s);
+        var otherTerm = await SeedOtherYearTermAsync(s);
+        var group = await SeedGroupAsync(s, EnrollmentSpan.Termly);
 
-        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
-            new AssignActivityGroupTopic(group.Id, TopicId, D(2027, 9, 1), PeriodId: otherTerm)))
-            .Should().ThrowAsync<TopicAssignmentPeriodException>();
+        var id = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2027, 9, 1), PeriodId: otherTerm));
+
+        (await new ActivityGroupTopicAssignmentRepository(s.Db).GetAsync(id))!.PeriodId.Should().BeNull();
     }
 
-    // FR-56/EC-23: OpenEnded group topic must not carry a PeriodId.
     [TestMethod]
-    public async Task AssignGroup_OpenEndedGroup_WithPeriod_Throws()
+    public async Task AssignGroup_OpenEndedGroup_WithPeriodId_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-group-ec23-" + Guid.NewGuid());
         var (yearId, _) = await SeedActiveYearAsync(s);
-        var group = ActivityGroup.Create("Open Club", span: EnrollmentSpan.OpenEnded);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        var group = await SeedGroupAsync(s, EnrollmentSpan.OpenEnded);
 
-        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
-            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 9, 1), PeriodId: yearId)))
-            .Should().ThrowAsync<TopicAssignmentPeriodException>();
+        var id = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 9, 1), PeriodId: yearId));
+
+        (await new ActivityGroupTopicAssignmentRepository(s.Db).GetAsync(id))!.PeriodId.Should().BeNull();
     }
 
-    // FR-56: Termly group topic with the wrong period type → rejected.
     [TestMethod]
-    public async Task AssignGroup_TermlyGroup_AcademicYearPeriod_Throws()
+    public async Task AssignGroup_TermlyGroup_WithAcademicYearPeriodId_IsAcceptedAndIgnored()
     {
         using var s = new StudentsTestScope("tp-group-mismatch-" + Guid.NewGuid());
         var (yearId, _) = await SeedActiveYearAsync(s);
-        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        var group = await SeedGroupAsync(s, EnrollmentSpan.Termly);
 
-        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
-            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 9, 1), PeriodId: yearId)))
-            .Should().ThrowAsync<TopicAssignmentPeriodException>();
+        var id = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 9, 1), PeriodId: yearId));
+
+        (await new ActivityGroupTopicAssignmentRepository(s.Db).GetAsync(id))!.PeriodId.Should().BeNull();
     }
 
-    // Rev. 6: duplicate active (group, topic, period) assignment → rejected (409).
+    // ── Duplicate guard: now (group, topic) — the database's own uniqueness ───
+
     [TestMethod]
     public async Task AssignGroup_DuplicateActiveSamePeriod_Throws()
     {
         using var s = new StudentsTestScope("tp-dup-period-" + Guid.NewGuid());
         var (_, termId) = await SeedActiveYearAsync(s);
-        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        var group = await SeedGroupAsync(s, EnrollmentSpan.Termly);
 
         // Start date in the past so the assignment is active on today (the guard
         // checks effectiveness on DateTime.UtcNow).
@@ -188,15 +203,12 @@ public class TopicAssignmentPeriodTests
             .Should().ThrowAsync<DuplicateTopicAssignmentException>();
     }
 
-    // Rev. 6: duplicate active (group, topic) with null period → rejected (null == null).
     [TestMethod]
     public async Task AssignGroup_DuplicateActiveNullPeriod_Throws()
     {
         using var s = new StudentsTestScope("tp-dup-null-" + Guid.NewGuid());
         await SeedActiveYearAsync(s);
-        var group = ActivityGroup.Create("Open Club", span: EnrollmentSpan.OpenEnded);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        var group = await SeedGroupAsync(s, EnrollmentSpan.OpenEnded);
 
         await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
             group.Id, TopicId, D(2026, 1, 1)));
@@ -206,17 +218,18 @@ public class TopicAssignmentPeriodTests
             .Should().ThrowAsync<DuplicateTopicAssignmentException>();
     }
 
-    // Rev. 6: same (group, topic) with a different period → both succeed.
     [TestMethod]
-    public async Task AssignGroup_DifferentPeriod_AllowsSecond()
+    public async Task AssignGroup_SameTopicWithTwoDifferentPeriodIds_IsStillADuplicate()
     {
+        // Rev. 6 allowed a second bridge row for the same (group, topic) when the
+        // PeriodId differed. That premise is unreachable: PeriodId is now ignored
+        // (one row per (tenant, group, topic), which
+        // ix_topic_assignments_tenant_group_topic_unique already enforced), so the
+        // second request is a 409 instead of a raw unique-index violation.
         using var s = new StudentsTestScope("tp-diff-period-" + Guid.NewGuid());
         var (yearId, termId) = await SeedActiveYearAsync(s);
-        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
+        var group = await SeedGroupAsync(s, EnrollmentSpan.Termly);
 
-        // A second Term within the active year gives a distinct PeriodId.
         var create = NewCreatePeriod(s);
         var term2 = (await create.HandleAsync(new CreatePeriod(
             "T2", D(2027, 1, 1), D(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
@@ -224,38 +237,10 @@ public class TopicAssignmentPeriodTests
 
         await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
             group.Id, TopicId, D(2026, 1, 1), PeriodId: termId));
-        var second = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
-            group.Id, TopicId, D(2026, 1, 1), PeriodId: term2));
-        second.Should().NotBeEmpty();
-    }
 
-    // Rev. 6: period validation runs before the duplicate guard (422 wins over 409).
-    [TestMethod]
-    public async Task AssignGroup_InvalidPeriod_Still422BeforeDuplicate()
-    {
-        using var s = new StudentsTestScope("tp-422-before-dup-" + Guid.NewGuid());
-        var create = NewCreatePeriod(s);
-        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
-        // Guard (FR-G1): seed a Draft sub so the Terms year can activate; this
-        // auto-activated seed is separate from the term the test creates below.
-        await create.HandleAsync(new CreatePeriod(
-            "Seed", D(2026, 9, 1), D(2026, 9, 30), AcademicYearDivision.Terms, ParentPeriodId: yearId));
-        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
-        s.Db.ActivityGroups.Add(group);
-        await s.Db.SaveChangesAsync();
-
-        // First assign with a valid Term.
-        var term = (await create.HandleAsync(new CreatePeriod(
-            "T1", D(2026, 10, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
-        await NewActivate(s).HandleAsync(new ActivatePeriod(term));
-        await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
-            group.Id, TopicId, D(2026, 1, 1), PeriodId: term));
-
-        // Second assign with the SAME (group, topic) but an INVALID period (year).
-        // The invalid period must 422 (TopicAssignmentPeriodException), not 409.
         await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
-            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 1, 1), PeriodId: yearId)))
-            .Should().ThrowAsync<TopicAssignmentPeriodException>();
+            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 1, 1), PeriodId: term2)))
+            .Should().ThrowAsync<DuplicateTopicAssignmentException>(
+                "a differing (ignored) PeriodId can no longer buy a second row");
     }
 }
