@@ -10,6 +10,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
 
@@ -27,14 +28,41 @@ public class JoinGroupsDialogTests : BunitContext
 {
     private IDialogService DialogService => Services.GetRequiredService<IDialogService>();
 
+    /// <summary>
+    /// Value handed to the registered <see cref="StubFlagService"/>. Set to false
+    /// (before rendering) to reproduce the default dark-launched state, in which
+    /// <c>/activity-groups</c> is not mapped at all.
+    /// </summary>
+    protected bool ActivityGroupsEnabled { get; set; } = true;
+
     public JoinGroupsDialogTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+        // The dialog short-circuits when FEATURE:EnableActivityGroups is off (the
+        // /activity-groups route is only mapped when it is on).
+        Services.AddSingleton<IFeatureFlagService>(new StubFlagService(this));
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IFeatureFlagService"/> whose state is read live from the
+    /// owning test, so a test can flip the flag after the constructor has run.
+    /// </summary>
+    private sealed class StubFlagService : IFeatureFlagService
+    {
+        private readonly JoinGroupsDialogTests _owner;
+        public StubFlagService(JoinGroupsDialogTests owner) => _owner = owner;
+        private bool Enabled => _owner.ActivityGroupsEnabled;
+        public bool IsEnabled(string featureKey) => Enabled;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(Enabled);
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
     }
 
     private sealed class ScriptedHandler : HttpMessageHandler
     {
+        public readonly List<string> Calls = new();
         private readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> _responses = new();
 
         public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
@@ -46,6 +74,7 @@ public class JoinGroupsDialogTests : BunitContext
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var url = request.RequestUri!.PathAndQuery;
+            Calls.Add(url);
             if (_responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var exact))
                 return Task.FromResult(new HttpResponseMessage(exact.Status)
                 {
@@ -81,6 +110,40 @@ public class JoinGroupsDialogTests : BunitContext
         periodType == "Term"
             ? $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"division\":\"Terms\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}"
             : $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":\"None\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
+
+    /// <summary>
+    /// Defense in depth. The Activity Groups section that opens this dialog is
+    /// already wrapped in a <c>FeatureFlagGate</c> (Detail.razor), but the dialog
+    /// must not surface a raw 404 from the unmapped <c>/activity-groups</c> route
+    /// if it is ever reached with the flag off — it should say the feature is off,
+    /// and must not call the route at all.
+    /// </summary>
+    [TestMethod]
+    public async Task JoinDialog_ActivityGroupsFlagOff_SaysFeatureDisabledAndSkipsRoute()
+    {
+        ActivityGroupsEnabled = false;
+
+        var handler = new ScriptedHandler();
+        // Deliberately do NOT map /activity-groups: with the flag off the route is
+        // unmapped, so an unmapped (404) route is the realistic condition.
+        handler.Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
+        Register(handler);
+
+        var cut = Render<FluentDialogProvider>();
+        var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
+            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("not enabled for this tenant"));
+
+        cut.Markup.Should().NotContain("Unexpected /activity-groups",
+            "the raw 404 body must never reach the user");
+
+        handler.Calls.Should().NotContain(url => url.StartsWith("/activity-groups", StringComparison.OrdinalIgnoreCase),
+            "a route that is known to be unmapped should not be called at all");
+
+        cut.Find("fluent-button[aria-label='Close']").Click();
+        (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();
+    }
 
     /// <summary>
     /// A7 (AC-36): with no active period (both active-period GETs 404), the

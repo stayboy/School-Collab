@@ -13,6 +13,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
 using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
@@ -30,10 +31,36 @@ public class TopicCreateDialogTests : BunitContext
 {
     private IDialogService DialogService => Services.GetRequiredService<IDialogService>();
 
+    /// <summary>
+    /// Value handed to the registered <see cref="StubFlagService"/>. Set to false
+    /// (before rendering) to reproduce the default dark-launched state, in which
+    /// <c>/activity-groups</c> is not mapped at all.
+    /// </summary>
+    protected bool ActivityGroupsEnabled { get; set; } = true;
+
     public TopicCreateDialogTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+        // The dialog resolves FEATURE:EnableActivityGroups before loading
+        // /activity-groups (the route only exists when the flag is on).
+        Services.AddSingleton<IFeatureFlagService>(new StubFlagService(this));
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IFeatureFlagService"/> whose state is read live from the
+    /// owning test, so a test can flip the flag after the constructor has run.
+    /// </summary>
+    private sealed class StubFlagService : IFeatureFlagService
+    {
+        private readonly TopicCreateDialogTests _owner;
+        public StubFlagService(TopicCreateDialogTests owner) => _owner = owner;
+        private bool Enabled => _owner.ActivityGroupsEnabled;
+        public bool IsEnabled(string featureKey) => Enabled;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(Enabled);
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
     }
 
     private sealed class ScriptedHandler : HttpMessageHandler
@@ -60,12 +87,15 @@ public class TopicCreateDialogTests : BunitContext
         }
     }
 
-    private void Register(ScriptedHandler handler)
+    private void Register(ScriptedHandler handler, bool mapActivityGroups = true)
     {
         // The dialog's OnInitializedAsync loads activity groups and periods to
         // populate the owner/period pickers. Map them to empty so the dialog
         // renders in the test. GetActiveAcademicYearAsync returns null on 404.
-        handler.Map("GET", "/activity-groups", HttpStatusCode.OK, "[]");
+        // Leave /activity-groups unmapped (mapActivityGroups: false) to reproduce
+        // the FEATURE:EnableActivityGroups-off reality, where the route does not exist.
+        if (mapActivityGroups)
+            handler.Map("GET", "/activity-groups", HttpStatusCode.OK, "[]");
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
@@ -77,6 +107,70 @@ public class TopicCreateDialogTests : BunitContext
 
     private static TopicCreateDialog.TopicCreateModel CreateModel() =>
         new() { GradeLevelId = Guid.NewGuid() };
+
+    /// <summary>
+    /// Regression: <c>/activity-groups</c> is only mapped when
+    /// <c>FEATURE:EnableActivityGroups</c> is on. With the flag off the dialog
+    /// called it unguarded from <c>OnInitializedAsync</c>, the 404 escaped, and the
+    /// entire dialog failed to open — taking the grade-level owner path down with
+    /// it. The dialog must open and offer the Grade Level owner instead.
+    /// </summary>
+    [TestMethod]
+    public async Task CreateDialog_ActivityGroupsFlagOff_StillOpensWithGradeOwner()
+    {
+        ActivityGroupsEnabled = false;
+
+        var handler = new ScriptedHandler();
+        Register(handler, mapActivityGroups: false);
+
+        var cut = Render<FluentDialogProvider>();
+        var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
+            CreateModel(), "Add subject", DialogSize.Large);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull(
+            "the dialog must open even though /activity-groups 404s"));
+
+        cut.Markup.Should().Contain("Grade Level",
+            "the always-available grade-level owner must still be offered");
+        handler.Calls.Should().NotContain(c => c.Url.StartsWith("/activity-groups", StringComparison.OrdinalIgnoreCase),
+            "a route that is known to be unmapped should not be called at all");
+
+        cut.Find("fluent-button[aria-label='Close']").Click();
+        (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();
+    }
+
+    /// <summary>
+    /// A caller may pre-seed the group owner (e.g. Subjects.razor does). With the
+    /// flag off there is no group owner to honour, so the model must fall back to
+    /// the grade-level owner rather than leaving the dialog pointed at a dead one.
+    /// </summary>
+    [TestMethod]
+    public async Task CreateDialog_ActivityGroupsFlagOff_PreseededGroupOwnerFallsBackToGradeLevel()
+    {
+        ActivityGroupsEnabled = false;
+
+        var handler = new ScriptedHandler();
+        Register(handler, mapActivityGroups: false);
+
+        var model = new TopicCreateDialog.TopicCreateModel
+        {
+            GradeLevelId = Guid.NewGuid(),
+            OwnerType = "ActivityGroup",
+            ActivityGroupId = Guid.NewGuid(),
+        };
+
+        var cut = Render<FluentDialogProvider>();
+        var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
+            model, "Add subject", DialogSize.Large);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+
+        model.OwnerType.Should().Be("GradeLevel", "the unavailable group owner must be cleared");
+        model.ActivityGroupId.Should().BeNull("a dangling group id must not survive the fallback");
+
+        cut.Find("fluent-button[aria-label='Close']").Click();
+        (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull();
+    }
 
     /// <summary>
     /// The Create submit button text must come from the dialog's

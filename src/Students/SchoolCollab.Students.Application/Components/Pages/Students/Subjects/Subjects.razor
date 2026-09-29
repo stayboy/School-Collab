@@ -5,9 +5,12 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.Features
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using AssignmentDto = SchoolCollab.Students.Application.Services.TopicAssignmentDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject IFeatureFlagService FeatureFlags
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
@@ -25,6 +28,7 @@
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_filteredItems"
              Loading="@(_items is null || _gradeLevels is null)"
+             Error="@_error"
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
@@ -39,7 +43,10 @@
                       Label="Owner"
                       Style="width:160px;">
             <FluentOption Value="GradeLevel">Grade Level</FluentOption>
-            <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+            @if (_activityGroupsEnabled)
+            {
+                <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+            }
         </FluentSelect>
         @if (_ownerType == "GradeLevel")
         {
@@ -73,6 +80,9 @@
         <TemplateColumn TGridItem="SubjectDto" Title="Name" SortBy="@_sortByName" Sortable="true">
             @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
         </TemplateColumn>
+        <TemplateColumn TGridItem="SubjectDto" Title="Delivery periods">
+            @DeliveryPeriodLabel(context.Id)
+        </TemplateColumn>
         <TemplateColumn TGridItem="SubjectDto" Title="Created">
             @context.CreatedAt.ToLocalTime().ToString("d")
         </TemplateColumn>
@@ -87,6 +97,21 @@
     private GradeLevelDto[]? _gradeLevels;
     private SubjectDto[]? _items;
     private Dictionary<Guid, string> _resolvedNames = new();
+
+    /// <summary>
+    /// Bridge rows (<c>GradeTopicAssignment</c>) for the selected owner, grouped
+    /// by TopicId. The delivery period lives on the bridge row, never on the
+    /// subject (<c>SubjectDto</c>), so the grid cannot show or edit periods
+    /// without this. Grouped, never keyed by TopicId — one subject may have
+    /// several rows (one per term). See subject-topic-delivery-periods.md §1, §8.
+    /// </summary>
+    private Dictionary<Guid, List<AssignmentDto>> _assignmentsByTopic = new();
+
+    /// <summary>
+    /// Period id → display name, so the grid renders "Term 1" rather than a GUID
+    /// prefix (Gap 6 — <c>PeriodLabel</c> used to return <c>pid.ToString()[..8]</c>).
+    /// </summary>
+    private Dictionary<Guid, string> _periodNames = new();
     private string _searchText = string.Empty;
     private string? _error;
     private CancellationTokenSource? _loadCts;
@@ -99,6 +124,14 @@
     private ActivityGroupDto[]? _activityGroups;
     private ActivityGroupOption? _selectedActivityGroup;
     private ActivityGroupOption[] _activityGroupOptions = [];
+
+    /// <summary>
+    /// Mirrors <c>FEATURE:EnableActivityGroups</c>. The <c>/activity-groups</c>
+    /// route group is only mapped when the flag is on, so an off flag simply means
+    /// the "Activity Group" owner filter is unavailable. It must never affect
+    /// whether topics themselves load.
+    /// </summary>
+    private bool _activityGroupsEnabled;
 
     private record GradeLevelOption(string Value, string Label);
     private record ActivityGroupOption(string Value, string Label);
@@ -127,19 +160,29 @@
         get
         {
             if (!_isRealTenant)
-                return "Select a tenant to manage subjects.";
+                return "Select a tenant to manage topics.";
 
-            if (_gradeLevels is null || _gradeLevels.Length == 0)
-                return "No grade levels exist. Create a grade level first.";
+            if (_ownerType == "ActivityGroup")
+            {
+                if (_selectedActivityGroup is null)
+                    return "Select an activity group to view its topics.";
+            }
+            else
+            {
+                if (_gradeLevels is null || _gradeLevels.Length == 0)
+                    return "No grade levels exist. Create a grade level first.";
 
-            if (_selectedGradeLevel is null)
-                return "Select a grade level to view its topics.";
+                if (_selectedGradeLevel is null)
+                    return "Select a grade level to view its topics.";
+            }
 
             if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
                 return $"No topics match '{_searchText}'.";
 
             return _items?.Length == 0
-                ? "No topics assigned to this grade level for the current period."
+                ? (_ownerType == "ActivityGroup"
+                    ? "No topics assigned to this activity group for the current period."
+                    : "No topics assigned to this grade level for the current period.")
                 : "No topics yet.";
         }
     }
@@ -166,20 +209,13 @@
         }
 
         Logger.LogInformation("Loading topics page");
+        _error = null;
 
         try
         {
             // Load grade levels first (for the filter)
             _gradeLevels = await Api.ListGradeLevelsAsync(token);
             if (_disposed) return;
-
-            // Load activity groups (for the ActivityGroup owner filter)
-            _activityGroups = await Api.ListActivityGroupsAsync(token);
-            if (_disposed) return;
-            _activityGroupOptions = (_activityGroups ?? [])
-                .OrderBy(g => g.Name)
-                .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
-                .ToArray();
 
             if (_gradeLevels is not null && _gradeLevels.Length > 0)
             {
@@ -213,6 +249,80 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load subjects");
             _error = ex.Message;
+
+            // Never leave the grid stuck in its loading state: Loading is bound to
+            // `_items is null`, so an empty list plus the rendered Error surfaces
+            // the failure instead of spinning forever.
+            _items = [];
+        }
+
+        // Activity groups feed ONLY the optional "Activity Group" owner filter, so
+        // they load after — and independently of — the topics list. A missing or
+        // failing endpoint here must never prevent topics from loading.
+        if (!_disposed)
+        {
+            await LoadActivityGroupsAsync(token);
+        }
+    }
+
+    /// <summary>
+    /// Loads the activity groups backing the "Activity Group" owner filter.
+    /// <c>/activity-groups</c> is only mapped when <c>FEATURE:EnableActivityGroups</c>
+    /// is on, so an off flag is a normal state (the filter is simply unavailable),
+    /// not an error. Every failure path is contained here so it cannot escalate
+    /// into a page-level load failure.
+    /// </summary>
+    private async Task LoadActivityGroupsAsync(CancellationToken token)
+    {
+        _activityGroupOptions = [];
+        _activityGroups = null;
+
+        try
+        {
+            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(
+                FeatureFlagKeys.EnableActivityGroups, token);
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not resolve FEATURE:EnableActivityGroups; hiding the Activity Group owner filter");
+            _activityGroupsEnabled = false;
+        }
+
+        if (!_activityGroupsEnabled)
+        {
+            // Never leave the page parked on a filter whose option is not rendered.
+            if (_ownerType == "ActivityGroup")
+            {
+                _ownerType = "GradeLevel";
+                _selectedActivityGroup = null;
+            }
+            return;
+        }
+
+        try
+        {
+            _activityGroups = await Api.ListActivityGroupsAsync(token);
+            if (_disposed) return;
+            _activityGroupOptions = (_activityGroups ?? [])
+                .OrderBy(g => g.Name)
+                .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
+                .ToArray();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load activity groups; the Activity Group owner filter is unavailable");
+            _activityGroupsEnabled = false;
+            _activityGroups = null;
+            _activityGroupOptions = [];
+            if (_ownerType == "ActivityGroup")
+            {
+                _ownerType = "GradeLevel";
+                _selectedActivityGroup = null;
+            }
         }
     }
 
@@ -238,7 +348,9 @@
     {
         if (_ownerType == "ActivityGroup")
         {
-            if (_selectedActivityGroup is null || !Guid.TryParse(_selectedActivityGroup.Value, out var groupId))
+            if (!_activityGroupsEnabled
+                || _selectedActivityGroup is null
+                || !Guid.TryParse(_selectedActivityGroup.Value, out var groupId))
             {
                 _items = [];
                 _resolvedNames = new();
@@ -258,6 +370,12 @@
                 _items = [];
                 _resolvedNames = new();
             }
+            // Group-owned period editing is NOT offered here: it needs a group
+            // topic-assignment LIST endpoint, and only the write
+            // (AssignActivityGroupTopicAsync) exists. Rather than render a dead
+            // "Edit periods" affordance, the landing claims no group periods.
+            _assignmentsByTopic = new();
+            _periodNames = new();
             return;
         }
 
@@ -265,6 +383,8 @@
         {
             _items = [];
             _resolvedNames = new();
+            _assignmentsByTopic = new();
+            _periodNames = new();
             return;
         }
 
@@ -273,6 +393,7 @@
             // Use the period from query param, or null to derive current period server-side
             _items = await Api.ListSubjectsByGradeAsync(gradeLevelId, PeriodId, token);
             if (_disposed) return;
+            await LoadDeliveryPeriodsAsync(gradeLevelId, token);
             await ResolveNamesAsync(token);
         }
         catch (Exception ex)
@@ -283,6 +404,108 @@
             _items = [];
             _resolvedNames = new();
         }
+    }
+
+    /// <summary>
+    /// Loads the owner-scoped bridge rows plus the period-name map that back the
+    /// "Delivery periods" column and the "Edit periods" action.
+    ///
+    /// Best-effort and self-contained: a failure here degrades the period column
+    /// and drops the action, but must never fail the topic list, which has
+    /// already loaded by this point.
+    /// </summary>
+    private async Task LoadDeliveryPeriodsAsync(Guid gradeLevelId, CancellationToken token)
+    {
+        _assignmentsByTopic = new();
+        try
+        {
+            var assignments = await Api.ListGradeTopicsByGradeAsync(gradeLevelId, null, token);
+            if (_disposed) return;
+
+            // Grouped, NOT keyed: a subject running in two terms is two rows.
+            _assignmentsByTopic = (assignments ?? [])
+                .Where(a => a.GradeLevelId == gradeLevelId)
+                .GroupBy(a => a.TopicId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var periods = await Api.ListPeriodsAsync(token);
+            if (_disposed) return;
+            _periodNames = (periods ?? []).ToDictionary(p => p.Id, p => p.Name);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Could not load delivery periods for grade {GradeId}", gradeLevelId);
+            _assignmentsByTopic = new();
+            _periodNames = new();
+        }
+    }
+
+    /// <summary>
+    /// The subject's delivery periods as one label: every term it runs in, joined
+    /// with " · ", or "Whole academic year" when the only row is year-spanning
+    /// (a null PeriodId = the whole academic year, per FR-55).
+    /// </summary>
+    private string DeliveryPeriodLabel(Guid topicId)
+    {
+        if (!_assignmentsByTopic.TryGetValue(topicId, out var rows) || rows.Count == 0)
+            return "Whole academic year";
+
+        var labels = rows
+            .Select(a => a.PeriodId is { } pid
+                ? (_periodNames.TryGetValue(pid, out var n) ? n : pid.ToString()[..8])
+                : "Whole academic year")
+            .Distinct()
+            .ToArray();
+
+        return string.Join(" · ", labels);
+    }
+
+    /// <summary>
+    /// Opens the topic-scoped delivery-period editor for one subject on the
+    /// selected grade. The editor manages the whole SET of periods, because a
+    /// subject is one topic with N bridge rows (one per period) — a
+    /// single-value picker cannot represent a subject that runs in several terms
+    /// (subject-topic-delivery-periods.md §5).
+    /// </summary>
+    private async Task EditPeriodsAsync(SubjectDto row)
+    {
+        if (_disposed) return;
+        if (_selectedGradeLevel is null
+            || !Guid.TryParse(_selectedGradeLevel.Value, out var gradeLevelId))
+            return;
+
+        var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
+        var rows = _assignmentsByTopic.TryGetValue(row.Id, out var list) ? list : [];
+
+        var model = new TopicPeriodsEditDialog.TopicPeriodsEditModel
+        {
+            GradeLevelId = gradeLevelId,
+            TopicId = row.Id,
+            TopicName = name,
+            Rows = rows
+                .Select(a => new TopicPeriodsEditDialog.TopicPeriodRow
+                {
+                    AssignmentId = a.Id,
+                    PeriodId = a.PeriodId,
+                })
+                .ToList(),
+        };
+
+        await DialogService.ShowShellDialogAsync<
+            TopicPeriodsEditDialog,
+            TopicPeriodsEditDialog.TopicPeriodsEditModel,
+            TopicPeriodsEditDialog.TopicPeriodsEditResult>(
+            model, $"Delivery periods · {name}", DialogSize.Medium);
+
+        if (_disposed) return;
+
+        // Reload even though the result is discarded: the editor applies rows one
+        // at a time and can leave a partial change behind when a later row fails
+        // server-side validation, so the grid must reflect whatever landed.
+        _error = null;
+        await LoadDeliveryPeriodsAsync(gradeLevelId, _loadCts?.Token ?? CancellationToken.None);
+        StateHasChanged();
     }
 
     private async Task ResolveNamesAsync(CancellationToken token)
@@ -315,20 +538,38 @@
     /// the Edit dialog (rename-only surface - the system-wide coded value
     /// is NEVER edited from here); Delete keeps the existing confirmation
     /// pattern. Same dialog-only pattern as GradeLevels/GradeLevelEditDialog.
+    ///
+    /// "Edit periods" is offered ONLY for a grade owner whose bridge rows loaded.
+    /// The subject edit dialog deliberately has no period field: the period is on
+    /// the assignment, not the topic, and one subject can run in several terms
+    /// (subject-topic-delivery-periods.md §5). So this is the only way to reach
+    /// period editing from the Topics landing.
     /// </summary>
     private IReadOnlyList<RowAction> BuildRowActions(SubjectDto row)
     {
         var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
-        return new List<RowAction>
+        var actions = new List<RowAction>
         {
             RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
-            RowAction.Callback(
-                "Delete",
-                () => OnDeleteAsync(row.Id, name),
-                FluentIcons.Delete,
-                destructive: true,
-                confirmMessage: $"Delete subject '{name}'? This cannot be undone if it is in use."),
         };
+
+        // Gate the control, not just the call: with no owner, a group owner, or a
+        // failed period load, there is no period set to edit, so the action is
+        // not rendered at all.
+        if (_ownerType == "GradeLevel" && _assignmentsByTopic.ContainsKey(row.Id))
+        {
+            actions.Add(RowAction.Callback(
+                "Edit periods", () => EditPeriodsAsync(row), FluentIcons.Calendar));
+        }
+
+        actions.Add(RowAction.Callback(
+            "Delete",
+            () => OnDeleteAsync(row.Id, name),
+            FluentIcons.Delete,
+            destructive: true,
+            confirmMessage: $"Delete subject '{name}'? This cannot be undone if it is in use."));
+
+        return actions;
     }
 
     /// <summary>

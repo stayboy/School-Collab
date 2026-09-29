@@ -13,6 +13,7 @@ using CreatePage = SchoolCollab.Assignments.Application.Components.Pages.Assignm
 using SchoolCollab.Assignments.Application.Helpers;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
@@ -55,6 +56,13 @@ public class AssignmentCreateBunitTests : BunitContext
         }
     }
 
+    /// <summary>
+    /// Value handed to the registered <see cref="StubFlagService"/>. Set to false
+    /// (before rendering) to reproduce the default dark-launched state, in which
+    /// <c>/activity-groups</c> is not mapped at all.
+    /// </summary>
+    protected bool ActivityGroupsEnabled { get; set; } = true;
+
     public AssignmentCreateBunitTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
@@ -88,6 +96,26 @@ public class AssignmentCreateBunitTests : BunitContext
         Services.AddSingleton<ILogger<AssignmentsApiClient>>(new CaptureLogger<AssignmentsApiClient>(_createLogs));
         Services.AddSingleton<ILogger<StudentsApiClient>>(new CaptureLogger<StudentsApiClient>(_createLogs));
         Services.AddSingleton<ILogger<CreatePage>>(new CaptureLogger<CreatePage>(_createLogs));
+        // Create.razor now resolves FEATURE:EnableActivityGroups before loading
+        // /activity-groups (the route only exists when the flag is on) and gates the
+        // SelectedGroups target card.
+        Services.AddSingleton<IFeatureFlagService>(new StubFlagService(this));
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IFeatureFlagService"/> whose state is read live from the
+    /// owning test, so a test can flip the flag after the constructor has run.
+    /// </summary>
+    private sealed class StubFlagService : IFeatureFlagService
+    {
+        private readonly AssignmentCreateBunitTests _owner;
+        public StubFlagService(AssignmentCreateBunitTests owner) => _owner = owner;
+        private bool Enabled => _owner.ActivityGroupsEnabled;
+        public bool IsEnabled(string featureKey) => Enabled;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(Enabled);
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
     }
 
     private void SetupGradeLevels(params GradeLevelDto[] grades)
@@ -183,6 +211,58 @@ public class AssignmentCreateBunitTests : BunitContext
 
     private static IRenderedComponent<FluentCheckbox> GetSignatureCheckbox(IRenderedComponent<CreatePage> cut) =>
         cut.FindComponents<FluentCheckbox>()[1];
+
+    /// <summary>
+    /// Regression: <c>/activity-groups</c> is only mapped when
+    /// <c>FEATURE:EnableActivityGroups</c> is on. Create.razor used to call it
+    /// inside the same try block as the grade-level load, so for most tenants the
+    /// 404 was caught under the misleading "Failed to load grade levels" log and the
+    /// grade-level options were left unbuilt. With the flag off the wizard must load
+    /// grade levels normally and must not offer the SelectedGroups target.
+    /// </summary>
+    [TestMethod]
+    public void Create_ActivityGroupsFlagOff_LoadsGradeLevelsAndHidesSelectedGroups()
+    {
+        ActivityGroupsEnabled = false;
+
+        var gradeId = Guid.NewGuid();
+        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupActivityGroups(); // mapped, but must never be requested
+        SetupSignatureDefault(null, false);
+
+        var cut = Render<CreatePage>();
+
+        cut.WaitForAssertion(() =>
+            cut.Markup.Should().NotContain("Assign to specific student groups or sections",
+                "the SelectedGroups target must not be offered when the feature is off"),
+            TimeSpan.FromSeconds(5));
+
+        _createLogs.Should().NotContain(l => l.Contains("Failed to load", StringComparison.OrdinalIgnoreCase),
+            "a dark-launched flag must not produce a load-failure log");
+    }
+
+    /// <summary>
+    /// The grade-level path — the wizard's default target — must still be fully
+    /// functional with the flag off, since that is the state most tenants run in.
+    /// </summary>
+    [TestMethod]
+    public void Create_ActivityGroupsFlagOff_DefaultMarkupStillRenders()
+    {
+        ActivityGroupsEnabled = false;
+
+        SetupGradeLevels();
+        SetupActivityGroups();
+        SetupSignatureDefault(null, false);
+
+        var cut = Render<CreatePage>();
+
+        cut.WaitForAssertion(() =>
+            cut.Markup.Should().Contain("Require guardian signature after completion"),
+            TimeSpan.FromSeconds(5));
+
+        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+            "the wizard must not be left spinning by the absent optional fetch");
+    }
 
     [TestMethod]
     public void Create_RendersRequiresSignatureCheckbox_DefaultsUnchecked()

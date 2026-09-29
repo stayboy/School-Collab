@@ -1,0 +1,352 @@
+@*
+    TopicPeriodsEditDialog — manages the delivery periods of ONE subject (topic)
+    on ONE grade, as a SET (Rev. 6 FR-55..58).
+
+    Why a set, not a single value: a subject can be delivered across several
+    terms ("Term 1 + Term 2"), across the whole academic year, or year-spanning
+    with a null PeriodId. One topic therefore has N GradeTopicAssignment rows
+    for the same grade, each carrying its own PeriodId (null = year-spanning).
+    A single-value editor could not represent that, and the pre-existing
+    TopicAssignmentPeriodEditDialog (one assignment, one period) was only ever
+    reachable from behind the "View all subjects" affordance — so the primary
+    Subjects card could neither show nor edit a subject's delivery periods.
+
+    Reachable from:
+      • the grade-detail Subjects SectionCard kebab ("Edit periods"), and
+      • the GradeTopicsDialog row kebab ("Edit periods").
+
+    Each row is one existing assignment (edit its period, or remove it). "Add
+    term" appends a new row that becomes a new assignment on save. Period options
+    are limited to the active academic year plus its sub-periods (FR-57) and
+    exclude retired periods (Archived / Deactivated) — a subject cannot be
+    delivered into a period that is no longer live.
+*@
+@inherits DialogShellBase<TopicPeriodsEditDialog.TopicPeriodsEditModel, TopicPeriodsEditDialog.TopicPeriodsEditResult>
+@using System.Linq
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject ILogger<TopicPeriodsEditDialog> Logger
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <p class="hint">
+            A subject can run in several terms, across the whole academic year, or
+            year-spanning. Each row below is one delivery period.
+        </p>
+
+        @if (_rows.Count == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
+                This subject has no delivery periods on this grade. Add one to continue.
+            </FluentMessageBar>
+        }
+
+        <div class="tpe-rows">
+            @for (var i = 0; i < _rows.Count; i++)
+            {
+                var index = i;
+                var row = _rows[index];
+                <div class="tpe-row @(row.Removed ? "tpe-row--removed" : null)">
+                    <FluentSelect TOption="string"
+                                  Items="@_periodChoices"
+                                  Value="@_rows[index].Choice"
+                                  ValueChanged="@(ChoiceChangedFor(index))"
+                                  OptionText="@LabelFor"
+                                  OptionValue="@(v => v)"
+                                  Label="@(row.IsNew ? "New term" : "Delivery period")"
+                                  Style="flex:1; min-width:0"
+                                  aria-label="@($"Delivery period row {index + 1}")" />
+
+                    @if (!row.Removed)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      Size="ButtonSize.Small"
+                                      IconStart="@FluentIcons.Delete"
+                                      Title="Remove this period"
+                                      aria-label="@($"Remove period row {index + 1}")"
+                                      OnClick="@(() => MarkRemoved(index))" />
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      Size="ButtonSize.Small"
+                                      IconStart="@FluentIcons.Add"
+                                      Title="Keep this period"
+                                      aria-label="@($"Restore period row {index + 1}")"
+                                      OnClick="@(() => MarkRestored(index))" />
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_rowErrors[index]))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">
+                        @_rowErrors[index]
+                    </FluentMessageBar>
+                }
+            }
+        </div>
+
+        <FluentButton Appearance="Appearance.Neutral"
+                      Size="ButtonSize.Small"
+                      IconStart="@FluentIcons.Add"
+                      OnClick="AddRow"
+                      Disabled="@_adding" Class="mb-2">
+            Add term
+        </FluentButton>
+
+        <DialogShellFooter Saving="Saving"
+                           Error="@Error"
+                           SubmitText="Save periods"
+                           SavingText="Saving…"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    /// <summary>One delivery period of the subject on the grade.</summary>
+    public sealed class TopicPeriodRow
+    {
+        /// <summary>The existing assignment; <c>null</c> for a row added in this session.</summary>
+        public Guid? AssignmentId { get; set; }
+
+        /// <summary>Period this row delivers the subject in; <c>null</c> = whole academic year.</summary>
+        public Guid? PeriodId { get; set; }
+
+        /// <summary>Value the row had when the dialog opened (for the changed-row test).</summary>
+        public Guid? OriginalPeriodId { get; set; }
+
+        /// <summary>Marked for deletion rather than removed straight from the list.</summary>
+        public bool Removed { get; set; }
+
+        /// <summary>True when the row was added in this session and has no assignment yet.</summary>
+        public bool IsNew => AssignmentId is null;
+
+        /// <summary>Select binding; empty string means the whole academic year.</summary>
+        public string Choice
+        {
+            get => PeriodId?.ToString() ?? string.Empty;
+            set => PeriodId = Guid.TryParse(value, out var id) ? id : null;
+        }
+    }
+
+    public sealed class TopicPeriodsEditModel
+    {
+        public Guid GradeLevelId { get; set; }
+        public Guid TopicId { get; set; }
+        public string TopicName { get; set; } = string.Empty;
+
+        /// <summary>The subject's existing delivery periods for this grade.</summary>
+        public List<TopicPeriodRow> Rows { get; set; } = new();
+    }
+
+    public sealed record TopicPeriodsEditResult(Guid TopicId, IReadOnlyList<Guid?> PeriodIds);
+
+    protected override string SubmitText => "Save periods";
+
+    private readonly List<TopicPeriodRow> _rows = new();
+    private readonly List<string> _rowErrors = new();
+    private PeriodDto[] _periodOptions = [];
+
+    /// <summary>Selectable period ids; the empty string is the whole academic year.</summary>
+    private string[] _periodChoices = [];
+    private Dictionary<Guid, string> _periodNames = new();
+    private bool _adding;
+
+    /// <summary>
+    /// The whole-academic-year entry plus every selectable live period, as ids.
+    /// <see cref="LabelFor"/> turns an id into its display name.
+    /// </summary>
+    private void BuildChoices(IEnumerable<PeriodDto> periods)
+    {
+        _periodOptions = periods.ToArray();
+        _periodNames = _periodOptions.ToDictionary(p => p.Id, p => p.Name);
+        _periodChoices = new[] { string.Empty }
+            .Concat(_periodOptions.Select(p => p.Id.ToString()))
+            .ToArray();
+    }
+
+    /// <summary>Display name for a selectable period id.</summary>
+    private string LabelFor(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return "Whole academic year (no period)";
+        return Guid.TryParse(id, out var pid) && _periodNames.TryGetValue(pid, out var name)
+            ? name
+            : id;
+    }
+
+    // Rows are mutated in place, so each select needs an explicit callback. Razor
+    // will not coerce an inline lambda to EventCallback<string> here.
+    private EventCallback<string> ChoiceChangedFor(int index) =>
+        EventCallback.Factory.Create<string>(this, v => _rows[index].Choice = v ?? string.Empty);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPeriodsAsync();
+
+        _rows.AddRange(Model.Rows.Select(r => new TopicPeriodRow
+        {
+            AssignmentId = r.AssignmentId,
+            PeriodId = r.PeriodId,
+            OriginalPeriodId = r.PeriodId,
+            Removed = false,
+        }));
+        NormalizeErrorSlots();
+    }
+
+    /// <summary>
+    /// FR-57: a grade-owned subject may target the active academic year or a
+    /// Term/Semester within it. Retired periods (Archived / Deactivated) are
+    /// excluded — a subject cannot be delivered into a period that is no longer
+    /// live. Draft/Active/Completed stay selectable so an upcoming or just-closed
+    /// term can still be corrected.
+    /// </summary>
+    private async Task LoadPeriodsAsync()
+    {
+        try
+        {
+            var all = await Api.ListPeriodsAsync() ?? [];
+            var activeYear = await Api.GetActiveAcademicYearAsync();
+            var activeYearId = activeYear?.Id;
+
+            var filtered = all
+                .Where(p => !IsRetired(p.Status))
+                .Where(p => p.ParentPeriodId is null
+                    || (activeYearId.HasValue && p.ParentPeriodId == activeYearId.Value))
+                .OrderBy(p => p.ParentPeriodId is null ? 0 : 1)
+                .ThenBy(p => p.StartDate);
+
+            BuildChoices(filtered);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load periods for the topic periods editor");
+            BuildChoices([]);
+        }
+    }
+
+    private static bool IsRetired(string? status) =>
+        string.Equals(status, "Archived", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, "Deactivated", StringComparison.OrdinalIgnoreCase);
+
+    private void NormalizeErrorSlots()
+    {
+        while (_rowErrors.Count < _rows.Count) _rowErrors.Add(string.Empty);
+        while (_rowErrors.Count > _rows.Count) _rowErrors.RemoveAt(_rowErrors.Count - 1);
+    }
+
+    private void AddRow()
+    {
+        _rows.Add(new TopicPeriodRow());
+        NormalizeErrorSlots();
+    }
+
+    private void MarkRemoved(int index)
+    {
+        // An unsaved row is dropped outright; a saved one is tombstoned so the
+        // user can undo before submitting.
+        if (_rows[index].IsNew) _rows.RemoveAt(index);
+        else _rows[index].Removed = true;
+        NormalizeErrorSlots();
+    }
+
+    private void MarkRestored(int index) => _rows[index].Removed = false;
+
+    /// <summary>Two rows cannot deliver the subject in the same period.</summary>
+    private string? ValidateRows()
+    {
+        NormalizeErrorSlots();
+        for (var i = 0; i < _rowErrors.Count; i++) _rowErrors[i] = string.Empty;
+
+        var live = _rows.Where(r => !r.Removed).ToArray();
+        if (live.Length == 0)
+        {
+            return "Keep at least one delivery period — a subject must be delivered "
+                 + "in a term, across the academic year, or year-spanning.";
+        }
+
+        string? error = null;
+        for (var i = 0; i < live.Length; i++)
+        {
+            for (var j = i + 1; j < live.Length; j++)
+            {
+                if (live[i].PeriodId is null || live[i].PeriodId != live[j].PeriodId) continue;
+                var message = "The same period is selected twice.";
+                _rowErrors[_rows.IndexOf(live[i])] = message;
+                _rowErrors[_rows.IndexOf(live[j])] = message;
+                error ??= message;
+            }
+        }
+        return error;
+    }
+
+    protected override async Task<TopicPeriodsEditResult?> SubmitAsync(TopicPeriodsEditModel model)
+    {
+        if (ValidateRows() is { } validationError)
+        {
+            Error = validationError;
+            return null;
+        }
+
+        var failures = new List<string>();
+        var ct = CancellationToken.None;
+
+        foreach (var row in _rows)
+        {
+            try
+            {
+                if (row.Removed)
+                {
+                    if (row.AssignmentId is { } removeId)
+                        await Api.RemoveTopicAssignmentAsync(removeId, ct);
+                    continue;
+                }
+
+                if (row.AssignmentId is { } existingId)
+                {
+                    // Only write when the period actually changed.
+                    if (row.PeriodId != row.OriginalPeriodId)
+                        await Api.UpdateTopicAssignmentPeriodAsync(existingId, row.PeriodId, ct);
+                }
+                else
+                {
+                    await Api.AssignGradeTopicAsync(
+                        new AssignGradeTopicRequest(
+                            model.GradeLevelId,
+                            model.TopicId,
+                            DateOnly.FromDateTime(DateTime.UtcNow),
+                            null,
+                            row.PeriodId),
+                        ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Surface the server's own validation message (FR-57/FR-58 422s)
+                // rather than swallowing it.
+                Logger.LogWarning(ex, "Failed to apply period change for topic {TopicId}", model.TopicId);
+                failures.Add(PeriodLabel(row) + ": " + ex.Message);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            Error = string.Join(" | ", failures);
+            return null;
+        }
+
+        return new TopicPeriodsEditResult(
+            model.TopicId,
+            _rows.Where(r => !r.Removed).Select(r => r.PeriodId).ToArray());
+    }
+
+    private string PeriodLabel(TopicPeriodRow row)
+    {
+        if (row.PeriodId is not { } id) return "Whole academic year";
+        return _periodOptions.FirstOrDefault(p => p.Id == id)?.Name ?? id.ToString()[..8];
+    }
+}

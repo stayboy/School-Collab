@@ -165,6 +165,9 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK, assignmentsJson);
         handler.Map("GET", $"/students/by-grade/{gradeId}", HttpStatusCode.OK, studentsJson);
         handler.Map("GET", $"/students/grade-levels/{gradeId}/curriculum", HttpStatusCode.OK, curriculumJson);
+        // Period names for the Subjects card's delivery-period chip.
+        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.NotFound, "{}");
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsForChip());
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
         // Grade streams (GRSTREAMS) for the Streams card.
@@ -192,6 +195,30 @@ public class GradeLevelDetailPageTests : BunitContext
 
         return (handler, gradeId);
     }
+
+    /// <summary>
+    /// The two sub-terms the multi-term regression test resolves by name. Fixed
+    /// ids so the test can reference them.
+    /// </summary>
+    public static readonly Guid ChipTerm1Id = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    public static readonly Guid ChipTerm2Id = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+    private static string PeriodsForChip() =>
+        JsonSerializer.Serialize(new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["id"] = ChipTerm1Id, ["name"] = "Term 1", ["startDate"] = "2026-02-01", ["endDate"] = "2026-06-30",
+                ["status"] = "Active", ["parentPeriodId"] = (Guid?)null, ["nextPeriodId"] = (Guid?)null,
+                ["division"] = "Terms", ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            },
+            new Dictionary<string, object?>
+            {
+                ["id"] = ChipTerm2Id, ["name"] = "Term 2", ["startDate"] = "2026-07-01", ["endDate"] = "2026-12-20",
+                ["status"] = "Active", ["parentPeriodId"] = (Guid?)null, ["nextPeriodId"] = (Guid?)null,
+                ["division"] = "Terms", ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            },
+        });
 
     private static string GradeJson(Guid gradeId, string name = "Grade 5", bool blocked = false) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -223,8 +250,28 @@ public class GradeLevelDetailPageTests : BunitContext
             ["endDate"] = (string?)null,
             ["topicStrandId"] = (Guid?)null,
             ["topicLessonId"] = (Guid?)null,
+            ["periodId"] = (Guid?)null,
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
+        };
+
+    /// <summary>Same assignment with an explicit delivery period (null = year-spanning).</summary>
+    private static Dictionary<string, object?> WithPeriod(Dictionary<string, object?> assignment, Guid? periodId)
+    {
+        assignment["periodId"] = periodId;
+        return assignment;
+    }
+
+    /// <summary>One row of the grade's curriculum endpoint (topic + strand/lesson counts).</summary>
+    private static Dictionary<string, object?> CurriculumJson(
+        Guid topicId, string name = "Mathematics", string code = "MATH") =>
+        new()
+        {
+            ["topicId"] = topicId,
+            ["name"] = name,
+            ["code"] = code,
+            ["strandCount"] = 2,
+            ["lessonCount"] = 3,
         };
 
     private static Dictionary<string, object?> TeacherJson(
@@ -330,6 +377,63 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Strands", "kebab offers strands"));
         cut.Markup.Should().Contain("Teachers", "kebab offers teachers");
         cut.Markup.Should().Contain("Remove", "kebab offers remove");
+    }
+
+    [TestMethod]
+    public void Detail_TopicsCard_SubjectRunningInTwoTerms_ShowsBothPeriods_AndViewAllDoesNotCrash()
+    {
+        // REGRESSION: a subject delivered in two terms has TWO bridge rows for the
+        // same topic. The page used to build the GradeTopicsDialog's assignment map
+        // with ToDictionary(a => a.TopicId, ...), which throws ArgumentException on
+        // the duplicate key — so "View all subjects" (the only surface where
+        // periods were editable) blew up exactly when the multi-term feature was
+        // being used.
+        var gradeId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+
+        Register(
+            gradeId,
+            GradeJson(gradeId),
+            topicsCatalogJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
+                ["name"] = "Mathematics", ["description"] = (string?)null,
+                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            } }),
+            assignmentsJson: JsonSerializer.Serialize(new[]
+            {
+                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), ChipTerm1Id),
+                WithPeriod(AssignmentJson(Guid.NewGuid(), topicId, gradeId), ChipTerm2Id),
+            }),
+            // The date-only curriculum query returns the topic once per term.
+            curriculumJson: JsonSerializer.Serialize(new[]
+            {
+                CurriculumJson(topicId),
+                CurriculumJson(topicId),
+            }));
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(x => x.Add(d => d.Id, gradeId)));
+
+        // One card row for one subject, even though it runs in two terms.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
+
+        // Both terms resolve to names on the card meta line, not a GUID prefix.
+        cut.Markup.Should().Contain("Term 1");
+        cut.Markup.Should().Contain("Term 2");
+        cut.Markup.Should().NotContain(ChipTerm1Id.ToString()[..8],
+            "the delivery period must be shown as a name, not a raw GUID prefix");
+
+        // The kebab exposes the topic-scoped period editor.
+        cut.Find("fluent-button[title=\"Actions for Mathematics\"]").Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit periods"));
+
+        // The crash itself: this used to throw before the dialog ever opened.
+        cut.FindAll("fluent-anchor")
+            .First(a => a.TextContent.Contains("View all subjects", StringComparison.Ordinal))
+            .Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topic actions"),
+            TimeSpan.FromSeconds(5));
     }
 
     [TestMethod]
@@ -914,7 +1018,11 @@ public class GradeLevelDetailPageTests : BunitContext
 
         // Subjects card: topic name + strand/lesson counts; name opens the edit dialog.
         source.Should().Contain("ItemTextSelector=\"t => t.Name\"", "Subjects card binds the topic name");
-        source.Should().Contain("ItemMetaSelector=\"@(t => [ $", "Subjects card binds strand/lesson counts");
+        source.Should().Contain("ItemMetaSelector=\"SubjectMeta\"", "Subjects card binds the meta selector");
+        source.Should().Contain("private string[] SubjectMeta(", "SubjectMeta renders the meta line parts");
+        source.Should().Contain("DeliveryPeriodLabel(t.TopicId)",
+            "the meta line must lead with the delivery period (Rev. 6 FR-55) — the card used to be period-blind");
+        source.Should().Contain("\"Edit periods\"", "the card kebab exposes the period editor");
         source.Should().Contain("ItemOnClick=\"t => OpenTopicEditAsync(t)\"", "Subjects card name opens the topic edit dialog");
         source.Should().Contain("ItemKeySelector=\"t => t.TopicId\"", "Subjects card opts into the central edit-key guard (TopicId)");
         source.Should().Contain("OnItemActionBlocked=\"OnTopicEditBlocked\"", "Subjects card surfaces the guard block");

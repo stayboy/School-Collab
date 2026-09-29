@@ -57,8 +57,12 @@
 </div>
 
 @code {
-    /// <summary>Lightweight per-assignment reference passed from the page so the
-    /// dialog can show the delivery period and invoke the period-edit flow.</summary>
+    /// <summary>
+    /// Per-assignment references passed from the page so the dialog can show the
+    /// subject's delivery periods and invoke the period-edit flow. A LIST, because
+    /// a subject can be delivered in several terms at once (one bridge row per
+    /// period) — see subject-topic-delivery-periods.md §1.
+    /// </summary>
     public sealed record AssignedTopicRef(Guid TopicId, Guid AssignmentId, Guid? PeriodId);
 
     /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
@@ -72,6 +76,9 @@
     public const string OnChangedKey = nameof(OnChanged);
     public const string AssignmentByKeyKey = nameof(AssignmentByKey);
     public const string EditPeriodKey = nameof(EditPeriod);
+
+    /// <summary>Period id → display name, so the label shows "Term 1", not a GUID.</summary>
+    public const string PeriodNamesKey = nameof(PeriodNames);
 
     // Read from Content (the DialogParameters indexer) — FluentUI renders dialog
     // content via DynamicComponent with only { "Content": <DialogParameters> } and
@@ -93,7 +100,9 @@
     private Func<Guid, Task>? Remove => Get<Func<Guid, Task>>(RemoveKey);
     private Func<Guid, Task>? Assign => Get<Func<Guid, Task>>(AssignKey);
     private Func<Task>? OnChanged => Get<Func<Task>>(OnChangedKey);
-    private Dictionary<Guid, AssignedTopicRef>? AssignmentByKey => Get<Dictionary<Guid, AssignedTopicRef>>(AssignmentByKeyKey);
+    private Dictionary<Guid, List<AssignedTopicRef>>? AssignmentByKey =>
+        Get<Dictionary<Guid, List<AssignedTopicRef>>>(AssignmentByKeyKey);
+    private Dictionary<Guid, string>? PeriodNames => Get<Dictionary<Guid, string>>(PeriodNamesKey);
     private Func<Guid, Task>? EditPeriod => Get<Func<Guid, Task>>(EditPeriodKey);
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
@@ -123,7 +132,7 @@
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
             RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
-            RowAction.Callback("Edit period", () => EditPeriodAsync(topic), FluentIcons.Calendar),
+            RowAction.Callback("Edit periods", () => EditPeriodAsync(topic), FluentIcons.Calendar),
             RowAction.Separator(),
             RowAction.Callback(
                 "Remove",
@@ -133,17 +142,31 @@
                 confirmMessage: $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed."),
         };
 
+    /// <summary>
+    /// The subject's delivery periods, resolved to names. A subject can run in
+    /// several terms at once, so this lists all of them; a null PeriodId means
+    /// year-spanning.
+    /// </summary>
     private string PeriodLabel(Guid topicId)
     {
-        if (AssignmentByKey is { } map && map.TryGetValue(topicId, out var a) && a.PeriodId is { } pid)
-            return pid.ToString()[..8];
-        return "Year-spanning";
+        if (AssignmentByKey is not { } map || !map.TryGetValue(topicId, out var rows) || rows.Count == 0)
+            return "Year-spanning";
+
+        var labels = rows
+            .Select(r => r.PeriodId is { } pid
+                ? (PeriodNames is { } names && names.TryGetValue(pid, out var n) ? n : pid.ToString()[..8])
+                : "Whole academic year")
+            .Distinct()
+            .ToArray();
+
+        return string.Join(" · ", labels);
     }
 
     private async Task EditPeriodAsync(GradeTopicCurriculumDto topic)
     {
-        if (EditPeriod is null || AssignmentByKey is not { } map || !map.TryGetValue(topic.TopicId, out var a)) return;
-        await EditPeriod(a.AssignmentId);
+        if (EditPeriod is null) return;
+        // Topic-scoped: the page opens the multi-period editor for this subject.
+        await EditPeriod(topic.TopicId);
     }
 
     private async Task RemoveAsync(GradeTopicCurriculumDto topic)

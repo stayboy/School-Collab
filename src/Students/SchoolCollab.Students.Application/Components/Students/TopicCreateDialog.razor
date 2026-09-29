@@ -30,9 +30,11 @@
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Core.Features
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject IFeatureFlagService FeatureFlags
 @inject CodedValuesApiClient CodedValues
 @inject EntityCodeRulesApiClient EntityCodeRules
 @inject ILogger<TopicCreateDialog> Logger
@@ -72,7 +74,10 @@
             <FormRow Label="Owner" For="topic-create-owner">
                 <FluentSelect TOption="string" @bind-Value="Model.OwnerType" @bind-Value:after="OnOwnerTypeChangedAsync" Id="topic-create-owner" Style="flex:1; min-width:0">
                     <FluentOption Value="GradeLevel">Grade Level</FluentOption>
-                    <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+                    @if (_activityGroupsEnabled)
+                    {
+                        <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+                    }
                 </FluentSelect>
             </FormRow>
 
@@ -165,6 +170,14 @@
     private string _activityGroupIdText = "";
     private string _periodIdText = "";
     private ActivityGroupDto[] _activityGroups = [];
+
+    /// <summary>
+    /// Mirrors <c>FEATURE:EnableActivityGroups</c>. The <c>/activity-groups</c>
+    /// route group is only mapped when the flag is on, so an off flag means the
+    /// group owner simply is not available here. It must never prevent the dialog
+    /// from opening or the grade-level owner from working.
+    /// </summary>
+    private bool _activityGroupsEnabled;
     private PeriodDto[] _periods = [];
     private SubjectDto[] _groupExistingTopics = [];
     private Guid? _activeYearId;
@@ -249,12 +262,41 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _activityGroups = await Api.ListActivityGroupsAsync() ?? [];
+        // Activity groups first, but fully isolated: /activity-groups is only
+        // mapped when FEATURE:EnableActivityGroups is on, so with the flag off the
+        // call would 404 and — being unguarded here previously — take the whole
+        // dialog down, including the grade-level owner path.
+        _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups);
+        if (_activityGroupsEnabled)
+        {
+            try
+            {
+                _activityGroups = await Api.ListActivityGroupsAsync() ?? [];
+            }
+            catch (Exception ex)
+            {
+                // Contained: fall back to the grade-level owner rather than
+                // failing the dialog.
+                Logger.LogWarning(ex, "Failed to load activity groups; the Activity Group owner is unavailable");
+                _activityGroupsEnabled = false;
+                _activityGroups = [];
+            }
+        }
+
+        if (!_activityGroupsEnabled)
+        {
+            // The caller may have pre-seeded a group owner (e.g. Subjects.razor);
+            // fall back to the grade-level owner that is always available.
+            Model.OwnerType = "GradeLevel";
+            Model.ActivityGroupId = null;
+            _activityGroupIdText = "";
+        }
+
         _periods = await Api.ListPeriodsAsync() ?? [];
         var activeYear = await Api.GetActiveAcademicYearAsync();
         _activeYearId = activeYear?.Id;
 
-        if (Model.ActivityGroupId.HasValue)
+        if (_activityGroupsEnabled && Model.ActivityGroupId.HasValue)
         {
             _activityGroupIdText = Model.ActivityGroupId.Value.ToString();
             // Fire the same group-topic load the user-path selection uses, so
