@@ -43,6 +43,7 @@
                 {
                     <div class="section-card__item">
                         <div class="section-card__item-main">
+                            <div class="item-name-row">
                             @if (ItemTextSelector is { } textSel)
                             {
                                 if (ItemHrefSelector is { } hrefSel && hrefSel(item) is { } href)
@@ -64,6 +65,11 @@
                                     <span class="item-name">@textSel(item)</span>
                                 }
                             }
+                            @if (ItemNameSuffix is { } nameSuffix)
+                            {
+                                @nameSuffix(item)
+                            }
+                            </div>
                             @if (ItemMetaSelector is { } metaSel && metaSel(item) is { } metaItems)
                             {
                                 <div class="item-meta">
@@ -173,6 +179,14 @@
     /// Return an array of parts; the component renders them separated by a "|" divider.
     /// </summary>
     [Parameter] public Func<TItem, string[]?>? ItemMetaSelector { get; set; }
+
+    /// <summary>
+    /// Optional markup rendered immediately AFTER the item name, on the same line
+    /// (e.g. a count badge). A <see cref="RenderFragment{T}"/> rather than a selector:
+    /// the caller owns the markup, so there is no string to format. Ignored when
+    /// <see cref="ItemTemplate"/> is used.
+    /// </summary>
+    [Parameter] public RenderFragment<TItem>? ItemNameSuffix { get; set; }
 
     /// <summary>
     /// Returns the navigation URL for each item; when set, the item name renders

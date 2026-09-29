@@ -95,6 +95,24 @@
                                          ItemKeySelector="t => t.TopicId"
                                          OnItemActionBlocked="OnTopicEditBlocked"
                                          ItemNameTitle="Edit topic">
+                                @* The exception count sits NEXT TO the subject name (spec §5.2),
+                                   as a real badge — not as one more part of the meta line, where
+                                   it read as another strand/lesson statistic. Rendered only
+                                   when the subject carries an exception; the absence of a
+                                   badge is the normal state. The kebab is unchanged. *@
+                                <ItemNameSuffix Context="t">
+                                    @if (ExceptionCount(t.TopicId) is var exceptionCount and > 0)
+                                    {
+                                        @* "SubjectText (2)": the COUNT is the badge, the parens are plain
+                                           text, and the wrapper keeps the whole token ONE flex item — the name
+                                           row is a flex container with a gap, so a bare ( badge ) would gain
+                                           spaces around each piece. Kept on one line for the same reason:
+                                           no whitespace text node may land between the pieces.
+                                           Red (Color.Red) is the danger signal: an exception is the
+                                           subject NOT being offered, i.e. a restriction, not a highlight. *@
+                                        <span class="item-name-count">(<FluentBadge Color="Color.Red" Title="@EnrollmentExceptionLabels.FormatCount(exceptionCount)">@exceptionCount</FluentBadge>)</span>
+                                    }
+                                </ItemNameSuffix>
                                 <ItemActions Context="t">
                                     <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
                                                     UseMenuService="false"
@@ -290,22 +308,13 @@
     private int ExceptionCount(Guid topicId) => _exceptions.Count(x => x.TopicId == topicId);
 
     /// <summary>
-    /// Card meta line: the exception count badge first (only when there are exceptions —
-    /// the absence of one is the normal state), then the strand/lesson counts.
+    /// Card meta line: the strand/lesson counts. The enrollment-exception count is NOT
+    /// here — it is a BADGE rendered next to the subject NAME by <c>ItemNameSuffix</c>,
+    /// because a count mixed into the strand/lesson text reads as one more statistic,
+    /// while the spec asks for a badge "next to the subject" (§5.2).
     /// </summary>
-    private string[] SubjectMeta(GradeTopicCurriculumDto t)
-    {
-        var exceptionCount = ExceptionCount(t.TopicId);
-        var meta = new List<string>(3);
-        if (exceptionCount > 0)
-        {
-            meta.Add(EnrollmentExceptionLabels.FormatCount(exceptionCount));
-        }
-
-        meta.Add($"{t.StrandCount} strands");
-        meta.Add($"{t.LessonCount} lessons");
-        return [.. meta];
-    }
+    private string[] SubjectMeta(GradeTopicCurriculumDto t) =>
+        [$"{t.StrandCount} strands", $"{t.LessonCount} lessons"];
 
     /// <summary>
     /// The dedicated management page's URL for one of this grade's subjects, with the
@@ -376,9 +385,9 @@
                 _genderName = (await CodedValuesApi.GetByIdAsync(gid, ct))?.Name;
             }
 
-            // Enrollment exceptions for the Subjects card's meta line (an exception names
-            // the period part and the span a subject is NOT offered in — the bridge row
-            // keeps no period meaning).
+            // Enrollment exceptions for the Subjects card's name badge (an exception
+            // names the period part and the span a subject is NOT offered in — the bridge
+            // row keeps no period meaning).
             // Best-effort: without them the card reads as "offered in every period".
             await ReloadExceptionsAsync(ct);
 
@@ -749,7 +758,7 @@
     }
 
     /// <summary>
-    /// Reloads the grade's enrollment exceptions. The Subjects card's meta line and
+    /// Reloads the grade's enrollment exceptions. The Subjects card's name BADGE and
     /// the "View all subjects" dialog both render them as a read-only count.
     /// Best-effort: a failure leaves the card with no exception badge rather than
     /// breaking the page.

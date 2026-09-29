@@ -106,6 +106,20 @@
     padding: 0;
     justify-content: flex-start;
 }
+/* The name and its optional suffix (e.g. an exception-count badge) share ONE row, so
+   the badge sits directly beside the subject text. `flex` replaces .item-name's
+   `width: 100%` so the name takes the remaining space and the suffix follows it. */
+.item-name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+.item-name-row .item-name {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
 .item-meta {
     color: var(--neutral-foreground-hint, #6b6b6b);
     font-size: 0.82em;
