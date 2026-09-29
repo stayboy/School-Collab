@@ -40,6 +40,7 @@ public class PeriodFormActivationToleranceTests : BunitContext
         public DateTime? Start { get; set; } = new DateTime(2026, 9, 1);
         public DateTime? End { get; set; } = new DateTime(2027, 8, 31);
         public int? ActivationToleranceDays { get; set; }
+        public int? Sequence { get; set; }
     }
 
     [TestMethod]

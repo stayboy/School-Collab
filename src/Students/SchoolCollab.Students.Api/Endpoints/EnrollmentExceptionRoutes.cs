@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.SubjectEnrollmentExceptions.Commands.CreateSubjectEnrollmentException;
+using SchoolCollab.Students.Core.CQRS.SubjectEnrollmentExceptions.Commands.CreateSubjectEnrollmentExceptions;
 using SchoolCollab.Students.Core.CQRS.SubjectEnrollmentExceptions.Commands.RemoveSubjectEnrollmentException;
 using SchoolCollab.Students.Core.CQRS.SubjectEnrollmentExceptions.Queries.ListSubjectEnrollmentExceptions;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -81,6 +82,31 @@ public static class EnrollmentExceptionRoutes
             {
                 var id = await handler.HandleAsync(command, ct);
                 return Results.Created($"/students/enrollment-exceptions/{id}", new { id });
+            }
+            catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+            catch (ActivityGroupNotFoundException) { return Results.NotFound(); }
+            catch (TopicNotFoundException) { return Results.NotFound(); }
+            catch (TopicAssignmentPeriodException ex) { return Results.Json(new { ex.Message }, statusCode: 422); }
+            catch (DuplicateSubjectEnrollmentException ex) { return Results.Conflict(new { ex.Message }); }
+        });
+
+        // Bulk create — one request, one ROW PER ITEM (§11.3, decision 18). A separate route rather
+        // than a set-shaped body on the route above, deliberately: that shape would force every
+        // existing caller and test of the single-item contract to be rewritten to a one-item list,
+        // and it matches the repo's own bulk idiom (`POST /coded-values/bulk` →
+        // `BulkCreateCodedValues`). The page posts here for EVERY add, one item or several, so
+        // there is still exactly one write path in the UI.
+        group.MapPost("/enrollment-exceptions/bulk", async (
+            [FromBody] CreateSubjectEnrollmentExceptions command,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreateSubjectEnrollmentExceptions, Guid[]> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var ids = await handler.HandleAsync(command, ct);
+                // 200 with the created ids, not 201: a batch has no single location to point at,
+                // which is the same call the house bulk route makes.
+                return Results.Ok(new { ids });
             }
             catch (GradeLevelNotFoundException) { return Results.NotFound(); }
             catch (ActivityGroupNotFoundException) { return Results.NotFound(); }

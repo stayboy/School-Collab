@@ -16,12 +16,16 @@ namespace SchoolCollab.Students.Core.Data.Configurations;
 /// period <i>part</i> plus a date span, never a period instance (§0 decision 7), so
 /// there is nothing to orphan or retire.</para>
 ///
-/// <para><b>The unique key is not in this model.</b> Both bounds are nullable and
-/// Postgres treats NULLs as distinct, so uniqueness has to be a COALESCE expression
-/// index — created by the migration in raw SQL (§7) and deliberately absent here, so
-/// <c>MigrationGuardTests.NoUncommittedModelChanges</c> stays green (a SQL-only index
-/// is invisible to the model). What this configuration declares is only the plain
-/// <b>non-unique</b> lookup indexes.</para>
+/// <para><b>The unique key is not in this model, and the ordinal is not part of it.</b>
+/// Both bounds are nullable and Postgres treats NULLs as distinct, so uniqueness has to be
+/// a COALESCE expression index — created by the migration in raw SQL (§7) and
+/// deliberately absent here, so <c>MigrationGuardTests.NoUncommittedModelChanges</c> stays
+/// green (a SQL-only index is invisible to the model). That index keys on
+/// <c>(owner, topic, division, span)</c> and NOT on <see cref="Ordinal"/>: the dates are
+/// the truth, so two exceptions covering the same span are the same row whatever ordinal
+/// they claim, and letting the ordinal vary would buy a way to write a duplicate that
+/// reads differently. What this configuration declares is only the plain <b>non-unique</b>
+/// lookup indexes.</para>
 ///
 /// <para>Every index and foreign key carries an <b>explicit</b> name: an
 /// auto-generated name for the activity-group FK overflows Postgres's 63-byte
@@ -51,6 +55,12 @@ internal sealed class SubjectEnrollmentExceptionConfiguration
         builder.Property(x => x.Division)
             .IsRequired()
             .HasDefaultValue(AcademicYearDivision.None);
+
+        // Which term/semester of the part this names — 1st, 2nd, … (v5 §0 decision 15).
+        // Nullable because it is OPTIONAL and descriptive: it never participates in the
+        // duplicate key or the availability test, both of which stay on the span.
+        builder.Property(x => x.Ordinal);
+
         builder.Property(x => x.StartDate);
         builder.Property(x => x.EndDate);
         builder.Property(x => x.Reason);

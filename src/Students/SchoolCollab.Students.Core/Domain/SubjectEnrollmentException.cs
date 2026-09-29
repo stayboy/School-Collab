@@ -47,6 +47,28 @@ public sealed class SubjectEnrollmentException : BaseTenantEntityWithAudit, IHas
     /// </summary>
     public AcademicYearDivision Division { get; private set; }
 
+    /// <summary>
+    /// Which run of the <see cref="Division"/> this exception names — 1 for the first
+    /// term/semester, 2 for the second, and so on
+    /// (subject-period-exception-model.md v5 §0 decision 15). Set when the exception was
+    /// written as "not offered in the 3rd term", so the row reads back that way without
+    /// anyone re-deriving an ordinal from its dates or its name.
+    ///
+    /// <para><b>Requires a part.</b> A <see cref="AcademicYearDivision.None"/> exception is
+    /// a free window, and a free window has no position in a run of terms, so the two
+    /// cannot be combined. Enforced in the entity and at the API boundary.</para>
+    ///
+    /// <para><b>It is descriptive; the dates are the truth.</b> Availability matching never
+    /// reads it (§2.3) — that is the whole point of §0 decision 7, and it is why an
+    /// exception's ordinal and its dates are ALLOWED to disagree (the 3rd term of a year
+    /// the tenant has not periodised, or a subset of one term). The consequence is
+    /// deliberate and is the cost of decision 15: the ordinal is a second statement about
+    /// the same span, and only the dates are authoritative. The duplicate check and the
+    /// unique expression index therefore <b>exclude</b> the ordinal — two exceptions with
+    /// the same owner, topic, division and span are the same row whatever they claim.</para>
+    /// </summary>
+    public int? Ordinal { get; private set; }
+
     /// <summary>First day excepted (inclusive). Null = open start.</summary>
     public DateOnly? StartDate { get; private set; }
 
@@ -60,11 +82,13 @@ public sealed class SubjectEnrollmentException : BaseTenantEntityWithAudit, IHas
     public uint RowVersion { get; private set; }
 
     /// <summary>
-    /// Creates an exception. Enforces the three §2.2 invariants: exactly one of
+    /// Creates an exception. Enforces the §2.2 invariants: exactly one of
     /// <paramref name="gradeLevelId"/> / <paramref name="activityGroupId"/> (the
     /// bridge owner rule), <b>at least one</b> span bound (an unbounded exception
-    /// would mean "never offered", a different concept), and
-    /// <paramref name="endDate"/> &gt;= <paramref name="startDate"/> when both are set.
+    /// would mean "never offered", a different concept),
+    /// <paramref name="endDate"/> &gt;= <paramref name="startDate"/> when both are set,
+    /// and — since v5 — that <paramref name="ordinal"/> is a 1-based position which
+    /// requires <paramref name="division"/> to name a real part.
     /// </summary>
     public static SubjectEnrollmentException Create(
         Guid tenantId,
@@ -74,7 +98,8 @@ public sealed class SubjectEnrollmentException : BaseTenantEntityWithAudit, IHas
         AcademicYearDivision division,
         DateOnly? startDate = null,
         DateOnly? endDate = null,
-        string? reason = null)
+        string? reason = null,
+        int? ordinal = null)
     {
         var hasGrade = gradeLevelId is not null;
         var hasGroup = activityGroupId is not null;
@@ -102,6 +127,21 @@ public sealed class SubjectEnrollmentException : BaseTenantEntityWithAudit, IHas
                 nameof(endDate));
         }
 
+        if (ordinal is < 1)
+        {
+            throw new ArgumentException(
+                "A subject enrollment exception's ordinal must be null or 1 or greater (it is a 1-based position: 1st term, 2nd term, …).",
+                nameof(ordinal));
+        }
+
+        if (ordinal.HasValue && division == AcademicYearDivision.None)
+        {
+            throw new ArgumentException(
+                "A subject enrollment exception can name an ordinal only when its division names a real part: a free window (" +
+                $"{AcademicYearDivision.None}) has no position in a run of terms or semesters.",
+                nameof(ordinal));
+        }
+
         var now = DateTimeOffset.UtcNow;
         return new SubjectEnrollmentException
         {
@@ -111,6 +151,7 @@ public sealed class SubjectEnrollmentException : BaseTenantEntityWithAudit, IHas
             ActivityGroupId = activityGroupId,
             TopicId = topicId,
             Division = division,
+            Ordinal = ordinal,
             StartDate = startDate,
             EndDate = endDate,
             Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),

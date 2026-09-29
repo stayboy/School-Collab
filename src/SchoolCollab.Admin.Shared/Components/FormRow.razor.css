@@ -125,3 +125,52 @@
        containers (e.g. <480px) instead of clipping. */
     flex-wrap: wrap;
 }
+
+/* ── Label placement: BELOW (opt-in, additive) ──
+   <FormRow LabelPosition="RowLabelPosition.Below">. The label drops
+   beneath its own input cell, both full width.
+
+   Everything here is a NEW rule: no existing selector above is
+   touched, so a row that does not pass the parameter keeps exactly
+   the CSS it had. The mechanism is `flex-direction: column-reverse`
+   rather than a reordered DOM — the markup still renders the label
+   first and the input second (this component's DOM order is
+   identical for every row it renders), and column-reverse simply
+   places the first child at the BOTTOM. Reading order and
+   screen-reader order therefore stay what they always were, and the
+   <label for> association is unchanged.
+
+   The two overrides below are needed because the row still carries
+   its form-row--horizontal / form-row--vertical class:
+     • width: auto + min-height: 0 undo the HORIZONTAL 180px label
+       column (there is no aligned label column in this layout — the
+       cost the parameter documents in RowLabelPosition.cs) and the
+       32px label min-height,  which would otherwise reserve a second
+       input-height under every input.
+     • padding-top: 0 neutralises the align-top rule, which is
+       meaningless once the label is under the input. */
+.form-row.form-row--label-below {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.form-row.form-row--label-below .form-row-label {
+    width: auto;
+    min-height: 0;
+    padding-top: 0;
+}
+
+/* When a Below row is a CELL of a row — which is the only place Below is used, the
+   EnrollmentExceptions add form — the container's `align-items: stretch` makes every
+   cell equal height and this row's own `flex: 1` input cell absorbs the surplus
+   above the label. That is what puts every label on one shared line.
+
+   Centring the input inside that GROWN cell would then drop a 32px control below a
+   taller sibling's top edge (the date cell is tallest, as each picker carries its own
+   From/To label), so the input is pinned to the top of its cell here: flex-start,
+   never center. This is the rule the flex-row-input-alignment convention states for
+   any mixed-height form row. */
+.form-row.form-row--label-below .form-row-input {
+    align-items: flex-start;
+}

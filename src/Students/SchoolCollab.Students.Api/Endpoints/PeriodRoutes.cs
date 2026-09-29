@@ -91,6 +91,20 @@ public static class PeriodRoutes
             {
                 return Results.Json(new { ex.Message }, statusCode: 422);
             }
+            catch (PeriodSequenceTakenException ex)
+            {
+                // v5 §0 decision 15: one sub-period per position per year per division.
+                // The index already forbids it; this is the 422 that NAMES the sibling
+                // holding the position, instead of the index's unhandled 500.
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (PeriodSequenceInvalidException ex)
+            {
+                // The position is not a position at all (below 1, or on a top-level year).
+                // A 422 like every other period shape rule, NOT the 400 the entity's own
+                // ArgumentException would produce — see PeriodSequenceInvalidException.
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { ex.Message });
@@ -106,7 +120,7 @@ public static class PeriodRoutes
             try
             {
                 await handler.HandleAsync(new UpdatePeriod(id, req.Name, req.StartDate,
-                    req.EndDate, req.ParentPeriodId, req.ActivationToleranceDays), ct);
+                    req.EndDate, req.ParentPeriodId, req.ActivationToleranceDays, req.Sequence), ct);
                 return Results.NoContent();
             }
             catch (PeriodNotFoundException)
@@ -123,6 +137,15 @@ public static class PeriodRoutes
             }
             catch (PeriodOverlapException ex)
             {
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (PeriodSequenceTakenException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (PeriodSequenceInvalidException ex)
+            {
+                // Same boundary rule as the create route: an illegal position is a 422.
                 return Results.Json(new { ex.Message }, statusCode: 422);
             }
             catch (ArgumentException ex)
@@ -264,4 +287,5 @@ internal record UpdatePeriodRequest(
     DateOnly StartDate,
     DateOnly EndDate,
     Guid? ParentPeriodId = null,
-    int? ActivationToleranceDays = null);
+    int? ActivationToleranceDays = null,
+    int? Sequence = null);

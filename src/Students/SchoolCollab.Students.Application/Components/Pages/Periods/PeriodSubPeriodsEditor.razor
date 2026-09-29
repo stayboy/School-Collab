@@ -240,6 +240,12 @@
     private string _name = string.Empty;
     private DateTime? _start;
     private DateTime? _end;
+    // The edited row's sub-period position (v5 §0 decision 15). Carried through the
+    // inline edit purely so the update does not clear it: UpdatePeriod replaces the
+    // whole mutable field set, so a null here would silently unposition a sub-period
+    // that the backfill (or the period form) had positioned. The inline grid never
+    // OFFERS a position — that row lives in PeriodFormFields.
+    private int? _sequence;
     private volatile bool _disposed;
 
     /// <summary>True when the division allows sub-periods (Terms/Semesters). A
@@ -509,6 +515,7 @@
         _name = p.Name;
         _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
         _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
+        _sequence = p.Sequence;
         _error = null;
     }
 
@@ -523,6 +530,7 @@
         _name = string.Empty;
         _start = null;
         _end = null;
+        _sequence = null;
     }
 
     private async Task OnDeleteAsync(PeriodDto p)
@@ -575,7 +583,8 @@
         {
             if (_editingId is { } editId)
             {
-                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, YearId.Value, null));
+                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(
+                    _name.Trim(), startDate, endDate, YearId.Value, null, Sequence: _sequence));
             }
             else
             {

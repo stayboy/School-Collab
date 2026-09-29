@@ -124,7 +124,11 @@ public sealed record PeriodDto(
     string Division,
     int? ActivationToleranceDays,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    // Mirrors SchoolCollab.Students.Core.DTOs.PeriodDto — trailing and optional for the
+    // same reason it is there: positional construction is everywhere and this field is a
+    // nullable addition. Null for a top-level academic year.
+    int? Sequence = null);
 
 /// <summary>Top-level period (academic year) row for the Periods landing grid,
 /// with server-computed sub-period counts — sub-period rows are never returned
@@ -366,7 +370,8 @@ public record CreatePeriodRequest(
     AcademicYearDivision Division,
     Guid? ParentPeriodId = null,
     IReadOnlyList<SubPeriodDefinitionRequest>? SubPeriods = null,
-    int? ActivationToleranceDays = null);
+    int? ActivationToleranceDays = null,
+    int? Sequence = null);
 
 /// <summary>A sub-period (Term/Semester) definition supplied with an atomic
 /// top-level academic-year create (FR-C1).</summary>
@@ -377,13 +382,16 @@ public record SubPeriodDefinitionRequest(
     int? ActivationToleranceDays = null);
 
 /// <summary>Update payload for a period. No Division: it is immutable at creation
-/// (period-edit-parity-deactivate.md FR-E1), so it is never sent on update.</summary>
+/// (period-edit-parity-deactivate.md FR-E1), so it is never sent on update.
+/// <see cref="Sequence"/> is a full replace when sent and null clears it, so a caller
+/// editing a positioned sub-period must echo the value it read.</summary>
 public record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
     Guid? ParentPeriodId = null,
-    int? ActivationToleranceDays = null);
+    int? ActivationToleranceDays = null,
+    int? Sequence = null);
 
 public record EnrollStudentRequest(
     Guid StudentId,
@@ -424,6 +432,8 @@ public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
 /// <c>CreateSubjectEnrollmentException</c> command (<c>POST /students/enrollment-exceptions</c>);
 /// the body carries a period <b>part</b> plus a span and <b>no</b> period id, and
 /// <paramref name="Reason"/> is optional free text.
+/// <paramref name="Ordinal"/> (v5 §0 decision 15) is the term/semester number the row
+/// names; it is descriptive only — the server's duplicate key stays on the span.
 /// </summary>
 public record CreateSubjectEnrollmentExceptionRequest(
     Guid? GradeLevelId,
@@ -432,7 +442,30 @@ public record CreateSubjectEnrollmentExceptionRequest(
     AcademicYearDivision Division,
     DateOnly? StartDate = null,
     DateOnly? EndDate = null,
+    string? Reason = null,
+    int? Ordinal = null);
+
+/// <summary>
+/// Bulk create (v6 §11.3, decision 18): the owner, the subject, the division and the reason are
+/// properties of the ACTION, so they sit here once; each sequence contributes an item carrying its
+/// OWN span, because the period holding position 1 and the one holding position 3 do not share
+/// dates. The page posts this for every add — a single sequence is a one-item list.
+/// </summary>
+public record CreateSubjectEnrollmentExceptionsRequest(
+    Guid? GradeLevelId,
+    Guid? ActivityGroupId,
+    Guid TopicId,
+    AcademicYearDivision Division,
+    IReadOnlyList<CreateSubjectEnrollmentExceptionItemRequest> Items,
     string? Reason = null);
+
+/// <param name="StartDate">Open start when null — a meaningful bound, not a missing value.</param>
+/// <param name="EndDate">Open end when null.</param>
+/// <param name="Ordinal">The sequence this item names, or null on a free window.</param>
+public record CreateSubjectEnrollmentExceptionItemRequest(
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null,
+    int? Ordinal = null);
 
 public record AssignStudentTopicRequest(
     Guid StudentId,
@@ -1712,6 +1745,28 @@ public sealed class StudentsApiClient : IContactsClient
     }
 
     /// <summary>
+    /// Bulk-creates exceptions — one row per item, in ONE transaction (v6 §11.3, decision 18). The
+    /// page calls this for EVERY add, one sequence or several, so the UI has a single write path.
+    /// A rejection surfaces the server's own sentence, exactly as the single-create call does; the
+    /// batch is all-or-nothing server-side, so there is no partial-success state to report here.
+    /// </summary>
+    public async Task<Guid[]> CreateSubjectEnrollmentExceptionsAsync(CreateSubjectEnrollmentExceptionsRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/enrollment-exceptions/bulk", req, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                ServerMessage(body)
+                    ?? $"CreateSubjectEnrollmentExceptions failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        var result = await response.Content.ReadFromJsonAsync<IdsResponse>(ct);
+        return result!.Ids;
+    }
+
+    /// <summary>
     /// The server's own sentence out of a failed response body: a rejected write answers
     /// <c>{"message":"…"}</c> (also seen as <c>{"Message":…}</c> and, from ProblemDetails,
     /// <c>detail</c>), and the page shows it verbatim. Null when the body is not a JSON
@@ -2085,6 +2140,9 @@ public sealed class StudentsApiClient : IContactsClient
     // ── Helper ──────────────────────────────────────────────────────────────
 
     private sealed record IdResponse(Guid Id);
+
+    /// <summary>The bulk create's answer — the ids of every row written.</summary>
+    private sealed record IdsResponse(Guid[] Ids);
 
     /// <summary>Response shape of the enrollment-exceptions <c>/check</c> route (§6).</summary>
     private sealed record ExceptionCheckResponse(bool Excepted);

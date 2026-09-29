@@ -90,6 +90,23 @@ public interface IPeriodRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The sub-period of <paramref name="parentPeriodId"/> that already holds
+    /// <paramref name="sequence"/> in <paramref name="division"/> — the sibling a create or
+    /// update would collide with — or <c>null</c> when the position is free. Backs the
+    /// handler-side half of "one sub-period per position per year per division"
+    /// (subject-period-exception-model.md v5 §0 decision 15); the filtered unique index
+    /// <c>ix_periods_tenant_parent_division_sequence</c> is the storage-side half.
+    /// <paramref name="excludeId"/> is the period being edited, which must be able to keep
+    /// the position it already holds.
+    /// </summary>
+    Task<Period?> GetSubPeriodBySequenceAsync(
+        Guid parentPeriodId,
+        AcademicYearDivision division,
+        int sequence,
+        Guid? excludeId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the <b>current period</b> — the one whose
     /// <c>[StartDate, EndDate]</c> range contains today (UTC). This is the
     /// derived period used by landing-page queries and create-for-grade flows

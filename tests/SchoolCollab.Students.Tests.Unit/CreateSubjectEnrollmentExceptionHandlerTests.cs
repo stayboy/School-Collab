@@ -388,6 +388,50 @@ public class CreateSubjectEnrollmentExceptionHandlerTests
         s.Db.SubjectEnrollmentExceptions.Should().HaveCount(1);
     }
 
+    /// <summary>
+    /// The ordinal is a LABEL, not part of the identity: two rows that cover the same span for the
+    /// same owner, topic and division are the same exception whatever positions they claim. Letting
+    /// the ordinal into the key would buy a way to write the same exception twice and have it read
+    /// differently — which is exactly what v5 §0 decision 15's second ruling refuses.
+    /// </summary>
+    [TestMethod]
+    public async Task Create_SameSpanWithADifferentOrdinal_IsStillADuplicate()
+    {
+        using var s = new StudentsTestScope("exc-duplicate-ordinal");
+        var gradeId = await SeedGradeLevelAsync(s);
+        await SeedCanonicalTopicAsync(s);
+        var handler = NewHandler(s);
+
+        await handler.HandleAsync(new CreateSubjectEnrollmentException(
+            gradeId, null, _topicId, AcademicYearDivision.Terms, D(2027, 1, 1), D(2027, 3, 31), Ordinal: 1));
+
+        await FluentActions.Awaiting(() => handler.HandleAsync(new CreateSubjectEnrollmentException(
+                gradeId, null, _topicId, AcademicYearDivision.Terms, D(2027, 1, 1), D(2027, 3, 31), Ordinal: 3)))
+            .Should().ThrowAsync<DuplicateSubjectEnrollmentException>(
+                "the ordinal is descriptive and NOT part of the duplicate key — the span already decides identity");
+
+        s.Db.SubjectEnrollmentExceptions.Should().HaveCount(1, "no silent second row");
+    }
+
+    /// <summary>
+    /// The ordinal IS persisted (Q6=B), so a row can read "Term 2" without re-deriving it from
+    /// dates — and it travels beside a span it is deliberately allowed to disagree with. Here the
+    /// division is a real part, so the ordinal is admissible; whether a period of that position
+    /// exists is never consulted (Q1).
+    /// </summary>
+    [TestMethod]
+    public async Task Create_WithAnOrdinal_PersistsIt()
+    {
+        using var s = new StudentsTestScope("exc-ordinal-persisted");
+        var gradeId = await SeedGradeLevelAsync(s);
+        await SeedCanonicalTopicAsync(s);
+
+        var id = await NewHandler(s).HandleAsync(new CreateSubjectEnrollmentException(
+            gradeId, null, _topicId, AcademicYearDivision.Terms, D(2027, 1, 1), D(2027, 3, 31), Ordinal: 2));
+
+        (await s.Db.SubjectEnrollmentExceptions.SingleAsync(e => e.Id == id)).Ordinal.Should().Be(2);
+    }
+
     [TestMethod]
     public async Task Create_SameSpan_DifferentDivision_IsNotADuplicate()
     {

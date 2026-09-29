@@ -41,7 +41,8 @@ internal sealed class PeriodRepository(StudentsDbContext db)
             x.Id, x.Name, x.StartDate, x.EndDate,
             x.Status.ToString(), x.ParentPeriodId, x.NextPeriodId,
             x.Division.ToString(), x.ActivationToleranceDays,
-            x.CreatedAt, x.UpdatedAt)).ToArray();
+            x.CreatedAt, x.UpdatedAt,
+            Sequence: x.Sequence)).ToArray();
     }
 
     public async Task<Period[]> GetActivePeriodsEndingBeforeAsync(DateOnly date, CancellationToken cancellationToken = default) =>
@@ -96,6 +97,20 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         => await Db.Periods
             .Where(p => p.ParentPeriodId == parentPeriodId)
             .ToArrayAsync(cancellationToken);
+
+    public async Task<Period?> GetSubPeriodBySequenceAsync(
+        Guid parentPeriodId,
+        AcademicYearDivision division,
+        int sequence,
+        Guid? excludeId = null,
+        CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .AsNoTracking()
+            .Where(p => p.ParentPeriodId == parentPeriodId
+                && p.Division == division
+                && p.Sequence == sequence
+                && (excludeId == null || p.Id != excludeId))
+            .FirstOrDefaultAsync(cancellationToken);
 
     public async Task<Period[]> GetDraftPeriodsLinkedToAsync(Guid nextPeriodId, CancellationToken cancellationToken = default)
         => await Db.Periods

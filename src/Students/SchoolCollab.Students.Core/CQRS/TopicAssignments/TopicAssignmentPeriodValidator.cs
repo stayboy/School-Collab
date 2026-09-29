@@ -151,6 +151,38 @@ public static class TopicAssignmentPeriodValidator
     }
 
     /// <summary>
+    /// The ordinal invariants (v5 §0 decision 15). Two rules, both about the ordinal being
+    /// a 1-based position in a run of the exception's <paramref name="division"/>:
+    /// it must be 1 or greater, and it may only be supplied when the division actually
+    /// names a part — a free window (<see cref="AcademicYearDivision.None"/>) has no
+    /// position in a run of terms or semesters, so "the 2nd" of a free window is a
+    /// category error rather than a value the server could accept and ignore.
+    ///
+    /// <para><b>What this deliberately does NOT check:</b> that the ordinal matches the
+    /// span. A tenant may not have periodised its years at all, in which case "not offered
+    /// in the 3rd term" is a perfectly meaningful thing to record against typed dates; and
+    /// a subset of one term is a legitimate span for a whole-term ordinal. The dates are
+    /// the truth for matching (§2.3) and the ordinal is a label beside them, so the two are
+    /// allowed to disagree — and the price of that is recorded in the entity's
+    /// <c>Ordinal</c> documentation rather than hidden here.</para>
+    /// </summary>
+    public static void ValidateExceptionOrdinal(AcademicYearDivision division, int? ordinal)
+    {
+        if (ordinal is < 1)
+        {
+            throw new TopicAssignmentPeriodException(
+                "A subject enrollment exception's ordinal must be 1 or greater (it is a 1-based position: 1st term, 2nd term, …).");
+        }
+
+        if (ordinal.HasValue && division == AcademicYearDivision.None)
+        {
+            throw new TopicAssignmentPeriodException(
+                "A subject enrollment exception can name an ordinal only when its division names a real part: a free window " +
+                $"({AcademicYearDivision.None}) has no position in a run of terms or semesters.");
+        }
+    }
+
+    /// <summary>
     /// FR-56 for the exception side (v3 §4.2): the exception's
     /// <paramref name="division"/> must match the group's <see cref="EnrollmentSpan"/>
     /// — <c>Termly</c>→<see cref="AcademicYearDivision.Terms"/>,

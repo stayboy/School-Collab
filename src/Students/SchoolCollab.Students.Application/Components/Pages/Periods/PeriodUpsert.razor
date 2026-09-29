@@ -70,7 +70,8 @@
                                     <PeriodFormFields Model="_model"
                                                       IsSubPeriod="_isSubPeriod"
                                                       DivisionLocked="_isSubPeriod"
-                                                      AcademicYears="_academicYears">
+                                                      AcademicYears="_academicYears"
+                                                      UnavailableSequences="UnavailableSequences">
                                         <NameActions>
                                             <FluentButton IconStart="@FluentIcons.Calendar"
                                                           Title="Fill the form with the current academic year (editable template)"
@@ -122,7 +123,8 @@
                                     <PeriodFormFields Model="_model"
                                                       IsSubPeriod="_isSubPeriod"
                                                       DivisionLocked="true"
-                                                      AcademicYears="_academicYears" />
+                                                      AcademicYears="_academicYears"
+                                                      UnavailableSequences="UnavailableSequences" />
 
                                     <PeriodSubPeriodsEditor @ref="_subPeriodEditor"
                                                             Show="@ShowSubPeriodsSection"
@@ -213,6 +215,10 @@
         public DateTime? Start { get; set; }
         public DateTime? End { get; set; }
         public int? ActivationToleranceDays { get; set; }
+        // Where this sub-period sits in its year's run (v5 §0 decision 15). Only
+        // rendered (and only accepted by the server) when a parent academic year is
+        // selected — a top-level year has no position.
+        public int? Sequence { get; set; }
     }
 
     private readonly PeriodFormModel _model = new();
@@ -239,6 +245,37 @@
 
     private PeriodDto[] _academicYears =>
         _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _model.Division.ToString()).ToArray() ?? [];
+
+    /// <summary>
+    /// The positions this form must NOT offer, because a SIBLING sub-period of the selected
+    /// academic year and the same division already holds them (one position per run,
+    /// subject-period-exception-model.md v5 §0 decision 15). The sibling set is read from the
+    /// tenant's period list the form already loads, and the period being EDITED is excluded
+    /// (its own id), so an edit can save without moving itself. The API's own pre-check
+    /// (PeriodSequenceGuard) stays the authority — this only stops the control offering a
+    /// choice that would be rejected.
+    /// </summary>
+    private int[] UnavailableSequences
+    {
+        get
+        {
+            if (!Guid.TryParse(_model.ParentPeriodIdText, out var parentId))
+            {
+                return [];
+            }
+
+            var division = _model.Division.ToString();
+            return
+            [
+                .. (_loadedPeriods ?? [])
+                    .Where(p => p.Sequence is { } sequence
+                        && p.Id != Id
+                        && p.ParentPeriodId == parentId
+                        && string.Equals(p.Division, division, StringComparison.OrdinalIgnoreCase))
+                    .Select(p => p.Sequence!.Value)
+            ];
+        }
+    }
 
     /// <summary>The sub-periods section renders for any top-level period (not a
     /// sub-period, not a blocked parent), regardless of division
@@ -339,6 +376,7 @@
                     : AcademicYearDivision.None;
                 _model.ParentPeriodIdText = _period.ParentPeriodId?.ToString() ?? "";
                 _model.ActivationToleranceDays = _period.ActivationToleranceDays;
+                _model.Sequence = _period.Sequence;
 
                 // Clear any prior load error only on the success path: a 404
                 // (GetPeriodByIdAsync returns null) surfaces a page-level error
@@ -444,7 +482,8 @@
             var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
             var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
             var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(
-                _model.Name.Trim(), startDate, endDate, division, parentId, subPeriods, _model.ActivationToleranceDays));
+                _model.Name.Trim(), startDate, endDate, division, parentId, subPeriods, _model.ActivationToleranceDays,
+                Sequence: _model.Sequence));
             var saved = await Api.GetPeriodByIdAsync(id);
 
             if (_disposed) return;
@@ -493,7 +532,9 @@
         {
             var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
             var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
-            await Api.UpdatePeriodAsync(Id, new UpdatePeriodRequest(_model.Name.Trim(), startDate, endDate, parentId, _model.ActivationToleranceDays));
+            await Api.UpdatePeriodAsync(Id, new UpdatePeriodRequest(
+                _model.Name.Trim(), startDate, endDate, parentId, _model.ActivationToleranceDays,
+                Sequence: _model.Sequence));
 
             if (_disposed) return;
             Logger.LogInformation("Period {Id} updated", Id);

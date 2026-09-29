@@ -19,6 +19,17 @@ internal sealed class SubjectEnrollmentExceptionRepository(StudentsDbContext db)
         await UpdateAsync(exception, cancellationToken);
     }
 
+    /// <summary>
+    /// The bulk create's write: tracked once, saved once — so a failure on any row leaves none
+    /// behind. The inherited single-entity AddAsync saves per call, so calling it in a loop would
+    /// be N transactions rather than the one atomic write a batch promises.
+    /// </summary>
+    public async Task AddRangeAsync(IEnumerable<SubjectEnrollmentException> exceptions, CancellationToken cancellationToken = default)
+    {
+        await Db.SubjectEnrollmentExceptions.AddRangeAsync(exceptions, cancellationToken);
+        await Db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<SubjectEnrollmentExceptionDto[]> ListDtosAsync(
         Guid? gradeLevelId,
         Guid? activityGroupId,
@@ -46,6 +57,7 @@ internal sealed class SubjectEnrollmentExceptionRepository(StudentsDbContext db)
                 b.StartDate,
                 b.EndDate,
                 b.Reason,
+                b.Ordinal,
                 b.CreatedAt,
                 b.UpdatedAt,
             })
@@ -61,7 +73,8 @@ internal sealed class SubjectEnrollmentExceptionRepository(StudentsDbContext db)
                 r.EndDate,
                 r.Reason,
                 r.CreatedAt,
-                r.UpdatedAt))
+                r.UpdatedAt,
+                Ordinal: r.Ordinal))
             .ToArray();
     }
 

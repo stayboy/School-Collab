@@ -56,6 +56,12 @@ public sealed class CreateSubjectEnrollmentExceptionHandler(
         // must be rejected at the boundary rather than stored verbatim — a 422.
         TopicAssignmentPeriodValidator.ValidateExceptionDivision(command.Division);
 
+        // The ordinal's own invariants (v5 §0 decision 15): 1-based, and only on a real
+        // part — a free window has no "3rd". Both are 422s at the boundary, so an invalid
+        // ordinal never reaches the entity's ArgumentException. Nothing here cross-checks
+        // the ordinal against the span: the two are ALLOWED to disagree (see the validator).
+        TopicAssignmentPeriodValidator.ValidateExceptionOrdinal(command.Division, command.Ordinal);
+
         if (hasGrade)
         {
             var gradeLevelId = command.GradeLevelId!.Value;
@@ -95,7 +101,8 @@ public sealed class CreateSubjectEnrollmentExceptionHandler(
             command.Division,
             command.StartDate,
             command.EndDate,
-            command.Reason);
+            command.Reason,
+            ordinal: command.Ordinal);
 
         await repository.AddAsync(exception, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);

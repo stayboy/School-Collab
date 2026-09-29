@@ -16,6 +16,13 @@ public interface ISubjectEnrollmentExceptionRepository
     Task AddAsync(SubjectEnrollmentException exception, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Adds a batch and saves ONCE, so the batch is one transaction — every row or none
+    /// (subject-period-exception-model.md v6 §11.3). Mirrors
+    /// <c>CodedValueRepository.AddRangeAsync</c>, the repo's existing bulk-create idiom.
+    /// </summary>
+    Task AddRangeAsync(IEnumerable<SubjectEnrollmentException> exceptions, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Soft-deletes the exception (removing one is a delete, never a status change).
     /// The row is retained as audit: "who excepted Math for Term 3, and when".
     /// </summary>

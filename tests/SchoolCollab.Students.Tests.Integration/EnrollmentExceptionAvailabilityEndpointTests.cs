@@ -46,6 +46,12 @@ namespace SchoolCollab.Students.Tests.Integration;
 ///   <item><b>The <c>/check</c> picker endpoint (AC-18).</b> Containment on a supplied
 ///         <c>onDate</c>, for both owner forms.</item>
 /// </list>
+///
+/// <para><b>v6 adds the BULK write (subject-period-exception-model.md §11.3, decision 18):</b>
+/// <c>POST /students/enrollment-exceptions/bulk</c> takes several items, each with its OWN span
+/// and ordinal, and writes one ROW PER ITEM in one transaction. The bulk tests below prove the two
+/// things only real Postgres can witness: several rows land with their own spans, and a batch
+/// rejected for an intra-batch duplicate leaves the table EMPTY rather than half-written.</para>
 /// </summary>
 [TestClass]
 [DoNotParallelize]
@@ -444,6 +450,127 @@ public class EnrollmentExceptionAvailabilityEndpointTests
         return (await response.Content.ReadFromJsonAsync<CheckAnswer>())!.Excepted;
     }
 
+    // ── v6 §11.3: the BULK write — one ROW PER ITEM, one transaction ─────────
+
+    /// <summary>
+    /// Several sequences are several ROWS with their own spans, not one row holding a set. That is
+    /// decision 18's whole point: the spans must stay separable in the DATA (a gapped selection IS
+    /// two spans, §2.4) even though the form shows nothing when both are derived.
+    /// </summary>
+    [TestMethod]
+    public async Task Bulk_TwoSequences_PersistTwoRowsWithTheirOwnSpans()
+    {
+        var tenantId = ApiFactory.TestTenantA;
+        var gradeLevelId = await SeedGradeLevelAsync(tenantId, "Grade 1");
+        var topicId = await SeedTopicAsync(tenantId, "MATH", "Mathematics");
+
+        var firstStart = new DateOnly(2027, 1, 1);
+        var firstEnd = new DateOnly(2027, 3, 31);
+        var thirdStart = new DateOnly(2027, 9, 1);
+        var thirdEnd = new DateOnly(2027, 12, 20);
+
+        var response = await PostAsync("/students/enrollment-exceptions/bulk", tenantId, new
+        {
+            gradeLevelId,
+            topicId,
+            division = AcademicYearDivision.Terms,
+            items = new[]
+            {
+                new { startDate = (DateOnly?)firstStart, endDate = (DateOnly?)firstEnd, ordinal = (int?)1 },
+                new { startDate = (DateOnly?)thirdStart, endDate = (DateOnly?)thirdEnd, ordinal = (int?)3 },
+            },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "a batch has no single location to point at, so it answers 200 with the created ids");
+        var created = await response.Content.ReadFromJsonAsync<CreatedIds>();
+        created!.Ids.Should().HaveCount(2);
+
+        var rows = await ListExceptionsAsync(tenantId, gradeLevelId, topicId);
+        rows.Should().HaveCount(2, "one row per chosen sequence — rows, not a JSON set in one column");
+        rows.Should().ContainSingle(e => e.Ordinal == 1 && e.StartDate == firstStart && e.EndDate == firstEnd,
+            "the 1st sequence keeps its OWN span");
+        rows.Should().ContainSingle(e => e.Ordinal == 3 && e.StartDate == thirdStart && e.EndDate == thirdEnd,
+            "and so does the 3rd — a shared span would collapse the gap this selection expresses");
+    }
+
+    /// <summary>
+    /// A batch whose items collide with each other is a 409, and NOTHING is written. This is the
+    /// atomicity proof on real Postgres: the first item is perfectly valid, so a handler that
+    /// saved row-by-row would leave one row behind.
+    ///
+    /// <para>It also pins WHERE that 409 comes from. The intra-batch check is in-memory, because
+    /// the database pre-check cannot see rows this transaction has not saved — so the collision is
+    /// reported as the 409 the caller can act on, never as the raw <c>23505</c> the COALESCE
+    /// expression index would raise at save time.</para>
+    /// </summary>
+    [TestMethod]
+    public async Task Bulk_IntraBatchDuplicateSpan_IsRejected409_WithNoPartialWrite()
+    {
+        var tenantId = ApiFactory.TestTenantA;
+        var gradeLevelId = await SeedGradeLevelAsync(tenantId, "Grade 1");
+        var topicId = await SeedTopicAsync(tenantId, "MATH", "Mathematics");
+        var start = new DateOnly(2027, 1, 1);
+        var end = new DateOnly(2027, 3, 31);
+
+        var response = await PostAsync("/students/enrollment-exceptions/bulk", tenantId, new
+        {
+            gradeLevelId,
+            topicId,
+            division = AcademicYearDivision.Terms,
+            items = new[]
+            {
+                new { startDate = (DateOnly?)start, endDate = (DateOnly?)end, ordinal = (int?)1 },
+                new { startDate = (DateOnly?)start, endDate = (DateOnly?)end, ordinal = (int?)3 },
+            },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "the ordinal is descriptive and not part of the duplicate key, so the same span twice is one span (§0 decision 15)");
+
+        var rows = await ListExceptionsAsync(tenantId, gradeLevelId, topicId);
+        rows.Should().BeEmpty("the batch is all-or-nothing — the VALID first item must not survive the bad second");
+    }
+
+    /// <summary>
+    /// Re-posting a batch that is already stored is a 409, and the row count does not move.
+    /// </summary>
+    [TestMethod]
+    public async Task Bulk_RePosted_IsRejected409_AndAddsNoRows()
+    {
+        var tenantId = ApiFactory.TestTenantA;
+        var gradeLevelId = await SeedGradeLevelAsync(tenantId, "Grade 1");
+        var topicId = await SeedTopicAsync(tenantId, "MATH", "Mathematics");
+        var start = new DateOnly(2027, 1, 1);
+        var end = new DateOnly(2027, 3, 31);
+
+        var body = new
+        {
+            gradeLevelId,
+            topicId,
+            division = AcademicYearDivision.Terms,
+            items = new[] { new { startDate = (DateOnly?)start, endDate = (DateOnly?)end, ordinal = (int?)1 } },
+        };
+
+        var first = await PostAsync("/students/enrollment-exceptions/bulk", tenantId, body);
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var second = await PostAsync("/students/enrollment-exceptions/bulk", tenantId, body);
+        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        var rows = await ListExceptionsAsync(tenantId, gradeLevelId, topicId);
+        rows.Should().HaveCount(1, "the retry is rejected, not appended");
+    }
+
+    private async Task<SubjectEnrollmentExceptionDto[]> ListExceptionsAsync(
+        Guid tenantId, Guid gradeLevelId, Guid topicId)
+    {
+        var response = await SendAsync(HttpMethod.Get,
+            $"/students/enrollment-exceptions?gradeLevelId={gradeLevelId:D}&topicId={topicId:D}", tenantId);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        return (await response.Content.ReadFromJsonAsync<SubjectEnrollmentExceptionDto[]>())!;
+    }
+
     private Task<HttpResponseMessage> PostAsync(string path, Guid tenantId, object body) =>
         SendAsync(HttpMethod.Post, path, tenantId, body);
 
@@ -461,6 +588,9 @@ public class EnrollmentExceptionAvailabilityEndpointTests
 
     /// <summary>Shape of the <c>POST /students/enrollment-exceptions</c> 201 body (<c>new { id }</c>).</summary>
     private sealed record CreatedId(Guid Id);
+
+    /// <summary>Shape of the <c>POST /students/enrollment-exceptions/bulk</c> 200 body (v6).</summary>
+    private sealed record CreatedIds(Guid[] Ids);
 
     /// <summary>Shape of the <c>GET /students/enrollment-exceptions/check</c> body.</summary>
     private sealed record CheckAnswer(bool Excepted);

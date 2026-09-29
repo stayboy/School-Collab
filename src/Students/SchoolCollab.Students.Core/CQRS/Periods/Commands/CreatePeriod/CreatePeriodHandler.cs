@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Students.Core.CQRS.Periods;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -32,6 +33,12 @@ public sealed class CreatePeriodHandler(
                 "Terms/Semesters academic year.", nameof(command.SubPeriods));
         }
 
+        // ── v5 §0 decision 15: an illegal position (below 1, or on a top-level year) is a
+        //    BOUNDARY rejection, mapped to 422 like every other period shape rule. The
+        //    entity's own ValidateSequence would raise ArgumentException, i.e. a 400, so the
+        //    same position rule would answer in two different status families.
+        PeriodSequenceGuard.EnsureDeclarable(command.Sequence, command.ParentPeriodId);
+
         // ── Period hierarchy (plan-drop-periodtype.md): a sub-period's parent must
         //    be an existing top-level academic year with the SAME division. The
         //    null/required shape is enforced by the entity.
@@ -58,6 +65,16 @@ public sealed class CreatePeriodHandler(
             if (command.StartDate < parent.StartDate || command.EndDate > parent.EndDate)
                 throw new PeriodContainmentException(
                     command.Division.ToString(), parent.Name, parent.StartDate, parent.EndDate);
+
+            // ── v5 §0 decision 15: one sub-period per position per year per division.
+            //    Checked here so a taken position is a 422 naming the sibling that holds
+            //    it, rather than the filtered unique index's unhandled DbUpdateException.
+            if (command.Sequence is { } sequence)
+            {
+                await PeriodSequenceGuard.EnsureFreeAsync(
+                    repository, parentId, command.Division, sequence,
+                    excludeId: null, cancellationToken);
+            }
         }
 
         // ── No-overlap invariant (§5.6): reject if another period's range
@@ -119,7 +136,8 @@ public sealed class CreatePeriodHandler(
             command.EndDate,
             command.Division,
             command.ParentPeriodId,
-            command.ActivationToleranceDays)
+            command.ActivationToleranceDays,
+            sequence: command.Sequence)
             .WithTenant(tenantProvider);
 
         var subPeriods = new List<Period>();

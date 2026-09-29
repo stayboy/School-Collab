@@ -14,6 +14,13 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// projected to their names at the DTO boundary. A null <see cref="StartDate"/> means
 /// an open start, a null <see cref="EndDate"/> an open end — at least one is set
 /// (§2.2).</para>
+///
+/// <para><see cref="Ordinal"/> is declared <b>last and optional</b> to keep every existing
+/// positional construction of this record compiling. It is the term/semester number the
+/// row was written as (v5 §0 decision 15) and is a <b>label beside the dates, never a
+/// key</b>: it is deliberately not part of the duplicate check or of the COALESCE unique
+/// index, so two rows covering the same span are the same exception whatever ordinals
+/// they claim.</para>
 /// </summary>
 public sealed record SubjectEnrollmentExceptionDto(
     Guid Id,
@@ -25,4 +32,5 @@ public sealed record SubjectEnrollmentExceptionDto(
     DateOnly? EndDate,
     string? Reason,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    int? Ordinal = null);
