@@ -258,11 +258,12 @@
                             @if (PositionOptions.Length > 0)
                             {
                                 @* The sequences are STRUCTURAL (Q1) and MULTI-SELECT (v6 §11.3):
-                                   1st–4th are always offered, extended by any higher position the
+                                   1st–4th are always RENDERED, extended by any higher position the
                                    tenant has declared, and ticking several writes one exception
-                                   per sequence in ONE request. Deliberately NOT limited to the
-                                   periods that exist — a tenant with no 3rd-term period can still
-                                   record "not offered in the 3rd term" and type the dates.
+                                   per sequence in ONE request. v7: a position the tenant has no
+                                   period for is DISABLED rather than hidden (the ladder keeps its
+                                   shape) — the span is now silent for every real part, so an
+                                   unbacked position could never supply a write.
                                    Native control, checked first per the repo rule:
                                    Microsoft.FluentUI.AspNetCore.Components 4.14.2 has no
                                    FluentListBox and no FluentField, and FluentRadioGroup is
@@ -287,6 +288,7 @@
                                         @foreach (var position in PositionOptions)
                                         {
                                             <FluentCheckbox Value="@(_positions.Contains(position))"
+                                                            Disabled="@(!PositionIsDerivable(position))"
                                                             ValueChanged="@(selected => SetPositionAsync(position, selected))">
                                                 @PeriodPositionLabels.Number(position)
                                             </FluentCheckbox>
@@ -295,17 +297,14 @@
                                 </FormRow>
                             }
 
-                            @* The span inputs are shown ONLY when a bound has to be typed
-                               (v6 §11.2 decision 17): on `Any date`, when no sequence is chosen
-                               yet, or when ANY chosen sequence has no period behind it. When
-                               EVERY chosen sequence resolves to a period, the span is DERIVED
-                               from those periods and the inputs are removed ENTIRELY — no
-                               derived-span text either (owner decision, 2026-09-29: "keep span
-                               fully silent").
-                               The guard is NOT optional and is not part of the
-                               silent-vs-read-only question: CanAdd needs a bound, so removing
-                               the pickers for a sequence that has no period would leave the
-                               button disabled with nothing able to enable it.
+                            @* The span inputs belong to the FREE WINDOW only (v7, owner decision
+                               2026-09-30): with a real part chosen the Position row is the only
+                               control, and the range is removed ENTIRELY — no derived-span text
+                               either ("keep span fully silent", v6 §11.2). v7 goes one step past
+                               v6: the old guard that re-showed the pickers for a position with no
+                               period is GONE, and that position is disabled instead, so the form
+                               can never be dead-ended — CanAdd is satisfied by every selectable
+                               position, every time.
                                The ends reuse FormRow's label-below variant rather than a
                                FluentUI parameter, because 4.14.2 has no LabelPosition type at
                                all (absent from the package XML AND the metadata) and the
@@ -365,6 +364,15 @@
                         {
                             <p class="add-note">
                                 This subject is already excepted on @AnchorDateLabel — the server will reject an identical span.
+                            </p>
+                        }
+                        else if (Division != AcademicYearDivision.None && _positions.Count == 0)
+                        {
+                            @* v7: a real part arms only on a POSITION now that the range is silent,
+                               so say so rather than leaving a disabled button unexplained. The free
+                               window never needs this — it has the pickers. *@
+                            <p class="add-note" role="status" aria-live="polite">
+                                Choose a position to add an exception.
                             </p>
                         }
                     }
@@ -521,9 +529,9 @@
 
     /// <summary>
     /// The batch this add would write: ONE ITEM PER CHOSEN SEQUENCE (v6 §11.3 decision 18), each
-    /// carrying its OWN span — the period's dates when that sequence has a period, otherwise the
-    /// typed bounds. On <c>Any date</c>, or before a sequence is ticked, the batch is the single
-    /// free window with no ordinal.
+    /// carrying its OWN span — always the period's dates, because v7 makes a position selectable
+    /// only when a period backs it. On <c>Any date</c>, or in the pre-write state where no position
+    /// is ticked yet, the batch is the single free window with no ordinal.
     ///
     /// <para>The ordinal is <b>descriptive</b>: availability never reads it (§2.3), it is not part
     /// of the duplicate key, and it is deliberately NOT cross-checked against the span. This is the
@@ -532,8 +540,9 @@
     /// </summary>
     private IReadOnlyList<CreateSubjectEnrollmentExceptionItemRequest> BuildItems()
     {
-        // A free window has no position at all, and a real part with no sequence ticked is the
-        // "not periodised" case v5 documented — both are ONE item carrying no ordinal.
+        // A free window has no position at all, and a real part with nothing ticked yet is the
+        // PRE-WRITE state (the range is silent and the note asks for a position) — both are ONE
+        // item carrying no ordinal and, in the second case, no bound, so CanAdd stays false.
         if (Division == AcademicYearDivision.None || _positions.Count == 0)
         {
             return [new CreateSubjectEnrollmentExceptionItemRequest(ToDateOnly(_startDate), ToDateOnly(_endDate))];
@@ -555,16 +564,23 @@
     }
 
     /// <summary>
-    /// True when every chosen sequence resolves to a period, so every span in the batch is DERIVED
-    /// and the reader has nothing to type (v6 §11.4 decision 19). That is exactly when the span
-    /// inputs are removed — and the reason the rule is per SEQUENCE rather than per division: one
-    /// selection may mix a 1st term that has a period with a 3rd that does not, and the second one
-    /// still needs typed bounds.
+    /// True for EVERY real part (v7, owner decision 2026-09-30): the range belongs to the free
+    /// window, and a Term/Semester is written from the periods behind its positions, never from
+    /// typed bounds. That is why the Position row and the range are mutually exclusive — and why a
+    /// position the tenant has no period for is rendered but DISABLED
+    /// (<see cref="PositionIsDerivable"/>): it could never supply the span v7 no longer lets the
+    /// reader type.
     /// </summary>
-    private bool SpanIsDerived =>
-        Division != AcademicYearDivision.None
-        && _positions.Count > 0
-        && _positions.All(position => PeriodForPosition(Division, position) is not null);
+    private bool SpanIsDerived => Division != AcademicYearDivision.None;
+
+    /// <summary>
+    /// Whether the offered <paramref name="position"/> has a period behind it and may therefore be
+    /// chosen. The ladder stays STRUCTURAL (Q5) — every position renders, so the reader still sees
+    /// the shape of the year — but only the ones the calendar can fill are selectable, because the
+    /// range is silent for every real part and an unbacked position could never produce a write
+    /// (§2.2: an exception needs at least one bound).
+    /// </summary>
+    private bool PositionIsDerivable(int position) => PeriodForPosition(Division, position) is not null;
 
     private bool _busy;
     private bool _isRealTenant;
@@ -652,11 +668,12 @@
     }
 
     /// <summary>
-    /// The positions the control offers. 1st–4th are ALWAYS offered, extended by any higher
-    /// position the tenant has declared on a period of the same division (v5 Q5) — and
-    /// deliberately NOT limited to the periods that exist (Q1): a tenant with no 3rd-term period
-    /// can still record "not offered in the 3rd term" and type the dates, which is precisely why
-    /// the position is a structural number rather than a period pick.
+    /// The positions the control RENDERS. 1st–4th are always there, extended by any higher position
+    /// the tenant has declared on a period of the same division (v5 Q5) — the ladder is structural
+    /// (Q1), so its SHAPE does not depend on which periods happen to exist. v7 splits "rendered"
+    /// from "selectable": a position with no period behind it is disabled in the view
+    /// (<see cref="PositionIsDerivable"/>), because the range is silent for every real part and
+    /// there would be no span to write.
     ///
     /// <para>Empty for <c>Any date</c>: a free window has no position in a run of terms or
     /// semesters, and the server rejects an ordinal on it (ValidateExceptionOrdinal), so the
@@ -681,10 +698,9 @@
     /// batch carrying at least one bound (the entity invariant — neither bound would mean "never
     /// offered", a different concept). The server re-checks; this only keeps the affordance honest.
     ///
-    /// <para>This is what makes "a sequence with no period behind it" an intended flow rather than
-    /// an error: that item's span falls back to the typed bounds, so the button stays disabled until
-    /// one is typed. A sequence WITH a period needs nothing typed — its span is derived — which is
-    /// why the whole batch can be addable with the pickers hidden entirely.</para>
+    /// <para>A real part arms on the choice of a POSITION alone, because every selectable position
+    /// is backed by a period (v7) and its span is derived. <c>Any date</c> is the one part that
+    /// needs the reader to type a bound.</para>
     /// </summary>
     private bool CanAdd => !_busy
         && SubjectInScope is not null
@@ -1029,10 +1045,9 @@
     }
 
     /// <summary>
-    /// A sequence was ticked or unticked. Unlike v5's single radio this does NOT touch the typed
-    /// range: with several sequences chosen, the typed bounds belong to the sequences that have no
-    /// period of their own, and overwriting them from one sequence's period would silently apply
-    /// that period's dates to the others (§11.4 decision 19).
+    /// A sequence was ticked or unticked. The typed range is untouched because a real part never has
+    /// one (v7): every selectable position derives its own span, and with several ticked each
+    /// carries ITS OWN dates (§11.4 decision 19).
     /// </summary>
     private async Task SetPositionAsync(int position, bool selected)
     {

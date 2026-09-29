@@ -536,8 +536,8 @@ public class EnrollmentExceptionsPageTests : BunitContext
         SetPositionAsync(page, position, ticked: true);
 
     /// <summary>Un-ticks that sequence. A checkbox is the one control in this section that can be
-    /// un-picked, which is what lets a test move from a DERIVED span back to a typed one without
-    /// re-picking the part.</summary>
+    /// un-picked, which is what lets a multi-select test drop one sequence without re-picking the
+    /// part.</summary>
     private static Task UntickPositionAsync(IRenderedComponent<EnrollmentExceptions> page, int position) =>
         SetPositionAsync(page, position, ticked: false);
 
@@ -557,8 +557,8 @@ public class EnrollmentExceptionsPageTests : BunitContext
             "a real part puts the position choices on offer"));
 
     /// <summary>Drives the whole add section to a complete write: scope to the only subject,
-    /// choose the Term part, and choose the 1st position — whose period EXISTS in the fixture,
-    /// so the range arrives filled.</summary>
+    /// choose the Term part, and choose the 1st position — whose period EXISTS in the fixture, so
+    /// the span is DERIVED and the range is hidden (v7).</summary>
     private static async Task FillAddSectionAsync(IRenderedComponent<EnrollmentExceptions> page)
     {
         await ScopeToSubjectAsync(page, TopicId);
@@ -777,7 +777,8 @@ public class EnrollmentExceptionsPageTests : BunitContext
     /// than something a button beside it has to undo. What the two share is the promise
     /// underneath: an unbound end reads as open IN WORDS, and the write affordance follows
     /// the same rule v3 tested (at least one bound, or there is nothing to write — neither
-    /// bound means "never offered", a different concept, §2.2).
+    /// bound means "never offered", a different concept, §2.2). v7 adds the other half: the
+    /// range belongs to the FREE WINDOW, and the Position row replaces it for a real part.
     /// </summary>
     [TestMethod]
     public async Task OpenEnds_ReadAsAnyStartAndAnyDate_AndGateTheWrite()
@@ -787,7 +788,8 @@ public class EnrollmentExceptionsPageTests : BunitContext
         AwaitSubjectFilter(harness.Page);
         await ScopeToSubjectAsync(harness.Page, TopicId);
 
-        // The open state is NAMED, not implied by a missing value or a button's absence.
+        // The page lands on the free window, which is the ONE part that keeps the range: the
+        // open state is NAMED, not implied by a missing value or a button's absence.
         DatePicker(harness.Page, "exception-start-date").Placeholder.Should().Be("(any start)");
         DatePicker(harness.Page, "exception-end-date").Placeholder.Should().Be("(any end)");
         harness.Page.FindAll(".clear-date").Should().BeEmpty(
@@ -797,33 +799,29 @@ public class EnrollmentExceptionsPageTests : BunitContext
         harness.Page.Find(".add-exception").GetAttribute("disabled").Should().NotBeNull(
             "a subject alone is not a write — the range needs at least one bound");
 
-        // A chosen sequence whose period EXISTS derives the whole span, so the pickers are
-        // REMOVED ENTIRELY — no derived-span text either (v6 §11.2 decision 17: the owner's
-        // "keep span fully silent"). Nothing is typed, so the write is armed on the choice
-        // alone; the derived dates are asserted where they are WRITTEN, not shown here.
-        await SelectDivisionAsync(harness.Page, AcademicYearDivision.Terms);
-        await ChoosePositionAsync(harness.Page, 1);
-        harness.Page.WaitForAssertion(() => harness.Page.Find(".add-exception").GetAttribute("disabled")
-            .Should().BeNull("a subject plus a sequence whose span is derived is a complete write"));
-        harness.Page.FindAll(".span-group").Should().BeEmpty(
-            "the span is derived, so the range inputs are silent — not shown read-only");
-
-        // A sequence with NO period behind it is the documented flow (Q1) AND the guard that keeps
-        // this form reachable: that item's span falls back to typed bounds, so the pickers COME BACK
-        // and the write stays disarmed until one is typed. The fixture has no 4th-term period.
-        await UntickPositionAsync(harness.Page, 1);
-        await ChoosePositionAsync(harness.Page, 4);
-        harness.Page.WaitForAssertion(() => harness.Page.FindAll(".span-group").Should().NotBeEmpty(
-            "one sequence with no period puts the typed range back — the dead-end guard"));
-        harness.Page.Find(".add-exception").GetAttribute("disabled").Should().NotBeNull(
-            "and the write waits for the bound that sequence needs");
-
         // Typing ONE end is enough: an open end is a legitimate span rather than a hole in one.
         await SetDateAsync(harness.Page, "exception-end-date", Term1End.ToDateTime(TimeOnly.MinValue));
         harness.Page.WaitForAssertion(() => harness.Page.Find(".add-exception").GetAttribute("disabled")
             .Should().BeNull("one bound is enough"));
         DatePicker(harness.Page, "exception-start-date").Value.Should().BeNull(
             "the open start stays open — decision 12's placeholder, not a Clear button");
+
+        // A real part makes the range SILENT for the WHOLE part (v7): the Position row replaces it,
+        // and a position with no period behind it renders but is DISABLED. The fixture has no
+        // 4th-term period, so that box is the discriminator for the v7 rule.
+        await SelectDivisionAsync(harness.Page, AcademicYearDivision.Terms);
+        AwaitPositions(harness.Page);
+        harness.Page.FindAll(".span-group").Should().BeEmpty(
+            "every real part hides the range — the Position row is the only control left (v7)");
+        PositionBoxes(harness.Page)[3].Instance.Disabled.Should().BeTrue(
+            "the 4th term has no period, and the range is silent, so it could never produce a write");
+        harness.Page.Find(".add-exception").GetAttribute("disabled").Should().NotBeNull(
+            "and with no position ticked yet there is nothing to write");
+
+        // The 1st term HAS a period, so choosing it derives the whole span and arms the write.
+        await ChoosePositionAsync(harness.Page, 1);
+        harness.Page.WaitForAssertion(() => harness.Page.Find(".add-exception").GetAttribute("disabled")
+            .Should().BeNull("a subject plus a sequence whose span is derived is a complete write"));
     }
 
     /// <summary>
@@ -1020,8 +1018,8 @@ public class EnrollmentExceptionsPageTests : BunitContext
         await SelectDivisionAsync(harness.Page, AcademicYearDivision.Terms);
         AwaitPositions(harness.Page);
 
-        harness.Page.FindAll(".add-form .form-row--label-below").Should().HaveCount(5,
-            "choosing a real part is what puts the position row on the form");
+        harness.Page.FindAll(".add-form .form-row--label-below").Should().HaveCount(3,
+            "a real part swaps the two range ends for the position row (v7): Fill from / Position / Reason");
         harness.Page.FindAll("[aria-label='Position']").Should().HaveCount(1,
             "and the choices are a NAMED group of checkboxes, not anonymous ones");
     }
@@ -1151,11 +1149,11 @@ public class EnrollmentExceptionsPageTests : BunitContext
     }
 
     /// <summary>
-    /// Q5 and Q1 in one assertion. The ladder is 1st–4th ALWAYS, extended by any higher position the
-    /// tenant has declared — here a 5th term — so a 5th appears the moment a tenant creates one. And
-    /// it is deliberately NOT limited to the periods that exist: 2nd, 3rd and 4th are on offer even
-    /// though the fixture has only 1st- and 5th-term periods, because the position is structural and
-    /// the reader may type the dates for a term the calendar has not been built for yet.
+    /// Q5 and Q1 in one assertion. The ladder RENDERS 1st–4th always, extended by any higher
+    /// position the tenant has declared — here a 5th term — so a 5th appears the moment a tenant
+    /// creates one, and its SHAPE never depends on which periods exist. v7 adds the other half: the
+    /// positions with no period behind them (2nd, 3rd, 4th here) render but are DISABLED, so the
+    /// structural ladder stays visible without offering a choice that could never be written.
     /// </summary>
     [TestMethod]
     public async Task Positions_AreOneToFourPlusAnyHigherDeclared_NotOnlyTheExistingPeriods()
@@ -1171,52 +1169,57 @@ public class EnrollmentExceptionsPageTests : BunitContext
         AwaitPositions(harness.Page);
 
         PositionLabels(harness.Page).Should().BeEquivalentTo(new[] { "1st", "2nd", "3rd", "4th", "5th" },
-            "1st–4th always, plus the 5th the tenant declared (Q5) — and 2nd/3rd/4th although no such "
-            + "period exists, which is what makes the position structural rather than a period pick (Q1)");
+            "1st–4th always, plus the 5th the tenant declared (Q5) — the shape is structural (Q1)");
+
+        PositionBoxes(harness.Page).Select(b => b.Instance.Disabled).Should()
+            .BeEquivalentTo(new[] { false, true, true, true, false },
+                "v7: only the 1st and 5th — the positions this fixture has a period for — are selectable");
     }
 
     /// <summary>
-    /// Q1's intended flow, which is NOT an error. A position either supplies the WHOLE span or none
-    /// of it: the 1st term fills the range, and the 3rd — which this tenant has no period for —
-    /// clears it, so no stale span can masquerade as the chosen one's. The write then stays disabled
-    /// until the reader types a bound, and the body carries the position BESIDE those dates: the
-    /// ordinal and the span are deliberately allowed to disagree (§0 decision 15).
+    /// v7 REPLACES v6's "a sequence with no period puts the typed range back" flow. The range is now
+    /// silent for EVERY real part, so a position the tenant has no period for could never satisfy
+    /// <c>CanAdd</c> — it renders (the ladder is structural, Q5) but is DISABLED, and the range stays
+    /// hidden. Multi-select is preserved for the positions that DO have periods: ticking two of them
+    /// writes one row per sequence in ONE request (§11.3 decision 18).
     /// </summary>
     [TestMethod]
-    public async Task PositionWithNoMatchingPeriod_LeavesTheRangeEmpty_AndTakesTheTypedDates()
+    public async Task PositionsWithoutAPeriod_AreDisabled_AndTheRangeStaysHidden()
     {
-        var harness = RenderPage(query: GradeOwnerQuery, exceptionsJson: "[]");
+        var harness = RenderPage(
+            query: GradeOwnerQuery,
+            exceptionsJson: "[]",
+            periodsJson: PeriodsWithFifthTermJson());
 
         AwaitSubjectFilter(harness.Page);
         await ScopeToSubjectAsync(harness.Page, TopicId);
         await SelectDivisionAsync(harness.Page, AcademicYearDivision.Terms);
+        AwaitPositions(harness.Page);
 
-        // The 1st term HAS a period, so its span is DERIVED and the range inputs are SILENT
-        // (v6 §11.2 decision 17) — nothing is shown and nothing needs typing.
+        // 1st and 5th have periods; 2nd, 3rd and 4th do not, and cannot be chosen at all.
+        PositionBoxes(harness.Page).Select(b => b.Instance.Disabled).Should()
+            .BeEquivalentTo(new[] { false, true, true, true, false },
+                "a position with no period behind it cannot supply a span, so it is not selectable");
+
+        // The 1st term HAS a period: its span is DERIVED and the range is SILENT for the whole real
+        // part (v7) — nothing is shown and nothing needs typing.
         await ChoosePositionAsync(harness.Page, 1);
         harness.Page.WaitForAssertion(() => harness.Page.Find(".add-exception").GetAttribute("disabled")
             .Should().BeNull("a derived span is a complete write on the choice alone"));
         harness.Page.FindAll(".span-group").Should().BeEmpty(
-            "the derived span is not shown at all — not even read-only");
+            "the range is hidden for every real part — not shown read-only");
 
-        // Ticking the 3rd term ADDS to the selection (multi-select) and it has no period, so the
-        // typed range comes BACK: that item's span falls back to bounds the reader supplies. That
-        // is the half of this test that v6 keeps — and the guard that keeps the form reachable.
-        await ChoosePositionAsync(harness.Page, 3);
-        harness.Page.WaitForAssertion(() => harness.Page.FindAll(".span-group").Should().NotBeEmpty(
-            "one sequence with no period puts the typed range back — the dead-end guard"));
-        harness.Page.WaitForAssertion(() =>
-        {
-            DatePicker(harness.Page, "exception-start-date").Value.Should().BeNull(
-                "nothing auto-fills: the typed bounds belong to the sequence that needs them, not to the one whose period supplied dates");
-            DatePicker(harness.Page, "exception-end-date").Value.Should().BeNull();
-            harness.Page.Find(".add-exception").GetAttribute("disabled").Should().NotBeNull(
-                "and with that item unbounded there is nothing to write — that is the flow, not a failure");
-        });
+        // Multi-select still writes one row per chosen sequence (§11.3 decision 18): the 5th is this
+        // fixture's second position WITH a period, and both ordinals must travel. Un-ticking is
+        // exercised first, because a checkbox is the one control here that can be un-picked.
+        await ChoosePositionAsync(harness.Page, 5);
+        await UntickPositionAsync(harness.Page, 5);
+        PositionBoxes(harness.Page).Count(b => b.Instance.Value).Should().Be(1,
+            "un-ticking drops that sequence from the set without re-picking the part");
+        await ChoosePositionAsync(harness.Page, 5);
 
-        await SetDateAsync(harness.Page, "exception-start-date", new DateTime(2027, 9, 1));
-        harness.Page.WaitForAssertion(() => harness.Page.Find(".add-exception").GetAttribute("disabled").Should()
-            .BeNull("one typed bound is enough"));
+        harness.Page.FindAll(".span-group").Should().BeEmpty(
+            "two derived sequences need nothing typed either");
         harness.Page.Find(".add-exception").Click();
 
         harness.Page.WaitForAssertion(() => harness.Handler.Calls.Should()
@@ -1224,13 +1227,11 @@ public class EnrollmentExceptionsPageTests : BunitContext
 
         var post = harness.Handler.Calls.Single(c => c.Method == "POST");
         post.Body.Should().Contain("\"division\":1");
-        post.Body.Should().Contain("\"ordinal\":1",
-            "v6 §11.3: the FIRST chosen sequence travels too — the selection is a SET written as one "
-            + "row per sequence, not the last tick replacing the rest");
-        post.Body.Should().Contain("\"ordinal\":3",
-            "the position is descriptive: it travels even though no period backs it");
-        post.Body.Should().Contain("\"startDate\":\"2027-09-01\"", "the dates the reader typed");
-        post.Body.Should().Contain("\"endDate\":null", "and the open end stays a legitimate bound");
+        post.Body.Should().Contain("\"ordinal\":1", "the first chosen sequence travels");
+        post.Body.Should().Contain("\"ordinal\":5",
+            "and the second — the selection is a SET written as one row per sequence, not a replacement");
+        post.Body.Should().Contain($"\"startDate\":\"{Term1Start:yyyy-MM-dd}\"",
+            "the 1st term's own period supplies that item's span");
     }
 
     /// <summary>
