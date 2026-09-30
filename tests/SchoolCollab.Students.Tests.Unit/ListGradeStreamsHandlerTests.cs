@@ -120,6 +120,41 @@ public class ListGradeStreamsHandlerTests
         result.Should().BeEmpty("a deleted coded value must not render as a blank row");
     }
 
+    // ── AC7: the BRIDGE row's order is the listing authority ────────────────
+
+    [TestMethod]
+    public async Task OrdersByTheBridgeDisplayOrder_NotByTheCodedValues()
+    {
+        using var s = new StudentsTestScope("lgs-order");
+        var gradeLevelId = await SeedGradeAsync(s);
+        var firstStreamId = Guid.NewGuid();
+        var secondStreamId = Guid.NewGuid();
+        // The second bridge row holds position 0, so it must be listed FIRST even
+        // though its coded value carries the HIGHER catalogue order.
+        await s.GradeStreamAssignments.AddOrReuseAsync(
+            GradeStreamAssignment.Create(gradeLevelId, firstStreamId, 1));
+        await s.GradeStreamAssignments.AddOrReuseAsync(
+            GradeStreamAssignment.Create(gradeLevelId, secondStreamId, 0));
+
+        var api = new StubCodedValuesApi
+        {
+            Catalogue =
+            [
+                StreamDtoFactory.Stream(firstStreamId, "5A", "Grade 5 - A", displayOrder: 7),
+                StreamDtoFactory.Stream(secondStreamId, "5B", "Grade 5 - B", displayOrder: 9),
+            ],
+        };
+
+        var result = await NewHandler(s, api).HandleAsync(new ListGradeStreams(gradeLevelId));
+
+        result.Select(x => x.StreamCodedValueId).Should().Equal(
+            new[] { secondStreamId, firstStreamId },
+            "the listing follows the bridge DisplayOrder, not the coded value's");
+        result.Select(x => x.DisplayOrder).Should().Equal(
+            new[] { 0, 1 },
+            "the DTO carries the BRIDGE order (0/1), not the catalogue order (7/9)");
+    }
+
     // ── AC10: cross-tenant isolation ────────────────────────────────────────
 
     [TestMethod]

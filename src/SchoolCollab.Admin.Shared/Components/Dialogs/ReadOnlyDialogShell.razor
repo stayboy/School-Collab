@@ -1,0 +1,57 @@
+@* Shared shell for a READ-ONLY dialog — the counterpart to DialogShellFooter for
+   dialogs that are NOT a DialogShellBase (no model / form / submit, opened via
+   DialogServiceExtensions.ShowReadonlyDialogAsync). It owns the three structural
+   pieces every one of them needs, so no dialog re-declares them:
+
+     <Toolbar>      optional fixed content ABOVE the scroll region — an assign
+                    picker, an error bar, a filter. Rendered as DIRECT children of
+                    the root (not wrapped), so omitting the slot costs no gap.
+     ChildContent   the ONE scroll region (a list, a FluentDataGrid, …). The content
+                    keeps its NATURAL height: a grid here must NOT be given
+                    `flex: 1 1 auto` (that stretches its rows) and must not carry its
+                    own overflow/max-height (it would become the sticky context and
+                    scroll its header away — see LandingPage.razor.css).
+     <Footer>       the action row: last child, pinned to the dialog's bottom.
+
+   WHY the ROOT carries the height (§7 of .github/skills/dialog-ui/SKILL.md):
+   FluentUI 4.14.2 pins the dialog BOX (`::part(control)` =
+   `calc(var(--dialog-height) - 2*padding)`, default 480px) while the BODY
+   (`.fluent-dialog-body`) stays `height: auto`. Passing `DialogParameters.Height`
+   therefore grows the box without growing the body, leaving the action row stranded
+   MID-DIALOG with dead space under it. A definite, capped height HERE gives the body
+   something to grow to, and the flex column hands the slack to the scroll region.
+
+   Usage (the caller's own root class goes in `Class`, so its scoped CSS and tests
+   keep working; the `readonly-dialog*` classes belong to this shell alone):
+
+     <ReadOnlyDialogShell Class="my-dialog">
+         <Toolbar>…optional…</Toolbar>
+         …the scrollable content…
+         <Footer><FluentButton OnClick="CloseAsync">Close</FluentButton></Footer>
+     </ReadOnlyDialogShell> *@
+
+<div class="readonly-dialog @Class">
+    @Toolbar
+    <div class="readonly-dialog__scroll">
+        @ChildContent
+    </div>
+    <div class="readonly-dialog__footer">
+        @Footer
+    </div>
+</div>
+
+@code {
+    /// <summary>Optional fixed content above the scroll region (assign picker, error
+    /// bar, …). Omit the slot and nothing renders — no phantom gap.</summary>
+    [Parameter] public RenderFragment? Toolbar { get; set; }
+
+    /// <summary>The scroll region's content. Keep it at its natural height — the
+    /// shell, not the content, owns the scrolling.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>The action row. Always the last child, pinned to the dialog's bottom.</summary>
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    /// <summary>The caller's own root class, appended to <c>readonly-dialog</c>.</summary>
+    [Parameter] public string? Class { get; set; }
+}

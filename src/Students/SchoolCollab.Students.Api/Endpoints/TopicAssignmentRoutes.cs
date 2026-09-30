@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.AssignGradeTopic;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.AssignActivityGroupTopic;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.RemoveTopicAssignment;
+using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.SetGradeTopicOrder;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentPeriod;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentTags;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicAssignments;
@@ -127,9 +128,34 @@ public static class TopicAssignmentRoutes
             }
         });
 
+        // Manual reorder of a grade's subject list: moves the ASSIGNMENT to
+        // position `order` (bridge DisplayOrder; swap semantics). The route is
+        // id-only, so the grade (and tenant) scope comes from the loaded row.
+        // 400 when the position is outside the grade's effective list; 404 for an
+        // unknown, other-tenant, activity-group, or non-effective assignment;
+        // 409 on a row-version conflict (the ContactRoutes catch shape).
+        group.MapPut("/topic-assignments/{id:guid}/order", async (
+            Guid id,
+            [FromBody] SetGradeTopicOrderRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<SetGradeTopicOrder> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SetGradeTopicOrder(id, req.Order), ct);
+                return Results.NoContent();
+            }
+            catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.NotFound(new { ex.Message }); }
+            catch (ConcurrencyException ex) { return Results.Conflict(new { ex.Message }); }
+        });
+
         return group;
     }
 }
 
 internal record UpdateTopicAssignmentTagsRequest(Guid? TopicStrandId);
 internal record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
+
+/// <summary>Request body for moving one subject assignment to a position in its grade's list.</summary>
+internal record SetGradeTopicOrderRequest(int Order);

@@ -190,7 +190,7 @@
                                          AddTitle="Add stream"
                                          AddAriaLabel="Add stream"
                                          OnAddClick="OpenStreamCreateAsync"
-                                         ViewAllAsDialog="true"
+                                         OnViewAllClick="OpenStreamsViewAllAsync"
                                          ViewAllText="View all streams"
                                          Items="@(_streams ?? [])"
                                          EmptyMessage="No streams defined for this grade yet."
@@ -357,6 +357,9 @@
     private GradeTopicCurriculumDto CurriculumRow(Guid topicId) =>
         (_curriculum ?? []).FirstOrDefault(t => t.TopicId == topicId)
         ?? new GradeTopicCurriculumDto(
+            // A row the loaded curriculum has not (yet) seen — the empty bridge id is
+            // deliberate: this fallback only titles a dialog, it never reorders.
+            Guid.Empty,
             topicId,
             _catalog.TryGetValue(topicId, out var topic) ? topic.Name : "Subject",
             _catalog.TryGetValue(topicId, out var withCode) ? withCode.Code : null,
@@ -609,6 +612,50 @@
     }
 
     /// <summary>
+    /// Opens the Streams card's "View all" dialog. The card no longer uses
+    /// <c>ViewAllAsDialog</c> because the list is now reorderable: the page owns the
+    /// move callbacks (it owns the API client) and the card keeps its preview data
+    /// flow. The dialog receives the card's own full list, so the list it shows is
+    /// exactly the card's — already scope-filtered to this grade's bridge rows.
+    /// </summary>
+    private Task OpenStreamsViewAllAsync() =>
+        DialogService.ShowReadonlyDialogAsync<SectionListDialog<GradeStreamDto>>(
+            $"Streams · {_grade!.Name}",
+            new Dictionary<string, object?>
+            {
+                { SectionListDialog<GradeStreamDto>.ItemsKey, _streams ?? [] },
+                { SectionListDialog<GradeStreamDto>.TextSelectorKey, new Func<GradeStreamDto, string?>(s => s.Name) },
+                { SectionListDialog<GradeStreamDto>.EmptyMessageKey, "No streams defined for this grade yet." },
+                { SectionListDialog<GradeStreamDto>.MoveUpKey, new Func<GradeStreamDto, Task>(MoveStreamUpAsync) },
+                { SectionListDialog<GradeStreamDto>.MoveDownKey, new Func<GradeStreamDto, Task>(MoveStreamDownAsync) },
+                // The dialog swaps its own neighbours optimistically; this refreshes
+                // the card behind it so the preview matches the new order on close.
+                { SectionListDialog<GradeStreamDto>.OnChangedKey, new Func<Task>(() => ReloadStreamsAsync()) },
+            },
+            DialogSize.Medium);
+
+    private Task MoveStreamUpAsync(GradeStreamDto stream) => MoveStreamAsync(stream, -1);
+
+    private Task MoveStreamDownAsync(GradeStreamDto stream) => MoveStreamAsync(stream, +1);
+
+    /// <summary>
+    /// Moves one stream to its neighbour's position. The target position is the
+    /// neighbour's index in the page's own list — the same order the dialog renders.
+    /// Failures deliberately propagate: the dialog owns the user-facing error surface
+    /// (it is the visible modal) and its caller runs <c>OnChanged</c> only on success.
+    /// </summary>
+    private async Task MoveStreamAsync(GradeStreamDto stream, int delta)
+    {
+        if (_disposed || _grade is null) return;
+        var rows = _streams ?? [];
+        var index = Array.FindIndex(rows, s => s.AssignmentId == stream.AssignmentId);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= rows.Length) return;
+
+        await Api.SetGradeStreamOrderAsync(_grade.Id, stream.AssignmentId, target);
+    }
+
+    /// <summary>
     /// Streams card item primary affordance — opens the shared CodedValueDialog
     /// in Override mode to edit the stream's tenant display name. The full coded
     /// value is fetched first: the card rows come from the bridge read, which
@@ -770,21 +817,49 @@
         }
     }
 
-    private async Task AssignTopicAsync(Guid topicId)
+    /// <summary>
+    /// Assigns the topic to this grade and returns the REAL bridge assignment id, so
+    /// the Subjects dialog can append a row whose move buttons reorder the actual
+    /// assignment (an empty id would 404 on its first move).
+    /// </summary>
+    private async Task<Guid> AssignTopicAsync(Guid topicId)
     {
-        if (_disposed) return;
+        if (_disposed) return Guid.Empty;
         try
         {
-            await Api.AssignGradeTopicAsync(
+            var assignmentId = await Api.AssignGradeTopicAsync(
                 new AssignGradeTopicRequest(Id, topicId, DateOnly.FromDateTime(DateTime.UtcNow)));
-            if (_disposed) return;
+            if (_disposed) return Guid.Empty;
             await ReloadAssignedTopicsAsync();
+            return assignmentId;
         }
         catch (Exception ex)
         {
-            if (_disposed) return;
+            if (_disposed) return Guid.Empty;
             _topicsError = $"Could not assign topic: {ex.Message}";
+            return Guid.Empty;
         }
+    }
+
+    /// <summary>
+    /// Subjects "View all" reorder. The dialog hands back the row whose ▲/▼ was
+    /// clicked; the target position is that row's neighbour index in the page's own
+    /// curriculum list — the same order the dialog renders. Failures propagate so the
+    /// dialog (the visible modal) surfaces them; it runs <c>OnChanged</c> on success.
+    /// </summary>
+    private Task MoveTopicUpAsync(GradeTopicCurriculumDto topic) => MoveTopicAsync(topic, -1);
+
+    private Task MoveTopicDownAsync(GradeTopicCurriculumDto topic) => MoveTopicAsync(topic, +1);
+
+    private async Task MoveTopicAsync(GradeTopicCurriculumDto topic, int delta)
+    {
+        if (_disposed) return;
+        var rows = _curriculum ?? [];
+        var index = Array.FindIndex(rows, t => t.AssignmentId == topic.AssignmentId);
+        var target = index + delta;
+        if (index < 0 || target < 0 || target >= rows.Length) return;
+
+        await Api.SetGradeTopicOrderAsync(topic.AssignmentId, target);
     }
 
     private async Task OpenTopicsDialogAsync()
@@ -797,16 +872,24 @@
                 { GradeTopicsDialog.UnassignedTopicsKey, _unassignedTopics },
                 { GradeTopicsDialog.OpenStrandsKey, new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
-                { GradeTopicsDialog.AssignKey, new Func<Guid, Task>(AssignTopicAsync) },
+                { GradeTopicsDialog.AssignKey, new Func<Guid, Task<Guid>>(AssignTopicAsync) },
                 { GradeTopicsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
                 { GradeTopicsDialog.OpenEnrollmentExceptionsKey, new Func<Guid, Task>(OpenEnrollmentExceptionsForTopicAsync) },
+                { GradeTopicsDialog.EditKey, new Func<GradeTopicCurriculumDto, Task>(OpenTopicEditAsync) },
+                { GradeTopicsDialog.MoveUpKey, new Func<GradeTopicCurriculumDto, Task>(MoveTopicUpAsync) },
+                { GradeTopicsDialog.MoveDownKey, new Func<GradeTopicCurriculumDto, Task>(MoveTopicDownAsync) },
                 // Per-topic exception COUNTS, not lists: the dialog renders a count
                 // badge only, and a count map cannot collide on a repeated topic key.
                 { GradeTopicsDialog.ExceptionCountsByTopicKey, _exceptions
                     .GroupBy(x => x.TopicId)
                     .ToDictionary(g => g.Key, g => g.Count()) },
             },
-            DialogSize.Medium);
+            // ExtraLarge's 960px width carries the six columns. NO height argument:
+            // the dialog box is a FIXED-height box (FluentUI 4.14.2) and pinning it
+            // taller leaves the Close row stranded mid-dialog — the CONTENT ROOT owns
+            // the height instead (GradeTopicsDialog.razor.css, §"Dialog height" in
+            // .github/skills/dialog-ui/SKILL.md).
+            DialogSize.ExtraLarge);
         if (_disposed) return;
         await ReloadAssignedTopicsAsync();
     }

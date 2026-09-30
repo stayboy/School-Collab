@@ -32,6 +32,10 @@ internal sealed class GradeStreamAssignmentConfiguration : TenantEntityTypeConfi
         builder.Property(x => x.GradeLevelId).IsRequired();
         builder.Property(x => x.StreamCodedValueId).IsRequired();
 
+        // Ordering authority for the grade's stream list (the coded value's own
+        // DisplayOrder orders the cross-grade GRSTREAMS catalogue instead).
+        builder.Property(x => x.DisplayOrder).IsRequired().HasDefaultValue(0);
+
         builder.HasOne<GradeLevel>()
             .WithMany()
             .HasForeignKey(x => x.GradeLevelId)

@@ -56,7 +56,14 @@ public sealed class AssignGradeStreamHandler(
         }
 
         var assignment = await repository.AddOrReuseAsync(
-            GradeStreamAssignment.Create(gradeLevel.Id, command.StreamCodedValueId), cancellationToken);
+            GradeStreamAssignment.Create(
+                gradeLevel.Id,
+                command.StreamCodedValueId,
+                // Append at the END of the grade's stream list. A re-assign reuses the
+                // winner of the unique-index race and discards this candidate, so the
+                // existing row's position is never overwritten.
+                await repository.GetNextDisplayOrderAsync(gradeLevel.Id, cancellationToken)),
+            cancellationToken);
 
         await cache.RemoveByTagAsync("students", cancellationToken);
 

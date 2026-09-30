@@ -138,6 +138,42 @@ public class AssignGradeStreamHandlerTests
         (await s.Db.GradeStreamAssignments.CountAsync()).Should().Be(1);
     }
 
+    // ── AC9: append at the END of the grade's list ──────────────────────────
+
+    [TestMethod]
+    public async Task Assign_AppendsTheBridgeRowAtTheEndOfTheGradesList()
+    {
+        // The grid/card order is the bridge row's DisplayOrder, so a newly offered
+        // stream must land LAST — the factory default (0) would put it first.
+        using var s = new StudentsTestScope("ags-append");
+        var gradeLevelId = await SeedGradeAsync(s);
+        await s.GradeStreamAssignments.AddOrReuseAsync(
+            GradeStreamAssignment.Create(gradeLevelId, Guid.NewGuid(), 3));
+        var streamId = Guid.NewGuid();
+        var api = new StubCodedValuesApi()
+            .WithStream(StreamDtoFactory.Stream(streamId, "5B", "Grade 5 - B", version: "5B"));
+
+        var assignmentId = await NewHandler(s, api).HandleAsync(new AssignGradeStream(gradeLevelId, streamId));
+
+        var appended = await s.Db.GradeStreamAssignments.SingleAsync(x => x.Id == assignmentId);
+        appended.DisplayOrder.Should().Be(4, "a newly offered stream appends at the END (max + 1)");
+    }
+
+    [TestMethod]
+    public async Task Assign_OfAGradesFirstStream_GetsOrderZero()
+    {
+        using var s = new StudentsTestScope("ags-first-order");
+        var gradeLevelId = await SeedGradeAsync(s);
+        var streamId = Guid.NewGuid();
+        var api = new StubCodedValuesApi()
+            .WithStream(StreamDtoFactory.Stream(streamId, "5A", "Grade 5 - A"));
+
+        var assignmentId = await NewHandler(s, api).HandleAsync(new AssignGradeStream(gradeLevelId, streamId));
+
+        (await s.Db.GradeStreamAssignments.SingleAsync(x => x.Id == assignmentId))
+            .DisplayOrder.Should().Be(0);
+    }
+
     [TestMethod]
     public async Task UnknownGradeLevel_Throws_NotFound()
     {

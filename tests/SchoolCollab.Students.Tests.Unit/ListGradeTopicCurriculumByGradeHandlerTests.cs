@@ -84,6 +84,35 @@ public class ListGradeTopicCurriculumByGradeHandlerTests
         result.Should().BeEmpty();
     }
 
+    // ── AC8: the BRIDGE row's order is the listing authority ────────────────
+
+    [TestMethod]
+    public async Task OrdersByTheBridgeDisplayOrder_AndCarriesEveryAssignmentId()
+    {
+        using var s = new StudentsTestScope("curriculum-order");
+        var glId = await SeedGradeLevelAsync(s, "Grade 4");
+        var mathId = await SeedTopicAsync(s, "MATH", "Mathematics", 1);
+        var engId = await SeedTopicAsync(s, "ENG", "English", 2);
+
+        // The bridge orders deliberately INVERT the shared catalogue order
+        // (Mathematics is topic 1, English is topic 2), so the assertion cannot
+        // pass via Topic.DisplayOrder.
+        var english = GradeTopicAssignment.Create(glId, engId, Today(), displayOrder: 0);
+        var mathematics = GradeTopicAssignment.Create(glId, mathId, Today(), displayOrder: 1);
+        s.Db.GradeTopicAssignments.AddRange(english, mathematics);
+        await s.Db.SaveChangesAsync();
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeTopicCurriculumByGrade(glId, Today()));
+
+        result.Select(x => x.Name).Should().Equal(
+            new[] { "English", "Mathematics" },
+            "the listing follows the bridge DisplayOrder, not Topic.DisplayOrder");
+        result.Select(x => x.AssignmentId).Should().Equal(
+            new[] { english.Id, mathematics.Id },
+            "every row carries its own bridge assignment id, which the reorder PUT targets");
+        result.Should().OnlyContain(x => x.AssignmentId != Guid.Empty);
+    }
+
     [TestMethod]
     public async Task ExceptedTopic_IsStillListed_WhileTheFeedReadersExcludeIt()
     {

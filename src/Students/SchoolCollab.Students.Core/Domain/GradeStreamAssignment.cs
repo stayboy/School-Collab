@@ -49,14 +49,30 @@ public sealed class GradeStreamAssignment : ITenantEntity, IEntity, IAuditableEn
     /// </summary>
     public Guid StreamCodedValueId { get; private set; }
 
+    /// <summary>
+    /// Position of this offer in the grade's stream list. The <b>bridge row</b>
+    /// is the ordering authority (the coded value's own
+    /// <c>DisplayOrder</c> orders the cross-grade GRSTREAMS catalogue, a
+    /// different concern). Contiguous 0..n-1 per grade once normalised; the
+    /// migration backfills it from the listing order the UI rendered before the
+    /// column existed.
+    /// </summary>
+    public int DisplayOrder { get; private set; }
+
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
-    /// <summary>Creates a bridge row offering <paramref name="streamCodedValueId"/> for <paramref name="gradeLevelId"/>.</summary>
-    public static GradeStreamAssignment Create(Guid gradeLevelId, Guid streamCodedValueId)
+    /// <summary>
+    /// Creates a bridge row offering <paramref name="streamCodedValueId"/> for
+    /// <paramref name="gradeLevelId"/>. <paramref name="displayOrder"/> defaults to
+    /// 0 so existing callers (the migration seeder, tests) keep compiling; the
+    /// assign flow stamps the append-at-end position explicitly.
+    /// </summary>
+    public static GradeStreamAssignment Create(
+        Guid gradeLevelId, Guid streamCodedValueId, int displayOrder = 0)
     {
         var now = DateTimeOffset.UtcNow;
         var assignment = new GradeStreamAssignment
@@ -64,6 +80,7 @@ public sealed class GradeStreamAssignment : ITenantEntity, IEntity, IAuditableEn
             Id = Guid.NewGuid(),
             GradeLevelId = gradeLevelId,
             StreamCodedValueId = streamCodedValueId,
+            DisplayOrder = displayOrder,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -71,6 +88,18 @@ public sealed class GradeStreamAssignment : ITenantEntity, IEntity, IAuditableEn
         assignment._domainEvents.Add(
             new GradeStreamAssignedEvent(assignment.Id, gradeLevelId, streamCodedValueId));
         return assignment;
+    }
+
+    /// <summary>
+    /// Moves this offer to <paramref name="displayOrder"/>. The reorder handler
+    /// owns the swap semantics (normalise, then swap the mover with the row at the
+    /// requested position); this only stamps the value and the audit timestamp.
+    /// </summary>
+    public void SetDisplayOrder(int displayOrder)
+    {
+        if (DisplayOrder == displayOrder) return;
+        DisplayOrder = displayOrder;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void ClearDomainEvents() => _domainEvents.Clear();

@@ -128,7 +128,11 @@ public sealed class CreateTopicForGradeHandler(
                     today,
                     endDate: null,
                     topicStrandId: null,
-                    periodId: null)
+                    periodId: null,
+                    // Append at the END of the grade's subject list (bridge-create
+                    // branch only — the shared-topic/no-new-bridge path never stamps).
+                    displayOrder: await assignmentRepository.GetNextDisplayOrderAsync(
+                        command.GradeLevelId, cancellationToken))
                 .WithTenant(tenantProvider);
 
             await assignmentRepository.AddAsync(assignment, cancellationToken);

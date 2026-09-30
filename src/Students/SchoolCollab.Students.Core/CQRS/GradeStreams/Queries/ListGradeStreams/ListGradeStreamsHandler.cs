@@ -52,7 +52,7 @@ public sealed class ListGradeStreamsHandler(
                 cv.Attributes.FirstOrDefault(a => a.Key == GradeStreamAssignment.StreamVersionAttributeKey)?.Value,
                 cv.IsOverridden,
                 cv.IsDisabled,
-                cv.DisplayOrder));
+                assignment.DisplayOrder));
         }
 
         return [.. streams];

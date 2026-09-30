@@ -12,6 +12,7 @@ using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevels;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsForLanding;
 using SchoolCollab.Students.Core.CQRS.GradeStreams.Commands.AssignGradeStream;
 using SchoolCollab.Students.Core.CQRS.GradeStreams.Commands.RemoveGradeStream;
+using SchoolCollab.Students.Core.CQRS.GradeStreams.Commands.SetGradeStreamOrder;
 using SchoolCollab.Students.Core.CQRS.GradeStreams.Queries.ListGradeStreams;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicCurriculumByGrade;
@@ -209,6 +210,27 @@ public static class GradeLevelRoutes
             catch (InvalidOperationException ex) { return Results.NotFound(new { ex.Message }); }
         });
 
+        // Manual reorder: moves one stream to position `order` in this grade's
+        // list (bridge DisplayOrder; swap semantics). 400 when the position is
+        // outside the grade's list; 404 for an unknown/other-grade assignment;
+        // 409 on a row-version conflict (the ContactRoutes catch shape).
+        group.MapPut("/grade-levels/{id:guid}/streams/{assignmentId:guid}/order", async (
+            Guid id,
+            Guid assignmentId,
+            [FromBody] SetGradeStreamOrderRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<SetGradeStreamOrder> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SetGradeStreamOrder(id, assignmentId, req.Order), ct);
+                return Results.NoContent();
+            }
+            catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.NotFound(new { ex.Message }); }
+            catch (ConcurrencyException ex) { return Results.Conflict(new { ex.Message }); }
+        });
+
         // ── Per-grade notification policy (override; null fields inherit tenant default) ──
         group.MapGet("/grade-levels/{id:guid}/notification-policy", async (
             Guid id,
@@ -279,6 +301,9 @@ internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, strin
     int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
 internal record SetEnrollmentBlockedRequest(bool Blocked);
 internal record AssignGradeStreamRequest(Guid StreamCodedValueId);
+
+/// <summary>Request body for moving one stream to a position in its grade's list.</summary>
+internal record SetGradeStreamOrderRequest(int Order);
 internal record UpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);
 internal record UpsertGradeNotificationPolicyRequest(
     SchoolCollab.Core.Notifications.NotificationChannel[]? PreferredChannelOrder,

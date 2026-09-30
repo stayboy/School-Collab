@@ -79,8 +79,14 @@ public class GradeDialogsBunitTests : BunitContext
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, cv));
     }
 
+    /// <summary>The bridge row id for the fixture's topic. The reorder endpoints
+    /// target the ASSIGNMENT, not the topic (one topic can be assigned to several
+    /// grades), so the DTO carries one; a fixed value keeps the rendered markup
+    /// reproducible and never hands the move buttons an empty guid.</summary>
+    private static readonly Guid BridgeAssignmentId = Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000b1");
+
     private static GradeTopicCurriculumDto Topic(Guid id, string name, string code, int strands, int lessons) =>
-        new(id, name, code, strands, lessons);
+        new(BridgeAssignmentId, id, name, code, strands, lessons);
 
     private static TopicDto CatalogTopic(Guid id, string name, string code) =>
         new(id, null, code, name, null, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
@@ -92,7 +98,7 @@ public class GradeDialogsBunitTests : BunitContext
         GradeTopicCurriculumDto[]? topics = null,
         TopicDto[]? unassigned = null,
         Func<Guid, Task>? remove = null,
-        Func<Guid, Task>? assign = null)
+        Func<Guid, Task<Guid>>? assign = null)
     {
         var c = new DialogParameters();
         if (topics is not null) c[GradeTopicsDialog.TopicsKey] = topics;
@@ -115,8 +121,12 @@ public class GradeDialogsBunitTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics"));
         cut.Markup.Should().Contain("MATH", "topic code renders");
-        cut.Markup.Should().Contain("2 strands");
-        cut.Markup.Should().Contain("3 lessons");
+        // The View-all is a FluentDataGrid now: the strand count is the Strands
+        // cell's own text (that cell is the link into the strands dialog), and the
+        // lesson count keeps its "<n> lessons" tooltip.
+        var strandsCell = cut.FindAll("fluent-anchor[title='Strands']").Should().ContainSingle().Subject;
+        strandsCell.TextContent.Trim().Should().Be("2", "the strands column shows the topic's strand count");
+        cut.Markup.Should().Contain("3 lessons", "the lessons column keeps its count tooltip");
         cut.Markup.Should().Contain("Close");
     }
 
@@ -173,12 +183,16 @@ public class GradeDialogsBunitTests : BunitContext
     public void TopicsDialog_Assign_MovesTopicFromPicker_ToAssignedList()
     {
         var topicId = Guid.NewGuid();
+        var assignmentId = Guid.NewGuid();
         var assigned = new System.Collections.Generic.List<Guid>();
         var cut = Render<GradeTopicsDialog>(p => p
             .Add(x => x.Content, TopicsContent(
                 topics: Array.Empty<GradeTopicCurriculumDto>(),
                 unassigned: new[] { CatalogTopic(topicId, "Science", "SCI") },
-                assign: new System.Func<Guid, Task>(id => { assigned.Add(id); return Task.CompletedTask; }))));
+                // The Assign callback returns the new bridge (assignment) id: the
+                // dialog appends nothing for an empty id, so the stub must return a
+                // real one for the row to reach the assigned list.
+                assign: new System.Func<Guid, Task<Guid>>(id => { assigned.Add(id); return Task.FromResult(assignmentId); }))));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science"));
 

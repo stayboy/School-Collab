@@ -55,7 +55,9 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
     public Guid? PeriodId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
-    public DateTimeOffset UpdatedAt { get; private set; }
+    // Protected: only a subtype-owned mutation (GradeTopicAssignment.SetDisplayOrder)
+    // stamps it from outside this base; the base's own mutators keep writing it directly.
+    public DateTimeOffset UpdatedAt { get; protected set; }
 
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
