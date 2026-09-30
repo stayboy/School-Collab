@@ -1,0 +1,102 @@
+@* Read-only "View all" list dialog backing a &lt;SectionCard&gt; footer anchor
+   when the card is opened in ViewAllAsDialog mode. It renders THIS card's
+   full item list — the same data source the card preview shows — so the list
+   is always the page's own (already scope-filtered) data. Use it when no
+   dedicated filtered list page exists for the card's entity (e.g. the
+   grade-detail Streams card, whose source is the GradeStreamAssignment
+   bridge and NOT the cross-grade GRSTREAMS coded-value catalogue).
+
+   Follows the established read-only dialog pattern (SubPeriodsListDialog /
+   GuardianContactsDialog / GradeTopicsDialog): NOT a DialogShellBase (no
+   model/form/result), opened via DialogServiceExtensions.ShowReadonlyDialogAsync,
+   reads its inputs from Content.TryGet&lt;T&gt;(key) — NOT from separate
+   [Parameter]s, because FluentUI renders dialog content via DynamicComponent
+   with only { "Content": &lt;DialogParameters&gt; } and does not spread the
+   indexer entries (see documents/solution/dialog-parameter-binding.md) — and
+   closes via the cascading FluentDialog reference.
+
+   Presentational only: rows are not clickable and carry no actions. The card
+   itself owns edit/add affordances for the same items. *@
+@implements IDialogContentComponent<DialogParameters>
+@using Microsoft.FluentUI.AspNetCore.Components
+@typeparam TItem
+
+<div class="section-list-dialog">
+    @if (_items.Length == 0)
+    {
+        <div class="section-list-dialog__empty">@_emptyMessage</div>
+    }
+    else
+    {
+        <div class="section-list-dialog__list">
+            @foreach (var item in _items)
+            {
+                <div class="section-list-dialog__row">
+                    <span class="section-list-dialog__name">@_textSelector(item)</span>
+                    @if (_metaSelector?.Invoke(item) is { } metaParts && metaParts.Length > 0)
+                    {
+                        <div class="section-list-dialog__meta">
+                            @for (var i = 0; i < metaParts.Length; i++)
+                            {
+                                <span>@metaParts[i]</span>
+                                @if (i < metaParts.Length - 1)
+                                {
+                                    <span class="section-list-dialog__meta-sep" aria-hidden="true">|</span>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+    </div>
+</div>
+
+@code {
+    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
+    /// indexer). Exposed so callers (SectionCard) set the same keys this
+    /// dialog reads here.</summary>
+    public const string ItemsKey = nameof(Items);
+    public const string TextSelectorKey = nameof(TextSelector);
+    public const string MetaSelectorKey = nameof(MetaSelector);
+    public const string EmptyMessageKey = nameof(EmptyMessage);
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    [Parameter] public DialogParameters Content { get; set; } = default!;
+
+    // Snapshot fields: the dialog is presentational and opened once with the
+    // card's current data, so everything is read from Content in OnInitialized
+    // (the card owns refreshes; it re-opens the dialog with fresh entries).
+    private TItem[] _items = [];
+    private Func<TItem, string?> _textSelector = static _ => string.Empty;
+    private Func<TItem, string[]?>? _metaSelector;
+    private string _emptyMessage = "No items yet.";
+
+    // Placeholder members so the key constants can use nameof(...) and stay
+    // rename-safe together with their readers.
+    private TItem[] Items => _items;
+    private Func<TItem, string?> TextSelector => _textSelector;
+    private Func<TItem, string[]?>? MetaSelector => _metaSelector;
+    private string EmptyMessage => _emptyMessage;
+
+    /// <summary>Safely reads a key from <see cref="Content"/> (the
+    /// DialogParameters indexer throws <see cref="KeyNotFoundException"/> for a
+    /// missing key, so use <c>TryGet</c>). Returns default when absent.</summary>
+    private T? Get<T>(string key) => Content is { } c ? c.TryGet<T>(key) : default;
+
+    /// <summary>Invokes the footer Close anchor (and the X / overlay dismiss,
+    /// which BuildShellParameters keeps enabled for read-only dialogs).
+    /// <see cref="CloseAsync"/> short-circuits when null.</summary>
+    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+
+    protected override void OnInitialized()
+    {
+        _items = Get<TItem[]>(ItemsKey) ?? [];
+        _textSelector = Get<Func<TItem, string?>>(TextSelectorKey) ?? (_ => string.Empty);
+        _metaSelector = Get<Func<TItem, string[]?>>(MetaSelectorKey);
+        _emptyMessage = Get<string>(EmptyMessageKey) ?? "No items yet.";
+    }
+}

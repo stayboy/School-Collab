@@ -1,5 +1,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 @typeparam TItem
 
 <FluentCard class="section-card-wrapper" AreaRestricted="false">
@@ -103,6 +105,12 @@
         else if (OnViewAllClick is not null)
         {
             <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="OnViewAllClick" IconEnd="@FluentIcons.ArrowRight">
+                @ViewAllText (@Count)
+            </FluentAnchor>
+        }
+        else if (ViewAllAsDialog)
+        {
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="OpenViewAllDialogAsync" IconEnd="@FluentIcons.ArrowRight">
                 @ViewAllText (@Count)
             </FluentAnchor>
         }
@@ -270,6 +278,22 @@
     [Parameter] public Func<Task>? OnViewAllClick { get; set; }
 
     /// <summary>
+    /// Opens <see cref="SectionListDialog{TItem}"/> from the "View all" anchor
+    /// instead of navigating. The dialog receives THIS card's title, full
+    /// <see cref="Items"/> and row selectors, so the list it shows is exactly
+    /// the card's own data — already scope-filtered by the hosting page (e.g.
+    /// the grade detail's Streams card, backed by the grade's
+    /// <c>GradeStreamAssignment</c> bridge rows, not the cross-grade
+    /// <c>GRSTREAMS</c> coded-value catalogue). Use it when no dedicated
+    /// filtered list page exists for the card's entity. Ignored when
+    /// <see cref="ViewAllNavigationUrl"/> or <see cref="OnViewAllClick"/> is
+    /// set. Requires the built-in row layout (i.e. <see cref="ItemTextSelector"/>
+    /// set); a custom <see cref="ItemTemplate"/> card should wire
+    /// <see cref="OnViewAllClick"/> instead.
+    /// </summary>
+    [Parameter] public bool ViewAllAsDialog { get; set; }
+
+    /// <summary>
     /// Callback for "Add" button click.
     /// </summary>
     [Parameter, EditorRequired] public Func<Task>? OnAddClick { get; set; }
@@ -281,6 +305,22 @@
     /// null reference at the event-binder level.
     /// </summary>
     private Task HandleAddClickAsync() => OnAddClick?.Invoke() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Opens the shared read-only <see cref="SectionListDialog{TItem}"/> with
+    /// this card's full item list and row selectors. The dialog title is the
+    /// card title; it dismisses itself via the cascading FluentDialog.
+    /// </summary>
+    private Task OpenViewAllDialogAsync() =>
+        DialogService.ShowReadonlyDialogAsync<SectionListDialog<TItem>>(
+            Title,
+            new Dictionary<string, object?>
+            {
+                { SectionListDialog<TItem>.ItemsKey, Items ?? [] },
+                { SectionListDialog<TItem>.TextSelectorKey, ItemTextSelector },
+                { SectionListDialog<TItem>.MetaSelectorKey, ItemMetaSelector },
+                { SectionListDialog<TItem>.EmptyMessageKey, EmptyMessage },
+            });
 
     /// <summary>
     /// Central guard for EDIT item actions (<see cref="ItemOnClick"/>). When
