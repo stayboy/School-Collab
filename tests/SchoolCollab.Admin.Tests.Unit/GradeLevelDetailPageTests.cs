@@ -1056,15 +1056,18 @@ public class GradeLevelDetailPageTests : BunitContext
             "the badge text is rendered from that count by the ONE shared count formatter");
         // TRAP REPLACEMENT (ii), intent-preserving: v1 asserted the card carried NO
         // "Enrollment exceptions" editor. The guard's intent ("no inline editor; the
-        // affordance navigates") survives under the new mechanism — the kebab action is a
-        // NAVIGATING RowAction.Navigate carrying owner + topic, and it carries no callback
-        // at all, so no editor can be opened from the card.
-        source.Should().Contain("RowAction.Navigate(\"Enrollment exceptions\"",
-            "the card's exceptions affordance NAVIGATES to the management page");
-        source.Should().Contain("/students/enrollment-exceptions?gradeLevelId=",
-            "the navigation target carries the owner + topic so the page lands pre-selected");
-        source.Should().NotContain("RowAction.Callback(\"Enrollment exceptions\"",
-            "M3: wiring the exceptions affordance as a callback (which could open an editor) must fail this test");
+        // affordance OPENS the editor") survives under v8's mechanism — the kebab action is a
+        // CALLBACK that opens the EnrollmentExceptionsDialog scoped to this grade + subject
+        // (spec §5.2 v8), and it is the only path to the editor, so the card itself keeps no
+        // list, no form and no period field.
+        source.Should().Contain("RowAction.Callback(\"Enrollment exceptions\"",
+            "the card's exceptions affordance OPENS the management dialog");
+        source.Should().Contain("EnrollmentExceptionsDialog.EnrollmentExceptionsModel",
+            "the callback builds the dialog's locked scope (owner + subject)");
+        source.Should().Contain("OpenEnrollmentExceptionsAsync(",
+            "and the callback is the dialog-opening method — not a second inline editor");
+        source.Should().NotContain("RowAction.Navigate(\"Enrollment exceptions\"",
+            "M3: wiring the exceptions affordance as a navigation (to the retired page) must fail this test");
         source.Should().Contain("ItemOnClick=\"t => OpenTopicEditAsync(t)\"", "Subjects card name opens the topic edit dialog");
         source.Should().Contain("ItemKeySelector=\"t => t.TopicId\"", "Subjects card opts into the central edit-key guard (TopicId)");
         source.Should().Contain("GradeTopicsDialog.ExceptionCountsByTopicKey",

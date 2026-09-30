@@ -16,6 +16,9 @@
      Error       — when non-empty, renders a red FluentMessageBar above
                    the button row.
      SubmitText  — the submit button label (default "Save").
+     CancelText  — the Cancel button label (default "Cancel"; dialogs whose
+                   footer closes a management surface rather than
+                   cancelling an edit pass e.g. "Close").
      OnCancel    — invoked when the Cancel button is clicked (typically
                    bound to DialogShellBase.HandleCancelAsync).
      ShowSubmit  — when false, hides the Submit button (used by dialogs that
@@ -32,7 +35,7 @@
     <FluentButton Appearance="Appearance.Outline"
                   OnClick="OnCancel"
                   Disabled="@Saving">
-        Cancel
+        @CancelText
     </FluentButton>
     @if (ShowSubmit)
     {
@@ -69,6 +72,13 @@
 
     /// <summary>Submit button label. Default: "Save".</summary>
     [Parameter] public string SubmitText { get; set; } = "Save";
+
+    /// <summary>
+    /// Cancel button label. Default: "Cancel". Dialogs whose footer closes a
+    /// management surface instead of cancelling an edit pass the label they want
+    /// (e.g. "Close").
+    /// </summary>
+    [Parameter] public string CancelText { get; set; } = "Cancel";
 
     /// <summary>Label shown while <paramref name="Saving"/> is true. Default: "Saving...".</summary>
     [Parameter] public string SavingText { get; set; } = "Saving...";
