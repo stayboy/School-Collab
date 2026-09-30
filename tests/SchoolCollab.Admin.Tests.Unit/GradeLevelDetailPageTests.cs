@@ -878,6 +878,45 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("Remove", "streams kebab offers remove");
     }
 
+    /// <summary>
+    /// Regression: the Streams card's "View all" must open the GRADE-scoped
+    /// read-only list dialog (the card's own bridge-loaded data), never
+    /// navigate to the unfiltered <c>/coded-values/GRSTREAMS/children</c>
+    /// catalogue page. The card's source is the <c>GradeStreamAssignment</c>
+    /// bridge, already filtered to this grade, so a cross-grade catalogue
+    /// link is the wrong target — the previous
+    /// <c>ViewAllNavigationUrl="/coded-values/GRSTREAMS/children"</c> wiring.
+    /// </summary>
+    [TestMethod]
+    public void Detail_StreamsCard_ViewAll_OpensGradeScopedListDialog_NotCataloguePage()
+    {
+        var gradeId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId), streamsJson: JsonSerializer.Serialize(new[]
+        {
+            StreamJson(Guid.NewGuid(), Guid.NewGuid(), gradeId, "Grade 5A", "GR5A"),
+            StreamJson(Guid.NewGuid(), Guid.NewGuid(), gradeId, "Grade 5B", "GR5B"),
+        }));
+
+        // DialogHost provides the FluentDialogProvider so the view-all dialog
+        // can render; the assertion is on the dialog's own markup.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all streams (2)"));
+
+        // The unfiltered catalogue navigation is gone from the card entirely.
+        cut.Markup.Should().NotContain("/coded-values/GRSTREAMS/children",
+            "the Streams card must never link to the cross-grade coded-values catalogue");
+
+        cut.FindAll("fluent-anchor")
+            .First(a => a.TextContent.Contains("View all streams", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => cut.FindAll(".section-list-dialog").Should().NotBeEmpty());
+        var dialog = cut.Find(".section-list-dialog");
+        dialog.TextContent.Should().Contain("Grade 5A", "the dialog lists this grade's streams");
+        dialog.TextContent.Should().Contain("Grade 5B", "the dialog lists this grade's streams");
+    }
+
     [TestMethod]
     public void Detail_StreamsCard_Remove_DeletesTheBridgeRow_AndNeverDisablesTheCodedValue()
     {
