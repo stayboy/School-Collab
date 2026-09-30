@@ -101,6 +101,7 @@ public class AcademicYearDivisionNoneBackCompatTests
             new StudentEnrollmentRepository(s.Db),
             new ActivePeriodProvider(s.Db, s.Tenants, s.Cache),
             new InMemoryGradeLevelRepository(s.Db),
+            s.GradeStreamAssignments,
             new StubCodedValuesApiClient(),
             publisher,
             s.Cache,
@@ -188,6 +189,9 @@ public class AcademicYearDivisionNoneBackCompatTests
 
     private sealed class StubCodedValuesApiClient : ICodedValuesApiClient
     {
+        public Task<StreamCodedValueDto[]> GetChildrenByParentCodeAsync(string parentCode, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<StreamCodedValueDto>());
+
         public Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
             => Task.FromResult<StreamCodedValueDto?>(new StreamCodedValueDto(
                 id, "GRSTREAMS_TEST", "Test Stream", null,

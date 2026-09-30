@@ -27,4 +27,13 @@ public sealed class FlagRoutedCodedValuesApiClient(
 
         return await httpClient.GetByIdAsync(id, ct);
     }
+
+    /// <summary>
+    /// Always delegates to the HTTP client: the local coded-value projection only
+    /// mirrors single-value reads (<c>by-id</c>), so there is no local
+    /// <c>by-parent</c> implementation to route to.
+    /// </summary>
+    public Task<StreamCodedValueDto[]> GetChildrenByParentCodeAsync(
+        string parentCode, CancellationToken ct = default) =>
+        httpClient.GetChildrenByParentCodeAsync(parentCode, ct);
 }

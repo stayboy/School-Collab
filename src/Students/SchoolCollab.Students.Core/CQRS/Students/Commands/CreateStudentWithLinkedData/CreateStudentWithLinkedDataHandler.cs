@@ -8,6 +8,7 @@ using SchoolCollab.Core.Features;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Contracts.Events;
+using SchoolCollab.Students.Core.CQRS.Enrollments;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
@@ -32,6 +33,7 @@ public sealed class CreateStudentWithLinkedDataHandler(
     ITenantProvider tenantProvider,
     IActivePeriodProvider activePeriodProvider,
     IGradeLevelRepository gradeLevelRepository,
+    IGradeStreamAssignmentRepository gradeStreamRepository,
     ICodedValuesApiClient codedValuesApi,
     IFeatureFlagService featureFlagService,
     ICompositeEnrollmentSpecification enrollmentSpecification,
@@ -286,32 +288,20 @@ public sealed class CreateStudentWithLinkedDataHandler(
         return guardian.Id;
     }
 
+    /// <summary>
+    /// FR-9: the enrollment target grade must OFFER the stream (a
+    /// <c>grade_stream_assignments</c> bridge row) — the shared rule in
+    /// <see cref="GradeStreamValidator"/>, identical to the enroll/transfer paths.
+    /// </summary>
     private async Task ValidateStreamAsync(
         Guid gradeLevelId,
         Guid streamCodedValueId,
         CancellationToken cancellationToken)
     {
-        // Resolve the grade's CodedValueId via the repository.
         var gradeLevel = await gradeLevelRepository.GetAsync(gradeLevelId, cancellationToken)
             ?? throw new GradeLevelNotFoundException(gradeLevelId);
-        var gradeCodedValueId = gradeLevel.CodedValueId;
 
-        // Fetch the stream coded value from the Settings API.
-        var stream = await codedValuesApi.GetByIdAsync(streamCodedValueId, cancellationToken)
-            ?? throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
-
-        var gradeLevelAttr = stream.Attributes
-            .FirstOrDefault(a => a.Key == "gradeLevel");
-        if (gradeLevelAttr is null)
-        {
-            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
-        }
-
-        if (!Guid.TryParse(gradeLevelAttr.Value, out var streamGradeCodedValueId)
-            || streamGradeCodedValueId != gradeCodedValueId)
-        {
-            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
-        }
+        await GradeStreamValidator.ValidateAsync(gradeStreamRepository, gradeLevel, streamCodedValueId, cancellationToken);
     }
 
     /// <summary>

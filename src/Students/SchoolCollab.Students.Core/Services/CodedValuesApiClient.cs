@@ -20,7 +20,10 @@ public record StreamCodedValueDto(
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyCollection<StreamAttributeDto> Attributes);
+    IReadOnlyCollection<StreamAttributeDto> Attributes,
+    bool IsOverridden = false,
+    string? DefaultName = null,
+    string? DefaultCode = null);
 
 public record StreamAttributeDto(string Key, string Value);
 
@@ -34,6 +37,17 @@ public interface ICodedValuesApiClient
     /// Fetches a coded value by its ID. Returns <c>null</c> if not found.
     /// </summary>
     Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetches the children of a parent coded value by the parent's <b>code</b>.
+    /// Backed by the Settings
+    /// <c>GET /api/coded-values/by-parent?parentCode=…</c> endpoint, which is
+    /// <b>override-resolving</b> (tenant overrides applied, <c>IsOverridden</c> /
+    /// <c>DefaultName</c> populated) and tenant-scoped in its cache key — the
+    /// stream read path needs both, so this is deliberately not the
+    /// tenant-independent <c>by-ids</c> endpoint.
+    /// </summary>
+    Task<StreamCodedValueDto[]> GetChildrenByParentCodeAsync(string parentCode, CancellationToken ct = default);
 }
 
 public sealed class CodedValuesApiClient(HttpClient http, ILogger<CodedValuesApiClient>? logger = null) : ICodedValuesApiClient
@@ -81,5 +95,13 @@ public sealed class CodedValuesApiClient(HttpClient http, ILogger<CodedValuesApi
         }
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<StreamCodedValueDto>(ct);
+    }
+
+    public async Task<StreamCodedValueDto[]> GetChildrenByParentCodeAsync(
+        string parentCode, CancellationToken ct = default)
+    {
+        var result = await http.GetFromJsonAsync<StreamCodedValueDto[]>(
+            $"/api/coded-values/by-parent?parentCode={Uri.EscapeDataString(parentCode)}", ct);
+        return result ?? [];
     }
 }

@@ -20,12 +20,21 @@ write path* — i.e. inside a `HandleAsync` that is persisting a mutation:
 
 | Caller → Callee | Site | Path | Data kind |
 |---|---|---|---|
-| Students → settings | `EnrollStudentHandler` grade materialize (`:57`) + stream validate (`:186`), `TransferStudentHandler` (`:86`), `CreateStudentWithLinkedDataHandler` (`:299`) | write | reference (coded values) |
+| Students → settings | `EnrollStudentHandler` grade materialize (`:57`), `AssignGradeStreamHandler` stream-version uniqueness read (`GetByIdAsync` + `by-parent`) | write | reference (coded values) |
 | Students → assignments | `ActivityGroupAssignmentQueryHttpClient` (delete-guard, FR-6) | write | live consistency |
 | Assignments → settings + students | `NotificationPolicyResolver` (from `PublishAssignmentCommandHandler`) | write | policy=config (reference) + recipients=live |
 | Assignments → students | `StudentsContactResolver`, `ActivityGroupLookupHttpClient` | write/read | live consistency |
 | AI server → settings | coded-values tools | read/tool | reference |
 | Admin shell → students/settings/assignments | UI flows | **originator** | n/a — the shell *is* the client |
+
+> **2026-09-29 (grade-streams round):** the enroll/transfer/create stream-validate
+> hop is GONE. The grade↔stream link is the `grade_stream_assignments` bridge in
+> the Students database, so the three enrollment write paths validate locally via
+> one shared `GradeStreamValidator` (a `grade_stream_assignments` read) and no
+> longer read the coded value's legacy `gradeLevel` attribute. The only remaining
+> Students → settings stream hop is `AssignGradeStreamHandler`'s
+> stream-version-uniqueness read (`GetByIdAsync` for the incoming version +
+> one override-resolving `by-parent` hop for the already-linked versions).
 
 Every module already publishes integration events through the outbox
 (`Settings`: `CodedValueCreated`/`CodedValueDisabled`; `Students`:
@@ -34,8 +43,8 @@ event-driven replication infrastructure is therefore already in place.
 
 ### Why this is a problem (evidence from the enroll investigation)
 
-The enroll-to-stream flow (`EnrollStudentHandler.ValidateStreamAsync`) hops to
-settings-api to resolve a coded value. This single hop produced, in one work
+The enroll-to-stream flow (`EnrollStudentHandler.ValidateStreamAsync`) used to
+hop to settings-api to resolve a coded value. This single hop produced, in one work
 session, a chain of failures that consumed the whole investigation:
 
 1. **Tenant not propagated API→API** — required a second custom

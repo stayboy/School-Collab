@@ -10,6 +10,9 @@ using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelByCodedVa
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelById;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevels;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsForLanding;
+using SchoolCollab.Students.Core.CQRS.GradeStreams.Commands.AssignGradeStream;
+using SchoolCollab.Students.Core.CQRS.GradeStreams.Commands.RemoveGradeStream;
+using SchoolCollab.Students.Core.CQRS.GradeStreams.Queries.ListGradeStreams;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicCurriculumByGrade;
 using SchoolCollab.Students.Core.CQRS.GradeNotificationPolicies.Commands.UpsertGradeNotificationPolicy;
@@ -165,6 +168,47 @@ public static class GradeLevelRoutes
             }
         });
 
+        // ── Grade level ↔ stream bridge (the card's read + add + remove path) ──
+        // The bridge row IS the link; the coded value's legacy `gradeLevel`
+        // attribute is no longer read or written.
+        group.MapGet("/grade-levels/{id:guid}/streams", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListGradeStreams, SchoolCollab.Students.Core.DTOs.GradeStreamDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListGradeStreams(id), ct)));
+
+        group.MapPost("/grade-levels/{id:guid}/streams", async (
+            Guid id,
+            [FromBody] AssignGradeStreamRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<AssignGradeStream, Guid> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var assignmentId = await handler.HandleAsync(new AssignGradeStream(id, req.StreamCodedValueId), ct);
+                return Results.Created($"/grade-levels/{id}/streams/{assignmentId}", new { id = assignmentId });
+            }
+            catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+            catch (DuplicateStreamAssignmentException ex) { return Results.Conflict(new { ex.Message }); }
+            catch (StreamGradeMismatchException ex) { return Results.BadRequest(new { ex.Message }); }
+        });
+
+        // Unassign: deletes the bridge row only. The coded value STAYS in the
+        // GRSTREAMS catalogue and its IsDisabled state is untouched.
+        group.MapDelete("/grade-levels/{id:guid}/streams/{assignmentId:guid}", async (
+            Guid id,
+            Guid assignmentId,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<RemoveGradeStream> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new RemoveGradeStream(id, assignmentId), ct);
+                return Results.NoContent();
+            }
+            catch (InvalidOperationException ex) { return Results.NotFound(new { ex.Message }); }
+        });
+
         // ── Per-grade notification policy (override; null fields inherit tenant default) ──
         group.MapGet("/grade-levels/{id:guid}/notification-policy", async (
             Guid id,
@@ -234,6 +278,7 @@ internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder
 internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, string Name, int DisplayOrder,
     int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
 internal record SetEnrollmentBlockedRequest(bool Blocked);
+internal record AssignGradeStreamRequest(Guid StreamCodedValueId);
 internal record UpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);
 internal record UpsertGradeNotificationPolicyRequest(
     SchoolCollab.Core.Notifications.NotificationChannel[]? PreferredChannelOrder,

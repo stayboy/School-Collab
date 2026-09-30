@@ -8,6 +8,7 @@
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SubjectEnrollmentExceptionDto = SchoolCollab.Students.Core.DTOs.SubjectEnrollmentExceptionDto
 @using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
+@using GradeStreamDto = SchoolCollab.Students.Core.DTOs.GradeStreamDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
@@ -183,20 +184,20 @@
                             {
                                 <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_streamsError</FluentMessageBar>
                             }
-                            <SectionCard TItem="CodedValueDto" Title="Streams"
+                            <SectionCard TItem="GradeStreamDto" Title="Streams"
                                          Icon="@FluentIcons.TextBulletList"
                                          Count="@(_streams?.Length ?? 0)"
                                          AddTitle="Add stream"
                                          AddAriaLabel="Add stream"
                                          OnAddClick="OpenStreamCreateAsync"
                                          ViewAllNavigationUrl="/coded-values/GRSTREAMS/children"
-                                         ViewAllText="Manage streams"
+                                         ViewAllText="All streams (catalogue)"
                                          Items="@(_streams ?? [])"
                                          EmptyMessage="No streams defined for this grade yet."
                                          Loading="@(_streams is null)"
                                          ItemTextSelector="s => s.Name"
                                          ItemOnClick="s => OpenStreamEditAsync(s)"
-                                         ItemKeySelector="s => s.Id"
+                                         ItemKeySelector="s => s.StreamCodedValueId"
                                          OnItemActionBlocked="OnStreamEditBlocked"
                                          ItemNameTitle="Edit stream">
                                 <ItemActions Context="s">
@@ -271,7 +272,7 @@
     // ── Teachers / Students ────────────────────────────────────────────────
     private TeacherWithRoleDto[]? _teachers;
     private StudentDto[]? _students;
-    private CodedValueDto[]? _streams;
+    private GradeStreamDto[]? _streams;
     private string? _streamsError;
     private TeacherDto[]? _allTeachers;
     private readonly Dictionary<Guid, string> _salutationNames = new();
@@ -541,35 +542,35 @@
     private void Back() => Nav.NavigateTo("/students/grade-levels");
 
     /// <summary>
-    /// Streams card "Add" affordance — opens the shared CodedValueDialog in
-    /// Create mode to add a new stream under GRSTREAMS, then tags it with this
-    /// grade's <c>gradeLevel</c> attribute so it shows up in the card (the card
-    /// filters GRSTREAMS children by that attribute).
+    /// Streams card "Add" affordance — opens <see cref="StreamCreateDialog"/>,
+    /// which offers a stream for this grade by inserting a bridge row: either by
+    /// picking an existing GRSTREAMS catalogue value (with a tenant override where
+    /// appropriate) or by creating a brand-new one. The coded value's legacy
+    /// <c>gradeLevel</c> attribute is no longer written.
     /// </summary>
     private async Task OpenStreamCreateAsync()
     {
         if (_disposed || _grade is null) return;
         try
         {
-            var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Streams.ToCode());
-            if (parent is null)
+            var model = new StreamCreateDialog.StreamCreateModel
             {
-                _error = "Could not locate the GRSTREAMS parent to create a stream under.";
-                return;
-            }
-
+                GradeLevelId = _grade.Id,
+                // Prevent offering the same coded value twice for this grade.
+                ExistingStreamCodedValueIds = (_streams ?? [])
+                    .Select(s => s.StreamCodedValueId)
+                    .ToHashSet(),
+            };
             var created = await DialogService.ShowShellDialogAsync<
-                CodedValueDialog,
-                CodedValueFormModel,
-                CodedValueDto>(
-                CodedValueFormModel.ForCreate(parent.Id),
+                StreamCreateDialog,
+                StreamCreateDialog.StreamCreateModel,
+                GradeStreamDto>(
+                model,
                 title: $"Add stream · {_grade.Name}",
-                size: DialogSize.Medium);
+                size: DialogSize.Large);
 
             if (created is not null && !_disposed)
             {
-                // Tag the new stream with this grade so it appears in the card.
-                await CodedValuesApi.SetAttributeAsync(created.Id, "gradeLevel", _grade.CodedValueId.ToString());
                 await ReloadStreamsAsync();
             }
         }
@@ -582,16 +583,17 @@
     }
 
     /// <summary>
-    /// Loads the grade's streams (GRSTREAMS coded values whose gradeLevel
-    /// attribute references this grade). Loaded separately so a failure here
-    /// only empties the Streams card rather than failing the whole page.
+    /// Loads the grade's streams from the bridge
+    /// (<c>GET /students/grade-levels/{id}/streams</c>) and resolves each bridge
+    /// row's coded-value metadata in one override-resolving Settings hop server-side.
+    /// Loaded separately so a failure here only empties the Streams card rather than
+    /// failing the whole page.
     /// </summary>
     private async Task ReloadStreamsAsync(CancellationToken ct = default)
     {
         try
         {
-            _streams = await CodedValuesApi.GetChildrenByParentCodeFilteredByAttributeAsync(
-                CodedValueParent.Streams.ToCode(), "gradeLevel", _grade!.CodedValueId.ToString(), ct) ?? [];
+            _streams = await Api.ListGradeStreamsAsync(Id, ct) ?? [];
             _streamsError = null;
         }
         catch (Exception ex)
@@ -600,20 +602,33 @@
             _streams = [];
             _streamsError = $"Could not load streams: {ex.Message}";
         }
+        // Invoked from child components (the Streams card's Add button and the row
+        // kebab menu) whose events re-render THEMSELVES, not this page. Without this,
+        // the SectionCard never receives the refreshed Items after an add/remove/edit.
+        if (!_disposed) StateHasChanged();
     }
 
     /// <summary>
     /// Streams card item primary affordance — opens the shared CodedValueDialog
-    /// in Override mode to edit the stream's tenant display name. Reloads the
-    /// card on a save.
+    /// in Override mode to edit the stream's tenant display name. The full coded
+    /// value is fetched first: the card rows come from the bridge read, which
+    /// carries only the resolved metadata the dialog model needs to seed from.
+    /// Reloads the card on a save.
     /// </summary>
-    private async Task OpenStreamEditAsync(CodedValueDto stream)
+    private async Task OpenStreamEditAsync(GradeStreamDto stream)
     {
+        var codedValue = await CodedValuesApi.GetByIdAsync(stream.StreamCodedValueId);
+        if (codedValue is null)
+        {
+            _streamsError = $"Could not load stream '{stream.Name}'.";
+            return;
+        }
+
         var updated = await DialogService.ShowShellDialogAsync<
             CodedValueDialog,
             CodedValueFormModel,
             CodedValueDto>(
-            CodedValueFormModel.ForOverride(stream, stream.IsOverridden),
+            CodedValueFormModel.ForOverride(codedValue, codedValue.IsOverridden),
             title: $"Edit stream · {stream.Name}",
             size: DialogSize.Medium);
         if (updated is not null && !_disposed)
@@ -625,11 +640,11 @@
     /// <summary>
     /// Row kebab for a Streams-card preview item. The stream name is the primary
     /// affordance (opens the edit dialog); the kebab holds the secondary actions
-    /// (Edit for discoverability + destructive Remove). Remove means disable —
-    /// the coded value is marked <c>isDisabled</c> (kept in the catalog, not hard
-    /// deleted), matching the coded-value lifecycle.
+    /// (Edit for discoverability + Remove). Remove deletes the grade's BRIDGE row
+    /// only — the coded value stays in the GRSTREAMS catalogue (it is not disabled
+    /// and not deleted), it is just no longer offered by this grade.
     /// </summary>
-    private IReadOnlyList<RowAction> BuildStreamRowActions(CodedValueDto stream) =>
+    private IReadOnlyList<RowAction> BuildStreamRowActions(GradeStreamDto stream) =>
         new List<RowAction>
         {
             RowAction.Callback("Edit", () => OpenStreamEditAsync(stream), FluentIcons.Edit),
@@ -639,23 +654,23 @@
                 () => RemoveStreamAsync(stream),
                 FluentIcons.Delete,
                 destructive: true,
-                confirmMessage: $"Remove stream '{stream.Name}'? The stream is disabled and hidden from this grade."),
+                confirmMessage: $"Stop offering stream '{stream.Name}' for this grade? The stream stays in the catalogue."),
         };
 
     /// <summary>
-    /// Streams card Remove — disables the stream (coded-value lifecycle, not a
-    /// hard delete) and reloads the card. Gated by the kebab's destructive
-    /// confirmation prompt.
+    /// Streams card Remove — deletes the grade↔stream bridge row and reloads the
+    /// card. The coded value is untouched (still in the GRSTREAMS catalogue with its
+    /// IsDisabled state unchanged). Gated by the kebab's destructive confirmation.
     /// </summary>
-    private async Task RemoveStreamAsync(CodedValueDto stream)
+    private async Task RemoveStreamAsync(GradeStreamDto stream)
     {
         if (_disposed) return;
         try
         {
-            await CodedValuesApi.DisableAsync(stream.Id);
+            await Api.RemoveGradeStreamAsync(Id, stream.AssignmentId);
             if (_disposed) return;
             await ReloadStreamsAsync();
-            Toast.ShowSuccess($"Stream '{stream.Name}' removed.");
+            Toast.ShowSuccess($"Stream '{stream.Name}' removed from this grade.");
         }
         catch (Exception ex)
         {
@@ -815,6 +830,9 @@
             Logger.LogWarning(ex, "Could not load enrollment exceptions for grade level {Id}", Id);
             _exceptions = [];
         }
+        // Invoked from child components (the Subjects card and the exceptions dialog)
+        // whose events re-render THEMSELVES, not this page.
+        if (!_disposed) StateHasChanged();
     }
 
     private async Task RemoveTopicAsync(Guid topicId)
@@ -1090,6 +1108,10 @@
             if (_disposed) return;
             _studentsError = $"Could not reload students: {ex.Message}";
         }
+        // Invoked from child components (the Students card's Add button / kebab menu)
+        // whose events re-render THEMSELVES, not this page. Without this, the
+        // SectionCard never receives the refreshed Items after an add/remove/transfer.
+        if (!_disposed) StateHasChanged();
     }
 
     /// <summary>

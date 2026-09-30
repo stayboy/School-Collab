@@ -1,0 +1,319 @@
+@*
+    StreamCreateDialog — opens from the grade-detail Streams card's Add button.
+
+    Offers a stream for the grade by inserting a bridge row
+    (grade_stream_assignments), replacing the legacy flow that wrote the
+    coded value's `gradeLevel` attribute. Two routes, mirroring
+    TopicCreateDialog:
+
+      * "Pick existing stream" pre-fills the fields from a GRSTREAMS catalogue
+        value (with a tenant override where appropriate) and then links it;
+      * leaving the picker on "None — new stream" creates a brand-new
+        GRSTREAMS child and links that.
+
+    The fields are shown read-only once a coded value is picked; the stealth
+    edit pencil switches to the editable inputs ("Update Fields" reflects the
+    edits locally without submitting — only "Add stream" persists). A picked
+    value already linked to this grade raises the duplicate warning bar and
+    disables submit.
+
+    The optional "Version label" writes the `streamVersion` attribute; it is
+    skipped entirely when blank (the assignment-time (grade, version)
+    uniqueness rule only fires on a non-empty label).
+*@
+@inherits DialogShellBase<StreamCreateDialog.StreamCreateModel, GradeStreamDto>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValues
+@inject ILogger<StreamCreateDialog> Logger
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Pick existing stream" For="stream-create-coded-value">
+            <div class="stream-create-pick-row">
+                <CodedValueDropdown @ref="_codedValueDropdown"
+                                    Parent="CodedValueParent.Streams"
+                                    @bind-SelectedId="Model.CodedValueId"
+                                    @bind-SelectedId:after="OnCodedValuePicked"
+                                    ShowEmptyOption="true"
+                                    EmptyOptionText="None — new stream"
+                                    Placeholder="Optional — pick an existing stream to pre-fill" />
+                <FluentButton Appearance="Appearance.Stealth"
+                              Class="stream-icon-button"
+                              IconStart="@FluentIcons.Edit"
+                              Title="Edit the stream fields"
+                              aria-label="Edit stream fields"
+                              OnClick="StartEditing" />
+            </div>
+            <p class="hint">Optional. Picking an existing stream pre-fills the fields below; you can still edit them. Leave blank to create a new stream in the catalogue.</p>
+            @if (_duplicateCodedValue)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
+                    This stream is already linked to the grade. A coded value can only be offered once per grade.
+                </FluentMessageBar>
+            }
+        </FormRow>
+
+        @* Horizontal separator (CSS border-top, per dialog-ui §2) between the
+           picker section and the stream fields below. *@
+        <div class="stream-fields-section">
+            @if (_editing || Model.CodedValueId is null)
+            {
+                <FormRow Label="Code" For="stream-create-code" Required="true">
+                    <FluentTextField @bind-Value="Model.Code"
+                                     Id="stream-create-code"
+                                     Placeholder="e.g. 5A"
+                                     Style="flex:1; min-width:0" />
+                </FormRow>
+                <FormRow Label="Name" For="stream-create-name" Required="true">
+                    <FluentTextField @bind-Value="Model.Name"
+                                     Id="stream-create-name"
+                                     Style="flex:1; min-width:0" />
+                </FormRow>
+                <FormRow Label="Description" For="stream-create-description">
+                    <FluentTextArea @bind-Value="Model.Description"
+                                    Id="stream-create-description"
+                                    Rows="2"
+                                    Style="flex:1; min-width:0" />
+                </FormRow>
+            }
+            else
+            {
+                <FieldDisplay Label="Code">@Model.Code</FieldDisplay>
+                <FieldDisplay Label="Name">@Model.Name</FieldDisplay>
+                <FieldDisplay Label="Description">@(string.IsNullOrWhiteSpace(Model.Description) ? "—" : Model.Description)</FieldDisplay>
+            }
+
+            <FormRow Label="Version label" For="stream-create-version">
+                <FluentTextField @bind-Value="Model.Version"
+                                 Id="stream-create-version"
+                                 Placeholder="e.g. 5A (optional)"
+                                 Style="flex:1; min-width:0" />
+            </FormRow>
+            <p class="hint">Optional. Two streams of the same grade cannot share a version label.</p>
+        </div>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@(_editing ? "Update Fields" : SubmitText)"
+                           SavingText="Adding..."
+                           SubmitIsServerSubmit="@(!_editing)"
+                           OnSubmit="UpdateFields"
+                           SubmitDisabled="@(_duplicateCodedValue || (!_editing && string.IsNullOrWhiteSpace(Model.Name)))"
+                           OnCancel="HandleCancel" />
+    </EditForm>
+</div>
+
+@code {
+    private CodedValueDropdown? _codedValueDropdown;
+    private CodedValueDto? _pickedCodedValue;
+    private bool _editing;
+    private bool _duplicateCodedValue;
+
+    // Snapshot of the pre-edit values so Cancel can revert the user's edits.
+    private string _origName = string.Empty;
+    private string? _origCode;
+    private string? _origDescription;
+    private string? _origVersion;
+    private Guid? _origCodedValueId;
+    private CodedValueDto? _origPickedCodedValue;
+
+    /// <summary>
+    /// Editable form model for the stream create dialog. Carries the grade context
+    /// so the new/existing stream is linked to the grade in the same flow.
+    /// </summary>
+    public sealed class StreamCreateModel
+    {
+        /// <summary>The grade level the stream is offered by.</summary>
+        public Guid GradeLevelId { get; set; }
+
+        /// <summary>
+        /// Coded value ids already offered by this grade. Used to reject picking a
+        /// stream that would duplicate an existing row on the card.
+        /// </summary>
+        public HashSet<Guid> ExistingStreamCodedValueIds { get; set; } = new();
+
+        /// <summary>Optional GRSTREAMS coded value picked from the dropdown.</summary>
+        public Guid? CodedValueId { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Name { get; set; } = string.Empty;
+
+        public string? Code { get; set; }
+
+        public string? Description { get; set; }
+
+        /// <summary>Optional <c>streamVersion</c> label; skipped when blank.</summary>
+        public string? Version { get; set; }
+    }
+
+    protected override string SubmitText => "Add stream";
+
+    private void StartEditing()
+    {
+        _origName = Model.Name;
+        _origCode = Model.Code;
+        _origDescription = Model.Description;
+        _origVersion = Model.Version;
+        _origCodedValueId = Model.CodedValueId;
+        _origPickedCodedValue = _pickedCodedValue;
+        _editing = true;
+    }
+
+    /// <summary>
+    /// Edit-mode "Update Fields" action: reflects the edited values back into the
+    /// read-only display section WITHOUT submitting. Persisting happens later via
+    /// the display-mode "Add stream".
+    /// </summary>
+    private void UpdateFields() => _editing = false;
+
+    /// <summary>
+    /// Cancel: while editing, reverts the user's edits and returns to display mode;
+    /// otherwise closes the dialog.
+    /// </summary>
+    private Task HandleCancel()
+    {
+        if (_editing)
+        {
+            Model.Name = _origName;
+            Model.Code = _origCode;
+            Model.Description = _origDescription;
+            Model.Version = _origVersion;
+            Model.CodedValueId = _origCodedValueId;
+            _pickedCodedValue = _origPickedCodedValue;
+            _editing = false;
+            return Task.CompletedTask;
+        }
+        return HandleCancelAsync();
+    }
+
+    /// <summary>
+    /// Pre-fills the fields from the picked GRSTREAMS value (resolved from the
+    /// dropdown's already-loaded items — no extra round-trip) and raises the
+    /// duplicate warning when that value is already offered by this grade.
+    /// </summary>
+    private async Task OnCodedValuePicked()
+    {
+        if (Model.CodedValueId is not { } id)
+        {
+            // Clearing the picker means "create a new stream": reset every field to
+            // a blank baseline. Otherwise the previously-picked value's name/code
+            // survive into the brand-new catalogue child and usually trip the
+            // server's duplicate-code guard (UI-tester P2-1).
+            _duplicateCodedValue = false;
+            _pickedCodedValue = null;
+            _editing = false;
+            Model.Name = string.Empty;
+            Model.Code = null;
+            Model.Description = null;
+            Model.Version = null;
+            return;
+        }
+
+        CodedValueDto? cv = null;
+        if (_codedValueDropdown is not null
+            && _codedValueDropdown.TryFindItem(id, out var found))
+        {
+            cv = found;
+        }
+
+        // The dropdown may still be loading its items when the selection lands
+        // (TryFindItem then returns false) — fall back to a direct read so the
+        // fields are never left silently blank (UI-tester P2-2).
+        cv ??= await CodedValues.GetByIdAsync(id);
+
+        if (cv is not null)
+        {
+            _pickedCodedValue = cv;
+            Model.Name = cv.Name;
+            Model.Code = cv.Code;
+            Model.Description = cv.Description;
+            Model.Version = cv.Attributes
+                .FirstOrDefault(a => a.Key == GradeStreamAssignment.StreamVersionAttributeKey)?.Value;
+        }
+
+        _duplicateCodedValue = Model.ExistingStreamCodedValueIds.Contains(id);
+    }
+
+    protected override async Task<GradeStreamDto?> SubmitAsync(StreamCreateModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.Name))
+        {
+            Error = "Enter a stream name.";
+            return null;
+        }
+
+        CodedValueDto? cv = null;
+        if (model.CodedValueId is { } id)
+        {
+            cv = _pickedCodedValue is { } picked && picked.Id == id
+                ? picked
+                : await CodedValues.GetByIdAsync(id);
+            if (cv is null)
+            {
+                Error = "Could not load the stream coded value.";
+                return null;
+            }
+
+            if (model.ExistingStreamCodedValueIds.Contains(id))
+            {
+                Error = "This stream is already linked to the grade.";
+                return null;
+            }
+        }
+
+        // The GRSTREAMS parent is required even when reusing a picked value: it is
+        // the parent a brand-new stream is created under.
+        var parent = await CodedValues.GetByCodeAsync(CodedValueParent.Streams.ToCode());
+        if (parent is null)
+        {
+            Error = "Could not locate the GRSTREAMS parent to create a stream under.";
+            return null;
+        }
+
+        var (resolvedCvId, effectiveCode) = await StreamCodedValueSaver.SaveAsync(
+            CodedValues, cv, parent.Id, model.Name, model.Code, model.Description,
+            cv?.DisplayOrder ?? 0);
+
+        if (resolvedCvId is not { } streamCodedValueId || streamCodedValueId == Guid.Empty)
+        {
+            Error = "Could not save the stream coded value.";
+            return null;
+        }
+
+        var version = model.Version?.Trim();
+        if (!string.IsNullOrEmpty(version))
+        {
+            await CodedValues.SetAttributeAsync(
+                streamCodedValueId, GradeStreamAssignment.StreamVersionAttributeKey, version);
+        }
+
+        var assignmentId = await Api.AssignGradeStreamAsync(model.GradeLevelId, streamCodedValueId);
+
+        // Prefer the row the bridge read resolves (override-aware Name/IsOverridden);
+        // fall back to the values we just persisted when the read has not caught up.
+        var linked = (await Api.ListGradeStreamsAsync(model.GradeLevelId))?
+            .FirstOrDefault(s => s.StreamCodedValueId == streamCodedValueId);
+        return linked ?? new GradeStreamDto(
+            assignmentId,
+            streamCodedValueId,
+            model.GradeLevelId,
+            effectiveCode ?? model.Code ?? string.Empty,
+            model.Name.Trim(),
+            null,
+            model.Description,
+            version,
+            false,
+            false,
+            cv?.DisplayOrder ?? 0);
+    }
+}

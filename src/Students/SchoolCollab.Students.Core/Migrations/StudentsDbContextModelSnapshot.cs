@@ -762,6 +762,51 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("grade_notification_policies", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeStreamAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("StreamCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stream_coded_value_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_grade_stream_assignments");
+
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_grade_stream_assignments_grade_level_id");
+
+                    b.HasIndex("TenantId", "GradeLevelId", "StreamCodedValueId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_grade_stream_assignments_tenant_grade_stream");
+
+                    b.ToTable("grade_stream_assignments", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Guardian", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2082,6 +2127,16 @@ namespace SchoolCollab.Students.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_grade_notification_policies_grade_levels_grade_level_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeStreamAssignment", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_grade_stream_assignments_grade_levels_grade_level_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Period", b =>

@@ -20,17 +20,15 @@ namespace SchoolCollab.Students.Tests.Integration;
 /// Integration tests for <c>POST /students/enrollments</c> with a grade AND a
 /// stream against real Postgres (via <see cref="ApiFactory"/>). This is the
 /// end-to-end "enroll to grade and stream" round-trip the enroll dialog drives:
-/// the endpoint resolves the active period, runs stream validation (which calls
-/// the settings-api <c>GET /api/coded-values/{id}</c> through the REAL
-/// <see cref="CodedValuesApiClient"/> HttpClient pipeline), then persists the
-/// enrollment.
+/// the endpoint resolves the active period, runs stream validation against the
+/// <see cref="GradeStreamAssignment"/> bridge in the Students database, then
+/// persists the enrollment.
 ///
-/// <para>The settings-api itself is not hosted in this Students-only factory;
-/// its HttpClient primary handler is replaced with a capturing stub that serves
-/// a stream coded value whose <c>gradeLevel</c> attribute matches the seeded
-/// grade. This keeps the real client + handler chain in play while recording
-/// the outgoing request for diagnostics. Regression coverage for
-/// docs/plans/2026-08-22-tenant-propagation-enroll-stream-investigation.md.</para>
+/// <para>Stream validation was moved onto the bridge by the grade-streams round;
+/// the settings-api <c>gradeLevel</c> attribute is no longer consulted. The
+/// capturing settings handler remains configured so the test can still observe
+/// any unexpected mid-flight settings hop, but a successful enrollment now only
+/// requires a matching bridge row.</para>
 /// </summary>
 [TestClass]
 [DoNotParallelize]
@@ -136,11 +134,11 @@ public class EnrollWithStreamEndpointTests
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE student_enrollments, students, grade_levels, periods CASCADE;");
+            "TRUNCATE TABLE student_enrollments, students, grade_levels, grade_stream_assignments, periods CASCADE;");
     }
 
     [TestMethod]
-    public async Task Enroll_WithGradeAndStream_PersistsEnrollment_AndValidatesStreamAgainstSettings()
+    public async Task Enroll_WithGradeAndStream_PersistsEnrollment_AndValidatesStreamAgainstBridge()
     {
         var tenantId = ApiFactory.TestTenantA;
 
@@ -160,10 +158,16 @@ public class EnrollWithStreamEndpointTests
             return (student.Id, period.Id, gradeLevel.Id);
         });
 
-        // The endpoint uses the Option B contract (commit 7d8a93f): the dialog
-        // submits the GRADE CODED VALUE id; the server resolves it to the
-        // GradeLevel row (materializing it if missing) and validates the
-        // stream's gradeLevel attribute against that coded value.
+        // Seed the bridge row that says this grade offers the selected stream.
+        // The stream's coded value lives in the Settings database, but the
+        // enrollment validation now only checks the Students-side bridge.
+        await SeedAsync(tenantId, async db =>
+        {
+            db.GradeStreamAssignments.Add(GradeStreamAssignment.Create(gradeLevelId, StreamCodedValueId));
+            await db.SaveChangesAsync();
+            return true;
+        });
+
         var response = await SendAsync(HttpMethod.Post, "/students/enrollments", tenantId,
             new
             {
@@ -174,24 +178,10 @@ public class EnrollWithStreamEndpointTests
                 EnrolledOn = (DateOnly?)DateOnly.FromDateTime(DateTime.UtcNow),
             });
 
-        // The enrollment must round-trip: stream validation passed (the real
-        // CodedValuesApiClient fetched the stream and the gradeLevel attribute
-        // matched) and the row was persisted with the stream reference.
+        // The enrollment must round-trip: a matching bridge row existed, so
+        // stream validation passed and the row was persisted with the stream reference.
         response.StatusCode.Should().Be(HttpStatusCode.Created,
             await response.Content.ReadAsStringAsync());
-
-        // Stream validation must have actually run over the settings-api hop.
-        _settingsCapture.LastRequest.Should().NotBeNull(
-            "EnrollStudentHandler.ValidateStreamAsync must call the settings-api coded-values endpoint");
-        _settingsCapture.LastRequest!.RequestUri!.AbsolutePath.Should()
-            .Be($"/api/coded-values/{StreamCodedValueId}");
-
-        // TenantForwardingDelegatingHandler must have forwarded the inbound
-        // request's resolved tenant onto the settings-api hop (Class B fix).
-        _settingsCapture.LastRequest.Headers.Contains("x-tenant-id").Should().BeTrue(
-            "the students-api must forward the enroll request's tenant to the settings-api");
-        _settingsCapture.LastRequest.Headers.GetValues("x-tenant-id").Should()
-            .ContainSingle().Which.Should().Be(tenantId.ToString());
 
         // Read the enrollment back under the tenant context (rows are
         // tenant-filtered; a bare scope resolves to the default tenant).
@@ -241,7 +231,7 @@ public class EnrollWithStreamEndpointTests
             });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "the stream's gradeLevel attribute references another grade");
+            "the stream is not offered by the selected grade (no bridge row)");
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
