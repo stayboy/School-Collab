@@ -74,6 +74,45 @@ public class GetOrCreateTopicHandlerTests
         generator.Verify(g => g.GenerateWithNameAsync("TOPIC_CODE", "Biology", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── AC9: the bridge-create branch appends at the END ─────────────────────
+
+    [TestMethod]
+    public async Task GetOrCreate_CreatedBridgeRow_AppendsAtTheEndOfTheGradesList()
+    {
+        using var s = new StudentsTestScope("gocs-append");
+        var gradeId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+        // An existing subject already holds position 2 for this grade.
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(
+            gradeId, Guid.NewGuid(), DateOnly.FromDateTime(DateTime.UtcNow), displayOrder: 2));
+        await s.Db.SaveChangesAsync();
+        var h = NewHandler(s);
+        var cv = Guid.NewGuid();
+
+        var dto = await h.HandleAsync(new GetOrCreateTopic(gradeId, cv, "MATH", "Mathematics", 1));
+
+        var created = await s.Db.GradeTopicAssignments.SingleAsync(a => a.TopicId == dto.Id);
+        created.DisplayOrder.Should().Be(3, "the wizard's find-or-create appends at the END (max + 1)");
+    }
+
+    [TestMethod]
+    public async Task GetOrCreate_ReusedTopic_DoesNotStampANewOrder()
+    {
+        // The skip-when-active guard means no second bridge row is created, so no
+        // append position is stamped either — the existing row keeps its place.
+        using var s = new StudentsTestScope("gocs-reuse-order");
+        var gradeId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+        var cv = Guid.NewGuid();
+
+        var first = await NewHandler(s).HandleAsync(new GetOrCreateTopic(gradeId, cv, "MATH", "Mathematics", 1));
+        var orderBefore = (await s.Db.GradeTopicAssignments.SingleAsync(a => a.TopicId == first.Id)).DisplayOrder;
+
+        await NewHandler(s).HandleAsync(new GetOrCreateTopic(gradeId, cv, "MATH", "Mathematics", 5));
+
+        var after = await s.Db.GradeTopicAssignments.SingleAsync(a => a.TopicId == first.Id);
+        after.DisplayOrder.Should().Be(orderBefore, "the reused assignment keeps its position");
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1, "no second bridge row for the same (grade, topic)");
+    }
+
     private static async Task<Guid> SeedGradeLevelAsync(StudentsTestScope s, Guid codedValueId, int level, string name)
     {
         var gl = GradeLevel.Create(codedValueId, level, name, level);

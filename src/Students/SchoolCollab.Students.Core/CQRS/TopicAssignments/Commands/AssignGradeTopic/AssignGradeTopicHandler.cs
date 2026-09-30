@@ -31,7 +31,9 @@ public sealed class AssignGradeTopicHandler(
             command.StartDate,
             command.EndDate,
             command.TopicStrandId,
-            periodId: null);
+            periodId: null,
+            // Append at the END of the grade's subject list.
+            displayOrder: await repository.GetNextDisplayOrderAsync(command.GradeLevelId, cancellationToken));
 
         await repository.AddAsync(assignment, cancellationToken);
         assignment.ClearDomainEvents();

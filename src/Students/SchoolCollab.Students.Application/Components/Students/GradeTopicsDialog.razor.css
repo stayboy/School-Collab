@@ -1,10 +1,18 @@
-.topic-dialog { display: flex; flex-direction: column; gap: 0.75rem; }
-.picker-row { display: flex; align-items: center; gap: 0.5rem; }
-.topic-dialog__list { display: flex; flex-direction: column; gap: 0.25rem; max-height: 50vh; overflow-y: auto; padding-right: 0.25rem; }
-.topic-dialog__row { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08)); }
-.topic-dialog__row:last-child { border-bottom: none; }
-.topic-dialog__main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+/* ── Dialog internals only ──
+   The height authority (content-fill, capped), the ONE scroll region and the pinned
+   Close row are the shared ReadOnlyDialogShell's job (§7 of
+   .github/skills/dialog-ui/SKILL.md). Never re-declare the dialog's height/scroll
+   here: `DialogParameters.Height` re-pins FluentUI's FIXED box while its body stays
+   `height: auto`, which strands the action row mid-dialog. */
+.picker-row { display: flex; align-items: center; gap: 0.5rem; flex: none; }
+/* The grid keeps its NATURAL height: no flex grow (that stretched its rows to fill
+   the box) and no own overflow/max-height (that would make it the sticky context and
+   scroll its header away — LandingPage.razor.css records the rationale). The shell
+   scrolls it, and GenerateHeaderOption.Sticky pins the header row. */
+.topic-dialog__grid { width: 100%; }
+.topic-dialog__main { display: flex; flex-direction: column; min-width: 0; }
 .topic-name { font-weight: 600; }
 .topic-code { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; }
-.topic-dialog__counts { display: flex; gap: 0.75rem; white-space: nowrap; }
-.dialog-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08)); padding-top: 0.75rem; }
+.topic-dialog__count { white-space: nowrap; }
+.topic-dialog__order { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
+.topic-dialog__actions { display: flex; align-items: center; }

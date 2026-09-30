@@ -233,6 +233,25 @@ public class CreateTopicForGradeHandlerTests
         assignment.PeriodId.Should().BeNull();
     }
 
+    // ── AC9: the bridge-create branch appends at the END ─────────────────────
+
+    [TestMethod]
+    public async Task CreateForGrade_StampsAppendAtEndOrderOnTheNewBridgeRow()
+    {
+        using var s = new StudentsTestScope("csfg-append");
+        var gradeId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+        // An existing subject already holds position 4 for this grade.
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(
+            gradeId, Guid.NewGuid(), DateOnly.FromDateTime(DateTime.UtcNow), displayOrder: 4));
+        await s.Db.SaveChangesAsync();
+        var h = NewHandler(s);
+
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "ENG", "English", 2));
+
+        var created = await s.Db.GradeTopicAssignments.SingleAsync(a => a.TopicId == dto.Id);
+        created.DisplayOrder.Should().Be(5, "the Subjects card's Add flow appends at the END (max + 1)");
+    }
+
     [TestMethod]
     public async Task CreateForGrade_ThrowsWhenGradeLevelNotFound()
     {

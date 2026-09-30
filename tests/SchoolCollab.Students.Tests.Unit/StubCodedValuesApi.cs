@@ -39,6 +39,11 @@ internal static class StreamDtoFactory
     /// When non-null, the DTO carries the LEGACY <c>gradeLevel</c> attribute — the
     /// discriminator the pre-fix validation read. The bridge read path ignores it.
     /// </param>
+    /// <param name="displayOrder">
+    /// The coded value's own display order — the cross-grade GRSTREAMS catalogue order.
+    /// It is deliberately independent of the grade's list order, which the bridge row
+    /// owns; the bridge read must not project this value.
+    /// </param>
     public static StreamCodedValueDto Stream(
         Guid id,
         string code,
@@ -46,7 +51,8 @@ internal static class StreamDtoFactory
         string? version = null,
         bool isOverridden = false,
         string? defaultName = null,
-        string? gradeLevelAttributeValue = null)
+        string? gradeLevelAttributeValue = null,
+        int displayOrder = 0)
     {
         var attributes = new List<StreamAttributeDto>();
         if (gradeLevelAttributeValue is not null)
@@ -55,7 +61,7 @@ internal static class StreamDtoFactory
             attributes.Add(new StreamAttributeDto("streamVersion", version));
 
         return new StreamCodedValueDto(
-            id, code, name, null, null, "GRSTREAMS", false, 0,
+            id, code, name, null, null, "GRSTREAMS", false, displayOrder,
             DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
             attributes, isOverridden, defaultName);
     }

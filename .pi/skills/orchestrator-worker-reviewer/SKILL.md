@@ -41,7 +41,7 @@ Cost rules that apply to every round (speed + token budget):
 | 0 | Trivial non-behavioural change (typo, comment, config tweak) | 0 — do not invoke this skill | solo, per `AGENTS.md` |
 | 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | parent: scope check + authoritative build/test + transcribed verdict |
 | 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | parent adjudicates REVIEW + transcribes verdict |
-| 3 | Feature rounds, any UI round, anything failing the Tier-1 checklist | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR parent-transcribed acceptance (**lean**, no-UI rounds) + UI tester when the UI trigger fires | orchestrator writes the verdict, or the parent transcribes it on lean rounds (+ tester-scope handover when the tester fires) |
+| 3 | Feature rounds; anything carrying schema / endpoint / contract / multi-context risk; anything failing the Tier-1 checklist for a NON-UI reason | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR parent-transcribed acceptance (**lean**, no-UI rounds) + UI tester when the UI trigger fires | orchestrator writes the verdict, or the parent transcribes it on lean rounds (+ tester-scope handover when the tester fires) |
 
 Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
 When starting a feature or fix, offer the user the menu (solo / light round /
@@ -55,6 +55,31 @@ full four-agent) per repo `AGENTS.md` — do not default silently.
 - No EF migration, schema, or MassTransit contract changes; no new public API.
 - Existing tests cover it, or the plan states why a test change is unnecessary.
 - No interplay with other in-flight work.
+
+### UI-only work is NEVER Tier 3 (owner rule 2026-09-30)
+
+A **UI-only** change — presentation in the broadest sense: markup, `*.razor.css`,
+dialog size/height, icon or button placement, grid columns, column order, labels,
+tooltips, spacing — carries no schema, endpoint, contract or multi-context logic.
+Even though the deterministic UI trigger fires (the changed-file list contains
+`.razor`/`.css`), such work runs **Solo (preferred, with the pinned model
+`ollama-cloud/deepseek-v4.1-flash`) or Light (Tier 1–2)** and **never Tier 3**.
+The UI tester exists to bug-hunt delivered UI *behaviour*; it is not a reason to
+promote a presentation tweak to a four-agent round.
+
+Owner workflow for this class of work:
+
+- **Always ask the owner which tier to use before starting** (repo `AGENTS.md`).
+  For a single-surface tweak, recommend Solo with the pinned model; for something
+  touching several components or adding a small behaviour, recommend Light.
+- A UI-only revision requested **mid-round or after** a feature round — e.g. "ditch
+  the icon buttons, use the kebab", "make the dialog bigger", "move the buttons to
+  the first column" — is a **bounded rework**, not a fresh round: apply it Solo (or
+  one worker run when it spans several files) and re-verify only what it touched.
+- Two adjacent traps this rule exists to avoid: (i) burning a plan-review + diff-review
+  cycle on CSS/markup; (ii) letting the Tier-3 shell hide a genuinely cheap change.
+- Test fallout from a surface change (a test asserting the old markup, or a widened
+  callback signature) is part of the same Solo rework — fix it in the same pass.
 
 ### Tier 3 lean (no-UI feature rounds)
 

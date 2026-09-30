@@ -12,8 +12,32 @@ internal sealed class GradeStreamAssignmentRepository(StudentsDbContext db)
         await Db.GradeStreamAssignments
             .AsNoTracking()
             .Where(x => x.GradeLevelId == gradeLevelId)
-            .OrderBy(x => x.CreatedAt)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.CreatedAt)
             .ToArrayAsync(cancellationToken);
+
+    public async Task<GradeStreamAssignment[]> ListByGradeLevelForUpdateAsync(
+        Guid gradeLevelId, CancellationToken cancellationToken = default) =>
+        await Db.GradeStreamAssignments
+            .Where(x => x.GradeLevelId == gradeLevelId)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.CreatedAt)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<int> GetNextDisplayOrderAsync(
+        Guid gradeLevelId, CancellationToken cancellationToken = default)
+    {
+        // Grade rows carry a non-null order (column default 0), so the cast to
+        // int? is only to make MaxAsync total on an empty grade.
+        var highest = await Db.GradeStreamAssignments
+            .Where(x => x.GradeLevelId == gradeLevelId)
+            .Select(x => (int?)x.DisplayOrder)
+            .MaxAsync(cancellationToken);
+        return (highest ?? -1) + 1;
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        Db.SaveChangesAsync(cancellationToken);
 
     public Task<bool> ExistsAsync(
         Guid gradeLevelId, Guid streamCodedValueId, CancellationToken cancellationToken = default) =>

@@ -190,10 +190,126 @@ do NOT re-declare the label grid locally.
 - [ ] Any `*.razor.css` edit was a **merge**, not a full overwrite; markup
       classes still resolve to CSS rules.
 - [ ] Build passes AND the separator line is confirmed present in the UI.
+- [ ] Any dialog **height** is set on the dialog's **content root** (definite
+      height + a `flex: 1 1 auto; min-height: 0` scrolling region + the action
+      row last with `margin-top: auto`) — NOT via `DialogParameters.Height`:
+      the actions must sit on the dialog's bottom, never mid-dialog. Use the
+      shared `ReadOnlyDialogShell` instead of re-declaring any of it (§7).
+- [ ] A scrolling region holding a `FluentDataGrid` scrolls the **wrapper**, not
+      the grid (the grid is `width: 100%` only — `flex: 1 1 auto` stretches its
+      rows) and the grid uses `GenerateHeader="GenerateHeaderOption.Sticky"` so
+      only the body scrolls under a fixed header (§7).
 
 ---
 
-## 7. Key file references
+## 7. Dialog height — the content area is the height authority, not the box
+
+To make a dialog taller, put the height on the dialog's **content root** — do
+**not** grow the dialog box with `DialogParameters.Height` (the `height:`
+argument on `ShowShellDialogAsync` / `ShowReadonlyDialogAsync`).
+
+Why (verified against FluentUI 4.14.2):
+
+- The dialog box (`::part(control)`) is a **fixed** height:
+  `calc(var(--dialog-height) - 2 * padding)`, with `--dialog-height` defaulting
+  to `480px`. `DialogParameters.Height` only re-pins that box.
+- The body (`.fluent-dialog-body`) is `height: auto`, so a taller box does NOT
+  grow the body. The content sits at the top and the action row (the shell
+  footer, or a read-only dialog's `.dialog-footer` — the content's LAST child)
+  is left **stranded mid-dialog**, with dead space underneath it.
+- A definite height on the content root gives the body something to grow to,
+  and the flex column hands the slack to the scrolling region, so the action
+  row lands on the dialog's bottom.
+
+Do this:
+
+```css
+.my-dialog {                      /* content root = the height authority */
+    display: flex;
+    flex-direction: column;
+    height: max(72vh, 480px);     /* or min-height/max-height for content-fill */
+    overflow: hidden;
+}
+.my-dialog__scroll {              /* the ONE scrolling region (grid/list/body) */
+    flex: 1 1 auto;
+    min-height: 0;                /* REQUIRED: a flex child will not shrink without it */
+    overflow-y: auto;
+}
+.dialog-footer {                  /* actions: last child, pinned to the bottom */
+    margin-top: auto;
+    flex: none;
+    /* + the §2 border-top separator */
+}
+```
+
+Open the dialog with the width preset you need and **no** `height:` argument:
+`ShowReadonlyDialogAsync<T>(title, params, DialogSize.ExtraLarge)`.
+
+- Prefer `min-height` + `max-height` (content-fill) when a short dialog should
+  stay short: `StudentEditDialog.razor.css` (`.student-edit-dialog-root`) is the
+  shipped precedent — `max-height: 72vh; min-height: 320px`.
+- Use a fixed `height` when the surface should always be that tall, e.g. the
+  Subjects View-all grid (`GradeTopicsDialog.razor.css`, `height: max(72vh, 480px)`).
+
+### A grid inside the scroll region keeps its natural height
+
+When the scrolling region holds a `FluentDataGrid`, the grid must keep its
+**natural height**: never `flex: 1 1 auto` on the grid (it stretches the rows to
+fill the box) and never `overflow`/`max-height` on the grid either — a bounded or
+overflowing grid becomes the sticky context itself and scrolls its header out of
+view (`LandingPage.razor.css` records that rationale). Let the wrapper scroll and
+switch on FluentUI's sticky header row:
+
+```razor
+<div class="my-dialog__scroll">
+    <FluentDataGrid … GenerateHeader="GenerateHeaderOption.Sticky" Class="my-dialog__grid" />
+</div>
+```
+
+```css
+.my-dialog__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* the scroll region */
+.my-dialog__grid   { width: 100%; }                                     /* natural height */
+```
+
+`GenerateHeaderOption.Sticky` marks the header row `row-type="sticky-header"`, and
+FluentUI's own grid CSS supplies `position: sticky; top: 0; background-color:
+var(--neutral-fill-stealth-rest); z-index: 2` — so only the body scrolls.
+
+### Implementation: use `ReadOnlyDialogShell` — never hand-roll any of this
+
+The three pieces above are a **shared component**:
+`src/SchoolCollab.Admin.Shared/Components/Dialogs/ReadOnlyDialogShell.razor(.css)`
+(the read-only sibling of `DialogShellFooter`). It renders the root (the height
+authority, content-fill: `min-height: 220px; max-height: 72vh; overflow: hidden`),
+one `.readonly-dialog__scroll` region and the bottom-pinned
+`.readonly-dialog__footer`. It takes:
+
+- `Class` — the caller's own root class, appended to `readonly-dialog`, so the
+  caller's scoped CSS and its tests keep working;
+- `Toolbar` — optional fixed rows ABOVE the region (assign picker, error bar);
+- `ChildContent` — the scroll region's content;
+- `Footer` — the action row.
+
+```razor
+<ReadOnlyDialogShell Class="my-dialog">
+    <Toolbar>…picker row / error bar…</Toolbar>
+    <ChildContent>…the scrollable list or grid…</ChildContent>
+    <Footer><FluentButton OnClick="CloseAsync">Close</FluentButton></Footer>
+</ReadOnlyDialogShell>
+```
+
+Two things to know:
+
+- With named slots present, Razor requires the body in an explicit
+  `<ChildContent>` (`RZ9996` otherwise) — unnamed content is rejected.
+- The dialog using the shell declares **no** height/scroll/footer CSS of its own.
+
+Consumers today: `GradeTopicsDialog` (Subjects View-all) and `SectionListDialog`
+(the Streams View-all a `SectionCard` opens).
+
+---
+
+## 8. Key file references
 
 - `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogShellBase.cs`
 - `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogShellFooter.razor`

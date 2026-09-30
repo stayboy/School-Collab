@@ -175,6 +175,7 @@ public sealed record TopicAssignmentDto(
     DateTimeOffset UpdatedAt);
 
 public sealed record GradeTopicCurriculumDto(
+    Guid AssignmentId,
     Guid TopicId,
     string Name,
     string? Code,
@@ -425,6 +426,9 @@ public record AssignActivityGroupTopicRequest(
     Guid? PeriodId = null);
 
 public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
+
+/// <summary>Body of the two per-grade list reorder endpoints (streams and subjects).</summary>
+public sealed record SetOrderRequest(int Order);
 
 /// <summary>Body of <c>POST /students/grade-levels/{id}/streams</c> — offers an existing stream for a grade.</summary>
 public record AssignGradeStreamRequest(Guid StreamCodedValueId);
@@ -1692,6 +1696,27 @@ public sealed class StudentsApiClient : IContactsClient
     /// <summary>Stops offering a stream for a grade level (bridge-row delete; the coded value stays).</summary>
     public async Task RemoveGradeStreamAsync(Guid gradeLevelId, Guid assignmentId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/grade-levels/{gradeLevelId}/streams/{assignmentId}", ct)).EnsureSuccessStatusCode();
+
+    /// <summary>
+    /// Moves one of a grade's streams to position <paramref name="order"/> in that
+    /// grade's list. Swap semantics server-side: the stream already at that
+    /// position takes the mover's old position.
+    /// </summary>
+    public async Task SetGradeStreamOrderAsync(
+        Guid gradeLevelId, Guid assignmentId, int order, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync(
+            $"/students/grade-levels/{gradeLevelId}/streams/{assignmentId}/order",
+            new SetOrderRequest(order), ct)).EnsureSuccessStatusCode();
+
+    /// <summary>
+    /// Moves one of a grade's subjects to position <paramref name="order"/> in that
+    /// grade's list. The route is id-only — the assignment id alone identifies the
+    /// grade's entry (the bridge row is the ordering authority).
+    /// </summary>
+    public async Task SetGradeTopicOrderAsync(Guid assignmentId, int order, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync(
+            $"/students/topic-assignments/{assignmentId}/order",
+            new SetOrderRequest(order), ct)).EnsureSuccessStatusCode();
 
     public async Task<Guid> AssignGradeTopicAsync(AssignGradeTopicRequest req, CancellationToken ct = default)
     {

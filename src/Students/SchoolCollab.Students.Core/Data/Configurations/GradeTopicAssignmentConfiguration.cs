@@ -18,6 +18,11 @@ internal sealed class GradeTopicAssignmentConfiguration : IEntityTypeConfigurati
     {
         builder.Property(x => x.GradeLevelId).IsRequired();
 
+        // Ordering authority for the grade's subject list (Topic.DisplayOrder orders
+        // the shared catalogue instead). The column lives on the shared TPH table and
+        // stays NULL for activity-group rows, which have no order surface.
+        builder.Property(x => x.DisplayOrder);
+
         builder.HasOne<GradeLevel>()
             .WithMany()
             .HasForeignKey(x => x.GradeLevelId)

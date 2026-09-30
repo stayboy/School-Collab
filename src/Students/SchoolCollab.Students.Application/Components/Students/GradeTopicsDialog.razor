@@ -1,4 +1,5 @@
-@using Microsoft.FluentUI.AspNetCore.Components
+﻿@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using GradeTopicCurriculumDto = SchoolCollab.Students.Application.Services.GradeTopicCurriculumDto
 @implements IDialogContentComponent<DialogParameters>
@@ -12,59 +13,121 @@
    READ-ONLY: the exceptions themselves are managed in the
    EnrollmentExceptionsDialog, which the kebab OPENS with this grade + topic as the
    scope. Reuses the per-topic Strands (strands + lessons, unified) / Teachers dialogs and the Remove flow
-   (RemoveTopicAsync on the page). *@
-<div class="topic-dialog">
-    <div class="picker-row">
-        <FluentSelect TOption="TopicDto"
-                      Items="UnassignedTopics"
-                      OptionText="@(t => t.Name)"
-                      OptionValue="@(t => t.Id.ToString())"
-                      @bind-SelectedOption="_topicToAdd"
-                      Placeholder="Add a topic…" />
-        <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
-                      OnClick="ConfirmAssignAsync" Disabled="@(_topicToAdd is null || _adding)">Assign</FluentButton>
-    </div>
+   (RemoveTopicAsync on the page).
 
-    @if (Topics.Length == 0)
-    {
-        <FluentMessageBar Intent="MessageIntent.Info">No topics assigned to this grade yet.</FluentMessageBar>
-    }
-    else
-    {
-        <div class="topic-dialog__list">
-            @foreach (var topic in Topics)
-            {
-                <div class="topic-dialog__row">
-                    <div class="topic-dialog__main">
-                        <span class="topic-name">@topic.Name</span>
-                        @if (!string.IsNullOrWhiteSpace(topic.Code))
-                        {
-                            <span class="topic-code">@topic.Code</span>
-                        }
-                    </div>
-                    <div class="topic-dialog__counts">
-                        <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenStrandsAsync(topic))" Title="Strands">
-                            @topic.StrandCount strands
-                        </FluentAnchor>
-                        <span class="topic-dialog__count" title="@topic.LessonCount lessons">@topic.LessonCount lessons</span>
-                        @if (ExceptionCount(topic.TopicId) is var exceptionCount and > 0)
-                        {
-                            <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
-                                @EnrollmentExceptionLabels.FormatCount(exceptionCount)
-                            </FluentBadge>
-                        }
-                    </div>
-                    <RowActionsMenu Actions="@BuildRowActions(topic)"
-                                    AriaLabel="Topic actions"
-                                    UseMenuService="false" />
-                </div>
-            }
+   The list is a FluentDataGrid (the SubPeriodsListDialog read-only precedent):
+   Order | Subject | Strands | Lessons | Exceptions | Actions. The Actions column
+   holds ONE control per row — the shared RowActionsMenu kebab — because the repo
+   rule puts the row's secondary + destructive actions in the kebab and never in
+   duplicated standalone icon buttons (.github/copilot/rules/section-card.md
+   §"Kebab actions (RowActionsMenu)"). The kebab carries Edit (→ the page's
+   OpenTopicEditAsync, the same flow the card's item name opens) / Strands /
+   Teachers / Enrollment exceptions / Remove, and Remove is declared
+   destructive: true with a confirmMessage so the SHARED RowActionsMenu enforces
+   the prompt — this dialog holds no confirmation logic of its own
+   (.github/copilot/rules/blazor-components.md §"Destructive actions require a
+   confirmation prompt"). MANUAL REORDER is the Order column — the row's FIRST
+   column, icon-only (move-up/move-down buttons, no position text; the repo's
+   reorder affordance — there is no drag-and-drop) — which invokes the page's
+   MoveUp/MoveDown callbacks with the row, then swaps the two neighbours locally
+   so the grid reflects the move at once. *@
+<ReadOnlyDialogShell Class="topic-dialog">
+    @* The picker and the move error are FIXED above the scroll region, so assigning
+       and reordering stay reachable however long the subject list is. The shell wraps
+       only the grid below and keeps it at its natural height. *@
+    <Toolbar>
+        <div class="picker-row">
+            <FluentSelect TOption="TopicDto"
+                          Items="UnassignedTopics"
+                          OptionText="@(t => t.Name)"
+                          OptionValue="@(t => t.Id.ToString())"
+                          @bind-SelectedOption="_topicToAdd"
+                          Placeholder="Add a topic…" />
+            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                          OnClick="ConfirmAssignAsync" Disabled="@(_topicToAdd is null || _adding)">Assign</FluentButton>
         </div>
-    }
-    <div class="dialog-footer">
+
+        @if (_moveError is { } moveError)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@moveError</FluentMessageBar>
+        }
+    </Toolbar>
+
+    <ChildContent>
+        @if (Topics.Length == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info">No topics assigned to this grade yet.</FluentMessageBar>
+        }
+        else
+        {
+            @* The grid keeps its NATURAL height (no flex grow — see the shell) and
+               GenerateHeaderOption.Sticky marks the header row `row-type="sticky-header"`,
+               so only the BODY scrolls under a fixed header, inside the shell's one scroll
+               region. *@
+            <FluentDataGrid TGridItem="GradeTopicCurriculumDto"
+                            Items="Topics.AsQueryable()"
+                            GenerateHeader="GenerateHeaderOption.Sticky"
+                            GridTemplateColumns="auto minmax(140px,2fr) 90px 80px 110px 130px"
+                            Class="topic-dialog__grid"
+                            AriaLabel="Subjects">
+                <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Order">
+                    <div class="topic-dialog__order">
+                        @if (ReorderEnabled)
+                        {
+                            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.ChevronUp"
+                                          Title="Move up"
+                                          AriaLabel="@($"Move {context.Name} up")"
+                                          Disabled="@(_adding || OrderOf(context) <= 0)"
+                                          OnClick="@(() => MoveAsync(OrderOf(context), OrderOf(context) - 1, MoveUp))" />
+                            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.ChevronDown"
+                                          Title="Move down"
+                                          AriaLabel="@($"Move {context.Name} down")"
+                                          Disabled="@(_adding || OrderOf(context) >= Topics.Length - 1)"
+                                          OnClick="@(() => MoveAsync(OrderOf(context), OrderOf(context) + 1, MoveDown))" />
+                        }
+                    </div>
+                </TemplateColumn>
+                <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Subject">
+                    <div class="topic-dialog__main">
+                        <span class="topic-name">@context.Name</span>
+                        @if (!string.IsNullOrWhiteSpace(context.Code))
+                        {
+                            <span class="topic-code">@context.Code</span>
+                        }
+                    </div>
+                </TemplateColumn>
+                <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Strands">
+                    <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenStrandsAsync(context))" Title="Strands">
+                        @context.StrandCount
+                    </FluentAnchor>
+                </TemplateColumn>
+                <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Lessons">
+                    <span class="topic-dialog__count" title="@context.LessonCount lessons">@context.LessonCount</span>
+                </TemplateColumn>
+                <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Exceptions">
+                    @if (ExceptionCount(context.TopicId) is var exceptionCount and > 0)
+                    {
+                        <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                            @EnrollmentExceptionLabels.FormatCount(exceptionCount)
+                        </FluentBadge>
+                    }
+                </TemplateColumn>
+                <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Actions">
+                    <div class="topic-dialog__actions">
+                        <RowActionsMenu Actions="@BuildRowActions(context)"
+                                        AriaLabel="Topic actions"
+                                        UseMenuService="false" />
+                    </div>
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+    </ChildContent>
+    <Footer>
         <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
-    </div>
-</div>
+    </Footer>
+</ReadOnlyDialogShell>
 
 @code {
     /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
@@ -76,6 +139,9 @@
     public const string RemoveKey = nameof(Remove);
     public const string AssignKey = nameof(Assign);
     public const string OnChangedKey = nameof(OnChanged);
+    public const string EditKey = nameof(Edit);
+    public const string MoveUpKey = nameof(MoveUp);
+    public const string MoveDownKey = nameof(MoveDown);
 
     /// <summary>Receives the callback that OPENS the EnrollmentExceptionsDialog for a
     /// topic id, scoped to this dialog's grade owner. Provided by the page (which owns
@@ -90,7 +156,7 @@
     // Read from Content (the DialogParameters indexer) — FluentUI renders dialog
     // content via DynamicComponent with only { "Content": <DialogParameters> } and
     // does NOT spread indexer entries onto separate [Parameter]s. Topics /
-    // UnassignedTopics are mutable (the dialog reassigns them on remove/assign),
+    // UnassignedTopics are mutable (the dialog reassigns them on remove/assign/move),
     // so they back onto fields initialized from Content in OnInitialized.
     private GradeTopicCurriculumDto[] _topics = [];
     private TopicDto[] _unassigned = [];
@@ -104,24 +170,40 @@
 
     private Func<GradeTopicCurriculumDto, Task>? OpenStrands => Get<Func<GradeTopicCurriculumDto, Task>>(OpenStrandsKey);
     private Func<GradeTopicCurriculumDto, Task>? OpenTeachers => Get<Func<GradeTopicCurriculumDto, Task>>(OpenTeachersKey);
+    private Func<GradeTopicCurriculumDto, Task>? Edit => Get<Func<GradeTopicCurriculumDto, Task>>(EditKey);
+    private Func<GradeTopicCurriculumDto, Task>? MoveUp => Get<Func<GradeTopicCurriculumDto, Task>>(MoveUpKey);
+    private Func<GradeTopicCurriculumDto, Task>? MoveDown => Get<Func<GradeTopicCurriculumDto, Task>>(MoveDownKey);
     private Func<Guid, Task>? Remove => Get<Func<Guid, Task>>(RemoveKey);
-    private Func<Guid, Task>? Assign => Get<Func<Guid, Task>>(AssignKey);
+
+    /// <summary>Assigns the picked topic and RETURNS the created bridge assignment id,
+    /// so the row appended below carries the real id its reorder buttons PUT against.</summary>
+    private Func<Guid, Task<Guid>>? Assign => Get<Func<Guid, Task<Guid>>>(AssignKey);
     private Func<Task>? OnChanged => Get<Func<Task>>(OnChangedKey);
     private Func<Guid, Task>? OpenEnrollmentExceptions => Get<Func<Guid, Task>>(OpenEnrollmentExceptionsKey);
     private Dictionary<Guid, int>? ExceptionCountsByTopic =>
         Get<Dictionary<Guid, int>>(ExceptionCountsByTopicKey);
+
+    /// <summary>Reorder controls render only when BOTH move callbacks arrived —
+    /// a caller that wires just one has no coherent move semantics.</summary>
+    private bool ReorderEnabled => MoveUp is not null && MoveDown is not null;
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
     [Parameter] public DialogParameters Content { get; set; } = default!;
 
     private TopicDto? _topicToAdd;
     private bool _adding;
+    private string? _moveError;
 
     protected override void OnInitialized()
     {
         _topics = Get<GradeTopicCurriculumDto[]>(TopicsKey) ?? [];
         _unassigned = Get<TopicDto[]>(UnassignedTopicsKey) ?? [];
     }
+
+    /// <summary>The row's 0-based position in the grid's own list — the order the
+    /// curriculum read returned, i.e. the bridge <c>DisplayOrder</c>.</summary>
+    private int OrderOf(GradeTopicCurriculumDto topic) =>
+        Array.FindIndex(_topics, t => t.AssignmentId == topic.AssignmentId);
 
     private async Task OpenStrandsAsync(GradeTopicCurriculumDto topic)
     {
@@ -133,13 +215,27 @@
         if (OpenTeachers is not null) await OpenTeachers(topic);
     }
 
+    /// <summary>The kebab's Edit action — the page's existing topic edit dialog,
+    /// the same flow the card's item name opens.</summary>
+    private async Task EditAsync(GradeTopicCurriculumDto topic)
+    {
+        if (Edit is not null) await Edit(topic);
+    }
+
     private IReadOnlyList<RowAction> BuildRowActions(GradeTopicCurriculumDto topic)
     {
-        var actions = new List<RowAction>
+        var actions = new List<RowAction>();
+
+        // Edit LEADS the kebab: with the standalone icon shortcut gone it is the
+        // row's only edit affordance, so it renders whenever the page wired the
+        // callback — the same conditional shape as the Enrollment-exceptions entry.
+        if (Edit is not null)
         {
-            RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
-            RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
-        };
+            actions.Add(RowAction.Callback("Edit", () => EditAsync(topic), FluentIcons.Edit));
+        }
+
+        actions.Add(RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList));
+        actions.Add(RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People));
 
         // OPENS the EnrollmentExceptionsDialog (spec §5.2 row 3, v8) — the shell already
         // owns the chrome, so the dialog shows a count only and nothing is edited inline.
@@ -154,10 +250,13 @@
             () => RemoveAsync(topic),
             FluentIcons.Delete,
             destructive: true,
-            confirmMessage: $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed."));
+            confirmMessage: RemoveConfirmation(topic)));
 
         return actions;
     }
+
+    private static string RemoveConfirmation(GradeTopicCurriculumDto topic) =>
+        $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed.";
 
     /// <summary>
     /// How many exceptions the subject carries — zero renders no badge, because the
@@ -174,7 +273,45 @@
         {
             await Remove(topic.TopicId);
             Topics = Topics.Where(t => t.TopicId != topic.TopicId).ToArray();
+            // The kebab is a CHILD component, so its click re-renders
+            // RowActionsMenu only — without this the removed row would stay in the
+            // grid (section-card.md §"Reload after child-triggered mutations").
+            StateHasChanged();
             if (OnChanged is not null) await OnChanged();
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    /// <summary>
+    /// Moves the row at <paramref name="from"/> to <paramref name="to"/>: the
+    /// page's callback performs the move server-side (it owns the target
+    /// position), then the two neighbours trade places locally so the grid
+    /// reflects the new order immediately. A failing callback leaves the order
+    /// untouched and surfaces the message instead of silently desyncing the grid.
+    /// </summary>
+    private async Task MoveAsync(int from, int to, Func<GradeTopicCurriculumDto, Task>? move)
+    {
+        if (_adding || move is null) return;
+        if (from < 0 || to < 0 || from >= Topics.Length || to >= Topics.Length) return;
+
+        _adding = true;
+        _moveError = null;
+        try
+        {
+            await move(Topics[from]);
+
+            var next = Topics.ToArray();
+            (next[from], next[to]) = (next[to], next[from]);
+            Topics = next;
+
+            if (OnChanged is not null) await OnChanged();
+        }
+        catch (Exception ex)
+        {
+            _moveError = $"Could not reorder: {ex.Message}";
         }
         finally
         {
@@ -188,10 +325,20 @@
         _adding = true;
         try
         {
-            await Assign(topic.Id);
+            // The callback returns the REAL bridge row id, so the row appended below
+            // can reorder itself (an empty id would 404 on its first move).
+            var assignmentId = await Assign(topic.Id);
+            if (assignmentId == Guid.Empty)
+            {
+                // The page surfaced the failure (it owns the error state); appending a
+                // row whose move buttons would PUT an empty id must be skipped.
+                return;
+            }
+
             // Reflect the assignment in the dialog's own lists so the topic moves
             // from the picker into the assigned list without reopening the dialog.
-            Topics = Topics.Append(new GradeTopicCurriculumDto(topic.Id, topic.Name, topic.Code, 0, 0)).ToArray();
+            Topics = Topics.Append(new GradeTopicCurriculumDto(
+                assignmentId, topic.Id, topic.Name, topic.Code, 0, 0)).ToArray();
             UnassignedTopics = UnassignedTopics.Where(t => t.Id != topic.Id).ToArray();
             _topicToAdd = null;
             if (OnChanged is not null) await OnChanged();

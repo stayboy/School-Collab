@@ -1,10 +1,16 @@
-@* Read-only "View all" list dialog backing a &lt;SectionCard&gt; footer anchor
+﻿@* Read-only "View all" list dialog backing a &lt;SectionCard&gt; footer anchor
    when the card is opened in ViewAllAsDialog mode. It renders THIS card's
    full item list — the same data source the card preview shows — so the list
    is always the page's own (already scope-filtered) data. Use it when no
    dedicated filtered list page exists for the card's entity (e.g. the
    grade-detail Streams card, whose source is the GradeStreamAssignment
    bridge and NOT the cross-grade GRSTREAMS coded-value catalogue).
+
+   Layout — the dialog's height authority, its ONE scroll region and the pinned
+   Close row — is the shared ReadOnlyDialogShell, so this file declares no
+   height/scroll/footer CSS of its own (§7 of .github/skills/dialog-ui/SKILL.md).
+   The list below is therefore NOT given a max-height/overflow: it keeps its natural
+   height and the SHELL scrolls it.
 
    Follows the established read-only dialog pattern (SubPeriodsListDialog /
    GuardianContactsDialog / GradeTopicsDialog): NOT a DialogShellBase (no
@@ -16,44 +22,84 @@
    closes via the cascading FluentDialog reference.
 
    Presentational only: rows are not clickable and carry no actions. The card
-   itself owns edit/add affordances for the same items. *@
+   itself owns edit/add affordances for the same items.
+
+   OPTIONAL reorder: when the caller supplies BOTH MoveUp and MoveDown
+   callbacks, each row gains icon-only move-up/move-down buttons in a leading
+   order column, BEFORE the name (the repo's mandated reorder affordance — there
+   is no drag-and-drop).
+   The callback moves ONE item (the one whose button was clicked) to the
+   neighbour position; this dialog swaps the two neighbours locally in the same
+   order so the list reflects the move without a re-fetch, then invokes the
+   optional OnChanged so the hosting page/card refreshes too. A failing callback
+   leaves the local order untouched and surfaces the message in an error bar.
+   Without those keys every existing caller renders exactly as before. *@
 @implements IDialogContentComponent<DialogParameters>
 @using Microsoft.FluentUI.AspNetCore.Components
 @typeparam TItem
 
-<div class="section-list-dialog">
-    @if (_items.Length == 0)
-    {
-        <div class="section-list-dialog__empty">@_emptyMessage</div>
-    }
-    else
-    {
-        <div class="section-list-dialog__list">
-            @foreach (var item in _items)
-            {
-                <div class="section-list-dialog__row">
-                    <span class="section-list-dialog__name">@_textSelector(item)</span>
-                    @if (_metaSelector?.Invoke(item) is { } metaParts && metaParts.Length > 0)
-                    {
-                        <div class="section-list-dialog__meta">
-                            @for (var i = 0; i < metaParts.Length; i++)
+<ReadOnlyDialogShell Class="section-list-dialog">
+    <Toolbar>
+        @if (_moveError is { } moveError)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@moveError</FluentMessageBar>
+        }
+    </Toolbar>
+    <ChildContent>
+        @if (_items.Length == 0)
+        {
+            <div class="section-list-dialog__empty">@_emptyMessage</div>
+        }
+        else
+        {
+            <div class="section-list-dialog__list">
+                @for (var index = 0; index < _items.Length; index++)
+                {
+                    var item = _items[index];
+                    var position = index;
+                    <div class="section-list-dialog__row">
+                        @if (ReorderEnabled)
+                        {
+                            <div class="section-list-dialog__order">
+                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                              IconStart="@FluentIcons.ChevronUp"
+                                              Title="Move up"
+                                              AriaLabel="@($"Move {_textSelector(item)} up")"
+                                              Disabled="@(_moving || position == 0)"
+                                              OnClick="@(() => MoveAsync(position, position - 1, _moveUp))" />
+                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                              IconStart="@FluentIcons.ChevronDown"
+                                              Title="Move down"
+                                              AriaLabel="@($"Move {_textSelector(item)} down")"
+                                              Disabled="@(_moving || position == _items.Length - 1)"
+                                              OnClick="@(() => MoveAsync(position, position + 1, _moveDown))" />
+                            </div>
+                        }
+                        <div class="section-list-dialog__main">
+                            <span class="section-list-dialog__name">@_textSelector(item)</span>
+                            @if (_metaSelector?.Invoke(item) is { } metaParts && metaParts.Length > 0)
                             {
-                                <span>@metaParts[i]</span>
-                                @if (i < metaParts.Length - 1)
-                                {
-                                    <span class="section-list-dialog__meta-sep" aria-hidden="true">|</span>
-                                }
+                                <div class="section-list-dialog__meta">
+                                    @for (var i = 0; i < metaParts.Length; i++)
+                                    {
+                                        <span>@metaParts[i]</span>
+                                        @if (i < metaParts.Length - 1)
+                                        {
+                                            <span class="section-list-dialog__meta-sep" aria-hidden="true">|</span>
+                                        }
+                                    }
+                                </div>
                             }
                         </div>
-                    }
-                </div>
-            }
-        </div>
-    }
-    <div class="dialog-footer">
+                    </div>
+                }
+            </div>
+        }
+    </ChildContent>
+    <Footer>
         <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
-    </div>
-</div>
+    </Footer>
+</ReadOnlyDialogShell>
 
 @code {
     /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
@@ -63,6 +109,9 @@
     public const string TextSelectorKey = nameof(TextSelector);
     public const string MetaSelectorKey = nameof(MetaSelector);
     public const string EmptyMessageKey = nameof(EmptyMessage);
+    public const string MoveUpKey = nameof(MoveUp);
+    public const string MoveDownKey = nameof(MoveDown);
+    public const string OnChangedKey = nameof(OnChanged);
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
     [Parameter] public DialogParameters Content { get; set; } = default!;
@@ -70,10 +119,17 @@
     // Snapshot fields: the dialog is presentational and opened once with the
     // card's current data, so everything is read from Content in OnInitialized
     // (the card owns refreshes; it re-opens the dialog with fresh entries).
+    // _items is re-assigned (never mutated in place) on a move, so the caller's
+    // own array is left alone.
     private TItem[] _items = [];
     private Func<TItem, string?> _textSelector = static _ => string.Empty;
     private Func<TItem, string[]?>? _metaSelector;
     private string _emptyMessage = "No items yet.";
+    private Func<TItem, Task>? _moveUp;
+    private Func<TItem, Task>? _moveDown;
+    private Func<Task>? _onChanged;
+    private string? _moveError;
+    private bool _moving;
 
     // Placeholder members so the key constants can use nameof(...) and stay
     // rename-safe together with their readers.
@@ -81,6 +137,13 @@
     private Func<TItem, string?> TextSelector => _textSelector;
     private Func<TItem, string[]?>? MetaSelector => _metaSelector;
     private string EmptyMessage => _emptyMessage;
+    private Func<TItem, Task> MoveUp => _moveUp!;
+    private Func<TItem, Task> MoveDown => _moveDown!;
+    private Func<Task> OnChanged => _onChanged!;
+
+    /// <summary>Reorder controls render only when BOTH move callbacks arrived —
+    /// a card that wires just one has no coherent move semantics.</summary>
+    private bool ReorderEnabled => _moveUp is not null && _moveDown is not null;
 
     /// <summary>Safely reads a key from <see cref="Content"/> (the
     /// DialogParameters indexer throws <see cref="KeyNotFoundException"/> for a
@@ -98,5 +161,42 @@
         _textSelector = Get<Func<TItem, string?>>(TextSelectorKey) ?? (_ => string.Empty);
         _metaSelector = Get<Func<TItem, string[]?>>(MetaSelectorKey);
         _emptyMessage = Get<string>(EmptyMessageKey) ?? "No items yet.";
+        _moveUp = Get<Func<TItem, Task>>(MoveUpKey);
+        _moveDown = Get<Func<TItem, Task>>(MoveDownKey);
+        _onChanged = Get<Func<Task>>(OnChangedKey);
+    }
+
+    /// <summary>
+    /// Moves the item at <paramref name="from"/> to <paramref name="to"/>: the
+    /// caller's callback performs the move server-side (it owns the target
+    /// position), then the two neighbours trade places locally so the dialog
+    /// reflects the new order immediately. A failing callback leaves the order
+    /// untouched and surfaces the message instead of silently desyncing the list.
+    /// </summary>
+    private async Task MoveAsync(int from, int to, Func<TItem, Task>? move)
+    {
+        if (_moving || move is null) return;
+        if (from < 0 || to < 0 || from >= _items.Length || to >= _items.Length) return;
+
+        _moving = true;
+        _moveError = null;
+        try
+        {
+            await move(_items[from]);
+
+            var next = _items.ToArray();
+            (next[from], next[to]) = (next[to], next[from]);
+            _items = next;
+
+            if (_onChanged is not null) await _onChanged();
+        }
+        catch (Exception ex)
+        {
+            _moveError = $"Could not reorder: {ex.Message}";
+        }
+        finally
+        {
+            _moving = false;
+        }
     }
 }

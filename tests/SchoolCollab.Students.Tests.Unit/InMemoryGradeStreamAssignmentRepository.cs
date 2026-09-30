@@ -44,8 +44,31 @@ internal sealed class InMemoryGradeStreamAssignmentRepository(StudentsDbContext 
         await db.GradeStreamAssignments
             .AsNoTracking()
             .Where(x => x.GradeLevelId == gradeLevelId)
-            .OrderBy(x => x.CreatedAt)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.CreatedAt)
             .ToArrayAsync(cancellationToken);
+
+    public async Task<GradeStreamAssignment[]> ListByGradeLevelForUpdateAsync(
+        Guid gradeLevelId, CancellationToken cancellationToken = default) =>
+        await db.GradeStreamAssignments
+            .AsTracking()
+            .Where(x => x.GradeLevelId == gradeLevelId)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.CreatedAt)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<int> GetNextDisplayOrderAsync(
+        Guid gradeLevelId, CancellationToken cancellationToken = default)
+    {
+        var orders = await db.GradeStreamAssignments
+            .Where(x => x.GradeLevelId == gradeLevelId)
+            .Select(x => x.DisplayOrder)
+            .ToArrayAsync(cancellationToken);
+        return orders.Length == 0 ? 0 : orders.Max() + 1;
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        db.SaveChangesAsync(cancellationToken);
 
     public Task<bool> ExistsAsync(
         Guid gradeLevelId, Guid streamCodedValueId, CancellationToken cancellationToken = default) =>

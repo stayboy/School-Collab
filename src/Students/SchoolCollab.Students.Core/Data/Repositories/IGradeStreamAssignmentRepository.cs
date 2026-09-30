@@ -18,8 +18,26 @@ public interface IGradeStreamAssignmentRepository
     /// </summary>
     Task<GradeStreamAssignment> AddOrReuseAsync(GradeStreamAssignment candidate, CancellationToken cancellationToken = default);
 
-    /// <summary>Lists the bridge rows offering a stream for the given grade level.</summary>
+    /// <summary>Lists the bridge rows offering a stream for the given grade level.
+    /// Ordered by the bridge's own <c>DisplayOrder</c> — the ordering authority for
+    /// the grade's stream list (the coded value's order is the catalogue's).</summary>
     Task<GradeStreamAssignment[]> ListByGradeLevelAsync(Guid gradeLevelId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the grade's bridge rows <b>tracked</b>, for a reorder that mutates
+    /// several rows in one save. The listing twin is <c>AsNoTracking</c> and cannot
+    /// be used there.
+    /// </summary>
+    Task<GradeStreamAssignment[]> ListByGradeLevelForUpdateAsync(Guid gradeLevelId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The append-at-end position for a newly created bridge row: the grade's
+    /// highest <c>DisplayOrder</c> + 1, or 0 when the grade offers no streams yet.
+    /// </summary>
+    Task<int> GetNextDisplayOrderAsync(Guid gradeLevelId, CancellationToken cancellationToken = default);
+
+    /// <summary>Persists tracked mutations (a reorder changes several rows at once).</summary>
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>True when the grade already offers the given stream coded value.</summary>
     Task<bool> ExistsAsync(Guid gradeLevelId, Guid streamCodedValueId, CancellationToken cancellationToken = default);
