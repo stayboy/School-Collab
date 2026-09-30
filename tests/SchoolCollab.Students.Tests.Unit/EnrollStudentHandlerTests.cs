@@ -113,7 +113,8 @@ public class EnrollStudentHandlerTests
         bool flagEnabled = false,
         int? minAge = null,
         int? maxAge = null,
-        Guid? allowedGender = null)
+        Guid? allowedGender = null,
+        ICodedValuesApiClient? codedValues = null)
     {
         // Seed a GradeLevel for stream validation. The handler resolves the
         // enrollment's GradeLevelId → GradeLevel → CodedValueId, and the
@@ -141,7 +142,8 @@ public class EnrollStudentHandlerTests
             new StudentEnrollmentRepository(s.Db),
             periods,
             new InMemoryGradeLevelRepository(s.Db),
-            new StubCodedValuesApiClient(),
+            s.GradeStreamAssignments,
+            codedValues ?? new StubCodedValuesApiClient(),
             publisher,
             s.Cache,
             NullLogger<EnrollStudentHandler>.Instance,
@@ -378,6 +380,11 @@ public class EnrollStudentHandlerTests
         var firstId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, null));
 
         var streamId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        // The grade must OFFER the stream: FR-9 validates against the
+        // grade_stream_assignments bridge row now, not a gradeLevel attribute.
+        s.Db.GradeStreamAssignments.Add(GradeStreamAssignment.Create(gradeLevel.Id, streamId));
+        await s.Db.SaveChangesAsync();
+
         var secondId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, streamId, null));
 
         secondId.Should().Be(firstId);
@@ -395,6 +402,62 @@ public class EnrollStudentHandlerTests
         audit.FromGradeLevelId.Should().Be(gradeLevel.Id);
         audit.ToGradeLevelId.Should().Be(gradeLevel.Id,
             "the grade-level audit entry records no grade change for a stream-only update");
+    }
+
+    // ── AC4: stream validation moved onto the bridge ────────────────────────
+
+    [TestMethod]
+    public async Task StreamValidation_MatchingGradeLevelAttributeButNoBridgeRow_Throws()
+    {
+        // AC4(i): the PRE-FIX success condition — the coded value's `gradeLevel`
+        // attribute references exactly this grade — is no longer sufficient. With no
+        // bridge row the grade does not OFFER the stream, so the enroll is rejected.
+        // Against the base commit this test is red: it enrolls happily.
+        using var s = new StudentsTestScope("enroll-stream-no-bridge");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher,
+            codedValues: new StubCodedValuesApiClient(includeGradeLevelAttribute: true));
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2012, 1, 15), GenderMale);
+        var streamId = Guid.NewGuid();
+
+        var act = () => h.HandleAsync(
+            new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, streamId, null));
+
+        (await act.Should().ThrowAsync<StreamGradeMismatchException>())
+            .Which.StreamCodedValueId.Should().Be(streamId);
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0,
+            "a rejected stream must leave nothing behind");
+    }
+
+    [TestMethod]
+    public async Task StreamValidation_BridgeRowPresentAndNoGradeLevelAttribute_Succeeds()
+    {
+        // AC4(ii): the inverse. The grade OFFERS the stream (a bridge row exists) but
+        // the coded value carries NO `gradeLevel` attribute at all — the state every
+        // stream created through the new StreamCreateDialog is in. Against the base
+        // commit this test is red: the missing attribute threw StreamGradeMismatch.
+        using var s = new StudentsTestScope("enroll-stream-bridge-only");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher,
+            codedValues: new StubCodedValuesApiClient(includeGradeLevelAttribute: false));
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var streamId = Guid.NewGuid();
+        await s.GradeStreamAssignments.AddOrReuseAsync(
+            GradeStreamAssignment.Create(gradeLevel.Id, streamId));
+
+        var student = SeedStudent(s, new DateOnly(2012, 1, 15), GenderMale);
+
+        var id = await h.HandleAsync(
+            new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, streamId, null));
+
+        id.Should().NotBeEmpty();
+        var row = await s.Db.StudentEnrollments.SingleAsync();
+        row.StreamCodedValueId.Should().Be(streamId);
     }
 
     [TestMethod]
@@ -432,6 +495,7 @@ public class EnrollStudentHandlerTests
             racingRepo,
             periods,
             new InMemoryGradeLevelRepository(s.Db),
+            s.GradeStreamAssignments,
             new StubCodedValuesApiClient(),
             publisher,
             s.Cache,
@@ -637,23 +701,32 @@ public class EnrollStudentHandlerTests
     }
 
     /// <summary>Stub <see cref="ICodedValuesApiClient"/> that returns a
-    /// stream whose <c>gradeLevel</c> attribute value matches the
-    /// GradeLevel's CodedValueId seeded by the test. Stream validation
-    /// is the only behavior exercised by these tests; the stub keeps
-    /// the test hermetic (no HTTP).</summary>
-    private sealed class StubCodedValuesApiClient : ICodedValuesApiClient
+    /// stream carrying (or, with <paramref name="includeGradeLevelAttribute"/>
+    /// false, deliberately NOT carrying) the LEGACY <c>gradeLevel</c> attribute
+    /// whose value matches the GradeLevel's CodedValueId seeded by the test.
+    /// The attribute is the discriminator the AC4 pair needs: the bridge is the
+    /// only thing that may decide stream validity now, so a matching attribute
+    /// must no longer be sufficient, and its absence must no longer disqualify.</summary>
+    private sealed class StubCodedValuesApiClient(bool includeGradeLevelAttribute = true) : ICodedValuesApiClient
     {
+        public Task<StreamCodedValueDto[]> GetChildrenByParentCodeAsync(string parentCode, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<StreamCodedValueDto>());
+
         public Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
         {
             // Look up the seeded GradeLevel's CodedValueId from the test's DbContext
             // is not available here (no DI), so we use a fixed Guid that the
             // test will also use when seeding the GradeLevel. See the test
             // setup for the matching seed.
+            var attributes = includeGradeLevelAttribute
+                ? new[] { new StreamAttributeDto("gradeLevel", "22222222-2222-2222-2222-222222222223") }
+                : Array.Empty<StreamAttributeDto>();
+
             return Task.FromResult<StreamCodedValueDto?>(new StreamCodedValueDto(
                 id, "GRSTREAMS_TEST", "Test Stream", null,
                 null, "GRSTREAMS", false, 0,
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-                new[] { new StreamAttributeDto("gradeLevel", "22222222-2222-2222-2222-222222222223") }));
+                attributes));
         }
     }
 
@@ -802,6 +875,7 @@ public class EnrollStudentHandlerTests
             new StudentEnrollmentRepository(s.Db),
             periods,
             racingRepo,
+            s.GradeStreamAssignments,
             new StubCodedValuesApiClient(),
             publisher,
             s.Cache,

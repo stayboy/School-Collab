@@ -566,19 +566,24 @@ public class EnrollStudentDialogFeatureFlagTests
             "the dialog MUST hold the picked CodedValueId on the form model (_formModel.GradeCodedValueId) bound two-way to <CodedValueDropdown> (dto-form-model-mapping.md)");
         src.Should().Contain("@bind-SelectedId=\"_formModel.GradeCodedValueId\"",
             "the grade <CodedValueDropdown> MUST two-way bind the form model field directly (no separate :after handler — the binder owns the write)");
-        src.Should().Contain("@bind-SelectedId=\"_formModel.StreamCodedValueId\"",
-            "the stream <CodedValueDropdown> MUST two-way bind the form model field directly");
-        // Stale-stream clearing on a grade change no longer lives in the
-        // dialog (OnGradeCodedValueChanged was removed): the shared
-        // CodedValueDropdown re-resolves its selection against the NEW
-        // attribute-filtered items on every reload and clears an invalidated
-        // selection exactly once (see StreamDropdownDoubleFireDiagnosticTests).
-        // Pin that contract where it now lives.
-        var dropdownSrc = Load("src/SchoolCollab.Admin.Shared/Components/CodedValueDropdown.razor");
-        dropdownSrc.Should().Contain("ComputeLoadKey(parentCode, AttributeFilter)",
-            "the dropdown's load key MUST include the attribute filter so filtered pickers (the stream row) do not reload on every render");
-        dropdownSrc.Should().Contain("ResolveSelection()",
-            "the dropdown MUST re-resolve its selection against the current items on each load phase so an invalidated selection is cleared deterministically");
+        // The stream picker is a plain <FluentSelect> fed from the grade↔stream
+        // bridge (ListGradeStreamsAsync), not the shared CodedValueDropdown with an
+        // attribute filter. The gradeLevel attribute is no longer written.
+        src.Should().Contain("@bind-Value=\"_streamSelection\"",
+            "the stream picker MUST be a <FluentSelect> bound to the string _streamSelection");
+        src.Should().Contain("@bind-Value:after=\"OnStreamSelectionChanged\"",
+            "the stream <FluentSelect> MUST parse the selected string back onto _formModel.StreamCodedValueId");
+        src.Should().Contain("LoadStreamOptionsAsync",
+            "the dialog MUST load stream options from the bridge when a grade is picked/reselected");
+        src.Should().Contain("ListGradeStreamsAsync",
+            "the stream option source MUST be the Students API bridge endpoint, not the Settings attribute-filtered by-parent endpoint");
+        // Stale-stream clearing now lives in the dialog's OnGradePickedAsync:
+        // switching grades invalidates the previously picked stream because the
+        // bridge is keyed by grade.
+        src.Should().Contain("OnGradePickedAsync",
+            "the dialog MUST react to a grade pick by clearing/reloading the stream options");
+        src.Should().Contain("_formModel.StreamCodedValueId = null",
+            "the dialog MUST clear the picked stream when the grade changes");
         // The request projection carries the coded value id.
         var formModelSrc = Load("src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentFormModel.cs");
         formModelSrc.Should().Contain("GradeCodedValueId!.Value",

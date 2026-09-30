@@ -29,6 +29,10 @@ internal sealed class StudentsTestScope : IDisposable
     public ActivityGroupMembershipRepository Memberships { get; }
     public StudentRepository Students { get; }
 
+    /// <summary>The bridge repository over the in-memory context — the enroll/transfer
+    /// suites validate streams against actual <c>grade_stream_assignments</c> rows.</summary>
+    public IGradeStreamAssignmentRepository GradeStreamAssignments { get; }
+
     public StudentsTestScope(string name)
     {
         var services = new ServiceCollection();
@@ -58,6 +62,7 @@ internal sealed class StudentsTestScope : IDisposable
         ActivityGroups = new ActivityGroupRepository(Db);
         Memberships = new ActivityGroupMembershipRepository(Db);
         Students = new StudentRepository(Db);
+        GradeStreamAssignments = new InMemoryGradeStreamAssignmentRepository(Db);
     }
 
     public void Dispose() => Db.Dispose();

@@ -41,6 +41,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<ActivityGroupMembership> ActivityGroupMemberships => Set<ActivityGroupMembership>();
     public DbSet<ActivityGroupGradeLevel> ActivityGroupGradeLevels => Set<ActivityGroupGradeLevel>();
     public DbSet<SubjectEnrollmentException> SubjectEnrollmentExceptions => Set<SubjectEnrollmentException>();
+    public DbSet<GradeStreamAssignment> GradeStreamAssignments => Set<GradeStreamAssignment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,6 +80,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new ActivityGroupGradeLevelConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new LocalCodedValueConfiguration());
         modelBuilder.ApplyConfiguration(new SubjectEnrollmentExceptionConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new GradeStreamAssignmentConfiguration(() => CurrentTenantId));
 
         // FR-18 / AC-17: build-time model audit — every non-allow-listed, non-owned
         // entity MUST have a "Tenant" named query filter.

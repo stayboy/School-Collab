@@ -11,10 +11,12 @@
   <ItemGroup>
     <PackageReference Include="MSTest" />
     <PackageReference Include="Moq" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="FluentAssertions" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
+    <ProjectReference Include="..\..\src\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
 </Project>

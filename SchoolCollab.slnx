@@ -101,6 +101,7 @@
     <Project Path="tests/SchoolCollab.Assignments.Tests.Unit/SchoolCollab.Assignments.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Families.Tests.Unit/SchoolCollab.Families.Tests.Unit.csproj" />
+    <Project Path="tests/SchoolCollab.MigrationService.Tests.Unit/SchoolCollab.MigrationService.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Settings.Api.Tests.Unit/SchoolCollab.Settings.Api.Tests.Unit.csproj" />
     <Project Path="tests/SchoolCollab.Settings.Tests.Integration/SchoolCollab.Settings.Tests.Integration.csproj" />
     <Project Path="tests/SchoolCollab.Settings.Tests.Playwright/SchoolCollab.Settings.Tests.Playwright.csproj" />

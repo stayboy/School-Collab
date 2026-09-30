@@ -760,3 +760,42 @@ Implementation notes:
 >   (real `Tenant` table), and all other decisions — these stand.
 >
 > See `global-tenant-filter.md` §11.1 for the full reconciliation.
+
+## Appendix: Supersession notice (2026-09-29) — grade↔stream link
+
+> The grade↔stream link is **no longer** the stream coded value's `gradeLevel`
+> attribute. This round introduces the Students-side bridge table
+> **`grade_stream_assignments`** (`tenant_id`, `grade_level_id` FK cascade,
+> `stream_coded_value_id`, unique on the three columns), and the attribute is
+> no longer **written** anywhere:
+>
+> - The grade-detail **Streams card** reads the bridge
+>   (`GET /students/grade-levels/{id}/streams`) instead of
+>   `by-parent?parentCode=GRSTREAMS&attributeKey=gradeLevel…`; **Remove** deletes
+>   the bridge row and leaves the coded value in the catalogue.
+> - The **Add** flow is the new `StreamCreateDialog` (pick-an-existing-catalogue
+>   stream or create a new `GRSTREAMS` child), mirroring the subject
+>   (`Topic`) add pattern.
+> - **Enrollment stream validation** moved onto the bridge: all three paths
+>   (`EnrollStudentHandler`, `TransferStudentHandler`,
+>   `CreateStudentWithLinkedDataHandler`) share one `GradeStreamValidator`, and
+>   the enroll-dialog and transfer-dialog stream pickers are bridge-backed.
+> - **(grade, streamVersion) uniqueness** is enforced at assignment time in
+>   `AssignGradeStreamHandler` (new `DuplicateStreamAssignmentException`). The
+>   Settings `DuplicateStreamException` guard is **retained** for direct
+>   attribute writes on any legacy row that still carries the attribute.
+> - **Backfill (REVISED 2026-09-29 — owner decisions "configured grades only" +
+>   "manual linking").** The `GradeStreamAssignmentSeeder` is **preservation-only**.
+>   Its single source is the historical `gradeLevel` attribute still stored on a
+>   GRSTREAMS child of an upgraded database; it links a stream only when the tenant
+>   **already** has a `grade_levels` row for that grade and it **never materializes**
+>   one. The native `SeedData/seed-stream-assignments.csv` mapping was therefore
+>   **deleted**: a fresh database seeds no bridge rows at all, and a newly configured
+>   grade gets no automatic streams (the school adds them on the Streams card).
+>   *Why:* that CSV was a **global blueprint with no tenant column** while the seeder
+>   fanned it out to every registered tenant, so pre-creating a `grade_levels` row per
+>   mapped grade gave every tenant all 13 grades and flooded the grade-level landing
+>   (`ListGradeLevelsForLanding`, which lists `grade_levels` rows, not coded values).
+>   The 39 `GRSTREAMS,gradeLevel` attribute rows and the `GRSTREAMS,gradeLevel`
+>   attribute definition were removed from the seed CSVs; the `streamVersion` rows
+>   **stand**.

@@ -69,6 +69,8 @@ public record CreateProvisionalCodedValueRequest(
 
 internal sealed record ProvisionalCreateResponse(Guid Id);
 
+internal sealed record CreateCodedValueResponse(Guid Id);
+
 public sealed class CodedValuesApiClient(HttpClient http)
 {
     public async Task<CodedValueDto[]> SearchAsync(string text, Guid? parentId = null, bool includeDisabled = false, CancellationToken ct = default)
@@ -140,10 +142,17 @@ public sealed class CodedValuesApiClient(HttpClient http)
         return await response.Content.ReadFromJsonAsync<CodedValueDto>(ct);
     }
 
-    public async Task CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default)
+    /// <summary>
+    /// Creates a coded value and returns its id. The Settings endpoint answers
+    /// <c>201 Created</c> with the new id in the body, so the caller can link the
+    /// created value without a second (cache-lagged) by-code read.
+    /// </summary>
+    public async Task<Guid> CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default)
     {
         var response = await http.PostAsJsonAsync("/api/coded-values", req, ct);
         response.EnsureSuccessStatusCode();
+        var envelope = await response.Content.ReadFromJsonAsync<CreateCodedValueResponse>(ct);
+        return envelope?.Id ?? Guid.Empty;
     }
 
     public async Task UpdateAsync(Guid id, UpdateCodedValueRequest req, CancellationToken ct = default)

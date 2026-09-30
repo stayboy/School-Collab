@@ -6,6 +6,7 @@ using SchoolCollab.Core.Features;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Contracts.Events;
+using SchoolCollab.Students.Core.CQRS.Enrollments;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
@@ -20,6 +21,7 @@ public sealed class EnrollStudentHandler(
     IStudentEnrollmentRepository repository,
     IActivePeriodProvider activePeriodProvider,
     IGradeLevelRepository gradeLevelRepository,
+    IGradeStreamAssignmentRepository gradeStreamRepository,
     ICodedValuesApiClient codedValuesApi,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
@@ -87,13 +89,14 @@ public sealed class EnrollStudentHandler(
             throw new GradeLevelEnrollmentBlockedException(gradeLevel.Id);
         }
 
-        // FR-9: stream validation. If a StreamCodedValueId is provided, the stream
-        // must be a child of GRSTREAMS and its gradeLevel attribute must reference a
-        // CodedValue that matches the enrollment's GradeLevel. Runs for BOTH the
-        // insert and the in-place-update path of the upsert below.
+        // FR-9: stream validation. If a StreamCodedValueId is provided, the grade must
+        // OFFER that stream — i.e. a grade_stream_assignments bridge row must exist for
+        // (grade, stream). Runs for BOTH the insert and the in-place-update path of the
+        // upsert below. The rule itself lives in one shared place
+        // (<see cref="GradeStreamValidator"/>) used by all three enrollment write paths.
         if (command.StreamCodedValueId is { } streamId)
         {
-            await ValidateStreamAsync(gradeLevel, streamId, cancellationToken);
+            await GradeStreamValidator.ValidateAsync(gradeStreamRepository, gradeLevel, streamId, cancellationToken);
         }
 
         // ── Upsert (fix for 23505 ix_student_enrollments_tenant_student_period) ──
@@ -281,31 +284,5 @@ public sealed class EnrollStudentHandler(
             _ => new InvalidOperationException(
                 $"Unhandled enrollment specification failure: {enrollmentSpecification.FailureMessage}")
         };
-    }
-
-    private async Task ValidateStreamAsync(Domain.GradeLevel gradeLevel, Guid streamCodedValueId, CancellationToken cancellationToken)
-    {
-        var gradeCodedValueId = gradeLevel.CodedValueId;
-
-        // Fetch the stream coded value from the Settings API.
-        var stream = await codedValuesApi.GetByIdAsync(streamCodedValueId, cancellationToken)
-            ?? throw new StreamGradeMismatchException(streamCodedValueId, gradeLevel.Id);
-
-        // The stream's gradeLevel attribute must reference a CodedValue whose Id
-        // matches the enrollment's grade's CodedValueId.
-        var gradeLevelAttr = stream.Attributes
-            .FirstOrDefault(a => a.Key == "gradeLevel");
-        if (gradeLevelAttr is null)
-        {
-            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevel.Id);
-        }
-
-        // The attribute value is the coded value's GUID (because DataType=CodedValue).
-        // We compare as Guid.
-        if (!Guid.TryParse(gradeLevelAttr.Value, out var streamGradeCodedValueId)
-            || streamGradeCodedValueId != gradeCodedValueId)
-        {
-            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevel.Id);
-        }
     }
 }

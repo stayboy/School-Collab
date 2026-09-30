@@ -30,6 +30,10 @@ namespace SchoolCollab.Students.Tests.Integration;
 ///
 /// <para>Verifies the shipped fixes at full fidelity:</para>
 /// <list type="bullet">
+///   <item><b>Bridge stream validation</b> — a stream is accepted only when a
+///         <c>GradeStreamAssignment</c> bridge row links the selected grade and
+///         stream in the Students database. The settings-api <c>gradeLevel</c>
+///         attribute is no longer consulted.</item>
 ///   <item><b>Tenant propagation (#181)</b> — the admin-side handler stamps
 ///         <c>x-tenant-id</c> from the dev selection; the request resolves under
 ///         that tenant even though the host's DEFAULT tenant differs (the
@@ -154,7 +158,7 @@ public class StudentsApiClientEndToEndEnrollmentTests
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE student_enrollments, students, grade_levels, periods CASCADE;");
+            "TRUNCATE TABLE student_enrollments, students, grade_levels, grade_stream_assignments, periods CASCADE;");
         DevSelection.ReadBehavior = () => Task.FromResult<Guid?>(null);
     }
 
@@ -184,7 +188,7 @@ public class StudentsApiClientEndToEndEnrollmentTests
     }
 
     [TestMethod]
-    public async Task EnrollStudentAsync_PropagatesDevTenant_AllTheWayToBackendAndSettingsHop()
+    public async Task EnrollStudentAsync_PropagatesDevTenant_AllTheWayToBackendAndBridge()
     {
         // Seed EVERYTHING under tenant B while the HOST default stays tenant A.
         // Without the propagated header the enroll would land in tenant A,
@@ -193,7 +197,7 @@ public class StudentsApiClientEndToEndEnrollmentTests
         var tenantB = ApiFactory.TestTenantB;
         DevSelection.ReadBehavior = () => Task.FromResult<Guid?>(tenantB);
 
-        var (studentId, periodId, _) = await SeedAsync(tenantB, async db =>
+        var (studentId, periodId, gradeLevelId) = await SeedAsync(tenantB, async db =>
         {
             var gradeLevel = GradeLevel.Create(GradeCodedValueId, 1, "Grade 1", 1);
             db.GradeLevels.Add(gradeLevel);
@@ -209,6 +213,14 @@ public class StudentsApiClientEndToEndEnrollmentTests
             return (student.Id, period.Id, gradeLevel.Id);
         });
 
+        // Seed the bridge row that says grade 1 offers the selected stream.
+        await SeedAsync(tenantB, async db =>
+        {
+            db.GradeStreamAssignments.Add(GradeStreamAssignment.Create(gradeLevelId, StreamCodedValueId));
+            await db.SaveChangesAsync();
+            return true;
+        });
+
         using var sp = BuildAdminClientStack(_factory.Server.CreateHandler());
         var api = sp.GetRequiredService<StudentsApiClient>();
 
@@ -220,14 +232,6 @@ public class StudentsApiClientEndToEndEnrollmentTests
             EnrolledOn: DateOnly.FromDateTime(DateTime.UtcNow)));
 
         enrollmentId.Should().NotBeEmpty("the typed client round-trips the created enrollment id");
-
-        // The settings hop must carry the FORWARDED tenant (students-api's
-        // TenantForwardingDelegatingHandler re-stamps what its TestAuthHandler
-        // resolved — which was only resolvable because of the admin-side stamp).
-        _settingsCapture.LastRequest.Should().NotBeNull(
-            "stream validation must run over the settings-api mid-flight hop");
-        _settingsCapture.LastRequest!.Headers.GetValues("x-tenant-id").Should()
-            .ContainSingle().Which.Should().Be(tenantB.ToString());
 
         // The row persists under tenant B (NOT the host default A).
         using var scope = _factory.Services.CreateScope();

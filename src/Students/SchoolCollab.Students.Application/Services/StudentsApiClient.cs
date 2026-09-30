@@ -426,6 +426,9 @@ public record AssignActivityGroupTopicRequest(
 
 public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
 
+/// <summary>Body of <c>POST /students/grade-levels/{id}/streams</c> — offers an existing stream for a grade.</summary>
+public record AssignGradeStreamRequest(Guid StreamCodedValueId);
+
 /// <summary>
 /// Creates a subject enrollment exception on exactly one owner — a grade level or an
 /// activity group (subject-period-exception-model.md v3). Mirrors the server-side
@@ -1643,6 +1646,52 @@ public sealed class StudentsApiClient : IContactsClient
             : $"/students/grade-levels/{gradeLevelId}/curriculum";
         return await _http.GetFromJsonAsync<GradeTopicCurriculumDto[]>(url, ct);
     }
+
+    // ── Grade level ↔ stream bridge ───────────────────────────────────────────
+    // The bridge row IS the grade↔stream link (the coded value's legacy
+    // `gradeLevel` attribute is no longer read or written). The list is served by
+    // the Students API, which resolves the coded-value metadata through the
+    // override-resolving Settings `by-parent` read.
+
+    /// <summary>Lists the streams offered by a grade level.</summary>
+    public async Task<GradeStreamDto[]?> ListGradeStreamsAsync(Guid gradeLevelId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<GradeStreamDto[]>($"/students/grade-levels/{gradeLevelId}/streams", ct);
+
+    /// <summary>
+    /// Resolves a grade level by its GRADE coded value id
+    /// (<c>GET /students/grade-levels/by-coded-value/{codedValueId}</c>). The enroll
+    /// dialog picks the grade as a coded value but the stream bridge is keyed by the
+    /// grade-level row id, so the id is resolved before the stream list is fetched.
+    /// Returns null when no row exists yet (it materializes server-side at enroll time).
+    /// </summary>
+    public async Task<GradeLevelDto?> GetGradeLevelByCodedValueAsync(Guid codedValueId, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/students/grade-levels/by-coded-value/{codedValueId}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GradeLevelDto>(ct);
+    }
+
+    /// <summary>Offers an existing stream for a grade level. Returns the bridge row id.</summary>
+    public async Task<Guid> AssignGradeStreamAsync(Guid gradeLevelId, Guid streamCodedValueId, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync(
+            $"/students/grade-levels/{gradeLevelId}/streams",
+            new AssignGradeStreamRequest(streamCodedValueId), ct);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            // The duplicate-version guard answers 409 with the actionable message in
+            // the body; surface it instead of the bare "Conflict" reason phrase.
+            throw new InvalidOperationException(await response.Content.ReadAsStringAsync(ct));
+        }
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    /// <summary>Stops offering a stream for a grade level (bridge-row delete; the coded value stays).</summary>
+    public async Task RemoveGradeStreamAsync(Guid gradeLevelId, Guid assignmentId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/grade-levels/{gradeLevelId}/streams/{assignmentId}", ct)).EnsureSuccessStatusCode();
 
     public async Task<Guid> AssignGradeTopicAsync(AssignGradeTopicRequest req, CancellationToken ct = default)
     {

@@ -1,0 +1,36 @@
+/* "Pick existing stream" row: the CodedValueDropdown flexes to fill the row
+   and the edit icon button sits fixed at the right. */
+.stream-create-pick-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.stream-create-pick-row ::deep .coded-value-dropdown {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Icon-only FluentButton (switch to the editable fields) needs a square
+   footprint. ::deep is required because <fluent-button> is rendered by the
+   FluentButton child component in a different scope. */
+::deep .stream-icon-button {
+    min-width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+}
+
+/* Horizontal separator (per dialog-ui §2) between the CodedValueDropdown
+   picker section and the stream fields below — CSS border-top, well padded. */
+.stream-fields-section {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+}
+
+.stream-fields-section .hint {
+    margin: -0.5rem 0 0.75rem;
+    font-size: 0.8125rem;
+    opacity: 0.8;
+}

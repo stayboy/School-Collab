@@ -95,7 +95,12 @@ public class StudentTransferDialogBunitTests : BunitContext
             }
 
             // GET /students/grade-levels — current + other grade (so gradeOptions = [other], Count > 0).
+            // The !EndsWith("/streams") guard prevents this broad matcher from
+            // shadowing the transfer dialog's bridge stream lookup
+            // (GET /students/grade-levels/{id}/streams) — same defect class the
+            // enrollment-dialog test hit (first-match-wins).
             if (path.Contains("/students/grade-levels", StringComparison.OrdinalIgnoreCase)
+                && !path.EndsWith("/streams", StringComparison.OrdinalIgnoreCase)
                 && HttpMethod.Get.Equals(request.Method))
             {
                 return Json(HttpStatusCode.OK, new GradeLevelDto[]

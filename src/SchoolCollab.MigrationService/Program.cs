@@ -68,6 +68,7 @@ builder.Services.AddScoped<CodedValueSeeder>();
 builder.Services.AddScoped<TenantSeeder>();
 builder.Services.AddScoped<EntityCodeRuleSeeder>();
 builder.Services.AddScoped<PilotActivityGroupFlagOverrideSeeder>();
+builder.Services.AddScoped<GradeStreamAssignmentSeeder>();
 // ar-20: dev-only identity seed ("Dev School" tenant + "Dev Teacher") backing the
 // committed Keycloak realm's fixed claim values. Idempotent; dev/test only.
 builder.Services.AddScoped<DevIdentitySeeder>();
@@ -83,6 +84,12 @@ try
 
     using (var scope = host.Services.CreateScope())
     {
+        // Hoisted so the Students-side backfill (below, OUTSIDE the Settings try block)
+        // can still consume the tenant registry the Settings pass produced. The two
+        // blocks have independent try/catch, so a Settings-seed failure leaves this
+        // null and the backfill call is null-guarded.
+        Dictionary<string, Guid>? tenantIdsByName = null;
+
         // ── Settings migrations + seeding (CodedValues data + FeatureFlag
         //    FEATURE:EnableCodedValuesAiChat) ──
         try
@@ -111,7 +118,7 @@ try
             // tenancy overrides have a target tenant. Idempotent by Name. See
             // documents/specs/grade-level-setup.md §5.5 / PR 1.
             var tenantSeeder = scope.ServiceProvider.GetRequiredService<TenantSeeder>();
-            var tenantIdsByName = await tenantSeeder.SeedAsync();
+            tenantIdsByName = await tenantSeeder.SeedAsync();
 
             // Phase 6.1: turn FEATURE:EnableActivityGroups ON for the pilot tenant only
             // (TenantFeatureFlagOverride). Global default stays OFF. Runs AFTER the flag
@@ -153,6 +160,33 @@ try
         {
             logger.LogError(ex, "Students migration failed");
             exitCode = 1;
+        }
+
+        // ── Grade↔stream bridge backfill ──────────────────────────────────────
+        // MUST run after BOTH: the Settings migration + coded-value seed above (the
+        // GRSTREAMS/GRADE coded values are the source the backfill reads) AND the
+        // Students migration (the grade_stream_assignments table must exist). It
+        // PRESERVES the legacy `gradeLevel` links on an upgraded database by inserting
+        // bridge rows only for grades the tenant ALREADY has; it never creates a
+        // grade_levels row and therefore seeds nothing on a fresh database. Idempotent;
+        // skips when the tenant registry is unavailable because the Settings pass failed.
+        if (tenantIdsByName is null)
+        {
+            logger.LogWarning(
+                "Tenant registry unavailable (Settings seed did not complete); skipping grade↔stream backfill");
+        }
+        else
+        {
+            try
+            {
+                var gradeStreamSeeder = scope.ServiceProvider.GetRequiredService<GradeStreamAssignmentSeeder>();
+                await gradeStreamSeeder.SeedAsync(tenantIdsByName);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Grade↔stream bridge backfill failed");
+                exitCode = 1;
+            }
         }
 
         // ── Dev identity seed (ar-20) ────────────────────────────────────────

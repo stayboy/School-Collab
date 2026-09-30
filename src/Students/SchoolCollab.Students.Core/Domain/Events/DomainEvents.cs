@@ -52,6 +52,11 @@ public sealed record ActivityGroupTopicAssignedEvent(Guid AssignmentId, Guid Act
 
 public sealed record StudentTopicAssignedEvent(Guid AssignmentId, Guid StudentId, Guid TopicId, Guid PeriodId) : IDomainEvent;
 
+/// <summary>Raised when a stream coded value (a <c>GRSTREAMS</c> child) is offered
+/// by a grade level — the grade↔stream bridge row is the link, replacing the
+/// legacy <c>gradeLevel</c> attribute on the coded value.</summary>
+public sealed record GradeStreamAssignedEvent(Guid AssignmentId, Guid GradeLevelId, Guid StreamCodedValueId) : IDomainEvent;
+
 // --- Topic Strands (a strand with a parent is a lesson) ---
 public sealed record TopicStrandCreatedEvent(Guid StrandId, string Name, Guid TopicId) : IDomainEvent;
 public sealed record TopicStrandUpdatedEvent(Guid StrandId, string Name) : IDomainEvent;

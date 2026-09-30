@@ -67,6 +67,7 @@ public class GradeLevelDetailPageTests : BunitContext
     {
         public readonly List<(string Method, string Url, string? Body)> Calls = new();
         private readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> _responses = new();
+        private readonly Dictionary<(string Method, string Url), Func<string>> _dynamic = new();
 
         public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
         {
@@ -75,11 +76,27 @@ public class GradeLevelDetailPageTests : BunitContext
         }
         public ScriptedHandler Map(string url, HttpStatusCode status, string body) => Map("ANY", url, status, body);
 
+        /// <summary>
+        /// Answers a URL from a delegate evaluated per request. Needed where the SAME
+        /// url must answer differently before and after a mutation — a static Map keeps
+        /// serving the stale body, which would hide a SectionCard that never refreshes.
+        /// </summary>
+        public ScriptedHandler MapDynamic(string method, string url, Func<string> body)
+        {
+            _dynamic[(method.ToUpperInvariant(), url)] = body;
+            return this;
+        }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             Calls.Add((request.Method.Method, request.RequestUri!.PathAndQuery, body));
             var url = request.RequestUri.PathAndQuery;
+            if (_dynamic.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var dynamicBody))
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(dynamicBody(), Encoding.UTF8, "application/json"),
+                };
             (HttpStatusCode Status, string Body)? found = null;
             if (_responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var exact))
                 found = exact;
@@ -136,14 +153,22 @@ public class GradeLevelDetailPageTests : BunitContext
         }
     }
 
-    private static Dictionary<string, object?> StreamJson(Guid id, string name, string code) =>
+    /// <summary>
+    /// One Streams-card row: the bridge read's <c>GradeStreamDto</c>
+    /// (assignment id + stream coded value id + resolved coded-value metadata), NOT
+    /// a raw coded value — the card no longer reads the coded-value catalogue
+    /// itself.
+    /// </summary>
+    private static Dictionary<string, object?> StreamJson(Guid assignmentId, Guid streamCodedValueId, Guid gradeId, string name, string code) =>
         new()
         {
-            ["id"] = id, ["code"] = code, ["name"] = name,
-            ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTREAMS",
-            ["isDisabled"] = false, ["displayOrder"] = 0,
-            ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
+            ["assignmentId"] = assignmentId,
+            ["streamCodedValueId"] = streamCodedValueId,
+            ["gradeLevelId"] = gradeId,
+            ["code"] = code, ["name"] = name,
+            ["nameOverride"] = (string?)null, ["description"] = (string?)null,
+            ["streamVersion"] = "5A", ["isOverridden"] = false, ["isDisabled"] = false,
+            ["displayOrder"] = 0,
         };
 
     private (ScriptedHandler Handler, Guid GradeId) Register(
@@ -172,8 +197,17 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("/students/enrollment-exceptions", HttpStatusCode.OK, exceptionsJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
-        // Grade streams (GRSTREAMS) for the Streams card.
-        handler.Map("/api/coded-values/by-parent?parentCode=GRSTREAMS", HttpStatusCode.OK, streamsJson);
+        // Grade streams for the Streams card (the grade<->stream BRIDGE, not the
+        // GRSTREAMS catalogue filtered by the legacy `gradeLevel` attribute).
+        handler.Map("GET", $"/students/grade-levels/{gradeId}/streams", HttpStatusCode.OK, streamsJson);
+        // Bridge-row removal (DELETE .../streams/{assignmentId}): the assignment id
+        // is unknown here, so match the prefix for any method. The exact GET above
+        // still wins for the card read (exact match is checked before the ANY loop),
+        // and MapDynamic overrides it where the test needs a before/after body.
+        // Without this mapping the DELETE 404s, RemoveStreamAsync lands in its catch
+        // and the card keeps the removed row (see
+        // Detail_StreamsCard_Remove_RefreshesTheCard_SoTheRemovedStreamDisappears).
+        handler.Map("ANY", $"/students/grade-levels/{gradeId}/streams/", HttpStatusCode.OK, "");
         // Notification &amp; Delivery editor: no tenant default / no grade override.
         handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
         handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
@@ -829,10 +863,9 @@ public class GradeLevelDetailPageTests : BunitContext
     public void Detail_StreamsCard_Row_HasKebab_WithEditAndRemove()
     {
         var gradeId = Guid.NewGuid();
-        var streamId = Guid.NewGuid();
         Register(gradeId, GradeJson(gradeId), streamsJson: JsonSerializer.Serialize(new[]
         {
-            StreamJson(streamId, "Grade 5A", "GR5A"),
+            StreamJson(Guid.NewGuid(), Guid.NewGuid(), gradeId, "Grade 5A", "GR5A"),
         }));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
@@ -846,15 +879,14 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_StreamsCard_Remove_Confirms_AndDisables()
+    public void Detail_StreamsCard_Remove_DeletesTheBridgeRow_AndNeverDisablesTheCodedValue()
     {
         var gradeId = Guid.NewGuid();
-        var streamId = Guid.NewGuid();
+        var assignmentId = Guid.NewGuid();
         var (handler, _) = Register(gradeId, GradeJson(gradeId), streamsJson: JsonSerializer.Serialize(new[]
         {
-            StreamJson(streamId, "Grade 5A", "GR5A"),
+            StreamJson(assignmentId, Guid.NewGuid(), gradeId, "Grade 5A", "GR5A"),
         }));
-        handler.Map("POST", $"/api/coded-values/{streamId}/disable", HttpStatusCode.OK, "");
 
         // Host the page under a FluentDialogProvider so the destructive Remove
         // confirmation prompt can render.
@@ -868,13 +900,54 @@ public class GradeLevelDetailPageTests : BunitContext
         removeItem.Click();
 
         // The destructive Remove opens a MODAL confirmation dialog.
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove stream 'Grade 5A'?"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Stop offering stream 'Grade 5A' for this grade?"));
         cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
 
-        // Confirm → the stream is disabled (coded-value lifecycle, not a hard delete).
+        // Confirm -> the grade stops OFFERING the stream: the bridge row is deleted
+        // and the coded value stays in the catalogue (never disabled, never deleted).
         cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
         cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
-            c.Method == "POST" && c.Url == $"/api/coded-values/{streamId}/disable"));
+            c.Method == "DELETE" && c.Url == $"/students/grade-levels/{gradeId}/streams/{assignmentId}"));
+        handler.Calls.Should().NotContain(c => c.Url.Contains("/disable"),
+            "removing a stream from a grade must never disable the catalogue value");
+    }
+
+    /// <summary>
+    /// The Streams card must RE-RENDER after a remove. The stream reload runs inside a
+    /// callback owned by a child component (the row kebab in <c>SectionCard</c>), so
+    /// Blazor does not re-render this page automatically — <c>ReloadStreamsAsync</c>
+    /// must call <c>StateHasChanged</c>. The bridge read is answered dynamically: the
+    /// row is served until the DELETE lands, then an empty list. Without the re-render
+    /// the card keeps showing the stale row, so this assertion fails.
+    /// </summary>
+    [TestMethod]
+    public void Detail_StreamsCard_Remove_RefreshesTheCard_SoTheRemovedStreamDisappears()
+    {
+        var gradeId = Guid.NewGuid();
+        var assignmentId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId));
+
+        var beforeDelete = JsonSerializer.Serialize(new[]
+        {
+            StreamJson(assignmentId, Guid.NewGuid(), gradeId, "Grade 5A", "GR5A"),
+        });
+        handler.MapDynamic("GET", $"/students/grade-levels/{gradeId}/streams",
+            () => handler.Calls.Any(c => c.Method == "DELETE") ? "[]" : beforeDelete);
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 5A"));
+
+        cut.Find("fluent-button[title=\"Actions for Grade 5A\"]").Click();
+        var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
+        removeItem.Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Stop offering stream 'Grade 5A' for this grade?"));
+        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+
+        // The card must drop the removed row — proving the page re-rendered with the
+        // reloaded (empty) bridge list.
+        cut.WaitForAssertion(() => cut.Markup.Should().NotContain("Grade 5A",
+            "a removed stream must disappear from the card once the bridge read no longer returns it"));
     }
 
     [TestMethod]
@@ -893,20 +966,43 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_StreamsAdd_OpensCodedValueDialog_CreateMode()
+    public void Detail_StreamsAdd_Click_OpensStreamCreateDialog()
+    {
+        // AC6(c): the Streams card's Add affordance OPENS the new dialog (the
+        // dialog-opener contract). Hosting the page under a FluentDialogProvider
+        // renders the real dialog content, so the assertion is on the dialog's own
+        // markup rather than on a mocked IDialogService.
+        var gradeId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId));
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No streams defined for this grade yet."));
+
+        cut.Find("fluent-button[title=\"Add stream\"]").Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Pick existing stream",
+            "the Streams Add button opens StreamCreateDialog"));
+        cut.Markup.Should().Contain("Version label", "the dialog writes the streamVersion label when supplied");
+        cut.Markup.Should().Contain("Add stream", "the dialog's submit is the stream create action");
+    }
+
+    [TestMethod]
+    public void Detail_StreamsAdd_OpensStreamCreateDialog_AndNeverWritesTheGradeLevelAttribute()
     {
         var source = ReadDetailSource();
 
-        // The Streams card "Add" affordance must open the shared CodedValueDialog
-        // in Create mode (not navigate away to the GRSTREAMS children page).
+        // The Streams card "Add" affordance must open the new StreamCreateDialog
+        // (pick-an-existing-catalogue-stream / create-new), not the raw
+        // CodedValueDialog with a manual `gradeLevel` attribute write.
         source.Should().Contain("OnAddClick=\"OpenStreamCreateAsync\"",
             "the Streams card Add button opens the create dialog, not a navigation");
-        source.Should().Contain("CodedValueFormModel.ForCreate",
-            "the create handler opens CodedValueDialog in Create mode");
-        source.Should().Contain("CodedValueParent.Streams.ToCode()",
-            "the create handler resolves the GRSTREAMS parent to create under");
-        source.Should().Contain("SetAttributeAsync",
-            "the create handler tags the new stream with the grade's gradeLevel attribute");
+        source.Should().Contain("StreamCreateDialog.StreamCreateModel",
+            "the create handler opens StreamCreateDialog with its own model");
+        source.Should().NotContain("CodedValueFormModel.ForCreate",
+            "the raw coded-value create dialog is no longer the stream add flow");
+        source.Should().NotContain("SetAttributeAsync(created.Id, \"gradeLevel\"",
+            "the gradeLevel attribute is no longer written on the create path");
         source.Should().Contain("ReloadStreamsAsync",
             "the create handler reloads the streams card after creating");
 
@@ -1093,7 +1189,7 @@ public class GradeLevelDetailPageTests : BunitContext
         // Streams card: stream name; name opens the stream edit dialog.
         source.Should().Contain("ItemTextSelector=\"s => s.Name\"", "Streams card binds the stream name");
         source.Should().Contain("ItemOnClick=\"s => OpenStreamEditAsync(s)\"", "Streams card name opens the stream edit dialog");
-        source.Should().Contain("ItemKeySelector=\"s => s.Id\"", "Streams card opts into the central edit-key guard (Id)");
+        source.Should().Contain("ItemKeySelector=\"s => s.StreamCodedValueId\"", "Streams card opts into the central edit-key guard (coded value id)");
         source.Should().Contain("OnItemActionBlocked=\"OnStreamEditBlocked\"", "Streams card surfaces the guard block");
         source.Should().Contain("ItemNameTitle=\"Edit stream\"", "Streams card advertises the edit affordance");
     }

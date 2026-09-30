@@ -6,6 +6,7 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Constants
 @using Microsoft.FluentUI.AspNetCore.Components
+@using GradeStreamDto = SchoolCollab.Students.Core.DTOs.GradeStreamDto
 @inject StudentsApiClient Api
 @inject ILogger<StudentTransferDialog> Logger
 
@@ -49,12 +50,20 @@
                                   OptionValue="@(g => g.Id)"
                                   Label="Transfer to grade" />
 
-                <CodedValueDropdown Parent="CodedValueParent.Streams"
-                                    AttributeFilter="@(SelectedGrade is null ? null : ("gradeLevel", SelectedGrade.CodedValueId.ToString()))"
-                                    EmptyFilterPlaceholder="No streams for this grade"
-                                    Placeholder="Select stream…"
-                                    Label="Transfer to stream"
-                                    @bind-SelectedId="_selectedStream" />
+                @* The stream options are the transfer grade's BRIDGE rows
+                   (GET /students/grade-levels/{id}/streams) — not an attribute
+                   filter, which the new add flow no longer feeds. *@
+                <FluentSelect TOption="string"
+                              @bind-Value="_selectedStreamText"
+                              @bind-Value:after="OnStreamSelectionChanged"
+                              Label="Transfer to stream"
+                              Style="flex:1; min-width:0">
+                    <FluentOption Value="">No stream</FluentOption>
+                    @foreach (var stream in _streamOptions)
+                    {
+                        <FluentOption Value="@stream.StreamCodedValueId.ToString()">@stream.Name</FluentOption>
+                    }
+                </FluentSelect>
 
                 <FluentTextArea @bind-Value="_model.Reason" Label="Reason" Required="true" />
             </FluentStack>
@@ -85,10 +94,15 @@
     /// <see cref="DropdownComponent{TItem, TValue}"/>. The full
     /// <see cref="GradeLevelDto"/> is resolved lazily via
     /// <see cref="SelectedGrade"/> for callers that need it
-    /// (DirectionHint, AttributeFilter on the stream picker, API call).
+    /// (DirectionHint, stream-option load, API call).
     /// </summary>
     private Guid? _selectedGradeId;
     private Guid? _selectedStream;
+
+    /// <summary>The transfer grade's offered streams (bridge rows), bound to the
+    /// stream <see cref="FluentSelect"/> as string option values.</summary>
+    private GradeStreamDto[] _streamOptions = [];
+    private string _selectedStreamText = "";
 
     /// <summary>Resolves the transfer-target <see cref="GradeLevelDto"/>
     /// from <see cref="_selectedGradeId"/>. Null when the id is null or
@@ -102,22 +116,61 @@
     /// Handles the transfer-grade <see cref="DropdownComponent{TItem, TValue}"/>'s
     /// <c>@bind-SelectedValue:after</c> side-effect. Runs after the binder has
     /// written the new <see cref="_selectedGradeId"/>, so we can read the
-    /// post-bind value via the property. The stream picker's <c>AttributeFilter</c>
-    /// value is derived from <see cref="SelectedGrade"/>'s <c>CodedValueId</c>,
-    /// so a grade change re-filters the stream list automatically. We must also
-    /// clear <see cref="_selectedStream"/> here: a stream from the previous grade
-    /// is no longer valid (the stream's <c>gradeLevel</c> attribute must match
-    /// the new grade; spec §4.3 / FR-9). Without this clear the consumer's
-    /// stream id would persist through the re-render and reach the API as a
-    /// stale value.
+    /// post-bind value via the property. The stream picker's option list is the
+    /// new grade's bridge rows, so a grade change re-reads it automatically. We
+    /// must also clear <see cref="_selectedStream"/> here: a stream from the
+    /// previous grade is no longer valid (it is offered by that grade only; spec
+    /// §4.3 / FR-9). Without this clear the consumer's stream id would persist
+    /// through the re-render and reach the API as a stale value.
     /// <para>
     /// Parameterless void per the repo rule: <see cref="DropdownComponent{TItem, TValue}"/>'s
     /// <c>SelectedValueChanged</c> is the binder's internal callback; do NOT
-    /// pass it directly. Use <c>@bind-SelectedValue:after</c> for side-effects
-    /// (mirrors the rule documented on <see cref="CodedValueDropdown"/>).
+    /// pass it directly. Use <c>@bind-SelectedValue:after</c> for side-effects.
+    /// The async load is fire-and-forgotten (its own try/catch inside).
     /// </para>
     /// </summary>
-    private void OnGradeSelectedValueChanged() => _selectedStream = null;
+    private void OnGradeSelectedValueChanged()
+    {
+        _selectedStream = null;
+        _selectedStreamText = "";
+        _ = LoadStreamOptionsAsync();
+    }
+
+    /// <summary>
+    /// Binder side-effect for the stream picker: the <see cref="FluentSelect"/> works
+    /// in string values, so the picked option is parsed back onto
+    /// <see cref="_selectedStream"/> ("" = no stream, i.e. clear the stream on
+    /// transfer).
+    /// </summary>
+    private void OnStreamSelectionChanged()
+    {
+        _selectedStream = Guid.TryParse(_selectedStreamText, out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// Reads the streams the selected transfer grade OFFERS (the bridge list
+    /// <c>GET /students/grade-levels/{id}/streams</c>). Best-effort: a failure
+    /// leaves the picker empty rather than failing the dialog.
+    /// </summary>
+    private async Task LoadStreamOptionsAsync()
+    {
+        _streamOptions = [];
+        if (SelectedGrade is not { } grade) return;
+
+        try
+        {
+            _streamOptions = await Api.ListGradeStreamsAsync(grade.Id) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load streams for grade {GradeLevelId}", grade.Id);
+            _streamOptions = [];
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

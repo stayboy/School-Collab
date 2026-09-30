@@ -136,6 +136,7 @@
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Features
 @using Microsoft.FluentUI.AspNetCore.Components
+@using GradeStreamDto = SchoolCollab.Students.Core.DTOs.GradeStreamDto
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
@@ -225,7 +226,7 @@
                         <CodedValueDropdown @ref="_gradeCodedValueDropdown"
                                             Parent="CodedValueParent.Grades"
                                             @bind-SelectedId="_formModel.GradeCodedValueId"
-                                            @bind-SelectedId:after="OnGradePicked"
+                                            @bind-SelectedId:after="OnGradePickedAsync"
                                             Placeholder="Select a grade"
                                             class="enroll-grade-select" />
                         <FeatureFlagGate Key="@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog">
@@ -290,28 +291,30 @@
                     </div>
                 </FormRow>
 
-                @* Grade stream picker. Filtered by the selected grade's
-                   CodedValueId so it shows only streams whose gradeLevel
-                   attribute matches the chosen grade. GUARD: the picker is
-                   only RENDERED once a concrete (non-empty) grade coded
-                   value is selected — with no grade there is no valid
-                   filter, so we never issue a stream lookup at all (the
-                   unfiltered GRSTREAMS list would show streams from every
-                   grade). Until then a read-only placeholder row shows
-                   instead. Uses the standard CodedValueDropdown augmented
-                   with an attribute filter (key=gradeLevel,
-                   value=selectedGradeCodedValueId). *@
+                @* Grade stream picker. The option list comes from the
+                   grade↔stream BRIDGE (GET /students/grade-levels/{id}/streams),
+                   NOT from an attribute filter: the `gradeLevel` attribute is no
+                   longer written, so an attribute-filtered list would silently
+                   miss every stream created through the new StreamCreateDialog.
+                   GUARD: the picker is only RENDERED once a concrete (non-empty)
+                   grade coded value is selected — with no grade there is no
+                   bridge to read, so we never issue a stream lookup at all.
+                   Until then a read-only placeholder row shows instead. *@
                 <FormRow Label="Stream" For="enroll-stream">
 
-                    @if (GradeCodedValueIdForFilter is { } gradeFilterId)
+                    @if (GradeCodedValueIdForFilter is not null)
                     {
-                        <CodedValueDropdown Parent="CodedValueParent.Streams"
-                                            AttributeFilter="@(("gradeLevel", gradeFilterId.ToString()))"
-                                            EmptyFilterPlaceholder="No streams for this grade"
-                                            ShowEmptyOption="true"
-                                            EmptyOptionText="No stream"
-                                            Placeholder="Select stream…"
-                                            @bind-SelectedId="_formModel.StreamCodedValueId" />
+                        <FluentSelect TOption="string"
+                                      Id="enroll-stream"
+                                      @bind-Value="_streamSelection"
+                                      @bind-Value:after="OnStreamSelectionChanged"
+                                      Style="flex:1; min-width:0">
+                            <FluentOption Value="">No stream</FluentOption>
+                            @foreach (var stream in _streamOptions)
+                            {
+                                <FluentOption Value="@stream.StreamCodedValueId.ToString()">@stream.Name</FluentOption>
+                            }
+                        </FluentSelect>
                     }
                     else
                     {
@@ -446,28 +449,71 @@
     /// page reload.</summary>
     private CodedValueDropdown? _gradeCodedValueDropdown;
 
-    // Stream selection lives on _formModel.StreamCodedValueId.
+    // Stream selection lives on _formModel.StreamCodedValueId; the picker is a plain
+    // FluentSelect over the bridge list for the picked grade (see _streamOptions).
+    private GradeStreamDto[] _streamOptions = [];
+    private string _streamSelection = "";
 
     /// <summary>Side-effect of a USER grade pick (fires via
     /// <c>@bind-SelectedId:after</c>, i.e. only when the dropdown itself raises
     /// <c>SelectedIdChanged</c> — never during the initial pre-selection of the
-    /// student's current enrollment values). A stream belongs to exactly one
-    /// grade (the picker is attribute-filtered by the selected grade's coded
-    /// value), so switching grades invalidates any previously picked/streamed-in
-    /// value — same rule as <c>StudentTransferDialog.OnGradeSelectedValueChanged</c>.
-    /// Without this, a grade change followed by submit would send the OLD
-    /// grade's stream id with the NEW grade.</summary>
-    private Task OnGradePicked()
+    /// student's current enrollment values). A stream is offered by exactly one
+    /// grade (the bridge row is keyed by the grade), so switching grades
+    /// invalidates any previously picked stream AND re-reads the option list for
+    /// the new grade. Without this, a grade change followed by submit would send
+    /// the OLD grade's stream id with the NEW grade.</summary>
+    private async Task OnGradePickedAsync()
     {
         _formModel.StreamCodedValueId = null;
-        return Task.CompletedTask;
+        _streamSelection = "";
+        await LoadStreamOptionsAsync();
     }
 
-    /// <summary>The coded value id of the selected grade, used as the
-    /// stream picker's <c>AttributeFilter</c> value. Null when no grade is
-    /// selected yet OR the id is empty (the dropdown's sentinel) — the
-    /// stream picker is not rendered at all in that case, so no stream
-    /// lookup is ever issued without a concrete grade.</summary>
+    /// <summary>
+    /// Binder side-effect for the stream picker: the FluentSelect works in string
+    /// values, so the picked option is parsed back onto the form model
+    /// ("" = no stream).
+    /// </summary>
+    private void OnStreamSelectionChanged()
+    {
+        _formModel.StreamCodedValueId = Guid.TryParse(_streamSelection, out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// Reads the streams the picked grade OFFERS (the bridge list
+    /// <c>GET /students/grade-levels/{id}/streams</c>). The grade picker yields a
+    /// GRADE coded value, so the grade-level row id is resolved first. Best-effort:
+    /// a failure leaves the picker empty rather than failing the dialog.
+    /// </summary>
+    private async Task LoadStreamOptionsAsync()
+    {
+        _streamOptions = [];
+
+        var gradeCodedValueId = GradeCodedValueIdForFilter;
+        if (gradeCodedValueId is not { } cvId) return;
+
+        try
+        {
+            var gradeLevel = await Api.GetGradeLevelByCodedValueAsync(cvId);
+            if (gradeLevel is null) return;
+
+            _streamOptions = await Api.ListGradeStreamsAsync(gradeLevel.Id) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load streams for grade coded value {CodedValueId}", cvId);
+            _streamOptions = [];
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>The coded value id of the selected grade, or null when no grade is
+    /// selected yet OR the id is empty (the dropdown's sentinel). The stream picker
+    /// is not rendered at all in that case, so no bridge lookup is ever issued
+    /// without a concrete grade.</summary>
     private Guid? GradeCodedValueIdForFilter
     {
         get
@@ -511,6 +557,11 @@
                         suggestedId, Model.StudentId);
                 }
                 _formModel.LoadFrom(suggestedGrade, Model.SuggestedStreamCodedValueId);
+
+                // The stream picker's options are the grade's BRIDGE rows, so the
+                // pre-selected stream only renders once that list is loaded.
+                _streamSelection = _formModel.StreamCodedValueId?.ToString() ?? "";
+                await LoadStreamOptionsAsync();
             }
         }
         catch (Exception ex)
