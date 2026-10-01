@@ -201,6 +201,10 @@ app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
 
+// Must sit inside the request-logging middleware: Serilog logs a passing exception at Error and
+// rethrows, so a catcher placed outside it would not silence the log entry this fixes.
+app.UseClientAbortHandling();
+
 // All assignment endpoints require an authenticated user
 var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
 // WS-F3 (ar-15-signoff-relocation): the public guardian sign-off route group,

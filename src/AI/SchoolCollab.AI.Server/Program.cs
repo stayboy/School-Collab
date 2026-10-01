@@ -114,6 +114,10 @@ var app = builder.Build();
 
 app.UseSerilogRequestLogging();
 
+// Must sit inside the request-logging middleware: Serilog logs a passing exception at Error and
+// rethrows, so a catcher placed outside it would not silence the log entry this fixes.
+app.UseClientAbortHandling();
+
 app.MapDefaultEndpoints();
 app.MapAssignmentQuestionGenerationEndpoints();
 

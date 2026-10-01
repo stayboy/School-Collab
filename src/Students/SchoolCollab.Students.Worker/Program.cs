@@ -50,6 +50,12 @@ builder.Services.AddStudentsCore(builder.Configuration);
 
 // Backfill HTTP client for the one permitted startup reference-data hop
 // (adr-cross-module-calls.md Phase 1 step 4).
+//
+// Timeout: the ADR requires an explicit timeout "separate from the default 100 s" so a slow peer
+// fails fast, so this stays below the default. The walk is ~143 sequential calls (one root call plus
+// a /by-parent call per node for today's 142 coded values) and is made resilient to a single slow or
+// failed call by the bounded retry in CodedValueBackfillService (the ADR's §Phase 2 hardening
+// direction) — not by a longer timeout here.
 builder.Services.AddHttpClient("settings-api", client =>
 {
     client.BaseAddress = new Uri("http://settings-api");

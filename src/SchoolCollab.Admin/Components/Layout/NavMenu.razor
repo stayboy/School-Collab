@@ -223,18 +223,25 @@
     {
         if (_loadingParents || _parentValues is not null) return;
 
-        _loadCts = new CancellationTokenSource();
+        // Capture the token in a local: DisposeAsync cancels AND nulls _loadCts, so the
+        // catch filters must not dereference the field.
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+        var ct = cts.Token;
         _loadingParents = true;
         try
         {
-            _parentValues = await Api.GetRootValuesAsync(_loadCts.Token);
+            _parentValues = await Api.GetRootValuesAsync(ct);
             if (_disposed) return;
             Logger.LogInformation("Loaded {Count} parent coded values for sidebar", _parentValues?.Length ?? 0);
         }
-        catch (OperationCanceledException) { /* user navigated away */ }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested || _disposed)
+        {
+            // Circuit torn down, or a newer load superseded this one — nothing to report.
+        }
         catch (Exception ex)
         {
-            if (_disposed) return;
+            if (_disposed || ct.IsCancellationRequested) return;
             Logger.LogError(ex, "Failed to load parent coded values for sidebar");
         }
         finally

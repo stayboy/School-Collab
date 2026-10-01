@@ -54,6 +54,10 @@ app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
 
+// Must sit inside the request-logging middleware: Serilog logs a passing exception at Error and
+// rethrows, so a catcher placed outside it would not silence the log entry this fixes.
+app.UseClientAbortHandling();
+
 var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
 // Map both legacy endpoint groups in this single host. See spec §8.
 app.MapCodedValueEndpoints(featureFlags);

@@ -37,8 +37,10 @@ namespace SchoolCollab.Students.Worker;
 /// backfilled).</para>
 ///
 /// <para><b>Failure policy:</b> failures are logged and swallowed — a downed
-/// settings-api at startup must not crash the worker. The next restart retries;
-/// events heal the gap meanwhile.</para>
+/// settings-api at startup must not crash the worker. The walk is retried up to
+/// <see cref="MaxAttempts"/> times at <b>Warning</b> level, because a cold settings-api
+/// is transient; only if every attempt fails is the projection left to coded-value
+/// events and the next restart.</para>
 /// </summary>
 public sealed class CodedValueBackfillService(
     IServiceProvider provider,
@@ -46,6 +48,13 @@ public sealed class CodedValueBackfillService(
     ILogger<CodedValueBackfillService> logger) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>How many times the whole walk is attempted before the projection is left to
+    /// coded-value events and the next restart.</summary>
+    private const int MaxAttempts = 3;
+
+    /// <summary>Pause between attempts — long enough for a cold settings-api to finish warming.</summary>
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
 
     private sealed record BackfillDto(
         Guid Id,
@@ -70,17 +79,42 @@ public sealed class CodedValueBackfillService(
             return;
         }
 
-        try
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            await RunAsync(stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // shutdown — nothing to do
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "CodedValueBackfill failed; projection will rely on events until next restart");
+            try
+            {
+                await RunAsync(stoppingToken);
+                return;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // shutdown — nothing to do
+                return;
+            }
+            catch (Exception ex) when (attempt < MaxAttempts)
+            {
+                // A cold settings-api (or a request stalling past the client timeout) is
+                // transient, so retry rather than deferring the whole hydration to the next
+                // restart. Warning, not Error: a deferred backfill is a degradation, not a failure.
+                logger.LogWarning(ex,
+                    "CodedValueBackfill attempt {Attempt}/{MaxAttempts} failed; retrying in {DelaySeconds}s",
+                    attempt, MaxAttempts, RetryDelay.TotalSeconds);
+
+                try
+                {
+                    await Task.Delay(RetryDelay, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "CodedValueBackfill deferred after {MaxAttempts} attempts; coded-value events or the next restart will complete the projection",
+                    MaxAttempts);
+            }
         }
     }
 
