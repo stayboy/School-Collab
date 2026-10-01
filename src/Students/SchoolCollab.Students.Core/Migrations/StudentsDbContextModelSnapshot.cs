@@ -573,15 +573,28 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_deleted");
 
-                    b.Property<bool?>("RequiresSignatureDefault")
+                    b.Property<int?>("MaxCopyContacts")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_copy_contacts");
+
+                    b.Property<int?>("MaxPrimaryContacts")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_primary_contacts");
+
+                    b.Property<bool?>("RequiresApprovalBeforePublish")
                         .HasColumnType("boolean")
-                        .HasColumnName("requires_signature_default");
+                        .HasColumnName("requires_approval_before_publish");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
+
+                    b.Property<string>("SignatureRequirement")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("signature_requirement");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

@@ -52,11 +52,12 @@ public class PublishAssignmentApprovalGateTests
         var tenantProvider = new FakeTenantProvider(TenantId);
         var broadcaster = new FakeBroadcaster();
         var policyResolver = new FakeNotificationPolicyResolver();
+        var assignmentPolicyResolver = new FakeAssignmentPolicyResolver();
         var cache = new FakeHybridCache();
 
         return new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, contactResolver, linkRepo, groupLookup,
-            topicLookup, tenantProvider, broadcaster, policyResolver,
+            topicLookup, tenantProvider, broadcaster, policyResolver, assignmentPolicyResolver,
             featureFlags, new FakeDeepLinkTokenMinter(), cache,
             NullLogger<PublishAssignmentCommandHandler>.Instance);
     }

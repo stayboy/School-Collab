@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Students.Core.CQRS.GradeAssignmentPolicies.Commands.UpsertGradeAssignmentPolicy;
 using SchoolCollab.Students.Core.CQRS.GradeAssignmentPolicies.Queries.GetGradeAssignmentPolicy;
 using SchoolCollab.Students.Core.Domain;
@@ -8,6 +9,11 @@ using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Tests.Unit;
 
+/// <summary>
+/// Round A (<c>documents/solution/assignment-policy-fields.md</c> §4) — the Students CQRS pair
+/// round-trips the whole four-field override shape, keeps the grade-exists guard, and keeps
+/// 204-when-no-row (all fields inherit) unchanged.
+/// </summary>
 [TestClass]
 public class GradeAssignmentPolicyHandlerTests
 {
@@ -32,21 +38,27 @@ public class GradeAssignmentPolicyHandlerTests
         var gradeId = await SeedGradeAsync(s);
 
         var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
-        result.Should().BeNull();
+        result.Should().BeNull("no override row means the grade inherits the tenant default");
     }
 
     [TestMethod]
-    public async Task Upsert_CreatesOverride_GetReturnsDto()
+    public async Task Upsert_CreatesOverride_GetRoundTripsEveryField()
     {
         using var s = new StudentsTestScope("gap-upsert-create");
         var gradeId = await SeedGradeAsync(s);
 
-        await NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(gradeId, RequiresSignatureDefault: true));
+        await NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, SignatureRequirementMode.Optional, RequiresApprovalBeforePublish: true,
+            MaxPrimaryContacts: 2, MaxCopyContacts: 4));
 
         var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
+
         result.Should().NotBeNull();
         result!.GradeLevelId.Should().Be(gradeId);
-        result.RequiresSignatureDefault.Should().BeTrue();
+        result.SignatureRequirement.Should().Be(SignatureRequirementMode.Optional);
+        result.RequiresApprovalBeforePublish.Should().BeTrue();
+        result.MaxPrimaryContacts.Should().Be(2);
+        result.MaxCopyContacts.Should().Be(4);
     }
 
     [TestMethod]
@@ -56,12 +68,34 @@ public class GradeAssignmentPolicyHandlerTests
         var gradeId = await SeedGradeAsync(s);
         var upsert = NewUpsert(s);
 
-        await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(gradeId, RequiresSignatureDefault: true));
-        await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(gradeId, RequiresSignatureDefault: null));
+        await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, SignatureRequirementMode.Mandatory, true, 1, 1));
+        await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(gradeId, null, null, null, null));
 
         var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
-        result!.RequiresSignatureDefault.Should().BeNull(); // inherit restored
-        (await s.Db.GradeAssignmentPolicies.CountAsync()).Should().Be(1);
+
+        result!.SignatureRequirement.Should().BeNull(); // inherit restored
+        result.RequiresApprovalBeforePublish.Should().BeNull();
+        result.MaxPrimaryContacts.Should().BeNull();
+        result.MaxCopyContacts.Should().BeNull();
+        (await s.Db.GradeAssignmentPolicies.CountAsync()).Should().Be(1, "one override row per grade");
+    }
+
+    [TestMethod]
+    public async Task Upsert_PartialFieldSet_LeavesTheRestInheriting()
+    {
+        using var s = new StudentsTestScope("gap-upsert-partial");
+        var gradeId = await SeedGradeAsync(s);
+
+        await NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, null, null, MaxPrimaryContacts: 6, null));
+
+        var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
+
+        result!.MaxPrimaryContacts.Should().Be(6);
+        result.MaxCopyContacts.Should().BeNull();
+        result.SignatureRequirement.Should().BeNull();
+        result.RequiresApprovalBeforePublish.Should().BeNull();
     }
 
     [TestMethod]
@@ -69,7 +103,53 @@ public class GradeAssignmentPolicyHandlerTests
     {
         using var s = new StudentsTestScope("gap-upsert-nograde");
         var act = () => NewUpsert(s).HandleAsync(
-            new UpsertGradeAssignmentPolicy(Guid.NewGuid(), RequiresSignatureDefault: true));
+            new UpsertGradeAssignmentPolicy(Guid.NewGuid(), SignatureRequirementMode.Optional, null, null, null));
         await act.Should().ThrowAsync<GradeLevelNotFoundException>();
+    }
+
+    // ── Q7 — non-positive contact caps are rejected on the write path ─────
+
+    [TestMethod]
+    public async Task Upsert_WithZeroPrimaryCap_ThrowsAndPersistsNothing()
+    {
+        using var s = new StudentsTestScope("gap-upsert-zero-primary");
+        var gradeId = await SeedGradeAsync(s);
+
+        var act = () => NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, SignatureRequirementMode.Optional, null, MaxPrimaryContacts: 0, MaxCopyContacts: 3));
+
+        var ex = await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        ex.Which.ParamName.Should().Be("MaxPrimaryContacts", "the guard names the offending field");
+        (await s.Db.GradeAssignmentPolicies.CountAsync()).Should().Be(0,
+            "a rejected cap never creates an override row");
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithNegativeCopyCap_ThrowsAndPersistsNothing()
+    {
+        using var s = new StudentsTestScope("gap-upsert-negative-copy");
+        var gradeId = await SeedGradeAsync(s);
+
+        var act = () => NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, SignatureRequirementMode.Optional, null, MaxPrimaryContacts: 3, MaxCopyContacts: -2));
+
+        var ex = await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        ex.Which.ParamName.Should().Be("MaxCopyContacts", "the guard names the offending field");
+        (await s.Db.GradeAssignmentPolicies.CountAsync()).Should().Be(0,
+            "the guard runs before the row is created");
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithNullCaps_IsAccepted()
+    {
+        using var s = new StudentsTestScope("gap-upsert-null-caps");
+        var gradeId = await SeedGradeAsync(s);
+
+        var result = await NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, SignatureRequirementMode.Mandatory, null, MaxPrimaryContacts: null, MaxCopyContacts: null));
+
+        result.MaxPrimaryContacts.Should().BeNull("null stays inherit — it is not a non-positive cap");
+        result.MaxCopyContacts.Should().BeNull();
+        result.SignatureRequirement.Should().Be(SignatureRequirementMode.Mandatory);
     }
 }

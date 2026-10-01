@@ -275,6 +275,8 @@ public static class GradeLevelRoutes
             return result is null ? Results.NoContent() : Results.Ok(result);
         });
 
+        // A non-positive contact cap is rejected by the handler (Q7) and mapped to 400
+        // here (the notification-policy PUT precedent above).
         group.MapPut("/grade-levels/{id:guid}/assignment-policy", async (
             Guid id,
             [FromBody] UpsertGradeAssignmentPolicyRequest req,
@@ -285,10 +287,14 @@ public static class GradeLevelRoutes
             {
                 var result = await handler.HandleAsync(new UpsertGradeAssignmentPolicy(
                     id,
-                    req.RequiresSignatureDefault), ct);
+                    req.ResolveSignatureRequirement(),
+                    req.RequiresApprovalBeforePublish,
+                    req.MaxPrimaryContacts,
+                    req.MaxCopyContacts), ct);
                 return Results.Ok(result);
             }
             catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+            catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
         });
 
         return group;
@@ -304,7 +310,37 @@ internal record AssignGradeStreamRequest(Guid StreamCodedValueId);
 
 /// <summary>Request body for moving one stream to a position in its grade's list.</summary>
 internal record SetGradeStreamOrderRequest(int Order);
-internal record UpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);
+
+/// <summary>
+/// PUT body for the per-grade assignment-policy override. Every field is nullable: null means
+/// "inherit the tenant default" (<c>documents/solution/assignment-policy-fields.md</c> §4).
+///
+/// <para><b>Legacy-input compatibility (Round A only).</b> The pre-widening wire shape was the
+/// boolean <c>requiresSignatureDefault</c>, and the shipped Admin editor
+/// (<c>GradeSignaturePolicyEditor</c>) still sends it. It is accepted <i>alongside</i> the new
+/// field set and mapped when <c>SignatureRequirement</c> is absent (<c>true → Optional</c>,
+/// <c>false → Disabled</c>, null → inherit). Round B deletes this member together with the
+/// retired editor.</para>
+/// </summary>
+internal record UpsertGradeAssignmentPolicyRequest(
+    SchoolCollab.Core.AssignmentPolicies.SignatureRequirementMode? SignatureRequirement,
+    bool? RequiresApprovalBeforePublish,
+    int? MaxPrimaryContacts,
+    int? MaxCopyContacts,
+    bool? RequiresSignatureDefault = null)
+{
+    /// <summary>
+    /// The signature requirement to persist: the new field when supplied, else the legacy
+    /// boolean mapped per D8's <c>false → Disabled, true → Optional</c> back-compat rule.
+    /// </summary>
+    public SchoolCollab.Core.AssignmentPolicies.SignatureRequirementMode? ResolveSignatureRequirement() =>
+        SignatureRequirement ?? (RequiresSignatureDefault switch
+        {
+            true => SchoolCollab.Core.AssignmentPolicies.SignatureRequirementMode.Optional,
+            false => SchoolCollab.Core.AssignmentPolicies.SignatureRequirementMode.Disabled,
+            null => (SchoolCollab.Core.AssignmentPolicies.SignatureRequirementMode?)null,
+        });
+}
 internal record UpsertGradeNotificationPolicyRequest(
     SchoolCollab.Core.Notifications.NotificationChannel[]? PreferredChannelOrder,
     SchoolCollab.Core.Notifications.NotificationChannel[]? BlockedChannels,

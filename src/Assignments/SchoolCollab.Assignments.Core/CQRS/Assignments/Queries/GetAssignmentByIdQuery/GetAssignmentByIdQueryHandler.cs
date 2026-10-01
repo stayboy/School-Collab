@@ -4,15 +4,27 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 
 public sealed class GetAssignmentByIdQueryHandler(
     AssignmentsDbContext db,
     HybridCache cache,
+    IAssignmentPolicyResolver assignmentPolicyResolver,
+    IFeatureFlagService featureFlags,
     ILogger<GetAssignmentByIdQueryHandler> logger) : IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
+    {
+        Expiration = TimeSpan.FromMinutes(5),
+        LocalCacheExpiration = TimeSpan.FromMinutes(1)
+    };
+
+    /// <summary>Per-(tenant, grade) effective-assignment-policy cache — see
+    /// <c>ListAssignmentsQueryHandler.PolicyCacheOptions</c> for the rationale (risk R-B1-1).</summary>
+    private static readonly HybridCacheEntryOptions PolicyCacheOptions = new()
     {
         Expiration = TimeSpan.FromMinutes(5),
         LocalCacheExpiration = TimeSpan.FromMinutes(1)
@@ -28,16 +40,44 @@ public sealed class GetAssignmentByIdQueryHandler(
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, query.Id),
+            (db, query.Id, cache, assignmentPolicyResolver, featureFlags, logger),
             static async (state, ct) =>
             {
-                var (dbContext, id) = state;
+                var (dbContext, id, hybridCache, policyResolver, flags, log) = state;
                 var assignment = await dbContext.Assignments
                     .AsNoTracking()
                     .SingleOrDefaultAsync(a => a.Id == id, ct);
 
                 if (assignment is null)
                     return null;
+
+                // D3 / Q6: the derived approval field is the effective policy field OR'd with
+                // FEATURE:RequireAssignmentApproval, resolved HERE so the detail surface reads no
+                // flag itself. The flag leg is guarded (plan-review P2-3) so a Config outage
+                // degrades to OFF — the replaced client-side read's behaviour — instead of 500-ing
+                // the detail read. The resolver is fail-open, so a failed policy fetch can never
+                // turn approval ON.
+                var flagOn = false;
+                try
+                {
+                    flagOn = await flags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, ct);
+                }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "Feature flag resolution failed; defaulting approval to OFF");
+                }
+
+                var policy = await hybridCache.GetOrCreateAsync(
+                    EffectivePolicyCacheKey(dbContext.CurrentTenantId, assignment.GradeLevelId),
+                    (assignment.GradeLevelId, policyResolver),
+                    static async (policyState, token) =>
+                    {
+                        var (grade, resolver) = policyState;
+                        return await resolver.ResolveAsync(grade, token);
+                    },
+                    PolicyCacheOptions,
+                    tags: ["assignments"],
+                    cancellationToken: ct);
 
                 return new AssignmentSummaryDto(
                     assignment.Id,
@@ -76,10 +116,17 @@ public sealed class GetAssignmentByIdQueryHandler(
                     assignment.DifficultyMediumCount,
                     assignment.DifficultyHardCount,
                     // WS-E2b / ar-17: "has ever been published" for the failure surface.
-                    PublishedAt: assignment.PublishedAt);
+                    PublishedAt: assignment.PublishedAt,
+                    // D3 / Q6: the server-derived approval gate for this assignment.
+                    RequiresApproval: policy.RequiresApprovalBeforePublish || flagOn);
             },
             CacheOptions,
             tags: ["assignments"],
             cancellationToken: cancellationToken);
     }
+
+    /// <summary>Per-(tenant, grade) effective-policy cache key; <c>none</c> is the sentinel for a
+    /// null grade (the tenant default only).</summary>
+    private static string EffectivePolicyCacheKey(Guid tenantId, Guid? gradeLevelId) =>
+        $"assignment-policy:effective:{tenantId}:{gradeLevelId?.ToString() ?? "none"}";
 }

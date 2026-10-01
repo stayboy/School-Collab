@@ -28,7 +28,10 @@ public sealed class GetGradeAssignmentPolicyHandler(StudentsDbContext db)
 
         return new GradeAssignmentPolicyDto(
             policy.GradeLevelId,
-            policy.RequiresSignatureDefault,
+            policy.SignatureRequirement,
+            policy.RequiresApprovalBeforePublish,
+            policy.MaxPrimaryContacts,
+            policy.MaxCopyContacts,
             policy.UpdatedAt);
     }
 }

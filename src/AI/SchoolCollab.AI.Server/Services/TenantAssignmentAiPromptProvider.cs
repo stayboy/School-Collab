@@ -18,7 +18,7 @@ public sealed record TenantAssignmentAiPromptInfo(string? SystemPrompt, bool IsL
 /// Fail-open: 204/404 ⇒ <see langword="null"/> (embedded default applies), and any
 /// transport/API failure logs a warning and returns <see langword="null"/> — it
 /// never throws to the caller, so a Settings outage cannot block question
-/// generation. Mirrors the ar-8 <c>ISignatureDefaultResolver</c> fail-open posture.
+/// generation. Mirrors the ar-8 <c>IAssignmentPolicyResolver</c> fail-open posture.
 /// </summary>
 public sealed class TenantAssignmentAiPromptProvider(
     HttpClient http,

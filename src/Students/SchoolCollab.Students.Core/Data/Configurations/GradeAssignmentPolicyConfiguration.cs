@@ -7,9 +7,10 @@ using SchoolCollab.Students.Core.Domain;
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
 /// <summary>
-/// Optional per-grade guardian-signature policy. Strict tenant-scoped, one row per
-/// (tenant, grade). Null override = inherit the tenant default. Cascade-deletes
-/// with its grade level (WS-C1 / spec §7 Q1).
+/// Optional per-grade assignment policy. Strict tenant-scoped, one row per
+/// (tenant, grade). Null field = inherit the tenant default. Cascade-deletes
+/// with its grade level (WS-C1 / spec §7 Q1;
+/// <c>documents/solution/assignment-policy-fields.md</c> §4).
 /// </summary>
 internal sealed class GradeAssignmentPolicyConfiguration
     : TenantEntityTypeConfigurationBase<GradeAssignmentPolicy>
@@ -27,7 +28,15 @@ internal sealed class GradeAssignmentPolicyConfiguration
         builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.GradeLevelId).IsRequired();
-        builder.Property(x => x.RequiresSignatureDefault);
+
+        // The shared AssignmentPolicyFields shape, stored as real nullable columns (no JSON).
+        // A null column means "inherit the tenant default".
+        builder.Property(x => x.SignatureRequirement)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+        builder.Property(x => x.RequiresApprovalBeforePublish);
+        builder.Property(x => x.MaxPrimaryContacts);
+        builder.Property(x => x.MaxCopyContacts);
 
         // One policy row per (tenant, grade); cascade-delete with the grade.
         builder.HasOne<GradeLevel>()

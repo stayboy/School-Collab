@@ -5,7 +5,7 @@ namespace SchoolCollab.Assignments.Core.Services;
 /// org-level AI prompt, so the wizard's prompt-override textarea can be disabled.
 /// The interface lives in Assignments.Core; the HTTP implementation lives in
 /// Assignments.Api (this module stays free of HTTP). Mirrors
-/// <see cref="ISignatureDefaultResolver"/>'s fail-open posture: a resolution
+/// <see cref="IAssignmentPolicyResolver"/>'s fail-open posture: a resolution
 /// failure degrades to <see langword="false"/> and never blocks the create wizard.
 /// </summary>
 public interface IAiPromptPolicyResolver

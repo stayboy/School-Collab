@@ -7,7 +7,7 @@ namespace SchoolCollab.Assignments.Core.Services;
 /// when configured, else <see cref="SignatureConsentDefaults.EmbeddedConsentText"/>.
 /// Interface lives in Assignments.Core; the HTTP implementation
 /// (settings-api named client) lives in Assignments.Api. Mirrors
-/// <see cref="ISignatureDefaultResolver"/>.
+/// <see cref="IAssignmentPolicyResolver"/>.
 /// </summary>
 public interface ISignatureConsentTextResolver
 {

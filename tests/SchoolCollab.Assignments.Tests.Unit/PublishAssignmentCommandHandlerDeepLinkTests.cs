@@ -65,6 +65,7 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
         return new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, contactResolver, linkRepo, groupLookup,
             topicLookup, tenantProvider, broadcaster, policyResolver,
+            new FakeAssignmentPolicyResolver(),
             flags ?? new FakeFeatureFlagService(), minter, cache,
             NullLogger<PublishAssignmentCommandHandler>.Instance);
     }

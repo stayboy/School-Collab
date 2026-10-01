@@ -26,6 +26,10 @@ public sealed class GetTenantAssignmentPolicyHandler(SettingsDbContext db)
             return null;
         }
 
-        return new TenantAssignmentPolicyDto(policy.RequiresSignatureDefault);
+        return new TenantAssignmentPolicyDto(
+            policy.SignatureRequirement,
+            policy.RequiresApprovalBeforePublish,
+            policy.MaxPrimaryContacts,
+            policy.MaxCopyContacts);
     }
 }

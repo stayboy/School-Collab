@@ -20,7 +20,7 @@ public sealed record WardGuardianInfo(Guid GuardianId, string DisplayName, bool 
 /// §2 WS-C; spec §5 / §7 Q5). The interface lives in Assignments.Core; the
 /// HTTP implementation (students-api named client) lives in Assignments.Api.
 /// Mirrors <see cref="IActivityGroupLookup"/> /
-/// <see cref="ISignatureDefaultResolver"/>.
+/// <see cref="IAssignmentPolicyResolver"/>.
 ///
 /// <para>Failure posture: all lookups are best-effort — a fetch failure or a
 /// 404 degrades to an absent result (null / empty list), never throws to the
