@@ -1,0 +1,140 @@
+@*
+    AssignmentPolicyFieldValueEditor — renders ONE assignment-policy field's value editor for ONE
+    scope (tenant-global default or per-grade override). Used twice by
+    AssignmentPolicyFieldEditDialog, which lays the two instances out side by side. The editor
+    shape is driven by Kind:
+
+      • Mode — a FluentSelect over SignatureRequirementMode plus a clear/inherit sentinel.
+      • Bool — a FluentSelect over Yes/No plus a sentinel. A select, not a switch: the value is
+               nullable, and "unset" is a third state a two-state switch cannot express.
+      • Int  — a FluentNumberField (blank ⇒ null; Min = 1 mirrors the Q7 write-path rule).
+
+    Raw FluentSelect is used deliberately: the three options are a sentinel plus a two/three-value
+    literal set over a nullable value — no enum-backed DTO list and no coded-value lookup — so the
+    shared dropdown wrappers do not apply (dropdown-ui skill §1). The sentinel's label differs by
+    scope (clear for the tenant default, inherit for the grade), hence ClearLabel.
+*@
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Core.AssignmentPolicies
+
+@if (Kind == AssignmentPolicyFieldEditDialog.FieldKind.Int)
+{
+    <FluentNumberField Id="@InputId" @bind-Value="IntValue" Min="1" Class="w-9" />
+}
+else
+{
+    <FluentSelect TOption="ValueOption"
+                  Id="@InputId"
+                  Items="@Options"
+                  OptionText="@(o => o.Label)"
+                  OptionValue="@(o => o.Value)"
+                  SelectedOption="@SelectedOption"
+                  SelectedOptionChanged="@OnOptionChanged"
+                  Class="w-9" />
+}
+
+@code {
+    /// <summary>One selectable option — the empty <see cref="Value"/> is the clear/inherit
+    /// sentinel.</summary>
+    internal sealed record ValueOption(string Value, string Label);
+
+    /// <summary>Which editor shape to render.</summary>
+    [Parameter] public AssignmentPolicyFieldEditDialog.FieldKind Kind { get; set; }
+
+    /// <summary>Optional DOM id for the value input (unique per side in the dialog).</summary>
+    [Parameter] public string? InputId { get; set; }
+
+    /// <summary>Label of the sentinel option: "clear" for the tenant default, "inherit" for the
+    /// grade override.</summary>
+    [Parameter] public string ClearLabel { get; set; } = "Not set";
+
+    /// <summary>The signature-requirement value (one-way, via <c>ModeChanged</c>).</summary>
+    [Parameter] public SignatureRequirementMode? Mode { get; set; }
+    [Parameter] public EventCallback<SignatureRequirementMode?> ModeChanged { get; set; }
+
+    /// <summary>The nullable boolean value (one-way, via <c>BoolValueChanged</c>).</summary>
+    [Parameter] public bool? BoolValue { get; set; }
+    [Parameter] public EventCallback<bool?> BoolValueChanged { get; set; }
+
+    /// <summary>The nullable integer value (one-way, via <c>IntValueChanged</c>; blank ⇒ null).</summary>
+    [Parameter] public int? IntValue { get; set; }
+    [Parameter] public EventCallback<int?> IntValueChanged { get; set; }
+
+    private const string DisabledKey = "Disabled";
+    private const string OptionalKey = "Optional";
+    private const string MandatoryKey = "Mandatory";
+    private const string TrueKey = "true";
+    private const string FalseKey = "false";
+
+    private ValueOption[] Options
+    {
+        get
+        {
+            if (Kind == AssignmentPolicyFieldEditDialog.FieldKind.Mode)
+            {
+                return
+                [
+                    new(string.Empty, ClearLabel),
+                    new(DisabledKey, "No signature required"),
+                    new(OptionalKey, "Optional (pre-filled, changeable)"),
+                    new(MandatoryKey, "Mandatory (author cannot untick)"),
+                ];
+            }
+
+            return
+            [
+                new(string.Empty, ClearLabel),
+                new(TrueKey, "Yes"),
+                new(FalseKey, "No"),
+            ];
+        }
+    }
+
+    private ValueOption? SelectedOption
+    {
+        get
+        {
+            var key = Kind switch
+            {
+                AssignmentPolicyFieldEditDialog.FieldKind.Mode => Mode switch
+                {
+                    SignatureRequirementMode.Disabled => DisabledKey,
+                    SignatureRequirementMode.Optional => OptionalKey,
+                    SignatureRequirementMode.Mandatory => MandatoryKey,
+                    _ => string.Empty,
+                },
+                _ => BoolValue switch
+                {
+                    true => TrueKey,
+                    false => FalseKey,
+                    null => string.Empty,
+                },
+            };
+            return Options.First(o => o.Value == key);
+        }
+    }
+
+    private async Task OnOptionChanged(ValueOption? option)
+    {
+        var key = option?.Value ?? string.Empty;
+        if (Kind == AssignmentPolicyFieldEditDialog.FieldKind.Mode)
+        {
+            await ModeChanged.InvokeAsync(key switch
+            {
+                DisabledKey => SignatureRequirementMode.Disabled,
+                OptionalKey => SignatureRequirementMode.Optional,
+                MandatoryKey => SignatureRequirementMode.Mandatory,
+                _ => null,
+            });
+            return;
+        }
+
+        await BoolValueChanged.InvokeAsync(key switch
+        {
+            TrueKey => true,
+            FalseKey => false,
+            _ => (bool?)null,
+        });
+    }
+}

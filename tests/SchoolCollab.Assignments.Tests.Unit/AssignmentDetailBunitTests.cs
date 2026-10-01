@@ -17,7 +17,6 @@ using DetailPage = SchoolCollab.Assignments.Application.Components.Pages.Assignm
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
-using SchoolCollab.Core.Features;
 using DetailPage_Component = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Detail;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
@@ -86,20 +85,6 @@ public class AssignmentDetailBunitTests : BunitContext
         // (the JS save path has no DOM in bUnit — these tests assert the action gating).
         Services.AddSingleton<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>();
         Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>>());
-        // WS-A2: the Detail page injects IFeatureFlagService to gate the
-        // approval panel + Draft row's Schedule action.
-        SetupFeatureFlag(false);
-    }
-
-    /// <summary>Replaces the registered <see cref="IFeatureFlagService"/>
-    /// singleton with a fake at the requested ON/OFF state so the
-    /// per-test gating is just call this method before rendering.</summary>
-    private void SetupFeatureFlag(bool on)
-    {
-        var existing = Services.Where(s => s.ServiceType == typeof(IFeatureFlagService)).ToList();
-        foreach (var s in existing)
-            Services.Remove(s);
-        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService { IsEnabledValue = on });
     }
 
     /// <summary>GET-hit counter for the assignment endpoint — the approve /
@@ -141,7 +126,7 @@ public class AssignmentDetailBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "[]");
     }
 
-    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null) =>
+    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null, bool requiresApproval = false) =>
         new(
             Id: Guid.NewGuid(),
             Title: "Math HW",
@@ -168,6 +153,9 @@ public class AssignmentDetailBunitTests : BunitContext
             // status test. An assignment in a post-publish status was necessarily published
             // at some point; a Draft was not — unless the test supplies one (the unpublish
             // case, where Unpublish() returns it to Draft with its history intact).
+            // Q6 / D3: the server-derived approval gate the Detail panel reads (the read
+            // handler ORs the effective policy with FEATURE:RequireAssignmentApproval).
+            RequiresApproval: requiresApproval,
             PublishedAt: publishedAt ?? (status is AssignmentStatusDto.Published
                 or AssignmentStatusDto.Scheduled
                 or AssignmentStatusDto.Closed
@@ -210,9 +198,8 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOff_ApprovalPanelHidden()
+    public void Detail_NotRequiresApproval_ApprovalPanelHidden()
     {
-        SetupFeatureFlag(false);
         var dto = MakeDto(AssignmentStatusDto.Draft);
         SetupGetAssignment(dto);
 
@@ -223,10 +210,9 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOn_Draft_RendersSubmitForApproval()
+    public void Detail_RequiresApproval_Draft_RendersSubmitForApproval()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var dto = MakeDto(AssignmentStatusDto.Draft, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -235,10 +221,9 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOn_Pending_RendersApproveAndReject()
+    public void Detail_RequiresApproval_Pending_RendersApproveAndReject()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -251,10 +236,9 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOn_Approved_ShowsReadOnlyChip()
+    public void Detail_RequiresApproval_Approved_ShowsReadOnlyChip()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -265,9 +249,8 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_DraftFlagOn_ShowsScheduleAction()
+    public void Detail_Draft_ShowsScheduleAction()
     {
-        SetupFeatureFlag(true);
         var dto = MakeDto(AssignmentStatusDto.Draft);
         SetupGetAssignment(dto);
 
@@ -281,8 +264,7 @@ public class AssignmentDetailBunitTests : BunitContext
     [TestMethod]
     public void Detail_ApprovalChipText_NotSubmittedWhenApprovalStatusNull()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: null);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: null, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -297,8 +279,7 @@ public class AssignmentDetailBunitTests : BunitContext
     [TestMethod]
     public void Detail_ApprovalChipText_PendingRendersPendingText()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -309,8 +290,7 @@ public class AssignmentDetailBunitTests : BunitContext
     [TestMethod]
     public void Detail_ApprovalChipText_RejectedRendersRejectedText()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -325,10 +305,9 @@ public class AssignmentDetailBunitTests : BunitContext
     //    with only the chip and no way to resubmit. The fixed gate is
     //    "null or Rejected" so a rejected draft sees the resubmit button.
     [TestMethod]
-    public void Detail_FlagOn_RejectedDraft_RendersSubmitForApproval()
+    public void Detail_RequiresApproval_RejectedDraft_RendersSubmitForApproval()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected, requiresApproval: true);
         SetupGetAssignment(dto);
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
@@ -380,10 +359,9 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOn_Pending_ApproveClicked_UserConfirms_PostsApprove()
+    public void Detail_RequiresApproval_Pending_ApproveClicked_UserConfirms_PostsApprove()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
         SetupConfirmDialogResult(confirmed: true);
 
@@ -424,8 +402,7 @@ public class AssignmentDetailBunitTests : BunitContext
         var actingTeacherId = Guid.Parse("00000000-0000-0000-0000-00000000AB24");
         _authStateProvider.TeacherId = actingTeacherId;
 
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
         SetupConfirmDialogResult(confirmed: true);
 
@@ -444,10 +421,9 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOn_Pending_ApproveClicked_UserDeclines_NoPost()
+    public void Detail_RequiresApproval_Pending_ApproveClicked_UserDeclines_NoPost()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
         var dialogMock = SetupConfirmDialogResult(confirmed: false);
 
@@ -481,10 +457,9 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_FlagOn_Pending_RejectClicked_UserConfirms_PostsReject()
+    public void Detail_RequiresApproval_Pending_RejectClicked_UserConfirms_PostsReject()
     {
-        SetupFeatureFlag(true);
-        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
         SetupConfirmDialogResult(confirmed: true);
 
@@ -536,9 +511,8 @@ public class AssignmentDetailBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_DraftFlagOn_ScheduleDialogConfirm_PostsScheduleAtUtcMidnight()
+    public void Detail_Draft_ScheduleDialogConfirm_PostsScheduleAtUtcMidnight()
     {
-        SetupFeatureFlag(true);
         var dto = MakeDto(AssignmentStatusDto.Draft);
         SetupGetAssignment(dto);
 

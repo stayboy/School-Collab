@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.AssignmentPolicies;
 
 namespace SchoolCollab.Assignments.Application.Services;
 
@@ -82,14 +83,18 @@ public sealed class AssignmentsApiClient
     }
 
     /// <summary>
-    /// Resolves the effective guardian-signature default for the create wizard
-    /// (WS-C1 / spec §7 Q1). <paramref name="gradeLevelId"/> null resolves the
-    /// tenant-global default; a grade id resolves the grade override falling back
-    /// to the tenant default. Always succeeds (the API resolves fail-open to
-    /// <see langword="false"/>); an unreachable endpoint surfaces as
-    /// <see cref="HttpRequestException"/> for the caller to log + ignore.
+    /// Resolves the effective guardian-signature requirement for the create wizard
+    /// (WS-C1 / spec §7 Q1; D2 / Q6 in Round B1). <paramref name="gradeLevelId"/> null
+    /// resolves the tenant-global default; a grade id resolves the grade override falling
+    /// back to the tenant default. Always succeeds (the API resolves fail-open to
+    /// <see cref="SignatureRequirementMode.Disabled"/>); an unreachable endpoint surfaces as
+    /// <see cref="HttpRequestException"/> for the caller to log + ignore. The returned mode
+    /// lets the wizard distinguish <c>Mandatory</c> (lock the checkbox) from
+    /// <c>Optional</c> (pre-fill only); the route's legacy boolean is honoured as
+    /// <c>Optional</c>/<c>Disabled</c> when the mode is absent (an older API).
     /// </summary>
-    public async Task<bool> GetSignatureDefaultAsync(Guid? gradeLevelId, CancellationToken ct = default)
+    public async Task<SignatureRequirementMode> GetSignatureDefaultAsync(
+        Guid? gradeLevelId, CancellationToken ct = default)
     {
         _logger.LogDebug("Resolving signature default for grade {GradeLevelId}", gradeLevelId);
         var url = gradeLevelId.HasValue
@@ -98,10 +103,13 @@ public sealed class AssignmentsApiClient
         var response = await _http.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<SignatureDefaultResponse>(_jsonOptions, ct);
+        var mode = result?.SignatureMode
+            ?? (result?.RequiresSignature == true
+                ? SignatureRequirementMode.Optional
+                : SignatureRequirementMode.Disabled);
         _logger.LogInformation(
-            "Resolved signature default {RequiresSignature} for grade {GradeLevelId}",
-            result?.RequiresSignature ?? false, gradeLevelId);
-        return result?.RequiresSignature ?? false;
+            "Resolved signature requirement {Mode} for grade {GradeLevelId}", mode, gradeLevelId);
+        return mode;
     }
 
     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)
@@ -511,8 +519,9 @@ public sealed class AssignmentsApiClient
     /// duplicate uses this working record instead.</summary>
     private sealed record IdResponse(Guid Id);
 
-    /// <summary>Private envelope for the <c>/assignments/signature-default</c>
-    /// route's always-200 body (<c>{"requiresSignature": ...}</c>) — the round-7
-    /// <see cref="IdResponse"/> camel-case precedent.</summary>
-    private sealed record SignatureDefaultResponse(bool RequiresSignature);
+    /// <summary>Private envelope for the <c>/assignments/signature-default</c> route's always-200
+    /// body. Round B1 widened it additively: <c>signatureMode</c> is authoritative when present;
+    /// the legacy <c>requiresSignature</c> boolean is the pre-widening derivation
+    /// (<c>mode != Disabled</c>) and is honoured when the mode is absent.</summary>
+    private sealed record SignatureDefaultResponse(bool RequiresSignature, SignatureRequirementMode? SignatureMode = null);
 }

@@ -6,7 +6,6 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Admin.Shared.Components
-@using SchoolCollab.Core.Features
 @inject AssignmentsApiClient Api
 @inject StudentsApiClient StudentsApi
 @inject IDialogService DialogService
@@ -137,9 +136,13 @@
                             }
                         </div>
 
-                        @* WS-A2 / spec §7 Q2 — approval panel (flag-gated).
-                            Hidden when the approval feature flag is off. *@
-                        <FeatureFlagGate Key="@FeatureFlagKeys.RequireAssignmentApproval">
+                        @* Q6 / D3 (documents/solution/assignment-policy-fields.md §5) — the
+                           approval panel is gated on the SERVER-derived RequiresApproval:
+                           the grade's effective RequiresApprovalBeforePublish policy field
+                           OR'd with the assignment-approval runtime feature flag by the read
+                           handler. The page reads no feature flag itself. *@
+                        @if (_item.RequiresApproval)
+                        {
                             <hr class="my-4" />
                             <h4>Approval</h4>
                             <div class="mt-2">
@@ -166,7 +169,7 @@
                             {
                                 <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_approvalError</FluentMessageBar>
                             }
-                        </FeatureFlagGate>
+                        }
 
                         @if (_item.Status == AssignmentStatusDto.Closed)
                         {

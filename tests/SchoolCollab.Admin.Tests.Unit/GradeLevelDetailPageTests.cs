@@ -1262,15 +1262,18 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_RendersSignaturePolicyCard()
+    public void Detail_RendersAssignmentPolicyCard()
     {
         // Precedent: Detail_NotificationEditor_IsWired uses ReadDetailSource().
         var source = ReadDetailSource();
 
-        source.Should().Contain("GradeSignaturePolicyEditor",
-            "the guardian-signature card hosts the per-grade signature policy editor component");
-        source.Should().Contain("Guardian Signature",
-            "the card is titled 'Guardian Signature'");
+        source.Should().Contain("AssignmentPolicyEditor",
+            "the assignment-policy card hosts the per-grade assignment policy editor component (D6, " +
+            "absorbing the retired guardian-signature row)");
+        source.Should().Contain("Assignment Policy",
+            "the card is titled 'Assignment Policy'");
+        source.Should().NotContain("GradeSignaturePolicyEditor",
+            "the retired component is gone from its only host");
     }
 
     private sealed class StubFlagService : IFeatureFlagService

@@ -2,9 +2,7 @@
 @using SchoolCollab.Assignments.Contracts
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Admin.Shared.Components.Landing
-@using SchoolCollab.Core.Features
 @inject AssignmentsApiClient Api
-@inject IFeatureFlagService FeatureFlags
 @inject ILogger<Index> Logger
 @inject IToastService Toast
 @implements IDisposable
@@ -17,7 +15,7 @@
              Items="@DisplayItems"
              Error="@_error"
              Loading="@_isSearching"
-             GridSettings="@_gridSettings"
+             GridSettings="@GridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
              SearchPlaceholder="Search assignments…"
@@ -57,13 +55,11 @@
                 @context.Status
             </FluentBadge>
         </TemplateColumn>
-        @* WS-A2 / spec §7 Q2 — reviewer-rework UI-tester P2: a Draft row's
-           approval state is otherwise invisible in the index, so the
-           optimistic Submit-for-approval flip (and its failure rollback)
-           has no surface. The Approval column is conditional on the flag
-           so OFF tenants see exactly today's grid; ON tenants see a chip
-           per Draft row with the five approval states. *@
-        @if (_approvalRequired)
+        @* Q6 / D3 — the Approval column is driven by the SERVER-derived RequiresApproval on
+           each row (the effective policy OR'd with the assignment-approval runtime feature
+           flag), not by a client-side flag read. The column appears when any loaded row carries
+           it, so flag-OFF tenants see exactly today's grid. *@
+        @if (AnyApprovalRequired)
         {
             <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Approval">
                 @if (context.Status == AssignmentStatusDto.Draft)
@@ -106,14 +102,25 @@
             ? $"No assignments match '{_searchText}'."
             : "No assignments yet.";
 
-    private static readonly LandingGridSettings _gridSettings = new()
+    // WS-A2 / spec §7 Q2 (UI-tester rework P2) — the optional Approval column is driven by
+    // the per-row derived RequiresApproval, so the template is derived from the SAME
+    // predicate the column renders on: a fixed 9-slot template left an empty 1fr slot
+    // between Status and Due Date whenever no loaded row was approval-required (the
+    // default state for tenants with the policy off). One static instance per state; the
+    // trailing "auto auto" keeps the Max Score and Actions columns at their natural width
+    // in both variants.
+    private static readonly LandingGridSettings _gridSettingsNoApproval = new()
     {
-        // WS-A2 / spec §7 Q2 — the optional Approval column rides on the
-        // flag. Template columns therefore grow by one when the flag is on
-        // (the explicit "auto" trailing column keeps the Actions column's
-        // natural width regardless).
+        GridTemplateColumns = "minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr auto auto"
+    };
+
+    private static readonly LandingGridSettings _gridSettingsWithApproval = new()
+    {
         GridTemplateColumns = "minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto auto"
     };
+
+    private LandingGridSettings GridSettings =>
+        AnyApprovalRequired ? _gridSettingsWithApproval : _gridSettingsNoApproval;
 
     // Status filter (WS-A2 / spec §3.5 — adds Scheduled + Archived).
     public record StatusOption(int? Value, string Label);
@@ -128,9 +135,13 @@
     ];
     private StatusOption? _selectedStatus;
 
-    // WS-A2 / spec §7 Q2: approval flag toggle for the Draft row action
-    // (Submit-for-approval replaces Publish when the flag is on).
-    private bool _approvalRequired;
+    // Q6 / D3: the Approval column renders when any loaded row is gated on approval. The
+    // gate itself is derived server-side onto each summary (effective policy OR flag), so
+    // the page performs no flag read. The search result set is included because it replaces
+    // the grid while a search is active (the approval chips must not flicker away mid-search).
+    private bool AnyApprovalRequired =>
+        (_items?.Any(a => a.RequiresApproval) ?? false)
+        || (_searchResults?.Any(a => a.RequiresApproval) ?? false);
 
     private readonly GridSort<AssignmentSummaryDto> _sortByTitle =
         GridSort<AssignmentSummaryDto>.ByAscending(x => x.Title);
@@ -155,19 +166,6 @@
         Logger.LogInformation("Loading assignments list");
         try
         {
-            // WS-A2 / spec §7 Q2: resolve the approval flag once and cache it
-            // (the NavMenu precedent). A resolution failure logs and leaves the
-            // page in the OFF state — the list never blocks on the flag.
-            try
-            {
-                _approvalRequired = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, token);
-            }
-            catch (Exception flagEx)
-            {
-                Logger.LogWarning(flagEx, "Feature flag resolution failed; defaulting approval to OFF");
-                _approvalRequired = false;
-            }
-
             _items = await LoadAssignmentsAsync(token);
             if (_disposed) return;
             Logger.LogInformation("Loaded {Count} assignments", _items?.Length ?? 0);
@@ -198,6 +196,23 @@
         return await Api.ListAsync(statusFilter, ct);
     }
 
+    // UI-tester rework P2: DisplayItems renders the search result set while a search is
+    // active, so a row substitution made to _items must be mirrored into _searchResults or
+    // the user never sees the optimistic flip (or its rollback). Same FindIndex-by-Id shape
+    // as the _items mutation, null-guarded while no search is active.
+    private void SetSearchResult(Guid id, AssignmentSummaryDto row)
+    {
+        if (_searchResults is null) return;
+        var i = Array.FindIndex(_searchResults, x => x.Id == id);
+        if (i >= 0) _searchResults[i] = row;
+    }
+
+    private void RemoveSearchResult(Guid id)
+    {
+        if (_searchResults is null) return;
+        _searchResults = _searchResults.Where(x => x.Id != id).ToArray();
+    }
+
     private async Task OnPublishAsync(Guid id)
     {
         if (_disposed || _items is null) return;
@@ -206,6 +221,7 @@
 
         var previous = _items[idx];
         _items[idx] = previous with { Status = AssignmentStatusDto.Published };
+        SetSearchResult(id, _items[idx]);
         StateHasChanged();
 
         try
@@ -218,6 +234,7 @@
             Logger.LogError(ex, "Failed to publish assignment {AssignmentId}", id);
             var i = Array.FindIndex(_items, x => x.Id == id);
             if (i >= 0) _items[i] = previous;
+            SetSearchResult(id, previous);
             _error = ex.Message;
             StateHasChanged();
         }
@@ -231,6 +248,7 @@
 
         var previous = _items[idx];
         _items[idx] = previous with { Status = AssignmentStatusDto.Draft };
+        SetSearchResult(id, _items[idx]);
         StateHasChanged();
 
         try
@@ -243,6 +261,7 @@
             Logger.LogError(ex, "Failed to unpublish assignment {AssignmentId}", id);
             var i = Array.FindIndex(_items, x => x.Id == id);
             if (i >= 0) _items[i] = previous;
+            SetSearchResult(id, previous);
             _error = ex.Message;
             StateHasChanged();
         }
@@ -256,6 +275,7 @@
 
         var previous = _items[idx];
         _items[idx] = previous with { Status = AssignmentStatusDto.Closed };
+        SetSearchResult(id, _items[idx]);
         StateHasChanged();
 
         try
@@ -268,6 +288,7 @@
             Logger.LogError(ex, "Failed to close assignment {AssignmentId}", id);
             var i = Array.FindIndex(_items, x => x.Id == id);
             if (i >= 0) _items[i] = previous;
+            SetSearchResult(id, previous);
             _error = ex.Message;
             StateHasChanged();
         }
@@ -285,6 +306,7 @@
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != id).ToArray();
+                RemoveSearchResult(id);
                 StateHasChanged();
             }
         }
@@ -308,6 +330,7 @@
 
         var previous = _items[idx];
         _items[idx] = previous with { ApprovalStatus = ApprovalStatusDto.Pending };
+        SetSearchResult(id, _items[idx]);
         StateHasChanged();
 
         try
@@ -320,6 +343,7 @@
             Logger.LogError(ex, "Failed to submit assignment {AssignmentId} for approval", id);
             var i = Array.FindIndex(_items, x => x.Id == id);
             if (i >= 0) _items[i] = previous;
+            SetSearchResult(id, previous);
             _error = ex.Message;
             StateHasChanged();
         }
@@ -339,6 +363,14 @@
             if (_disposed) return;
             Toast.ShowSuccess($"Assignment duplicated: '{title} (copy)'.");
             _items = await LoadAssignmentsAsync(_loadCts?.Token ?? CancellationToken.None);
+            // DisplayItems renders the search result set while a search is active, so the
+            // list reload that surfaces the new Draft must be mirrored there too (same
+            // fetch + client-side title filter as the search box) — otherwise the copy
+            // stays invisible until the search is cleared.
+            if (_searchResults is not null)
+            {
+                await OnSearchValueChanged(_searchText);
+            }
             StateHasChanged();
         }
         catch (Exception ex)
@@ -380,14 +412,11 @@
         {
             case AssignmentStatusDto.Draft:
                 actions.Add(RowAction.Navigate("Edit", $"/assignments/{a.Id}/edit", FluentIcons.Edit));
-                // WS-A2 / spec §7 Q2: when the approval flag is on, Draft
-                // rows surface "Submit for Approval" instead of Publish —
-                // BUT only while the assignment has no current approval. An
-                // already-APPROVED Draft must keep the Publish action so the
-                // reviewer-rework UI-tester P1 cannot silently revoke an
-                // approval (SubmitForApproval on an Approved row is a
-                // Draft-only guard that flips Approved → Pending).
-                if (_approvalRequired && a.ApprovalStatus != ApprovalStatusDto.Approved)
+                // Q6 / D3: the row action reads the server-derived approval requirement
+                // (effective policy OR flag) — an already-APPROVED Draft must keep the Publish
+                // action so a reviewer cannot silently revoke an approval (SubmitForApproval
+                // on an Approved row is a Draft-only guard that flips Approved → Pending).
+                if (a.RequiresApproval && a.ApprovalStatus != ApprovalStatusDto.Approved)
                 {
                     actions.Add(RowAction.Callback(
                         "Submit for Approval",
