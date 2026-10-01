@@ -42,7 +42,7 @@ public class ScheduleAssignmentCommandHandlerTests
         var repo = new FakeAssignmentRepository { Assignment = assignment };
         var featureFlags = new FakeFeatureFlagService(); // OFF
         var cache = new FakeHybridCache();
-        var handler = new ScheduleAssignmentCommandHandler(repo, featureFlags, cache,
+        var handler = new ScheduleAssignmentCommandHandler(repo, featureFlags, new FakeAssignmentPolicyResolver(), cache,
             NullLogger<ScheduleAssignmentCommandHandler>.Instance);
 
         var availableFrom = DateTimeOffset.UtcNow.AddDays(7);
@@ -60,7 +60,7 @@ public class ScheduleAssignmentCommandHandlerTests
         var repo = new FakeAssignmentRepository { Assignment = assignment };
         var featureFlags = new FakeFeatureFlagService { IsEnabledValue = true };
         var cache = new FakeHybridCache();
-        var handler = new ScheduleAssignmentCommandHandler(repo, featureFlags, cache,
+        var handler = new ScheduleAssignmentCommandHandler(repo, featureFlags, new FakeAssignmentPolicyResolver(), cache,
             NullLogger<ScheduleAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>
@@ -79,7 +79,7 @@ public class ScheduleAssignmentCommandHandlerTests
         var repo = new FakeAssignmentRepository { Assignment = assignment };
         var featureFlags = new FakeFeatureFlagService { IsEnabledValue = true };
         var cache = new FakeHybridCache();
-        var handler = new ScheduleAssignmentCommandHandler(repo, featureFlags, cache,
+        var handler = new ScheduleAssignmentCommandHandler(repo, featureFlags, new FakeAssignmentPolicyResolver(), cache,
             NullLogger<ScheduleAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new ScheduleAssignmentCommand(assignment.Id, DateTimeOffset.UtcNow.AddDays(7)));
@@ -91,7 +91,7 @@ public class ScheduleAssignmentCommandHandlerTests
     public async Task HandleAsync_UnknownId_Throws()
     {
         var repo = new FakeAssignmentRepository { Assignment = null };
-        var handler = new ScheduleAssignmentCommandHandler(repo, new FakeFeatureFlagService(),
+        var handler = new ScheduleAssignmentCommandHandler(repo, new FakeFeatureFlagService(), new FakeAssignmentPolicyResolver(),
             new FakeHybridCache(), NullLogger<ScheduleAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>
@@ -105,7 +105,7 @@ public class ScheduleAssignmentCommandHandlerTests
         var assignment = NewAssignment();
         var before = assignment.Status;
         var repo = new FakeAssignmentRepository { Assignment = assignment };
-        var handler = new ScheduleAssignmentCommandHandler(repo, new FakeFeatureFlagService(),
+        var handler = new ScheduleAssignmentCommandHandler(repo, new FakeFeatureFlagService(), new FakeAssignmentPolicyResolver(),
             new FakeHybridCache(), NullLogger<ScheduleAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>

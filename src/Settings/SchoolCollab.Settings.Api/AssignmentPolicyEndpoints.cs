@@ -8,7 +8,7 @@ namespace SchoolCollab.Settings.Api;
 public static class AssignmentPolicyEndpoints
 {
     /// <summary>
-    /// Maps the per-tenant default guardian-signature policy under
+    /// Maps the per-tenant default assignment policy under
     /// <c>/api/settings/assignment-policy</c>. Cookie-gated when OIDC is on; open
     /// under TestAuth in dev (the tenant context is still enforced by the tenant
     /// query filter, so reads/writes stay scoped to the caller's tenant).

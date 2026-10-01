@@ -39,6 +39,7 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 
@@ -75,13 +76,20 @@ public static class AssignmentRoutes
         // The literal segment wins over the {id:guid} template above (a
         // non-GUID segment never matches a guid route), so the always-200
         // fail-open resolution is reachable by the create-wizard pre-fill.
+        // Round B1 (D2) widens the body ADDITIVELY with `signatureMode` (the enum
+        // name, via the type-level JsonStringEnumConverter) so the create wizard can
+        // distinguish Mandatory (lock the checkbox) from Optional (pre-fill only);
+        // `requiresSignature` keeps its Round A derivation
+        // (Mandatory/Optional ⇒ true, Disabled ⇒ false), so a consumer reading only
+        // the boolean still parses.
         group.MapGet("/signature-default", async (
             [FromQuery] Guid? gradeLevelId,
-            [FromServices] SchoolCollab.Assignments.Core.Services.ISignatureDefaultResolver resolver,
+            [FromServices] SchoolCollab.Assignments.Core.Services.IAssignmentPolicyResolver resolver,
             CancellationToken ct) =>
         {
-            var requiresSignature = await resolver.ResolveRequiresSignatureDefaultAsync(gradeLevelId, ct);
-            return Results.Ok(new { requiresSignature });
+            var policy = await resolver.ResolveAsync(gradeLevelId, ct);
+            var requiresSignature = policy.SignatureRequirement != SignatureRequirementMode.Disabled;
+            return Results.Ok(new { requiresSignature, signatureMode = policy.SignatureRequirement });
         });
 
         // ── Guardian sign-off consent language (WS-C1/C2 / spec §3.2 line 53) ──

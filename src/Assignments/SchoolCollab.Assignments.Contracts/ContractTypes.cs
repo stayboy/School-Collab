@@ -139,7 +139,15 @@ public record AssignmentSummaryDto(
     /// "at least one publish happened"). The failure-surfacing UI gates on this rather
     /// than on <see cref="Status"/>, because <c>Unpublish</c> returns an assignment to
     /// <c>Draft</c> while its delivery history survives.</summary>
-    DateTimeOffset? PublishedAt = null);
+    DateTimeOffset? PublishedAt = null,
+    /// <summary>WS-A2 / D3 / Q6 (<c>documents/solution/assignment-policy-fields.md</c> §5):
+    /// whether this assignment's publish is gated on approval — the grade's effective
+    /// <c>RequiresApprovalBeforePublish</c> policy field OR'd with
+    /// <c>FEATURE:RequireAssignmentApproval</c>, resolved <b>server-side</b> by the read
+    /// handlers. The approval surfaces read this field instead of the flag, so the
+    /// deploy-window OR stays live without client-side policy logic. Defaults to false for
+    /// pre-Q6/cached payloads.</summary>
+    bool RequiresApproval = false);
 
 public record CreateAssignmentRequest(
     string Title,

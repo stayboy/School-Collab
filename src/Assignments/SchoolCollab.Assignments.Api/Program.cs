@@ -124,11 +124,13 @@ builder.Services.AddHttpClient("settings-api")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationPolicyResolver,
     SchoolCollab.Assignments.Core.Services.NotificationPolicyResolver>();
-// Guardian-signature default resolver (WS-C1 / spec §7 Q1): reads the tenant
-// default (Settings API) + grade override (Students API), resolves effective
-// for the create-wizard pre-fill. Same named clients as the notification resolver.
-builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureDefaultResolver,
-    SchoolCollab.Assignments.Api.Services.SignatureDefaultResolver>();
+// Effective assignment-policy resolver (documents/solution/assignment-policy-fields.md §5):
+// reads the tenant default (Settings API) + grade override (Students API) and merges them into
+// the effective policy, replacing the single-boolean signature-default resolver.
+// Same named clients as the
+// notification resolver above.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentPolicyResolver,
+    SchoolCollab.Assignments.Api.Services.AssignmentPolicyResolver>();
 
 // Guardian sign-off consent language (WS-C1/C2 / spec §3.2 line 53): tenant
 // consent-text override from the Settings API, fail-open to the embedded

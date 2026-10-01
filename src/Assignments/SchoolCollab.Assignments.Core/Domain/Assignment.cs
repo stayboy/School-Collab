@@ -90,8 +90,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public int ArchiveGraceDays { get; private set; }
     /// <summary>The approval status (spec §7 Q2). Null when the
     /// assignment has not been submitted for approval — the default
-    /// state. Only meaningful when the
-    /// <c>FEATURE:RequireAssignmentApproval</c> flag is on.</summary>
+    /// state. Only meaningful when the effective assignment policy's
+    /// <c>RequiresApprovalBeforePublish</c> is true, or the
+    /// <c>FEATURE:RequireAssignmentApproval</c> flag is on (the two are
+    /// OR'd for one release — D3, documents/solution/assignment-policy-fields.md).</summary>
     public ApprovalStatus? ApprovalStatus { get; private set; }
     /// <summary>The id of the user who approved the assignment.
     /// Cleared on <see cref="Reject"/>. Null until the assignment is
@@ -302,10 +304,11 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         if (Status == AssignmentStatus.Published)
             return;
 
-        // WS-A2 / spec §7 Q2: when the tenant has enabled the approval
-        // flag the publish path is gated on an explicit approve decision.
-        // Serve both immediate publish (Draft) and publish-now (Scheduled)
-        // with the same handler — the window has fired by definition.
+        // WS-A2 / spec §7 Q2: when the effective assignment policy requires
+        // approval (or the tenant has the approval flag on — the two are OR'd
+        // for one release, D3) the publish path is gated on an explicit approve
+        // decision. Serve both immediate publish (Draft) and publish-now
+        // (Scheduled) with the same handler — the window has fired by definition.
         if (approvalRequired && ApprovalStatus != Domain.ApprovalStatus.Approved)
             throw new AssignmentApprovalRequiredException("This assignment requires approval before it can be published.");
 
@@ -342,8 +345,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// <paramref name="availableFromUtc"/> (spec §3.5 step 2). Allowed
     /// from Draft OR Scheduled (reschedule). Past dates are rejected
     /// with <see cref="ArgumentException"/>. When
-    /// <paramref name="approvalRequired"/> is true the tenant has
-    /// enabled the approval flag — the assignment must already carry
+    /// <paramref name="approvalRequired"/> is true the effective
+    /// policy requires approval (or the tenant's
+    /// <c>FEATURE:RequireAssignmentApproval</c> flag is on — OR'd for one
+    /// release, D3) — the assignment must already carry
     /// an <see cref="ApprovalStatus.Approved"/> decision.</summary>
     public void Schedule(DateTimeOffset availableFromUtc, bool approvalRequired = false)
     {

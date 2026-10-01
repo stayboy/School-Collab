@@ -8,6 +8,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Assignments.Core.Services.Delivery;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Notifications;
 using SchoolCollab.Core.Tenancy;
@@ -103,6 +104,17 @@ public class AssignmentNotificationBroadcasterTests
             MaxRemindersFromOverride: false, ReminderIntervalHoursFromOverride: false, LinkValidityDaysFromOverride: false,
             SendoutTimeOfDayFromOverride: false, SendoutIntervalMinutesFromOverride: false);
 
+    /// <summary>
+    /// Round B1: the widened <c>NotificationRecipientFilter.Apply</c> also takes the effective
+    /// assignment policy whose two contact caps (D4) it now enforces. This fixture models a tenant
+    /// with no assignment policy configured — the built-in default, i.e. both caps unset — so these
+    /// broadcaster tests keep exercising exactly the pre-B1 filtering (blocked channels +
+    /// <c>MaxNotifications</c>). The caps themselves are covered by
+    /// <c>NotificationRecipientFilterTests</c>.
+    /// </summary>
+    private static EffectiveAssignmentPolicy UncappedAssignmentPolicy() =>
+        new EffectiveAssignmentPolicyResolver().Resolve(tenantDefault: null, gradeOverride: null);
+
     [TestMethod]
     public async Task OneQueuedRowPerFilteredRecipient_WithThatRecipientsDeepLink()
     {
@@ -126,7 +138,8 @@ public class AssignmentNotificationBroadcasterTests
 
         // The publish handler applies the effective policy before broadcasting; the
         // broadcaster must therefore only see (and log) the surviving set.
-        var filtered = NotificationRecipientFilter.Apply(recipients, Policy(blocked: [NotificationChannel.WhatsApp]));
+        var filtered = NotificationRecipientFilter.Apply(
+            recipients, Policy(blocked: [NotificationChannel.WhatsApp]), UncappedAssignmentPolicy());
 
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, filtered));
@@ -166,7 +179,8 @@ public class AssignmentNotificationBroadcasterTests
             Recipient(second, ContactChannel.Email, "tok-2"),
         };
 
-        var filtered = NotificationRecipientFilter.Apply(recipients, Policy(maxNotifications: 1));
+        var filtered = NotificationRecipientFilter.Apply(
+            recipients, Policy(maxNotifications: 1), UncappedAssignmentPolicy());
 
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, filtered));

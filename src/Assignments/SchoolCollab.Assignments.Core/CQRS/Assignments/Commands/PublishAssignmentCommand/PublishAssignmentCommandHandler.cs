@@ -21,6 +21,7 @@ public sealed class PublishAssignmentCommandHandler(
     ITenantProvider tenantProvider,
     IAssignmentNotificationBroadcaster broadcaster,
     INotificationPolicyResolver policyResolver,
+    IAssignmentPolicyResolver assignmentPolicyResolver,
     IFeatureFlagService featureFlags,
     IDeepLinkTokenMinter minter,
     HybridCache cache,
@@ -33,11 +34,17 @@ public sealed class PublishAssignmentCommandHandler(
         var assignment = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.Id);
 
-        // WS-A2 / spec §7 Q2: the approval flag gates publish. When on
-        // the row must carry ApprovalStatus.Approved — otherwise the
-        // domain throws the typed AssignmentApprovalRequiredException
-        // which the API surface maps to 400.
-        var approvalRequired = await featureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, cancellationToken);
+        // WS-A2 / spec §7 Q2 + D3 (documents/solution/assignment-policy-fields.md §5): the
+        // approval requirement is the effective policy field OR'd with the
+        // FEATURE:RequireAssignmentApproval flag for one release (the flag is retired in
+        // Round B). When on, the row must carry ApprovalStatus.Approved — otherwise the
+        // domain throws the typed AssignmentApprovalRequiredException which the API surface
+        // maps to 400. The policy resolver is fail-open: a failed fetch resolves
+        // RequiresApprovalBeforePublish = false, so a policy outage can never turn the gate
+        // ON silently — only the flag still can.
+        var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(assignment.GradeLevelId, cancellationToken);
+        var approvalRequired = assignmentPolicy.RequiresApprovalBeforePublish
+            || await featureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, cancellationToken);
 
         assignment.Publish(approvalRequired);
 
@@ -52,8 +59,10 @@ public sealed class PublishAssignmentCommandHandler(
             assignment, tenantId, effectivePolicy.LinkValidityDays, command.ContactIds, cancellationToken);
 
         // Effective-policy resolution (notification-delivery-plan.md §3): drop blocked
-        // channels, apply preferred-channel order, cap the sendout at MaxNotifications.
-        var broadcastRecipients = NotificationRecipientFilter.Apply(recipients, effectivePolicy);
+        // channels, apply preferred-channel order, cap each guardian role at the
+        // assignment policy's contact caps (D4) and cap the sendout at MaxNotifications.
+        var broadcastRecipients = NotificationRecipientFilter.Apply(
+            recipients, effectivePolicy, assignmentPolicy);
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, broadcastRecipients),
             cancellationToken);

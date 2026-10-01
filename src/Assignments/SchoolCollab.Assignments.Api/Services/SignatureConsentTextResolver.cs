@@ -12,7 +12,7 @@ namespace SchoolCollab.Assignments.Api.Services;
 /// <c>settings-api</c>) and falls back to
 /// <see cref="SignatureConsentDefaults.EmbeddedConsentText"/> on 204 or any
 /// failure — fail-open, signing is never blocked by a Settings outage (the
-/// <see cref="SignatureDefaultResolver"/> posture). Mirrors it line-for-line.
+/// <see cref="AssignmentPolicyResolver"/> posture). Mirrors it line-for-line.
 /// </summary>
 public sealed class SignatureConsentTextResolver(
     IHttpClientFactory httpClientFactory,

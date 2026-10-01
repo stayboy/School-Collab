@@ -17,6 +17,11 @@
     <PackageReference Include="MSTest" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <!-- Round B1: the TestHost harness the assignment-policy route tests need (400 on a
+         non-positive cap, 200 on a valid field set). The project's documented purpose above is
+         exactly "exposes the Program type for WebApplicationFactory use"; the reference was
+         simply never added. Version comes from Directory.Packages.props (CPM). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />

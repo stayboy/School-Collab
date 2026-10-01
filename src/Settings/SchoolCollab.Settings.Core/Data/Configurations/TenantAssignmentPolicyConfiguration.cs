@@ -21,7 +21,14 @@ internal sealed class TenantAssignmentPolicyConfiguration
         builder.ConfigureSoftDeleteQueryFilter();
         builder.ConfigurePostgresRowVersion();
 
-        builder.Property(x => x.RequiresSignatureDefault).IsRequired();
+        // The shared AssignmentPolicyFields shape, stored as real nullable columns (no JSON).
+        // A null column means the tenant has not set that field; the built-in default applies.
+        builder.Property(x => x.SignatureRequirement)
+            .HasConversion<string>()
+            .HasMaxLength(20);
+        builder.Property(x => x.RequiresApprovalBeforePublish);
+        builder.Property(x => x.MaxPrimaryContacts);
+        builder.Property(x => x.MaxCopyContacts);
 
         // One policy row per tenant.
         builder.HasIndex(x => x.TenantId)

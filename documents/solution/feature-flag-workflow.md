@@ -116,3 +116,24 @@ Once the gated behaviour is permanent, remove the `IsEnabledAsync` call site
 and archive the flag from the admin UI (archived flags are excluded from
 resolution but kept for audit). Delete it (soft-delete, recoverable) once no
 audit window needs it.
+
+### Replaced by a policy field (the reconciliation pattern)
+
+A runtime flag whose knob becomes tenant/grade configuration is retired in two
+releases, not one:
+
+1. **Reconcile** — the policy field is resolved alongside the flag and the two are **OR'd**, so
+   behaviour is unchanged for every tenant that only used the flag, and the new field is an
+   independent trigger for anyone who configures it.
+2. **Retire** — once the policy surface has shipped to UI, delete the flag's call sites, its
+   rows/artefacts (the AppHost cold-start parameter, the `documents/configuration.md` rows) and
+   the OR.
+
+**In flight: `FEATURE:RequireAssignmentApproval`** (round `assignment-policy-core`, D3). Step 1
+shipped in Round A — `PublishAssignmentCommandHandler` and `ScheduleAssignmentCommandHandler`
+gate on `effectiveAssignmentPolicy.RequiresApprovalBeforePublish || flag`, where the effective
+policy merges the tenant row (`PUT /api/settings/assignment-policy`) with an optional per-grade
+override (`PUT /grade-levels/{id}/assignment-policy`). The resolver is fail-open to
+`false`, so a Settings/Students outage can never turn approval ON by itself. Step 2 (the deletion)
+is Round B, together with the new policy editor. Full record:
+[`assignment-policy-fields.md`](./assignment-policy-fields.md) §5/§8.
