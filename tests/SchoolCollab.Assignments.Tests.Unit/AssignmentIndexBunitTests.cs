@@ -13,10 +13,10 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
+using SchoolCollab.Admin.Shared.Components.Landing;
 using IndexPage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Index;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
-using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
@@ -44,9 +44,6 @@ public class AssignmentIndexBunitTests : BunitContext
         Services.AddSingleton<AssignmentsApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
         Services.AddSingleton(Mock.Of<ILogger<IndexPage>>());
-        // WS-A2: the Index page injects IFeatureFlagService to gate the
-        // Draft row action (Submit-for-approval vs Publish).
-        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService());
     }
 
     private void SetupListResponse(AssignmentSummaryDto[] items)
@@ -66,11 +63,13 @@ public class AssignmentIndexBunitTests : BunitContext
             null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <summary>UI-tester rework overload — pin the ApprovalStatus (and
-    /// optional ApprovedBy/ApprovedAt) on the row. Used by the new chip
-    /// + flag-on-Approved Draft tests; the five lifecycle fields still
-    /// carry their record defaults except those explicitly overridden.</summary>
+    /// optional ApprovedBy/ApprovedAt) on the row. Used by the chip +
+    /// approval-required Draft tests; the five lifecycle fields still
+    /// carry their record defaults except those explicitly overridden.
+    /// <paramref name="requiresApproval"/> is the server-derived Q6 gate.</summary>
     private static AssignmentSummaryDto MakeRow(Guid id, string title, AssignmentStatusDto status,
-        ApprovalStatusDto? approvalStatus = null, Guid? approvedBy = null, DateTimeOffset? approvedAt = null) =>
+        ApprovalStatusDto? approvalStatus = null, Guid? approvedBy = null, DateTimeOffset? approvedAt = null,
+        bool requiresApproval = false) =>
         new(
             id, title, null, AssignmentTypeDto.Digital,
             GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
@@ -79,7 +78,8 @@ public class AssignmentIndexBunitTests : BunitContext
             AvailableFromUtc: null, ArchiveGraceDays: 30,
             ApprovalStatus: approvalStatus,
             ApprovedBy: approvalStatus == ApprovalStatusDto.Approved ? approvedBy : null,
-            ApprovedAt: approvalStatus == ApprovalStatusDto.Approved ? (approvedAt ?? DateTimeOffset.UtcNow) : null);
+            ApprovedAt: approvalStatus == ApprovalStatusDto.Approved ? (approvedAt ?? DateTimeOffset.UtcNow) : null,
+            RequiresApproval: requiresApproval);
 
     [TestMethod]
     public void Index_ShowsSpinner_WhileLoading()
@@ -166,25 +166,14 @@ public class AssignmentIndexBunitTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Index_FlagOn_DraftRow_ShowsSubmitForApproval_NotPublish()
+    public async Task Index_RequiresApproval_DraftRow_ShowsSubmitForApproval_NotPublish()
     {
-        // Decision (j) / spec §7 Q2: flag ON swaps Publish for Submit-for-
-        // approval on Draft rows (publishing unapproved 400s the typed
-        // guard), and clicking the action POSTs the submit-for-approval
-        // endpoint.
-        var fake = new FakeFeatureFlagService { IsEnabledValue = true };
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(fake);
+        // Decision (j) / spec §7 Q2 + Q6: a row the server derived as approval-required swaps
+        // Publish for Submit-for-approval on Draft rows (publishing unapproved 400s the typed
+        // guard), and clicking the action POSTs the submit-for-approval endpoint. The gate is the
+        // row's own RequiresApproval — the page reads no feature flag.
         var id = Guid.NewGuid();
-        SetupListResponse(new[]
-        {
-            new AssignmentSummaryDto(
-                id, "Math HW", null, AssignmentTypeDto.Digital,
-                GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-                Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Draft,
-                null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
-        });
+        SetupListResponse([MakeRow(id, "Math HW", AssignmentStatusDto.Draft, requiresApproval: true)]);
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
@@ -194,9 +183,9 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
         var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
         items.Should().Contain("Submit for Approval",
-            "flag ON swaps Publish for Submit-for-approval on Draft rows");
+            "an approval-required Draft swaps Publish for Submit-for-approval");
         items.Should().NotContain("Publish",
-            "publishing an unapproved Draft 400s the typed approval guard when the flag is on");
+            "publishing an unapproved Draft 400s the typed approval guard");
 
         // Clicking Submit for Approval POSTs the endpoint (the
         // ResourcesSectionBunitTests Expect/VerifyNoOutstandingExpectation precedent).
@@ -210,29 +199,19 @@ public class AssignmentIndexBunitTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Index_FlagOn_ApprovedDraftRow_ShowsPublish_NotSubmitForApproval()
+    public async Task Index_RequiresApproval_ApprovedDraftRow_ShowsPublish_NotSubmitForApproval()
     {
-        // UI-tester rework P1: flag ON must NOT silently revoke an existing
-        // approval. SubmitForApproval is a Draft-only guard that flips
+        // UI-tester rework P1: an approval-required row must NOT silently revoke
+        // an existing approval. SubmitForApproval is a Draft-only guard that flips
         // Approved → Pending; the row action for an already-APPROVED Draft
         // must therefore stay "Publish" so a reviewer can publish without
         // first having to reject-and-resubmit. This pins the reviewer-
         // rework fix at the row-action boundary.
-        var fake = new FakeFeatureFlagService { IsEnabledValue = true };
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(fake);
         var id = Guid.NewGuid();
         SetupListResponse(new[]
         {
-            new AssignmentSummaryDto(
-                id, "Math HW", null, AssignmentTypeDto.Digital,
-                GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-                Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Draft,
-                null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-                AvailableFromUtc: null, ArchiveGraceDays: 30,
-                ApprovalStatus: ApprovalStatusDto.Approved,
-                ApprovedBy: Guid.NewGuid(), ApprovedAt: DateTimeOffset.UtcNow)
+            MakeRow(id, "Math HW", AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved,
+                approvedBy: Guid.NewGuid(), requiresApproval: true)
         });
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
@@ -241,33 +220,29 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
         var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
         items.Should().Contain("Publish",
-            "an already-APPROVED Draft must keep the Publish action when the flag is on — Submit-for-approval would silently revoke the approval");
+            "an already-APPROVED Draft must keep the Publish action when approval is required — Submit-for-approval would silently revoke the approval");
         items.Should().NotContain("Submit for Approval",
             "the substitute applies ONLY while the assignment has no current approval");
     }
 
     [TestMethod]
-    public async Task Index_FlagOn_ApprovalChip_RendersTextPerApprovalStatus()
+    public async Task Index_RequiresApproval_ApprovalChip_RendersTextPerApprovalStatus()
     {
         // UI-tester rework P2: the conditional Approval column must surface a
         // chip on Draft rows with the right text per ApprovalStatus (the
         // Reviewer-rework fix for the invisible optimistic-flip surface).
-        var fake = new FakeFeatureFlagService { IsEnabledValue = true };
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(fake);
 
         var rows = new[]
         {
-            MakeRow(Guid.NewGuid(), "Never Submitted HW", AssignmentStatusDto.Draft, approvalStatus: null),
-            MakeRow(Guid.NewGuid(), "Pending HW", AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending),
+            MakeRow(Guid.NewGuid(), "Never Submitted HW", AssignmentStatusDto.Draft, approvalStatus: null, requiresApproval: true),
+            MakeRow(Guid.NewGuid(), "Pending HW", AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true),
             MakeRow(Guid.NewGuid(), "Approved HW", AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Approved,
-                approvedBy: Guid.NewGuid()),
-            MakeRow(Guid.NewGuid(), "Rejected HW", AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected),
+                approvedBy: Guid.NewGuid(), requiresApproval: true),
+            MakeRow(Guid.NewGuid(), "Rejected HW", AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected, requiresApproval: true),
             // Non-Draft rows render no chip — verified by the negative assertion
             // at the end of this test (the Scheduled row carries an Approval
             // column cell, but it's empty).
-            MakeRow(Guid.NewGuid(), "Scheduled HW", AssignmentStatusDto.Scheduled, approvalStatus: null),
+            MakeRow(Guid.NewGuid(), "Scheduled HW", AssignmentStatusDto.Scheduled, approvalStatus: null, requiresApproval: true),
         };
         SetupListResponse(rows);
 
@@ -295,7 +270,7 @@ public class AssignmentIndexBunitTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Index_FlagOn_SubmitForApprovalClick_OptimisticChipFlipAndRollbackVisible()
+    public async Task Index_RequiresApproval_SubmitForApprovalClick_OptimisticChipFlipAndRollbackVisible()
     {
         // UI-tester rework P2: the optimistic Submit-for-approval flip
         // (chip goes Pending instantly) and its failure rollback (chip
@@ -304,10 +279,6 @@ public class AssignmentIndexBunitTests : BunitContext
         // no-op because no chip surfaced ApprovalStatus — pinning both
         // directions here so a regression to the silent-flip path is
         // caught at test time.
-        var fake = new FakeFeatureFlagService { IsEnabledValue = true };
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(fake);
 
         var id = Guid.NewGuid();
         // Use When (not Expect) for the success path so the request can be
@@ -317,10 +288,7 @@ public class AssignmentIndexBunitTests : BunitContext
         // succeed so we use When (multi-fire).
         _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{id}/submit-for-approval")
             .Respond(HttpStatusCode.NoContent);
-        SetupListResponse(new[]
-        {
-            MakeRow(id, "Math HW", AssignmentStatusDto.Draft, approvalStatus: null)
-        });
+        SetupListResponse([MakeRow(id, "Math HW", AssignmentStatusDto.Draft, approvalStatus: null, requiresApproval: true)]);
 
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
@@ -343,22 +311,15 @@ public class AssignmentIndexBunitTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Index_FlagOn_SubmitForApprovalClick_FailingPost_RollsBackChip()
+    public async Task Index_RequiresApproval_SubmitForApprovalClick_FailingPost_RollsBackChip()
     {
         // UI-tester rework P2 — second half: a failing POST must restore the
         // previous chip text. Mount a 500 backend and click — the chip must
         // flip optimistically to Pending then revert to 'Not submitted' when
         // the API throws.
-        var fake = new FakeFeatureFlagService { IsEnabledValue = true };
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(fake);
 
         var id = Guid.NewGuid();
-        SetupListResponse(new[]
-        {
-            MakeRow(id, "Math HW", AssignmentStatusDto.Draft, approvalStatus: null)
-        });
+        SetupListResponse([MakeRow(id, "Math HW", AssignmentStatusDto.Draft, approvalStatus: null, requiresApproval: true)]);
 
         // v6 ordering rule (Expect-before-backend 404s the initial GET):
         // register the failing-POST backend AFTER the initial SetupListResponse
@@ -392,16 +353,13 @@ public class AssignmentIndexBunitTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Index_FlagOff_NoApprovalColumnRenders()
+    public async Task Index_NoRowRequiresApproval_NoApprovalColumnRenders()
     {
-        // Negative half of the P2 fix: when the flag is OFF, the
-        // conditional Approval column must NOT render — the grid is
+        // Negative half of the P2 fix: when NO loaded row is approval-required,
+        // the conditional Approval column must NOT render — the grid is
         // exactly today's grid (no Approval header, no chip). This is
         // what the UI-tester flagged as the regression risk when adding
         // the conditional column.
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService { IsEnabledValue = false });
 
         SetupListResponse(new[]
         {
@@ -414,34 +372,24 @@ public class AssignmentIndexBunitTests : BunitContext
             TimeSpan.FromSeconds(15));
 
         cut.Markup.Should().NotContain(">Approval<",
-            "flag OFF hides the conditional Approval column");
+            "no approval-required row hides the conditional Approval column");
         cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim())
             .Should().NotContain("Not submitted",
-                "flag OFF hides the approval chips");
+                "no approval-required row hides the approval chips");
     }
 
     [TestMethod]
-    public async Task Index_FlagOff_DraftRow_ShowsPublish()
+    public async Task Index_NotRequiresApproval_DraftRow_ShowsPublish()
     {
-        var existing = Services.Where(sd => sd.ServiceType == typeof(IFeatureFlagService)).ToList();
-        existing.ForEach(sd => Services.Remove(sd));
-        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService { IsEnabledValue = false });
-        SetupListResponse(new[]
-        {
-            new AssignmentSummaryDto(
-                Guid.NewGuid(), "Math HW", null, AssignmentTypeDto.Digital,
-                GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-                Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Draft,
-                null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
-        });
+        SetupListResponse([MakeRow(Guid.NewGuid(), "Math HW", AssignmentStatusDto.Draft)]);
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
         cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
         var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
-        items.Should().Contain("Publish", "flag OFF keeps the existing Publish action on Draft rows");
-        items.Should().NotContain("Submit for Approval", "flag OFF hides the approval action");
+        items.Should().Contain("Publish", "a row without the derived gate keeps the Publish action on Draft rows");
+        items.Should().NotContain("Submit for Approval", "no derived gate means no approval action");
     }
 
     [TestMethod]
@@ -645,6 +593,192 @@ public class AssignmentIndexBunitTests : BunitContext
         var mock = new Mock<IToastService>();
         Services.AddSingleton(mock.Object);
         return mock;
+    }
+
+    // ── UI-tester rework P2 — the conditional Approval column's grid template
+    //    (P2-1) and the search-aware row-action updates (P2-2) ───────────────
+
+    /// <summary>Drives the page's own search seam: <c>LandingPage.SearchTextChanged</c>
+    /// is the page's <c>OnSearchValueChanged</c>. Invoked through the component
+    /// callback rather than the search box because the box lives in the
+    /// <c>page-toolbar</c> section (no outlet in a bare <c>Render&lt;IndexPage&gt;</c> —
+    /// see <see cref="StatusFilterHost"/>), and so the fetch stays deterministic:
+    /// the interaction is observable before the next one (the
+    /// <c>fix-flaky-bunit-fluentui-after-cascade</c> guidance). Once it resolves,
+    /// <c>DisplayItems</c> renders <c>_searchResults</c> instead of <c>_items</c>.</summary>
+    private static async Task SearchAsync(IRenderedComponent<IndexPage> cut, string text)
+    {
+        var landing = cut.FindComponent<LandingPage<AssignmentSummaryDto>>().Instance;
+        await cut.InvokeAsync(() => landing.SearchTextChanged.InvokeAsync(text));
+    }
+
+    /// <summary>The grid template currently handed to the <c>LandingPage</c> wrapper,
+    /// split into its CSS-grid slots.</summary>
+    private static string[] GridSlots(IRenderedComponent<IndexPage> cut) =>
+        cut.FindComponent<LandingPage<AssignmentSummaryDto>>().Instance.GridSettings
+            .GridTemplateColumns.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    [TestMethod]
+    public async Task Index_NoRowRequiresApproval_TemplateOffersOneSlotPerRenderedColumn()
+    {
+        // UI-tester P2-1, default state: with no approval-required row the
+        // conditional Approval column is hidden, so a fixed 9-slot template left
+        // an empty 1fr slot between Status and Due Date. This is the state nearly
+        // every tenant (policy OFF) sees, so the template must offer exactly one
+        // slot per rendered column.
+        SetupListResponse([MakeRow(Guid.NewGuid(), "Math HW", AssignmentStatusDto.Draft)]);
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
+
+        var headers = cut.FindAll("th").Select(h => h.TextContent.Trim()).ToArray();
+        headers.Should().NotContain("Approval", "no loaded row carries the server-derived gate");
+
+        GridSlots(cut).Should().HaveCount(headers.Length,
+            "one grid slot per rendered column — a surplus slot opens an empty column between Status and Due Date");
+    }
+
+    [TestMethod]
+    public async Task Index_ApprovalRow_TemplateOffersOneSlotPerRenderedColumn()
+    {
+        // UI-tester P2-1, approval state: the column IS rendered, and the template
+        // must add exactly the one slot that column occupies (the positive half of
+        // the same invariant).
+        SetupListResponse([MakeRow(Guid.NewGuid(), "Math HW", AssignmentStatusDto.Draft, requiresApproval: true)]);
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
+
+        var headers = cut.FindAll("th").Select(h => h.TextContent.Trim()).ToArray();
+        headers.Should().Contain("Approval", "an approval-required row renders the conditional column");
+
+        GridSlots(cut).Should().HaveCount(headers.Length,
+            "the approval variant carries one slot per rendered column");
+    }
+
+    [TestMethod]
+    public async Task Index_SearchActive_SubmitForApproval_FlipsTheDisplayedRow()
+    {
+        // UI-tester P2-2: DisplayItems renders _searchResults while a search is
+        // active, so the optimistic flip must be mirrored into that set too —
+        // otherwise the click completes and the chip still reads "Not submitted".
+        var id = Guid.NewGuid();
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{id}/submit-for-approval")
+            .Respond(HttpStatusCode.NoContent);
+        SetupListResponse([
+            MakeRow(id, "Math HW", AssignmentStatusDto.Draft, requiresApproval: true),
+            MakeRow(Guid.NewGuid(), "Science Lab", AssignmentStatusDto.Draft, requiresApproval: true)
+        ]);
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
+
+        await SearchAsync(cut, "Math");
+
+        // The search result set is what renders now: the client-side title filter
+        // drops "Science Lab", so exactly one row (and one kebab) is displayed.
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Math HW");
+            cut.Markup.Should().NotContain("Science Lab",
+                "DisplayItems renders the search result set while a search is active");
+            cut.FindAll("fluent-button[title=\"Assignment actions\"]").Should().HaveCount(1);
+            cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim()).Should().Contain("Not submitted");
+        }, TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim())
+                .Should().Contain("Pending",
+                    "the row action must patch the DISPLAYED search result set, not only _items"),
+            TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public async Task Index_SearchActive_Delete_RemovesTheDisplayedRow()
+    {
+        // UI-tester P2-2, removal branch: the deleted row must leave the rendered
+        // search result set as well, or it stays on screen until the search is cleared.
+        var id = Guid.NewGuid();
+        _mockHttp.When(HttpMethod.Delete, $"http://localhost/assignments/{id}")
+            .Respond(HttpStatusCode.NoContent);
+        SetupListResponse([
+            MakeRow(id, "Math HW", AssignmentStatusDto.Draft, requiresApproval: true),
+            MakeRow(Guid.NewGuid(), "Science Lab", AssignmentStatusDto.Draft, requiresApproval: true)
+        ]);
+        SetupConfirmDialogResult(confirmed: true);
+        ReplaceToastService();
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
+
+        await SearchAsync(cut, "Math");
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title=\"Assignment actions\"]").Should().HaveCount(1),
+            TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Delete").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().NotContain("Math HW",
+                "the deleted row must leave the DISPLAYED search result set");
+            cut.Markup.Should().Contain("No assignments match",
+                "the emptied search result set renders the search-aware empty message");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public async Task Index_SearchActive_Duplicate_RefreshesTheDisplayedRows()
+    {
+        // UI-tester P2-2, reload branch: the duplicate's list reload must reach the
+        // displayed set too, or the new Draft stays invisible while a search is active.
+        var id = Guid.NewGuid();
+        var copyId = Guid.NewGuid();
+        var duplicated = false;
+
+        var source = MakeRow(id, "Math HW", AssignmentStatusDto.Draft, requiresApproval: true);
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments*")
+            .Respond(_ =>
+            {
+                var rows = duplicated
+                    ? new[] { source, source with { Id = copyId, Title = "Math HW (copy)" } }
+                    : new[] { source };
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        JsonSerializer.Serialize(rows, _apiJsonOptions), Encoding.UTF8, "application/json")
+                };
+            });
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
+            .Respond(_ =>
+            {
+                duplicated = true;
+                return new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(
+                        JsonSerializer.Serialize(new { id = copyId }, _apiJsonOptions), Encoding.UTF8, "application/json")
+                };
+            });
+        SetupConfirmDialogResult(confirmed: true);
+        ReplaceToastService();
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
+
+        await SearchAsync(cut, "Math");
+        cut.WaitForAssertion(() => cut.Markup.Should().NotContain("(copy)"), TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Math HW (copy)",
+                "the duplicated Draft must reach the DISPLAYED search result set, not only _items");
+            cut.FindAll("fluent-button[title=\"Assignment actions\"]").Should().HaveCount(2,
+                "the displayed set now holds the source and its copy");
+        }, TimeSpan.FromSeconds(15));
     }
 
     // ── WS-A4 / spec §3.1 — duplicate-as-template row action ───────

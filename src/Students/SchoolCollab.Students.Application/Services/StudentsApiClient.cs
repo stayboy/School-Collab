@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Notifications;
 using SchoolCollab.Students.Core.Contracts;
 using SchoolCollab.Students.Core.Domain;
@@ -1024,11 +1025,24 @@ public sealed class StudentsApiClient : IContactsClient
         return await response.Content.ReadFromJsonAsync<GradeAssignmentPolicyDto>(ct);
     }
 
+    public async Task UpsertGradeAssignmentPolicyAsync(Guid gradeLevelId, UpsertGradeAssignmentPolicyRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync(
+            $"/students/grade-levels/{gradeLevelId}/assignment-policy", req, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// <b>Legacy overload (Round A only)</b> — sends the pre-widening boolean body
+    /// (<c>requiresSignatureDefault</c>) the shipped <c>GradeSignaturePolicyEditor</c> still uses;
+    /// the Students API maps it (<c>true → Optional</c>, <c>false → Disabled</c>, null → inherit).
+    /// Round B deletes it with the retired editor.
+    /// </summary>
     public async Task UpsertGradeAssignmentPolicyAsync(Guid gradeLevelId, bool? requiresSignatureDefault, CancellationToken ct = default)
     {
         var response = await _http.PutAsJsonAsync(
             $"/students/grade-levels/{gradeLevelId}/assignment-policy",
-            new UpsertGradeAssignmentPolicyRequest(requiresSignatureDefault), ct);
+            new LegacyUpsertGradeAssignmentPolicyRequest(requiresSignatureDefault), ct);
         response.EnsureSuccessStatusCode();
     }
 
@@ -2238,6 +2252,18 @@ public sealed record UpsertGradeNotificationPolicyRequest(
     TimeOnly? SendoutTimeOfDay,
     int? SendoutIntervalMinutes);
 
-/// <summary>Upsert request for a per-grade guardian-signature override (null = inherit
-/// the tenant default). Mirrors the Students API shape (WS-C1 / spec §7 Q1).</summary>
-public sealed record UpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);
+/// <summary>Upsert request for a per-grade assignment-policy override (all-nullable: a null
+/// field clears to "inherit the tenant default"). Mirrors the Students API shape
+/// (<c>documents/solution/assignment-policy-fields.md</c> §4).</summary>
+public sealed record UpsertGradeAssignmentPolicyRequest(
+    SignatureRequirementMode? SignatureRequirement,
+    bool? RequiresApprovalBeforePublish,
+    int? MaxPrimaryContacts,
+    int? MaxCopyContacts);
+
+/// <summary>
+/// <b>Legacy request shape (Round A only).</b> The pre-widening PUT body was the single
+/// input-only boolean <c>requiresSignatureDefault</c>; the shipped editor still sends it and the
+/// Students API maps it. Round B deletes this record with the retired editor.
+/// </summary>
+public sealed record LegacyUpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);

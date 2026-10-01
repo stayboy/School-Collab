@@ -1,0 +1,212 @@
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.AssignmentPolicies
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.DTOs
+@inject StudentsApiClient Api
+@inject AssignmentPolicyApiClient SettingsApi
+@inject IDialogService DialogService
+@inject ILogger<AssignmentPolicyEditor> Logger
+
+@* Per-grade Assignment Policy editor (documents/solution/assignment-policy-fields.md D6, §4).
+   A single grid lists each of the four policy fields with its tenant-global value and its
+   per-grade override. Row actions: Edit (opens a dialog with Global / This-grade scope) and Reset
+   (clears the per-grade override back to "inherit global"). This card absorbs the retired
+   Guardian Signature card (GradeSignaturePolicyEditor). *@
+
+@if (_loading)
+{
+    <div class="spinner-container"><FluentProgressRing /></div>
+}
+else if (!string.IsNullOrEmpty(_error))
+{
+    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+}
+else
+{
+    <FluentDataGrid Items="_rows.AsQueryable()" TGridItem="FieldRow" Class="policy-grid">
+        <TemplateColumn Title="Setting">
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="setting-label"
+                          Title="@($"Edit {context.Def.Label}")"
+                          OnClick="() => EditAsync(context)">@context.Def.Label</FluentAnchor>
+        </TemplateColumn>
+        <TemplateColumn Title="Global settings">
+            <span class="global-value">@context.GlobalDisplay</span>
+        </TemplateColumn>
+        <TemplateColumn Title="Grade override">
+            @if (context.GradeSet)
+            {
+                <span class="grade-value">@context.GradeDisplay</span>
+            }
+            else
+            {
+                <FluentBadge Appearance="Appearance.Lightweight" Class="inherit-badge">Inherit global</FluentBadge>
+            }
+        </TemplateColumn>
+        <TemplateColumn Title="Actions">
+            <RowActionsMenu AriaLabel="@($"Actions for {context.Def.Label}")"
+                            UseMenuService="false"
+                            Actions="@BuildRowActions(context)" />
+        </TemplateColumn>
+    </FluentDataGrid>
+    <p class="muted grid-hint">
+        <strong>Edit</strong> opens a dialog where you can change the value for this grade or the tenant-global default.
+        <strong>Reset</strong> clears the per-grade override so the global value applies.
+    </p>
+}
+
+@code {
+    private sealed record FieldDef(string Key, string Label, AssignmentPolicyFieldEditDialog.FieldKind Kind);
+    private sealed record FieldRow(FieldDef Def, string GlobalDisplay, string GradeDisplay, bool GradeSet);
+
+    private static readonly FieldDef[] Fields =
+    [
+        new("SignatureRequirement", "Guardian signature", AssignmentPolicyFieldEditDialog.FieldKind.Mode),
+        new("RequiresApprovalBeforePublish", "Approval before publish", AssignmentPolicyFieldEditDialog.FieldKind.Bool),
+        new("MaxPrimaryContacts", "Max primary guardian contacts per sendout", AssignmentPolicyFieldEditDialog.FieldKind.Int),
+        new("MaxCopyContacts", "Max copy guardian contacts per sendout", AssignmentPolicyFieldEditDialog.FieldKind.Int),
+    ];
+
+    [Parameter] public Guid GradeLevelId { get; set; }
+
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private TenantAssignmentPolicyDto? _tenantDefault;
+    private GradeAssignmentPolicyDto? _gradeOverride;
+    private FieldRow[] _rows = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null; // clear any stale failure before refetching
+        StateHasChanged();
+        try
+        {
+            var tenantTask = SettingsApi.GetAsync();
+            var gradeTask = Api.GetGradeAssignmentPolicyAsync(GradeLevelId);
+            await Task.WhenAll(tenantTask, gradeTask);
+
+            _tenantDefault = tenantTask.Result;
+            _gradeOverride = gradeTask.Result;
+            BuildRows();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load assignment policy for grade {Grade}", GradeLevelId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void BuildRows() => _rows = Fields.Select(GetRow).ToArray();
+
+    private FieldRow GetRow(FieldDef def)
+    {
+        var global = GetValue(def.Key, _tenantDefault);
+        var grade = GetValue(def.Key, _gradeOverride);
+        return new FieldRow(
+            def,
+            FormatValue(global),
+            grade is null ? "Inherit global" : FormatValue(grade),
+            grade is not null);
+    }
+
+    private async Task EditAsync(FieldRow row)
+    {
+        try
+        {
+            var model = new AssignmentPolicyFieldEditDialog.EditModel(
+                row.Def.Key, row.Def.Label, row.Def.Kind, GradeLevelId, _tenantDefault, _gradeOverride);
+            var result = await DialogService.ShowShellDialogAsync<AssignmentPolicyFieldEditDialog,
+                AssignmentPolicyFieldEditDialog.EditModel,
+                AssignmentPolicyFieldEditDialog.EditResult>(model, $"Edit {row.Def.Label}", DialogSize.Large);
+            if (result is not null)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to edit assignment policy field {Field} for grade {Grade}", row.Def.Key, GradeLevelId);
+            _error = ex.Message;
+        }
+    }
+
+    private IReadOnlyList<RowAction> BuildRowActions(FieldRow row) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => EditAsync(row), FluentIcons.Edit),
+            RowAction.Callback("Reset", () => ResetAsync(row), FluentIcons.ArrowClockwise,
+                disabled: !row.GradeSet || _saving),
+        };
+
+    private async Task ResetAsync(FieldRow row)
+    {
+        if (_saving) return;
+        _saving = true;
+        try
+        {
+            await Api.UpsertGradeAssignmentPolicyAsync(GradeLevelId, BuildResetRequest(row.Def.Key));
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reset assignment policy field {Field} for grade {Grade}", row.Def.Key, GradeLevelId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>Clears the row's per-grade override, preserving the grade's other fields.</summary>
+    private UpsertGradeAssignmentPolicyRequest BuildResetRequest(string key) =>
+        new(
+            key == "SignatureRequirement" ? null : _gradeOverride?.SignatureRequirement,
+            key == "RequiresApprovalBeforePublish" ? null : _gradeOverride?.RequiresApprovalBeforePublish,
+            key == "MaxPrimaryContacts" ? null : _gradeOverride?.MaxPrimaryContacts,
+            key == "MaxCopyContacts" ? null : _gradeOverride?.MaxCopyContacts);
+
+    private static string FormatValue(object? value) => value switch
+    {
+        null => "Not set",
+        SignatureRequirementMode mode => mode switch
+        {
+            SignatureRequirementMode.Disabled => "No signature required",
+            SignatureRequirementMode.Optional => "Optional",
+            _ => "Mandatory (locked)",
+        },
+        bool flag => flag ? "Required" : "Not required",
+        int number => number.ToString("N0"),
+        _ => "Not set",
+    };
+
+    private static object? GetValue(string key, TenantAssignmentPolicyDto? policy) => key switch
+    {
+        "SignatureRequirement" => policy?.SignatureRequirement,
+        "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
+        "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
+        "MaxCopyContacts" => policy?.MaxCopyContacts,
+        _ => null,
+    };
+
+    private static object? GetValue(string key, GradeAssignmentPolicyDto? policy) => key switch
+    {
+        "SignatureRequirement" => policy?.SignatureRequirement,
+        "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
+        "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
+        "MaxCopyContacts" => policy?.MaxCopyContacts,
+        _ => null,
+    };
+}

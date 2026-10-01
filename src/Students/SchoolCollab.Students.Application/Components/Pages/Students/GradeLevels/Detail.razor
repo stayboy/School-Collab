@@ -218,13 +218,15 @@
                             <GradeNotificationPolicyEditor GradeLevelId="@Id" />
                         </FluentCard>
 
-                        @* ── Guardian Signature card (WS-C1 / spec §7 Q1) ──── *@
+                        @* ── Assignment Policy card (D6, documents/solution/assignment-policy-fields.md) ────
+                           Absorbs the retired Guardian Signature card: one grid over all four
+                           policy fields, each editable for the tenant-global default or this grade. *@
                         <FluentCard class="detail-card">
                             <div class="notification-title">
                                 <FluentIcon Icon="@(Icons.Regular.Size20.DocumentSignature)" />
-                                <h3>Guardian Signature</h3>
+                                <h3>Assignment Policy</h3>
                             </div>
-                            <GradeSignaturePolicyEditor GradeLevelId="@Id" />
+                            <AssignmentPolicyEditor GradeLevelId="@Id" />
                         </FluentCard>
                     }
                 </ChildContent>

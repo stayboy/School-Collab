@@ -1,0 +1,22 @@
+/* Scoped styles for the per-grade Assignment Policy grid (documents/solution/assignment-policy-fields.md D6).
+   Mirrors the notification-policy editor's grid so the two cards on grade detail read as one family. */
+.policy-grid {
+    width: 100%;
+}
+
+.setting-label {
+    font-weight: 500;
+}
+
+.global-value {
+    color: var(--neutral-foreground-hint);
+}
+
+.grade-value {
+    font-weight: 500;
+}
+
+.grid-hint {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+}

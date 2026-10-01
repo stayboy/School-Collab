@@ -1,0 +1,188 @@
+@*
+    AssignmentPolicyFieldEditDialog — opens from the grade-detail "Assignment Policy" grid "Edit"
+    action. Edits ONE policy field's value for BOTH scopes at once, laid out side-by-side
+    (Global settings | This grade):
+
+      • Global settings — upserts the tenant-global default via
+        AssignmentPolicyApiClient.UpsertAsync (preserving the other fields).
+      • This grade       — upserts the per-grade override via
+        StudentsApiClient.UpsertGradeAssignmentPolicyAsync (preserving the other fields; the
+        clear/inherit sentinel ⇒ null).
+
+    Save writes each scope ONLY if its value changed, so opening the dialog and saving without
+    edits never creates or mutates a policy. The caller (AssignmentPolicyEditor) reloads on a
+    non-null result.
+
+    The two panels are laid out with FluentUI's own two-column grid rather than a hand-rolled flex
+    row, so this dialog needs no .razor.css of its own (the only styling it uses is the global
+    .dialog-container / .muted utilities).
+*@
+@inherits DialogShellBase<AssignmentPolicyFieldEditDialog.EditModel, AssignmentPolicyFieldEditDialog.EditResult>
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.AssignmentPolicies
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.DTOs
+@inject StudentsApiClient Api
+@inject AssignmentPolicyApiClient SettingsApi
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <p class="panel-caption">
+            <strong>@Model.Label</strong>
+            <span class="muted"> — set the value for the tenant-global default, this grade, or both. Save writes each changed side.</span>
+        </p>
+
+        <FluentGrid>
+            <FluentGridItem xs="12" sm="6">
+                <h4 class="panel-title">Global settings</h4>
+                <p class="muted panel-subtitle">Tenant default used by every grade.</p>
+                <AssignmentPolicyFieldValueEditor Kind="Model.Kind" InputId="apd-global" ClearLabel="Not set"
+                    @bind-Mode="_globalMode"
+                    @bind-BoolValue="_globalBool"
+                    @bind-IntValue="_globalInt" />
+            </FluentGridItem>
+
+            <FluentGridItem xs="12" sm="6">
+                <h4 class="panel-title">This grade</h4>
+                <p class="muted panel-subtitle">Override for this grade only.</p>
+                <AssignmentPolicyFieldValueEditor Kind="Model.Kind" InputId="apd-grade" ClearLabel="Inherit global"
+                    @bind-Mode="_gradeMode"
+                    @bind-BoolValue="_gradeBool"
+                    @bind-IntValue="_gradeInt" />
+            </FluentGridItem>
+        </FluentGrid>
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Save"
+                           SavingText="Saving..." OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    /// <summary>Which value editor a policy row needs.</summary>
+    public enum FieldKind { Mode, Bool, Int }
+
+    /// <summary>Immutable inputs for a single-field edit request.</summary>
+    public sealed record EditModel(
+        string Key,
+        string Label,
+        FieldKind Kind,
+        Guid GradeId,
+        TenantAssignmentPolicyDto? TenantDefault,
+        GradeAssignmentPolicyDto? GradeOverride);
+
+    /// <summary>Returned to the caller so it can reload after a successful save.</summary>
+    public sealed record EditResult(string Key);
+
+    // Global-scope state.
+    private SignatureRequirementMode? _globalMode;
+    private bool? _globalBool;
+    private int? _globalInt;
+
+    // Grade-scope state.
+    private SignatureRequirementMode? _gradeMode;
+    private bool? _gradeBool;
+    private int? _gradeInt;
+
+    protected override void OnModelInitialized(EditModel model)
+    {
+        var global = ValueOf(model.Key, model.TenantDefault);
+        var grade = ValueOf(model.Key, model.GradeOverride);
+
+        _globalMode = global as SignatureRequirementMode?;
+        _globalBool = global as bool?;
+        _globalInt = global as int?;
+
+        _gradeMode = grade as SignatureRequirementMode?;
+        _gradeBool = grade as bool?;
+        _gradeInt = grade as int?;
+    }
+
+    protected override async Task<EditResult?> SubmitAsync(EditModel model)
+    {
+        var globalInitial = ValueOf(model.Key, model.TenantDefault);
+        var gradeInitial = ValueOf(model.Key, model.GradeOverride);
+
+        // Boxed comparison: null (the sentinel) equals an unset scope value, so opening the dialog
+        // and saving without edits writes nothing.
+        var globalChanged = !Equals(CurrentValue(model.Kind, _globalMode, _globalBool, _globalInt), globalInitial);
+        var gradeChanged = !Equals(CurrentValue(model.Kind, _gradeMode, _gradeBool, _gradeInt), gradeInitial);
+
+        if (globalChanged)
+            await SettingsApi.UpsertAsync(BuildTenantRequest(model));
+
+        if (gradeChanged)
+            await Api.UpsertGradeAssignmentPolicyAsync(model.GradeId, BuildGradeRequest(model));
+
+        return new EditResult(model.Key);
+    }
+
+    private UpsertAssignmentPolicyRequest BuildTenantRequest(EditModel model)
+    {
+        var t = model.TenantDefault;
+        var (sig, approval, primary, copy) = (
+            t?.SignatureRequirement, t?.RequiresApprovalBeforePublish, t?.MaxPrimaryContacts, t?.MaxCopyContacts);
+        ApplyEditedValue(model.Key, ref sig, ref approval, ref primary, ref copy,
+            _globalMode, _globalBool, _globalInt);
+        return new UpsertAssignmentPolicyRequest(sig, approval, primary, copy);
+    }
+
+    private UpsertGradeAssignmentPolicyRequest BuildGradeRequest(EditModel model)
+    {
+        var g = model.GradeOverride;
+        var (sig, approval, primary, copy) = (
+            g?.SignatureRequirement, g?.RequiresApprovalBeforePublish, g?.MaxPrimaryContacts, g?.MaxCopyContacts);
+        ApplyEditedValue(model.Key, ref sig, ref approval, ref primary, ref copy,
+            _gradeMode, _gradeBool, _gradeInt);
+        return new UpsertGradeAssignmentPolicyRequest(sig, approval, primary, copy);
+    }
+
+    private static void ApplyEditedValue(
+        string key,
+        ref SignatureRequirementMode? signatureRequirement,
+        ref bool? requiresApproval,
+        ref int? maxPrimaryContacts,
+        ref int? maxCopyContacts,
+        SignatureRequirementMode? mode, bool? boolValue, int? intValue)
+    {
+        switch (key)
+        {
+            case "SignatureRequirement": signatureRequirement = mode; break;
+            case "RequiresApprovalBeforePublish": requiresApproval = boolValue; break;
+            case "MaxPrimaryContacts": maxPrimaryContacts = intValue; break;
+            case "MaxCopyContacts": maxCopyContacts = intValue; break;
+        }
+    }
+
+    /// <summary>The edited value for the row's kind, as a boxed object (null = the
+    /// clear/inherit sentinel).</summary>
+    private static object? CurrentValue(FieldKind kind, SignatureRequirementMode? mode, bool? boolValue, int? intValue) =>
+        kind switch
+        {
+            FieldKind.Mode => mode,
+            FieldKind.Bool => boolValue,
+            _ => intValue,
+        };
+
+    /// <summary>The stored value of the row's field — null when the scope has no value for it.</summary>
+    private static object? ValueOf(string key, TenantAssignmentPolicyDto? policy) => key switch
+    {
+        "SignatureRequirement" => policy?.SignatureRequirement,
+        "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
+        "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
+        "MaxCopyContacts" => policy?.MaxCopyContacts,
+        _ => null,
+    };
+
+    private static object? ValueOf(string key, GradeAssignmentPolicyDto? policy) => key switch
+    {
+        "SignatureRequirement" => policy?.SignatureRequirement,
+        "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
+        "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
+        "MaxCopyContacts" => policy?.MaxCopyContacts,
+        _ => null,
+    };
+}
