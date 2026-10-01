@@ -216,6 +216,35 @@ handler-rotation race for them. Ordered, each step a reviewable layer:
    MigrationService/worker startup job pages `GET /api/coded-values` and
    hydrates global rows + known tenant overrides. Runs off the enroll path and
    only while the flag is off, so it never blocks a user-facing write.
+
+   > **Shipped deviation (recorded 2026-10-01).** The delivered
+   > `CodedValueBackfillService` does **not** page `GET /api/coded-values` as this step intends —
+   > it performs a **breadth-first walk with one `/by-parent` call per node**: ≈143 sequential
+   > round trips for today's 142 coded values. Two distinct defects were traced from that walk:
+   >
+   > 1. **Hydration was abandoned after a single transient failure.** A failed walk was logged at
+   >    Error and the projection then relied on events until the next restart. Fixed in
+   >    `CodedValueBackfillService` with a bounded **3-attempt, Warning-level retry** (5s apart),
+   >    matching this ADR's §Phase 2 "bounded retries, fresh attempt each" direction. The client
+   >    timeout stays at the explicit **30s** the timeout rule above asks for — an earlier 30s → 60s
+   >    raise was **reverted**, because it rested on the per-call-stall hypothesis below, which the
+   >    evidence disproved.
+   > 2. **A client disconnect was reported as a server fault.** The startup
+   >    `OperationCanceledException` first attributed to a cold-call timeout actually came from
+   >    `HybridCache` stampede protection: the first caller runs the factory and every other caller
+   >    *joins* it, awaiting with its own token — so a **joiner** that disconnects throws out of an
+   >    endpoint whose query never ran (`DefaultHybridCache.StampedeState.JoinAsync` →
+   >    `ThrowIfCancellationRequested` → `ListRootCodedValuesHandler.HandleAsync`), surfacing through
+   >    the developer exception page as an unhandled exception. `HttpClient.Timeout` is per request,
+   >    but nothing in the trace shows a request stalling — the aborter was a *disconnecting caller*,
+   >    which this ~143-request walk only makes easier to hit. Fixed generically in
+   >    `SchoolCollab.ServiceDefaults` (`ClientAbortMiddleware` + `UseClientAbortHandling`, wired in
+   >    the four HTTP hosts) rather than in this hop — see
+   >    `documents/solution/client-abort-not-a-fault.md`.
+   >
+   > **Still open:** replace the per-node walk with a paged or bulk fetch to cut ~143 calls to a
+   > handful — a small feature, not a solo tweak; and tenant overrides remain unbackfilled, as the
+   > service's own doc comment concedes.
 5. **Flag-gated swap.** Config flag `Students:UseLocalCodedValueProjection`
    (default **off**). `EnrollStudentHandler`, `TransferStudentHandler`, and
    `CreateStudentWithLinkedDataHandler` inject `ILocalCodedValueRepository`

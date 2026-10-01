@@ -427,9 +427,14 @@
                 await InvokeAsync(StateHasChanged);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested || _disposed)
         {
-            // User navigated away or ParentCode changed before the lookup completed.
+            // Our own load was superseded (ParentCode/AttributeFilter changed, the component
+            // was disposed, the user navigated away) — the result is obsolete, so nothing is
+            // surfaced. A cancellation that does NOT come from this load's token (e.g. the HTTP
+            // transport timing out) deliberately falls through to the handler below and IS
+            // surfaced: swallowing every OperationCanceledException left the dropdown disabled
+            // on its placeholder forever, with no explanation to the user.
         }
         catch (Exception ex)
         {

@@ -7,6 +7,7 @@ using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using SchoolCollab.ServiceDefaults;
 using Serilog;
 using Serilog.Sinks.OpenTelemetry;
 
@@ -142,6 +143,29 @@ public static class Extensions
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Absorbs a client disconnect so it is not reported as a server fault — see
+    /// <see cref="ClientAbortMiddleware"/> for which shape is absorbed and why.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Call from <b>inside</b> the endpoint pipeline — in particular inside (after)
+    /// <c>UseSerilogRequestLogging()</c>: that middleware logs a passing exception at <b>Error</b> and
+    /// then <i>rethrows</i>, so a catcher placed outside it would leave the very Error entry this is
+    /// meant to remove. The four HTTP hosts call this immediately after their
+    /// <c>app.UseSerilogRequestLogging()</c> line.
+    /// </para>
+    /// <para>
+    /// It must also still wrap every endpoint, so call it before the <c>Map…Endpoints</c> group
+    /// registrations.
+    /// </para>
+    /// </remarks>
+    public static WebApplication UseClientAbortHandling(this WebApplication app)
+    {
+        app.UseMiddleware<ClientAbortMiddleware>();
+        return app;
     }
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
