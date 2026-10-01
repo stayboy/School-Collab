@@ -51,7 +51,7 @@ Every "form" dialog in this repo derives from the shared shell in
 <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
     <DataAnnotationsValidator />
     @* form fields bound to Model *@
-    <DialogShellFooter Saving="Saving" Error="Error"
+    <DialogShellFooter Saving="@Saving" Error="@Error"
                        OnCancel="HandleCancelAsync" SubmitText="Save" />
 </EditForm>
 
@@ -67,6 +67,19 @@ Every "form" dialog in this repo derives from the shared shell in
 
 ### Rules that catch people out
 
+- **Bind the footer's `Error` — never pass it a literal.** `Error` is a `string?` parameter
+  and `DialogShellFooter` renders a danger `FluentMessageBar` whenever it is non-empty. A bare
+  attribute value on a **string** parameter is a *string literal*, so `Error="Error"` passes the
+  text `"Error"` and paints a **permanent red bar reading “Error”** on every open, whether or not
+  anything failed. The neighbouring `Saving="Saving"` is *not* the same thing: `Saving` is a
+  `bool`, so the bare token binds the base's **property** and works — which is exactly why this
+  defect hides in plain sight. Always write `Saving="@Saving" Error="@Error"` (the form 9 dialogs
+  use). Regression: **four** dialogs shipped or carried this — the B1 `AssignmentPolicyFieldEditDialog` and
+  `NotificationPolicyFieldEditDialog` (found 2026-09-30/10-01) plus `ActivityGroupCreateDialog` /
+  `ActivityGroupEditDialog` (older) — all fixed 2026-10-01. It is now guarded **repo-wide** by
+  `DialogShellFooterBindingArchitectureTests`, which fails on any literal passed to the footer's `Error` (or on a
+  bare `Saving`), so a fifth instance cannot land; `AssignmentPolicyFieldEditDialogTests.Dialog_CleanOpen_RendersNoErrorBar`
+  covers the runtime behaviour.
 - The footer's **Submit** button is `Type="ButtonType.Submit"` with **no
   `@onclick`** — clicking it submits the enclosing `<EditForm>` and fires
   `OnValidSubmit` → `HandleSubmitAsync` → your `SubmitAsync`. The **Cancel**
