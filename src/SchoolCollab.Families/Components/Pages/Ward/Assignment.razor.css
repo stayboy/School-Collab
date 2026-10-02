@@ -6,6 +6,15 @@
     margin-bottom: 1rem;
 }
 
+/* INS-2: the student-facing instructions card above the content modules. */
+.ward-instructions {
+    margin-bottom: 1rem;
+}
+
+.ward-instructions-text {
+    white-space: pre-wrap;
+}
+
 .ward-video {
     width: 100%;
     max-height: 360px;

@@ -1,0 +1,124 @@
+/*
+    Isolated styles for the shared assignment authoring surface
+    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): a sticky action bar,
+    a sticky compartment jump-nav, and stacked section-card-style compartments.
+*/
+
+.authoring-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ── Sticky action bar (UX-4/UX-5) ─────────────────────────────────── */
+
+.authoring-actionbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 16px;
+    background-color: var(--neutral-layer-1);
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: 6px;
+}
+
+.authoring-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.authoring-heading {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.authoring-actionbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Sticky compartment jump-nav (UX-4) ────────────────────────────── */
+
+.authoring-jumpnav {
+    position: sticky;
+    top: 56px;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    padding: 6px 12px;
+    background-color: var(--neutral-layer-1);
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: 6px;
+}
+
+.authoring-jumpnav-link {
+    white-space: nowrap;
+}
+
+/* ── Compartment cards (UX-1/UX-3/UX-8) ────────────────────────────── */
+
+.authoring-compartment {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    background-color: var(--neutral-layer-1);
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: 6px;
+    scroll-margin-top: 112px;
+}
+
+.authoring-compartment-title {
+    margin: 0 0 4px 0;
+}
+
+/* ── Field treatments ──────────────────────────────────────────────── */
+
+.authoring-hint {
+    margin: 0;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.875rem;
+}
+
+/* UX-17/D12: the inline reason beside every disabled (never hidden) inapplicable control. */
+.authoring-reason {
+    margin: 0;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.875rem;
+    font-style: italic;
+}
+
+.authoring-readonly-value {
+    display: inline-block;
+    min-height: 24px;
+    line-height: 24px;
+}
+
+/* UX-13: policy-derived values are read-only resolved text plus the inherited badge. */
+.authoring-policy-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 4px 0;
+}
+
+.authoring-policy-label {
+    min-width: 180px;
+    font-weight: 600;
+}
+
+.authoring-policy-value {
+    flex: 1 1 auto;
+}
+
+.authoring-message {
+    margin: 0;
+}

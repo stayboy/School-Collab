@@ -1,13 +1,9 @@
 @page "/assignments/{Id:guid}"
 @using SchoolCollab.Assignments.Contracts
-@using SchoolCollab.Students.Application.Services
-@using SchoolCollab.Students.Core.Domain
-@using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Admin.Shared.Components
 @inject AssignmentsApiClient Api
-@inject StudentsApiClient StudentsApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
@@ -50,80 +46,17 @@
 
                 <FluentTabs>
                     <FluentTab Label="Overview" Icon="@FluentIcons.ClipboardCheckmark">
-                        <div class="detail-grid">
-                            <div class="detail-label">Type</div>
-                            <div class="detail-value">@EnumHelper.GetDescription(_item.AssignmentType)</div>
-
-                            <div class="detail-label">Grading</div>
-                            <div class="detail-value">@EnumHelper.GetDescription(_item.GradingFormat)</div>
-
-                            <div class="detail-label">Audience</div>
-                            <div class="detail-value">@EnumHelper.GetDescription(_item.TargetAudienceType)</div>
-
-                            <div class="detail-label">Subject</div>
-                            <div class="detail-value">@( _item.TopicName ?? "—")</div>
-
-                            <div class="detail-label">Grade</div>
-                            <div class="detail-value">@( _item.GradeName ?? "—")</div>
-
-                            <div class="detail-label">Due Date</div>
-                            <div class="detail-value">@( _item.DueDate?.ToLocalTime().ToString("g") ?? "—")</div>
-
-                            <div class="detail-label">Max Score</div>
-                            <div class="detail-value">@( _item.MaxScore?.ToString("0.##") ?? "—")</div>
-
-                            <div class="detail-label">Available from</div>
-                            <div class="detail-value">@(_item.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")</div>
-
-                            <div class="detail-label">Archive after</div>
-                            <div class="detail-value">
-                                @if (_item.DueDate.HasValue)
-                                {
-                                    @_item.DueDate.Value.AddDays(_item.ArchiveGraceDays).ToLocalTime().ToString("g")
-                                    <span class="dialog-hint">(grace: @_item.ArchiveGraceDays days)</span>
-                                }
-                                else
-                                {
-                                    <span>—</span>
-                                }
-                            </div>
-
-                            <div class="detail-label">Created</div>
-                            <div class="detail-value">@_item.CreatedAt.ToLocalTime().ToString("g")</div>
-
-                            <div class="detail-label">Updated</div>
-                            <div class="detail-value">@_item.UpdatedAt.ToLocalTime().ToString("g")</div>
-                        </div>
-
-                        @if (!string.IsNullOrWhiteSpace(_item.Description))
-                        {
-                            <div class="mt-3">
-                                <div class="detail-label">Description</div>
-                                <div class="detail-value description">@_item.Description</div>
-                            </div>
-                        }
+                        @* R1 (UX-10 / assignment-authoring-compartments §5): the read-only
+                           authoring summary IS the shared View mode — the hand-rolled Overview
+                           grid was retired so Detail can never drift from Create/Edit (NFR-4).
+                           The lifecycle actions (Publish / Unpublish / Schedule / Reschedule /
+                           Close / Archive) now live in the authoring action bar's §11 matrix;
+                           Detail keeps the approver surface (LIF-1) and the operational tabs. *@
+                        <AssignmentAuthoring Mode="AssignmentAuthoringMode.View" Id="@Id"
+                                             Changed="ReloadItemAsync" />
 
                         <div class="mt-3">
                             <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to List</FluentButton>
-                            @if (_item.Status == AssignmentStatusDto.Draft)
-                            {
-                                <FluentAnchor Href="@($"/assignments/{_item.Id}/edit")" Appearance="Appearance.Accent" class="ms-2">Edit</FluentAnchor>
-                                <FluentButton Appearance="Appearance.Accent" OnClick="OpenPublishDialogAsync" Disabled="@_publishing" class="ms-2">
-                                    @(_publishing ? "Publishing…" : "Publish")
-                                </FluentButton>
-                                <FluentButton Appearance="Appearance.Outline" OnClick="OpenScheduleDialogAsync" Disabled="@_scheduling" class="ms-2">
-                                    @(_scheduling ? "Scheduling…" : "Schedule…")
-                                </FluentButton>
-                            }
-                            @if (_item.Status == AssignmentStatusDto.Scheduled)
-                            {
-                                <FluentButton Appearance="Appearance.Accent" OnClick="OpenPublishDialogAsync" Disabled="@_publishing" class="ms-2">
-                                    @(_publishing ? "Publishing…" : "Publish now")
-                                </FluentButton>
-                                <FluentButton Appearance="Appearance.Outline" OnClick="OnCancelScheduleAsync" Disabled="@_cancelling" class="ms-2">
-                                    @(_cancelling ? "Cancelling…" : "Cancel schedule")
-                                </FluentButton>
-                            }
                             @* WS-A4 / spec §3.1: duplicate the assignment as a fresh
                                Draft template copy. Rendered regardless of status — it
                                is a read-only-on-source operation. *@
@@ -362,8 +295,7 @@
 
     private AssignmentSummaryDto? _item;
     private bool _loading = true;
-    private string? _error;
-    // WS-E2b / ar-18 (ar-17 follow-up F5): reported by the failures section's own load —
+    private string? _error;    // WS-E2b / ar-18 (ar-17 follow-up F5): reported by the failures section's own load —
     // Detail never fetches the failure list itself just to count it.
     private int _notificationFailureCount;
     private CancellationTokenSource? _loadCts;
@@ -379,13 +311,7 @@
     private SubmissionDetailDto? _selectedSubmission;
     private bool _loadingSubmission;
 
-    // Publish dialog (spec §12)
-    private bool _publishing;
-    private string? _publishError;
-
     // WS-A2 schedule / cancel-schedule / approval actions
-    private bool _scheduling;
-    private bool _cancelling;
     private bool _submittingForApproval;
     private bool _actingOnApproval;
     private string? _approvalError;
@@ -464,11 +390,22 @@
 
     private void OnFailureCountLoaded(int count) => _notificationFailureCount = count;
 
-    private string AudienceSummary()
+    /// <summary>R1: the shared View-mode authoring component raises this after a successful
+    /// lifecycle action (publish / unpublish / schedule / close / archive) so Detail re-reads
+    /// the assignment its badge, tabs and approval panel render around.</summary>
+    private async Task ReloadItemAsync()
     {
-        var audience = _item is not null ? EnumHelper.GetDescription(_item.TargetAudienceType) : "All students";
-        var grade = _item?.GradeName;
-        return grade is not null ? $"Audience: {audience} · Grade {grade}" : $"Audience: {audience}";
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _item = await Api.GetByIdAsync(Id, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to reload assignment {AssignmentId}", Id);
+        }
     }
 
     // ── WS-A2: approval-status chip + dialog ────────────────────────────
@@ -494,101 +431,6 @@
         ApprovalStatusDto.Rejected => Appearance.Neutral,
         _ => Appearance.Lightweight
     };
-
-    private async Task OpenPublishDialogAsync()
-    {
-        if (_item is null) return;
-        _publishing = true;
-        _publishError = null;
-        var ct = _loadCts?.Token ?? CancellationToken.None;
-
-        try
-        {
-            var contacts = await StudentsApi.ListSubscribedContactsAsync(
-                ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct) ?? [];
-            var model = new PublishFormModel(contacts.ToList(), AudienceSummary(), _item.MandatoryReview);
-
-            var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
-                model, title: "Publish assignment", size: DialogSize.Medium);
-
-            if (result is null)
-                return; // cancelled
-
-            await Api.PublishAsync(Id, result.ContactIds, ct);
-            _item = await Api.GetByIdAsync(Id, ct);
-            _recipients = await Api.GetRecipientsAsync(Id, ct);
-            Nav.NavigateTo($"/assignments/{Id}");
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to publish assignment {AssignmentId}", Id);
-            _publishError = ex.Message;
-        }
-        finally
-        {
-            if (!_disposed) _publishing = false;
-        }
-    }
-
-    // WS-A2 / spec §3.5 step 2: open the schedule dialog (mirrors PublishDialog's
-    // ShowShellDialogAsync plumbing).
-    private async Task OpenScheduleDialogAsync()
-    {
-        if (_item is null) return;
-        _scheduling = true;
-        _approvalError = null;
-        var ct = _loadCts?.Token ?? CancellationToken.None;
-
-        try
-        {
-            var result = await DialogService.ShowShellDialogAsync<ScheduleDialog, ScheduleFormModel, ScheduleResult>(
-                new ScheduleFormModel(), title: "Schedule assignment", size: DialogSize.Medium);
-
-            if (result is null) return; // cancelled
-            await Api.ScheduleAsync(Id, result.AvailableFromUtc, ct);
-            _item = await Api.GetByIdAsync(Id, ct);
-            Nav.NavigateTo($"/assignments/{Id}", forceLoad: false);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to schedule assignment {AssignmentId}", Id);
-            _approvalError = ex.Message;
-        }
-        finally
-        {
-            if (!_disposed) _scheduling = false;
-        }
-    }
-
-    private async Task OnCancelScheduleAsync()
-    {
-        if (_item is null) return;
-        _cancelling = true;
-        _approvalError = null;
-        var ct = _loadCts?.Token ?? CancellationToken.None;
-
-        try
-        {
-            await Api.UnpublishAsync(Id, ct);
-            _item = await Api.GetByIdAsync(Id, ct);
-            Nav.NavigateTo($"/assignments/{Id}", forceLoad: false);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to cancel schedule for assignment {AssignmentId}", Id);
-            _approvalError = ex.Message;
-        }
-        finally
-        {
-            if (!_disposed) _cancelling = false;
-        }
-    }
 
     private async Task OnSubmitForApprovalAsync()
     {

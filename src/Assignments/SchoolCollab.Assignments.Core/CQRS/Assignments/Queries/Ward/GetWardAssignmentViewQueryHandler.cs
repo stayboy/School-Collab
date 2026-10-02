@@ -57,7 +57,10 @@ public sealed class GetWardAssignmentViewHandler(
             .All(m => progressByModule.TryGetValue(m.Id, out var p) && p.CompletedAt is not null);
 
         return new WardAssignmentViewDto(
-            query.AssignmentId, assignment.Title, assignment.DueDate, questionsUnlocked, modules);
+            query.AssignmentId, assignment.Title, assignment.DueDate, questionsUnlocked, modules,
+            // INS-2 (assignment-authoring-compartments §9): the student-facing instructions
+            // are surfaced read-only on the ward player.
+            Instructions: assignment.Instructions);
     }
 
     /// <summary>Domain <see cref="ModuleType"/> → contract <see cref="ModuleTypeDto"/>

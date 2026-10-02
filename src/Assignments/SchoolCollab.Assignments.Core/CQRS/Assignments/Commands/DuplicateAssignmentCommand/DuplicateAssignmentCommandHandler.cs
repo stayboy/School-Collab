@@ -72,7 +72,11 @@ public sealed class DuplicateAssignmentCommandHandler(
             // scalar fields (the unconfirmed questions draft blob is NOT copied).
             difficultyEasy: source.DifficultyEasyCount,
             difficultyMedium: source.DifficultyMediumCount,
-            difficultyHard: source.DifficultyHardCount)
+            difficultyHard: source.DifficultyHardCount,
+            // INS-1 (assignment-authoring-compartments §9): the student-facing text is
+            // cloned with the other scalar fields (the questions draft blob is still NOT
+            // copied).
+            instructions: source.Instructions)
             .WithTenant(tenantProvider);
 
         // Children copied IN ORDER via the aggregate's Add* factories (the

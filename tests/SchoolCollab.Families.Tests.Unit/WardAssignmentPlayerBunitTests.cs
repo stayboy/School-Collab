@@ -120,6 +120,42 @@ public class WardAssignmentPlayerBunitTests : BunitContext
     }
 
     [TestMethod]
+    public void Instructions_RenderReadOnly_WhenPresent()
+    {
+        // INS-2 (assignment-authoring-compartments §9): the student-facing instructions are
+        // threaded through the ward DTO and rendered above the modules.
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 0, null)
+            ],
+            Instructions: "Read chapter 5 before answering.");
+        SetupView(view);
+        SetupResultNotFound();
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Read chapter 5 before answering.");
+            cut.Markup.Should().Contain("Instructions");
+        });
+    }
+
+    [TestMethod]
+    public void Instructions_CardAbsent_WhenNotAuthored()
+    {
+        SetupView(UnlockedView());
+        SetupResultNotFound();
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Video 1"));
+        cut.Markup.Should().NotContain(">Instructions<",
+            "an assignment without instructions renders no empty instructions card");
+    }
+
+    [TestMethod]
     public async Task Submit_Triggers_ClientCall()
     {
         SetupView(UnlockedView());

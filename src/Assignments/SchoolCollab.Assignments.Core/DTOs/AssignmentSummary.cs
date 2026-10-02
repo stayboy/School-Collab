@@ -52,4 +52,7 @@ public record AssignmentSummary(
     /// the failure-surfacing gate can ask "has this ever been published" rather than testing
     /// the current status — <c>Unpublish</c> returns an assignment to <c>Draft</c> while its
     /// <c>NotificationLog</c> rows survive.</summary>
-    DateTimeOffset? PublishedAt = null);
+    DateTimeOffset? PublishedAt = null,
+    /// <summary>INS-1/INS-2 (assignment-authoring-compartments §9): student-facing task
+    /// text, distinct from <see cref="Description"/>.</summary>
+    string? Instructions = null);

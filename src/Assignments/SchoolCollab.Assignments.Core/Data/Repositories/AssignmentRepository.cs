@@ -39,7 +39,9 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount,
                 // WS-E2b / ar-17: must be projected or every published assignment reports
                 // never-published and silently loses its failure surface.
-                a.PublishedAt))
+                a.PublishedAt,
+                // INS-1 (assignment-authoring-compartments §9): student-facing text.
+                a.Instructions))
             .ToListAsync(ct);
     }
 

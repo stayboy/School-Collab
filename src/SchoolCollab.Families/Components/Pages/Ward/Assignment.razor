@@ -33,6 +33,16 @@
         else
         {
     <div class="ward-player">
+        @* INS-2 (assignment-authoring-compartments §9): the student-facing instructions,
+           read-only, above the content modules. *@
+        @if (!string.IsNullOrWhiteSpace(_view.Instructions))
+        {
+            <FluentCard class="ward-instructions">
+                <h2>Instructions</h2>
+                <p class="ward-instructions-text">@_view.Instructions</p>
+            </FluentCard>
+        }
+
         @foreach (var module in _view.Modules)
         {
             <FluentCard @key="module.ModuleId" class="ward-module">

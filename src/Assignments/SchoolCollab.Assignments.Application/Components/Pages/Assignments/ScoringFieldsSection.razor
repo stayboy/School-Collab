@@ -2,39 +2,61 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 
 @*
-    WS-A3 (spec §3.3 / §7 Q4): the Pass Score + Max Attempts inputs
-    rendered ONLY for AutoGraded / InstantGraded grading formats (the
-    `QuestionsPassSubmitGate` conditional precedent — the fields are
-    hidden for TeacherGraded so a teacher authoring a TeacherGraded
-    assignment never sees them). The wizard's Details step, the Edit
-    page, and any future owner renders this component directly — the
-    conditional + the validation live in the component itself so the
-    pages' diffs stay minimal (decision (h) recorded adjustment:
-    shipped as a section component rather than inline wizard markup so
-    bUnit assertions target a stable surface).
+    WS-A3 (spec §3.3 / §7 Q4): the Pass Score + Max Attempts inputs.
+
+    UX-17 / D12 (assignment-authoring-compartments §12): an inapplicable
+    control renders **disabled with an inline reason, never hidden** — the
+    authoring page must not reflow when the grading format changes. The
+    fields were hidden for TeacherGraded before R1; they now render
+    disabled so the compartment keeps its shape and the reason is visible.
+
+    The gating rule itself is unchanged (`ScoringFieldsPassSubmitGate`
+    still always passes for TeacherGraded, so a stale value can never
+    block submit with an invisible error).
 *@
 
-@if (GradingFormat is GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded)
-{
-    <p class="muted">Set the pass threshold and attempt cap. Leave blank for no pass threshold / unlimited attempts.</p>
+@{
+    var inapplicable = IsInapplicable(GradingFormat);
+}
 
-    <FormRow Label="Pass Score" For="scoringFieldsPassScore">
-        <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3" />
-    </FormRow>
-    <FormRow Label="Max Attempts" For="scoringFieldsMaxAttempts">
-        <FluentNumberField Id="scoringFieldsMaxAttempts" @bind-Value="Model.MaxAttempts" Class="w-3" />
-    </FormRow>
+<p class="muted">Set the pass threshold and attempt cap. Leave blank for no pass threshold / unlimited attempts.</p>
+
+<FormRow Label="Pass Score" For="scoringFieldsPassScore">
+    <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3"
+                       Disabled="@inapplicable" />
+</FormRow>
+<FormRow Label="Max Attempts" For="scoringFieldsMaxAttempts">
+    <FluentNumberField Id="scoringFieldsMaxAttempts" @bind-Value="Model.MaxAttempts" Class="w-3"
+                       Disabled="@inapplicable" />
+</FormRow>
+
+@if (inapplicable)
+{
+    <p class="scoring-fields-reason">@ScoringInapplicableReason</p>
 }
 
 @code {
+    /// <summary>UX-17 / D12: the inline reason shown (and used as the field
+    /// tooltip) when the grading format does not carry pass/fail scoring.
+    /// Declared once so the component, the authoring compartment and the
+    /// bUnit suite cannot drift.</summary>
+    public const string ScoringInapplicableReason =
+        "Not applicable for Teacher Marked grading — pass score and attempt caps apply to Auto Scored and Instant Feedback only.";
+
     /// <summary>The shared form model (PassScore + MaxAttempts live
-    /// here so the wizard's <c>ToCreateRequest</c> projection and
+    /// here so the authoring page's request projection and
     /// <c>ScoringFieldsPassSubmitGate</c> pick them up automatically).</summary>
     [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
 
-    /// <summary>The currently selected grading format. When this is
-    /// <see cref="GradingFormatDto.TeacherGraded"/> the section renders
-    /// nothing — a TeacherGraded assignment does not carry a pass
-    /// threshold or attempt cap (scoring is reviewer-driven).</summary>
+    /// <summary>The currently selected grading format. For
+    /// <see cref="GradingFormatDto.TeacherGraded"/> the fields render
+    /// disabled with <see cref="ScoringInapplicableReason"/> — scoring is
+    /// reviewer-driven, so neither a pass threshold nor an attempt cap has
+    /// a meaning to enforce.</summary>
     [Parameter, EditorRequired] public GradingFormatDto GradingFormat { get; set; }
+
+    /// <summary>True when the grading format does not support the
+    /// pass-score / attempt-cap fields (UX-17 / D12).</summary>
+    private static bool IsInapplicable(GradingFormatDto gradingFormat) =>
+        gradingFormat is not (GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded);
 }
