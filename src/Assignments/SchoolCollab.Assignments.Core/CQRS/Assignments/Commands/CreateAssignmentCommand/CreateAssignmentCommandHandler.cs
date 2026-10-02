@@ -26,6 +26,7 @@ public sealed class CreateAssignmentCommandHandler(
     ICurrentUser currentUser,
     ITeacherDirectory teacherDirectory,
     IFeatureFlagService featureFlags,
+    IActivityGroupLookup groupLookup,
     ILogger<CreateAssignmentCommandHandler> logger) : ICommandHandler<CreateAssignmentCommand, Guid>
 {
     public async Task<Guid> HandleAsync(CreateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -104,6 +105,17 @@ public sealed class CreateAssignmentCommandHandler(
             instructions: command.Instructions)
             .WithTenant(tenantProvider);
 
+        // R2 (D-1/TGT-1): attach the authored targeting rows. SetTargets — not Create — owns
+        // their validation (TGT-13/TGT-2/D-2/D-8.1) and the derived compat column, and the
+        // child rows carry the tenant id that WithTenant has just stamped. Every group id here
+        // is newly added (a create has no persisted targets), so each is resolved through the
+        // FR-21/FR-22 port and any inactive one is rejected (D-8.1).
+        var inactiveGroupIds = await ResolveInactiveActivityGroupIdsAsync(command.Targets, cancellationToken);
+        assignment.SetTargets(
+            command.Targets?.Select(t => (Kind: (TargetKind)t.Kind, RefId: t.RefId)).ToList(),
+            assignment.TenantId,
+            inactiveGroupIds);
+
         if (command.Questions is { Count: > 0 })
         {
             // Re-index DisplayOrder 0..n by list position (EC-7) — the payload's
@@ -181,5 +193,26 @@ public sealed class CreateAssignmentCommandHandler(
         logger.LogInformation("Assignment {Id} created with number {AssignmentNumber} for tenant {TenantId}",
             assignment.Id, assignment.AssignmentNumber, tenantContext.TenantId);
         return assignment.Id;
+    }
+
+    /// <summary>D-8.1: resolves the activity-group ids in <paramref name="targets"/> that the
+    /// FR-21 port does not report as active. A create has no persisted target rows, so every
+    /// group id is newly added; an id the port omits (unknown / other tenant) is left to the
+    /// route-level FR-21 checks and is not rejected here.</summary>
+    private async Task<Guid[]> ResolveInactiveActivityGroupIdsAsync(
+        IReadOnlyList<AssignmentTargetDto>? targets, CancellationToken ct)
+    {
+        var groupIds = (targets ?? [])
+            .Where(t => t.Kind == TargetKindDto.ActivityGroup && t.RefId.HasValue)
+            .Select(t => t.RefId!.Value)
+            .Distinct()
+            .ToArray();
+        if (groupIds.Length == 0)
+        {
+            return [];
+        }
+
+        var groups = await groupLookup.GetByIdsAsync(groupIds, ct);
+        return groups.Where(g => !g.IsActive).Select(g => g.Id).ToArray();
     }
 }

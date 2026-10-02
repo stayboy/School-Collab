@@ -12,6 +12,7 @@ using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentByStudentNumber
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ListDeletedStudents;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ListStudents;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ListStudentsByGrade;
+using SchoolCollab.Students.Core.CQRS.Students.Queries.ResolveStudentsByTarget;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -56,6 +57,30 @@ public static class StudentRoutes
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListStudentsByGrade, SchoolCollab.Students.Core.DTOs.StudentDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListStudentsByGrade(gradeLevelId, periodId), ct)));
+
+        // ── Target resolution (assignment-authoring-compartments §7.2 TGT-8) ──
+        // The single Students leg of IAssignmentTargetResolver: the union of the matching
+        // active, non-soft-deleted student ids for an assignment's authored constraints.
+        // Query-bound arrays follow the EnrollmentRoutes `by-students` precedent; the
+        // `allStudents` leg is explicit (D-6) so the tenant-wide cohort cannot be requested
+        // by accident. Mapped on this group, so it inherits its RequireAuthorization +
+        // BearerScheme (D-7). Tenant scoping comes from the handler's DbContext query filter.
+        group.MapGet("/by-target", async (
+            [FromQuery] bool allStudents,
+            [FromQuery] Guid[] gradeLevelIds,
+            [FromQuery] Guid[] streamCodedValueIds,
+            [FromQuery] Guid[] studentIds,
+            [FromQuery] Guid[] activityGroupIds,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ResolveStudentsByTarget, Guid[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(
+                new ResolveStudentsByTarget(
+                    allStudents,
+                    gradeLevelIds ?? [],
+                    streamCodedValueIds ?? [],
+                    studentIds ?? [],
+                    activityGroupIds ?? []),
+                ct)));
 
         group.MapPost("/", async (
             [FromBody] CreateStudent command,

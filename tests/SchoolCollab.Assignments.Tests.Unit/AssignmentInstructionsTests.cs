@@ -132,6 +132,7 @@ public class AssignmentInstructionsTests
             new FakeCurrentUser(),
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = true },
+            new AcceptAllActivityGroupLookup(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
         var id = await handler.HandleAsync(new CreateAssignmentCommand(
@@ -168,6 +169,7 @@ public class AssignmentInstructionsTests
             new Mock<IIntegrationEventPublisher>().Object,
             cache,
             Options.Create(new AttachmentUploadOptions()),
+            new AcceptAllActivityGroupLookup(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new UpdateAssignmentCommand(

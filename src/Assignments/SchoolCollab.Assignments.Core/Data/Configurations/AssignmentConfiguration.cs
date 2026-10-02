@@ -116,6 +116,11 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             .OnDelete(DeleteBehavior.Cascade);
         builder.Navigation(x => x.Resources).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
 
+        // R2 (TGT-1): the authored targeting rows are a required navigation for publish
+        // (the fail-closed resolver reads them off the aggregate) and for the authoring
+        // child read, so they are auto-included like the other structural children.
+        builder.Navigation(x => x.Targets).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
+
         builder.OwnsMany(x => x.Attachments, a =>
         {
             a.ToTable("assignment_attachments");

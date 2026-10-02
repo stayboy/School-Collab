@@ -443,7 +443,29 @@ the tester never derives or expands its own scope.
   `~/.nuget/packages`), never `find /`. If a worker's bash stays open past a
   plausible build/test window, interrupt and escalate the pass per the
   build-escalation pattern in step 3 — steering a hung process is wasted
-  quota.
+  quota. **Escalating is not enough on its own:** the re-dispatched brief must carry the
+  same guard *plus* **bounded per-command timeouts and a skip-if-slow rule** — the escalation
+  inherits the identical hang risk, and a second hang on a test/Testcontainers suite burns
+  another full cycle (observed 2026-10-02: a 44-minute open `bash` on an R2 rework produced
+  **zero** files). **Reconcile the tree first** — a hung pass may have produced nothing, so
+  never assume partial work exists — and **kill that run's orphaned `dotnet`/testhost
+  processes before re-dispatching**, or the next build fails on MSB3021/MSB3027 locks.
+- **Adjudicate a tester's/reviewer's findings against source BEFORE dispatching a rework.** A UI
+  tester reported five P1s; two rested on a single wrong premise — that the Publish action submits the
+  in-memory form, when it publishes the *persisted* entity (`Api.PublishAsync(_item.Id, …)`) — so their
+  repros were unreachable, and a third was mis-severed (real behaviour, but caught downstream so not a
+  data-loss path). Verifying each claimed P1 in the code yourself is what separates the one genuine
+  data-loss bug from the two that do not exist; relaying a plausible-sounding repro into a rework brief
+  spends a whole cycle on phantom defects **and** hides the real one. A tester's severity is a claim,
+  not a fact — the parent owns the triage.
+- **Orphaned `dotnet` processes hang the PARENT too, not just the child.** A parent verification run
+  (`dotnet build` then `dotnet test`) sat for the full 40-minute timeout — build green, first suite
+  apparently stuck. After killing ~11 stale `dotnet` processes the *same* suite passed in **26 s**.
+  The identical root cause had already killed a worker run earlier the same session. So: after any
+  hung/killed child — and before a parent verification run — clear stale `dotnet`/`testhost` processes
+  first; and when a parent test run looks hung, suspect process contention *before* concluding that the
+  suite (or the code) hangs. A false "the tests hang" diagnosis sends you hunting a defect that does not
+  exist, in a change you were about to accept.
 
 ## Verification
 

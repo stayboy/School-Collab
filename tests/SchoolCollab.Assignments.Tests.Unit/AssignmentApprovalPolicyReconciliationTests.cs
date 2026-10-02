@@ -37,11 +37,14 @@ public class AssignmentApprovalPolicyReconciliationTests
     private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-000000000020");
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
-            .WithTenant(TenantId);
+            .WithTenant(TenantId)
+            // R2 (TGT-13): a publishable assignment needs at least one authored target row.
+            .WithAllStudentsTarget();
 
     private static EffectiveAssignmentPolicy PolicyWith(bool requiresApproval) =>
         FakeAssignmentPolicyResolver.BuiltInDefault with { RequiresApprovalBeforePublish = requiresApproval };
@@ -49,8 +52,10 @@ public class AssignmentApprovalPolicyReconciliationTests
     private static PublishAssignmentCommandHandler NewPublishHandler(
         Assignment assignment, IFeatureFlagService flags, IAssignmentPolicyResolver policyResolver) =>
         new(new StubAssignmentRepository(assignment), new StubSubmissionRepository(),
-            new StubContactResolver(), new StubLinkRepository(), new StubActivityGroupLookup(),
-            new StubTopicAssignmentLookup(), new StubTenantProvider(TenantId), new StubBroadcaster(),
+            new StubContactResolver(),
+            new StubTopicAssignmentLookup(),
+            new FakeAssignmentTargetResolver { StudentIds = [StudentId] },
+            new StubTenantProvider(TenantId), new StubBroadcaster(),
             new FakeNotificationPolicyResolver(), policyResolver, flags, new FakeDeepLinkTokenMinter(),
             new StubHybridCache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 

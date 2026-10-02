@@ -1119,12 +1119,14 @@ public class AssignmentFormModelMappingsTests
     private static AssignmentAuthoringChildrenDto MakeChildren(
         IReadOnlyList<AssignmentQuestionReadDto>? questions = null,
         IReadOnlyList<AssignmentAttachmentReadDto>? attachments = null,
-        IReadOnlyList<ResourceDto>? resources = null) =>
+        IReadOnlyList<ResourceDto>? resources = null,
+        IReadOnlyList<AssignmentTargetDto>? targets = null) =>
         new(
             Guid.NewGuid(),
             questions ?? [],
             attachments ?? [],
-            resources ?? []);
+            resources ?? [],
+            targets ?? []);
 
     [TestMethod]
     public void LoadChildren_MapsQuestionsWithOptionsAndCorrectIndex()
@@ -1271,5 +1273,34 @@ public class AssignmentFormModelMappingsTests
         req.Attachments.Should().BeNull();
         req.Resources.Should().BeNull(
             "an empty clear projects to null, which the update handler reads as 'preserve the persisted set'");
+    }
+
+    // ── LoadTargets (R2 targeting): the Everyone snapshot belongs to ONE load ──
+
+    /// <summary>R2-10 (P2): the Everyone snapshot belongs to ONE load. A reused component instance
+    /// (the host page's <c>Id</c> changes) loads the next assignment through the same model, so a
+    /// snapshot left pending by the earlier load would be restored onto the NEXT assignment's
+    /// target set instead of being discarded with it.</summary>
+    [TestMethod]
+    public void LoadTargets_DiscardsAPendingEveryoneSnapshot()
+    {
+        var staleGradeId = Guid.NewGuid();
+        var loadedStreamId = Guid.NewGuid();
+        var model = new AssignmentEditFormModel();
+        model.SetTargetsOfKind(TargetKindDto.GradeLevel, [staleGradeId]);
+
+        // Everyone ON snapshots the constraints it is about to replace (F4).
+        model.SetEveryoneTarget(true);
+        model.Targets.Should().ContainSingle().Which.Kind.Should().Be(TargetKindDto.AllStudents,
+            "the constraint set is snapshotted and the live set becomes the Everyone row");
+
+        // The next assignment loads into the same model instance.
+        model.LoadTargets([new AssignmentTargetDto(TargetKindDto.Stream, loadedStreamId, 0)]);
+
+        model.SetEveryoneTarget(false);
+
+        model.Targets.Should().BeEmpty(
+            "P2: the pending snapshot belonged to the previous load — Everyone OFF restores nothing "
+            + "instead of resurrecting the stale constraints onto the freshly loaded assignment");
     }
 }

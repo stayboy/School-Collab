@@ -52,6 +52,7 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             publisher.Object,
             cache,
             Options.Create(new AttachmentUploadOptions()),
+            new AcceptAllActivityGroupLookup(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
     }
 

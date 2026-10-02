@@ -8,6 +8,20 @@ using SchoolCollab.Core.AssignmentPolicies;
 
 namespace SchoolCollab.Assignments.Application.Services;
 
+/// <summary>
+/// The Audience &amp; Targets live-preview request (assignment-authoring-compartments §7.5
+/// TGT-16 / D-4): the current constraint set, exactly as the create/update payload would carry
+/// it, plus the authored primary grade (plan-review P2-n2 — publish's teacher cohort and both
+/// policy legs resolve from it, so the preview must too).
+/// </summary>
+public sealed record RecipientPreviewRequest(
+    bool AllStudents,
+    IReadOnlyList<Guid> GradeLevelIds,
+    IReadOnlyList<Guid> StreamCodedValueIds,
+    IReadOnlyList<Guid> StudentIds,
+    IReadOnlyList<Guid> ActivityGroupIds,
+    Guid? PrimaryGradeId);
+
 public sealed class AssignmentsApiClient
 {
     private readonly HttpClient _http;
@@ -26,6 +40,9 @@ public sealed class AssignmentsApiClient
                 new JsonStringEnumConverter<AssignmentStatusDto>(),
                 new JsonStringEnumConverter<GradingFormatDto>(),
                 new JsonStringEnumConverter<TargetAudienceTypeDto>(),
+                // R2 (TGT-1): the targeting-kind discriminator round-trips as a name on the
+                // create/update payload and the authoring child read.
+                new JsonStringEnumConverter<TargetKindDto>(),
                 new JsonStringEnumConverter<ReviewStateDto>(),
                 new JsonStringEnumConverter<ContactOwnerTypeDto>(),
                 new JsonStringEnumConverter<ContactChannelDto>(),
@@ -129,6 +146,43 @@ public sealed class AssignmentsApiClient
         }
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<AssignmentAuthoringChildrenDto>(_jsonOptions, ct);
+    }
+
+    /// <summary>
+    /// Resolves the live recipient preview for a constraint set (assignment-authoring-compartments
+    /// §7.5 TGT-16 / D-4). The counts are advisory — a failed read returns null and the caller
+    /// renders the degraded note; save is never blocked.
+    /// </summary>
+    /// <param name="primaryGradeId">Plan-review P2-n2: publish resolves BOTH its teacher-recipient
+    /// cohort and its notification/assignment policy from the assignment's primary grade, so the
+    /// preview must carry it too — otherwise the "contacts reachable" count under-reports against
+    /// what publish actually sends. Null = the tenant-global leg only.</param>
+    public async Task<RecipientPreviewDto?> GetRecipientPreviewAsync(
+        RecipientPreviewRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var query = new List<string> { $"allStudents={request.AllStudents.ToString().ToLowerInvariant()}" };
+        query.AddRange(request.GradeLevelIds.Select(id => $"gradeLevelIds={id}"));
+        query.AddRange(request.StreamCodedValueIds.Select(id => $"streamCodedValueIds={id}"));
+        query.AddRange(request.StudentIds.Select(id => $"studentIds={id}"));
+        query.AddRange(request.ActivityGroupIds.Select(id => $"activityGroupIds={id}"));
+        if (request.PrimaryGradeId is Guid primaryGradeId)
+        {
+            query.Add($"primaryGradeId={primaryGradeId}");
+        }
+
+        _logger.LogDebug("Resolving recipient preview for {Constraints} target(s)",
+            request.GradeLevelIds.Count + request.StreamCodedValueIds.Count
+            + request.StudentIds.Count + request.ActivityGroupIds.Count);
+        var response = await _http.GetAsync($"/assignments/recipient-preview?{string.Join("&", query)}", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Recipient preview read failed with {Status}", response.StatusCode);
+            return null;
+        }
+
+        return await response.Content.ReadFromJsonAsync<RecipientPreviewDto>(_jsonOptions, ct);
     }
 
     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)

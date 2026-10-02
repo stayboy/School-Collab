@@ -63,7 +63,8 @@ public class CreateAssignmentCommandHandlerEntityCodeTests
                new FakeCurrentUser(),
                new FakeTeacherDirectory(),
                new FakeFeatureFlagService { IsEnabledValue = true },
-               NullLogger<CreateAssignmentCommandHandler>.Instance);
+               new AcceptAllActivityGroupLookup(),
+            NullLogger<CreateAssignmentCommandHandler>.Instance);
 
     private static CreateAssignmentCommand SampleCommand() =>
         new(

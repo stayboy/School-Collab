@@ -34,11 +34,14 @@ public class PublishAssignmentApprovalGateTests
     private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-000000000020");
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
-            .WithTenant(TenantId);
+            .WithTenant(TenantId)
+            // R2 (TGT-13): a publishable assignment needs at least one authored target row.
+            .WithAllStudentsTarget();
 
     private static PublishAssignmentCommandHandler NewHandler(
         Assignment assignment, IFeatureFlagService featureFlags)
@@ -46,9 +49,8 @@ public class PublishAssignmentApprovalGateTests
         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
         var submissionRepo = new FakeSubmissionRepository();
         var contactResolver = new FakeContactResolver([]);
-        var linkRepo = new FakeLinkRepository();
-        var groupLookup = new FakeActivityGroupLookup();
         var topicLookup = new FakeTopicAssignmentLookup();
+        var targetResolver = new FakeAssignmentTargetResolver { StudentIds = [StudentId] };
         var tenantProvider = new FakeTenantProvider(TenantId);
         var broadcaster = new FakeBroadcaster();
         var policyResolver = new FakeNotificationPolicyResolver();
@@ -56,8 +58,8 @@ public class PublishAssignmentApprovalGateTests
         var cache = new FakeHybridCache();
 
         return new PublishAssignmentCommandHandler(
-            assignmentRepo, submissionRepo, contactResolver, linkRepo, groupLookup,
-            topicLookup, tenantProvider, broadcaster, policyResolver, assignmentPolicyResolver,
+            assignmentRepo, submissionRepo, contactResolver,
+            topicLookup, targetResolver, tenantProvider, broadcaster, policyResolver, assignmentPolicyResolver,
             featureFlags, new FakeDeepLinkTokenMinter(), cache,
             NullLogger<PublishAssignmentCommandHandler>.Instance);
     }

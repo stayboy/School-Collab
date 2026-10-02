@@ -106,6 +106,7 @@ public class SignatureDefaultsTests
         var updateHandler = new UpdateAssignmentCommandHandler(
             repo, new Mock<IIntegrationEventPublisher>().Object, scope.cache,
             Options.Create(new AttachmentUploadOptions()),
+            new AcceptAllActivityGroupLookup(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
 
         await updateHandler.HandleAsync(new UpdateAssignmentCommand(
@@ -161,6 +162,7 @@ public class SignatureDefaultsTests
             new FakeCurrentUser(),
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = true },
+            new AcceptAllActivityGroupLookup(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
     }
 }

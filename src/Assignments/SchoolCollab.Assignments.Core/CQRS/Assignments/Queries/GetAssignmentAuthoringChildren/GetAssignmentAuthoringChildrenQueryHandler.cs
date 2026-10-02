@@ -67,6 +67,14 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
                 r.IncludedInGeneration))
             .ToList();
 
-        return new AssignmentAuthoringChildrenDto(assignment.Id, questions, attachments, resources);
+        // R2 (D-8.3 / TGT-1): the persisted targeting rows, in the author's DisplayOrder, so the
+        // Audience & Targets compartment loads its constraints before enabling — the same
+        // fail-closed load-half posture as the question/resource editors (UX-21).
+        var targets = assignment.Targets
+            .OrderBy(t => t.DisplayOrder)
+            .Select(t => new AssignmentTargetDto((TargetKindDto)t.Kind, t.RefId, t.DisplayOrder))
+            .ToList();
+
+        return new AssignmentAuthoringChildrenDto(assignment.Id, questions, attachments, resources, targets);
     }
 }

@@ -86,6 +86,13 @@ public class AssignmentCreateBunitTests : BunitContext
         // WS-B2 (step 6): the authoring page loads the org AI-prompt lock on init.
         _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
             .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
+        // R2 (TGT-5): the stream picker sources its options from the grade-stream listing.
+        _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels/*/streams")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        // R2 (TGT-16): the live recipient preview — advisory, always 200.
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
+            .Respond(HttpStatusCode.OK, "application/json",
+                "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}");
 
         Services.AddSingleton(httpClient);
         Services.AddSingleton<AssignmentsApiClient>();
@@ -192,6 +199,12 @@ public class AssignmentCreateBunitTests : BunitContext
 
     /// <summary>Fills the Basics title through the bound text field's own callback — the create
     /// guards require a non-empty title before anything is posted.</summary>
+    /// <summary>R2 (TGT-2/TGT-13): ticks the compartment's "Everyone" toggle — the shortest route
+    /// to a valid authored target set on the create surface.</summary>
+    private static Task SelectEveryoneAsync(IRenderedComponent<CreatePage> cut) =>
+        cut.InvokeAsync(() => cut.FindComponents<FluentCheckbox>()
+            .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance.ValueChanged.InvokeAsync(true));
+
     private static Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title) =>
         cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
             .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
@@ -399,6 +412,7 @@ public class AssignmentCreateBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
         await SetTitleAsync(cut, "Algebra HW");
+        await SelectEveryoneAsync(cut);
         await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
         cut.Find("#authoring-primary-action").Click();
 
@@ -435,6 +449,7 @@ public class AssignmentCreateBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
         await SetTitleAsync(cut, "Algebra HW");
+        await SelectEveryoneAsync(cut);
         await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
         cut.Find("#authoring-primary-action").Click();
 

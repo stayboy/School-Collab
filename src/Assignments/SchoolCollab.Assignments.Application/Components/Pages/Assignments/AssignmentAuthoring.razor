@@ -173,19 +173,77 @@
                     }
                 </section>
 
-                @* ── 2 · Audience & Targets (§7.5 recipient preview is R2) ─────── *@
+                @* ── 2 · Audience & Targets (§7 TGT-1…TGT-16, UX-21) ──────────── *@
                 <section id="authoring-audience" class="authoring-compartment">
                     <h3 class="authoring-compartment-title">Audience &amp; Targets</h3>
 
-                    <FormRow Label="Target audience" Required For="authoring-audience-target">
-                        <FluentSelect TOption="PickerOption" Id="authoring-audience-target"
-                                      Items="@TargetAudienceOptions" @bind-SelectedOption="_selectedTargetAudience"
-                                      OptionText="@(o => o?.Label ?? string.Empty)"
-                                      OptionValue="@(o => o?.Value ?? string.Empty)"
-                                      Disabled="@IsReadOnly" class="full-width" />
+                    @if (AudienceEditorDisabledReason is not null)
+                    {
+                        @* UX-21 load-half, fail-closed: the persisted constraints are unknown, so
+                           the editor renders disabled-with-reason rather than live-empty. *@
+                        <p class="authoring-reason" id="authoring-audience-reason">@AudienceEditorDisabledReason</p>
+                    }
+
+                    @* TGT-2/UX-17: Everyone is mutually exclusive with every constraint — when it
+                       is on the pickers render DISABLED WITH REASON, never hidden. *@
+                    @* NFR-1 (F6/F8): every control this compartment disables-with-reason also names
+                       that reason paragraph in aria-describedby, so a screen reader announces WHY the
+                       control is unavailable instead of only that it is. AlignTop (F9/F14) keeps the
+                       labels of these rows at the top of their (mixed-height) controls. *@
+                    <FormRow Label="Everyone" For="authoring-audience-everyone">
+                        <FluentCheckbox Id="authoring-audience-everyone"
+                                        @bind-Value="_everyone"
+                                        @bind-Value:after="OnEveryoneChangedAsync"
+                                        Label="All active students in the organization"
+                                        aria-describedby="authoring-audience-constraint-reason"
+                                        Disabled="@(IsReadOnly || AudienceEditorDisabledReason is not null)" />
                     </FormRow>
 
-                    <FormRow Label="Activity groups" For="authoring-audience-groups">
+                    <FormRow Label="Grade levels" For="authoring-audience-grades" AlignTop>
+                        <FluentSelect TOption="PickerOption" Id="authoring-audience-grades"
+                                      Items="@_gradeLevelOptions"
+                                      Multiple="true"
+                                      OptionText="@(o => o.Label)"
+                                      OptionValue="@(o => o.Value)"
+                                      SelectedOptions="@SelectedGradeTargetOptions"
+                                      SelectedOptionsChanged="@OnSelectedGradeTargetsChangedAsync"
+                                      aria-describedby="authoring-audience-constraint-reason"
+                                      Disabled="@ConstraintPickersDisabled" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Streams" For="authoring-audience-streams" AlignTop>
+                        @* TGT-5/D-5: streams are grade-agnostic constraints; the picker groups them
+                           under their offering grade for legibility only (display), and stores the
+                           bare StreamCodedValueId. *@
+                        <FluentSelect TOption="PickerOption" Id="authoring-audience-streams"
+                                      Items="@_streamOptions"
+                                      Multiple="true"
+                                      OptionText="@(o => o.Label)"
+                                      OptionValue="@(o => o.Value)"
+                                      SelectedOptions="@SelectedStreamTargetOptions"
+                                      SelectedOptionsChanged="@OnSelectedStreamTargetsChangedAsync"
+                                      aria-describedby="authoring-audience-constraint-reason"
+                                      Disabled="@ConstraintPickersDisabled" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Students" For="authoring-audience-students" AlignTop>
+                        @* TGT-6: individual students via server search (never a full roster load). *@
+                        <FluentAutocomplete TOption="PickerOption" Id="authoring-audience-students"
+                                            Multiple="true"
+                                            MaximumOptionsSearch="20"
+                                            ImmediateDelay="300"
+                                            Placeholder="Search students by name or number…"
+                                            Items="@_studentOptions"
+                                            OptionText="@(o => o.Label)"
+                                            OptionValue="@(o => o.Value)"
+                                            SelectedOptions="@SelectedStudentTargetOptions"
+                                            SelectedOptionsChanged="@OnSelectedStudentTargetsChangedAsync"
+                                            OnOptionsSearch="@OnStudentSearchAsync"
+                                            aria-describedby="authoring-audience-constraint-reason"
+                                            Disabled="@ConstraintPickersDisabled" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Activity groups" For="authoring-audience-groups" AlignTop>
                         @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md routes
                            multi-select pickers to the raw control and asks for the reason to be
                            documented here — the five shared wrappers are all single-value. The
@@ -195,6 +253,10 @@
                            does not exist on FluentListbox in FluentUI 4.14.2, so the binding was
                            silently dropped into AdditionalAttributes and the picker never
                            reported or showed a selection.) *@
+                        @* R2-10 (P1/NFR-1): the idref is DERIVED from the reason that renders — a
+                           hard-coded authoring-groups-reason dangled whenever this picker was disabled
+                           by the UX-21 constraint gate (GroupPickerReason is null there), leaving the
+                           disabled control with no reason at all. *@
                         <FluentSelect TOption="PickerOption" Id="authoring-audience-groups"
                                       Items="@_activityGroupOptions"
                                       Multiple="true"
@@ -202,7 +264,8 @@
                                       OptionValue="@(g => g.Value)"
                                       SelectedOptions="@SelectedGroupOptions"
                                       SelectedOptionsChanged="@OnSelectedGroupsChangedAsync"
-                                      Disabled="@(IsReadOnly || GroupPickerReason is not null)"
+                                      aria-describedby="@GroupPickerAriaDescribedBy"
+                                      Disabled="@GroupPickerDisabled"
                                       class="full-width" />
                     </FormRow>
                     @if (GroupPickerReason is not null)
@@ -210,9 +273,63 @@
                         <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
                     }
 
-                    <p class="authoring-hint">
-                        Recipients are resolved from this audience when the assignment is published.
-                    </p>
+                    @if (ConstraintPickersDisabledReason is not null)
+                    {
+                        <p class="authoring-reason" id="authoring-audience-constraint-reason">@ConstraintPickersDisabledReason</p>
+                    }
+
+                    @* The selected constraints as chips in DisplayOrder; removal re-indexes 0..n-1. *@
+                    <div class="authoring-target-chips" id="authoring-audience-targets">
+                        @if (TargetChips.Count == 0)
+                        {
+                            <span class="authoring-hint" id="authoring-audience-no-targets">
+                                No targets yet — add at least one before publishing.
+                            </span>
+                        }
+                        else
+                        {
+                            @foreach (var chip in TargetChips)
+                            {
+                                <span class="authoring-target-chip" data-order="@chip.Index">
+                                    <FluentBadge Appearance="Appearance.Lightweight"
+                                                 Title="@chip.KindLabel">@chip.Label</FluentBadge>
+                                    @if (!IsReadOnly)
+                                    {
+                                        @* NFR-1 (F6): the visible "Remove" text alone is ambiguous
+                                           to a screen reader across the chip list, so the accessible
+                                           name carries the chip it removes. *@
+                                        <FluentButton Appearance="Appearance.Stealth"
+                                                      aria-label="@($"Remove {chip.Label}")"
+                                                      OnClick="@(() => RemoveTargetAsync(chip.Index))">Remove</FluentButton>
+                                    }
+                                </span>
+                            }
+                        }
+                    </div>
+
+                    @if (IsReadOnly)
+                    {
+                        @* D-1: the derived compat audience is read-only in View mode — it is no
+                           longer an authored field. *@
+                        <FormRow Label="Target audience" For="authoring-audience-derived">
+                            <span class="authoring-readonly-value" id="authoring-audience-derived">@DerivedAudienceText</span>
+                        </FormRow>
+                    }
+
+                    @* TGT-16 / D-4: live, server-resolved, advisory preview (debounced; never blocks
+                       save). F10: a degraded read answers all-zero counts, so only the unavailable
+                       reason renders then — counts that merely LOOK trustworthy are never shown beside
+                       it. F11: the preview resolves on an editable surface only, so a read-only View
+                       renders PreviewAuthorOnlyNote (via PreviewText) rather than a "Preview pending…"
+                       that can never settle. *@
+                    @if (!IsReadOnly && _previewDegraded)
+                    {
+                        <p class="authoring-reason" id="authoring-audience-preview-note">@PreviewUnavailableReason</p>
+                    }
+                    else
+                    {
+                        <p class="authoring-hint" id="authoring-audience-preview">@PreviewText</p>
+                    }
                 </section>
 
                 @* ── 3 · Delivery & Publishing (UX-15) ────────────────────────── *@
@@ -424,6 +541,12 @@
     /// <summary>The assignment to load for Edit / View. Unused (and ignored) in Create mode.</summary>
     [Parameter] public Guid? Id { get; set; }
 
+    /// <summary>D-4: the clock the 500 ms trailing preview debounce runs on. BCL default so the
+    /// component needs no host wiring; a bUnit test substitutes a controllable
+    /// <see cref="TimeProvider"/> because the trail cannot be asserted deterministically against
+    /// wall-clock time.</summary>
+    [Parameter] public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
     /// <summary>Raised after a successful save or lifecycle action so a host page (Detail) can
     /// re-read the assignment it renders around this component.</summary>
     [Parameter] public EventCallback Changed { get; set; }
@@ -436,10 +559,19 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    // Type / grading / audience / review / signature selection state.
+    /// <summary>D-4 (TGT-16): the trailing preview debounce interval, and the CTS that cancels a
+    /// pending/stale preview call whenever a further constraint change lands.</summary>
+    private static readonly TimeSpan PreviewDebounce = TimeSpan.FromMilliseconds(500);
+    private CancellationTokenSource? _previewCts;
+    private RecipientPreviewDto? _preview;
+    private bool _previewDegraded;
+
+    /// <summary>TGT-2: the "Everyone" toggle. Mirrors the model's single <c>AllStudents</c> row.</summary>
+    private bool _everyone;
+
+    // Type / grading / review / signature selection state.
     private PickerOption? _selectedType;
     private PickerOption? _selectedGradingFormat;
-    private PickerOption? _selectedTargetAudience;
     private bool _mandatoryReview = true;
     private bool _requiresSignature;
     private bool _signatureMandatory;
@@ -462,6 +594,15 @@
     private SubjectDto[]? _groupSubjects;
     private PickerOption[] _groupSubjectOptions = [];
     private bool _loadingGroupSubjects;
+
+    /// <summary>TGT-5: the stream options, labelled "Grade · Stream" (display grouping only —
+    /// the stored constraint is the bare <c>StreamCodedValueId</c>).</summary>
+    private PickerOption[] _streamOptions = [];
+
+    /// <summary>TGT-6: the server-search result page backing the student picker, plus every
+    /// student the author has selected (kept so a chip keeps its label after the next search).</summary>
+    private PickerOption[] _studentOptions = [];
+    private readonly List<PickerOption> _selectedStudentOptions = [];
 
     /// <summary>P1 rework — whether the persisted children were loaded into
     /// <see cref="AssignmentEditFormModel"/> before the editors rendered.</summary>
@@ -550,13 +691,40 @@
             ? (GradingFormatDto)int.Parse(_selectedGradingFormat.Value)
             : _item?.GradingFormat ?? GradingFormatDto.TeacherGraded;
 
-    private TargetAudienceTypeDto SelectedTargetAudience =>
-        _selectedTargetAudience is not null
-            ? (TargetAudienceTypeDto)int.Parse(_selectedTargetAudience.Value)
-            : _item?.TargetAudienceType ?? TargetAudienceTypeDto.AllStudents;
+    /// <summary>D-1: the legacy compat audience the request still carries, DERIVED from the
+    /// authored target rows by the same precedence the aggregate applies in
+    /// <c>SyncDerivedTargeting</c> — so a legacy consumer of the wire field stays consistent.
+    /// <para>View mode with no loaded targets falls back to the persisted value.</para></summary>
+    private TargetAudienceTypeDto DerivedTargetAudience
+    {
+        get
+        {
+            if (_model.CountOf(TargetKindDto.AllStudents) > 0) return TargetAudienceTypeDto.AllStudents;
+            if (_model.CountOf(TargetKindDto.GradeLevel) > 0) return TargetAudienceTypeDto.SelectedGrades;
+            if (_model.CountOf(TargetKindDto.ActivityGroup) > 0) return TargetAudienceTypeDto.SelectedGroups;
+            if (!_model.TargetsLoaded) return _item?.TargetAudienceType ?? TargetAudienceTypeDto.AllStudents;
+            return TargetAudienceTypeDto.Mixed;
+        }
+    }
 
-    private bool IsSelectedGroupsAudience =>
-        SelectedTargetAudience == TargetAudienceTypeDto.SelectedGroups;
+    private string DerivedAudienceText => EnumHelper.GetDescription(DerivedTargetAudience);
+
+    /// <summary>UX-21 load-half, fail-closed: non-null exactly when an editable Edit surface did
+    /// not get its persisted targeting rows, so the Audience &amp; Targets editor renders
+    /// disabled-with-reason instead of live-empty.</summary>
+    private string? AudienceEditorDisabledReason =>
+        EffectiveMode == AssignmentAuthoringMode.Edit && !_model.TargetsLoaded
+            ? ChildrenUnavailableReason
+            : null;
+
+    /// <summary>TGT-2/UX-17: the constraint pickers are disabled while Everyone is on (the set is
+    /// a single AllStudents row) and while the persisted constraints are unknown.</summary>
+    private bool ConstraintPickersDisabled =>
+        IsReadOnly || _everyone || AudienceEditorDisabledReason is not null;
+
+    private string? ConstraintPickersDisabledReason =>
+        AudienceEditorDisabledReason
+        ?? (_everyone ? "Not applicable while the audience is Everyone." : null);
 
     /// <summary>FR-220 / EC-3 — whether this type + grading combination offers AI generation.
     /// Drives the disabled-with-reason treatment of compartment 6 and the kebab's
@@ -580,34 +748,110 @@
     private IEnumerable<PickerOption> SelectedGroupOptions =>
         _activityGroupOptions.Where(o => _selectedGroupIds.Contains(Guid.Parse(o.Value)));
 
-    private PickerOption[] SubjectOptions => IsSelectedGroupsAudience ? _groupSubjectOptions : _subjectOptions;
+    /// <summary>TGT-4: the grade target picker's selection projection — the option instances the
+    /// model's GradeLevel targets match (FluentSelect highlights the options it is handed).</summary>
+    private IEnumerable<PickerOption> SelectedGradeTargetOptions =>
+        _gradeLevelOptions.Where(o => ModelHasTarget(TargetKindDto.GradeLevel, o.Value));
+
+    /// <summary>TGT-5: the stream target picker's selection projection.</summary>
+    private IEnumerable<PickerOption> SelectedStreamTargetOptions =>
+        _streamOptions.Where(o => ModelHasTarget(TargetKindDto.Stream, o.Value));
+
+    /// <summary>TGT-6: the student target picker's selection projection — every selected student
+    /// (kept across searches so the chip and the picker agree).</summary>
+    private IEnumerable<PickerOption> SelectedStudentTargetOptions =>
+        _selectedStudentOptions.Where(o => ModelHasTarget(TargetKindDto.Student, o.Value));
+
+    private bool ModelHasTarget(TargetKindDto kind, string value) =>
+        Guid.TryParse(value, out var id)
+        && _model.Targets.Any(t => t.Kind == kind && t.RefId == id);
+
+    /// <summary>
+    /// FR-58: the offered subjects are the union of the primary grade's effective list and the
+    /// union across the targeted activity groups — the pre-R2 grade-or-group paths, now both driven
+    /// by the authored target rows.
+    /// <para>The union is CACHED and only rebuilt when one of its two source arrays is replaced: a
+    /// fresh array on every render makes the picker see its <c>Items</c> change on each pass, and
+    /// the control then drops a selection it cannot match by instance (the subject was silently
+    /// cleared between the author's pick and the save).</para>
+    /// </summary>
+    private PickerOption[] SubjectOptions
+    {
+        get
+        {
+            if (!ReferenceEquals(_subjectOptionsUnionSource, _subjectOptions)
+                || !ReferenceEquals(_groupSubjectOptionsUnionSource, _groupSubjectOptions))
+            {
+                _subjectOptionsUnionSource = _subjectOptions;
+                _groupSubjectOptionsUnionSource = _groupSubjectOptions;
+                _subjectOptionsUnion = _subjectOptions
+                    .Concat(_groupSubjectOptions)
+                    .GroupBy(o => o.Value)
+                    .Select(g => g.First())
+                    .ToArray();
+            }
+
+            return _subjectOptionsUnion!;
+        }
+    }
+
+    private PickerOption[]? _subjectOptionsUnion;
+    private PickerOption[]? _subjectOptionsUnionSource;
+    private PickerOption[]? _groupSubjectOptionsUnionSource;
 
     private bool SubjectPickerDisabled =>
-        IsSelectedGroupsAudience
-            ? _selectedGroupIds.Count == 0 || _loadingGroupSubjects
-            : _selectedGradeLevel is null || _loadingSubjects;
+        (_selectedGradeLevel is null && _selectedGroupIds.Count == 0)
+        || SubjectOptions.Length == 0
+        || _loadingSubjects
+        || _loadingGroupSubjects;
 
     private string SubjectPickerPlaceholder =>
-        IsSelectedGroupsAudience
-            ? (_selectedGroupIds.Count == 0 ? "Select activity groups first" : "Select a subject")
-            : (_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject");
+        _selectedGradeLevel is null && _selectedGroupIds.Count == 0
+            ? "Select a grade level or activity group first"
+            : "Select a subject";
 
-    /// <summary>UX-17: the Primary grade picker is inapplicable (not hidden) when the audience
-    /// is group-based.</summary>
+    /// <summary>D-2 (TGT-11): the primary grade is the authored policy/authoring field. With
+    /// exactly ONE grade target it auto-derives from that target and the picker is disabled with
+    /// this reason; with none it is free (nullable) and with two or more it must be one of them
+    /// (enforced by <see cref="ValidateForSave"/> and by the server).</summary>
     private string? GradePickerReason =>
-        IsSelectedGroupsAudience ? "Not applicable when the audience is By Group." : null;
+        _model.CountOf(TargetKindDto.GradeLevel) == 1
+            ? "Set automatically from the single targeted grade level."
+            : null;
 
     private bool GradePickerDisabled => GradePickerReason is not null;
 
-    /// <summary>UX-17/UX-19: the activity-group picker is inapplicable (not hidden) unless the
-    /// audience is group-based — unavailable entirely when the tenant flag is off (in which
-    /// case the group audience is not offered at all), and disabled when the persisted links
-    /// could not be read (P2-1 fail-closed: an unknown set must never be saved over).</summary>
+    /// <summary>UX-17/UX-19: the activity-group picker is unavailable entirely when the tenant
+    /// flag is off (no group targets exist then), disabled while Everyone is selected, and
+    /// disabled when the persisted links could not be read (P2-1 fail-closed: an unknown set must
+    /// never be saved over the stored one).</summary>
     private string? GroupPickerReason =>
         !_activityGroupsEnabled
             ? "Not available — activity groups are disabled for this organization."
             : _groupLinksUnavailableReason
-              ?? (IsSelectedGroupsAudience ? null : "Not applicable for the selected target audience.");
+              ?? (_everyone ? "Not applicable while the audience is Everyone." : null);
+
+    /// <summary>F1: the activity-group picker is gated by everything that gates the other three
+    /// constraint pickers — <see cref="ConstraintPickersDisabled"/> carries the UX-21 "persisted
+    /// targets did not load" reason, which <see cref="GroupPickerReason"/> does not — plus its own
+    /// reasons. The targets read (<c>GET /assignments/{id}/authoring</c>) and the group-links read
+    /// are separate calls, so a failed targets read with a successful links read used to leave this
+    /// picker LIVE over an empty in-memory target set: a group selection then marked the model's
+    /// <c>TargetsChanged</c> and Save full-replaced the persisted rows. The two group-only reasons
+    /// stay in the gate — neither the flag-off state nor an unreadable link set is expressible
+    /// through <see cref="ConstraintPickersDisabled"/>.</summary>
+    private bool GroupPickerDisabled => ConstraintPickersDisabled || GroupPickerReason is not null;
+
+    /// <summary>R2-10 (P1, NFR-1): the group picker's <c>aria-describedby</c>, derived from the
+    /// reason paragraph that actually RENDERS. The attribute used to be the hard-coded
+    /// <c>authoring-groups-reason</c>, which dangles in the UX-21 case — <see cref="ConstraintPickersDisabled"/>
+    /// disables the picker while <see cref="GroupPickerReason"/> is still null, so that paragraph is
+    /// absent and the disabled control exposed no reason to assistive tech. Null when no reason
+    /// paragraph renders at all, so the attribute is omitted rather than left pointing at nothing.</summary>
+    private string? GroupPickerAriaDescribedBy =>
+        GroupPickerReason is not null ? "authoring-groups-reason"
+        : ConstraintPickersDisabledReason is not null ? "authoring-audience-constraint-reason"
+        : null;
 
     // ── Policy-derived read-only values (UX-13) ───────────────────────────────
 
@@ -646,29 +890,148 @@
         new(((int)GradingFormatDto.InstantGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.InstantGraded))
     ];
 
-    /// <summary>The offered target audiences. <c>SelectedGroups</c> is only offered when
-    /// FEATURE:EnableActivityGroups is on — /activity-groups is unmapped otherwise, so the
-    /// option would offer a target whose picker never loads.</summary>
-    private PickerOption[] TargetAudienceOptions
+    // ── Target chips (TGT-16 chip list, DisplayOrder) ─────────────────────────
+
+    /// <summary>One rendered target chip: its position in the DisplayOrder and the labels the
+    /// author reads.</summary>
+    public sealed record TargetChip(int Index, TargetKindDto Kind, Guid? RefId, string KindLabel, string Label);
+
+    /// <summary>The authored constraints as chips, in DisplayOrder (the model's list order).</summary>
+    private IReadOnlyList<TargetChip> TargetChips => _model.Targets
+        .Select((t, i) => new TargetChip(i, t.Kind, t.RefId, KindLabel(t.Kind), TargetLabel(t)))
+        .ToList();
+
+    private static string KindLabel(TargetKindDto kind) => kind switch
+    {
+        TargetKindDto.AllStudents => "Everyone",
+        TargetKindDto.GradeLevel => "Grade level",
+        TargetKindDto.Stream => "Stream",
+        TargetKindDto.Student => "Student",
+        _ => "Activity group"
+    };
+
+    /// <summary>The chip's display name, resolved from the loaded picker option for that kind and
+    /// id — with an explicit fallback so a stale or foreign id is still removable.</summary>
+    private string TargetLabel(AssignmentEditFormModel.AssignmentTargetSpec target)
+    {
+        if (target.Kind == TargetKindDto.AllStudents)
+        {
+            return "Everyone";
+        }
+
+        var options = target.Kind switch
+        {
+            TargetKindDto.GradeLevel => _gradeLevelOptions,
+            TargetKindDto.Stream => _streamOptions,
+            TargetKindDto.ActivityGroup => _activityGroupOptions,
+            TargetKindDto.Student => _selectedStudentOptions.ToArray(),
+            _ => []
+        };
+
+        // F16: one explicit shape for the fallback — the null-conditional chain
+        // `RefId?.ToString()[..8] ?? "—"` leans on the ?. propagating through the range operator,
+        // which reads as a slice taken before the null check. Branch on the Guid instead.
+        return options.FirstOrDefault(o => o.Value == target.RefId?.ToString())?.Label
+            ?? $"{KindLabel(target.Kind)} {(target.RefId is Guid refId ? refId.ToString()[..8] : "—")}";
+    }
+
+    // ── Live recipient preview (TGT-16 / D-4) ─────────────────────────────────
+
+    /// <summary>D-4: the inline degraded note the compartment renders when the preview could not
+    /// be resolved. Advisory only — save is never blocked and publish re-resolves.</summary>
+    public const string PreviewUnavailableReason =
+        "Preview unavailable — the audience could not be resolved right now. Saving is unaffected; " +
+        "publishing re-resolves the audience server-side.";
+
+    /// <summary>F11: the stable note a read-only surface renders in place of recipient counts —
+    /// <see cref="SchedulePreviewAsync"/> resolves a preview on an editable surface only, so
+    /// "Preview pending…" in View mode would never settle into anything.</summary>
+    public const string PreviewAuthorOnlyNote =
+        "Recipient counts are resolved for authors on the edit surface.";
+
+    private string PreviewText
     {
         get
         {
-            var options = new List<PickerOption>
+            if (IsReadOnly)
             {
-                new(((int)TargetAudienceTypeDto.AllStudents).ToString(),
-                    EnumHelper.GetDescription(TargetAudienceTypeDto.AllStudents)),
-                new(((int)TargetAudienceTypeDto.SelectedGrades).ToString(),
-                    EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGrades))
-            };
-            if (_activityGroupsEnabled)
-            {
-                options.Add(new PickerOption(
-                    ((int)TargetAudienceTypeDto.SelectedGroups).ToString(),
-                    EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGroups)));
+                return PreviewAuthorOnlyNote;
             }
-            return options.ToArray();
+
+            return _preview is null
+                ? "Preview pending…"
+                : $"Students matched: {_preview.StudentsMatched} \u00b7 Contacts reachable: " +
+                  $"{_preview.PrimaryContacts + _preview.OtherContacts} " +
+                  $"({_preview.PrimaryContacts} primary / {_preview.OtherContacts} other)";
         }
     }
+
+    /// <summary>
+    /// D-4: schedules a preview call on a 500 ms TRAILING debounce, cancelling any pending or
+    /// in-flight call first so a burst of constraint changes produces exactly one server read and
+    /// a stale response can never overwrite a newer one. The delay runs on
+    /// <see cref="TimeProvider"/> so tests can drive it deterministically.
+    /// </summary>
+    private async Task SchedulePreviewAsync()
+    {
+        var previous = _previewCts;
+        _previewCts = null;
+        previous?.Cancel();
+        previous?.Dispose();
+
+        if (IsReadOnly || AudienceEditorDisabledReason is not null)
+        {
+            _preview = null;
+            _previewDegraded = false;
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _previewCts = cts;
+        var ct = cts.Token;
+
+        try
+        {
+            await Task.Delay(PreviewDebounce, TimeProvider, ct);
+            var preview = await Api.GetRecipientPreviewAsync(
+                new RecipientPreviewRequest(
+                    _model.HasAllStudents,
+                    TargetIds(TargetKindDto.GradeLevel),
+                    TargetIds(TargetKindDto.Stream),
+                    TargetIds(TargetKindDto.Student),
+                    TargetIds(TargetKindDto.ActivityGroup),
+                    GradeLevelId),
+                ct);
+
+            if (ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _preview = preview;
+            _previewDegraded = preview?.PreviewDegraded ?? true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            Logger.LogWarning(ex, "Recipient preview resolution failed");
+            _preview = null;
+            _previewDegraded = true;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private IReadOnlyList<Guid> TargetIds(TargetKindDto kind) => _model.Targets
+        .Where(t => t.Kind == kind && t.RefId.HasValue)
+        .Select(t => t.RefId!.Value)
+        .Distinct()
+        .ToList();
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -692,34 +1055,45 @@
                     _selectedType = TypeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
                     _selectedGradingFormat = GradingFormatOptions
                         .FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
-                    _selectedTargetAudience = TargetAudienceOptions
-                        .FirstOrDefault(o => o.Value == ((int)_item.TargetAudienceType).ToString())
-                        ?? new PickerOption(
-                            ((int)_item.TargetAudienceType).ToString(),
-                            EnumHelper.GetDescription(_item.TargetAudienceType));
                 }
             }
             else if (Mode == AssignmentAuthoringMode.Create)
             {
                 // A new assignment starts on the authored defaults the retired wizard used
-                // (Offline / Teacher Marked / Everyone) so the Create form is never blank
-                // where a value is required.
+                // (Offline / Teacher Marked / no targets yet — TGT-13 requires the author to add one).
                 _selectedType = TypeOptions.Single(o => o.Value == ((int)AssignmentTypeDto.Manual).ToString());
                 _selectedGradingFormat = GradingFormatOptions
                     .Single(o => o.Value == ((int)GradingFormatDto.TeacherGraded).ToString());
-                _selectedTargetAudience = TargetAudienceOptions
-                    .Single(o => o.Value == ((int)TargetAudienceTypeDto.AllStudents).ToString());
             }
 
             await LoadPickersAsync(_item, ct);
 
-            // P1/P2-1 rework: an editable Edit surface reads the persisted children and the
-            // linked activity groups BEFORE the editors render, so an author's first add can
-            // never turn an empty collection into a full-replacement payload.
+            // P1/P2-1/R2: an editable Edit surface reads the persisted children (which now carry
+            // the targeting rows, D-8.3) and the linked activity groups BEFORE the editors render,
+            // so an author's first add can never turn an empty collection into a full-replacement
+            // payload.
             if (EffectiveMode == AssignmentAuthoringMode.Edit && Id is Guid authoringId)
             {
                 await LoadChildrenAsync(authoringId, ct);
                 await LoadLinkedGroupIdsAsync(authoringId, ct);
+            }
+            else if (Mode == AssignmentAuthoringMode.Create)
+            {
+                // Create has no persisted targets to lose, so its targeting editor is live.
+                _model.LoadTargets([]);
+            }
+
+            // D-2 / TGT-7: mirror the loaded target set onto the pickers.
+            SyncTargetPickerState();
+            SyncGroupsFromTargets();
+            _everyone = _model.HasAllStudents;
+
+            // FR-58: a persisted group target needs its group-subject union loaded up front —
+            // the submit gate and the subject picker both read it, and the union otherwise only
+            // loads when the author touches the group picker (which would silently block the save).
+            if (_selectedGroupIds.Count > 0)
+            {
+                await LoadGroupSubjectsAsync();
             }
 
             // WS-C1 (spec §7 Q1) / D2: resolve the effective signature requirement — the
@@ -728,6 +1102,9 @@
 
             // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock (best-effort, fail-open).
             await LoadAiPromptPolicyAsync(ct);
+
+            // TGT-16/D-4: the preview resolves in every editable mode; it never persists.
+            await SchedulePreviewAsync();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -779,6 +1156,10 @@
         }
 
         await LoadActivityGroupsAsync(ct);
+
+        // TGT-5 (D-5): the stream picker's options come from the existing grade-stream listing,
+        // so only real StreamCodedValueIds are ever offered.
+        await LoadStreamTargetsAsync(ct);
 
         if (item is not null)
         {
@@ -995,7 +1376,7 @@
             await LoadSubjectsForGradeAsync(_selectedGradeLevel, _loadCts?.Token ?? CancellationToken.None);
         }
 
-        if (IsSelectedGroupsAudience && _selectedGroupIds.Count > 0)
+        if (TargetIds(TargetKindDto.ActivityGroup).Count > 0)
         {
             _selectedSubject = null;
             _groupSubjectOptions = [];
@@ -1006,18 +1387,207 @@
     private async Task OnSelectedGroupsChangedAsync(IEnumerable<PickerOption>? selected)
     {
         // The picker reports option objects; the ids stay the page's source of truth
-        // (validation, the FR-58 subject union and the link persistence all read them).
+        // (validation, the FR-58 subject union and the legacy link persistence all read them).
         _selectedGroupIds = (selected ?? [])
             .Select(o => Guid.Parse(o.Value))
             .ToHashSet();
         _selectedSubject = null;
         _groupSubjectOptions = [];
+
+        // TGT-7: the selection IS the ActivityGroup target set (D-1 — the target rows are the
+        // authored source; the legacy link table is synchronized on save).
+        _model.SetTargetsOfKind(TargetKindDto.ActivityGroup, _selectedGroupIds.ToList());
+
         if (_selectedGroupIds.Count == 0)
         {
             _groupSubjects = null;
+        }
+        else
+        {
+            await LoadGroupSubjectsAsync();
+        }
+
+        await OnTargetsChangedAsync();
+    }
+
+    /// <summary>TGT-2: the Everyone toggle replaces the whole constraint set with a single
+    /// AllStudents row (the pickers then render disabled-with-reason).</summary>
+    private async Task OnEveryoneChangedAsync()
+    {
+        _model.SetEveryoneTarget(_everyone);
+        if (_everyone)
+        {
+            _selectedGroupIds.Clear();
+            _selectedStudentOptions.Clear();
+            _groupSubjectOptions = [];
+            _groupSubjects = null;
+        }
+
+        await OnTargetsChangedAsync();
+    }
+
+    private Task OnSelectedGradeTargetsChangedAsync(IEnumerable<PickerOption>? selected)
+    {
+        _model.SetTargetsOfKind(
+            TargetKindDto.GradeLevel,
+            (selected ?? []).Select(o => Guid.Parse(o.Value)).ToList());
+        return OnTargetsChangedAsync();
+    }
+
+    private Task OnSelectedStreamTargetsChangedAsync(IEnumerable<PickerOption>? selected)
+    {
+        _model.SetTargetsOfKind(
+            TargetKindDto.Stream,
+            (selected ?? []).Select(o => Guid.Parse(o.Value)).ToList());
+        return OnTargetsChangedAsync();
+    }
+
+    private Task OnSelectedStudentTargetsChangedAsync(IEnumerable<PickerOption>? selected)
+    {
+        var chosen = (selected ?? []).ToList();
+        _selectedStudentOptions.Clear();
+        _selectedStudentOptions.AddRange(chosen);
+        _model.SetTargetsOfKind(
+            TargetKindDto.Student,
+            chosen.Select(o => Guid.Parse(o.Value)).ToList());
+        return OnTargetsChangedAsync();
+    }
+
+    /// <summary>The chip list's removal action; the model re-indexes DisplayOrder 0..n-1
+    /// implicitly because the list order IS the order.</summary>
+    private async Task RemoveTargetAsync(int index)
+    {
+        var removed = index >= 0 && index < _model.Targets.Count ? _model.Targets[index] : null;
+        _model.RemoveTargetAt(index);
+        if (removed?.Kind == TargetKindDto.ActivityGroup && removed.RefId is Guid groupId)
+        {
+            _selectedGroupIds.Remove(groupId);
+            await LoadGroupSubjectsAsync();
+        }
+
+        await OnTargetsChangedAsync();
+    }
+
+    /// <summary>
+    /// The single reaction to any constraint change: mirror the picker state onto the model, derive
+    /// the primary grade (D-2) and re-schedule the debounced preview. Nothing here persists — the
+    /// preview never writes (D-4). The FR-58 subject union is refreshed by the group handler, which
+    /// own the group-selection side effects.
+    /// </summary>
+    private async Task OnTargetsChangedAsync()
+    {
+        var previousGrade = _selectedGradeLevel?.Value;
+        _everyone = _model.HasAllStudents;
+        SyncTargetPickerState();
+        SyncGroupsFromTargets();
+
+        // Only a MOVED primary grade reloads the grade's subject list — a reload clears nothing
+        // itself, but keeping it tied to the grade change preserves the author's subject otherwise.
+        if (previousGrade != _selectedGradeLevel?.Value && _selectedGradeLevel is not null)
+        {
+            await LoadSubjectsForGradeAsync(_selectedGradeLevel, _loadCts?.Token ?? CancellationToken.None);
+        }
+
+        await SchedulePreviewAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>D-2: a single grade target auto-derives the primary grade (the picker is disabled);
+    /// two or more leave the author's choice to <see cref="ValidateForSave"/> and the server. With
+    /// no grade target the field stays authored and nullable — never silently cleared.</summary>
+    private void SyncTargetPickerState()
+    {
+        var gradeTargetIds = TargetIds(TargetKindDto.GradeLevel);
+        if (gradeTargetIds.Count != 1 || _selectedGradeLevel?.Value == gradeTargetIds[0].ToString())
+        {
             return;
         }
-        await LoadGroupSubjectsAsync();
+
+        _selectedGradeLevel = _gradeLevelOptions.FirstOrDefault(o => o.Value == gradeTargetIds[0].ToString())
+            ?? new PickerOption(gradeTargetIds[0].ToString(), "Current grade");
+        _selectedSubject = null;
+    }
+
+    /// <summary>Mirrors the model's ActivityGroup targets onto the picker's id set (the load and
+    /// the chip-removal paths both need this without re-entering <see cref="OnSelectedGroupsChangedAsync"/>).</summary>
+    private void SyncGroupsFromTargets() =>
+        _selectedGroupIds = TargetIds(TargetKindDto.ActivityGroup).ToHashSet();
+
+    /// <summary>TGT-5/D-5: loads the stream options from the grade-stream listing, labelled
+    /// "Grade · Stream" for the display grouping the spec asks for. Per-grade failures are
+    /// isolated — a grade whose streams cannot be read simply offers none.</summary>
+    private async Task LoadStreamTargetsAsync(CancellationToken ct)
+    {
+        _streamOptions = [];
+        if (_gradeLevels is not { Length: > 0 } grades)
+        {
+            return;
+        }
+
+        var options = new List<PickerOption>();
+        var seen = new HashSet<Guid>();
+        foreach (var grade in grades.OrderBy(g => g.Level))
+        {
+            if (ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                var streams = await StudentsApi.ListGradeStreamsAsync(grade.Id, ct);
+                foreach (var stream in streams ?? [])
+                {
+                    if (seen.Add(stream.StreamCodedValueId))
+                    {
+                        options.Add(new PickerOption(
+                            stream.StreamCodedValueId.ToString(),
+                            $"{grade.Name} · {stream.NameOverride ?? stream.Name}"));
+                    }
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                // Optional picker source: a grade whose streams cannot be read simply offers none
+                // (never a page-level load failure).
+                Logger.LogDebug(ex, "Stream options unavailable for grade {GradeId}", grade.Id);
+            }
+        }
+
+        _streamOptions = options.ToArray();
+    }
+
+    /// <summary>TGT-6: the student picker's server search (`GET /students?search=`). A short
+    /// query clears the list rather than scanning the roster.</summary>
+    private async Task OnStudentSearchAsync(OptionsSearchEventArgs<PickerOption> e)
+    {
+        var query = (e.Text ?? string.Empty).Trim();
+        if (query.Length < 2)
+        {
+            e.Items = [];
+            return;
+        }
+
+        try
+        {
+            var students = await StudentsApi.ListStudentsAsync(
+                _loadCts?.Token ?? CancellationToken.None, query) ?? [];
+            e.Items = students
+                .Where(s => !s.IsDeleted)
+                .Take(20)
+                .Select(s => new PickerOption(
+                    s.Id.ToString(),
+                    $"{s.FirstName} {s.LastName} ({s.StudentNumber})"))
+                .ToArray();
+        }
+        catch (OperationCanceledException) { e.Items = []; }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Student target search failed");
+            e.Items = [];
+        }
     }
 
     private async Task LoadGroupSubjectsAsync()
@@ -1224,16 +1794,20 @@
                 var request = _model.ToCreateRequest(
                     SelectedType ?? AssignmentTypeDto.Manual,
                     SelectedGradingFormat,
-                    SelectedTargetAudience,
+                    DerivedTargetAudience,
                     TopicId!.Value,
                     GradeLevelId,
                     _mandatoryReview,
-                    _requiresSignature);
+                    _requiresSignature,
+                    _model.ToTargetDtos());
 
                 Logger.LogInformation("Creating assignment {Title} from the authoring page", _model.Title);
                 var assignmentId = await Api.CreateAsync(request, ct);
 
-                if (IsSelectedGroupsAudience)
+                // D-8.2: the group ids ALSO ride the legacy link route, whose R2 handler is a
+                // thin adapter over SetTargets — so the link table the FR-6 delete guard and
+                // GET /assignments/{id}/groups read stays in step with the target rows.
+                if (TargetIds(TargetKindDto.ActivityGroup).Count > 0)
                 {
                     await Api.LinkAssignmentGroupsAsync(assignmentId, _selectedGroupIds.ToList(), ct);
                 }
@@ -1243,22 +1817,27 @@
                 return;
             }
 
+            // UX-21/D-4 change gate: an untouched targeting editor sends null, which the update
+            // handler reads as "preserve" — only an actual edit issues a full replacement.
             var update = _model.ToUpdateRequest(
                 SelectedType ?? AssignmentTypeDto.Manual,
                 SelectedGradingFormat,
-                SelectedTargetAudience,
+                DerivedTargetAudience,
                 TopicId!.Value,
                 GradeLevelId,
                 _mandatoryReview,
-                _requiresSignature);
+                _requiresSignature,
+                _model.TargetsChanged ? _model.ToTargetDtos() : null);
 
             Logger.LogInformation("Updating assignment {AssignmentId} from the authoring page", Id);
             await Api.UpdateAsync(Id!.Value, update, ct);
 
-            // P2-1 rework: the picker now starts from the persisted links, so an actual edit
-            // of it is persisted too — and only then. An untouched picker never issues the
-            // replace-set call (the route deletes every link missing from its payload).
-            if (IsSelectedGroupsAudience && _groupLinksLoaded && !_loadedGroupIds.SetEquals(_selectedGroupIds))
+            // P2-1/R2: the picker starts from the persisted links, so an actual edit of the group
+            // target set is synchronised to the legacy link table too — and only then (the route
+            // deletes every link missing from its payload).
+            if (TargetIds(TargetKindDto.ActivityGroup).Count > 0
+                && _groupLinksLoaded
+                && !_loadedGroupIds.SetEquals(_selectedGroupIds))
             {
                 await Api.LinkAssignmentGroupsAsync(Id!.Value, _selectedGroupIds.ToList(), ct);
 
@@ -1286,8 +1865,9 @@
     }
 
     /// <summary>The client-side mirror of the server-side create/update guards: a subject is
-    /// always required, group targeting needs at least one group whose subject union contains
-    /// the chosen subject (FR-58), and the question / scoring gates mirror the domain rules.
+    /// always required, at least one audience target is required (TGT-13), a group target needs
+    /// the chosen subject inside the group-subject union (FR-58), the D-2 primary-grade rule holds,
+    /// and the question / scoring gates mirror the domain rules.
     /// </summary>
     private bool ValidateForSave()
     {
@@ -1301,28 +1881,46 @@
             _error = "Select a subject.";
             return false;
         }
-        if (IsSelectedGroupsAudience && _groupLinksUnavailableReason is not null)
+
+        // TGT-13: at least one target is required.
+        if (_model.Targets.Count == 0)
+        {
+            _error = "Add at least one audience target.";
+            return false;
+        }
+
+        if (_activityGroupsEnabled && _groupLinksUnavailableReason is not null)
         {
             // P2-1 fail-closed: the picker is disabled because the persisted links are
             // unknown, so asking the author to pick a group would be a dead end.
             _error = _groupLinksUnavailableReason;
             return false;
         }
-        if (IsSelectedGroupsAudience && _selectedGroupIds.Count == 0)
+
+        // TGT-2: Everyone is mutually exclusive — a state the pickers cannot produce, but the
+        // loaded model could carry from legacy data.
+        if (_model.HasAllStudents && _model.Targets.Count > 1)
         {
-            _error = "Select at least one activity group.";
+            _error = "An Everyone audience cannot be combined with any other target.";
             return false;
         }
-        if (IsSelectedGroupsAudience && !(_groupSubjects?.Any(s => s.Id == TopicId.Value) ?? false))
+
+        var groupTargetIds = TargetIds(TargetKindDto.ActivityGroup);
+        if (groupTargetIds.Count > 0 && !(_groupSubjects?.Any(s => s.Id == TopicId.Value) ?? false))
         {
             _error = "The selected subject is not assigned to any of the selected activity groups.";
             return false;
         }
-        if (SelectedTargetAudience == TargetAudienceTypeDto.SelectedGrades && GradeLevelId is null)
+
+        // D-2: two or more grade targets require a primary grade drawn from them.
+        var gradeTargetIds = TargetIds(TargetKindDto.GradeLevel);
+        if (gradeTargetIds.Count >= 2
+            && (GradeLevelId is null || !gradeTargetIds.Contains(GradeLevelId.Value)))
         {
-            _error = "Select a primary grade for By Grade Level targeting.";
+            _error = "Select a primary grade from the targeted grade levels.";
             return false;
         }
+
         if (!_model.QuestionsPassSubmitGate(SelectedGradingFormat, out var gateError))
         {
             _error = gateError;
@@ -1351,7 +1949,7 @@
         {
             var contacts = await StudentsApi.ListSubscribedContactsAsync(
                 ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct) ?? [];
-            var model = new PublishFormModel(contacts.ToList(), $"Audience: {EnumHelper.GetDescription(_item.TargetAudienceType)}", _item.MandatoryReview);
+            var model = new PublishFormModel(contacts.ToList(), $"Audience: {DerivedAudienceText}", _item.MandatoryReview);
 
             var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
                 model, title: "Publish assignment", size: DialogSize.Medium);
@@ -1510,5 +2108,10 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+
+        // D-4: a pending/stale preview call must not outlive the component.
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+        _previewCts = null;
     }
 }

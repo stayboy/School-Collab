@@ -36,14 +36,27 @@ internal sealed class AssignmentActivityGroupRepository(AssignmentsDbContext db)
             .AsNoTracking()
             .Where(l => l.ActivityGroupId == activityGroupId)
             .Select(l => l.AssignmentId)
+            .Union(GroupTargetAssignmentIds(activityGroupId))
             .ToArrayAsync(ct);
 
     public Task<AssignmentGroupSummaryDto[]> GetAssignmentsByGroupAsync(Guid activityGroupId, CancellationToken ct = default) =>
         db.AssignmentActivityGroups
             .AsNoTracking()
             .Where(l => l.ActivityGroupId == activityGroupId)
-            .Join(db.Assignments, l => l.AssignmentId, a => a.Id, (l, a) => new AssignmentGroupSummaryDto(
+            .Select(l => l.AssignmentId)
+            // D-8.2 / FR-6: a group referenced by an AssignmentTarget row must block the hard
+            // delete exactly like a link-table reference, so the guard read unions both.
+            .Union(GroupTargetAssignmentIds(activityGroupId))
+            .Join(db.Assignments, id => id, a => a.Id, (id, a) => new AssignmentGroupSummaryDto(
                 a.Id, a.Title, a.Status.ToString()))
             .OrderByDescending(s => s.Title)
             .ToArrayAsync(ct);
+
+    /// <summary>The assignment ids referencing the group through an
+    /// <c>ActivityGroup</c> target row (D-8.2 — the FR-6 delete guard reads both sources).</summary>
+    private IQueryable<Guid> GroupTargetAssignmentIds(Guid activityGroupId) =>
+        db.AssignmentTargets
+            .AsNoTracking()
+            .Where(t => t.Kind == TargetKind.ActivityGroup && t.RefId == activityGroupId)
+            .Select(t => t.AssignmentId);
 }

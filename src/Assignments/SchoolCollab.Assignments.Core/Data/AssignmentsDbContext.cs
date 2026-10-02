@@ -18,6 +18,9 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     public DbSet<AssignmentSubmissionVersion> AssignmentSubmissionVersions => Set<AssignmentSubmissionVersion>();
     public DbSet<SubmissionReview> SubmissionReviews => Set<SubmissionReview>();
     public DbSet<AssignmentActivityGroup> AssignmentActivityGroups => Set<AssignmentActivityGroup>();
+    // R2 (assignment-authoring-compartments §7.1 TGT-1): the authored multi-constraint
+    // targeting rows — standalone tenant child entities of the assignment aggregate.
+    public DbSet<AssignmentTarget> AssignmentTargets => Set<AssignmentTarget>();
     public DbSet<ContentModule> ContentModules => Set<ContentModule>();
     public DbSet<AssignmentResource> AssignmentResources => Set<AssignmentResource>();
     // WS-A3 (spec §3.3): structured per-question submission answers
@@ -60,6 +63,9 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         modelBuilder.ApplyConfiguration(new AssignmentSubmissionVersionConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new SubmissionReviewConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new AssignmentActivityGroupConfiguration(() => CurrentTenantId));
+        // R2 (TGT-1): authored assignment targets. Same explicit configuration pattern
+        // (constructor-injected tenant-id accessor).
+        modelBuilder.ApplyConfiguration(new AssignmentTargetConfiguration(() => CurrentTenantId));
         // WS-A1: standalone child entities (content modules + AI-generation
         // resources) — configurations follow the explicit-ApplyConfiguration
         // pattern so constructor-injected tenant-id accessors are available.

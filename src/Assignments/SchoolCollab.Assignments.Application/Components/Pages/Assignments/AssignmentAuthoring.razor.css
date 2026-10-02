@@ -122,3 +122,18 @@
 .authoring-message {
     margin: 0;
 }
+
+/* R2 (TGT-16): the authored constraint chips, rendered in DisplayOrder. */
+.authoring-target-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.authoring-target-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}

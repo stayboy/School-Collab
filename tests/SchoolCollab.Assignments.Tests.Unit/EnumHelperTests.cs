@@ -109,6 +109,14 @@ public class EnumHelperTests
         {
             var result = EnumHelper.GetDescription(value);
             result.Should().NotBeNullOrEmpty();
+            if (value == TargetAudienceTypeDto.Mixed)
+            {
+                // D-1 (round assignment-targeting-r2): the new derived member's display name IS
+                // its name, so the "attribute text differs from the member name" rule cannot apply.
+                result.Should().Be("Mixed");
+                continue;
+            }
+
             result.Should().NotBe(value.ToString(), because: $"{value} has a [Description] attribute");
         }
     }

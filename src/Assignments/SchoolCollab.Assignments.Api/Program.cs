@@ -22,6 +22,11 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AssignmentStatusDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GradingFormatDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<TargetAudienceTypeDto>());
+    // R2 (TGT-1): the authored targeting constraints ride the create/update payload and the
+    // authoring child read, so TargetKindDto must round-trip as its name on the same host
+    // options block as every other assignment enum (the ar-15/ar-18 lesson: a converter
+    // registered only in a test host hides the live gap).
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<TargetKindDto>());
     // AI spec §3.2: question payloads round-trip the discriminator as a string
     // (e.g. "multipleChoice") — register the converter on the same options block
     // as the other assignment enums so existing callers stay valid.
@@ -158,6 +163,13 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherDirect
 // port (Assignments → Students) for the link command and SelectedGroups publish.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,
     SchoolCollab.Assignments.Api.Services.ActivityGroupLookupHttpClient>();
+
+// R2 (assignment-authoring-compartments §7.2 TGT-8): the target resolver port
+// (Assignments → Students `GET /students/by-target`). Reuses the existing
+// "students-api" named client registered above (bearer forwarding only, D-7) and
+// is fail-closed at publish (TGT-10) — the client rethrows transport failures.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentTargetResolver,
+    SchoolCollab.Assignments.Api.Services.AssignmentTargetResolverHttpClient>();
 
 // Rev. 6 (spec activity-group-enrollment.md FR-58): subject/period consistency
 // check at publish (Assignments → Students topic-assignment lookup).
