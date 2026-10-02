@@ -365,6 +365,29 @@ the tester never derives or expands its own scope.
 
 ## Pitfalls
 
+- **Keep a Tier-1–2 diff reviewable; a large patch buys no review.** Round
+  `assignment-authoring-r1` shipped a ~358 KB / 41-file Tier-2 patch: the static
+  reviewer read it in nine 800-line chunks, blew its 30-minute deadline
+  mid-reasoning and returned **no verdict**; even after a resume it gave a
+  `CLOSED` verdict that had missed **two P1s** — a destructive full-replacement of
+  child collections from an Edit form whose children were never loaded, and a dead
+  `@bind-SelectedValues` on FluentUI `FluentListbox<T>` that broke `Create`'s
+  By-Group submit gate. Bound the diff for a light round, or **split the review by
+  area** (one reviewer per patch slice) instead of handing one reviewer an
+  unbounded patch.
+- **An empty reviewer verdict means "no review", never "clean".** A reviewer that
+  times out, errors, or returns without a REVIEW block has verified nothing. Treat
+  the round as unreviewed (resume or re-dispatch it) and never transcribe `CLOSED`
+  acceptance off a missing verdict.
+- **Verify a FluentUI parameter name against the installed version before binding
+  it.** `@bind-SelectedValues` does not exist on 4.14.2's list components (the pair
+  is `SelectedOptions` / `SelectedOptionsChanged`); an unknown name silently lands
+  in the component's `AdditionalAttributes`, rendering a stray attribute
+  (`selectedvalues="System.Collections.Generic.HashSet\`1[System.Guid]"`) while the
+  binding stays dead. It is invisible until something depends on the value. Repo
+  guidance: `.github/skills/dropdown-ui/SKILL.md`,
+  `.github/skills/fluentui-component-props/SKILL.md`; findings and the fix pattern:
+  `documents/solution/fluentui-dead-selectedvalues-binding.md`.
 - **Never combine structured single-child execution with `workflowScript`.**
 - **Test-output starvation kills worker passes.** Two worker timeouts in
   round ar-15 were self-reported as *"I cannot clearly see pass/fail due to
