@@ -78,6 +78,7 @@ public class UpdateAssignmentCommandHandlerModuleResourceTests
         return new UpdateAssignmentCommandHandler(
             repo, publisher.Object, cache,
             uploadOptions ?? Options.Create(new AttachmentUploadOptions()),
+            new AcceptAllActivityGroupLookup(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
     }
 

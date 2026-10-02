@@ -48,4 +48,7 @@ public sealed record UpdateAssignmentCommand(
     int? DifficultyHardCount = null,
     /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
     /// text. Threaded to <c>Assignment.Update(...)</c>.</summary>
-    string? Instructions = null) : ICommand;
+    string? Instructions = null,
+    /// <summary>R2 (TGT-1 / D-1 / UX-21): the authored targeting constraints — full
+    /// replacement when non-null, preserve when null. Threaded to <c>SetTargets</c>.</summary>
+    IReadOnlyList<AssignmentTargetDto>? Targets = null) : ICommand;

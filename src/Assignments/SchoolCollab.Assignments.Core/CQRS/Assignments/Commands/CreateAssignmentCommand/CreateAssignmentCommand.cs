@@ -47,4 +47,8 @@ public sealed record CreateAssignmentCommand(
     int? DifficultyHardCount = null,
     /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
     /// text. Threaded to <c>Assignment.Create(...)</c>.</summary>
-    string? Instructions = null) : ICommand;
+    string? Instructions = null,
+    /// <summary>R2 (TGT-1 / D-1): the authored targeting constraints. Null = none supplied;
+    /// a non-null list must hold at least one entry (TGT-13). The handler attaches them with
+    /// <c>SetTargets</c> once the tenant is stamped.</summary>
+    IReadOnlyList<AssignmentTargetDto>? Targets = null) : ICommand;

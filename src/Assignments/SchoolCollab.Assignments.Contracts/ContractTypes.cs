@@ -53,7 +53,24 @@ public enum TargetAudienceTypeDto
     [Description("By Grade Level")]
     SelectedGrades = 1,
     [Description("By Group")]
-    SelectedGroups = 2
+    SelectedGroups = 2,
+    /// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.TargetAudienceType.Mixed</c>
+    /// (D-1, round <c>assignment-targeting-r2</c>): the DERIVED value for a target set whose
+    /// rows are a Stream/Student mix (or, defensively, empty). Serializes as the string
+    /// "Mixed".</summary>
+    [Description("Mixed")]
+    Mixed = 3
+}
+
+/// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.TargetKind</c>
+/// (assignment-authoring-compartments §7.1 TGT-1). Serializes as the string name.</summary>
+public enum TargetKindDto
+{
+    AllStudents = 0,
+    GradeLevel = 1,
+    Stream = 2,
+    Student = 3,
+    ActivityGroup = 4
 }
 
 /// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.QuestionType</c>
@@ -190,7 +207,12 @@ public record CreateAssignmentRequest(
     int? DifficultyHardCount = null,
     /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
     /// text. Threaded to <c>Assignment.Create(...)</c>.</summary>
-    string? Instructions = null);
+    string? Instructions = null,
+    /// <summary>D-1/TGT-1 (round <c>assignment-targeting-r2</c>): the authored targeting
+    /// constraints. <see langword="null"/> preserves the persisted set (the child-collection
+    /// contract used by questions/attachments/modules); a non-null list is a full
+    /// replacement and must hold at least one entry (TGT-13).</summary>
+    IReadOnlyList<AssignmentTargetDto>? Targets = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -229,7 +251,10 @@ public record UpdateAssignmentRequest(
     int? DifficultyHardCount = null,
     /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
     /// text. Threaded to <c>Assignment.Update(...)</c>.</summary>
-    string? Instructions = null);
+    string? Instructions = null,
+    /// <summary>D-1/TGT-1: the authored targeting constraints — full replacement when
+    /// non-null, preserve when null (see <see cref="CreateAssignmentRequest.Targets"/>).</summary>
+    IReadOnlyList<AssignmentTargetDto>? Targets = null);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing
@@ -407,12 +432,34 @@ public record AssignmentAttachmentReadDto(
 /// <summary>The persisted children of one assignment as the authoring Edit surface
 /// needs them (assignment-authoring P1 rework): questions, attachments and AI-generation
 /// resources. Read as ONE call so the editors are never rendered against a partially
-/// loaded form.</summary>
+/// loaded form.
+/// <para>R2 (D-8.3 / TGT-1): <see cref="Targets"/> carries the persisted targeting rows, so
+/// the Audience &amp; Targets compartment loads its constraints from the server before
+/// enabling — a first add can never full-replace the persisted set (UX-21).</para></summary>
 public record AssignmentAuthoringChildrenDto(
     Guid AssignmentId,
     IReadOnlyList<AssignmentQuestionReadDto> Questions,
     IReadOnlyList<AssignmentAttachmentReadDto> Attachments,
-    IReadOnlyList<ResourceDto> Resources);
+    IReadOnlyList<ResourceDto> Resources,
+    IReadOnlyList<AssignmentTargetDto> Targets);
+
+/// <summary>One authored targeting constraint (TGT-1). <see cref="RefId"/> is null exactly
+/// for <see cref="TargetKindDto.AllStudents"/>. <see cref="DisplayOrder"/> is the author's
+/// order, re-indexed 0..n-1 by the server on every write.</summary>
+public record AssignmentTargetDto(TargetKindDto Kind, Guid? RefId, int DisplayOrder);
+
+/// <summary>The Audience &amp; Targets live recipient preview (TGT-16 / D-4).
+/// <see cref="StudentsMatched"/> is the resolver's deduped union;
+/// <see cref="PrimaryContacts"/>/<see cref="OtherContacts"/> are the POLICY-FILTERED contact
+/// counts (exactly what publish would send). <see cref="PreviewDegraded"/> is true when the
+/// preview could not be resolved (transport failure or no current period): the counts are
+/// then all zero and the UI renders an inline "Preview unavailable" note. Advisory only —
+/// save is never blocked and publish re-resolves fresh.</summary>
+public record RecipientPreviewDto(
+    int StudentsMatched,
+    int PrimaryContacts,
+    int OtherContacts,
+    bool PreviewDegraded);
 
 /// <summary>Result of <c>POST /assignments/attachments/stage</c> (WS-A1 /
 /// FR-210 / EC-4). The wizard stages one file at selection time and

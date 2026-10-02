@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands;
@@ -17,6 +18,7 @@ public sealed class UpdateAssignmentCommandHandler(
     IIntegrationEventPublisher publisher,
     HybridCache cache,
     IOptions<AttachmentUploadOptions> uploadOptions,
+    IActivityGroupLookup groupLookup,
     ILogger<UpdateAssignmentCommandHandler> logger) : ICommandHandler<UpdateAssignmentCommand>
 {
     public async Task HandleAsync(UpdateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -61,6 +63,17 @@ public sealed class UpdateAssignmentCommandHandler(
             difficultyHard: command.DifficultyHardCount,
             // INS-1 (assignment-authoring-compartments §9): student-facing text.
             instructions: command.Instructions);
+
+        // R2 (D-1/TGT-1, UX-21): the authored targeting rows. Non-null = full replacement,
+        // null = preserve (the same contract as questions/attachments/modules). SetTargets owns
+        // validation (TGT-13/TGT-2/D-2) plus the derived compat column; the D-8.1 archived-group
+        // rejection applies only to ids that are NEW relative to the persisted set, so an
+        // unchanged link to a since-archived group still re-saves.
+        var inactiveGroupIds = await ResolveInactiveActivityGroupIdsAsync(command.Targets, assignment.Targets, cancellationToken);
+        assignment.SetTargets(
+            command.Targets?.Select(t => (Kind: (TargetKind)t.Kind, RefId: t.RefId)).ToList(),
+            assignment.TenantId,
+            inactiveGroupIds);
 
         // Full-replacement semantics for questions + attachments (decision b):
         // snapshot existing child ids, remove each, then re-add inbound. Re-index
@@ -179,5 +192,36 @@ public sealed class UpdateAssignmentCommandHandler(
         assignment.ClearDomainEvents();
 
         logger.LogInformation("Assignment {Id} updated", assignment.Id);
+    }
+
+    /// <summary>D-8.1: resolves the activity-group ids in <paramref name="targets"/> that are
+    /// NEW relative to <paramref name="persistedTargets"/> and that the FR-21 port does not
+    /// report as active — the only ids <c>SetTargets</c> rejects. A persisted target pointing at
+    /// a group archived after linking is deliberately not re-validated (the historical row must
+    /// not be silently dropped); an id the port omits (unknown / other tenant) is left to the
+    /// route-level FR-21 checks.</summary>
+    private async Task<Guid[]> ResolveInactiveActivityGroupIdsAsync(
+        IReadOnlyList<AssignmentTargetDto>? targets,
+        IReadOnlyList<AssignmentTarget> persistedTargets,
+        CancellationToken ct)
+    {
+        var persistedGroupIds = persistedTargets
+            .Where(t => t.Kind == TargetKind.ActivityGroup && t.RefId.HasValue)
+            .Select(t => t.RefId!.Value)
+            .ToHashSet();
+
+        var groupIds = (targets ?? [])
+            .Where(t => t.Kind == TargetKindDto.ActivityGroup && t.RefId.HasValue)
+            .Select(t => t.RefId!.Value)
+            .Where(id => !persistedGroupIds.Contains(id))
+            .Distinct()
+            .ToArray();
+        if (groupIds.Length == 0)
+        {
+            return [];
+        }
+
+        var groups = await groupLookup.GetByIdsAsync(groupIds, ct);
+        return groups.Where(g => !g.IsActive).Select(g => g.Id).ToArray();
     }
 }

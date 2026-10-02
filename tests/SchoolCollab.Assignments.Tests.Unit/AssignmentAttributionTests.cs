@@ -58,6 +58,7 @@ public class AssignmentAttributionTests
             currentUser,
             new FakeTeacherDirectory { ExistsResult = true },
             new FakeFeatureFlagService { IsEnabledValue = true }, // dev; claim governs
+            new AcceptAllActivityGroupLookup(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new CreateAssignmentCommand(
@@ -84,6 +85,7 @@ public class AssignmentAttributionTests
             new FakeCurrentUser(),                       // TeacherId = null
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = false }, // real-auth (DisableOIDCAuth=false)
+            new AcceptAllActivityGroupLookup(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>

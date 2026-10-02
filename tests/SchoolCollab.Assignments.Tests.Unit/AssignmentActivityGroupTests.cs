@@ -44,18 +44,33 @@ public class AssignmentActivityGroupTests
             audience, TopicId, gradeLevelId, null, null, TeacherId)
             .WithTenant(TenantId);
 
+    /// <summary>
+    /// R2 (D-1/D-8.2): publish now reads the AUTHORED TARGET rows and the
+    /// <see cref="IAssignmentTargetResolver"/> union, so this helper projects the pre-R2
+    /// link/lookup fixtures onto that seam — each linked group becomes one ActivityGroup target
+    /// (unless the assignment already carries targets) and the fake lookup's member ids become the
+    /// resolver's union. An assignment with no links therefore has NO targets, which is exactly the
+    /// TGT-13 class the publish guard must refuse.
+    /// </summary>
     private static PublishAssignmentCommandHandler NewPublishHandler(
         Assignment assignment,
         IContactResolver resolver,
         IAssignmentActivityGroupRepository linkRepo,
         IActivityGroupLookup lookup,
-        IAssignmentNotificationBroadcaster broadcaster)
-        => new(new FakeAssignmentRepository { Assignment = assignment },
+        IAssignmentNotificationBroadcaster broadcaster,
+        bool topicAssigned = true)
+    {
+        if (assignment.Targets.Count == 0 && linkRepo is FakeLinkRepository { GroupIds.Length: > 0 } links)
+        {
+            assignment.WithGroupTargets(links.GroupIds);
+        }
+
+        return new PublishAssignmentCommandHandler(
+               new FakeAssignmentRepository { Assignment = assignment },
                new FakeSubmissionRepository(),
                resolver,
-               linkRepo,
-               lookup,
-               new FakeTopicAssignmentLookup(),
+               new FakeTopicAssignmentLookup { Result = topicAssigned },
+               new FakeAssignmentTargetResolver { StudentIds = (lookup as FakeActivityGroupLookup)?.MemberIds ?? [] },
                new FakeTenantProvider(TenantId),
                broadcaster,
                new FakeNotificationPolicyResolver(),
@@ -64,6 +79,7 @@ public class AssignmentActivityGroupTests
                new FakeDeepLinkTokenMinter(),
                new FakeHybridCache(),
                NullLogger<PublishAssignmentCommandHandler>.Instance);
+    }
 
 
     // ── AC-12 (FR-17, FR-18, FR-20) ────────────────────────────────────────────
@@ -90,7 +106,7 @@ public class AssignmentActivityGroupTests
         broadcaster.Last!.Recipients.Should().HaveCount(2);
     }
 
-    // ── AC-13 (FR-23, EC-7) ────────────────────────────────────────────────────
+    // ── AC-13 (TGT-13, EC-7) ───────────────────────────────────────────────────
     [TestMethod]
     public async Task Publish_SelectedGroups_ZeroGroups_Rejected()
     {
@@ -111,30 +127,26 @@ public class AssignmentActivityGroupTests
     public async Task Publish_SelectedGroups_SubjectNotAssigned_Rejected()
     {
         var assignment = NewAssignment(TargetAudienceType.SelectedGroups);
-        var handler = new PublishAssignmentCommandHandler(
-            new FakeAssignmentRepository { Assignment = assignment },
-            new FakeSubmissionRepository(),
+        var handler = NewPublishHandler(
+            assignment,
             new FakeContactResolver([]),
             new FakeLinkRepository { GroupIds = [Group1] },
             new FakeActivityGroupLookup { MemberIds = [StudentId1] },
-            new FakeTopicAssignmentLookup { Result = false },
-            new FakeTenantProvider(TenantId),
             new FakeBroadcaster(),
-            new FakeNotificationPolicyResolver(),
-            new FakeAssignmentPolicyResolver(),
-            new FakeFeatureFlagService(),
-            new FakeDeepLinkTokenMinter(),
-            new FakeHybridCache(),
-            NullLogger<PublishAssignmentCommandHandler>.Instance);
+            topicAssigned: false);
 
         await FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
             .Should().ThrowAsync<InvalidOperationException>();
     }
 
-    // ── EC-9: student in zero groups not targeted ──────────────────────────────
+    // ── TGT-10 / D-6(c): a target set that resolves to NO students refuses the publish ─────
     [TestMethod]
-    public async Task StudentInZeroGroups_NotTargeted()
+    public async Task Publish_GroupTargetWithNoResolvedStudents_IsRefused()
     {
+        // Pre-R2 this scenario (a group whose members resolve to nobody) published an empty
+        // sendout. R2 is fail-closed (D-6c): an empty resolved union blocks the publish instead of
+        // silently publishing to nobody. The EC-9 exclusion itself (a student in zero groups is
+        // not matched) is asserted on the resolver side — ResolveStudentsByTargetHandlerTests.
         var assignment = NewAssignment(TargetAudienceType.SelectedGroups);
         var broadcaster = new FakeBroadcaster();
         var handler = NewPublishHandler(
@@ -144,9 +156,13 @@ public class AssignmentActivityGroupTests
             new FakeActivityGroupLookup { MemberIds = [] },
             broadcaster);
 
-        await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+        await FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
+            .Should().ThrowAsync<InvalidOperationException>();
 
-        broadcaster.Last!.Recipients.Should().BeEmpty();
+        broadcaster.Last.Should().BeNull("a refused publish must not broadcast anything");
+        // The in-memory aggregate IS Publish()-ed before resolution (the handler's existing order),
+        // but the refusal propagates before any persistence — nothing is written and the route
+        // maps InvalidOperationException to 400 (D-6a).
     }
 
     // ── EC-4: archived group excluded from resolution ──────────────────────────
@@ -173,23 +189,57 @@ public class AssignmentActivityGroupTests
         broadcaster.Last!.Recipients.Should().ContainSingle();
     }
 
-    // ── AC-16 (FR-19, NFR-6) ───────────────────────────────────────────────────
+    // ── TGT-9: the resolved target cohort rides StudentIds; the primary grade rides GradeLevelId ──
     [TestMethod]
-    public async Task SelectedGrades_Path_Unchanged()
+    public async Task SelectedGrades_Path_ResolvesThroughTheTargetResolver()
     {
-        var assignment = NewAssignment(TargetAudienceType.SelectedGrades, GradeLevelId);
+        // D-6/D-9: the grade target resolves through IAssignmentTargetResolver (never the legacy
+        // grade cohort enumeration) and the RESOLVED ids ride StudentIds, while the assignment's
+        // primary grade still rides GradeLevelId so that grade's teacher-recipient leg survives.
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades, GradeLevelId)
+            .WithGradeTarget(GradeLevelId);
         var resolver = new CapturingContactResolver([]);
         var handler = NewPublishHandler(
             assignment,
             resolver,
             new FakeLinkRepository(),
-            new FakeActivityGroupLookup(),
+            new FakeActivityGroupLookup { MemberIds = [StudentId1] },
             new FakeBroadcaster());
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
-        resolver.LastRequest!.GradeLevelId.Should().Be(GradeLevelId);
-        resolver.LastRequest.StudentIds.Should().BeNull();
+        resolver.LastRequest!.GradeLevelId.Should().Be(GradeLevelId,
+            "the authored primary grade is the teacher-recipient leg (the D-6 documented widening)");
+        resolver.LastRequest.StudentIds.Should().Equal(new[] { StudentId1 },
+            "the resolver's union is what publish sends to (TGT-9)");
+    }
+
+    // ── TGT-10 / D-6(b): a resolver outage BLOCKS the publish (fail-closed) ────────────────
+    [TestMethod]
+    public async Task Publish_TargetResolverOutage_IsRefused()
+    {
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades, GradeLevelId)
+            .WithGradeTarget(GradeLevelId);
+        var broadcaster = new FakeBroadcaster();
+        var handler = new PublishAssignmentCommandHandler(
+            new FakeAssignmentRepository { Assignment = assignment },
+            new FakeSubmissionRepository(),
+            new FakeContactResolver([]),
+            new FakeTopicAssignmentLookup(),
+            new FakeAssignmentTargetResolver { Throw = new HttpRequestException("students-api unreachable") },
+            new FakeTenantProvider(TenantId),
+            broadcaster,
+            new FakeNotificationPolicyResolver(),
+            new FakeAssignmentPolicyResolver(),
+            new FakeFeatureFlagService(),
+            new FakeDeepLinkTokenMinter(),
+            new FakeHybridCache(),
+            NullLogger<PublishAssignmentCommandHandler>.Instance);
+
+        await FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
+            .Should().ThrowAsync<HttpRequestException>();
+
+        broadcaster.Last.Should().BeNull("a resolver failure must never degrade into a sendout");
     }
 
     // ── AC-14 (FR-21, NFR-5) / EC-11: group not in tenant → omitted → rejected ──
@@ -198,6 +248,7 @@ public class AssignmentActivityGroupTests
     {
         var assignment = NewAssignment(TargetAudienceType.SelectedGroups);
         var handler = new LinkAssignmentGroupsHandler(
+            TestDb(),
             new FakeAssignmentRepository { Assignment = assignment },
             new FakeLinkRepository(),
             new FakeActivityGroupLookup { Groups = [] },
@@ -215,6 +266,7 @@ public class AssignmentActivityGroupTests
     {
         var assignment = NewAssignment(TargetAudienceType.SelectedGroups);
         var handler = new LinkAssignmentGroupsHandler(
+            TestDb(),
             new FakeAssignmentRepository { Assignment = assignment },
             new FakeLinkRepository(),
             new FakeActivityGroupLookup { Groups = [new ActivityGroupRefDto(Group1, "Chess", IsActive: false)] },
@@ -257,6 +309,29 @@ public class AssignmentActivityGroupTests
         summaries.Should().ContainSingle();
         summaries[0].Title.Should().Be("Math");
         summaries[0].Status.Should().Be("Draft");
+    }
+
+    // ── R2-7 (D-8.2 / FR-6): a group referenced ONLY via an AssignmentTarget row is still
+    // reported by the hard-delete guard — the reverse lookup unions both sources.
+    [TestMethod]
+    public async Task DeleteGroup_ReferencedOnlyByTargetRow_Blocked()
+    {
+        using var scope = new LinkScope("target-only-guard-" + Guid.NewGuid());
+        var assignment = NewAssignment(TargetAudienceType.SelectedGroups);
+        assignment.SetTargets([(TargetKind.ActivityGroup, (Guid?)Group1)], TenantId);
+        scope.Db.Assignments.Add(assignment);
+        await scope.Db.SaveChangesAsync();
+
+        // Ensure no legacy link-table row exists — the guard must still see the target row.
+        scope.Db.AssignmentActivityGroups.RemoveRange(scope.Db.AssignmentActivityGroups.Where(l => l.AssignmentId == assignment.Id));
+        await scope.Db.SaveChangesAsync();
+
+        var ids = await scope.Links.GetAssignmentIdsByGroupAsync(Group1);
+        ids.Should().ContainSingle().Which.Should().Be(assignment.Id);
+
+        var summaries = await scope.Links.GetAssignmentsByGroupAsync(Group1);
+        summaries.Should().ContainSingle();
+        summaries[0].Id.Should().Be(assignment.Id);
     }
 
     // ── NFR-9: model guard ─────────────────────────────────────────────────────
@@ -303,6 +378,21 @@ public class AssignmentActivityGroupTests
         }
 
         public void Dispose() => Db.Dispose();
+    }
+
+    private static AssignmentsDbContext TestDb()
+    {
+        var services = new ServiceCollection();
+        services.AddTenancy();
+        services.AddDbContext<AssignmentsDbContext>(o => o
+            .UseInMemoryDatabase("link-handler-" + Guid.NewGuid())
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning)));
+        var sp = services.BuildServiceProvider();
+        var db = sp.GetRequiredService<AssignmentsDbContext>();
+        db.Database.EnsureCreated();
+        var tenants = sp.GetRequiredService<ITenantProvider>();
+        ((TenantProvider)tenants).SetTenant(new TenantContext(TenantId, "School", TenantType.School));
+        return db;
     }
 
     private sealed class FakeTenantProvider : ITenantProvider

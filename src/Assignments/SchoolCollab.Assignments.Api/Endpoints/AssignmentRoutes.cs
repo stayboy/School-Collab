@@ -44,6 +44,8 @@ using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
+using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Assignments.Api.Endpoints;
 
@@ -223,6 +225,104 @@ public static class AssignmentRoutes
             return Results.Ok(new { aiPromptLocked });
         });
 
+        // ── Audience & Targets live recipient preview (TGT-16 / D-4) ──
+        // Advisory, read-only, never blocks save: the same resolver + contact + policy chain the
+        // publish handler runs (TGT-9), applied to the CURRENT constraint set so "contacts
+        // reachable" means exactly what publish would send. Literal segment wins over the
+        // {id:guid} template (the /signature-default precedent).
+        //
+        // Failure posture: any resolve/transport failure returns 200 with all-zero counts and
+        // PreviewDegraded = true, which the compartment renders as an inline "Preview
+        // unavailable" note — publish re-resolves fresh server-side.
+        //
+        // `primaryGradeId` (plan-review P2-n2): the route has no assignment, so publish's two
+        // primary-grade legs — the ResolveSubscribersRequest grade cohort that carries the
+        // grade's teachers, and the grade's policy override — would otherwise be unreproducible
+        // and the preview would under-count against publish. Optional; omitted = the tenant leg
+        // only (the null-grade posture).
+        //
+        // A missing current period is a resolve-level condition the Students `by-target` leg
+        // answers with "no matches" rather than an error, so it surfaces as zero counts, not as
+        // PreviewDegraded.
+        group.MapGet("/recipient-preview", async (
+            [FromQuery] bool allStudents,
+            [FromQuery] Guid[] gradeLevelIds,
+            [FromQuery] Guid[] streamCodedValueIds,
+            [FromQuery] Guid[] studentIds,
+            [FromQuery] Guid[] activityGroupIds,
+            [FromQuery] Guid? primaryGradeId,
+            [FromServices] IAssignmentTargetResolver targetResolver,
+            [FromServices] IContactResolver contactResolver,
+            [FromServices] INotificationPolicyResolver policyResolver,
+            [FromServices] IAssignmentPolicyResolver assignmentPolicyResolver,
+            [FromServices] ITenantProvider tenantProvider,
+            CancellationToken ct) =>
+        {
+            // Advisory zero for any failure — the whole preview is best-effort (D-4).
+            var degraded = new RecipientPreviewDto(0, 0, 0, PreviewDegraded: true);
+            var tenantId = tenantProvider.GetTenantContext().TenantId;
+
+            try
+            {
+                var constraints = new List<TargetConstraint>();
+                constraints.AddRange((gradeLevelIds ?? []).Select(id => new TargetConstraint(TargetKind.GradeLevel, id)));
+                constraints.AddRange((streamCodedValueIds ?? []).Select(id => new TargetConstraint(TargetKind.Stream, id)));
+                constraints.AddRange((studentIds ?? []).Select(id => new TargetConstraint(TargetKind.Student, id)));
+                constraints.AddRange((activityGroupIds ?? []).Select(id => new TargetConstraint(TargetKind.ActivityGroup, id)));
+
+                var matchedStudentIds = await targetResolver.ResolveStudentIdsAsync(constraints, allStudents, ct);
+
+                if (matchedStudentIds.Length == 0)
+                {
+                    return Results.Ok(new RecipientPreviewDto(0, 0, 0, PreviewDegraded: false));
+                }
+
+                // Mirror publish's own chain: resolve subscribed contacts for the resolved cohort
+                // (plus the primary grade's teacher cohort), then apply the two effective
+                // policies. The recipient rows are transient projections — they exist only to
+                // feed the pure filter, so they carry no assignment id.
+                var subscribers = await contactResolver.ResolveSubscribersAsync(
+                    new ResolveSubscribersRequest(
+                        tenantId, SubscriptionScope.AllAssignments, primaryGradeId, matchedStudentIds),
+                    ct);
+
+                var projected = subscribers
+                    .Select(s => AssignmentRecipient.Create(
+                        tenantId,
+                        Guid.Empty,
+                        s.OwnerType,
+                        s.OwnerId,
+                        s.StudentId,
+                        s.ContactId,
+                        s.Channel,
+                        s.Role,
+                        notifyOnBroadcast: true,
+                        subscriptionActive: true))
+                    .ToList();
+
+                var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, primaryGradeId, ct);
+                var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(primaryGradeId, ct);
+                var reachable = NotificationRecipientFilter.Apply(projected, effectivePolicy, assignmentPolicy);
+
+                var primaryContacts = reachable.Count(r => r.Role == GuardianRole.Primary);
+                return Results.Ok(new RecipientPreviewDto(
+                    matchedStudentIds.Length,
+                    primaryContacts,
+                    reachable.Count - primaryContacts,
+                    PreviewDegraded: false));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // Advisory only (D-4): a resolve/transport failure degrades the counts rather
+                // than failing the read, and publish re-resolves fresh server-side.
+                return Results.Ok(degraded);
+            }
+        });
+
         group.MapPost("/", async (
             [FromBody] CreateAssignmentRequest req,
             [FromServices] ICommandHandler<CreateAssignmentCommand, Guid> handler,
@@ -253,7 +353,9 @@ public static class AssignmentRoutes
                     req.DifficultyMediumCount,
                     req.DifficultyHardCount,
                     // INS-1 (assignment-authoring-compartments §9): student-facing text.
-                    req.Instructions);
+                    req.Instructions,
+                    // R2 (TGT-1 / D-1): the authored targeting constraints (null = none supplied).
+                    req.Targets);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -268,6 +370,14 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+            // R2: the target validation (TGT-13 at-least-one, TGT-2 AllStudents exclusivity, the
+            // D-2 primary-grade rule, the D-8.1 archived-group rule) surfaces as
+            // ArgumentException — 400, never a 500. The pre-R2 domain argument guards
+            // (pass score / attempts / difficulty) land on the same mapping.
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
             }
             catch (InvalidOperationException ex)
             {
@@ -315,7 +425,9 @@ public static class AssignmentRoutes
                     req.DifficultyMediumCount,
                     req.DifficultyHardCount,
                     // INS-1 (assignment-authoring-compartments §9): student-facing text.
-                    req.Instructions);
+                    req.Instructions,
+                    // R2 (TGT-1 / D-1 / UX-21): full-replacement when non-null, preserve when null.
+                    req.Targets);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
@@ -328,6 +440,13 @@ public static class AssignmentRoutes
                 return Results.BadRequest(new { ex.Message });
             }
             catch (AssignmentContentValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // R2: the target validation (TGT-13 at-least-one, TGT-2 AllStudents exclusivity, the
+            // D-2 primary-grade rule, the D-8.1 archived-group rule) surfaces as
+            // ArgumentException — 400, never a 500.
+            catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }

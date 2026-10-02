@@ -226,9 +226,23 @@ resolver.
 - authoring defaults (the `RequiresSignature` snapshot), and
 - the approval gate (`RequiresApprovalBeforePublish`).
 
-**TGT-12** — **Per-recipient grade** drives notification caps/channels at publish
-(the notification policy already resolves per grade). A multi-grade assignment
-therefore has one policy for authoring and per-recipient policy for delivery.
+**TGT-12** — **Delivery policy resolves once per sendout, from the primary
+grade.** `PublishAssignmentCommandHandler` resolves a **single** effective
+notification policy from `Assignment.GradeLevelId` and applies it to every
+recipient in the sendout; there is **no per-recipient grade resolution**
+(`NotificationRecipientFilter` takes one policy). A multi-grade assignment
+therefore has one policy for authoring and **one** policy for delivery — the
+primary grade's.
+
+> **Recorded gap (corrected 2026-10-02 during the R2 plan-review).** This
+decision previously claimed that *per-recipient grade* drives notification
+caps/channels at publish. **That is false against the shipped seam** — no such
+resolution exists. The R2 plan-review caught the claim (P1-3) and it is
+corrected here rather than silently carried. **True per-recipient delivery
+policy is not implemented** and is not part of R2: the filter consumes a single
+policy, so per-recipient resolution would require splitting the sendout by
+grade (or resolving policy per recipient inside the filter). Tracked as a
+follow-up.
 
 ### 7.4 Validation and migration
 

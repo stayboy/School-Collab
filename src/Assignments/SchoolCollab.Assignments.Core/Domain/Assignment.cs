@@ -12,6 +12,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     private readonly List<AssignmentAttachment> _attachments = [];
     private readonly List<ContentModule> _modules = [];
     private readonly List<AssignmentResource> _resources = [];
+    private readonly List<AssignmentTarget> _targets = [];
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private Assignment() { }
@@ -120,6 +121,12 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// (links / files / videos). Same persistence model as
     /// <see cref="Modules"/>.</summary>
     public IReadOnlyList<AssignmentResource> Resources => _resources.AsReadOnly();
+
+    /// <summary>The authored targeting constraints (TGT-1) — the sole authored source of
+    /// who receives a published assignment. <see cref="TargetAudienceType"/> is DERIVED from
+    /// this set (D-1), never authored against it. Unordered at the EF level; consumers that
+    /// render the author's order sort by <c>DisplayOrder</c>.</summary>
+    public IReadOnlyList<AssignmentTarget> Targets => _targets.AsReadOnly();
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
     public static Assignment Create(
@@ -203,6 +210,11 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             UpdatedAt = now
         };
 
+        // TGT-15 / D-1: the legacy compat column is derived from the authored target rows,
+        // which the caller attaches with SetTargets once the tenant is stamped (the child
+        // rows carry the tenant id, so they cannot be created before WithTenant runs).
+        assignment.SyncDerivedTargeting();
+
         assignment._domainEvents.Add(new AssignmentCreatedEvent(assignment.Id, assignment.Title));
         return assignment;
     }
@@ -263,7 +275,114 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         AiPromptOverride = aiPromptOverride?.Trim();
         ArchiveGraceDays = archiveGraceDays;
         UpdatedAt = DateTimeOffset.UtcNow;
+        SyncDerivedTargeting();
         _domainEvents.Add(new AssignmentUpdatedEvent(Id, Title));
+    }
+
+    /// <summary>
+    /// Replaces the authored targeting constraints (TGT-1, UX-21 full-replacement semantics):
+    /// a non-null <paramref name="targets"/> replaces the whole set and re-indexes
+    /// <c>DisplayOrder</c> 0..n-1; <see langword="null"/> preserves the current rows (the
+    /// questions/attachments/modules null-means-preserve contract). Validation, in the order
+    /// the spec states it: TGT-13 at-least-one, TGT-2 <c>AllStudents</c> exclusivity and
+    /// uniqueness, per-kind duplicate <c>(Kind, RefId)</c> rejection, the D-8.1 archived-group
+    /// rejection for NEWLY-ADDED group targets, and the D-2 primary-grade rule.
+    /// <para>D-8.1: an already-persisted group target whose group was archived after linking
+    /// is NOT re-validated, so a re-save never silently drops the historical row; archived
+    /// state still filters recipients at resolution (EC-4) and at the topic gate.</para>
+    /// </summary>
+    /// <param name="inactiveActivityGroupIds">The activity-group ids the caller resolved as
+    /// not active via <c>IActivityGroupLookup.GetByIdsAsync</c> (the port lives outside the
+    /// domain). Only ids absent from the persisted set are treated as newly added.</param>
+    public void SetTargets(
+        IReadOnlyList<(TargetKind Kind, Guid? RefId)>? targets,
+        Guid tenantId,
+        IReadOnlyCollection<Guid>? inactiveActivityGroupIds = null)
+    {
+        if (targets is null)
+            return;
+
+        // TGT-13: at least one target is required.
+        if (targets.Count == 0)
+            throw new ArgumentException("At least one target is required.", nameof(targets));
+
+        // TGT-2: AllStudents is mutually exclusive with every other kind, and may appear once.
+        var allStudentsCount = targets.Count(t => t.Kind == TargetKind.AllStudents);
+        if (allStudentsCount > 1)
+            throw new ArgumentException("Only one AllStudents target is allowed.", nameof(targets));
+        if (allStudentsCount == 1 && targets.Count > 1)
+            throw new ArgumentException(
+                "An AllStudents target cannot be combined with any other target.", nameof(targets));
+
+        // One target per (kind, reference) — the DB unique index backstops this.
+        var seen = new HashSet<(TargetKind Kind, Guid? RefId)>();
+        foreach (var target in targets)
+        {
+            if (!seen.Add((target.Kind, target.RefId)))
+                throw new ArgumentException($"Duplicate {target.Kind} target.", nameof(targets));
+        }
+
+        // D-8.1 (FR-22 / AC-15): reject a NEWLY-ADDED group target whose group is not active.
+        var persistedGroupIds = _targets
+            .Where(t => t.Kind == TargetKind.ActivityGroup && t.RefId.HasValue)
+            .Select(t => t.RefId!.Value)
+            .ToHashSet();
+        if (inactiveActivityGroupIds is { Count: > 0 })
+        {
+            var archivedNewIds = targets
+                .Where(t => t.Kind == TargetKind.ActivityGroup && t.RefId.HasValue)
+                .Select(t => t.RefId!.Value)
+                .Where(id => !persistedGroupIds.Contains(id) && inactiveActivityGroupIds.Contains(id))
+                .Distinct()
+                .ToArray();
+            if (archivedNewIds.Length > 0)
+                throw new ArgumentException(
+                    $"Cannot link archived activity group(s): {string.Join(", ", archivedNewIds)}");
+        }
+
+        // D-2 (TGT-11): with two or more distinct grade targets the primary grade is required
+        // and must be one of them.
+        var targetedGradeIds = targets
+            .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+            .Select(t => t.RefId!.Value)
+            .Distinct()
+            .ToArray();
+        if (targetedGradeIds.Length >= 2
+            && (GradeLevelId is null || !targetedGradeIds.Contains(GradeLevelId.Value)))
+        {
+            throw new ArgumentException(
+                "The primary grade must be one of the targeted grade levels.", nameof(targets));
+        }
+
+        _targets.Clear();
+        for (var i = 0; i < targets.Count; i++)
+        {
+            _targets.Add(AssignmentTarget.Create(tenantId, Id, targets[i].Kind, targets[i].RefId, i));
+        }
+
+        UpdatedAt = DateTimeOffset.UtcNow;
+        SyncDerivedTargeting();
+    }
+
+    /// <summary>
+    /// D-1 (TGT-15): derives the legacy compat columns from the authored target rows. Called
+    /// at the end of <see cref="Create"/>, <see cref="Update"/> and <see cref="SetTargets"/> —
+    /// the three write points — so the list DTO, the Admin list surface and the ward
+    /// projection keep reading a correct value without any change of their own.
+    /// <para><see cref="GradeLevelId"/> is deliberately NOT derived: D-2 re-purposes it as the
+    /// authored primary grade, which is a policy/authoring field rather than a delivery
+    /// constraint.</para>
+    /// </summary>
+    private void SyncDerivedTargeting()
+    {
+        if (_targets.Any(t => t.Kind == TargetKind.AllStudents))
+            TargetAudienceType = TargetAudienceType.AllStudents;
+        else if (_targets.Any(t => t.Kind == TargetKind.GradeLevel))
+            TargetAudienceType = TargetAudienceType.SelectedGrades;
+        else if (_targets.Any(t => t.Kind == TargetKind.ActivityGroup))
+            TargetAudienceType = TargetAudienceType.SelectedGroups;
+        else
+            TargetAudienceType = TargetAudienceType.Mixed;
     }
 
     /// <summary>WS-B2 (spec §3.4 line 73) — stages an unconfirmed AI question

@@ -116,6 +116,22 @@ public sealed class DuplicateAssignmentCommandHandler(
             clone.AddResource(r.ResourceKind, r.Url, r.StoragePath, r.DisplayName, r.IncludedInGeneration);
         }
 
+        // R2 (TGT-1 / D-1): the authored targeting rows are duplicated with the other
+        // structural children — never the recipients. A source with no rows (the zero-target
+        // legacy class, D-3) is left zero-target: an empty replacement would be rejected by
+        // TGT-13, and the clone is re-authored before it can publish anyway. No archived-group
+        // resolution is performed, so duplicating an assignment whose group was archived after
+        // linking keeps its rows (the D-8.1 unchanged-id posture).
+        if (source.Targets.Count > 0)
+        {
+            clone.SetTargets(
+                source.Targets
+                    .OrderBy(t => t.DisplayOrder)
+                    .Select(t => (Kind: t.Kind, RefId: t.RefId))
+                    .ToList(),
+                clone.TenantId);
+        }
+
         // The duplicate IS a new assignment creation on the wire — mirror the
         // create-handler tail verbatim: enqueue the integration event for each
         // AssignmentCreatedEvent (Create() already emits it), persist, invalidate

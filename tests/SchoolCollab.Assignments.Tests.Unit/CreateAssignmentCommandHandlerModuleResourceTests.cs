@@ -66,6 +66,7 @@ public class CreateAssignmentCommandHandlerModuleResourceTests
             new FakeCurrentUser(),
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = true },
+            new AcceptAllActivityGroupLookup(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
     }
 

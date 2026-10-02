@@ -95,6 +95,134 @@ public sealed class AssignmentEditFormModel
     /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
     public int? DifficultyHardCount { get; set; }
 
+    /// <summary>R2 (TGT-1): one authored targeting constraint in the form model — the kind plus
+    /// its reference (null exactly for <see cref="TargetKindDto.AllStudents"/>). The list order IS
+    /// the display order, re-indexed 0..n-1 by <see cref="ToTargetDtos"/>.</summary>
+    public sealed record AssignmentTargetSpec(TargetKindDto Kind, Guid? RefId);
+
+    private readonly List<AssignmentTargetSpec> _targets = [];
+    private readonly List<AssignmentTargetSpec> _loadedTargets = [];
+
+    /// <summary>F4: the constraint set that was in place when Everyone was switched ON, kept so the
+    /// OFF transition restores the author's work instead of silently discarding it. Null whenever
+    /// Everyone was not switched on in this session.</summary>
+    private List<AssignmentTargetSpec>? _everyonePriorTargets;
+
+    /// <summary>The authored targeting constraints (TGT-1) — the Audience &amp; Targets
+    /// compartment's selection, in display order.</summary>
+    public IReadOnlyList<AssignmentTargetSpec> Targets => _targets.AsReadOnly();
+
+    /// <summary>UX-21 fail-closed gate: true once the persisted target set has been read (or a
+    /// Create surface has nothing to read). False means an editable Edit surface could not load
+    /// the constraints, so the editor must render disabled-with-reason — a first add must never
+    /// turn an unknown set into a full-replacement payload.</summary>
+    public bool TargetsLoaded { get; private set; }
+
+    public bool HasAllStudents => _targets.Any(t => t.Kind == TargetKindDto.AllStudents);
+
+    public int CountOf(TargetKindDto kind) => _targets.Count(t => t.Kind == kind);
+
+    /// <summary>The target set as the wire DTOs, DisplayOrder re-indexed 0..n-1 by list
+    /// position (the EC-7 re-indexing convention).</summary>
+    public IReadOnlyList<AssignmentTargetDto> ToTargetDtos() =>
+        _targets.Select((t, i) => new AssignmentTargetDto(t.Kind, t.RefId, i)).ToList();
+
+    /// <summary>
+    /// Loads the persisted targeting rows (D-8.3) in their stored <c>DisplayOrder</c> and records
+    /// the same sequence as the change-detection baseline. A null <paramref name="targets"/> clears
+    /// the set and marks it NOT loaded (the caller renders the editor disabled in that case).
+    /// <para>R2-10 (P2): the load also discards a pending Everyone snapshot. The snapshot belongs
+    /// to the target set that was live when Everyone was switched ON, and a reused component
+    /// instance (the host page's <c>Id</c> changes) loads the next assignment through this same
+    /// model — leaving the snapshot behind let switching Everyone OFF restore the PREVIOUS
+    /// assignment's constraints onto the freshly loaded one.</para>
+    /// </summary>
+    public void LoadTargets(IReadOnlyList<AssignmentTargetDto>? targets)
+    {
+        _everyonePriorTargets = null;
+        _targets.Clear();
+        _loadedTargets.Clear();
+        TargetsLoaded = false;
+
+        if (targets is null)
+        {
+            return;
+        }
+
+        foreach (var target in targets.OrderBy(t => t.DisplayOrder))
+        {
+            _targets.Add(new AssignmentTargetSpec(target.Kind, target.RefId));
+            _loadedTargets.Add(new AssignmentTargetSpec(target.Kind, target.RefId));
+        }
+
+        TargetsLoaded = true;
+    }
+
+    /// <summary>
+    /// Replaces every target of one kind with <paramref name="refIds"/>, keeping the other kinds
+    /// (a picker reports only its own kind's selection). A duplicate id inside
+    /// <paramref name="refIds"/> is collapsed — the server rejects a duplicate
+    /// <c>(Kind, RefId)</c> at save time (TGT-1), so the form must not offer one.
+    /// </summary>
+    public void SetTargetsOfKind(TargetKindDto kind, IReadOnlyList<Guid> refIds)
+    {
+        _targets.RemoveAll(t => t.Kind == kind);
+        foreach (var refId in refIds.Distinct())
+        {
+            _targets.Add(new AssignmentTargetSpec(kind, refId));
+        }
+    }
+
+    /// <summary>
+    /// TGT-2: the "Everyone" toggle. On, the target set becomes exactly one
+    /// <see cref="TargetKindDto.AllStudents"/> row (mutually exclusive with every other kind — the
+    /// constraint pickers render disabled). Off, the constraint set that was in place when Everyone
+    /// was switched on is RESTORED — the author's work is kept, not silently discarded (F4). With no
+    /// such snapshot (an Everyone row that was loaded, never toggled) the set is emptied for
+    /// re-authoring, which is the pre-F4 behaviour.
+    /// </summary>
+    public void SetEveryoneTarget(bool everyone)
+    {
+        if (everyone)
+        {
+            // An AllStudents row IS the Everyone state, never a prior constraint, so it is not part
+            // of what the OFF transition puts back.
+            _everyonePriorTargets = _targets.Where(t => t.Kind != TargetKindDto.AllStudents).ToList();
+            _targets.Clear();
+            _targets.Add(new AssignmentTargetSpec(TargetKindDto.AllStudents, null));
+            return;
+        }
+
+        _targets.Clear();
+        if (_everyonePriorTargets is { Count: > 0 })
+        {
+            _targets.AddRange(_everyonePriorTargets);
+        }
+
+        // Consumed: a later ON re-snapshots whatever the set is at that point.
+        _everyonePriorTargets = null;
+    }
+
+    /// <summary>Removes the target at <paramref name="index"/> (the chip list's removal action);
+    /// out-of-range indices are ignored so a stale click cannot throw. DisplayOrder re-indexes
+    /// implicitly because the list order IS the order.</summary>
+    public void RemoveTargetAt(int index)
+    {
+        if (index < 0 || index >= _targets.Count)
+        {
+            return;
+        }
+
+        _targets.RemoveAt(index);
+    }
+
+    /// <summary>D-4/UX-21 change gate: true when the current selection differs from the loaded
+    /// baseline, so an untouched editor never issues a full-replacement write.</summary>
+    public bool TargetsChanged =>
+        _targets.Count != _loadedTargets.Count
+        || !_targets.Select(t => (t.Kind, t.RefId))
+            .SequenceEqual(_loadedTargets.Select(t => (t.Kind, t.RefId)));
+
     /// <summary>Fixed question page size for the editor + review paginator
     /// (spec §0 decision 9 / FR-240).</summary>
     public const int QuestionPageSize = 5;
@@ -156,8 +284,13 @@ public sealed class AssignmentEditFormModel
 
         if (children is null)
         {
+            // R2 (UX-21): the target load shares this fail-closed contract — a null children read
+            // leaves the targeting constraints NOT loaded, so their editor renders disabled.
+            LoadTargets(null);
             return;
         }
+
+        LoadTargets(children.Targets);
 
         // Display order is re-indexed 0..n by load position (EC-7) — the read already
         // ordered by the persisted DisplayOrder.
@@ -232,7 +365,11 @@ public sealed class AssignmentEditFormModel
         Guid topicId,
         Guid? gradeLevelId,
         bool mandatoryReview,
-        bool requiresSignature = false)
+        bool requiresSignature = false,
+        /// <summary>R2 (TGT-1): the authored targeting constraints. Null on a create means "no
+        /// targets supplied" (publish is then refused until they are authored); on an update null
+        /// preserves the persisted set (the caller's change gate).</summary>
+        IReadOnlyList<AssignmentTargetDto>? targets = null)
     {
         IReadOnlyList<NewQuestionDto>? questions = null;
         if (Questions.Count > 0)
@@ -316,7 +453,9 @@ public sealed class AssignmentEditFormModel
             DifficultyMediumCount: DifficultyMediumCount,
             DifficultyHardCount: DifficultyHardCount,
             // INS-1 (assignment-authoring-compartments §9): student-facing text.
-            Instructions: Instructions);
+            Instructions: Instructions,
+            // R2 (TGT-1 / D-1): the authored targeting constraints.
+            Targets: targets);
     }
 
     /// <summary>
@@ -336,11 +475,12 @@ public sealed class AssignmentEditFormModel
         Guid topicId,
         Guid? gradeLevelId,
         bool mandatoryReview,
-        bool requiresSignature = false)
+        bool requiresSignature = false,
+        IReadOnlyList<AssignmentTargetDto>? targets = null)
     {
         var create = ToCreateRequest(
             assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
-            mandatoryReview, requiresSignature);
+            mandatoryReview, requiresSignature, targets);
 
         return new UpdateAssignmentRequest(
             Title: create.Title,
@@ -365,7 +505,8 @@ public sealed class AssignmentEditFormModel
             DifficultyEasyCount: create.DifficultyEasyCount,
             DifficultyMediumCount: create.DifficultyMediumCount,
             DifficultyHardCount: create.DifficultyHardCount,
-            Instructions: Instructions);
+            Instructions: Instructions,
+            Targets: create.Targets);
     }
 
     /// <summary>

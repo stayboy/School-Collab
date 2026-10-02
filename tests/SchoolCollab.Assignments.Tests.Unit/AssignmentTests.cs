@@ -107,6 +107,11 @@ public class AssignmentTests
         Assert.AreEqual("Complete exercises 1-10", assignment.Description);
         Assert.AreEqual(AssignmentType.Digital, assignment.AssignmentType);
         Assert.AreEqual(GradingFormat.AutoGraded, assignment.GradingFormat);
+        // R2 (D-1): TargetAudienceType is DERIVED from the authored target rows, not the legacy
+        // constructor argument — attaching the equivalent AllStudents target derives it.
+        assignment.TargetAudienceType.Should().Be(TargetAudienceType.Mixed,
+            "a freshly constructed aggregate carries no target rows yet");
+        assignment.WithAllStudentsTarget();
         Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
         Assert.AreEqual(TopicId, assignment.TopicId);
         Assert.IsNull(assignment.GradeLevelId);
@@ -157,9 +162,15 @@ public class AssignmentTests
     }
 
     [TestMethod]
-    public void Create_DefaultTargetAudienceIsAllStudents()
+    public void Create_DefaultTargetAudienceIsDerivedFromTheAuthoredTargets()
     {
+        // R2 (D-1/TGT-15): the legacy column is derived by SyncDerivedTargeting, so the
+        // constructor argument no longer authors it. An AllStudents target derives AllStudents;
+        // a grade-only set derives SelectedGrades; a Stream/Student set (or none) derives Mixed.
         var assignment = CreateTestAssignment(audience: TargetAudienceType.AllStudents);
+        Assert.AreEqual(TargetAudienceType.Mixed, assignment.TargetAudienceType);
+
+        assignment.WithAllStudentsTarget();
         Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
     }
 
@@ -169,9 +180,12 @@ public class AssignmentTests
         var assignment = CreateTestAssignment("Old Title");
         var newTopicId = Guid.NewGuid();
 
+        var gradeLevelId = Guid.NewGuid();
         assignment.Update("New Title", "New Desc", AssignmentType.SemiManual,
             GradingFormat.InstantGraded, TargetAudienceType.SelectedGrades,
-            newTopicId, Guid.NewGuid(), null, 50m, true);
+            newTopicId, gradeLevelId, null, 50m, true);
+        // R2 (D-1): the derived compat column follows the authored targets.
+        assignment.WithGradeTarget(gradeLevelId);
 
         Assert.AreEqual("New Title", assignment.Title);
         Assert.AreEqual("New Desc", assignment.Description);

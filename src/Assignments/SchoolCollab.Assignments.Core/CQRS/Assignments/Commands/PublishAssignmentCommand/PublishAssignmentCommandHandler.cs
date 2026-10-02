@@ -15,9 +15,8 @@ public sealed class PublishAssignmentCommandHandler(
     IAssignmentRepository repository,
     ISubmissionRepository submissionRepository,
     IContactResolver contactResolver,
-    IAssignmentActivityGroupRepository linkRepository,
-    IActivityGroupLookup groupLookup,
     ITopicAssignmentLookup topicAssignmentLookup,
+    IAssignmentTargetResolver targetResolver,
     ITenantProvider tenantProvider,
     IAssignmentNotificationBroadcaster broadcaster,
     INotificationPolicyResolver policyResolver,
@@ -83,9 +82,13 @@ public sealed class PublishAssignmentCommandHandler(
     /// contact selection subset per spec §8). When the assignment mandates
     /// guardian review, also ensure a <see cref="GuardianSubmissionGate"/> exists
     /// for every student who has a Primary guardian subscriber (spec §4.6 / §4.10).
-    /// For <see cref="TargetAudienceType.SelectedGroups"/> the cohort is the active
-    /// members of the linked groups (FR-20), archived groups excluded (EC-4); a
-    /// SelectedGroups assignment with zero links cannot be published (FR-23).
+    /// <para>R2 (TGT-9/TGT-10, D-6): the recipient cohort is the union resolved from the
+    /// assignment's authored <see cref="AssignmentTarget"/> rows through
+    /// <see cref="IAssignmentTargetResolver"/>; the resolved ids ride the existing
+    /// <see cref="ResolveSubscribersRequest.StudentIds"/> seam, so contact / subscription /
+    /// policy filtering is unchanged. Resolution is fail-closed: no targets (TGT-13), a
+    /// resolver failure (the exception propagates) and an empty resolved set each refuse the
+    /// publish.</para>
     /// </summary>
     private async Task<List<AssignmentRecipient>> ResolveRecipientsAndGatesAsync(
         Assignment assignment, Guid tenantId, int? linkValidityDays, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
@@ -95,37 +98,69 @@ public sealed class PublishAssignmentCommandHandler(
         var effectiveDate = DateOnly.FromDateTime(
             (assignment.DueDate ?? assignment.PublishedAt ?? DateTimeOffset.UtcNow).UtcDateTime);
 
-        ResolveSubscribersRequest request;
-        if (assignment.TargetAudienceType == TargetAudienceType.SelectedGroups)
+        // TGT-13 (+ D-6(a)): the authored target rows are the only recipient source — an
+        // assignment with none cannot publish. This mirrors (and replaces) the pre-R2 FR-23
+        // empty-group-links refusal; the publish route maps InvalidOperationException to 400.
+        var targets = assignment.Targets;
+        if (targets.Count == 0)
         {
-            // FR-18 / FR-20: target the active members of the linked groups.
-            var groupIds = await linkRepository.GetGroupIdsForAssignmentAsync(assignment.Id, cancellationToken);
-
-            // FR-23 / EC-7: an assignment targeting groups must have at least one
-            // linked group before it can be published.
-            if (groupIds.Length == 0)
-                throw new InvalidOperationException(
-                    $"Assignment '{assignment.Id}' targets SelectedGroups but has no linked activity groups; link at least one group before publishing.");
-
-            // FR-58: the subject must be assigned to every linked group.
-            if (!await topicAssignmentLookup.IsTopicAssignedAsync(null, groupIds, assignment.TopicId, effectiveDate, cancellationToken))
-                throw new InvalidOperationException(
-                    $"Assignment '{assignment.Id}' subject is not assigned to its linked activity group(s) for the effective period; assign the topic before publishing.");
-
-            // EC-4: archived groups are excluded from recipient resolution.
-            var memberIds = await groupLookup.GetActiveMemberIdsAsync(groupIds, cancellationToken);
-            request = new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, StudentIds: memberIds);
+            throw new InvalidOperationException(
+                $"Assignment '{assignment.Id}' has no targets; add at least one audience target before publishing.");
         }
-        else
+
+        // D-6: the all-students leg is explicit — true iff the set carries an AllStudents row.
+        var includeAllStudents = targets.Any(t => t.Kind == TargetKind.AllStudents);
+        var constraints = targets
+            .Select(t => new TargetConstraint(t.Kind, t.RefId))
+            .ToArray();
+
+        // TGT-10 / D-6(b): a resolver/transport failure propagates — publish is blocked and
+        // never degrades to publishing to nobody or everybody.
+        var resolvedStudentIds = await targetResolver.ResolveStudentIdsAsync(
+            constraints, includeAllStudents, cancellationToken);
+
+        // D-6(c): an empty resolved set is refused (fail-closed) — the deliberate mirror of
+        // the fail-open policy resolver (assignment-policy.md §2).
+        if (resolvedStudentIds.Length == 0)
         {
-            // FR-58: the subject must be assigned to the target grade.
-            if (!await topicAssignmentLookup.IsTopicAssignedAsync(assignment.GradeLevelId, [], assignment.TopicId, effectiveDate, cancellationToken))
+            throw new InvalidOperationException(
+                $"Assignment '{assignment.Id}' targets resolve to no students; refusing to publish an empty sendout.");
+        }
+
+        // FR-58 topic gate (D-6): derived exclusively from the kinded target rows — grade
+        // targets run the grade gate, activity-group targets the group gate (every group must
+        // carry the subject). The AllStudents leg runs NO gate, and an authored primary grade
+        // is a policy/authoring field rather than a delivery constraint, so it runs no grade
+        // gate either; Stream/Student legs impose no gate.
+        var groupIds = targets
+            .Where(t => t.Kind == TargetKind.ActivityGroup && t.RefId.HasValue)
+            .Select(t => t.RefId!.Value)
+            .Distinct()
+            .ToArray();
+        if (groupIds.Length > 0
+            && !await topicAssignmentLookup.IsTopicAssignedAsync(null, groupIds, assignment.TopicId, effectiveDate, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                $"Assignment '{assignment.Id}' subject is not assigned to its linked activity group(s) for the effective period; assign the topic before publishing.");
+        }
+
+        foreach (var gradeId in targets
+                     .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                     .Select(t => t.RefId!.Value)
+                     .Distinct())
+        {
+            if (!await topicAssignmentLookup.IsTopicAssignedAsync(gradeId, [], assignment.TopicId, effectiveDate, cancellationToken))
+            {
                 throw new InvalidOperationException(
                     $"Assignment '{assignment.Id}' subject is not assigned to the target grade for the effective period; assign the topic before publishing.");
-
-            // AllStudents / SelectedGrades keep the existing grade-level path.
-            request = new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId);
+            }
         }
+
+        // TGT-9: the resolved target cohort rides the existing StudentIds seam. The primary
+        // grade rides GradeLevelId so the grade's teacher-recipient leg survives (D-6's
+        // documented widening for a group-only assignment carrying a primary grade).
+        var request = new ResolveSubscribersRequest(
+            tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId, resolvedStudentIds);
 
         var subscribers = await contactResolver.ResolveSubscribersAsync(request, cancellationToken);
 

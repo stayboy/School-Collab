@@ -66,7 +66,10 @@ public class SubmissionEngineTests
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents, TopicId, GradeLevelId, null, null, TeacherId)
-            .WithTenant(TenantProvider());
+            .WithTenant(TenantProvider())
+            // R2 (TGT-13/D-1): the publish path reads the authored target rows, so this fixture
+            // needs a grade target (matching its GradeLevelId) to stay publishable.
+            .WithGradeTarget(GradeLevelId);
         if (!mandatoryReview)
             typeof(Assignment).GetProperty(nameof(Assignment.MandatoryReview))!.SetValue(a, false);
         return a;
@@ -160,8 +163,8 @@ public class SubmissionEngineTests
 
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
+            new FakeAssignmentTargetResolver { StudentIds = [StudentId] },
             TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeAssignmentPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -189,8 +192,8 @@ public class SubmissionEngineTests
         var submissionRepo = new FakeSubmissionRepository();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
+            new FakeAssignmentTargetResolver { StudentIds = [StudentId] },
             TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), new FakeAssignmentPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -320,8 +323,8 @@ public class SubmissionEngineTests
         var broadcaster = new FakeBroadcaster();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
+            new FakeAssignmentTargetResolver { StudentIds = [StudentId] },
             TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeAssignmentPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -415,8 +418,8 @@ public class SubmissionEngineTests
         var broadcaster = new FakeBroadcaster();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
+            new FakeAssignmentTargetResolver { StudentIds = [StudentId] },
             TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeAssignmentPolicyResolver(), new FakeFeatureFlagService(), new FakeDeepLinkTokenMinter(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         // Select only the guardian contact (spec §8).

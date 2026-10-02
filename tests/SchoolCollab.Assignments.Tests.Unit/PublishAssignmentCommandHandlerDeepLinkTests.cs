@@ -44,7 +44,9 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
     private static Assignment NewAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
-            .WithTenant(TenantId);
+            .WithTenant(TenantId)
+            // R2 (TGT-13): a publishable assignment needs at least one authored target row.
+            .WithAllStudentsTarget();
 
     private static PublishAssignmentCommandHandler NewHandler(
         FakeSubmissionRepository submissionRepo,
@@ -55,16 +57,15 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
         var assignment = NewAssignment();
         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
         var contactResolver = new FakeContactResolver([Subscriber]);
-        var linkRepo = new FakeLinkRepository();
-        var groupLookup = new FakeActivityGroupLookup();
         var topicLookup = new FakeTopicAssignmentLookup();
+        var targetResolver = new FakeAssignmentTargetResolver { StudentIds = [StudentId] };
         var tenantProvider = new FakeTenantProvider(TenantId);
         var broadcaster = new FakeBroadcaster();
         var cache = new FakeHybridCache();
 
         return new PublishAssignmentCommandHandler(
-            assignmentRepo, submissionRepo, contactResolver, linkRepo, groupLookup,
-            topicLookup, tenantProvider, broadcaster, policyResolver,
+            assignmentRepo, submissionRepo, contactResolver,
+            topicLookup, targetResolver, tenantProvider, broadcaster, policyResolver,
             new FakeAssignmentPolicyResolver(),
             flags ?? new FakeFeatureFlagService(), minter, cache,
             NullLogger<PublishAssignmentCommandHandler>.Instance);
