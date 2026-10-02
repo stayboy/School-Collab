@@ -1,7 +1,7 @@
 # Teachers & Ward Portal — Prefab UI (Python) integration plan
 
 Status: **Phase-0 spike LANDED (ar-23, PR #247 → `8d1c8a20`, 2026-09-21)** — phases 1+ remain a proposal pending the owner's MVP go/no-go. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
-Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`)
+Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7)
 Branch context: authored alongside the AR-13 round (branch `stack/13-ar-13-families-ward-surface`, since squash-merged to `main` as PR #236); the AR train (ar-13/ar-14/ar-15 — #236/#237/#239) has since fully merged to `main`. No code for this plan has landed.
 
 ## 1. Goal
@@ -32,6 +32,38 @@ is frontend-only.
 | Q4 | MVP order | Ward portal first, teacher review second |
 | Q5 | Serving | Aspire AppHost caters for it solely — app launched via `AddPythonApp` entrypoint only; no separate serving-stack layer |
 | Q6 | Definition of done | **Spike only**: AppHost + prefab + one live API call in the Aspire dashboard, then re-decide before any MVP work |
+
+### Teacher-portal spike + auth roles/policies (grill session, 2026-10-01)
+
+Owner-ratified decisions for the **teacher portal** — the staff/teacher-facing
+workspace in the same Prefab app. Direction: assignment creation and management
+are staff/teacher-facing, and the portal is the eventual home for the working
+assignment feature set.
+
+| # | Branch | Decision |
+|---|---|---|
+| T1 | Container project | **`src/SchoolCollab.Portals/`** already hosts it — add `views/teacher/` + `api/` client methods. **No new project.** (The sibling `src/SchoolCollab.AuthPortal` owns identity/login/user-admin, not the teacher workspace.) |
+| T2 | Role taxonomy | Add **`teacher`** and **`staff`** as declarative Keycloak realm roles in `school-collab-realm.json` (D11: definitions declarative; assignment via the auth admin UI). Approval is a **policy** over (staff ∨ admin), not a fourth role. |
+| T3 | Teacher data scope | A `teacher` sees assignments they **created** (`CreatedByTeacherId`) **plus** assignments for the **subject + grade** they teach, resolved from `TeacherGradeLevel` (`TopicId` = subject, `GradeLevelId` = grade, optional `TeacherRoleCodedValueId` = `TCHROLES` role). `staff` and admins see tenant-wide. |
+| T4 | Enforcement point | **API-side authorization policies** on the assignment endpoint groups (fail-closed), conditional on `FEATURE:DisableOIDCAuth` per `AGENTS.md`. Portal-side hiding is UX only, never the control. |
+| T5 | Spike boundary | **Read-only review**: assignment list + review queue + submission detail + submission review/grade. **No** create/edit/publish in the portal (those stay on the Blazor Admin surface until migrated). |
+| T6 | Auth mode | Dev bypass first (`FEATURE:DisableOIDCAuth=true`, TestAuth) keeps CI container-free; the role/policy wiring lands in the same change and activates when the flag flips. |
+| T7 | Relationship to the Blazor compartments | **Both tracks run** (owner Q5 = A). `documents/specs/assignment-authoring-compartments.md` (Blazor) remains the **authoring destination**; the Prefab teacher portal is a **read/review second surface** for the spike and the eventual migration target for the rest. |
+
+**Consequence — Q3 (“zero backend changes”) is revised for the teacher portal
+only.** T2–T4 require backend work the ward portal does not:
+
+- **Roles** — add `teacher` + `staff` to the realm import and ship the `roles`
+  claim mapper. `PortalSessionAuthenticationHandler` already projects realm roles
+  onto `ClaimTypes.Role`, so `RequireRole` resolves without new plumbing.
+- **Policies** — one or more authorization policies (e.g. `require-teacher`,
+  `require-staff`) applied to the assignment endpoint groups, conditional on the
+  auth flag.
+- **Scope** — a teacher-scope filter on the assignment list/review queries fed by
+  a **new Assignments→Students cross-context port** over `TeacherGradeLevel`
+  (existing Students queries `ListGradeLevelsForTeacher` / `ListTeacherGradeAssignments`,
+  routes in `TeacherRoutes.cs`). `ListAssignmentsQueryHandler` does **not** filter
+  by teacher today.
 
 ## 2. Findings — Prefab UI
 
@@ -145,16 +177,19 @@ School-Collab/
         └── tests/                    (pytest + httpx.MockTransport — no server, no Docker)
 ```
 
-### API contract already fits — zero backend changes (Q3)
+### API contract (Q3 — zero backend changes for the ward portal; revised for the teacher portal)
 
 - **Ward completion** (MVP 1): `GET /{studentId}/assignments`,
   `GET /{id}/students/{studentId}/modules`,
   `POST /{id}/students/{studentId}/modules/{moduleId}/progress`,
   `POST /{id}/students/{studentId}/submission` (Assignments API).
-- **Teacher review** (MVP 2, deferred): `GET /{id}/submissions`,
+- **Teacher review** (spike, T5 read-only subset): `GET /{id}/submissions`,
   `GET /{id}/submissions/review-queue`,
   `GET /{id}/students/{studentId}/submission`,
-  `POST /{id}/students/{studentId}/submission/review`, plus publish/approve flow.
+  `POST /{id}/students/{studentId}/submission/review`.
+  Unlike the ward endpoints these are **not** zero-change: they need the T2–T4
+  roles, policies and teacher-scope filter; `review-queue` is already
+  principal-first (`ar-24`). Publish/approve stay out of the spike.
 
 **Architecture constraints honored:**
 - No direct project references between bounded contexts — the Python app talks
@@ -188,13 +223,23 @@ School-Collab/
   route, mirroring the Families Blazor pattern.
 - Test story: Playwright per `.github/copilot/rules/testing.md`.
 
-### Phase 2 — Teacher review portal (deferred)
-- Submissions list / review queue over the existing review endpoints; mutations
-  only after Phase 1 is accepted.
+### Phase 2 — Teacher review portal spike (2026-10-01 decisions T1–T7)
+- **Read-only** teacher workspace in `views/teacher/`: assignment list (scoped per
+  T3) → review queue (principal-first, ar-24) → submission detail → submission
+  review/grade. No create/edit/publish in the spike (T5).
+- **Auth/roles (T2, T4, T6)**: add `teacher` + `staff` realm roles, the
+  assignment endpoint-group authorization policies (flag-conditional), and the
+  teacher-scope filter fed by a new Assignments→Students `TeacherGradeLevel` port.
+- **T7**: the Blazor compartment spec
+  (`documents/specs/assignment-authoring-compartments.md`) remains the authoring
+  destination; both tracks run.
+- Test story: Playwright per `.github/copilot/rules/testing.md`; pytest +
+  `httpx.MockTransport` for the view/client layer.
 
-### Phase 3 — Auth & tenancy (deferred)
-- OIDC flow for the portal with token pass-through; tenant scoping stays
-  server-side as today.
+### Phase 3 — Auth & tenancy (partially pulled forward)
+- The **role/policy** half of this phase is pulled into Phase 2 (§1 T2–T6).
+- **OIDC flow** for the portal (token pass-through / mediation) remains deferred;
+  tenant scoping stays server-side as today.
 
 ### Phase 4 — Decision review (deferred)
 - Go/no-go vs extending the Blazor Families host; document in
@@ -209,6 +254,7 @@ School-Collab/
 | No bUnit equivalent | Playwright tests per `.github/copilot/rules/testing.md` conventions |
 | `Aspire.Hosting.Python` API surface (verified 2026-09-16 against aspire.dev + Learn docs; exact patch version still to pin at spike time) | Phase 0 spike pins the version and settles the ASGI-vs-script entrypoint choice (`AddUvicornApp` vs `AddPythonApp`) |
 | Dual-stack surface drift (Blazor Families vs Prefab portal) | Phase 4 decision review; keep ward REST contract as single source of truth |
+| Teacher scope depends on cross-context data (`TeacherGradeLevel`) | New Assignments→Students port; scope filter is fail-closed and server-side (T3/T4); spike stays read-only until it lands |
 
 ## 7. Open questions → resolved / remaining
 
@@ -220,5 +266,8 @@ auth model, API contract fit, MVP order, serving stack, definition of done.
 1. **Spike-success criteria for the ward MVP go/no-go** — define after Phase 0,
    before any MVP work (prefab reactivity/form/table ergonomics is the thing
    being evaluated).
-2. **Teacher review portal, OIDC, and CI for the `src/SchoolCollab.Portals/` folder** — deferred
-   until the spike re-decision.
+2. **Teacher portal — remaining after the 2026-10-01 decisions (T1–T7):** the
+   spike-success criteria for the teacher workspace, OIDC (still deferred; the
+   role/policy half moved to Phase 2), CI for the `src/SchoolCollab.Portals/`
+   folder, and the migration order for the remaining assignment
+   create/edit/publish features once the read-only review spike is accepted.

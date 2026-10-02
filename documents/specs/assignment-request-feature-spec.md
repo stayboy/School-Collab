@@ -1,5 +1,10 @@
 # Feature Spec: Assignment Request (AR) System for Schools
 
+> **Companion spec:** the authoring/editing UX and the multi-constraint targeting
+> model are governed by `documents/specs/assignment-authoring-compartments.md`
+> (adopted 2026-10-01) — it supersedes the create wizard and extends targeting
+> beyond this spec's §3.1 roster/class/group model.
+
 ## 1. Summary
 
 An **Assignment Request** is a school-issued unit of work that combines:
