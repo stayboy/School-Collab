@@ -9,10 +9,12 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 
 /// <summary>
 /// WS-A3 (spec §3.3 + §7 Q4) — <see cref="ScoringFieldsSection"/>
-/// renders the Pass Score + Max Attempts inputs ONLY for
-/// AutoGraded / InstantGraded grading formats; hidden for
-/// TeacherGraded (the conditional that keeps the section in sync with
-/// the page's <c>ScoringFieldsPassSubmitGate</c>).
+/// renders the Pass Score + Max Attempts inputs for AutoGraded / InstantGraded; for
+/// TeacherGraded they render <b>disabled with an inline reason</b>
+/// (assignment-authoring-compartments UX-17/D12 — never hidden, so the authoring page does
+/// not reflow when the grading format changes). The <c>ScoringFieldsPassSubmitGate</c>
+/// safety rule is unchanged: a TeacherGraded submit never blocks on the hidden-then,
+/// disabled-now values.
 /// </summary>
 [TestClass]
 public class ScoringFieldsSectionBunitTests : BunitContext
@@ -59,16 +61,23 @@ public class ScoringFieldsSectionBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void TeacherGraded_HidesBothInputs()
+    public void TeacherGraded_RendersBothInputsDisabledWithReason()
     {
         var cut = Render(new AssignmentEditFormModel(), GradingFormatDto.TeacherGraded);
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().NotContain("Pass Score",
-                "TeacherGraded must hide the Pass Score field (the gate's safety rule)");
-            cut.Markup.Should().NotContain("Max Attempts",
-                "TeacherGraded must hide the Max Attempts field (the gate's safety rule)");
+            // UX-17 / D12 (assignment-authoring-compartments §12): inapplicable controls are
+            // disabled with an inline reason, never hidden — the compartment must not reflow
+            // when the grading format changes.
+            var fields = cut.FindAll("fluent-number-field");
+            fields.Should().HaveCount(2, "both fields stay rendered for TeacherGraded");
+            fields.Should().OnlyContain(f => f.HasAttribute("disabled"),
+                "TeacherGraded disables the Pass Score and Max Attempts fields");
+            cut.Markup.Should().Contain("Pass Score");
+            cut.Markup.Should().Contain("Max Attempts");
+            cut.Markup.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
+                "the inline reason explains why the fields cannot be edited");
         });
     }
 

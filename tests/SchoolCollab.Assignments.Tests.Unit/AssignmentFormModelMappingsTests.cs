@@ -1113,4 +1113,163 @@ public class AssignmentFormModelMappingsTests
         model.RemoveResourceUrlAt(-1);
         model.ResourceUrls.Should().HaveCount(1, "out-of-range indices are silently ignored");
     }
+
+    // ── LoadChildren (assignment-authoring P1 rework: the load half of Edit parity) ──
+
+    private static AssignmentAuthoringChildrenDto MakeChildren(
+        IReadOnlyList<AssignmentQuestionReadDto>? questions = null,
+        IReadOnlyList<AssignmentAttachmentReadDto>? attachments = null,
+        IReadOnlyList<ResourceDto>? resources = null) =>
+        new(
+            Guid.NewGuid(),
+            questions ?? [],
+            attachments ?? [],
+            resources ?? []);
+
+    [TestMethod]
+    public void LoadChildren_MapsQuestionsWithOptionsAndCorrectIndex()
+    {
+        var questionId = Guid.NewGuid();
+        var children = MakeChildren(questions:
+        [
+            new AssignmentQuestionReadDto(
+                questionId,
+                "What is 2+2?",
+                QuestionTypeDto.MultipleChoice,
+                DisplayOrder: 0,
+                ModelAnswer: null,
+                Options:
+                [
+                    new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "3", false),
+                    new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "4", true),
+                    new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "5", false)
+                ]),
+            new AssignmentQuestionReadDto(
+                Guid.NewGuid(), "Name a planet.", QuestionTypeDto.ShortAnswer, DisplayOrder: 1, ModelAnswer: "Mars")
+        ]);
+        var model = new AssignmentEditFormModel();
+
+        model.LoadChildren(children);
+
+        model.Questions.Should().HaveCount(2);
+        model.Questions[0].QuestionText.Should().Be("What is 2+2?");
+        model.Questions[0].Type.Should().Be(QuestionTypeDto.MultipleChoice);
+        model.Questions[0].Options.Select(o => o.OptionText).Should().Equal("3", "4", "5");
+        model.Questions[0].CorrectOptionIndex.Should().Be(1,
+            "IsCorrect on the persisted option re-projects onto the editor row's single correct index");
+        model.Questions[1].Type.Should().Be(QuestionTypeDto.ShortAnswer);
+        model.Questions[1].Options.Should().BeEmpty();
+        model.Questions[1].ModelAnswer.Should().Be("Mars");
+        model.Questions.Select(q => q.DisplayOrder).Should().Equal(new[] { 0, 1 });
+        // ...because DisplayOrder is re-indexed 0..n on load (EC-7).
+    }
+
+    [TestMethod]
+    public void LoadChildren_MapsAttachmentsAndUrlResources()
+    {
+        var children = MakeChildren(
+            attachments: [new AssignmentAttachmentReadDto(Guid.NewGuid(), "syllabus.pdf", "application/pdf", 2048, "tenants/t/syllabus.pdf")],
+            resources: [new ResourceDto(Guid.NewGuid(), Guid.NewGuid(), ResourceKindDto.Url, "https://example.com/a", null, "A", true)]);
+        var model = new AssignmentEditFormModel();
+
+        model.LoadChildren(children);
+
+        model.Attachments.Should().ContainSingle();
+        model.Attachments[0].FileName.Should().Be("syllabus.pdf");
+        model.Attachments[0].ContentType.Should().Be("application/pdf");
+        model.Attachments[0].FileSize.Should().Be(2048);
+        model.Attachments[0].StoragePath.Should().Be("tenants/t/syllabus.pdf");
+        model.ResourceUrls.Should().ContainSingle();
+        model.ResourceUrls[0].Url.Should().Be("https://example.com/a");
+        model.ResourceUrls[0].DisplayName.Should().Be("A");
+        model.PreservedResources.Should().BeEmpty("a Url resource is owned by the URL editor");
+    }
+
+    /// <summary>
+    /// The P1 data-loss shape: a loaded set PLUS one added question must project BOTH, so the
+    /// update handler's full replacement re-writes the persisted rows instead of deleting them.
+    /// </summary>
+    [TestMethod]
+    public void LoadChildren_ThenAddQuestion_ProjectsTheLoadedAndNewSet()
+    {
+        var children = MakeChildren(
+            questions: [new AssignmentQuestionReadDto(Guid.NewGuid(), "Loaded?", QuestionTypeDto.ShortAnswer, 0, "Yes")],
+            attachments: [new AssignmentAttachmentReadDto(Guid.NewGuid(), "syllabus.pdf", "application/pdf", 2048, "tenants/t/syllabus.pdf")],
+            resources: [new ResourceDto(Guid.NewGuid(), Guid.NewGuid(), ResourceKindDto.Url, "https://example.com/a", null, null, true)]);
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.LoadChildren(children);
+
+        var added = new QuestionEditorRow { QuestionText = "Added?", Type = QuestionTypeDto.ShortAnswer };
+        model.AddQuestion(added);
+
+        var req = model.ToUpdateRequest(
+            AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
+            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+
+        req.Questions.Should().NotBeNull();
+        // The outgoing request carries the loaded set plus the new question — never only the
+        // new one.
+        req.Questions!.Select(q => q.QuestionText).Should().Equal(new[] { "Loaded?", "Added?" });
+        req.Questions.Select(q => q.DisplayOrder).Should().Equal(new[] { 0, 1 });
+        req.Attachments.Should().HaveCount(1, "the loaded attachment is re-projected, not dropped");
+        req.Attachments![0].FileName.Should().Be("syllabus.pdf");
+        req.Resources.Should().HaveCount(1);
+        req.Resources![0].Url.Should().Be("https://example.com/a");
+    }
+
+    /// <summary>
+    /// A File-kind resource has no editor row, so the load keeps it verbatim and the
+    /// projection re-emits it — otherwise editing one URL would delete every non-URL
+    /// resource on the assignment (the update handler full-replaces a non-null collection).
+    /// </summary>
+    [TestMethod]
+    public void LoadChildren_FileKindResource_IsPreservedAndReProjected()
+    {
+        var children = MakeChildren(resources:
+        [
+            new ResourceDto(Guid.NewGuid(), Guid.NewGuid(), ResourceKindDto.Url, "https://example.com/a", null, null, true),
+            new ResourceDto(Guid.NewGuid(), Guid.NewGuid(), ResourceKindDto.File, null, "tenants/t/notes.pdf", "Notes", false)
+        ]);
+        var model = new AssignmentEditFormModel { Title = "T" };
+
+        model.LoadChildren(children);
+
+        model.ResourceUrls.Should().ContainSingle();
+        model.PreservedResources.Should().ContainSingle();
+        model.PreservedResources[0].ResourceKind.Should().Be(ResourceKindDto.File);
+
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
+            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+
+        req.Resources.Should().HaveCount(2);
+        var file = req.Resources!.Single(r => r.ResourceKind == ResourceKindDto.File);
+        file.StoragePath.Should().Be("tenants/t/notes.pdf");
+        file.DisplayName.Should().Be("Notes");
+        file.IncludedInGeneration.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void LoadChildren_ReplacesAnyPreviousRows_NullClears()
+    {
+        var model = new AssignmentEditFormModel();
+        model.LoadChildren(MakeChildren(
+            questions: [new AssignmentQuestionReadDto(Guid.NewGuid(), "Q", QuestionTypeDto.ShortAnswer, 0)],
+            attachments: [new AssignmentAttachmentReadDto(Guid.NewGuid(), "a.pdf", "application/pdf", 1, "p")]));
+
+        model.LoadChildren(null);
+
+        model.Questions.Should().BeEmpty("a null read clears the model — the caller then renders the editors disabled");
+        model.Attachments.Should().BeEmpty();
+        model.ResourceUrls.Should().BeEmpty();
+
+        var req = model.ToUpdateRequest(
+            AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
+            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+
+        req.Questions.Should().BeNull();
+        req.Attachments.Should().BeNull();
+        req.Resources.Should().BeNull(
+            "an empty clear projects to null, which the update handler reads as 'preserve the persisted set'");
+    }
 }

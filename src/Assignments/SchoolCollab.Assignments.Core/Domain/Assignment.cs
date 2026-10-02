@@ -19,6 +19,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public Guid Id { get; private set; }
     public string Title { get; private set; } = default!;
     public string? Description { get; private set; }
+    /// <summary>INS-1 (assignment-authoring-compartments §9) — student-facing task
+    /// text, distinct from <see cref="Description"/> (the internal/author summary).</summary>
+    public string? Instructions { get; private set; }
     public AssignmentType AssignmentType { get; private set; }
     public GradingFormat GradingFormat { get; private set; }
     public TargetAudienceType TargetAudienceType { get; private set; }
@@ -150,7 +153,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         /// counts. Null = let the model decide; no cross-field sum validation.</summary>
         int? difficultyEasy = null,
         int? difficultyMedium = null,
-        int? difficultyHard = null)
+        int? difficultyHard = null,
+        /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing
+        /// task text. Null when the author supplied none.</summary>
+        string? instructions = null)
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
@@ -169,6 +175,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             Id = Guid.NewGuid(),
             Title = title.Trim(),
             Description = description?.Trim(),
+            Instructions = instructions?.Trim(),
             AssignmentType = assignmentType,
             GradingFormat = gradingFormat,
             TargetAudienceType = targetAudienceType,
@@ -218,7 +225,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         /// counts. Null = let the model decide; no cross-field sum validation.</summary>
         int? difficultyEasy = null,
         int? difficultyMedium = null,
-        int? difficultyHard = null)
+        int? difficultyHard = null,
+        /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing
+        /// task text. Null when the author supplied none.</summary>
+        string? instructions = null)
     {
         if (Status is not (AssignmentStatus.Draft or AssignmentStatus.Scheduled))
             throw new InvalidOperationException("Only draft or scheduled assignments can be updated.");
@@ -235,6 +245,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
         Title = title.Trim();
         Description = description?.Trim();
+        Instructions = instructions?.Trim();
         AssignmentType = assignmentType;
         GradingFormat = gradingFormat;
         TargetAudienceType = targetAudienceType;

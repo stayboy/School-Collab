@@ -24,6 +24,11 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.Description)
             .HasMaxLength(5000);
 
+        // INS-1 (assignment-authoring-compartments §9): student-facing task text,
+        // distinct from Description (the internal/author summary).
+        builder.Property(x => x.Instructions)
+            .HasMaxLength(4000);
+
         builder.Property(x => x.AssignmentType)
             .IsRequired()
             .HasDefaultValue(AssignmentType.Digital);

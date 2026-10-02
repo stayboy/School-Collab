@@ -147,7 +147,11 @@ public record AssignmentSummaryDto(
     /// handlers. The approval surfaces read this field instead of the flag, so the
     /// deploy-window OR stays live without client-side policy logic. Defaults to false for
     /// pre-Q6/cached payloads.</summary>
-    bool RequiresApproval = false);
+    bool RequiresApproval = false,
+    /// <summary>INS-1/INS-2 (assignment-authoring-compartments §9): student-facing task
+    /// text, distinct from <see cref="Description"/> (the internal/author summary).
+    /// Null when the author supplied none.</summary>
+    string? Instructions = null);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -183,7 +187,10 @@ public record CreateAssignmentRequest(
     /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
     int? DifficultyMediumCount = null,
     /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
-    int? DifficultyHardCount = null);
+    int? DifficultyHardCount = null,
+    /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
+    /// text. Threaded to <c>Assignment.Create(...)</c>.</summary>
+    string? Instructions = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -219,7 +226,10 @@ public record UpdateAssignmentRequest(
     /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
     int? DifficultyMediumCount = null,
     /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
-    int? DifficultyHardCount = null);
+    int? DifficultyHardCount = null,
+    /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
+    /// text. Threaded to <c>Assignment.Update(...)</c>.</summary>
+    string? Instructions = null);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing
@@ -325,7 +335,10 @@ public record WardAssignmentViewDto(
     string Title,
     DateTimeOffset? DueDate,
     bool QuestionsUnlocked,
-    IReadOnlyList<WardModuleViewDto> Modules);
+    IReadOnlyList<WardModuleViewDto> Modules,
+    /// <summary>INS-2 (assignment-authoring-compartments §9): the student-facing
+    /// instructions, surfaced read-only on the ward player.</summary>
+    string? Instructions = null);
 
 /// <summary>WS-A5 — one row in a ward's assignment list.</summary>
 public record WardAssignmentListItemDto(
@@ -359,6 +372,47 @@ public record ResourceDto(
     string? StoragePath,
     string? DisplayName,
     bool IncludedInGeneration);
+
+/// <summary>One persisted question option (assignment-authoring-compartments P1
+/// rework, <c>GET /assignments/{id}/authoring</c>). The Edit surface loads the
+/// persisted set before it renders the question editor, so an add can never
+/// submit a non-null-but-empty collection that the update handler full-replaces.</summary>
+public record AssignmentQuestionOptionReadDto(
+    Guid Id,
+    string OptionText,
+    bool IsCorrect);
+
+/// <summary>One persisted question with its id and options (assignment-authoring
+/// P1 rework). <see cref="Options"/> is empty for
+/// <see cref="QuestionTypeDto.ShortAnswer"/>; correctness is carried per option and
+/// re-projected onto the editor row's single <c>CorrectOptionIndex</c>.</summary>
+public record AssignmentQuestionReadDto(
+    Guid Id,
+    string QuestionText,
+    QuestionTypeDto QuestionType,
+    int DisplayOrder,
+    string? ModelAnswer = null,
+    IReadOnlyList<AssignmentQuestionOptionReadDto>? Options = null);
+
+/// <summary>One persisted attachment (assignment-authoring P1 rework). The metadata
+/// round-trips verbatim onto the editor row, so a loaded attachment survives an
+/// update unchanged.</summary>
+public record AssignmentAttachmentReadDto(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    long FileSize,
+    string StoragePath);
+
+/// <summary>The persisted children of one assignment as the authoring Edit surface
+/// needs them (assignment-authoring P1 rework): questions, attachments and AI-generation
+/// resources. Read as ONE call so the editors are never rendered against a partially
+/// loaded form.</summary>
+public record AssignmentAuthoringChildrenDto(
+    Guid AssignmentId,
+    IReadOnlyList<AssignmentQuestionReadDto> Questions,
+    IReadOnlyList<AssignmentAttachmentReadDto> Attachments,
+    IReadOnlyList<ResourceDto> Resources);
 
 /// <summary>Result of <c>POST /assignments/attachments/stage</c> (WS-A1 /
 /// FR-210 / EC-4). The wizard stages one file at selection time and

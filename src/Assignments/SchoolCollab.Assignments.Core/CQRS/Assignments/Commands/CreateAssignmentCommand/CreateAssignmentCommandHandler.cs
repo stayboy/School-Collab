@@ -99,7 +99,9 @@ public sealed class CreateAssignmentCommandHandler(
             // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
             difficultyEasy: command.DifficultyEasyCount,
             difficultyMedium: command.DifficultyMediumCount,
-            difficultyHard: command.DifficultyHardCount)
+            difficultyHard: command.DifficultyHardCount,
+            // INS-1 (assignment-authoring-compartments §9): student-facing text.
+            instructions: command.Instructions)
             .WithTenant(tenantProvider);
 
         if (command.Questions is { Count: > 0 })

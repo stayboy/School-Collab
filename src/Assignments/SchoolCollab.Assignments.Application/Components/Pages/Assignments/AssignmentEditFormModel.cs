@@ -20,6 +20,11 @@ public sealed class AssignmentEditFormModel
 
     public string? Description { get; set; }
 
+    /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task text,
+    /// distinct from <see cref="Description"/> (the internal/author summary).
+    /// Round-trips through create/update so an edit never silently drops it.</summary>
+    public string? Instructions { get; set; }
+
     public DateTime? DueDate { get; set; }
 
     public decimal? MaxScore { get; set; }
@@ -39,6 +44,15 @@ public sealed class AssignmentEditFormModel
     /// <c>Resources</c> as <see cref="ResourceKindDto.Url"/> rows and fed to the
     /// question generator as <see cref="Resources"/> texts (≤3).</summary>
     public List<ResourceUrlRow> ResourceUrls { get; } = [];
+
+    /// <summary>Persisted resources whose kind the URL editor does not own
+    /// (<see cref="ResourceKindDto.File"/> / <see cref="ResourceKindDto.Video"/>, which
+    /// only a direct API write or a duplicated assignment can produce).
+    /// <para>Loaded by <see cref="LoadChildren"/> and re-projected verbatim, because the
+    /// update handler full-replaces <c>Resources</c> whenever the collection is non-null:
+    /// without them, editing one URL would silently delete every non-URL resource of the
+    /// assignment.</para></summary>
+    public List<NewResourceDto> PreservedResources { get; } = [];
 
     /// <summary>Optional free-text prompt override (FR-230 / decision 8).
     /// When blank, the AI host loads the embedded system prompt. When
@@ -87,9 +101,9 @@ public sealed class AssignmentEditFormModel
 
     /// <summary>
     /// Projects an <see cref="AssignmentSummaryDto"/> into a brand-new, fully-
-    /// populated <see cref="AssignmentEditFormModel"/>. The question/attachment
-    /// collections start empty — this round only persists them on create
-    /// (FR-250/251); the edit page is a later round (round doc §Out).
+    /// populated <see cref="AssignmentEditFormModel"/>. The question/attachment/resource
+    /// collections are NOT part of the summary DTO — the Edit surface loads them separately
+    /// via <see cref="LoadChildren"/>.
     /// </summary>
     public static AssignmentEditFormModel From(AssignmentSummaryDto assignment)
     {
@@ -107,6 +121,8 @@ public sealed class AssignmentEditFormModel
     {
         Title = assignment.Title;
         Description = assignment.Description;
+        // INS-1 (assignment-authoring-compartments §9): student-facing text round-trip.
+        Instructions = assignment.Instructions;
         DueDate = assignment.DueDate?.DateTime;
         MaxScore = assignment.MaxScore;
         ArchiveGraceDays = assignment.ArchiveGraceDays;
@@ -120,6 +136,83 @@ public sealed class AssignmentEditFormModel
         DifficultyEasyCount = assignment.DifficultyEasyCount;
         DifficultyMediumCount = assignment.DifficultyMediumCount;
         DifficultyHardCount = assignment.DifficultyHardCount;
+    }
+
+    /// <summary>
+    /// Loads this model's editable child collections from the authoring child read
+    /// (assignment-authoring P1 rework — the load half of Edit parity). Replaces
+    /// <see cref="Questions"/>, <see cref="Attachments"/>, <see cref="ResourceUrls"/> and
+    /// <see cref="PreservedResources"/> outright, so calling it never leaves a stale
+    /// row behind. A null <paramref name="children"/> clears them (the caller renders
+    /// the editors disabled in that case — a cleared form is never submitted as a
+    /// replacement).
+    /// </summary>
+    public void LoadChildren(AssignmentAuthoringChildrenDto? children)
+    {
+        Questions.Clear();
+        Attachments.Clear();
+        ResourceUrls.Clear();
+        PreservedResources.Clear();
+
+        if (children is null)
+        {
+            return;
+        }
+
+        // Display order is re-indexed 0..n by load position (EC-7) — the read already
+        // ordered by the persisted DisplayOrder.
+        foreach (var question in children.Questions)
+        {
+            var row = new QuestionEditorRow
+            {
+                QuestionText = question.QuestionText,
+                Type = question.QuestionType,
+                ModelAnswer = question.ModelAnswer,
+            };
+
+            var options = question.Options ?? [];
+            for (var i = 0; i < options.Count; i++)
+            {
+                row.Options.Add(new OptionEditorRow { OptionText = options[i].OptionText });
+                if (options[i].IsCorrect && row.CorrectOptionIndex is null)
+                {
+                    row.CorrectOptionIndex = i;
+                }
+            }
+
+            AddQuestion(row);
+        }
+
+        foreach (var attachment in children.Attachments)
+        {
+            Attachments.Add(new AttachmentEditorRow
+            {
+                FileName = attachment.FileName,
+                ContentType = attachment.ContentType,
+                FileSize = attachment.FileSize,
+                StoragePath = attachment.StoragePath,
+            });
+        }
+
+        foreach (var resource in children.Resources)
+        {
+            if (resource.ResourceKind is ResourceKindDto.Url && !string.IsNullOrWhiteSpace(resource.Url))
+            {
+                ResourceUrls.Add(new ResourceUrlRow(resource.Url, resource.DisplayName));
+            }
+            else
+            {
+                // No editor owns this row (a File/Video resource has no URL block), so it
+                // is kept verbatim and re-projected by ToCreateRequest — dropping it would
+                // make the next save delete it.
+                PreservedResources.Add(new NewResourceDto(
+                    resource.ResourceKind,
+                    resource.Url,
+                    resource.StoragePath,
+                    resource.DisplayName,
+                    resource.IncludedInGeneration));
+            }
+        }
     }
 
     /// <summary>
@@ -182,15 +275,18 @@ public sealed class AssignmentEditFormModel
         }
 
         IReadOnlyList<NewResourceDto>? resources = null;
-        if (ResourceUrls.Count > 0)
+        if (ResourceUrls.Count > 0 || PreservedResources.Count > 0)
         {
-            resources = ResourceUrls
-                .Select(r => new NewResourceDto(
+            // Preserved rows (File/Video resources loaded from the persisted set) come
+            // first so the projection round-trips the whole resource set, not just the
+            // URL rows the editor owns.
+            resources = PreservedResources
+                .Concat(ResourceUrls.Select(r => new NewResourceDto(
                     ResourceKind: ResourceKindDto.Url,
                     Url: r.Url,
                     StoragePath: null,
                     DisplayName: r.DisplayName,
-                    IncludedInGeneration: true))
+                    IncludedInGeneration: true)))
                 .ToList();
         }
 
@@ -218,7 +314,58 @@ public sealed class AssignmentEditFormModel
             // WS-B2 (spec §3.4 line 70): difficulty mix threaded to create.
             DifficultyEasyCount: DifficultyEasyCount,
             DifficultyMediumCount: DifficultyMediumCount,
-            DifficultyHardCount: DifficultyHardCount);
+            DifficultyHardCount: DifficultyHardCount,
+            // INS-1 (assignment-authoring-compartments §9): student-facing text.
+            Instructions: Instructions);
+    }
+
+    /// <summary>
+    /// Projects this form model into an <see cref="UpdateAssignmentRequest"/> for the
+    /// assignment identified by the route. Page-level values that live outside the model
+    /// (type, grading, audience, subject, grade level, review/signature flags) are passed in
+    /// as arguments — the <see cref="ToCreateRequest"/> precedent.
+    /// <para>Child collections follow the wire contract's null-means-preserve rule: an empty
+    /// editor projects <c>null</c> (not an empty list) so an edit that touches only scalar
+    /// fields can never wipe the persisted questions/attachments/resources — the update
+    /// handler's full-replacement semantics treat a non-null empty collection as "clear".</para>
+    /// </summary>
+    public UpdateAssignmentRequest ToUpdateRequest(
+        AssignmentTypeDto assignmentType,
+        GradingFormatDto gradingFormat,
+        TargetAudienceTypeDto targetAudienceType,
+        Guid topicId,
+        Guid? gradeLevelId,
+        bool mandatoryReview,
+        bool requiresSignature = false)
+    {
+        var create = ToCreateRequest(
+            assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
+            mandatoryReview, requiresSignature);
+
+        return new UpdateAssignmentRequest(
+            Title: create.Title,
+            Description: create.Description,
+            AssignmentType: create.AssignmentType,
+            GradingFormat: create.GradingFormat,
+            TargetAudienceType: create.TargetAudienceType,
+            TopicId: create.TopicId,
+            GradeLevelId: create.GradeLevelId,
+            DueDate: create.DueDate,
+            MaxScore: create.MaxScore,
+            MandatoryReview: create.MandatoryReview,
+            AiPromptOverride: create.AiPromptOverride,
+            Questions: create.Questions,
+            Attachments: create.Attachments,
+            ContentModules: create.ContentModules,
+            Resources: create.Resources,
+            ArchiveGraceDays: ArchiveGraceDays,
+            PassScore: create.PassScore,
+            MaxAttempts: create.MaxAttempts,
+            RequiresSignature: create.RequiresSignature,
+            DifficultyEasyCount: create.DifficultyEasyCount,
+            DifficultyMediumCount: create.DifficultyMediumCount,
+            DifficultyHardCount: create.DifficultyHardCount,
+            Instructions: Instructions);
     }
 
     /// <summary>

@@ -45,4 +45,7 @@ public sealed record UpdateAssignmentCommand(
     /// Threaded to <c>Assignment.Update(...)</c>.</summary>
     int? DifficultyEasyCount = null,
     int? DifficultyMediumCount = null,
-    int? DifficultyHardCount = null) : ICommand;
+    int? DifficultyHardCount = null,
+    /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
+    /// text. Threaded to <c>Assignment.Update(...)</c>.</summary>
+    string? Instructions = null) : ICommand;

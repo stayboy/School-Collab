@@ -113,7 +113,10 @@ public sealed class ListAssignmentsQueryHandler(
                     // WS-E2b / ar-17: "has ever been published" for the failure surface.
                     PublishedAt: s.PublishedAt,
                     // D3 / Q6: the server-derived approval gate for this row.
-                    RequiresApproval: approvalByGrade[GradeKey(s.GradeLevelId)])).ToArray();
+                    RequiresApproval: approvalByGrade[GradeKey(s.GradeLevelId)],
+                    // INS-1/INS-2 (assignment-authoring-compartments §9): student-facing
+                    // text — must be mapped or every list read drops it.
+                    Instructions: s.Instructions)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],

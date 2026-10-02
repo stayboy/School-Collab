@@ -1,5 +1,4 @@
 using System.Net;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
@@ -16,34 +15,29 @@ using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Services;
+using Authoring = SchoolCollab.Assignments.Application.Components.Pages.Assignments.AssignmentAuthoring;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
 /// <summary>
-/// bUnit + Moq + RichardSzalay.MockHttp coverage for the Create.razor
-/// wizard's question-generation gate plumbing (FR-220 / decision (a) —
-/// the Resources UI does not land this round, so the form model
-/// half-attachment is the only attachment surface under test here).
+/// R1 (round <c>round-assignment-authoring-r1</c>, supervisor-approved port) — the create
+/// surface is now the shared <see cref="AssignmentAuthoring"/> component in Create mode
+/// (documents/specs/assignment-authoring-compartments.md D1/UX-3 retires the FluentWizard).
 ///
-/// Per the round-3 plan's binding coverage list:
-/// <list type="bullet">
-///   <item>QuestionGenerationGate truth table (pure methods, no render)</item>
-///   <item>Default step-1 markup shows DisabledHint under Manual / TeacherGraded</item>
-///   <item>Clicking the Digital and AutoGraded cards flips the hint to EnabledHint (FR-220 hint updates)</item>
-/// </list>
-///
-/// The wizard uses FluentUI's <c>FluentWizard</c> web component, which
-/// does not always render step content under bUnit. The gating
-/// assertions are bound to the <see cref="QuestionGenerationGate"/>
-/// constants and the <c>HintText</c> method (decision per plan:
-/// do NOT sink time into wizard-navigation testing).
+/// <para>The retired suite drove the wizard through reflection on Create's private members
+/// (<c>_requiresSignature</c>, <c>_selectedGradeLevel</c>, <c>_selectedSubject</c>, nested
+/// option records) and indexed <c>FindComponents&lt;FluentCheckbox&gt;()[1]</c>. Every
+/// behavioural assertion it protected is ported here onto the shared component's real
+/// surface: the public pickers' <c>SelectedOptionChanged</c> callback, the stable control
+/// ids, and the action-bar primary button.</para>
 /// </summary>
 [TestClass]
 public class AssignmentCreateBunitTests : BunitContext
 {
     private readonly MockHttpMessageHandler _mockHttp;
     private readonly JsonSerializerOptions _apiJsonOptions;
-    private readonly List<string> _createLogs = new();
+    private readonly List<string> _createLogs = [];
+    private readonly StubFlagService _flags = new();
 
     private sealed class CaptureLogger<T> : ILogger<T>
     {
@@ -58,11 +52,15 @@ public class AssignmentCreateBunitTests : BunitContext
     }
 
     /// <summary>
-    /// Value handed to the registered <see cref="StubFlagService"/>. Set to false
-    /// (before rendering) to reproduce the default dark-launched state, in which
+    /// Value handed to the registered <see cref="StubFlagService"/>. Set to false (before
+    /// rendering) to reproduce the default dark-launched state, in which
     /// <c>/activity-groups</c> is not mapped at all.
     /// </summary>
-    protected bool ActivityGroupsEnabled { get; set; } = true;
+    protected bool ActivityGroupsEnabled
+    {
+        get => _flags.ActivityGroupsEnabled;
+        set => _flags.ActivityGroupsEnabled = value;
+    }
 
     public AssignmentCreateBunitTests()
     {
@@ -84,36 +82,36 @@ public class AssignmentCreateBunitTests : BunitContext
         _mockHttp = new MockHttpMessageHandler();
         var httpClient = _mockHttp.ToHttpClient();
         httpClient.BaseAddress = new Uri("http://localhost");
-        // WS-B2 (step 6): Create.razor now loads the org AI-prompt lock on init.
+
+        // WS-B2 (step 6): the authoring page loads the org AI-prompt lock on init.
         _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
             .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
 
         Services.AddSingleton(httpClient);
         Services.AddSingleton<AssignmentsApiClient>();
         Services.AddSingleton<StudentsApiClient>();
-        // CodedValuesApiClient is required by StudentsApiClient's ctor;
-        // Create.razor injects both. Register with the same HttpClient.
+        // CodedValuesApiClient is required by StudentsApiClient's ctor.
         Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
-        Services.AddSingleton<ILogger<AssignmentsApiClient>>(new CaptureLogger<AssignmentsApiClient>(_createLogs));
-        Services.AddSingleton<ILogger<StudentsApiClient>>(new CaptureLogger<StudentsApiClient>(_createLogs));
-        Services.AddSingleton<ILogger<CreatePage>>(new CaptureLogger<CreatePage>(_createLogs));
-        // Create.razor now resolves FEATURE:EnableActivityGroups before loading
-        // /activity-groups (the route only exists when the flag is on) and gates the
-        // SelectedGroups target card.
-        Services.AddSingleton<IFeatureFlagService>(new StubFlagService(this));
+        Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
+        Services.AddSingleton(Mock.Of<ILogger<StudentsApiClient>>());
+        Services.AddSingleton(Mock.Of<ILogger<CreatePage>>());
+        Services.AddSingleton<ILogger<Authoring>>(new CaptureLogger<Authoring>(_createLogs));
+        // The Questions & AI compartment injects the generation seams; these tests never
+        // click Generate, so bare mocks are the right shape.
+        Services.AddSingleton(Mock.Of<IAssignmentQuestionGenerator>());
+        Services.AddSingleton(Mock.Of<IUrlTextExtractor>());
+        Services.AddSingleton<IFeatureFlagService>(_flags);
     }
 
     /// <summary>
-    /// Minimal <see cref="IFeatureFlagService"/> whose state is read live from the
-    /// owning test, so a test can flip the flag after the constructor has run.
+    /// Minimal <see cref="IFeatureFlagService"/> whose state is read live from the owning
+    /// test, so a test can flip the flag before rendering.
     /// </summary>
     private sealed class StubFlagService : IFeatureFlagService
     {
-        private readonly AssignmentCreateBunitTests _owner;
-        public StubFlagService(AssignmentCreateBunitTests owner) => _owner = owner;
-        private bool Enabled => _owner.ActivityGroupsEnabled;
-        public bool IsEnabled(string featureKey) => Enabled;
-        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(Enabled);
+        public bool ActivityGroupsEnabled { get; set; } = true;
+        public bool IsEnabled(string featureKey) => ActivityGroupsEnabled;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(ActivityGroupsEnabled);
         public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
         public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
@@ -130,6 +128,80 @@ public class AssignmentCreateBunitTests : BunitContext
         _mockHttp.When(HttpMethod.Get, "http://localhost/activity-groups*")
             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(groups, _apiJsonOptions));
     }
+
+    private void SetupSubjects(Guid gradeLevelId)
+    {
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/students/subjects/by-grade/{gradeLevelId}*")
+            .Respond(HttpStatusCode.OK, "application/json",
+                $"[{{\"id\":\"{TopicId}\",\"name\":\"Mathematics\",\"displayOrder\":0}}]");
+    }
+
+    /// <summary>
+    /// Stubs the tenant-level <c>/assignments/signature-default</c> body (Round B1 / D2
+    /// widening: <c>{ requiresSignature, signatureMode }</c>, where the boolean keeps its
+    /// pre-widening derivation <c>mode != Disabled</c>).
+    /// </summary>
+    private void SetupSignatureDefault(SignatureRequirementMode mode)
+    {
+        var requiresSignature = mode != SignatureRequirementMode.Disabled ? "true" : "false";
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
+            .Respond(HttpStatusCode.OK, "application/json",
+                $"{{\"requiresSignature\":{requiresSignature},\"signatureMode\":\"{mode}\"}}");
+    }
+
+    /// <summary>Stubs the grade-scoped signature default. Registered BEFORE the tenant-level
+    /// matcher so the query-carrying call wins (MockHttp matches in registration order).
+    /// Request matching is on the query string because MockHttp's string matchers ignore it
+    /// when both calls share the same path.</summary>
+    private void SetupGradeSignatureDefault(Guid gradeLevelId, SignatureRequirementMode mode)
+    {
+        var requiresSignature = mode != SignatureRequirementMode.Disabled ? "true" : "false";
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
+            .With(req => req.RequestUri!.Query.Contains(gradeLevelId.ToString(), StringComparison.OrdinalIgnoreCase))
+            .Respond(HttpStatusCode.OK, "application/json",
+                $"{{\"requiresSignature\":{requiresSignature},\"signatureMode\":\"{mode}\"}}");
+    }
+
+    private static Guid TopicId { get; } = Guid.Parse("00000000-0000-0000-0000-0000000000cc");
+
+    private static Guid GradeFiveId { get; } = Guid.Parse("00000000-0000-0000-0000-000000000005");
+
+    private static GradeLevelDto GradeFive =>
+        new(GradeFiveId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+
+    /// <summary>The guardian-signature checkbox, found by its stable id (the retired suite's
+    /// index-based <c>FindComponents&lt;FluentCheckbox&gt;()[1]</c> is deliberately gone).</summary>
+    private static FluentCheckbox SignatureCheckbox(IRenderedComponent<CreatePage> cut) =>
+        cut.FindComponents<FluentCheckbox>()
+            .Single(c => c.Instance.Id == "authoring-submission-requires-signature").Instance;
+
+    private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<CreatePage> cut, string id) =>
+        cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
+
+    /// <summary>Drives a picker through its real <c>SelectedOptionChanged</c> callback (the
+    /// AssignmentPolicyFieldEditDialogTests pattern) — never a raw DOM event.</summary>
+    private static Task SelectAsync(IRenderedComponent<CreatePage> cut, string pickerId, Guid value, string label) =>
+        cut.InvokeAsync(() => Picker(cut, pickerId).SelectedOptionChanged.InvokeAsync(
+            new Authoring.PickerOption(value.ToString(), label)));
+
+    /// <summary>Selects the primary grade. The picker binds <c>SelectedOptionChanged</c>
+    /// explicitly (it carries the FR-58 subject reload plus the signature re-resolve), so the
+    /// test drives that same callback — exactly what the select raises for a real user pick.</summary>
+    private static Task SelectGradeAsync(IRenderedComponent<CreatePage> cut, Guid value, string label) =>
+        SelectAsync(cut, "authoring-basics-grade", value, label);
+
+    /// <summary>Fills the Basics title through the bound text field's own callback — the create
+    /// guards require a non-empty title before anything is posted.</summary>
+    private static Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title) =>
+        cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
+            .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
+
+    /// <summary>The D2 Mandatory-lock tooltip copy, bound once so the assertion and the
+    /// component cannot drift silently (the <c>QuestionGenerationGate.DisabledTooltip</c>
+    /// precedent).</summary>
+    private const string AssignmentSignatureMandatoryTooltip = Authoring.SignatureMandatoryReason;
+
+    // ── QuestionGenerationGate (pure, no render) ────────────────────────────
 
     [TestMethod]
     public void QuestionGenerationGate_IsEnabled_TruthTable_FR220()
@@ -165,8 +237,6 @@ public class AssignmentCreateBunitTests : BunitContext
     [TestMethod]
     public void QuestionGenerationGate_DisabledTooltip_HasStableCopy()
     {
-        // The wizard + the bUnit tests both bind to this constant so the
-        // wording cannot drift.
         QuestionGenerationGate.DisabledTooltip.Should().Contain("Auto Scored");
     }
 
@@ -175,97 +245,52 @@ public class AssignmentCreateBunitTests : BunitContext
     {
         SetupGradeLevels();
         SetupActivityGroups();
+        SetupSignatureDefault(SignatureRequirementMode.Disabled);
 
         var cut = Render<CreatePage>();
 
-        // Default state: Manual + TeacherGraded → gate closed → DisabledHint
-        // The hint is a <p class="wizard-hint"> so the string is rendered
-        // somewhere in the markup (we don't depend on a specific
-        // FluentWizard step being visible — see plan fallback).
+        // Default state: Manual + TeacherGraded → gate closed → the compartment 1 hint carries
+        // the DisabledHint copy.
         cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain(QuestionGenerationGate.DisabledHint);
-        }, TimeSpan.FromSeconds(5));
+            cut.Markup.Should().Contain(QuestionGenerationGate.DisabledHint),
+            TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>
-    /// Stubs the always-200 <c>/assignments/signature-default</c> route with the Round B1 (D2)
-    /// widened body: <c>{ requiresSignature, signatureMode }</c>, where the boolean keeps its
-    /// pre-widening derivation (<c>mode != Disabled</c>) so the additive contract is exercised the
-    /// way the route produces it.
-    /// </summary>
-    private MockedRequest SetupSignatureDefault(Guid? gradeLevelId, SignatureRequirementMode mode)
-    {
-        var url = gradeLevelId.HasValue
-            ? $"http://localhost/assignments/signature-default?gradeLevelId={gradeLevelId}"
-            : "http://localhost/assignments/signature-default";
-        var requiresSignature = mode != SignatureRequirementMode.Disabled ? "true" : "false";
-        return _mockHttp.When(HttpMethod.Get, url)
-            .Respond(HttpStatusCode.OK, "application/json", $"{{\"requiresSignature\":{requiresSignature},\"signatureMode\":\"{mode}\"}}");
-    }
-
-    private MockedRequest SetupSubjects(Guid gradeLevelId)
-    {
-        return _mockHttp.When(HttpMethod.Get, $"http://localhost/students/subjects/by-grade/{gradeLevelId}*")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
-    }
-
-    private static object CreateOption(string typeName, string value, string label)
-    {
-        var type = typeof(CreatePage).GetNestedType(typeName, BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException($"Could not find nested type {typeName}");
-        return Activator.CreateInstance(type, value, label)!;
-    }
-
-    private static IRenderedComponent<FluentCheckbox> GetSignatureCheckbox(IRenderedComponent<CreatePage> cut) =>
-        cut.FindComponents<FluentCheckbox>()[1];
-
-    /// <summary>The D2 Mandatory-lock tooltip copy, bound once so the assertion and the wizard
-    /// cannot drift silently (the <c>QuestionGenerationGate.DisabledTooltip</c> precedent).</summary>
-    private const string AssignmentSignatureMandatoryTooltip =
-        "Your organization requires a guardian signature for new assignments in this grade.";
+    // ── Ported behavioural assertions ───────────────────────────────────────
 
     /// <summary>
     /// Regression: <c>/activity-groups</c> is only mapped when
-    /// <c>FEATURE:EnableActivityGroups</c> is on. Create.razor used to call it
-    /// inside the same try block as the grade-level load, so for most tenants the
-    /// 404 was caught under the misleading "Failed to load grade levels" log and the
-    /// grade-level options were left unbuilt. With the flag off the wizard must load
-    /// grade levels normally and must not offer the SelectedGroups target.
+    /// <c>FEATURE:EnableActivityGroups</c> is on. With the flag off the page must load grade
+    /// levels normally and must not offer the group target (and, in particular, must not
+    /// produce a load-failure log for the dark-launched backend).
     /// </summary>
     [TestMethod]
     public void Create_ActivityGroupsFlagOff_LoadsGradeLevelsAndHidesSelectedGroups()
     {
         ActivityGroupsEnabled = false;
 
-        var gradeId = Guid.NewGuid();
-        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups(); // mapped, but must never be requested
-        SetupSignatureDefault(null, SignatureRequirementMode.Disabled);
+        SetupSignatureDefault(SignatureRequirementMode.Disabled);
 
         var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
-            cut.Markup.Should().NotContain("Assign to specific student groups or sections",
-                "the SelectedGroups target must not be offered when the feature is off"),
+            cut.Markup.Should().NotContain("By Group",
+                "the group target must not be offered when the feature is off"),
             TimeSpan.FromSeconds(5));
 
-        _createLogs.Should().NotContain(l => l.Contains("Failed to load", StringComparison.OrdinalIgnoreCase),
-            "a dark-launched flag must not produce a load-failure log");
+        _createLogs.Should().NotContain(l => l.Contains("Failed to load", StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// The grade-level path — the wizard's default target — must still be fully
-    /// functional with the flag off, since that is the state most tenants run in.
-    /// </summary>
     [TestMethod]
     public void Create_ActivityGroupsFlagOff_DefaultMarkupStillRenders()
     {
         ActivityGroupsEnabled = false;
 
-        SetupGradeLevels();
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(null, SignatureRequirementMode.Disabled);
+        SetupSignatureDefault(SignatureRequirementMode.Disabled);
 
         var cut = Render<CreatePage>();
 
@@ -274,124 +299,96 @@ public class AssignmentCreateBunitTests : BunitContext
             TimeSpan.FromSeconds(5));
 
         cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
-            "the wizard must not be left spinning by the absent optional fetch");
+            "the page must not be left spinning by the absent optional fetch");
     }
 
+    /// <summary>Assertion 1 (ported): a <c>Disabled</c> requirement leaves the signature
+    /// checkbox unchecked and free.</summary>
     [TestMethod]
-    public void Create_RendersRequiresSignatureCheckbox_DefaultsUnchecked()
+    public void Create_DisabledSignatureDefault_LeavesCheckboxUncheckedAndFree()
     {
-        SetupGradeLevels();
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(null, SignatureRequirementMode.Disabled);
+        SetupSignatureDefault(SignatureRequirementMode.Disabled);
 
         var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Require guardian signature after completion");
-            GetSignatureCheckbox(cut).Instance.Value.Should().BeFalse("a Disabled requirement leaves the signature checkbox unchecked");
-            GetSignatureCheckbox(cut).Instance.Disabled.Should().BeFalse("a Disabled requirement leaves the checkbox free");
+            SignatureCheckbox(cut).Value.Should().BeFalse("a Disabled requirement leaves the signature checkbox unchecked");
+            SignatureCheckbox(cut).Disabled.Should().BeFalse("a Disabled requirement leaves the checkbox free");
         }, TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>Assertion 2 (ported): an <c>Optional</c> tenant default pre-ticks the checkbox
+    /// while leaving the author in control.</summary>
     [TestMethod]
-    public async Task Create_GradeSelected_PreFillsCheckboxFromResolvedDefault()
+    public void Create_OptionalSignatureDefault_PreFillsTheCheckbox()
     {
-        var gradeId = Guid.NewGuid();
-        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        var sigReq = SetupSignatureDefault(gradeId, SignatureRequirementMode.Optional); // register BEFORE the bare-URL matcher (MockHttp string matchers ignore query strings)
-        SetupSignatureDefault(null, SignatureRequirementMode.Disabled); // the init no-grade pre-fill call
-        var subjectsReq = SetupSubjects(gradeId);
+        SetupSignatureDefault(SignatureRequirementMode.Optional);
 
         var cut = Render<CreatePage>();
-        await Task.Delay(1000); // let OnInitializedAsync complete
-
-        // Diagnostic: verify the API client resolves the mocked default directly.
-        var api = Services.GetRequiredService<AssignmentsApiClient>();
-        var direct = await api.GetSignatureDefaultAsync(gradeId);
-        direct.Should().Be(SignatureRequirementMode.Optional, "the API resolves the mocked grade policy's mode");
-
-        var componentApi = typeof(CreatePage).GetProperty("Api", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance) as AssignmentsApiClient;
-        componentApi.Should().NotBeNull();
-        var fromComponent = await componentApi!.GetSignatureDefaultAsync(gradeId);
-        fromComponent.Should().Be(SignatureRequirementMode.Optional, "the component's API client resolves the mocked mode");
-
-        var onGradeChanged = typeof(CreatePage).GetMethod("OnGradeLevelChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var option = CreateOption("GradeLevelOption", gradeId.ToString(), "Grade 5");
-        await cut.InvokeAsync(async () => await ((Task)onGradeChanged.Invoke(cut.Instance, new[] { option })!)!);
-
-        var selectedGradeField = typeof(CreatePage).GetField("_selectedGradeLevel", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var selectedGrade = selectedGradeField.GetValue(cut.Instance);
-        selectedGrade.Should().NotBeNull("the grade selection should be stored");
-
-        var resolve = typeof(CreatePage).GetMethod("ResolveSignatureDefaultAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var loadCtsField = typeof(CreatePage).GetField("_loadCts", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        loadCtsField.SetValue(cut.Instance, null);
-        await cut.InvokeAsync(async () => await ((Task)resolve.Invoke(cut.Instance, new object?[] { gradeId })!)!);
-        cut.Render();
-
-        foreach (var log in _createLogs) Console.WriteLine(log);
-        // Only Error/Warning-level logs indicate a real failure — the
-        // AssignmentsApiClient logs benign Debug/Information for every
-        // signature-default resolution.
-        var severe = _createLogs.Where(l => l.StartsWith("[Error]") || l.StartsWith("[Warning]")).ToList();
-        if (severe.Count > 0)
-        {
-            Assert.Fail(string.Join(Environment.NewLine, severe));
-        }
-
-        _mockHttp.GetMatchCount(subjectsReq)
-            .Should().BeGreaterThan(0, "the subjects endpoint should be called when a grade is selected");
-
-        _mockHttp.GetMatchCount(sigReq)
-            .Should().BeGreaterThan(1, "the signature default endpoint should be called by the grade-change handler in addition to the diagnostic call");
-
-        var field = typeof(CreatePage).GetField("_requiresSignature", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var value = (bool)field.GetValue(cut.Instance)!;
-        value.Should().BeTrue("the resolved grade default field should be true");
 
         cut.WaitForAssertion(() =>
         {
-            GetSignatureCheckbox(cut).Instance.Value.Should().BeTrue("the resolved grade default pre-fills the checkbox");
-            GetSignatureCheckbox(cut).Instance.Disabled.Should().BeFalse(
+            SignatureCheckbox(cut).Value.Should().BeTrue("the resolved default pre-fills the checkbox");
+            SignatureCheckbox(cut).Disabled.Should().BeFalse(
                 "an Optional requirement pre-fills but leaves the author in control");
         }, TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>Assertion 1 (ported, discriminating): the grade-scoped requirement wins over
+    /// the tenant default as soon as a grade is chosen.</summary>
+    [TestMethod]
+    public async Task Create_GradeSelected_ReResolvesTheSignatureDefault()
+    {
+        SetupGradeLevels(GradeFive);
+        SetupActivityGroups();
+        SetupGradeSignatureDefault(GradeFiveId, SignatureRequirementMode.Mandatory);
+        SetupSignatureDefault(SignatureRequirementMode.Disabled); // the init no-grade resolve
+        SetupSubjects(GradeFiveId);
+
+        var cut = Render<CreatePage>();
+        cut.WaitForAssertion(() => SignatureCheckbox(cut).Value.Should().BeFalse());
+
+        await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
+
+        cut.WaitForAssertion(() =>
+        {
+            SignatureCheckbox(cut).Value.Should().BeTrue(
+                "the grade's Mandatory requirement replaces the tenant Disabled default");
+            SignatureCheckbox(cut).Disabled.Should().BeTrue("Mandatory locks the checkbox");
+        }, TimeSpan.FromSeconds(5));
+    }
+
     /// <summary>
-    /// Round B1 / D2 (Plan (f) AC4(b) — the discriminating case): a <c>Mandatory</c> signature
-    /// requirement pre-ticks the checkbox, DISABLES it and renders the explanatory tooltip, and the
-    /// submitted create body still carries <c>requiresSignature: true</c> (the snapshot the policy
-    /// locked in). The interaction is observable before Submit runs (Plan risk R-B1-5).
+    /// Assertion 3 (ported, the discriminating case): a <c>Mandatory</c> requirement
+    /// pre-ticks, DISABLES and explains the checkbox, and the submitted create body still
+    /// carries <c>requiresSignature: true</c> (the snapshot the policy locked in).
     /// </summary>
     [TestMethod]
     public async Task Create_MandatoryPolicy_LocksCheckboxAndSubmitsTrue()
     {
-        var gradeId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(gradeId, SignatureRequirementMode.Mandatory);
-        SetupSubjects(gradeId);
+        SetupSignatureDefault(SignatureRequirementMode.Mandatory);
+        SetupSubjects(GradeFiveId);
 
         var cut = Render<CreatePage>();
 
-        var onGradeChanged = typeof(CreatePage).GetMethod("OnGradeLevelChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await ((Task)onGradeChanged.Invoke(cut.Instance, new[] { CreateOption("GradeLevelOption", gradeId.ToString(), "Grade 5") })!)!);
-        cut.Render();
+        await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
 
-        // The lock must be observable (checked + disabled + the tooltip copy) BEFORE the submit.
         cut.WaitForAssertion(() =>
         {
-            GetSignatureCheckbox(cut).Instance.Value.Should().BeTrue("Mandatory pre-ticks the checkbox");
-            GetSignatureCheckbox(cut).Instance.Disabled.Should().BeTrue("Mandatory locks the checkbox");
+            SignatureCheckbox(cut).Value.Should().BeTrue("Mandatory pre-ticks the checkbox");
+            SignatureCheckbox(cut).Disabled.Should().BeTrue("Mandatory locks the checkbox");
             cut.Markup.Should().Contain(AssignmentSignatureMandatoryTooltip,
                 "the disabled checkbox explains why it cannot be unticked");
         }, TimeSpan.FromSeconds(5));
 
-        var selectedSubjectField = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)!;
-
         string? capturedBody = null;
         _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
             .With(req =>
@@ -401,46 +398,32 @@ public class AssignmentCreateBunitTests : BunitContext
             })
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
-        var submit = typeof(CreatePage).GetMethod("SubmitAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () =>
-        {
-            selectedSubjectField.SetValue(cut.Instance, CreateOption("SubjectOption", topicId.ToString(), "Mathematics"));
-            await ((Task)submit.Invoke(cut.Instance, Array.Empty<object?>())!)!;
-        });
+        await SetTitleAsync(cut, "Algebra HW");
+        await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
+        cut.Find("#authoring-primary-action").Click();
 
-        capturedBody.Should().NotBeNull();
+        cut.WaitForAssertion(() => capturedBody.Should().NotBeNull("the primary action saves the draft"),
+            TimeSpan.FromSeconds(5));
         capturedBody.Should().Contain("\"requiresSignature\":true",
             "the locked value is what the author submits — the persisted assignment keeps the policy snapshot");
     }
 
+    /// <summary>Assertion 4 (ported): an author override of an <c>Optional</c> default is what
+    /// gets submitted.</summary>
     [TestMethod]
     public async Task Create_AuthorOverrides_OverridesPrefillAndSubmitsValue()
     {
-        var gradeId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(gradeId, SignatureRequirementMode.Optional);
-        SetupSubjects(gradeId);
+        SetupSignatureDefault(SignatureRequirementMode.Optional);
+        SetupSubjects(GradeFiveId);
 
         var cut = Render<CreatePage>();
 
-        var onGradeChanged = typeof(CreatePage).GetMethod("OnGradeLevelChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await ((Task)onGradeChanged.Invoke(cut.Instance, new[] { CreateOption("GradeLevelOption", gradeId.ToString(), "Grade 5") })!)!);
-        cut.Render();
+        await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
 
         // The author overrides the pre-filled true back to false.
-        var checkbox = GetSignatureCheckbox(cut);
-        await cut.InvokeAsync(() => checkbox.Instance.ValueChanged.InvokeAsync(false));
-
-        // Prime the subject selection required by SubmitAsync — INSIDE the same renderer
-        // invocation as the submit. FluentUI's activity-groups multi-select and due-date
-        // picker raise their @bind-*:after handlers (OnSelectedGroupsChangedAsync /
-        // OnDueDateChangedAsync) one render pass late, and both clear _selectedSubject
-        // (FR-58 re-filter). A write made outside this invocation can therefore be
-        // clobbered by the pending cascade before SubmitAsync reads it — the observed
-        // CI-only flake ("Please select a subject.") diagnosed 2026-09-15.
-        var selectedSubjectField = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await cut.InvokeAsync(() => SignatureCheckbox(cut).ValueChanged.InvokeAsync(false));
 
         string? capturedBody = null;
         _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
@@ -451,44 +434,20 @@ public class AssignmentCreateBunitTests : BunitContext
             })
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
-        var submit = typeof(CreatePage).GetMethod("SubmitAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () =>
-        {
-            selectedSubjectField.SetValue(cut.Instance, CreateOption("SubjectOption", topicId.ToString(), "Mathematics"));
-            await ((Task)submit.Invoke(cut.Instance, Array.Empty<object?>())!)!;
-        });
+        await SetTitleAsync(cut, "Algebra HW");
+        await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
+        cut.Find("#authoring-primary-action").Click();
 
-        // Diagnostic wrapping: this test failed once on the GitHub Actions Linux
-        // runner (run 34938835437) with a bare "Expected capturedBody not to be
-        // <null>" and proved unreproducible across ~50 local runs (Linux container,
-        // Release, exact CI command, 2 CPUs, en-US culture). When the submit path
-        // bails silently (guard return or swallowed OperationCanceledException)
-        // the page state at that moment is the only evidence — dump it.
-        try
-        {
-            capturedBody.Should().NotBeNull();
-            capturedBody.Should().Contain("\"requiresSignature\":false", "the author's override is submitted in the create request");
-        }
-        catch (Exception)
-        {
-            var err = typeof(CreatePage).GetField("_error", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(cut.Instance);
-            var subject = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(cut.Instance);
-            Assert.Fail($"""
-                Create_AuthorOverrides submit did not reach POST /assignments.
-                capturedBody: {capturedBody}
-                Page _error: {err}
-                Page _selectedSubject: {subject}
-                Captured page logs:
-                {string.Join(Environment.NewLine, _createLogs)}
-                """);
-        }
+        cut.WaitForAssertion(() => capturedBody.Should().NotBeNull("the primary action saves the draft"),
+            TimeSpan.FromSeconds(5));
+        capturedBody.Should().Contain("\"requiresSignature\":false",
+            "the author's override is submitted in the create request");
     }
 
     [TestMethod]
     public void Create_PreFillFetchFails_CheckboxStaysDefault_NoError()
     {
-        var gradeId = Guid.NewGuid();
-        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupGradeLevels(GradeFive);
         SetupActivityGroups();
         _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
             .Respond(HttpStatusCode.InternalServerError);
@@ -497,41 +456,12 @@ public class AssignmentCreateBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            GetSignatureCheckbox(cut).Instance.Value.Should().BeFalse("a failed pre-fill keeps the checkbox at its default");
-            GetSignatureCheckbox(cut).Instance.Disabled.Should().BeFalse(
+            SignatureCheckbox(cut).Value.Should().BeFalse("a failed resolve keeps the checkbox at its default");
+            SignatureCheckbox(cut).Disabled.Should().BeFalse(
                 "fail-open: a transport failure must never lock the author out of their own choice");
             cut.FindComponents<FluentMessageBar>()
                 .Should().NotContain(mb => mb.Instance.Intent == MessageIntent.Error,
                     "the fail-open pre-fill does not render an error message bar");
         }, TimeSpan.FromSeconds(5));
-    }
-
-    [TestMethod]
-    public void Create_HintText_ReflectsSelectionViaGate()
-    {
-        // Unit-style binding to the gate's own state machine rather than
-        // driving the FluentWizard step UI (FluentWizard step content
-        // does not reliably render under bUnit — see plan fallback).
-        // The wizard's step-1 hint binds to QuestionGenerationGate.HintText
-        // directly, so verifying the gate's outputs under every cell
-        // proves the hint will follow.
-        foreach (AssignmentTypeDto type in Enum.GetValues<AssignmentTypeDto>())
-        {
-            foreach (GradingFormatDto grading in Enum.GetValues<GradingFormatDto>())
-            {
-                var enabled = QuestionGenerationGate.IsEnabled(type, grading);
-                var hint = QuestionGenerationGate.HintText(type, grading);
-                if (enabled)
-                {
-                    hint.Should().Be(QuestionGenerationGate.EnabledHint,
-                        "an enabled gate must show the EnabledHint");
-                }
-                else
-                {
-                    hint.Should().Be(QuestionGenerationGate.DisabledHint,
-                        "a disabled gate must show the DisabledHint");
-                }
-            }
-        }
     }
 }

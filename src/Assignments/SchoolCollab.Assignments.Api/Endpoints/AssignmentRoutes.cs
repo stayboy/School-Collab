@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ApproveAssignmentCommand;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ArchiveAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CloseAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
@@ -22,6 +23,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCo
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAuthoringChildren;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetNotificationFailures;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
@@ -69,6 +71,22 @@ public static class AssignmentRoutes
             CancellationToken ct) =>
         {
             var result = await handler.HandleAsync(new GetAssignmentByIdQuery(id), ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        // ── Authoring child read (assignment-authoring P1 rework) ─────────────
+        // The Edit surface loads one assignment's persisted questions / attachments /
+        // resources BEFORE it renders those editors: a non-null-but-empty collection
+        // makes PUT /assignments/{id} full-replace (and therefore delete) the
+        // persisted children. Same shape as the /{id:guid} read above — 404 when the
+        // assignment is absent (also for a cross-tenant id, via the tenant filter),
+        // 200 with the body otherwise. No authorization beyond the group's.
+        group.MapGet("/{id:guid}/authoring", async (
+            Guid id,
+            [FromServices] IQueryHandler<GetAssignmentAuthoringChildrenQuery, AssignmentAuthoringChildrenDto?> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(new GetAssignmentAuthoringChildrenQuery(id), ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
@@ -233,7 +251,9 @@ public static class AssignmentRoutes
                     // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
                     req.DifficultyEasyCount,
                     req.DifficultyMediumCount,
-                    req.DifficultyHardCount);
+                    req.DifficultyHardCount,
+                    // INS-1 (assignment-authoring-compartments §9): student-facing text.
+                    req.Instructions);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -293,7 +313,9 @@ public static class AssignmentRoutes
                     // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
                     req.DifficultyEasyCount,
                     req.DifficultyMediumCount,
-                    req.DifficultyHardCount);
+                    req.DifficultyHardCount,
+                    // INS-1 (assignment-authoring-compartments §9): student-facing text.
+                    req.Instructions);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
@@ -532,6 +554,31 @@ public static class AssignmentRoutes
             // mirror the publish route's InvalidOperationException -> 400
             // mapping so the call surfaces a domain message instead of
             // a 500.
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // R1 (assignment-authoring-compartments §11): the Closed status's primary action is
+        // Archive. Mirrors the /close route — the same command the archive sweep dispatches.
+        group.MapPost("/{id:guid}/archive", async (
+            Guid id,
+            [FromServices] ICommandHandler<ArchiveAssignmentCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new ArchiveAssignmentCommand(id), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            // Archived rows are read-only and Archive() is only valid from
+            // Published/Closed — surface the domain message as a 400 rather
+            // than a 500 (the /close precedent).
             catch (InvalidOperationException ex)
             {
                 return Results.BadRequest(new { ex.Message });

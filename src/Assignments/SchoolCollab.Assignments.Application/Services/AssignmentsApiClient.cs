@@ -112,6 +112,25 @@ public sealed class AssignmentsApiClient
         return mode;
     }
 
+    /// <summary>
+    /// Reads one assignment's persisted child collections — questions (with options),
+    /// attachments and AI-generation resources — so the Edit surface can populate its
+    /// editors before an author edits them (assignment-authoring P1 rework). Null on
+    /// 404 (no such assignment in the caller's tenant).
+    /// </summary>
+    public async Task<AssignmentAuthoringChildrenDto?> GetAuthoringChildrenAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting authoring children for assignment {AssignmentId}", id);
+        var response = await _http.GetAsync($"/assignments/{id}/authoring", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Assignment {AssignmentId} not found for the authoring child read", id);
+            return null;
+        }
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AssignmentAuthoringChildrenDto>(_jsonOptions, ct);
+    }
+
     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating assignment with title {Title}", req.Title);
@@ -126,6 +145,27 @@ public sealed class AssignmentsApiClient
     {
         var response = await _http.PutAsJsonAsync($"/assignments/{assignmentId}/groups", new { ActivityGroupIds = groupIds }, _jsonOptions, ct);
         response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Reads the activity groups already linked to an assignment (spec §7.3
+    /// <c>GET /assignments/{id}/groups</c>) so the Edit surface's picker starts from the
+    /// persisted links rather than an empty set. Returns <c>null</c> when the route is not
+    /// mapped for this host (404 — <c>FEATURE:EnableActivityGroups</c> off) or the read
+    /// fails, which the caller treats as "links unknown": it then never persists a
+    /// replace-set (that would clear the persisted links).
+    /// </summary>
+    public async Task<Guid[]?> GetLinkedActivityGroupIdsAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting linked activity groups for assignment {AssignmentId}", assignmentId);
+        var response = await _http.GetAsync($"/assignments/{assignmentId}/groups", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        response.EnsureSuccessStatusCode();
+        var refs = await response.Content.ReadFromJsonAsync<LinkedActivityGroupResponse[]>(_jsonOptions, ct);
+        return refs?.Select(r => r.Id).ToArray();
     }
 
     public async Task UpdateAsync(Guid id, UpdateAssignmentRequest req, CancellationToken ct = default)
@@ -157,6 +197,16 @@ public sealed class AssignmentsApiClient
     {
         _logger.LogInformation("Closing assignment {AssignmentId}", id);
         (await _http.PostAsync($"/assignments/{id}/close", null, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Archive a closed (or published) assignment — read-only retention
+    /// (assignment-authoring-compartments §11: the Closed row's primary action).
+    /// The archive sweep performs the same transition automatically once the grace
+    /// window elapses.</summary>
+    public async Task ArchiveAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Archiving assignment {AssignmentId}", id);
+        (await _http.PostAsync($"/assignments/{id}/archive", null, ct)).EnsureSuccessStatusCode();
     }
 
     // ── WS-A2 / spec §3.5 step 2 + §7 Q2 lifecycle ───────────────────────────
@@ -511,6 +561,11 @@ public sealed class AssignmentsApiClient
         response.EnsureSuccessStatusCode();
         throw new InvalidOperationException("Unreachable: EnsureSuccessStatusCode returned without throwing.");
     }
+
+    /// <summary>Private envelope for <c>GET /assignments/{id}/groups</c> — the Assignments
+    /// API's <c>ActivityGroupRefDto</c> is declared in the Core project, which this client
+    /// does not reference, so the read binds its own shape (id + name only).</summary>
+    private sealed record LinkedActivityGroupResponse(Guid Id, string Name);
 
     /// <summary>Private envelope for the duplicate route's Created body
     /// (<c>{"id": ...}</c>) — the StudentsApiClient precedent. The create

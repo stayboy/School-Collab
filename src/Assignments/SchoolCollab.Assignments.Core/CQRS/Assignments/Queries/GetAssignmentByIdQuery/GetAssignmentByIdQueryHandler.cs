@@ -118,7 +118,10 @@ public sealed class GetAssignmentByIdQueryHandler(
                     // WS-E2b / ar-17: "has ever been published" for the failure surface.
                     PublishedAt: assignment.PublishedAt,
                     // D3 / Q6: the server-derived approval gate for this assignment.
-                    RequiresApproval: policy.RequiresApprovalBeforePublish || flagOn);
+                    RequiresApproval: policy.RequiresApprovalBeforePublish || flagOn,
+                    // INS-1/INS-2 (assignment-authoring-compartments §9): student-facing
+                    // text — must be mapped or every detail read drops it.
+                    Instructions: assignment.Instructions);
             },
             CacheOptions,
             tags: ["assignments"],

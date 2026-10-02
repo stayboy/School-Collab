@@ -32,7 +32,9 @@ internal sealed class WardAssignmentProjectionRepository(AssignmentsDbContext db
                 // (guardian) list, which has no failure surface today, but leaving it
                 // unprojected would silently report every published assignment as
                 // never-published — the exact trap the summary contract warns about.
-                a.PublishedAt))
+                a.PublishedAt,
+                // INS-1 (assignment-authoring-compartments §9): student-facing text.
+                a.Instructions))
             .ToListAsync(ct);
     }
 }

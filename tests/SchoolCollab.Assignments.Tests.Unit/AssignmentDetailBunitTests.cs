@@ -17,6 +17,7 @@ using DetailPage = SchoolCollab.Assignments.Application.Components.Pages.Assignm
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.Features;
 using DetailPage_Component = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Detail;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
@@ -62,6 +63,9 @@ public class AssignmentDetailBunitTests : BunitContext
                 new JsonStringEnumConverter<TargetAudienceTypeDto>(),
                 new JsonStringEnumConverter<ApprovalStatusDto>(),
                 new JsonStringEnumConverter<SignOffStateDto>(),
+                new JsonStringEnumConverter<QuestionTypeDto>(),
+                new JsonStringEnumConverter<ModuleTypeDto>(),
+                new JsonStringEnumConverter<ResourceKindDto>(),
                 // ar-18: the failures endpoint now emits these two as names (the host
                 // registers them), so the fixtures encode them the same way.
                 new JsonStringEnumConverter<NotificationKindDto>(),
@@ -77,6 +81,15 @@ public class AssignmentDetailBunitTests : BunitContext
         Services.AddSingleton<AssignmentsApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
         Services.AddSingleton(Mock.Of<ILogger<DetailPage>>());
+        // R1: Detail's Overview embeds the shared authoring component (View mode), which
+        // resolves FEATURE:EnableActivityGroups for the audience picker and injects the
+        // question-generation seams.
+        Services.AddSingleton<IFeatureFlagService>(new FakeFeatureFlagService());
+        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.IAssignmentQuestionGenerator>(
+            Mock.Of<SchoolCollab.Assignments.Application.Services.IAssignmentQuestionGenerator>());
+        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.IUrlTextExtractor>(
+            Mock.Of<SchoolCollab.Assignments.Application.Services.IUrlTextExtractor>());
+        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Assignments.Application.Components.Pages.Assignments.AssignmentAuthoring>>());
         // Detail.razor injects StudentsApiClient for the publish dialog contact picker.
         Services.AddSingleton<SchoolCollab.Students.Application.Services.StudentsApiClient>();
         Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
@@ -93,8 +106,37 @@ public class AssignmentDetailBunitTests : BunitContext
     /// coverage list.</summary>
     private int _assignmentGetCount;
 
+    /// <summary>Opens the embedded authoring bar's kebab. The bar renders from the shared
+    /// component's own (async) load, so the helper waits for the trigger before clicking — and
+    /// the click stays outside any WaitForAssertion body (a click re-issued on every retry
+    /// oscillates the menu open/closed).</summary>
+    private static void OpenAuthoringActionsMenu(IRenderedComponent<DetailPage_Component> cut)
+    {
+        cut.WaitForAssertion(
+            () => cut.FindAll("fluent-button[title=\"More assignment actions\"]")
+                .Should().NotBeEmpty("the embedded authoring bar renders its kebab"),
+            TimeSpan.FromSeconds(15));
+        cut.Find("fluent-button[title=\"More assignment actions\"]").Click();
+    }
+
     private void SetupGetAssignment(AssignmentSummaryDto dto, params NotificationFailureDto[] failures)
     {
+        // R1: the embedded shared authoring component self-loads its pickers, policy reads
+        // and (for a Draft) the questions draft. Every specific route is registered BEFORE
+        // the generic detail read (MockHttp v6 first-match ordering).
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/questions-draft")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
+            .Respond(HttpStatusCode.OK, "application/json", "{\"requiresSignature\":false,\"signatureMode\":\"Disabled\"}");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
+            .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/students/subjects/by-grade/*")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/activity-groups*")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
             .Respond(_ =>
             {
@@ -175,11 +217,19 @@ public class AssignmentDetailBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Scheduled");
-            cut.Markup.Should().Contain("Publish now");
-            cut.Markup.Should().Contain("Cancel schedule");
             cut.Markup.Should().Contain("Available from",
-                "the Overview grid surfaces the Scheduled availability window (decision (j))");
-        });
+                "the Delivery & Publishing compartment surfaces the Scheduled window (UX-15)");
+            // §11: Scheduled's primary action is Unpublish; the secondary actions are in the
+            // kebab (Reschedule replaces the retired "Cancel schedule" button).
+            cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Unpublish");
+        }, TimeSpan.FromSeconds(15));
+
+        // The kebab click stays OUTSIDE the wait: a click inside a WaitForAssertion body is
+        // re-issued on every retry, which oscillates the menu open/closed forever (the
+        // recursion guard for that trap).
+        OpenAuthoringActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())
+            .Should().Contain("Reschedule"));
     }
 
     [TestMethod]
@@ -256,7 +306,13 @@ public class AssignmentDetailBunitTests : BunitContext
 
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Schedule"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
+
+        // §11: the Draft secondary actions live in the authoring bar's kebab (the retired
+        // Overview button row is gone — Detail's Overview renders the shared View mode).
+        OpenAuthoringActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())
+            .Should().Contain("Schedule"));
     }
 
     // ── Approval chip-text matrix (decision (k) binding coverage) ──
@@ -442,6 +498,12 @@ public class AssignmentDetailBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
             cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Approve"));
+
+        // Baseline AFTER the initial render: Detail loads the assignment itself and R1's embedded
+        // authoring component loads it once too, so the assertion is "declining adds no further
+        // load" rather than a fixed count.
+        var loadsBeforeDecline = _assignmentGetCount;
+
         cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Approve").Click();
 
         // Positive wait first: the confirm dialog opened and resolved (declined).
@@ -452,8 +514,8 @@ public class AssignmentDetailBunitTests : BunitContext
 
         approvePosts.Should().Be(0,
             "declining the confirm dialog must not fire the approve POST");
-        _assignmentGetCount.Should().Be(1,
-            "declining must not reload the assignment either — only the initial load fired");
+        _assignmentGetCount.Should().Be(loadsBeforeDecline,
+            "declining must not reload the assignment either — only the initial loads fired");
     }
 
     [TestMethod]
@@ -530,8 +592,11 @@ public class AssignmentDetailBunitTests : BunitContext
         var expectedJson = JsonSerializer.Serialize(new ScheduleAssignmentRequest(expectedUtc), _apiJsonOptions);
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
 
-        cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Contains("Schedule")));
+        // R1 (§11): the Schedule action moved from Detail's Overview button row into the shared
+        // authoring action bar's kebab — Detail's Overview now renders the shared View mode.
+        OpenAuthoringActionsMenu(cut);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())
+            .Should().Contain("Schedule", "the authoring bar hosts the schedule action"));
 
         // v6 ordering rule: register the Expect only now — an outstanding
         // Expect 404s every other request (the flag-ON Index test documents
@@ -541,13 +606,13 @@ public class AssignmentDetailBunitTests : BunitContext
             .WithContent(expectedJson)
             .Respond(HttpStatusCode.NoContent);
 
-        cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Schedule")).Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Schedule").Click();
 
         cut.WaitForAssertion(() =>
         {
             _mockHttp.VerifyNoOutstandingExpectation();
             _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
-                "the page reloads the assignment after the schedule POST succeeds");
+                "the authoring bar reloads the assignment after the schedule POST succeeds");
         }, TimeSpan.FromSeconds(15));
     }
 

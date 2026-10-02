@@ -44,4 +44,7 @@ public sealed record CreateAssignmentCommand(
     /// Threaded to <c>Assignment.Create(...)</c>.</summary>
     int? DifficultyEasyCount = null,
     int? DifficultyMediumCount = null,
-    int? DifficultyHardCount = null) : ICommand;
+    int? DifficultyHardCount = null,
+    /// <summary>INS-1 (assignment-authoring-compartments §9): student-facing task
+    /// text. Threaded to <c>Assignment.Create(...)</c>.</summary>
+    string? Instructions = null) : ICommand;

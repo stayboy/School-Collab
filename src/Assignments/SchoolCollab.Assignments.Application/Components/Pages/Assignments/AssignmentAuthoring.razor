@@ -1,0 +1,1514 @@
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Core.AssignmentPolicies
+@using SchoolCollab.Core.Features
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
+@inject AssignmentsApiClient Api
+@inject StudentsApiClient StudentsApi
+@inject IFeatureFlagService FeatureFlags
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<AssignmentAuthoring> Logger
+@implements IDisposable
+
+@*
+    The ONE compartmentalized assignment authoring surface
+    (documents/specs/assignment-authoring-compartments.md §3–§6, §9, §11, §12; R1).
+
+    Modes (UX-9): Create (empty form → Draft) · Edit (loaded form, full parity while
+    Draft|Scheduled) · View (read-only; Published|Closed|Archived). Edit degrades to View
+    internally for a later status so hosts never test the status themselves.
+
+    Layout (UX-3/UX-4/UX-8): all six compartments stacked in one scroll as
+    section-card-style blocks, a sticky compartment jump-nav, and a sticky action bar whose
+    primary action follows the §11 status matrix with the secondary actions in a kebab.
+
+    Conditional fields follow UX-17/UX-18/UX-19 — inapplicable controls render DISABLED
+    with an inline reason, never hidden, so changing type/grading never reflows the page.
+    Policy-derived values follow UX-13 — read-only resolved values with an
+    "Inherited from Grade/Tenant policy" badge, never an editable control.
+
+    Out of scope for R1 (R2/R3): multi-constraint targeting + recipient preview, attachment
+    grounded AI generation.
+*@
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (Mode != AssignmentAuthoringMode.Create && _item is null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">Assignment not found.</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Outline" OnClick="BackToList">Back to List</FluentButton>
+        }
+        else
+        {
+            <div class="authoring-page">
+                <header class="authoring-actionbar">
+                    <div class="authoring-title-group">
+                        <h2 class="authoring-heading">@HeadingText</h2>
+                        @if (_item is not null)
+                        {
+                            <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
+                        }
+                    </div>
+                    <div class="authoring-actionbar-controls">
+                        @if (PrimaryActionLabel is not null)
+                        {
+                            <FluentButton Id="authoring-primary-action"
+                                          Appearance="Appearance.Accent"
+                                          Disabled="@_busy"
+                                          OnClick="OnPrimaryActionAsync">
+                                @(_busy ? "Working…" : PrimaryActionLabel)
+                            </FluentButton>
+                        }
+                        @if (SecondaryActions.Count > 0)
+                        {
+                            @* UseMenuService="false" keeps the kebab items in the rendered DOM
+                               (the Index.razor landing-grid precedent) — the module registers no
+                               FluentMenuProvider. *@
+                            <RowActionsMenu UseMenuService="false"
+                                            ForceKebab="true"
+                                            Actions="@SecondaryActions"
+                                            AriaLabel="More assignment actions" />
+                        }
+                    </div>
+                </header>
+
+                <nav class="authoring-jumpnav" aria-label="Assignment compartments">
+                    @foreach (var compartment in Compartments)
+                    {
+                        <FluentAnchor @key="compartment.Anchor"
+                                      Id="@($"jump-{compartment.Anchor}")"
+                                      Appearance="Appearance.Hypertext"
+                                      Href="@($"#authoring-{compartment.Anchor}")"
+                                      class="authoring-jumpnav-link">@compartment.Title</FluentAnchor>
+                    }
+                </nav>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Id="authoring-error" Intent="MessageIntent.Error" class="authoring-message">@_error</FluentMessageBar>
+                }
+
+                @* ── 1 · Basics (the always-on spine, §3/UX-12) ───────────────── *@
+                <section id="authoring-basics" class="authoring-compartment">
+                    <h3 class="authoring-compartment-title">Basics</h3>
+
+                    <FormRow Label="Title" Required For="authoring-basics-title">
+                        <FluentTextField Id="authoring-basics-title" @bind-Value="_model.Title" Required
+                                         ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Description" For="authoring-basics-description">
+                        <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
+                                        ReadOnly="@IsReadOnly" Rows="3"
+                                        Placeholder="Internal note for other teachers…" class="full-width" />
+                    </FormRow>
+
+                    @* INS-1/INS-2: student-facing task text, distinct from Description. *@
+                    <FormRow Label="Instructions" For="authoring-basics-instructions">
+                        <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
+                                        ReadOnly="@IsReadOnly" Rows="4"
+                                        Placeholder="What the student must do — shown to students…" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Assignment type" Required For="authoring-basics-type">
+                        <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
+                                      Items="@TypeOptions" @bind-SelectedOption="_selectedType"
+                                      OptionText="@(o => o?.Label ?? string.Empty)"
+                                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                                      Disabled="@IsReadOnly" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Grading format" Required For="authoring-basics-grading">
+                        <FluentSelect TOption="PickerOption" Id="authoring-basics-grading"
+                                      Items="@GradingFormatOptions" @bind-SelectedOption="_selectedGradingFormat"
+                                      OptionText="@(o => o?.Label ?? string.Empty)"
+                                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                                      Disabled="@IsReadOnly" class="full-width" />
+                    </FormRow>
+
+                    @* FR-220 / UX-19: the AI-availability hint lives with the type/grading choice. *@
+                    <p class="authoring-hint" id="authoring-generation-hint">
+                        @QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat)
+                    </p>
+
+                    <FormRow Label="Subject" Required For="authoring-basics-subject">
+                        <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
+                                      Items="@SubjectOptions" @bind-SelectedOption="_selectedSubject"
+                                      OptionText="@(o => o?.Label ?? string.Empty)"
+                                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                                      Placeholder="@SubjectPickerPlaceholder"
+                                      Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Primary grade" For="authoring-basics-grade">
+                        @* The grade picker owns an extra side effect (FR-58 subject reload + the
+                           WS-C1 signature re-resolve), so it binds the selected option and the
+                           changed callback explicitly rather than through @bind. *@
+                        <FluentSelect TOption="PickerOption" Id="authoring-basics-grade"
+                                      Items="@_gradeLevelOptions"
+                                      SelectedOption="@_selectedGradeLevel"
+                                      SelectedOptionChanged="@OnGradeLevelChangedAsync"
+                                      OptionText="@(o => o?.Label ?? string.Empty)"
+                                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                                      Placeholder="Select a grade level"
+                                      Disabled="@(IsReadOnly || GradePickerDisabled)"
+                                      class="full-width" />
+                    </FormRow>
+                    @if (GradePickerReason is not null)
+                    {
+                        <p class="authoring-reason" id="authoring-grade-reason">@GradePickerReason</p>
+                    }
+
+                    @if (_gradeLevels is { Length: 0 })
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Warning">
+                            No grade levels available. Please create grade levels in the Students module first.
+                        </FluentMessageBar>
+                    }
+                </section>
+
+                @* ── 2 · Audience & Targets (§7.5 recipient preview is R2) ─────── *@
+                <section id="authoring-audience" class="authoring-compartment">
+                    <h3 class="authoring-compartment-title">Audience &amp; Targets</h3>
+
+                    <FormRow Label="Target audience" Required For="authoring-audience-target">
+                        <FluentSelect TOption="PickerOption" Id="authoring-audience-target"
+                                      Items="@TargetAudienceOptions" @bind-SelectedOption="_selectedTargetAudience"
+                                      OptionText="@(o => o?.Label ?? string.Empty)"
+                                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                                      Disabled="@IsReadOnly" class="full-width" />
+                    </FormRow>
+
+                    <FormRow Label="Activity groups" For="authoring-audience-groups">
+                        @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md routes
+                           multi-select pickers to the raw control and asks for the reason to be
+                           documented here — the five shared wrappers are all single-value. The
+                           selection binds the supported SelectedOptions/SelectedOptionsChanged
+                           pair over the option objects; the page keeps the ids as its source of
+                           truth. (R1 regression: this element bound @bind-SelectedValues, which
+                           does not exist on FluentListbox in FluentUI 4.14.2, so the binding was
+                           silently dropped into AdditionalAttributes and the picker never
+                           reported or showed a selection.) *@
+                        <FluentSelect TOption="PickerOption" Id="authoring-audience-groups"
+                                      Items="@_activityGroupOptions"
+                                      Multiple="true"
+                                      OptionText="@(g => g.Label)"
+                                      OptionValue="@(g => g.Value)"
+                                      SelectedOptions="@SelectedGroupOptions"
+                                      SelectedOptionsChanged="@OnSelectedGroupsChangedAsync"
+                                      Disabled="@(IsReadOnly || GroupPickerReason is not null)"
+                                      class="full-width" />
+                    </FormRow>
+                    @if (GroupPickerReason is not null)
+                    {
+                        <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
+                    }
+
+                    <p class="authoring-hint">
+                        Recipients are resolved from this audience when the assignment is published.
+                    </p>
+                </section>
+
+                @* ── 3 · Delivery & Publishing (UX-15) ────────────────────────── *@
+                <section id="authoring-delivery" class="authoring-compartment">
+                    <h3 class="authoring-compartment-title">Delivery &amp; Publishing</h3>
+
+                    <FormRow Label="Status" For="authoring-delivery-status">
+                        <span class="authoring-readonly-value" id="authoring-delivery-status">
+                            @(_item?.Status.ToString() ?? "New draft")
+                        </span>
+                    </FormRow>
+
+                    <FormRow Label="Available from" For="authoring-delivery-available-from">
+                        <span class="authoring-readonly-value" id="authoring-delivery-available-from">
+                            @(_item?.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")
+                        </span>
+                    </FormRow>
+
+                    <FormRow Label="Due date" For="authoring-delivery-due">
+                        <FluentDatePicker Id="authoring-delivery-due" @bind-Value="_model.DueDate"
+                                          @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
+                                          Class="w-4" />
+                    </FormRow>
+
+                    <FormRow Label="Archive grace (days)" For="authoring-delivery-grace">
+                        <FluentNumberField Id="authoring-delivery-grace" @bind-Value="_model.ArchiveGraceDays"
+                                           ReadOnly="@IsReadOnly" Class="w-3" />
+                    </FormRow>
+
+                    <div class="authoring-policy-row" id="authoring-policy-approval">
+                        <span class="authoring-policy-label">Approval before publish</span>
+                        <span class="authoring-policy-value">@ApprovalPolicyValueText</span>
+                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
+                        @if (PolicyLinkHref is not null)
+                        {
+                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
+                                          class="authoring-policy-link">Grade policy</FluentAnchor>
+                        }
+                    </div>
+
+                    <div class="authoring-policy-row" id="authoring-policy-notification">
+                        <span class="authoring-policy-label">Notification policy</span>
+                        <span class="authoring-policy-value">Resolved per recipient grade at publish</span>
+                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
+                        @if (PolicyLinkHref is not null)
+                        {
+                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
+                                          class="authoring-policy-link">Grade policy</FluentAnchor>
+                        }
+                    </div>
+                </section>
+
+                @* ── 4 · Submission & Sign-off (UX-16, UX-17) ─────────────────── *@
+                <section id="authoring-submission" class="authoring-compartment">
+                    <h3 class="authoring-compartment-title">Submission &amp; Sign-off</h3>
+
+                    <FormRow Label="Max score" For="authoring-submission-max-score">
+                        <FluentNumberField Id="authoring-submission-max-score" @bind-Value="_model.MaxScore"
+                                           ReadOnly="@IsReadOnly" Class="w-3" />
+                    </FormRow>
+
+                    <p class="authoring-hint" id="authoring-feedback-mode">
+                        Feedback mode: @EnumHelper.GetDescription(SelectedGradingFormat)
+                    </p>
+
+                    @* UX-17/UX-18: the pass-score / attempt-cap pair renders disabled with an
+                       inline reason for TeacherGraded instead of disappearing. *@
+                    <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
+
+                    <FormRow Label="Guardian review" For="authoring-submission-mandatory-review">
+                        <FluentCheckbox Id="authoring-submission-mandatory-review"
+                                        @bind-Value="_mandatoryReview"
+                                        Label="Require guardian review before student submits"
+                                        Disabled="@IsReadOnly" />
+                    </FormRow>
+
+                    <FormRow Label="Guardian signature" For="authoring-submission-requires-signature">
+                        <FluentCheckbox Id="authoring-submission-requires-signature"
+                                        @bind-Value="_requiresSignature"
+                                        Label="Require guardian signature after completion"
+                                        Disabled="@(IsReadOnly || _signatureMandatory)"
+                                        Tooltip="@(_signatureMandatory ? SignatureMandatoryReason : null)" />
+                    </FormRow>
+                    @if (_signatureMandatory)
+                    {
+                        <p class="authoring-reason" id="authoring-signature-reason">@SignatureMandatoryReason</p>
+                    }
+
+                    <div class="authoring-policy-row" id="authoring-policy-signature">
+                        <span class="authoring-policy-label">Signature requirement</span>
+                        <span class="authoring-policy-value">@SignaturePolicyValueText</span>
+                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
+                        @if (PolicyLinkHref is not null)
+                        {
+                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
+                                          class="authoring-policy-link">Grade policy</FluentAnchor>
+                        }
+                    </div>
+                </section>
+
+                @* ── 5 · Content & Resources (always active, UX-19) ───────────── *@
+                <section id="authoring-content" class="authoring-compartment">
+                    <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
+                    @if (IsReadOnly)
+                    {
+                        <p class="authoring-hint">
+                            Attachments and URL resources are managed on the assignment's edit surface.
+                        </p>
+                    }
+                    else if (ChildrenEditorDisabledReason is not null)
+                    {
+                        @* P1 fail-closed: no live-empty editor, so an add can never replace the
+                           persisted set (the update handler full-replaces a non-null collection). *@
+                        <p class="authoring-reason" id="authoring-content-reason">@ChildrenEditorDisabledReason</p>
+                    }
+                    else
+                    {
+                        <ResourcesSection Model="_model" Changed="OnModelChanged" />
+                    }
+                </section>
+
+                @* ── 6 · Questions & AI (UX-19: disabled-with-reason, never hidden) ── *@
+                <section id="authoring-questions" class="authoring-compartment">
+                    <h3 class="authoring-compartment-title">Questions &amp; AI</h3>
+                    @if (IsReadOnly)
+                    {
+                        <p class="authoring-hint">
+                            Questions are managed on the assignment's edit surface.
+                        </p>
+                    }
+                    else if (ChildrenEditorDisabledReason is not null)
+                    {
+                        <p class="authoring-reason" id="authoring-questions-reason">@ChildrenEditorDisabledReason</p>
+                    }
+                    else if (!GateEnabled)
+                    {
+                        <p class="authoring-reason" id="authoring-questions-reason">@QuestionGenerationGate.DisabledHint</p>
+                        <QuestionGenerationSection Model="_model"
+                                                   GateEnabled="false"
+                                                   TopicId="@TopicId"
+                                                   TopicName="@_selectedSubject?.Label"
+                                                   GradeLevelId="@GradeLevelId"
+                                                   PromptLocked="_aiPromptLocked"
+                                                   OnQuestionsChanged="OnModelChanged" />
+                        <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                    }
+                    else
+                    {
+                        <QuestionGenerationSection Model="_model"
+                                                   GateEnabled="true"
+                                                   TopicId="@TopicId"
+                                                   TopicName="@_selectedSubject?.Label"
+                                                   GradeLevelId="@GradeLevelId"
+                                                   PromptLocked="_aiPromptLocked"
+                                                   OnQuestionsChanged="OnModelChanged" />
+                        <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                        @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
+                        {
+                            <QuestionsDraftSection AssignmentId="_item.Id"
+                                                   GateEnabled="true"
+                                                   PromptLocked="_aiPromptLocked"
+                                                   TopicId="@TopicId"
+                                                   TopicName="@_selectedSubject?.Label"
+                                                   GradeLevelId="@GradeLevelId"
+                                                   OnConfirmed="ReloadAsync" />
+                        }
+                    }
+                </section>
+            </div>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    /// <summary>UX-13: the badge every policy-derived (non-editable) value carries.
+    /// Declared once so the markup, the spec wording and the bUnit suite cannot drift.</summary>
+    public const string InheritedPolicyBadgeText = "Inherited from Grade/Tenant policy";
+
+    /// <summary>D2 / Round B1: the inline reason (also the checkbox tooltip) shown when the
+    /// resolved grade/tenant signature requirement is <c>Mandatory</c> and therefore locks the
+    /// <c>RequiresSignature</c> checkbox.</summary>
+    public const string SignatureMandatoryReason =
+        "Your organization requires a guardian signature for new assignments in this grade.";
+
+    /// <summary>P1 rework, fail-closed: the reason the Content &amp; Resources and
+    /// Questions &amp; AI editors render disabled with when an editable Edit surface could
+    /// not load the assignment's persisted children. Adding to a blank form there is what
+    /// let one new question/URL delete every persisted child.</summary>
+    public const string ChildrenUnavailableReason =
+        "The saved questions, attachments and links could not be loaded, so these editors are disabled — " +
+        "adding to a blank form would replace what is already saved. Reload the page to try again.";
+
+    /// <summary>P2-1 rework, fail-closed: the reason the activity-group picker renders
+    /// disabled with when the assignment's persisted links could not be read. An unknown
+    /// link set must never be written over the stored one (the replace-set route deletes
+    /// whatever is not in the payload).</summary>
+    public const string GroupLinksUnavailableReason =
+        "The activity groups already linked to this assignment could not be loaded, so this picker is " +
+        "disabled — saving would replace the existing links. Reload the page to try again.";
+
+    /// <summary>The requested mode (UX-9). <see cref="AssignmentAuthoringMode.Edit"/> degrades
+    /// to <see cref="AssignmentAuthoringMode.View"/> for a Published/Closed/Archived
+    /// assignment — see <see cref="EffectiveMode"/>.</summary>
+    [Parameter, EditorRequired] public AssignmentAuthoringMode Mode { get; set; } = AssignmentAuthoringMode.View;
+
+    /// <summary>The assignment to load for Edit / View. Unused (and ignored) in Create mode.</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    /// <summary>Raised after a successful save or lifecycle action so a host page (Detail) can
+    /// re-read the assignment it renders around this component.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private readonly AssignmentEditFormModel _model = new();
+    private AssignmentSummaryDto? _item;
+    private bool _loading;
+    private bool _busy;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    // Type / grading / audience / review / signature selection state.
+    private PickerOption? _selectedType;
+    private PickerOption? _selectedGradingFormat;
+    private PickerOption? _selectedTargetAudience;
+    private bool _mandatoryReview = true;
+    private bool _requiresSignature;
+    private bool _signatureMandatory;
+    private SignatureRequirementMode? _resolvedSignatureMode;
+
+    /// <summary>WS-B2 (spec §3.4 line 70) — org-level AI-prompt lock.</summary>
+    private bool _aiPromptLocked;
+
+    // Primary grade + subject + activity-group picker state.
+    private GradeLevelDto[]? _gradeLevels;
+    private PickerOption[] _gradeLevelOptions = [];
+    private PickerOption? _selectedGradeLevel;
+    private bool _loadingSubjects;
+    private SubjectDto[]? _subjects;
+    private PickerOption[] _subjectOptions = [];
+    private PickerOption? _selectedSubject;
+    private bool _activityGroupsEnabled;
+    private PickerOption[] _activityGroupOptions = [];
+    private HashSet<Guid> _selectedGroupIds = [];
+    private SubjectDto[]? _groupSubjects;
+    private PickerOption[] _groupSubjectOptions = [];
+    private bool _loadingGroupSubjects;
+
+    /// <summary>P1 rework — whether the persisted children were loaded into
+    /// <see cref="AssignmentEditFormModel"/> before the editors rendered.</summary>
+    private bool _childrenLoaded;
+
+    /// <summary>P2-1 rework — whether the persisted activity-group links were read, plus the
+    /// set that was read, so an update only rewrites the links when the author changed them.</summary>
+    private bool _groupLinksLoaded;
+    private readonly HashSet<Guid> _loadedGroupIds = [];
+    private string? _groupLinksUnavailableReason;
+
+    /// <summary>One dropdown item for every picker on this page (grade, subject, group,
+    /// assignment type, grading format, target audience). Kept public so the pickers can be
+    /// driven by tests through their real <c>SelectedOptionChanged</c> callback.</summary>
+    public sealed record PickerOption(string Value, string Label);
+
+    private sealed record Compartment(string Anchor, string Title);
+
+    /// <summary>The six compartments in canonical order (UX-1). The jump-nav and the stacked
+    /// sections both render from this list, so the two can never disagree.</summary>
+    private static readonly Compartment[] Compartments =
+    [
+        new("basics", "Basics"),
+        new("audience", "Audience & Targets"),
+        new("delivery", "Delivery & Publishing"),
+        new("submission", "Submission & Sign-off"),
+        new("content", "Content & Resources"),
+        new("questions", "Questions & AI")
+    ];
+
+    // ── Mode resolution (UX-9 / UX-11) ────────────────────────────────────────
+
+    /// <summary>The mode actually rendered. Create stays Create; Edit degrades to View when the
+    /// loaded assignment is no longer Draft/Scheduled (the server refuses structural edits
+    /// outside Draft|Scheduled — <c>Assignment.Update</c>'s guard is unchanged).</summary>
+    private AssignmentAuthoringMode EffectiveMode
+    {
+        get
+        {
+            if (Mode == AssignmentAuthoringMode.Create)
+            {
+                return AssignmentAuthoringMode.Create;
+            }
+
+            var stillEditable = _item is { Status: AssignmentStatusDto.Draft or AssignmentStatusDto.Scheduled };
+            return Mode == AssignmentAuthoringMode.Edit && stillEditable
+                ? AssignmentAuthoringMode.Edit
+                : AssignmentAuthoringMode.View;
+        }
+    }
+
+    private bool IsReadOnly => EffectiveMode == AssignmentAuthoringMode.View;
+
+    /// <summary>P1 rework, fail-closed: non-null exactly when an editable Edit surface did
+    /// NOT get its persisted children. The Content &amp; Resources and Questions &amp; AI
+    /// editors then render disabled-with-reason instead of live-empty (UX-17/UX-19
+    /// treatment) — never an empty editor that a first add would convert into a
+    /// full-replacement payload. Create mode is exempt: it has no persisted children to
+    /// lose, so its editors stay live.</summary>
+    private string? ChildrenEditorDisabledReason =>
+        EffectiveMode == AssignmentAuthoringMode.Edit && !_childrenLoaded
+            ? ChildrenUnavailableReason
+            : null;
+
+    private string HeadingText => EffectiveMode switch
+    {
+        AssignmentAuthoringMode.Create => "New assignment",
+        AssignmentAuthoringMode.Edit => "Edit assignment",
+        _ => "Assignment overview"
+    };
+
+    private static Appearance StatusAppearance(AssignmentStatusDto status) => status switch
+    {
+        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => Appearance.Accent,
+        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
+    // ── Typed selection projections ───────────────────────────────────────────
+
+    private AssignmentTypeDto? SelectedType =>
+        _selectedType is null ? null : (AssignmentTypeDto)int.Parse(_selectedType.Value);
+
+    private GradingFormatDto SelectedGradingFormat =>
+        _selectedGradingFormat is not null
+            ? (GradingFormatDto)int.Parse(_selectedGradingFormat.Value)
+            : _item?.GradingFormat ?? GradingFormatDto.TeacherGraded;
+
+    private TargetAudienceTypeDto SelectedTargetAudience =>
+        _selectedTargetAudience is not null
+            ? (TargetAudienceTypeDto)int.Parse(_selectedTargetAudience.Value)
+            : _item?.TargetAudienceType ?? TargetAudienceTypeDto.AllStudents;
+
+    private bool IsSelectedGroupsAudience =>
+        SelectedTargetAudience == TargetAudienceTypeDto.SelectedGroups;
+
+    /// <summary>FR-220 / EC-3 — whether this type + grading combination offers AI generation.
+    /// Drives the disabled-with-reason treatment of compartment 6 and the kebab's
+    /// "Generate questions" action (AI-4).</summary>
+    private bool GateEnabled => QuestionGenerationGate.IsEnabled(SelectedType, SelectedGradingFormat);
+
+    private Guid? TopicId =>
+        _selectedSubject is not null && Guid.TryParse(_selectedSubject.Value, out var id) ? id : null;
+
+    private Guid? GradeLevelId =>
+        _selectedGradeLevel is not null && Guid.TryParse(_selectedGradeLevel.Value, out var id) ? id : null;
+
+    /// <summary>The picker's selection projection: the option instances matching the ids the
+    /// page holds. FluentSelect highlights the options it is handed, so a loaded link must be
+    /// projected back onto its own option (the TeacherEditDialog multi-select precedent).
+    /// <para>R1 regression fix: the picker previously bound <c>@bind-SelectedValues</c>, a
+    /// parameter that does not exist on the FluentUI 4.14.2 list components — Blazor routed it
+    /// into the catch-all <c>AdditionalAttributes</c> (rendering a stray
+    /// <c>selectedvalues</c> HTML attribute) and the picker neither showed nor reported a
+    /// selection, so Create-with-By-Group could never pass <see cref="ValidateForSave"/>.</para></summary>
+    private IEnumerable<PickerOption> SelectedGroupOptions =>
+        _activityGroupOptions.Where(o => _selectedGroupIds.Contains(Guid.Parse(o.Value)));
+
+    private PickerOption[] SubjectOptions => IsSelectedGroupsAudience ? _groupSubjectOptions : _subjectOptions;
+
+    private bool SubjectPickerDisabled =>
+        IsSelectedGroupsAudience
+            ? _selectedGroupIds.Count == 0 || _loadingGroupSubjects
+            : _selectedGradeLevel is null || _loadingSubjects;
+
+    private string SubjectPickerPlaceholder =>
+        IsSelectedGroupsAudience
+            ? (_selectedGroupIds.Count == 0 ? "Select activity groups first" : "Select a subject")
+            : (_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject");
+
+    /// <summary>UX-17: the Primary grade picker is inapplicable (not hidden) when the audience
+    /// is group-based.</summary>
+    private string? GradePickerReason =>
+        IsSelectedGroupsAudience ? "Not applicable when the audience is By Group." : null;
+
+    private bool GradePickerDisabled => GradePickerReason is not null;
+
+    /// <summary>UX-17/UX-19: the activity-group picker is inapplicable (not hidden) unless the
+    /// audience is group-based — unavailable entirely when the tenant flag is off (in which
+    /// case the group audience is not offered at all), and disabled when the persisted links
+    /// could not be read (P2-1 fail-closed: an unknown set must never be saved over).</summary>
+    private string? GroupPickerReason =>
+        !_activityGroupsEnabled
+            ? "Not available — activity groups are disabled for this organization."
+            : _groupLinksUnavailableReason
+              ?? (IsSelectedGroupsAudience ? null : "Not applicable for the selected target audience.");
+
+    // ── Policy-derived read-only values (UX-13) ───────────────────────────────
+
+    private string ApprovalPolicyValueText => _item is null
+        ? "Not resolved yet"
+        : _item.RequiresApproval
+            ? "Approval is required before this assignment can be published"
+            : "No approval required before publishing";
+
+    private string SignaturePolicyValueText => _resolvedSignatureMode switch
+    {
+        SignatureRequirementMode.Mandatory => "A guardian signature is required after completion",
+        SignatureRequirementMode.Optional => "A guardian signature is optional and pre-ticked",
+        SignatureRequirementMode.Disabled => "No guardian signature is required",
+        _ => "Not resolved yet"
+    };
+
+    /// <summary>UX-13: the resolved values link to the policy card that owns them — the grade's
+    /// policy page when the assignment carries a primary grade, otherwise the grade-level list
+    /// that hosts the tenant-global default.</summary>
+    private string? PolicyLinkHref => _item?.GradeLevelId is Guid gradeId
+        ? $"/students/grade-levels/{gradeId}"
+        : null;
+
+    private PickerOption[] TypeOptions =>
+    [
+        new(((int)AssignmentTypeDto.Digital).ToString(), EnumHelper.GetDescription(AssignmentTypeDto.Digital)),
+        new(((int)AssignmentTypeDto.SemiManual).ToString(), EnumHelper.GetDescription(AssignmentTypeDto.SemiManual)),
+        new(((int)AssignmentTypeDto.Manual).ToString(), EnumHelper.GetDescription(AssignmentTypeDto.Manual))
+    ];
+
+    private PickerOption[] GradingFormatOptions =>
+    [
+        new(((int)GradingFormatDto.TeacherGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.TeacherGraded)),
+        new(((int)GradingFormatDto.AutoGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.AutoGraded)),
+        new(((int)GradingFormatDto.InstantGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.InstantGraded))
+    ];
+
+    /// <summary>The offered target audiences. <c>SelectedGroups</c> is only offered when
+    /// FEATURE:EnableActivityGroups is on — /activity-groups is unmapped otherwise, so the
+    /// option would offer a target whose picker never loads.</summary>
+    private PickerOption[] TargetAudienceOptions
+    {
+        get
+        {
+            var options = new List<PickerOption>
+            {
+                new(((int)TargetAudienceTypeDto.AllStudents).ToString(),
+                    EnumHelper.GetDescription(TargetAudienceTypeDto.AllStudents)),
+                new(((int)TargetAudienceTypeDto.SelectedGrades).ToString(),
+                    EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGrades))
+            };
+            if (_activityGroupsEnabled)
+            {
+                options.Add(new PickerOption(
+                    ((int)TargetAudienceTypeDto.SelectedGroups).ToString(),
+                    EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGroups)));
+            }
+            return options.ToArray();
+        }
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+        _loading = Mode != AssignmentAuthoringMode.Create;
+
+        try
+        {
+            if (Mode != AssignmentAuthoringMode.Create && Id is Guid id)
+            {
+                _item = await Api.GetByIdAsync(id, ct);
+                if (_disposed) return;
+                if (_item is not null)
+                {
+                    _model.LoadFrom(_item);
+                    _mandatoryReview = _item.MandatoryReview;
+                    _requiresSignature = _item.RequiresSignature;
+                    _selectedType = TypeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
+                    _selectedGradingFormat = GradingFormatOptions
+                        .FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
+                    _selectedTargetAudience = TargetAudienceOptions
+                        .FirstOrDefault(o => o.Value == ((int)_item.TargetAudienceType).ToString())
+                        ?? new PickerOption(
+                            ((int)_item.TargetAudienceType).ToString(),
+                            EnumHelper.GetDescription(_item.TargetAudienceType));
+                }
+            }
+            else if (Mode == AssignmentAuthoringMode.Create)
+            {
+                // A new assignment starts on the authored defaults the retired wizard used
+                // (Offline / Teacher Marked / Everyone) so the Create form is never blank
+                // where a value is required.
+                _selectedType = TypeOptions.Single(o => o.Value == ((int)AssignmentTypeDto.Manual).ToString());
+                _selectedGradingFormat = GradingFormatOptions
+                    .Single(o => o.Value == ((int)GradingFormatDto.TeacherGraded).ToString());
+                _selectedTargetAudience = TargetAudienceOptions
+                    .Single(o => o.Value == ((int)TargetAudienceTypeDto.AllStudents).ToString());
+            }
+
+            await LoadPickersAsync(_item, ct);
+
+            // P1/P2-1 rework: an editable Edit surface reads the persisted children and the
+            // linked activity groups BEFORE the editors render, so an author's first add can
+            // never turn an empty collection into a full-replacement payload.
+            if (EffectiveMode == AssignmentAuthoringMode.Edit && Id is Guid authoringId)
+            {
+                await LoadChildrenAsync(authoringId, ct);
+                await LoadLinkedGroupIdsAsync(authoringId, ct);
+            }
+
+            // WS-C1 (spec §7 Q1) / D2: resolve the effective signature requirement — the
+            // Create-mode pre-fill and the Edit/View read-only policy row share this call.
+            await ResolveSignatureDefaultAsync(_item?.GradeLevelId);
+
+            // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock (best-effort, fail-open).
+            await LoadAiPromptPolicyAsync(ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load the assignment authoring surface for {AssignmentId}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    /// <summary>Loads grade levels, activity groups (flag-gated) and, for a loaded assignment,
+    /// the subject option that carries its persisted topic. Every fetch is isolated so one
+    /// optional backend being absent can never take down the rest of the page (the
+    /// /activity-groups 404 precedent).</summary>
+    private async Task LoadPickersAsync(AssignmentSummaryDto? item, CancellationToken ct)
+    {
+        try
+        {
+            _gradeLevels = await StudentsApi.ListGradeLevelsAsync(ct);
+            if (_gradeLevels is not null)
+            {
+                _gradeLevelOptions = _gradeLevels
+                    .OrderBy(gl => gl.Level)
+                    .Select(gl => new PickerOption(gl.Id.ToString(), gl.Name))
+                    .ToArray();
+            }
+            else
+            {
+                _gradeLevels = [];
+            }
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade levels");
+        }
+
+        // Seed the primary grade from the loaded assignment even when the grade is not in the
+        // fetched list (a deleted/foreign grade must not silently blank the assignment).
+        if (item?.GradeLevelId is Guid gradeId)
+        {
+            _selectedGradeLevel = _gradeLevelOptions.FirstOrDefault(o => o.Value == gradeId.ToString())
+                ?? new PickerOption(gradeId.ToString(), item.GradeName ?? "Current grade");
+        }
+
+        await LoadActivityGroupsAsync(ct);
+
+        if (item is not null)
+        {
+            // The persisted topic seeds the subject picker; it may not appear in the grade's
+            // effective subject list anymore, so it is added to the options explicitly.
+            var topic = new PickerOption(item.TopicId.ToString(), item.TopicName ?? "Current subject");
+            _selectedSubject = topic;
+            _subjectOptions = [topic];
+        }
+
+        if (_selectedGradeLevel is not null)
+        {
+            await LoadSubjectsForGradeAsync(_selectedGradeLevel, ct);
+        }
+    }
+
+    /// <summary>Loads the activity groups backing the SelectedGroups audience. Off flag = the
+    /// audience is not offered at all, so this is a normal no-op rather than an error.</summary>
+    private async Task LoadActivityGroupsAsync(CancellationToken ct)
+    {
+        _activityGroupOptions = [];
+        _selectedGroupIds.Clear();
+        _loadedGroupIds.Clear();
+        _groupLinksLoaded = false;
+
+        try
+        {
+            if (!await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups, ct))
+            {
+                _activityGroupsEnabled = false;
+                return;
+            }
+
+            _activityGroupsEnabled = true;
+            var groups = await StudentsApi.ListActivityGroupsAsync(ct);
+            if (groups is null) return;
+
+            _activityGroupOptions = groups
+                .Where(g => g.IsActive)
+                .OrderBy(g => g.Name)
+                .Select(g => new PickerOption(g.Id.ToString(), g.Name))
+                .ToArray();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load activity groups; the SelectedGroups target is unavailable");
+            _activityGroupOptions = [];
+            _selectedGroupIds.Clear();
+        }
+    }
+
+    /// <summary>
+    /// P1 rework (the load half of Edit parity): reads the assignment's persisted question /
+    /// attachment / resource set into the form model. Fail-closed — a failed or absent read
+    /// leaves <see cref="ChildrenEditorDisabledReason"/> non-null, so the editors render
+    /// disabled-with-reason and the save payload keeps its (null) child collections, which the
+    /// update handler reads as "preserve".
+    /// </summary>
+    private async Task LoadChildrenAsync(Guid assignmentId, CancellationToken ct)
+    {
+        _childrenLoaded = false;
+        try
+        {
+            var children = await Api.GetAuthoringChildrenAsync(assignmentId, ct);
+            if (children is null)
+            {
+                Logger.LogWarning("Authoring children read found no assignment {AssignmentId}", assignmentId);
+                return;
+            }
+
+            _model.LoadChildren(children);
+            _childrenLoaded = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load authoring children for {AssignmentId}", assignmentId);
+        }
+    }
+
+    /// <summary>
+    /// P2-1 rework: reads the activity groups already linked to this assignment so the picker
+    /// starts from the persisted links (the review's P2-1 — the picker was editable but never
+    /// loaded or persisted). Fail-closed: a failed read disables the picker with a reason and
+    /// the save path then never issues the replace-set call, so an unknown set can never be
+    /// written over the stored one.
+    /// </summary>
+    private async Task LoadLinkedGroupIdsAsync(Guid assignmentId, CancellationToken ct)
+    {
+        _groupLinksLoaded = false;
+        _loadedGroupIds.Clear();
+        _groupLinksUnavailableReason = null;
+
+        if (!_activityGroupsEnabled)
+        {
+            // The link routes are unmapped with the flag off and the group audience is not
+            // offered, so there is nothing to load and nothing to persist.
+            return;
+        }
+
+        try
+        {
+            var ids = await Api.GetLinkedActivityGroupIdsAsync(assignmentId, ct);
+            if (ids is null)
+            {
+                _groupLinksUnavailableReason = GroupLinksUnavailableReason;
+                return;
+            }
+
+            foreach (var groupId in ids)
+            {
+                // Only ids the picker can represent are selected: the link route rejects ANY
+                // archived id in a replace set, so offering one would fail every save (bounded
+                // residual — an archived link is not re-writable through this route).
+                if (_activityGroupOptions.Any(o => o.Value == groupId.ToString()))
+                {
+                    _loadedGroupIds.Add(groupId);
+                    _selectedGroupIds.Add(groupId);
+                }
+            }
+
+            _groupLinksLoaded = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _groupLinksUnavailableReason = GroupLinksUnavailableReason;
+            Logger.LogWarning(ex, "Failed to load linked activity groups for {AssignmentId}", assignmentId);
+        }
+    }
+
+    /// <summary>WS-B2 (spec §3.4 line 70): loads the org-level AI-prompt lock. Fail-open —
+    /// any failure is a warning log and the prompt stays editable (no error bar).</summary>
+    private async Task LoadAiPromptPolicyAsync(CancellationToken ct)
+    {
+        try
+        {
+            _aiPromptLocked = await Api.GetAiPromptPolicyAsync(ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "AI-prompt lock resolution failed");
+        }
+    }
+
+    private void OnModelChanged() { }
+
+    private async Task OnGradeLevelChangedAsync(PickerOption? option)
+    {
+        _selectedGradeLevel = option;
+        _selectedSubject = null;
+        _subjectOptions = [];
+        _groupSubjects = null;
+        _groupSubjectOptions = [];
+        _subjects = null;
+
+        if (option is null)
+        {
+            return;
+        }
+
+        await LoadSubjectsForGradeAsync(option, _loadCts?.Token ?? CancellationToken.None);
+
+        // WS-C1 (spec §7 Q1) / D2: switching grade re-resolves the signature default (the
+        // author's prior override is intentionally replaced — mirrors the subject-list reset).
+        if (Guid.TryParse(option.Value, out var gradeLevelId))
+        {
+            await ResolveSignatureDefaultAsync(gradeLevelId);
+        }
+    }
+
+    private async Task LoadSubjectsForGradeAsync(PickerOption gradeLevel, CancellationToken ct)
+    {
+        _loadingSubjects = true;
+        try
+        {
+            var effectiveDate = EffectiveTopicDate();
+            _subjects = await StudentsApi.ListSubjectsByGradeEffectiveAsync(
+                Guid.Parse(gradeLevel.Value), effectiveDate, ct);
+            if (_subjects is not null)
+            {
+                _subjectOptions = _subjects
+                    .OrderBy(s => s.DisplayOrder)
+                    .Select(s => new PickerOption(s.Id.ToString(), s.Name))
+                    .ToArray();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for grade {GradeId}", gradeLevel.Value);
+        }
+        finally
+        {
+            _loadingSubjects = false;
+        }
+    }
+
+    /// <summary>FR-58 — re-filter the topic picker so only topics effective on the due date
+    /// are offered (the grade path and the group-union path both re-run here).</summary>
+    private async Task OnDueDateChangedAsync()
+    {
+        if (_selectedGradeLevel is not null && Guid.TryParse(_selectedGradeLevel.Value, out _))
+        {
+            _selectedSubject = null;
+            _subjectOptions = [];
+            await LoadSubjectsForGradeAsync(_selectedGradeLevel, _loadCts?.Token ?? CancellationToken.None);
+        }
+
+        if (IsSelectedGroupsAudience && _selectedGroupIds.Count > 0)
+        {
+            _selectedSubject = null;
+            _groupSubjectOptions = [];
+            await LoadGroupSubjectsAsync();
+        }
+    }
+
+    private async Task OnSelectedGroupsChangedAsync(IEnumerable<PickerOption>? selected)
+    {
+        // The picker reports option objects; the ids stay the page's source of truth
+        // (validation, the FR-58 subject union and the link persistence all read them).
+        _selectedGroupIds = (selected ?? [])
+            .Select(o => Guid.Parse(o.Value))
+            .ToHashSet();
+        _selectedSubject = null;
+        _groupSubjectOptions = [];
+        if (_selectedGroupIds.Count == 0)
+        {
+            _groupSubjects = null;
+            return;
+        }
+        await LoadGroupSubjectsAsync();
+    }
+
+    private async Task LoadGroupSubjectsAsync()
+    {
+        _loadingGroupSubjects = true;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            // One effective date per load so the union across the selected groups is
+            // consistent (FR-58), mirroring the grade path.
+            var effectiveDate = EffectiveTopicDate();
+            var union = new List<SubjectDto>();
+            var seen = new HashSet<Guid>();
+            foreach (var groupId in _selectedGroupIds)
+            {
+                var subjects = await StudentsApi.ListSubjectsByGroupAsync(groupId, effectiveDate, ct) ?? [];
+                foreach (var s in subjects)
+                {
+                    if (seen.Add(s.Id)) union.Add(s);
+                }
+            }
+            _groupSubjects = union.ToArray();
+            _groupSubjectOptions = _groupSubjects
+                .OrderBy(s => s.DisplayOrder)
+                .Select(s => new PickerOption(s.Id.ToString(), s.Name))
+                .ToArray();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for selected groups");
+        }
+        finally
+        {
+            _loadingGroupSubjects = false;
+        }
+    }
+
+    private DateOnly EffectiveTopicDate() => _model.DueDate.HasValue
+        ? DateOnly.FromDateTime(_model.DueDate.Value)
+        : DateOnly.FromDateTime(DateTime.UtcNow);
+
+    /// <summary>
+    /// WS-C1 (spec §7 Q1) / D2: resolves the effective guardian-signature requirement, pre-fills
+    /// the <c>RequiresSignature</c> checkbox and the <c>Mandatory</c> lock, and feeds the
+    /// read-only policy row. Fail-open: an endpoint failure is a warning, the checkbox keeps its
+    /// value and stays ENABLED — a transport failure never locks an author out of their own
+    /// choice.
+    /// </summary>
+    private async Task ResolveSignatureDefaultAsync(Guid? gradeLevelId)
+    {
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            ApplySignatureRequirement(await Api.GetSignatureDefaultAsync(gradeLevelId, ct));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _signatureMandatory = false;
+            _resolvedSignatureMode = null;
+            Logger.LogWarning(ex, "Signature-default resolution failed for grade {GradeLevelId}", gradeLevelId);
+        }
+    }
+
+    /// <summary>D2: <c>Disabled</c> leaves the checkbox unticked and free, <c>Optional</c>
+    /// pre-ticks it with the author in control, and <c>Mandatory</c> pre-ticks and locks it.</summary>
+    private void ApplySignatureRequirement(SignatureRequirementMode mode)
+    {
+        _resolvedSignatureMode = mode;
+        _requiresSignature = mode != SignatureRequirementMode.Disabled;
+        _signatureMandatory = mode == SignatureRequirementMode.Mandatory;
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Id is not Guid id) return;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _item = await Api.GetByIdAsync(id, ct);
+            if (_item is not null)
+            {
+                _model.LoadFrom(_item);
+                _mandatoryReview = _item.MandatoryReview;
+                _requiresSignature = _item.RequiresSignature;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to reload assignment {AssignmentId}", id);
+        }
+    }
+
+    // ── Action bar (§11) ─────────────────────────────────────────────────────
+
+    /// <summary>The status-driven primary action (§11 / UX-5). Null for an Archived assignment
+    /// (the terminal state has no primary action).</summary>
+    private string? PrimaryActionLabel => EffectiveMode switch
+    {
+        AssignmentAuthoringMode.Create => "Save as Draft",
+        _ => _item?.Status switch
+        {
+            AssignmentStatusDto.Draft => "Publish",
+            AssignmentStatusDto.Scheduled => "Unpublish",
+            AssignmentStatusDto.Published => "Unpublish",
+            AssignmentStatusDto.Closed => "Archive",
+            _ => null
+        }
+    };
+
+    /// <summary>The kebab overflow (UX-5). "Generate questions" anchors to compartment 6
+    /// (AI-1/AI-2) and is disabled when the type/grading gate is closed (AI-4). The Save /
+    /// Schedule actions only appear where the surface can actually perform them; an Archived
+    /// assignment has no secondary actions at all (§11).</summary>
+    private IReadOnlyList<RowAction> SecondaryActions
+    {
+        get
+        {
+            var actions = new List<RowAction>();
+
+            if (EffectiveMode == AssignmentAuthoringMode.Create)
+            {
+                actions.Add(GenerateQuestionsAction());
+                return actions;
+            }
+
+            if (_item is null) return actions;
+
+            var editable = EffectiveMode == AssignmentAuthoringMode.Edit;
+            switch (_item.Status)
+            {
+                case AssignmentStatusDto.Draft:
+                    if (editable) actions.Add(RowAction.Callback("Save draft", SaveAsync, FluentIcons.Save));
+                    actions.Add(GenerateQuestionsAction());
+                    actions.Add(RowAction.Callback("Schedule", OpenScheduleDialogAsync, FluentIcons.Calendar));
+                    break;
+                case AssignmentStatusDto.Scheduled:
+                    if (editable) actions.Add(RowAction.Callback("Save", SaveAsync, FluentIcons.Save));
+                    actions.Add(RowAction.Callback("Reschedule", OpenScheduleDialogAsync, FluentIcons.Calendar));
+                    break;
+                case AssignmentStatusDto.Published:
+                    actions.Add(RowAction.Callback("Close", CloseAsync, FluentIcons.Checkmark));
+                    break;
+            }
+
+            // View mode is the read-only surface (Detail's Overview): the edit surface itself
+            // stays one click away for the statuses that still accept structural edits.
+            if (!editable && _item.Status is AssignmentStatusDto.Draft or AssignmentStatusDto.Scheduled)
+            {
+                actions.Add(RowAction.Navigate("Edit", $"/assignments/{_item.Id}/edit", FluentIcons.Edit));
+            }
+
+            return actions;
+        }
+    }
+
+    private RowAction GenerateQuestionsAction() =>
+        RowAction.Navigate("Generate questions", "#authoring-questions", FluentIcons.Bot, disabled: !GateEnabled);
+
+    private async Task OnPrimaryActionAsync()
+    {
+        switch (EffectiveMode)
+        {
+            case AssignmentAuthoringMode.Create:
+                await SaveAsync();
+                break;
+            default:
+                switch (_item?.Status)
+                {
+                    case AssignmentStatusDto.Draft:
+                        await PublishAsync();
+                        break;
+                    case AssignmentStatusDto.Scheduled:
+                    case AssignmentStatusDto.Published:
+                        await UnpublishAsync();
+                        break;
+                    case AssignmentStatusDto.Closed:
+                        await ArchiveAsync();
+                        break;
+                }
+                break;
+        }
+    }
+
+    // ── Save ─────────────────────────────────────────────────────────────────
+
+    private async Task SaveAsync()
+    {
+        if (!ValidateForSave()) return;
+
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            if (EffectiveMode == AssignmentAuthoringMode.Create)
+            {
+                var request = _model.ToCreateRequest(
+                    SelectedType ?? AssignmentTypeDto.Manual,
+                    SelectedGradingFormat,
+                    SelectedTargetAudience,
+                    TopicId!.Value,
+                    GradeLevelId,
+                    _mandatoryReview,
+                    _requiresSignature);
+
+                Logger.LogInformation("Creating assignment {Title} from the authoring page", _model.Title);
+                var assignmentId = await Api.CreateAsync(request, ct);
+
+                if (IsSelectedGroupsAudience)
+                {
+                    await Api.LinkAssignmentGroupsAsync(assignmentId, _selectedGroupIds.ToList(), ct);
+                }
+
+                await Changed.InvokeAsync();
+                Nav.NavigateTo("/assignments");
+                return;
+            }
+
+            var update = _model.ToUpdateRequest(
+                SelectedType ?? AssignmentTypeDto.Manual,
+                SelectedGradingFormat,
+                SelectedTargetAudience,
+                TopicId!.Value,
+                GradeLevelId,
+                _mandatoryReview,
+                _requiresSignature);
+
+            Logger.LogInformation("Updating assignment {AssignmentId} from the authoring page", Id);
+            await Api.UpdateAsync(Id!.Value, update, ct);
+
+            // P2-1 rework: the picker now starts from the persisted links, so an actual edit
+            // of it is persisted too — and only then. An untouched picker never issues the
+            // replace-set call (the route deletes every link missing from its payload).
+            if (IsSelectedGroupsAudience && _groupLinksLoaded && !_loadedGroupIds.SetEquals(_selectedGroupIds))
+            {
+                await Api.LinkAssignmentGroupsAsync(Id!.Value, _selectedGroupIds.ToList(), ct);
+
+                // The persisted set is now the loaded baseline, so a later save of this same
+                // page does not re-issue the replace-set call for an already-written set.
+                _loadedGroupIds.Clear();
+                _loadedGroupIds.UnionWith(_selectedGroupIds);
+            }
+
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+            Nav.NavigateTo($"/assignments/{Id}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save assignment {Title}", _model.Title);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _busy = false;
+        }
+    }
+
+    /// <summary>The client-side mirror of the server-side create/update guards: a subject is
+    /// always required, group targeting needs at least one group whose subject union contains
+    /// the chosen subject (FR-58), and the question / scoring gates mirror the domain rules.
+    /// </summary>
+    private bool ValidateForSave()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Title))
+        {
+            _error = "Title is required.";
+            return false;
+        }
+        if (TopicId is null)
+        {
+            _error = "Select a subject.";
+            return false;
+        }
+        if (IsSelectedGroupsAudience && _groupLinksUnavailableReason is not null)
+        {
+            // P2-1 fail-closed: the picker is disabled because the persisted links are
+            // unknown, so asking the author to pick a group would be a dead end.
+            _error = _groupLinksUnavailableReason;
+            return false;
+        }
+        if (IsSelectedGroupsAudience && _selectedGroupIds.Count == 0)
+        {
+            _error = "Select at least one activity group.";
+            return false;
+        }
+        if (IsSelectedGroupsAudience && !(_groupSubjects?.Any(s => s.Id == TopicId.Value) ?? false))
+        {
+            _error = "The selected subject is not assigned to any of the selected activity groups.";
+            return false;
+        }
+        if (SelectedTargetAudience == TargetAudienceTypeDto.SelectedGrades && GradeLevelId is null)
+        {
+            _error = "Select a primary grade for By Grade Level targeting.";
+            return false;
+        }
+        if (!_model.QuestionsPassSubmitGate(SelectedGradingFormat, out var gateError))
+        {
+            _error = gateError;
+            return false;
+        }
+        if (!_model.ScoringFieldsPassSubmitGate(SelectedGradingFormat, out var scoringError))
+        {
+            _error = scoringError;
+            return false;
+        }
+        return true;
+    }
+
+    // ── Lifecycle actions ────────────────────────────────────────────────────
+
+    /// <summary>UX-6: the publish-time choices are captured in the confirm dialog (replacing
+    /// the wizard's Review step) — contact limiting lives in <c>PublishDialog</c>.</summary>
+    private async Task PublishAsync()
+    {
+        if (_item is null) return;
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            var contacts = await StudentsApi.ListSubscribedContactsAsync(
+                ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct) ?? [];
+            var model = new PublishFormModel(contacts.ToList(), $"Audience: {EnumHelper.GetDescription(_item.TargetAudienceType)}", _item.MandatoryReview);
+
+            var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
+                model, title: "Publish assignment", size: DialogSize.Medium);
+
+            if (result is null) return; // cancelled
+
+            await Api.PublishAsync(_item.Id, result.ContactIds, ct);
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to publish assignment {AssignmentId}", _item.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _busy = false;
+        }
+    }
+
+    private async Task UnpublishAsync()
+    {
+        if (_item is null) return;
+        if (!await DialogService.ShowConfirmDialogAsync(
+                $"Unpublish assignment '{_item.Title}'? It returns to Draft and its schedule is cleared.",
+                primaryText: "Unpublish"))
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await Api.UnpublishAsync(_item.Id, ct);
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to unpublish assignment {AssignmentId}", _item.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _busy = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_item is null) return;
+        if (!await DialogService.ShowConfirmDialogAsync(
+                $"Close assignment '{_item.Title}'? Closed assignments are read-only.",
+                primaryText: "Close"))
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await Api.CloseAsync(_item.Id, ct);
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to close assignment {AssignmentId}", _item.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _busy = false;
+        }
+    }
+
+    private async Task ArchiveAsync()
+    {
+        if (_item is null) return;
+        if (!await DialogService.ShowConfirmDialogAsync(
+                $"Archive assignment '{_item.Title}'? Archived assignments are retained read-only.",
+                primaryText: "Archive"))
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await Api.ArchiveAsync(_item.Id, ct);
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to archive assignment {AssignmentId}", _item.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _busy = false;
+        }
+    }
+
+    private async Task OpenScheduleDialogAsync()
+    {
+        if (_item is null) return;
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            var result = await DialogService.ShowShellDialogAsync<ScheduleDialog, ScheduleFormModel, ScheduleResult>(
+                new ScheduleFormModel(), title: "Schedule assignment", size: DialogSize.Medium);
+
+            if (result is null) return; // cancelled
+
+            await Api.ScheduleAsync(_item.Id, result.AvailableFromUtc, ct);
+            await ReloadAsync();
+            await Changed.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to schedule assignment {AssignmentId}", _item.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _busy = false;
+        }
+    }
+
+    private void BackToList() => Nav.NavigateTo("/assignments");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}
