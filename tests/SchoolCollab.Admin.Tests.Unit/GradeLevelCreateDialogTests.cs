@@ -14,6 +14,7 @@ using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
+using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -186,6 +187,19 @@ public class GradeLevelCreateDialogTests : BunitContext
         return handler;
     }
 
+    /// <summary>Serializes a topic for the <c>GET /students/topics</c> catalog.</summary>
+    private static Dictionary<string, object?> TopicJson(Guid id, string name) => new()
+    {
+        ["id"] = id,
+        ["codedValueId"] = (Guid?)null,
+        ["code"] = $"T-{id.ToString()[..4]}",
+        ["name"] = name,
+        ["description"] = (string?)null,
+        ["displayOrder"] = 1,
+        ["createdAt"] = DateTimeOffset.UnixEpoch,
+        ["updatedAt"] = DateTimeOffset.UnixEpoch,
+    };
+
     [TestMethod]
     public async Task Create_Dialog_Renders_Form_Fields()
     {
@@ -265,20 +279,129 @@ public class GradeLevelCreateDialogTests : BunitContext
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
 
-        // The submit pipeline is unit-testable but the bUnit FluentListbox two-way
-        // binding requires real user interaction to populate SelectedValues -
-        // we can't simulate "click subject id X" without driving the
-        // listbox's selection state machine. The deeper submit-pipeline
-        // assertion (assign-on-add / remove-on-drop / no-period-short-
-        // circuit) is left to integration tests; here we only assert the
-        // dialog mounts, renders the form fields, and the Cancel path
-        // returns null. The deeper diff is exercised by the smoke test
-        // in Edit_Dialog_Loads_Already_Assigned_Subjects_Preselected
-        // style cases that bypass the FluentListbox by pre-seeding the
-        // model.
+        // The deeper submit-pipeline assertion (assign-on-add / remove-on-drop /
+        // no-period-short-circuit) is driven through the picker's real callback in
+        // Create_Dialog_TopicSelection_ReachesTheModel_AndSubmitAssignsThePickedTopics;
+        // this smoke case only pins the mount + Cancel path.
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();
         var result = await task;
         result.Should().BeNull("cancelling closes the dialog with no result");
+    }
+
+    /// <summary>
+    /// Regression (round fluentui-dead-binding): the Topics picker bound the dead
+    /// <c>SelectedValues</c> pair, which does not exist on FluentUI 4.14.2 list
+    /// components — Blazor dropped it into the catch-all <c>AdditionalAttributes</c>
+    /// (a stray <c>selectedvalues</c> HTML attribute) and the picker never showed a
+    /// selection. The supported control highlights the options it is handed, so a
+    /// pre-populated <c>Model.TopicIds</c> renders as selected.
+    /// </summary>
+    [TestMethod]
+    public async Task Create_Dialog_TopicPicker_BindsTheSupportedApi_AndPreloadedIdsRenderSelected()
+    {
+        var gradeId = Guid.NewGuid();
+        var codedValueId = Guid.NewGuid();
+        var topicA = Guid.NewGuid();
+        var topicB = Guid.NewGuid();
+        var handler = RegisterFor(gradeId: gradeId, codedValueId: codedValueId);
+        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
+        {
+            TopicJson(topicA, "Algebra"),
+            TopicJson(topicB, "Geometry"),
+        }));
+
+        var cut = RenderProvider();
+        var model = new GradeLevelCreateDialog.GradeLevelCreateModel
+        {
+            CodedValueId = codedValueId,
+            TopicIds = [topicB],
+        };
+
+        var task = DialogService.ShowShellDialogAsync<
+            GradeLevelCreateDialog,
+            GradeLevelCreateDialog.GradeLevelCreateModel,
+            SchoolCollab.Students.Application.Services.GradeLevelDto>(
+            model, "Create grade level", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra", "the topic catalog renders as picker options"));
+
+        cut.Markup.Should().NotContain("selectedvalues",
+            "the dead SelectedValues binding must not leak into the DOM");
+        cut.FindAll("fluent-listbox").Should().BeEmpty(
+            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
+
+        var picker = cut.FindComponent<FluentSelect<TopicDto>>().Instance;
+        picker.Multiple.Should().BeTrue();
+        picker.SelectedOptions.Should().ContainSingle(o => o.Id == topicB,
+            "the pre-populated Model.TopicIds projects into the picker's selected options");
+
+        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
+            .HasAttribute("selected").Should().BeTrue("the pre-populated topic renders as selected");
+        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
+            .HasAttribute("selected").Should().BeFalse("an unpicked topic must not render as selected");
+
+        var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
+        cancelButton.Click();
+        (await task).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Regression (round fluentui-dead-binding): a click on the picker must reach the
+    /// ids field, and the submit diff must then carry those ids. With the dead binding
+    /// neither direction worked — the picker reported nothing into
+    /// <c>Model.TopicIds</c>, so no topic could ever be assigned.
+    /// </summary>
+    [TestMethod]
+    public async Task Create_Dialog_TopicSelection_ReachesTheModel_AndSubmitAssignsThePickedTopics()
+    {
+        var gradeId = Guid.NewGuid();
+        var codedValueId = Guid.NewGuid();
+        var topicA = Guid.NewGuid();
+        var topicB = Guid.NewGuid();
+        var handler = RegisterFor(gradeId: gradeId, codedValueId: codedValueId);
+        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
+        {
+            TopicJson(topicA, "Algebra"),
+            TopicJson(topicB, "Geometry"),
+        }));
+        // The dialog's baseline read is a prefix-matching wildcard (RegisterFor's
+        // by-grade entry is method-keyed and so never matches a parameterised url).
+        handler.Map("/students/topic-assignments/by-grade/", HttpStatusCode.OK, "[]");
+
+        var cut = RenderProvider();
+        var model = new GradeLevelCreateDialog.GradeLevelCreateModel { CodedValueId = codedValueId };
+
+        var task = DialogService.ShowShellDialogAsync<
+            GradeLevelCreateDialog,
+            GradeLevelCreateDialog.GradeLevelCreateModel,
+            SchoolCollab.Students.Application.Services.GradeLevelDto>(
+            model, "Create grade level", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
+
+        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+            picker.Instance.Items!.Where(t => t.Id == topicA || t.Id == topicB).ToArray()));
+
+        model.TopicIds.Should().BeEquivalentTo(new[] { topicA, topicB },
+            "the picker's callback writes the picked ids back to the single source of truth");
+        cut.Markup.Should().Contain("Topics (2)", "the label's count is projected from the ids field");
+
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(
+            () => handler.Calls.Count(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
+                .Should().Be(2, "the submit diff assigns exactly the picked topics"),
+            TimeSpan.FromSeconds(5));
+
+        var assignBodies = handler.Calls
+            .Where(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
+            .Select(c => c.Body ?? string.Empty)
+            .ToArray();
+        assignBodies.Should().Contain(b => b.Contains(topicA.ToString()));
+        assignBodies.Should().Contain(b => b.Contains(topicB.ToString()));
+
+        (await task).Should().NotBeNull("the create completed against the scripted backend");
     }
 }

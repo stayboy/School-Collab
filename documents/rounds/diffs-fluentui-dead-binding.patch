@@ -1,0 +1,1012 @@
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor
+index b151b427..aed8970c 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Create.razor
+@@ -35,13 +35,24 @@
+                         @if (_allTopics.Length > 0)
+                         {
+                             <FormRow Label="@($"Topics ({_selectedTopicIds.Count})")" AlignTop>
+-                                <FluentListbox Items="@_allTopics"
+-                                               @bind-SelectedValues="_selectedTopicIds"
+-                                               OptionText="@(t => t.Name)"
+-                                               OptionValue="@(t => t.Id.ToString())"
+-                                               Multiple="true"
+-                                               Style="width: 100%; min-height: 160px;"
+-                                               Title="Pick which topics belong to this grade. Picked topics are assigned on save." />
++                                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md
++                                   routes multi-select pickers to the raw control and asks for the reason to
++                                   be documented here — every shared dropdown wrapper is single-value. The
++                                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
++                                   over the topic objects; _selectedTopicIds stays the single source of truth
++                                   for the submit diff. (Round fluentui-dead-binding: this element bound
++                                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
++                                   components, so the binding fell into AdditionalAttributes — a stray
++                                   selectedvalues HTML attribute — and the picker neither showed nor
++                                   reported a selection.) *@
++                                <FluentSelect TOption="TopicDto" Items="@_allTopics"
++                                              OptionText="@(t => t.Name)"
++                                              OptionValue="@(t => t.Id.ToString())"
++                                              Multiple="true"
++                                              SelectedOptions="@SelectedTopicOptions"
++                                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
++                                              Style="width: 100%; min-height: 160px;"
++                                              Title="Pick which topics belong to this grade. Picked topics are assigned on save." />
+                             </FormRow>
+                         }
+                         else
+@@ -79,6 +90,18 @@
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+ 
++    /// <summary>
++    /// The Topics picker's selected option objects, projected from
++    /// <see cref="_selectedTopicIds"/>. The ids stay the single source of truth (the
++    /// submit diff reads them); FluentSelect highlights the options it is handed.
++    /// </summary>
++    private IEnumerable<TopicDto> SelectedTopicOptions =>
++        _allTopics.Where(t => _selectedTopicIds.Contains(t.Id));
++
++    /// <summary>Writes the picker's option objects back to the ids field.</summary>
++    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
++        _selectedTopicIds = (selected ?? []).Select(t => t.Id).ToList();
++
+     protected override async Task OnInitializedAsync()
+     {
+         _loadCts = new CancellationTokenSource();
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor
+index a472d5b2..2b08ed75 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Edit.razor
+@@ -48,13 +48,24 @@
+                             @if (_allTopics.Length > 0)
+                             {
+                                 <FormRow Label="@($"Topics ({_selectedTopicIds.Count})")" AlignTop>
+-                                    <FluentListbox Items="@_allTopics"
+-                                                   @bind-SelectedValues="_selectedTopicIds"
+-                                                   OptionText="@(t => t.Name)"
+-                                                   OptionValue="@(t => t.Id.ToString())"
+-                                                   Multiple="true"
+-                                                   Style="width: 100%; min-height: 160px;"
+-                                                   Title="Picked topics are assigned; unchecked ones are removed on save." />
++                                    @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md
++                                       routes multi-select pickers to the raw control and asks for the reason to
++                                       be documented here — every shared dropdown wrapper is single-value. The
++                                       selection binds the supported SelectedOptions/SelectedOptionsChanged pair
++                                       over the topic objects; _selectedTopicIds stays the single source of truth
++                                       for the submit diff. (Round fluentui-dead-binding: this element bound
++                                       the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
++                                       components, so the binding fell into AdditionalAttributes — a stray
++                                       selectedvalues HTML attribute — and the picker neither showed nor
++                                       reported a selection.) *@
++                                    <FluentSelect TOption="TopicDto" Items="@_allTopics"
++                                                  OptionText="@(t => t.Name)"
++                                                  OptionValue="@(t => t.Id.ToString())"
++                                                  Multiple="true"
++                                                  SelectedOptions="@SelectedTopicOptions"
++                                                  SelectedOptionsChanged="@OnSelectedTopicsChanged"
++                                                  Style="width: 100%; min-height: 160px;"
++                                                  Title="Picked topics are assigned; unchecked ones are removed on save." />
+                                 </FormRow>
+                             }
+                             else
+@@ -98,6 +109,19 @@
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+ 
++    /// <summary>
++    /// The Topics picker's selected option objects, projected from
++    /// <see cref="_selectedTopicIds"/>. The ids stay the single source of truth (the
++    /// submit diff reads them); FluentSelect highlights the options it is handed —
++    /// which is what makes the loaded assignments render as selected.
++    /// </summary>
++    private IEnumerable<TopicDto> SelectedTopicOptions =>
++        _allTopics.Where(t => _selectedTopicIds.Contains(t.Id));
++
++    /// <summary>Writes the picker's option objects back to the ids field.</summary>
++    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
++        _selectedTopicIds = (selected ?? []).Select(t => t.Id).ToList();
++
+     protected override async Task OnInitializedAsync()
+     {
+         _loadCts = new CancellationTokenSource();
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor
+index 63ac200f..e7e2ee4e 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelCreateDialog.razor
+@@ -63,13 +63,24 @@
+         @if (_allTopics.Length > 0)
+         {
+             <FormRow Label="@($"Topics ({Model.TopicIds.Count})")" AlignTop>
+-                <FluentListbox Items="@_allTopics"
+-                               @bind-SelectedValues="Model.TopicIds"
+-                               OptionText="@(s => s.Name)"
+-                               OptionValue="@(s => s.Id.ToString())"
+-                               Multiple="true"
+-                               Style="width: 100%; min-height: 160px;"
+-                               Title="Pick which topics belong to this grade for the current period. Existing assignments will be added; unselected ones will be removed." />
++                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md
++                   routes multi-select pickers to the raw control and asks for the reason to
++                   be documented here — every shared dropdown wrapper is single-value. The
++                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
++                   over the topic objects; Model.TopicIds stays the single source of truth
++                   for the submit diff. (Round fluentui-dead-binding: this element bound
++                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
++                   components, so the binding fell into AdditionalAttributes — a stray
++                   selectedvalues HTML attribute — and the picker neither showed nor
++                   reported a selection.) *@
++                <FluentSelect TOption="TopicDto" Items="@_allTopics"
++                              OptionText="@(s => s.Name)"
++                              OptionValue="@(s => s.Id.ToString())"
++                              Multiple="true"
++                              SelectedOptions="@SelectedTopicOptions"
++                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
++                              Style="width: 100%; min-height: 160px;"
++                              Title="Pick which topics belong to this grade for the current period. Existing assignments will be added; unselected ones will be removed." />
+             </FormRow>
+         }
+         else if (_allTopics.Length == 0)
+@@ -101,8 +112,8 @@
+     /// <summary>
+     /// Editable form model for the Create dialog. Plain class (not record)
+     /// because every field is two-way bound (FluentNumberField / FluentSelect
+-    /// / CodedValueDropdown / FluentListbox) — init-only record properties
+-    /// reject the @bind-Value assignments the Razor compiler emits.
++    /// / CodedValueDropdown) — init-only record properties reject the
++    /// @bind-Value assignments the Razor compiler emits.
+     /// </summary>
+     public sealed class GradeLevelCreateModel
+     {
+@@ -113,7 +124,7 @@
+         public int? MaxAge { get; set; }
+         public Guid? AllowedGenderCodedValueId { get; set; }
+ 
+-        /// <summary>Picked topic ids; bound to the FluentListbox.</summary>
++        /// <summary>Picked topic ids; the Topics multi-select picker's source of truth.</summary>
+         public IReadOnlyList<Guid> TopicIds { get; set; } = [];
+ 
+         /// <summary>
+@@ -150,6 +161,19 @@
+         }
+     }
+ 
++    /// <summary>
++    /// The Topics picker's selected option objects, projected from
++    /// <see cref="GradeLevelCreateModel.TopicIds"/>. The ids stay the single source of
++    /// truth (the submit diff reads them); FluentSelect highlights the options it is
++    /// handed.
++    /// </summary>
++    private IEnumerable<TopicDto> SelectedTopicOptions =>
++        _allTopics.Where(t => Model.TopicIds.Contains(t.Id));
++
++    /// <summary>Writes the picker's option objects back to the ids field.</summary>
++    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
++        Model.TopicIds = (selected ?? []).Select(t => t.Id).ToList();
++
+     /// <summary>
+     /// The CodedValueDropdown's binder has already updated <c>Model.CodedValueId</c>
+     /// by the time this fires. We don't fetch the coded value here — the submit
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor
+index b2f8150c..7ef737c0 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/GradeLevelEditDialog.razor
+@@ -70,12 +70,23 @@
+         @if (_allTopics.Length > 0)
+         {
+             <FormRow Label="@($"Topics ({Model.TopicIds.Count})")" AlignTop>
+-                <FluentListbox Items="@_allTopics"
+-                               @bind-SelectedValues="Model.TopicIds"
+-                               OptionText="@(s => s.Name)"
+-                               OptionValue="@(s => s.Id.ToString())"
+-                               Multiple="true"
+-                               Style="width: 100%; min-height: 160px;" />
++                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md
++                   routes multi-select pickers to the raw control and asks for the reason to
++                   be documented here — every shared dropdown wrapper is single-value. The
++                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
++                   over the topic objects; Model.TopicIds stays the single source of truth
++                   for the submit diff. (Round fluentui-dead-binding: this element bound
++                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
++                   components, so the binding fell into AdditionalAttributes — a stray
++                   selectedvalues HTML attribute — and the picker neither showed nor
++                   reported a selection.) *@
++                <FluentSelect TOption="TopicDto" Items="@_allTopics"
++                              OptionText="@(s => s.Name)"
++                              OptionValue="@(s => s.Id.ToString())"
++                              Multiple="true"
++                              SelectedOptions="@SelectedTopicOptions"
++                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
++                              Style="width: 100%; min-height: 160px;" />
+             </FormRow>
+         }
+         else if (_allTopics.Length == 0)
+@@ -130,7 +141,7 @@
+         public int? MaxAge { get; set; }
+         public Guid? AllowedGenderCodedValueId { get; set; }
+ 
+-        /// <summary>Picked topic ids; bound to the FluentListbox.</summary>
++        /// <summary>Picked topic ids; the Topics multi-select picker's source of truth.</summary>
+         public IReadOnlyList<Guid> TopicIds { get; set; } = [];
+ 
+         /// <summary>
+@@ -192,6 +203,19 @@
+         }
+     }
+ 
++    /// <summary>
++    /// The Topics picker's selected option objects, projected from
++    /// <see cref="GradeLevelEditModel.TopicIds"/>. The ids stay the single source of
++    /// truth (the submit diff reads them); FluentSelect highlights the options it is
++    /// handed — which is what makes the loaded assignments render as selected.
++    /// </summary>
++    private IEnumerable<TopicDto> SelectedTopicOptions =>
++        _allTopics.Where(t => Model.TopicIds.Contains(t.Id));
++
++    /// <summary>Writes the picker's option objects back to the ids field.</summary>
++    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
++        Model.TopicIds = (selected ?? []).Select(t => t.Id).ToList();
++
+     private async Task OpenNameOverrideDialog()
+     {
+         if (_resolvingOverride) return;
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Students/JoinGroupsDialog.razor b/src/Students/SchoolCollab.Students.Application/Components/Students/JoinGroupsDialog.razor
+index c03e2268..46eb84be 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Students/JoinGroupsDialog.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Students/JoinGroupsDialog.razor
+@@ -32,11 +32,22 @@
+             }
+             else
+             {
+-                <FluentListbox Items="@_filteredGroups"
+-                               @bind-SelectedValues="_selectedIds"
+-                               OptionText="@(g => GroupOptionText(g))"
+-                               OptionValue="@(g => g.Id.ToString())"
+-                               Multiple="true" />
++                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md routes
++                   multi-select pickers to the raw control and asks for the reason to be
++                   documented here — every shared dropdown wrapper is single-value. The
++                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
++                   over the group objects; Model.SelectedGroupIds stays the single source of
++                   truth for the join loop. (Round fluentui-dead-binding: this element bound
++                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
++                   components, so the binding fell into AdditionalAttributes — a stray
++                   selectedvalues HTML attribute — and the picker neither showed nor
++                   reported a selection.) *@
++                <FluentSelect TOption="ActivityGroupDto" Items="@_filteredGroups"
++                              OptionText="@(g => GroupOptionText(g))"
++                              OptionValue="@(g => g.Id.ToString())"
++                              Multiple="true"
++                              SelectedOptions="@SelectedGroupOptions"
++                              SelectedOptionsChanged="@OnSelectedGroupsChanged" />
+             }
+         </FluentStack>
+ 
+@@ -61,9 +72,36 @@
+     private string? _search;
+     private List<ActivityGroupDto> _availableGroups = new();
+     private bool _loadingGroups = true;
+-    private HashSet<Guid> _selectedIds = new();
+     private string _activePeriodKind = "AcademicYear";
+ 
++    /// <summary>
++    /// The picker's selected option objects, projected from
++    /// <see cref="JoinGroupsModel.SelectedGroupIds"/>. The ids stay the single source
++    /// of truth (the join loop reads them); FluentSelect highlights the options it is
++    /// handed. Projected over the full joinable list, not the search-filtered view,
++    /// so a group hidden by the current search stays part of the selection.
++    /// </summary>
++    private IEnumerable<ActivityGroupDto> SelectedGroupOptions =>
++        _availableGroups.Where(g => Model.SelectedGroupIds.Contains(g.Id));
++
++    /// <summary>
++    /// Writes the picker's option objects back to the model's ids field, preserving the
++    /// groups the active search has filtered out of the picker's <c>Items</c>.
++    /// </summary>
++    private void OnSelectedGroupsChanged(IEnumerable<ActivityGroupDto>? selected)
++    {
++        // Hidden-selection preservation. FluentSelect renders only the search-filtered
++        // _filteredGroups and reports only what it renders; if it re-derives its
++        // selection from those rendered options, replacing the ids wholesale would
++        // silently drop a group the user picked before typing a search that hides it.
++        // Union the ids that are not currently rendered with the incoming selection:
++        // idempotent when the control already preserves the passed selection, and a
++        // repair when it does not.
++        var renderedIds = _filteredGroups.Select(g => g.Id).ToHashSet();
++        var hidden = Model.SelectedGroupIds.Where(id => !renderedIds.Contains(id));
++        Model.SelectedGroupIds = hidden.Concat((selected ?? []).Select(g => g.Id)).ToHashSet();
++    }
++
+     private IEnumerable<ActivityGroupDto> _filteredGroups =>
+         string.IsNullOrWhiteSpace(_search)
+             ? _availableGroups
+@@ -158,14 +196,14 @@
+ 
+     protected override async Task<JoinGroupsResult?> SubmitAsync(JoinGroupsModel model)
+     {
+-        if (_selectedIds.Count == 0)
++        if (model.SelectedGroupIds.Count == 0)
+         {
+             Error = "Select at least one group to join.";
+             return null;
+         }
+ 
+         var failures = new List<string>();
+-        foreach (var groupId in _selectedIds)
++        foreach (var groupId in model.SelectedGroupIds)
+         {
+             try
+             {
+@@ -184,6 +222,6 @@
+             return null;
+         }
+ 
+-        return new JoinGroupsResult(_selectedIds.ToList());
++        return new JoinGroupsResult(model.SelectedGroupIds.ToList());
+     }
+ }
+\ No newline at end of file
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateDialogTests.cs
+index 166707fc..eefbde79 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateDialogTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateDialogTests.cs
+@@ -14,6 +14,7 @@ using SchoolCollab.Admin.Shared.Components.Dialogs;
+ using SchoolCollab.Admin.Shared.Services;
+ using SchoolCollab.Students.Application.Components.Students;
+ using SchoolCollab.Students.Application.Services;
++using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
+ 
+ namespace SchoolCollab.Admin.Tests.Unit;
+ 
+@@ -186,6 +187,19 @@ public class GradeLevelCreateDialogTests : BunitContext
+         return handler;
+     }
+ 
++    /// <summary>Serializes a topic for the <c>GET /students/topics</c> catalog.</summary>
++    private static Dictionary<string, object?> TopicJson(Guid id, string name) => new()
++    {
++        ["id"] = id,
++        ["codedValueId"] = (Guid?)null,
++        ["code"] = $"T-{id.ToString()[..4]}",
++        ["name"] = name,
++        ["description"] = (string?)null,
++        ["displayOrder"] = 1,
++        ["createdAt"] = DateTimeOffset.UnixEpoch,
++        ["updatedAt"] = DateTimeOffset.UnixEpoch,
++    };
++
+     [TestMethod]
+     public async Task Create_Dialog_Renders_Form_Fields()
+     {
+@@ -265,20 +279,129 @@ public class GradeLevelCreateDialogTests : BunitContext
+         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+         cut.Find("form").Submit();
+ 
+-        // The submit pipeline is unit-testable but the bUnit FluentListbox two-way
+-        // binding requires real user interaction to populate SelectedValues -
+-        // we can't simulate "click subject id X" without driving the
+-        // listbox's selection state machine. The deeper submit-pipeline
+-        // assertion (assign-on-add / remove-on-drop / no-period-short-
+-        // circuit) is left to integration tests; here we only assert the
+-        // dialog mounts, renders the form fields, and the Cancel path
+-        // returns null. The deeper diff is exercised by the smoke test
+-        // in Edit_Dialog_Loads_Already_Assigned_Subjects_Preselected
+-        // style cases that bypass the FluentListbox by pre-seeding the
+-        // model.
++        // The deeper submit-pipeline assertion (assign-on-add / remove-on-drop /
++        // no-period-short-circuit) is driven through the picker's real callback in
++        // Create_Dialog_TopicSelection_ReachesTheModel_AndSubmitAssignsThePickedTopics;
++        // this smoke case only pins the mount + Cancel path.
+         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
+         cancelButton.Click();
+         var result = await task;
+         result.Should().BeNull("cancelling closes the dialog with no result");
+     }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): the Topics picker bound the dead
++    /// <c>SelectedValues</c> pair, which does not exist on FluentUI 4.14.2 list
++    /// components — Blazor dropped it into the catch-all <c>AdditionalAttributes</c>
++    /// (a stray <c>selectedvalues</c> HTML attribute) and the picker never showed a
++    /// selection. The supported control highlights the options it is handed, so a
++    /// pre-populated <c>Model.TopicIds</c> renders as selected.
++    /// </summary>
++    [TestMethod]
++    public async Task Create_Dialog_TopicPicker_BindsTheSupportedApi_AndPreloadedIdsRenderSelected()
++    {
++        var gradeId = Guid.NewGuid();
++        var codedValueId = Guid.NewGuid();
++        var topicA = Guid.NewGuid();
++        var topicB = Guid.NewGuid();
++        var handler = RegisterFor(gradeId: gradeId, codedValueId: codedValueId);
++        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
++        {
++            TopicJson(topicA, "Algebra"),
++            TopicJson(topicB, "Geometry"),
++        }));
++
++        var cut = RenderProvider();
++        var model = new GradeLevelCreateDialog.GradeLevelCreateModel
++        {
++            CodedValueId = codedValueId,
++            TopicIds = [topicB],
++        };
++
++        var task = DialogService.ShowShellDialogAsync<
++            GradeLevelCreateDialog,
++            GradeLevelCreateDialog.GradeLevelCreateModel,
++            SchoolCollab.Students.Application.Services.GradeLevelDto>(
++            model, "Create grade level", DialogSize.Medium);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra", "the topic catalog renders as picker options"));
++
++        cut.Markup.Should().NotContain("selectedvalues",
++            "the dead SelectedValues binding must not leak into the DOM");
++        cut.FindAll("fluent-listbox").Should().BeEmpty(
++            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
++
++        var picker = cut.FindComponent<FluentSelect<TopicDto>>().Instance;
++        picker.Multiple.Should().BeTrue();
++        picker.SelectedOptions.Should().ContainSingle(o => o.Id == topicB,
++            "the pre-populated Model.TopicIds projects into the picker's selected options");
++
++        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
++            .HasAttribute("selected").Should().BeTrue("the pre-populated topic renders as selected");
++        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
++            .HasAttribute("selected").Should().BeFalse("an unpicked topic must not render as selected");
++
++        var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
++        cancelButton.Click();
++        (await task).Should().BeNull();
++    }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): a click on the picker must reach the
++    /// ids field, and the submit diff must then carry those ids. With the dead binding
++    /// neither direction worked — the picker reported nothing into
++    /// <c>Model.TopicIds</c>, so no topic could ever be assigned.
++    /// </summary>
++    [TestMethod]
++    public async Task Create_Dialog_TopicSelection_ReachesTheModel_AndSubmitAssignsThePickedTopics()
++    {
++        var gradeId = Guid.NewGuid();
++        var codedValueId = Guid.NewGuid();
++        var topicA = Guid.NewGuid();
++        var topicB = Guid.NewGuid();
++        var handler = RegisterFor(gradeId: gradeId, codedValueId: codedValueId);
++        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
++        {
++            TopicJson(topicA, "Algebra"),
++            TopicJson(topicB, "Geometry"),
++        }));
++        // The dialog's baseline read is a prefix-matching wildcard (RegisterFor's
++        // by-grade entry is method-keyed and so never matches a parameterised url).
++        handler.Map("/students/topic-assignments/by-grade/", HttpStatusCode.OK, "[]");
++
++        var cut = RenderProvider();
++        var model = new GradeLevelCreateDialog.GradeLevelCreateModel { CodedValueId = codedValueId };
++
++        var task = DialogService.ShowShellDialogAsync<
++            GradeLevelCreateDialog,
++            GradeLevelCreateDialog.GradeLevelCreateModel,
++            SchoolCollab.Students.Application.Services.GradeLevelDto>(
++            model, "Create grade level", DialogSize.Medium);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
++
++        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
++        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
++            picker.Instance.Items!.Where(t => t.Id == topicA || t.Id == topicB).ToArray()));
++
++        model.TopicIds.Should().BeEquivalentTo(new[] { topicA, topicB },
++            "the picker's callback writes the picked ids back to the single source of truth");
++        cut.Markup.Should().Contain("Topics (2)", "the label's count is projected from the ids field");
++
++        cut.Find("form").Submit();
++
++        cut.WaitForAssertion(
++            () => handler.Calls.Count(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
++                .Should().Be(2, "the submit diff assigns exactly the picked topics"),
++            TimeSpan.FromSeconds(5));
++
++        var assignBodies = handler.Calls
++            .Where(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
++            .Select(c => c.Body ?? string.Empty)
++            .ToArray();
++        assignBodies.Should().Contain(b => b.Contains(topicA.ToString()));
++        assignBodies.Should().Contain(b => b.Contains(topicB.ToString()));
++
++        (await task).Should().NotBeNull("the create completed against the scripted backend");
++    }
+ }
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateEditPageTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateEditPageTests.cs
+index 557f342b..13b07be8 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateEditPageTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelCreateEditPageTests.cs
+@@ -8,6 +8,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
+ using SchoolCollab.Admin.Shared.Services;
+ using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
+ using SchoolCollab.Students.Application.Services;
++using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
+ using System.Net;
+ using System.Net.Http;
+ using System.Security.Claims;
+@@ -110,6 +111,35 @@ public class GradeLevelCreateEditPageTests : BunitContext
+             ["isBlockedFromEnrollment"] = false,
+         });
+ 
++    /// <summary>Serializes a topic for the <c>GET /students/topics</c> catalog.</summary>
++    private static Dictionary<string, object?> TopicJson(Guid id, string name) => new()
++    {
++        ["id"] = id,
++        ["codedValueId"] = (Guid?)null,
++        ["code"] = $"T-{id.ToString()[..4]}",
++        ["name"] = name,
++        ["description"] = (string?)null,
++        ["displayOrder"] = 1,
++        ["createdAt"] = DateTimeOffset.UnixEpoch,
++        ["updatedAt"] = DateTimeOffset.UnixEpoch,
++    };
++
++    /// <summary>Serializes a grade-topic assignment for the by-grade baseline.</summary>
++    private static Dictionary<string, object?> AssignmentJson(Guid assignmentId, Guid gradeId, Guid topicId) => new()
++    {
++        ["id"] = assignmentId,
++        ["audience"] = "grade",
++        ["gradeLevelId"] = gradeId,
++        ["activityGroupId"] = (Guid?)null,
++        ["topicId"] = topicId,
++        ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
++        ["endDate"] = (string?)null,
++        ["topicStrandId"] = (Guid?)null,
++        ["topicLessonId"] = (Guid?)null,
++        ["createdAt"] = DateTimeOffset.UnixEpoch,
++        ["updatedAt"] = DateTimeOffset.UnixEpoch,
++    };
++
+     [TestMethod]
+     public void Create_Page_RendersFormAndLoadsTopics()
+     {
+@@ -154,4 +184,105 @@ public class GradeLevelCreateEditPageTests : BunitContext
+         var cut = Render<Edit>(p => p.Add(x => x.Id, gradeId));
+         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade level not found."));
+     }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): the page's Topics picker bound the dead
++    /// <c>SelectedValues</c> pair — absent from FluentUI 4.14.2 list components — so Blazor
++    /// dropped it into the catch-all <c>AdditionalAttributes</c> (a stray
++    /// <c>selectedvalues</c> HTML attribute) and a pick never reached
++    /// <c>_selectedTopicIds</c>. The label's count is projected from that field, so it is
++    /// the visible proof the selection landed.
++    /// </summary>
++    [TestMethod]
++    public async Task Create_Page_TopicPicker_BindsTheSupportedApi_AndTheSelectionReachesTheField()
++    {
++        var topicA = Guid.NewGuid();
++        var topicB = Guid.NewGuid();
++        var handler = RegisterBase();
++        handler.Map("GET", "/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
++        {
++            TopicJson(topicA, "Algebra"),
++            TopicJson(topicB, "Geometry"),
++        }));
++        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GRADE", HttpStatusCode.OK, "[]");
++        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
++
++        var cut = Render<Create>();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra", "the topic catalog renders as picker options"));
++        cut.Markup.Should().Contain("Topics (0)");
++
++        cut.Markup.Should().NotContain("selectedvalues",
++            "the dead SelectedValues binding must not leak into the DOM");
++        cut.FindAll("fluent-listbox").Should().BeEmpty(
++            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
++
++        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
++        picker.Instance.Multiple.Should().BeTrue();
++        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
++            picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
++
++        // The label's count is projected from _selectedTopicIds — the page's single
++        // source of truth — so it is the visible proof the picker's callback landed.
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topics (1)"));
++    }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): the Edit page's picker must render the
++    /// grade's loaded assignments as selected, and a changed selection must reach the
++    /// submit diff — assigning the picked topic and unassigning the dropped one. With the
++    /// dead binding the loaded baseline could never change, so neither call was issued.
++    /// </summary>
++    [TestMethod]
++    public async Task Edit_Page_TopicPicker_ShowsLoadedAssignments_AndSubmitsThePickedSet()
++    {
++        var gradeId = Guid.NewGuid();
++        var topicA = Guid.NewGuid();
++        var topicB = Guid.NewGuid();
++        var assignmentA = Guid.NewGuid();
++
++        var handler = RegisterBase();
++        handler.Map("GET", $"/students/grade-levels/{gradeId}", HttpStatusCode.OK, GradeJson(gradeId, "Grade 5"));
++        handler.Map("GET", "/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
++        {
++            TopicJson(topicA, "Algebra"),
++            TopicJson(topicB, "Geometry"),
++        }));
++        handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK,
++            JsonSerializer.Serialize(new[] { AssignmentJson(assignmentA, gradeId, topicA) }));
++        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GRADE", HttpStatusCode.OK, "[]");
++        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
++        handler.Map("PUT", $"/students/grade-levels/{gradeId}", HttpStatusCode.NoContent, "");
++        handler.Map("POST", "/students/topic-assignments/grade", HttpStatusCode.Created,
++            JsonSerializer.Serialize(new Dictionary<string, object?> { ["id"] = Guid.NewGuid() }));
++        handler.Map("DELETE", $"/students/topic-assignments/{assignmentA}", HttpStatusCode.NoContent, "");
++
++        var cut = Render<Edit>(p => p.Add(x => x.Id, gradeId));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
++
++        cut.Markup.Should().NotContain("selectedvalues",
++            "the dead SelectedValues binding must not leak into the DOM");
++        cut.FindAll("fluent-listbox").Should().BeEmpty();
++        cut.Markup.Should().Contain("Topics (1)", "the loaded assignment is the field's single source of truth");
++        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
++            .HasAttribute("selected").Should().BeTrue("the loaded assignment renders as selected");
++        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
++            .HasAttribute("selected").Should().BeFalse("an unassigned topic must not render as selected");
++
++        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
++        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
++            picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
++
++        cut.Find("form").Submit();
++
++        cut.WaitForAssertion(() =>
++        {
++            handler.Calls.Should().Contain(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade",
++                "the submitted set assigns the picked topic");
++            handler.Calls.Should().Contain(c => c.Method == "DELETE" && c.Url == $"/students/topic-assignments/{assignmentA}",
++                "the dropped topic is unassigned");
++        }, TimeSpan.FromSeconds(5));
++
++        handler.Calls.Single(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
++            .Body.Should().Contain(topicB.ToString()).And.NotContain(topicA.ToString());
++    }
+ }
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelEditDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelEditDialogTests.cs
+index fe86f39a..6d67ccb2 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelEditDialogTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/GradeLevelEditDialogTests.cs
+@@ -14,6 +14,7 @@ using SchoolCollab.Admin.Shared.Components.Dialogs;
+ using SchoolCollab.Admin.Shared.Services;
+ using SchoolCollab.Students.Application.Components.Students;
+ using SchoolCollab.Students.Application.Services;
++using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
+ 
+ namespace SchoolCollab.Admin.Tests.Unit;
+ 
+@@ -164,6 +165,62 @@ public class GradeLevelEditDialogTests : BunitContext
+ 
+     private IRenderedComponent<FluentDialogProvider> RenderProvider() => Render<FluentDialogProvider>();
+ 
++    /// <summary>Serializes a topic for the <c>GET /students/topics</c> catalog.</summary>
++    private static Dictionary<string, object?> TopicJson(Guid id, string name) => new()
++    {
++        ["id"] = id,
++        ["codedValueId"] = (Guid?)null,
++        ["code"] = $"T-{id.ToString()[..4]}",
++        ["name"] = name,
++        ["description"] = (string?)null,
++        ["displayOrder"] = 1,
++        ["createdAt"] = DateTimeOffset.UnixEpoch,
++        ["updatedAt"] = DateTimeOffset.UnixEpoch,
++    };
++
++    /// <summary>Serializes a grade-topic assignment for the by-grade baseline.</summary>
++    private static Dictionary<string, object?> AssignmentJson(Guid assignmentId, Guid gradeId, Guid topicId) => new()
++    {
++        ["id"] = assignmentId,
++        ["audience"] = "grade",
++        ["gradeLevelId"] = gradeId,
++        ["activityGroupId"] = (Guid?)null,
++        ["topicId"] = topicId,
++        ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
++        ["endDate"] = (string?)null,
++        ["topicStrandId"] = (Guid?)null,
++        ["topicLessonId"] = (Guid?)null,
++        ["createdAt"] = DateTimeOffset.UnixEpoch,
++        ["updatedAt"] = DateTimeOffset.UnixEpoch,
++    };
++
++    /// <summary>
++    /// Serializes the picked grade's coded value for the dialog's
++    /// <c>GET /api/coded-values/{id}</c> lookup. RegisterFor keys that route by its bare
++    /// prefix, so a test that needs the load to COMPLETE (not just to render the topic
++    /// catalog) must register the id-qualified route itself.
++    /// </summary>
++    private static Dictionary<string, object?> CodedValueJson(Guid id) => new()
++    {
++        ["id"] = id,
++        ["code"] = "GRADE5",
++        ["name"] = "Grade 5",
++        ["description"] = (string?)null,
++        ["parentId"] = (Guid?)null,
++        ["parentCode"] = (string?)null,
++        ["isDisabled"] = false,
++        ["displayOrder"] = 5,
++        ["createdAt"] = DateTimeOffset.UnixEpoch,
++        ["updatedAt"] = DateTimeOffset.UnixEpoch,
++        ["attributes"] = (IReadOnlyCollection<object>?)null,
++        ["attributeDefinitions"] = (IReadOnlyCollection<object>?)null,
++        ["childrenCount"] = 0,
++        ["isDeleted"] = false,
++        ["deletedAt"] = (DateTimeOffset?)null,
++        ["isOverridden"] = false,
++        ["defaultName"] = (string?)null,
++    };
++
+     [TestMethod]
+     public async Task Edit_Dialog_Renders_GradeName_Pencil_And_ValidationFields()
+     {
+@@ -239,4 +296,138 @@ public class GradeLevelEditDialogTests : BunitContext
+         result.Should().BeNull();
+     }
+ 
+-    }
+\ No newline at end of file
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): the Topics picker bound the dead
++    /// <c>SelectedValues</c> pair — absent from FluentUI 4.14.2 list components — so
++    /// Blazor dropped it into the catch-all <c>AdditionalAttributes</c> (a stray
++    /// <c>selectedvalues</c> HTML attribute) and the loaded assignments never rendered
++    /// as selected. The supported control highlights the options it is handed.
++    /// </summary>
++    [TestMethod]
++    public async Task EditDialog_TopicPicker_BindsTheSupportedApi_AndLoadedAssignmentsRenderSelected()
++    {
++        var gradeId = Guid.NewGuid();
++        var codedValueId = Guid.NewGuid();
++        var topicA = Guid.NewGuid();
++        var topicB = Guid.NewGuid();
++        var assignmentA = Guid.NewGuid();
++
++        var handler = RegisterFor(gradeId, codedValueId);
++        handler.Map("GET", $"/api/coded-values/{codedValueId}", HttpStatusCode.OK,
++            JsonSerializer.Serialize(CodedValueJson(codedValueId)));
++        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
++        {
++            TopicJson(topicA, "Algebra"),
++            TopicJson(topicB, "Geometry"),
++        }));
++        // The dialog's baseline read is a prefix-matching wildcard (the seeded
++        // by-grade entry in RegisterFor is method-keyed and never matches a
++        // parameterised url).
++        handler.Map("/students/topic-assignments/by-grade/", HttpStatusCode.OK,
++            JsonSerializer.Serialize(new[] { AssignmentJson(assignmentA, gradeId, topicA) }));
++
++        var cut = RenderProvider();
++        var model = new GradeLevelEditDialog.GradeLevelEditModel
++        {
++            Id = gradeId,
++            CodedValueId = codedValueId,
++            CurrentName = "Grade 5",
++        };
++
++        var task = DialogService.ShowShellDialogAsync<
++            GradeLevelEditDialog,
++            GradeLevelEditDialog.GradeLevelEditModel,
++            SchoolCollab.Students.Application.Services.GradeLevelDto>(
++            model, "Edit grade", DialogSize.Medium);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
++
++        cut.Markup.Should().NotContain("selectedvalues",
++            "the dead SelectedValues binding must not leak into the DOM");
++        cut.FindAll("fluent-listbox").Should().BeEmpty(
++            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
++
++        model.TopicIds.Should().BeEquivalentTo(new[] { topicA },
++            "the loaded assignments are the picker's single source of truth");
++        cut.Markup.Should().Contain("Topics (1)");
++
++        var picker = cut.FindComponent<FluentSelect<TopicDto>>().Instance;
++        picker.Multiple.Should().BeTrue();
++        picker.SelectedOptions.Should().ContainSingle(o => o.Id == topicA);
++        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
++            .HasAttribute("selected").Should().BeTrue("the loaded assignment renders as selected");
++        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
++            .HasAttribute("selected").Should().BeFalse("an unassigned topic must not render as selected");
++
++        var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
++        cancelButton.Click();
++        (await task).Should().BeNull();
++    }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): changing the picker must reach the
++    /// ids field and the submit diff must apply the new set — assign the picked topic
++    /// and drop the one the picker no longer reports. With the dead binding the loaded
++    /// baseline could never change, so neither call was ever issued.
++    /// </summary>
++    [TestMethod]
++    public async Task EditDialog_TopicSelection_ReachesTheModel_AndSubmitAppliesThePickedSet()
++    {
++        var gradeId = Guid.NewGuid();
++        var codedValueId = Guid.NewGuid();
++        var topicA = Guid.NewGuid();
++        var topicB = Guid.NewGuid();
++        var assignmentA = Guid.NewGuid();
++
++        var handler = RegisterFor(gradeId, codedValueId);
++        handler.Map("GET", $"/api/coded-values/{codedValueId}", HttpStatusCode.OK,
++            JsonSerializer.Serialize(CodedValueJson(codedValueId)));
++        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
++        {
++            TopicJson(topicA, "Algebra"),
++            TopicJson(topicB, "Geometry"),
++        }));
++        handler.Map("/students/topic-assignments/by-grade/", HttpStatusCode.OK,
++            JsonSerializer.Serialize(new[] { AssignmentJson(assignmentA, gradeId, topicA) }));
++        handler.Map("PUT", $"/students/grade-levels/{gradeId}", HttpStatusCode.NoContent, "");
++        handler.Map("DELETE", $"/students/topic-assignments/{assignmentA}", HttpStatusCode.NoContent, "");
++
++        var cut = RenderProvider();
++        var model = new GradeLevelEditDialog.GradeLevelEditModel
++        {
++            Id = gradeId,
++            CodedValueId = codedValueId,
++            CurrentName = "Grade 5",
++        };
++
++        var task = DialogService.ShowShellDialogAsync<
++            GradeLevelEditDialog,
++            GradeLevelEditDialog.GradeLevelEditModel,
++            SchoolCollab.Students.Application.Services.GradeLevelDto>(
++            model, "Edit grade", DialogSize.Medium);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
++
++        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
++        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
++            picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
++
++        model.TopicIds.Should().BeEquivalentTo(new[] { topicB },
++            "the picker's callback writes the picked ids back to the single source of truth");
++
++        cut.Find("form").Submit();
++
++        cut.WaitForAssertion(() =>
++        {
++            handler.Calls.Should().Contain(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade",
++                "the submitted set assigns the picked topic");
++            handler.Calls.Should().Contain(c => c.Method == "DELETE" && c.Url == $"/students/topic-assignments/{assignmentA}",
++                "the dropped topic is unassigned");
++        }, TimeSpan.FromSeconds(5));
++
++        handler.Calls.Single(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
++            .Body.Should().Contain(topicB.ToString()).And.NotContain(topicA.ToString());
++
++        (await task).Should().NotBeNull("the edit completed against the scripted backend");
++    }
++}
+\ No newline at end of file
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/JoinGroupsDialogTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/JoinGroupsDialogTests.cs
+index aa4c6210..cce2637a 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/JoinGroupsDialogTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/JoinGroupsDialogTests.cs
+@@ -201,4 +201,117 @@ public class JoinGroupsDialogTests : BunitContext
+         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
+         result.Should().BeNull("closing the dialog yields no result");
+     }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding): the group picker bound the dead
++    /// <c>SelectedValues</c> pair — absent from FluentUI 4.14.2 list components — so
++    /// Blazor dropped it into the catch-all <c>AdditionalAttributes</c> (a stray
++    /// <c>selectedvalues</c> HTML attribute) and the picker reported no selection, which
++    /// left <c>SubmitAsync</c>'s "select at least one group" guard unsatisfiable. The
++    /// supported control is the multi-select FluentSelect.
++    /// </summary>
++    [TestMethod]
++    public async Task JoinDialog_GroupPicker_BindsTheSupportedApi_AndSubmitsTheSelectedGroups()
++    {
++        var handler = new ScriptedHandler();
++        handler.Map("GET", "/activity-groups", HttpStatusCode.OK,
++            $"[{GroupJson(OpenGroupId, "Chess Club", "OpenEnded")}]");
++        handler.Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
++        handler.Map("GET", "/students/periods/active-sub-period", HttpStatusCode.NotFound, "{}");
++        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.NotFound, "{}");
++        handler.Map("POST", $"/activity-groups/{OpenGroupId}/members", HttpStatusCode.Created, "{}");
++        Register(handler);
++
++        var cut = Render<FluentDialogProvider>();
++        var model = new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId };
++        var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
++            model, "Join groups", DialogSize.Medium);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
++
++        cut.Markup.Should().NotContain("selectedvalues",
++            "the dead SelectedValues binding must not leak into the DOM");
++        cut.FindAll("fluent-listbox").Should().BeEmpty(
++            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
++
++        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
++        picker.Instance.Multiple.Should().BeTrue();
++        cut.FindAll("fluent-option").Should().ContainSingle("the available group is offered by the picker");
++
++        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
++            picker.Instance.Items!.ToArray()));
++
++        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId },
++            "the picker's callback writes the picked ids back to the single source of truth");
++
++        cut.Find("form").Submit();
++
++        var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
++        result.Should().NotBeNull("the picker's selection must satisfy the join validation");
++        result!.GroupIds.Should().Equal(OpenGroupId);
++        handler.Calls.Should().Contain($"/activity-groups/{OpenGroupId}/members",
++            "the submitted selection is joined");
++    }
++
++    /// <summary>
++    /// Regression (round fluentui-dead-binding, option (a)): the picker renders only the
++    /// search-filtered <c>Items</c> and reports only what it renders. A group picked before
++    /// the user types a search that hides it must survive the next selection change — the
++    /// merge in <c>OnSelectedGroupsChanged</c> keeps the ids that are not currently rendered
++    /// and unions them with the incoming selection, which is correct both when FluentSelect
++    /// preserves the passed selection and when it re-derives it from the rendered options.
++    /// </summary>
++    [TestMethod]
++    public async Task JoinDialog_SearchFiltersOutSelectedGroup_SelectionOfHiddenGroupSurvives()
++    {
++        var handler = new ScriptedHandler();
++        handler.Map("GET", "/activity-groups", HttpStatusCode.OK,
++            $"[{GroupJson(OpenGroupId, "Chess Club", "OpenEnded")},{GroupJson(TermGroupId, "Robotics Club", "OpenEnded")}]");
++        handler.Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
++        handler.Map("GET", "/students/periods/active-sub-period", HttpStatusCode.NotFound, "{}");
++        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.NotFound, "{}");
++        Register(handler);
++
++        var cut = Render<FluentDialogProvider>();
++        var model = new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId };
++        var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
++            model, "Join groups", DialogSize.Medium);
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
++
++        // Pick group A ("Chess Club") from the unfiltered list.
++        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
++        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
++            picker.Instance.Items!.Where(g => g.Id == OpenGroupId).ToArray()));
++        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId });
++
++        // Search text that keeps "Chess Club" out of the rendered Items. The search box is
++        // not Immediate, so the browser's change event (blur) is what drives @bind-Value.
++        await cut.InvokeAsync(() => cut.Find("fluent-text-field").ChangeAsync("Robotics"));
++
++        cut.FindAll("fluent-option").Should().ContainSingle(
++            "the active search renders only the matching group");
++        cut.Markup.Should().NotContain("Chess Club",
++            "the selected group is no longer part of the options FluentSelect renders");
++
++        // Fire a selection change against the filtered list, picking the visible group B.
++        var filteredPicker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
++        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedOptionsChanged.InvokeAsync(
++            filteredPicker.Instance.Items!.ToArray()));
++
++        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId, TermGroupId },
++            "the group hidden by the search keeps its place alongside the newly picked one");
++
++        // Clearing the visible selection must leave the hidden pick untouched: the user
++        // cannot deselect a group the search is currently hiding.
++        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedOptionsChanged.InvokeAsync(
++            Array.Empty<ActivityGroupDto>()));
++
++        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId },
++            "only groups the user can see can be deselected");
++
++        cut.Find("fluent-button[aria-label='Close']").Click();
++        (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull(
++            "the dialog is closed without joining");
++    }
+ }

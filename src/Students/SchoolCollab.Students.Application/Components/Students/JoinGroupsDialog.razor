@@ -32,11 +32,22 @@
             }
             else
             {
-                <FluentListbox Items="@_filteredGroups"
-                               @bind-SelectedValues="_selectedIds"
-                               OptionText="@(g => GroupOptionText(g))"
-                               OptionValue="@(g => g.Id.ToString())"
-                               Multiple="true" />
+                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md routes
+                   multi-select pickers to the raw control and asks for the reason to be
+                   documented here — every shared dropdown wrapper is single-value. The
+                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
+                   over the group objects; Model.SelectedGroupIds stays the single source of
+                   truth for the join loop. (Round fluentui-dead-binding: this element bound
+                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
+                   components, so the binding fell into AdditionalAttributes — a stray
+                   selectedvalues HTML attribute — and the picker neither showed nor
+                   reported a selection.) *@
+                <FluentSelect TOption="ActivityGroupDto" Items="@_filteredGroups"
+                              OptionText="@(g => GroupOptionText(g))"
+                              OptionValue="@(g => g.Id.ToString())"
+                              Multiple="true"
+                              SelectedOptions="@SelectedGroupOptions"
+                              SelectedOptionsChanged="@OnSelectedGroupsChanged" />
             }
         </FluentStack>
 
@@ -61,8 +72,35 @@
     private string? _search;
     private List<ActivityGroupDto> _availableGroups = new();
     private bool _loadingGroups = true;
-    private HashSet<Guid> _selectedIds = new();
     private string _activePeriodKind = "AcademicYear";
+
+    /// <summary>
+    /// The picker's selected option objects, projected from
+    /// <see cref="JoinGroupsModel.SelectedGroupIds"/>. The ids stay the single source
+    /// of truth (the join loop reads them); FluentSelect highlights the options it is
+    /// handed. Projected over the full joinable list, not the search-filtered view,
+    /// so a group hidden by the current search stays part of the selection.
+    /// </summary>
+    private IEnumerable<ActivityGroupDto> SelectedGroupOptions =>
+        _availableGroups.Where(g => Model.SelectedGroupIds.Contains(g.Id));
+
+    /// <summary>
+    /// Writes the picker's option objects back to the model's ids field, preserving the
+    /// groups the active search has filtered out of the picker's <c>Items</c>.
+    /// </summary>
+    private void OnSelectedGroupsChanged(IEnumerable<ActivityGroupDto>? selected)
+    {
+        // Hidden-selection preservation. FluentSelect renders only the search-filtered
+        // _filteredGroups and reports only what it renders; if it re-derives its
+        // selection from those rendered options, replacing the ids wholesale would
+        // silently drop a group the user picked before typing a search that hides it.
+        // Union the ids that are not currently rendered with the incoming selection:
+        // idempotent when the control already preserves the passed selection, and a
+        // repair when it does not.
+        var renderedIds = _filteredGroups.Select(g => g.Id).ToHashSet();
+        var hidden = Model.SelectedGroupIds.Where(id => !renderedIds.Contains(id));
+        Model.SelectedGroupIds = hidden.Concat((selected ?? []).Select(g => g.Id)).ToHashSet();
+    }
 
     private IEnumerable<ActivityGroupDto> _filteredGroups =>
         string.IsNullOrWhiteSpace(_search)
@@ -158,14 +196,14 @@
 
     protected override async Task<JoinGroupsResult?> SubmitAsync(JoinGroupsModel model)
     {
-        if (_selectedIds.Count == 0)
+        if (model.SelectedGroupIds.Count == 0)
         {
             Error = "Select at least one group to join.";
             return null;
         }
 
         var failures = new List<string>();
-        foreach (var groupId in _selectedIds)
+        foreach (var groupId in model.SelectedGroupIds)
         {
             try
             {
@@ -184,6 +222,6 @@
             return null;
         }
 
-        return new JoinGroupsResult(_selectedIds.ToList());
+        return new JoinGroupsResult(model.SelectedGroupIds.ToList());
     }
 }
