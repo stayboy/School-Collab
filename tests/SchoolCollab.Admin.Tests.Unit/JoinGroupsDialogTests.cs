@@ -201,4 +201,117 @@ public class JoinGroupsDialogTests : BunitContext
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
         result.Should().BeNull("closing the dialog yields no result");
     }
+
+    /// <summary>
+    /// Regression (round fluentui-dead-binding): the group picker bound the dead
+    /// <c>SelectedValues</c> pair — absent from FluentUI 4.14.2 list components — so
+    /// Blazor dropped it into the catch-all <c>AdditionalAttributes</c> (a stray
+    /// <c>selectedvalues</c> HTML attribute) and the picker reported no selection, which
+    /// left <c>SubmitAsync</c>'s "select at least one group" guard unsatisfiable. The
+    /// supported control is the multi-select FluentSelect.
+    /// </summary>
+    [TestMethod]
+    public async Task JoinDialog_GroupPicker_BindsTheSupportedApi_AndSubmitsTheSelectedGroups()
+    {
+        var handler = new ScriptedHandler();
+        handler.Map("GET", "/activity-groups", HttpStatusCode.OK,
+            $"[{GroupJson(OpenGroupId, "Chess Club", "OpenEnded")}]");
+        handler.Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/students/periods/active-sub-period", HttpStatusCode.NotFound, "{}");
+        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.NotFound, "{}");
+        handler.Map("POST", $"/activity-groups/{OpenGroupId}/members", HttpStatusCode.Created, "{}");
+        Register(handler);
+
+        var cut = Render<FluentDialogProvider>();
+        var model = new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId };
+        var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
+            model, "Join groups", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
+
+        cut.Markup.Should().NotContain("selectedvalues",
+            "the dead SelectedValues binding must not leak into the DOM");
+        cut.FindAll("fluent-listbox").Should().BeEmpty(
+            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
+
+        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
+        picker.Instance.Multiple.Should().BeTrue();
+        cut.FindAll("fluent-option").Should().ContainSingle("the available group is offered by the picker");
+
+        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+            picker.Instance.Items!.ToArray()));
+
+        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId },
+            "the picker's callback writes the picked ids back to the single source of truth");
+
+        cut.Find("form").Submit();
+
+        var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().NotBeNull("the picker's selection must satisfy the join validation");
+        result!.GroupIds.Should().Equal(OpenGroupId);
+        handler.Calls.Should().Contain($"/activity-groups/{OpenGroupId}/members",
+            "the submitted selection is joined");
+    }
+
+    /// <summary>
+    /// Regression (round fluentui-dead-binding, option (a)): the picker renders only the
+    /// search-filtered <c>Items</c> and reports only what it renders. A group picked before
+    /// the user types a search that hides it must survive the next selection change — the
+    /// merge in <c>OnSelectedGroupsChanged</c> keeps the ids that are not currently rendered
+    /// and unions them with the incoming selection, which is correct both when FluentSelect
+    /// preserves the passed selection and when it re-derives it from the rendered options.
+    /// </summary>
+    [TestMethod]
+    public async Task JoinDialog_SearchFiltersOutSelectedGroup_SelectionOfHiddenGroupSurvives()
+    {
+        var handler = new ScriptedHandler();
+        handler.Map("GET", "/activity-groups", HttpStatusCode.OK,
+            $"[{GroupJson(OpenGroupId, "Chess Club", "OpenEnded")},{GroupJson(TermGroupId, "Robotics Club", "OpenEnded")}]");
+        handler.Map("GET", $"/students/{StudentId}/activity-groups", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/students/periods/active-sub-period", HttpStatusCode.NotFound, "{}");
+        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.NotFound, "{}");
+        Register(handler);
+
+        var cut = Render<FluentDialogProvider>();
+        var model = new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId };
+        var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
+            model, "Join groups", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
+
+        // Pick group A ("Chess Club") from the unfiltered list.
+        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+            picker.Instance.Items!.Where(g => g.Id == OpenGroupId).ToArray()));
+        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId });
+
+        // Search text that keeps "Chess Club" out of the rendered Items. The search box is
+        // not Immediate, so the browser's change event (blur) is what drives @bind-Value.
+        await cut.InvokeAsync(() => cut.Find("fluent-text-field").ChangeAsync("Robotics"));
+
+        cut.FindAll("fluent-option").Should().ContainSingle(
+            "the active search renders only the matching group");
+        cut.Markup.Should().NotContain("Chess Club",
+            "the selected group is no longer part of the options FluentSelect renders");
+
+        // Fire a selection change against the filtered list, picking the visible group B.
+        var filteredPicker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
+        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedOptionsChanged.InvokeAsync(
+            filteredPicker.Instance.Items!.ToArray()));
+
+        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId, TermGroupId },
+            "the group hidden by the search keeps its place alongside the newly picked one");
+
+        // Clearing the visible selection must leave the hidden pick untouched: the user
+        // cannot deselect a group the search is currently hiding.
+        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedOptionsChanged.InvokeAsync(
+            Array.Empty<ActivityGroupDto>()));
+
+        model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId },
+            "only groups the user can see can be deselected");
+
+        cut.Find("fluent-button[aria-label='Close']").Click();
+        (await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeNull(
+            "the dialog is closed without joining");
+    }
 }

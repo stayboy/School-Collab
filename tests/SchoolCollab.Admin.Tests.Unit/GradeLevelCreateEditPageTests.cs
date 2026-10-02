@@ -8,6 +8,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
+using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto;
 using System.Net;
 using System.Net.Http;
 using System.Security.Claims;
@@ -110,6 +111,35 @@ public class GradeLevelCreateEditPageTests : BunitContext
             ["isBlockedFromEnrollment"] = false,
         });
 
+    /// <summary>Serializes a topic for the <c>GET /students/topics</c> catalog.</summary>
+    private static Dictionary<string, object?> TopicJson(Guid id, string name) => new()
+    {
+        ["id"] = id,
+        ["codedValueId"] = (Guid?)null,
+        ["code"] = $"T-{id.ToString()[..4]}",
+        ["name"] = name,
+        ["description"] = (string?)null,
+        ["displayOrder"] = 1,
+        ["createdAt"] = DateTimeOffset.UnixEpoch,
+        ["updatedAt"] = DateTimeOffset.UnixEpoch,
+    };
+
+    /// <summary>Serializes a grade-topic assignment for the by-grade baseline.</summary>
+    private static Dictionary<string, object?> AssignmentJson(Guid assignmentId, Guid gradeId, Guid topicId) => new()
+    {
+        ["id"] = assignmentId,
+        ["audience"] = "grade",
+        ["gradeLevelId"] = gradeId,
+        ["activityGroupId"] = (Guid?)null,
+        ["topicId"] = topicId,
+        ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
+        ["endDate"] = (string?)null,
+        ["topicStrandId"] = (Guid?)null,
+        ["topicLessonId"] = (Guid?)null,
+        ["createdAt"] = DateTimeOffset.UnixEpoch,
+        ["updatedAt"] = DateTimeOffset.UnixEpoch,
+    };
+
     [TestMethod]
     public void Create_Page_RendersFormAndLoadsTopics()
     {
@@ -153,5 +183,106 @@ public class GradeLevelCreateEditPageTests : BunitContext
 
         var cut = Render<Edit>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade level not found."));
+    }
+
+    /// <summary>
+    /// Regression (round fluentui-dead-binding): the page's Topics picker bound the dead
+    /// <c>SelectedValues</c> pair — absent from FluentUI 4.14.2 list components — so Blazor
+    /// dropped it into the catch-all <c>AdditionalAttributes</c> (a stray
+    /// <c>selectedvalues</c> HTML attribute) and a pick never reached
+    /// <c>_selectedTopicIds</c>. The label's count is projected from that field, so it is
+    /// the visible proof the selection landed.
+    /// </summary>
+    [TestMethod]
+    public async Task Create_Page_TopicPicker_BindsTheSupportedApi_AndTheSelectionReachesTheField()
+    {
+        var topicA = Guid.NewGuid();
+        var topicB = Guid.NewGuid();
+        var handler = RegisterBase();
+        handler.Map("GET", "/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
+        {
+            TopicJson(topicA, "Algebra"),
+            TopicJson(topicB, "Geometry"),
+        }));
+        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GRADE", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
+
+        var cut = Render<Create>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra", "the topic catalog renders as picker options"));
+        cut.Markup.Should().Contain("Topics (0)");
+
+        cut.Markup.Should().NotContain("selectedvalues",
+            "the dead SelectedValues binding must not leak into the DOM");
+        cut.FindAll("fluent-listbox").Should().BeEmpty(
+            "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
+
+        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
+        picker.Instance.Multiple.Should().BeTrue();
+        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+            picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
+
+        // The label's count is projected from _selectedTopicIds — the page's single
+        // source of truth — so it is the visible proof the picker's callback landed.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topics (1)"));
+    }
+
+    /// <summary>
+    /// Regression (round fluentui-dead-binding): the Edit page's picker must render the
+    /// grade's loaded assignments as selected, and a changed selection must reach the
+    /// submit diff — assigning the picked topic and unassigning the dropped one. With the
+    /// dead binding the loaded baseline could never change, so neither call was issued.
+    /// </summary>
+    [TestMethod]
+    public async Task Edit_Page_TopicPicker_ShowsLoadedAssignments_AndSubmitsThePickedSet()
+    {
+        var gradeId = Guid.NewGuid();
+        var topicA = Guid.NewGuid();
+        var topicB = Guid.NewGuid();
+        var assignmentA = Guid.NewGuid();
+
+        var handler = RegisterBase();
+        handler.Map("GET", $"/students/grade-levels/{gradeId}", HttpStatusCode.OK, GradeJson(gradeId, "Grade 5"));
+        handler.Map("GET", "/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
+        {
+            TopicJson(topicA, "Algebra"),
+            TopicJson(topicB, "Geometry"),
+        }));
+        handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { AssignmentJson(assignmentA, gradeId, topicA) }));
+        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GRADE", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
+        handler.Map("PUT", $"/students/grade-levels/{gradeId}", HttpStatusCode.NoContent, "");
+        handler.Map("POST", "/students/topic-assignments/grade", HttpStatusCode.Created,
+            JsonSerializer.Serialize(new Dictionary<string, object?> { ["id"] = Guid.NewGuid() }));
+        handler.Map("DELETE", $"/students/topic-assignments/{assignmentA}", HttpStatusCode.NoContent, "");
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
+
+        cut.Markup.Should().NotContain("selectedvalues",
+            "the dead SelectedValues binding must not leak into the DOM");
+        cut.FindAll("fluent-listbox").Should().BeEmpty();
+        cut.Markup.Should().Contain("Topics (1)", "the loaded assignment is the field's single source of truth");
+        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
+            .HasAttribute("selected").Should().BeTrue("the loaded assignment renders as selected");
+        cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
+            .HasAttribute("selected").Should().BeFalse("an unassigned topic must not render as selected");
+
+        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+            picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
+
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() =>
+        {
+            handler.Calls.Should().Contain(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade",
+                "the submitted set assigns the picked topic");
+            handler.Calls.Should().Contain(c => c.Method == "DELETE" && c.Url == $"/students/topic-assignments/{assignmentA}",
+                "the dropped topic is unassigned");
+        }, TimeSpan.FromSeconds(5));
+
+        handler.Calls.Single(c => c.Method == "POST" && c.Url == "/students/topic-assignments/grade")
+            .Body.Should().Contain(topicB.ToString()).And.NotContain(topicA.ToString());
     }
 }

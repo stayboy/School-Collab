@@ -35,13 +35,24 @@
                         @if (_allTopics.Length > 0)
                         {
                             <FormRow Label="@($"Topics ({_selectedTopicIds.Count})")" AlignTop>
-                                <FluentListbox Items="@_allTopics"
-                                               @bind-SelectedValues="_selectedTopicIds"
-                                               OptionText="@(t => t.Name)"
-                                               OptionValue="@(t => t.Id.ToString())"
-                                               Multiple="true"
-                                               Style="width: 100%; min-height: 160px;"
-                                               Title="Pick which topics belong to this grade. Picked topics are assigned on save." />
+                                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md
+                                   routes multi-select pickers to the raw control and asks for the reason to
+                                   be documented here — every shared dropdown wrapper is single-value. The
+                                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
+                                   over the topic objects; _selectedTopicIds stays the single source of truth
+                                   for the submit diff. (Round fluentui-dead-binding: this element bound
+                                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
+                                   components, so the binding fell into AdditionalAttributes — a stray
+                                   selectedvalues HTML attribute — and the picker neither showed nor
+                                   reported a selection.) *@
+                                <FluentSelect TOption="TopicDto" Items="@_allTopics"
+                                              OptionText="@(t => t.Name)"
+                                              OptionValue="@(t => t.Id.ToString())"
+                                              Multiple="true"
+                                              SelectedOptions="@SelectedTopicOptions"
+                                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
+                                              Style="width: 100%; min-height: 160px;"
+                                              Title="Pick which topics belong to this grade. Picked topics are assigned on save." />
                             </FormRow>
                         }
                         else
@@ -78,6 +89,18 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    /// <summary>
+    /// The Topics picker's selected option objects, projected from
+    /// <see cref="_selectedTopicIds"/>. The ids stay the single source of truth (the
+    /// submit diff reads them); FluentSelect highlights the options it is handed.
+    /// </summary>
+    private IEnumerable<TopicDto> SelectedTopicOptions =>
+        _allTopics.Where(t => _selectedTopicIds.Contains(t.Id));
+
+    /// <summary>Writes the picker's option objects back to the ids field.</summary>
+    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
+        _selectedTopicIds = (selected ?? []).Select(t => t.Id).ToList();
 
     protected override async Task OnInitializedAsync()
     {

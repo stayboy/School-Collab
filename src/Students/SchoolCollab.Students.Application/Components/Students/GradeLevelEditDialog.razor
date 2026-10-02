@@ -70,12 +70,23 @@
         @if (_allTopics.Length > 0)
         {
             <FormRow Label="@($"Topics ({Model.TopicIds.Count})")" AlignTop>
-                <FluentListbox Items="@_allTopics"
-                               @bind-SelectedValues="Model.TopicIds"
-                               OptionText="@(s => s.Name)"
-                               OptionValue="@(s => s.Id.ToString())"
-                               Multiple="true"
-                               Style="width: 100%; min-height: 160px;" />
+                @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md
+                   routes multi-select pickers to the raw control and asks for the reason to
+                   be documented here — every shared dropdown wrapper is single-value. The
+                   selection binds the supported SelectedOptions/SelectedOptionsChanged pair
+                   over the topic objects; Model.TopicIds stays the single source of truth
+                   for the submit diff. (Round fluentui-dead-binding: this element bound
+                   the SelectedValues / SelectedValuesChanged pair — neither of which exists on FluentUI 4.14.2 list
+                   components, so the binding fell into AdditionalAttributes — a stray
+                   selectedvalues HTML attribute — and the picker neither showed nor
+                   reported a selection.) *@
+                <FluentSelect TOption="TopicDto" Items="@_allTopics"
+                              OptionText="@(s => s.Name)"
+                              OptionValue="@(s => s.Id.ToString())"
+                              Multiple="true"
+                              SelectedOptions="@SelectedTopicOptions"
+                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
+                              Style="width: 100%; min-height: 160px;" />
             </FormRow>
         }
         else if (_allTopics.Length == 0)
@@ -130,7 +141,7 @@
         public int? MaxAge { get; set; }
         public Guid? AllowedGenderCodedValueId { get; set; }
 
-        /// <summary>Picked topic ids; bound to the FluentListbox.</summary>
+        /// <summary>Picked topic ids; the Topics multi-select picker's source of truth.</summary>
         public IReadOnlyList<Guid> TopicIds { get; set; } = [];
 
         /// <summary>
@@ -191,6 +202,19 @@
             Error = $"Could not load edit context: {ex.Message}";
         }
     }
+
+    /// <summary>
+    /// The Topics picker's selected option objects, projected from
+    /// <see cref="GradeLevelEditModel.TopicIds"/>. The ids stay the single source of
+    /// truth (the submit diff reads them); FluentSelect highlights the options it is
+    /// handed — which is what makes the loaded assignments render as selected.
+    /// </summary>
+    private IEnumerable<TopicDto> SelectedTopicOptions =>
+        _allTopics.Where(t => Model.TopicIds.Contains(t.Id));
+
+    /// <summary>Writes the picker's option objects back to the ids field.</summary>
+    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
+        Model.TopicIds = (selected ?? []).Select(t => t.Id).ToList();
 
     private async Task OpenNameOverrideDialog()
     {
