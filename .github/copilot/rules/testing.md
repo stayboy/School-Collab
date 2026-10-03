@@ -56,6 +56,14 @@ not treat a bug fix as complete when it only changes production code.
      bug — the UI won't reflect the change until the dialog is reopened. Test that the
      added item appears in the list and leaves the picker (e.g. `Teachers` gains the
      linked teacher and `UnlinkedTeachers` drops it).
+   - **FluentUI web components cannot be driven with generic bUnit events.**
+     `TriggerEvent("oncheckedchange", new ChangeEventArgs{…})` throws inside the
+     page's `ErrorBoundary` (`ChangeEventArgs` cannot convert to
+     `CheckboxChangeEventArgs`), which reads as a page defect when it is a test
+     defect. Drive the bound callback instead:
+     `cut.InvokeAsync(() => cut.FindComponent<FluentCheckbox>().Instance.ValueChanged.InvokeAsync(true))`
+     (the `InvokeAsync` wrapper is required — invoking off the renderer thread
+     raises *"not associated with the Dispatcher"*).
 
 5. **No untested bug fixes.** If a bug cannot be tested directly, document why in the PR
    and add the closest available coverage, such as routing, service, or component
