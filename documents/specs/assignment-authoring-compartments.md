@@ -16,8 +16,11 @@
 >   incorporated here as an **action**, not re-specified.
 > - `documents/specs/notification-delivery-plan.md` — notification policy contract.
 >
-> **Implementation status:** **not implemented.** This document is the input to the
-> R1–R3 rounds in §14; no code, migration or test has been written from it yet.
+> **Implementation status:** **implemented in the main line.** R1 (#288), R2 (#291) and
+> R3 (#293) are merged on `main` — the compartmentalized authoring page, the targeting
+> model and the attachment-grounded AI surface specified below exist in code, with tests.
+> What those rounds deferred or found open (and the defects they closed by hand) is
+> recorded durably in §17.
 >
 > **Parallel surface (2026-10-01):** the Prefab **teacher portal**
 > (`documents/specs/teachers-ward-portal-prefab-plan.md` §1 T1–T7) is a
@@ -439,7 +442,6 @@ done rather than letting this list drift away from the code.
 | **A read-only View has no reason to convey** (R2, verified benign) | The grades / streams / students pickers carry a hard-coded `aria-describedby="authoring-audience-constraint-reason"`. The only state where that paragraph is absent is a plain read-only View, where no reason exists and the controls are disabled by `IsReadOnly` — so the idref does not actually dangle on a control that had something to say. | None while that reasoning holds; re-check if a reason is ever introduced on a read-only surface. |
 | **Structured output for question generation** (R3 / D5) | `AssignmentQuestionGenerationService` builds a prompt and then parses free text back into JSON (`AssignmentQuestionResponseParser` + `AiTextCleaner`) instead of using `Microsoft.Extensions.AI` 10.6.0's response-format / structured-output support. Real, but orthogonal to R3 — that round already carried a schema migration, a new extraction dependency and a cross-host contract change. | Move the question-generation call to a structured response format and delete the tolerant parser, once a provider in the supported set is known to honour it. |
 | **Question rows have no stable identity across a save** (R3 / P2-5) | The create/update paths implement the child contract as full replacement — snapshot the ids, `RemoveQuestion` each, `AddQuestion` the inbound set — so every question row is re-minted with a fresh `Id` on every save. R3's `GenerationId` survives that because it rides the wire DTOs, but any future feature that needs to *refer* to a question across saves (a publish-time selection, a per-question sort, an answer keyed to a question id) has no stable id to bind to. | Either give the save path a key-preserving merge (match inbound rows to persisted rows by id and update in place), or snapshot the selection at publish time instead of referencing live rows. |
-| **Snapshot-vs-config equality is enforced only by review** (R3; found by the R3-1 re-verify) | `dotnet ef migrations has-pending-model-changes` is **insensitive** to the `ValueGeneratedOnAdd` annotation on an owned key, so a generated mirror can contradict the model and the gate still passes: it could neither catch R3-1's drift (the snapshot and designer still declared `ValueGeneratedOnAdd` after `AssignmentConfiguration` gained `ValueGeneratedNever()`) nor will it regress-detect a recurrence. The gate reports "No changes have been made to the model since the last migration" on **both** the stale and the correct artifact. | An architecture test asserting that no owned key whose configuration declares `ValueGeneratedNever()` carries the annotation in `*DbContextModelSnapshot.cs` or a migration `.Designer.cs` — or a CI step that regenerates the migration and fails on a non-empty diff. |
 
 Round `authoring-ai-attachments-r3` closed **a pre-existing P0: owned children could not be added to a persisted
 assignment on PostgreSQL**. Found by R3's Postgres round-trip tests, not by a review: every owned
@@ -483,6 +485,21 @@ The R2 UI P2 backlog (**F7** kebab disabled-without-reason, **F12** empty-state 
 **F13** first-render debounce delay, **F15** per-row reason placement, **F17** missing
 `OnParametersSet`) and the spec'd-but-unimplemented **UX-7** (§4) were closed by round
 `authoring-ux7-residuals`; the table above is what remains open.
+
+Round `snapshot-config-guard` closed the **snapshot-vs-config equality gap** the R3-1 re-verify found:
+`tests/SchoolCollab.ArchitectureTests.Unit/OwnedKeyValueGenerationArchitectureTests` is now the gate for
+it, and it reads the EF-generated model artifacts under `src/` — every `Migrations/*ModelSnapshot.cs`,
+plus the newest `.Designer.cs` of each migrations directory (the two live mirrors; an older designer is an
+immutable record of the model as it stood at that migration, which the differ never consults) — failing if
+an **owned** key (a `Property<Guid>("Id")`
+declared inside an `OwnsMany(...)` block, so a match cannot leak in from a neighbouring entity) still
+carries `.ValueGeneratedOnAdd()`. That annotation is the mirror-side half of the owned-key P0 above: it
+makes EF read an explicitly-set key on a newly-attached child as an **already existing** row and emit
+`UPDATE <child table> SET … WHERE id = <the new id>` with no INSERT. The gate has to be a
+source-inspection test, because the differ cannot see this annotation at all:
+`dotnet ef migrations has-pending-model-changes` reports "No changes have been made to the model since the
+last migration" on the stale artifact and on the corrected one alike, which is why R3-1's drift was
+invisible to that gate *and* to the runtime `HasPendingModelChanges()` guard in `MigrationGuardTests`.
 
 ---
 

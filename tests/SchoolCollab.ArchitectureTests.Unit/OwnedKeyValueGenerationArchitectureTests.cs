@@ -1,0 +1,676 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using FluentAssertions;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace SchoolCollab.ArchitectureTests.Unit;
+
+/// <summary>
+/// Round <c>snapshot-config-guard</c>: no EF-generated model artifact under <c>src/</c> may declare
+/// <c>ValueGeneratedOnAdd()</c> on an <b>owned</b> key.
+/// <para>
+/// Why the guard exists (R3-1). <c>AssignmentConfiguration</c> gained <c>ValueGeneratedNever()</c> on its
+/// four owned keys, but the generated mirror — the context's <c>*ModelSnapshot.cs</c> and the migration's
+/// <c>.Designer.cs</c> — still said <c>ValueGeneratedOnAdd()</c>, and nothing failed. The annotation is
+/// not cosmetic: an owned collection's <c>Guid</c> key is always assigned by the application and EF never
+/// generates it, so declaring <c>OnAdd</c> makes EF Core read an explicitly-set key on a newly-attached
+/// child as an <b>already existing</b> row — tracking it as <c>Modified</c> and emitting
+/// <c>UPDATE &lt;child table&gt; SET … WHERE id = &lt;the new id&gt;</c> with no <c>INSERT</c>. On
+/// PostgreSQL that updates zero rows and <c>SaveChanges</c> throws
+/// <c>DbUpdateConcurrencyException</c>, while the InMemory provider performs no row-count check and
+/// silently "succeeds" — which is why no unit suite saw it.
+/// </para>
+/// <para>
+/// Why it is a source inspection (the model differ is blind to this annotation).
+/// <c>dotnet ef migrations has-pending-model-changes</c> reports "No changes have been made to the model
+/// since the last migration" on <b>both</b> the stale and the corrected artifact, so the project's own
+/// migration gate — including the runtime <c>HasPendingModelChanges()</c> check in
+/// <see cref="MigrationGuardTests"/> — is structurally unable to see the drift. R3-1's artifact was caught
+/// only by a human reading it. Reading the emitted C# is the only instrument that holds this line, and
+/// asserting on the emitted text rather than on the model is deliberate: it is the artifact that shipped.
+/// </para>
+/// <para>
+/// Scope: every <c>src/**/Migrations/*ModelSnapshot.cs</c> plus the <b>newest</b> <c>.Designer.cs</c> of each
+/// migrations directory (newest by migration id — the timestamp prefix — not by file modification time).
+/// Those two artifact kinds are the current-model mirrors: the snapshot is what the differ reads, and the
+/// designer beside it is written from the same model. The <b>older</b> designers are immutable per-migration
+/// records of the model as it stood at <em>their own</em> migration; the differ never consults them, the
+/// annotation changes no SQL, and they predate <c>ValueGeneratedNever()</c> by construction — the 25
+/// historical Assignments designers that still carry <c>OnAdd</c> on an owned key are therefore faithful
+/// records, not defects, and R3-1's fix hand-edited exactly those two live files and left them alone.
+/// Rewriting them would be rewriting migration history for no functional gain. This exemption is a rule,
+/// not an oversight: do not widen the scan to all designers, and do not narrow it to a snapshot-only read
+/// (the designer is half of what R3-1 had to fix by hand).
+/// </para>
+/// <para>
+/// The invariant is unconditional for owned keys — no configuration lookup and no allow-list — because an
+/// owned collection's key is app-assigned in every case. A new bounded context or owned type is covered the
+/// moment its snapshot lands.
+/// </para>
+/// </summary>
+[TestClass]
+public class OwnedKeyValueGenerationArchitectureTests
+{
+    private const string OwnsManyOpener = "OwnsMany(";
+    private const string OnAddAnnotation = ".ValueGeneratedOnAdd()";
+
+    private static readonly string RepoRoot = FindRepoRoot();
+
+    private static readonly string SrcRoot = Path.Combine(RepoRoot, "src");
+
+    /// <summary>How EF emits a key property: <c>b1.Property&lt;Guid&gt;("Id")</c>, chain continuing to <c>;</c>.</summary>
+    private static readonly Regex KeyDeclaration = new(@"Property<Guid>\(""Id""\)", RegexOptions.Compiled);
+
+    /// <summary>The artifacts under test: every context snapshot, plus the newest designer per context.</summary>
+    private static readonly IReadOnlyList<string> LiveModelArtifacts = DiscoverLiveModelArtifacts();
+
+    /// <summary>
+    /// The invariant: an owned key is a <c>Property&lt;Guid&gt;("Id")</c> declared inside an
+    /// <c>OwnsMany(...)</c> block, and none of them may carry <c>.ValueGeneratedOnAdd()</c>.
+    /// <para>
+    /// The scan is block-aware by construction, not by regex proximity: a declaration is an owned key only
+    /// when its offset falls inside the balanced parentheses of an <c>OwnsMany(</c> opener, so a match can
+    /// never leak in from the neighbouring entity. That matters here — a flat
+    /// <c>Property&lt;Guid&gt;("Id")</c> search over these same files also hits 100+ ordinary entity keys
+    /// (and every <c>b.Property&lt;Guid&gt;("Id")</c> in the Settings snapshots), which are store-generated
+    /// by design. The offsets that decide all of this are read through <see cref="ScanNonCode"/>, so a
+    /// parenthesis, an opener or a literal inside a string or a comment is never mistaken for code — the
+    /// artifacts carry author-supplied <c>.HasComment("…")</c> labels, and one of those containing an
+    /// unbalanced parenthesis would otherwise shift every span after it and leave this guard green while
+    /// inspecting the wrong region.
+    /// </para>
+    /// <para>
+    /// Known limitation, deliberately left loud rather than silent: the owned-key pattern is still matched
+    /// against raw text, so a declaration commented out <em>inside</em> a live block's span would be counted as
+    /// an owned key. That is a false <em>positive</em> — the guard turns red on a phantom and someone
+    /// investigates — not a false negative, which is the failure mode this scan exists to prevent. Generated
+    /// artifacts carry no comments, so it cannot arise from EF output as written today.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void LiveModelArtifacts_DoNotDeclareValueGeneratedOnAddOnAnOwnedKey()
+    {
+        LiveModelArtifacts.Should().NotBeEmpty(
+            "the guard must inspect the generated model artifacts; a discovery that finds none would " +
+            "otherwise pass as a green test that checked nothing");
+
+        var violations = new List<string>();
+        var ownedKeysExamined = 0;
+
+        foreach (var artifact in LiveModelArtifacts)
+        {
+            var source = File.ReadAllText(artifact);
+            var ownedKeys = FindOwnedKeys(source);
+            ownedKeysExamined += ownedKeys.Count;
+
+            violations.AddRange(ownedKeys
+                .Where(key => key.DeclaresValueGeneratedOnAdd)
+                .Select(key =>
+                    $"{RelativeToRepoRoot(artifact)}:{key.Line} — owned key of '{key.OwnedType}' " +
+                    $"declares {OnAddAnnotation}"));
+        }
+
+        ownedKeysExamined.Should().BeGreaterThan(0,
+            "the block-aware scan must find the owned keys these artifacts contain; finding none means the " +
+            "guard is blind (or every owned collection is gone), never that the artifacts are clean");
+
+        violations.Should().BeEmpty(
+            "an owned collection's key is assigned by the application and EF never generates it, so " +
+            $"{OnAddAnnotation} on an owned key is unconditionally wrong: EF reads an explicitly-set key " +
+            "on a newly-attached child as an existing row, tracks it as Modified and emits " +
+            "UPDATE ... WHERE id = <the new id> with no INSERT (DbUpdateConcurrencyException on " +
+            "PostgreSQL). This is the drift `dotnet ef migrations has-pending-model-changes` and " +
+            "HasPendingModelChanges() cannot see — R3-1 (see the spec's §17 record of the round " +
+            "snapshot-config-guard). Fix the configuration, then regenerate the snapshot/designer.\n\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// Anti-vacuity, asserted rather than assumed: the guard reads every context snapshot that exists on
+    /// disk, at least one designer, and the owned-key scan still recognises the shape EF emits. Each
+    /// failure lists the artifacts it did find, so a broken enumeration can never read as a green test.
+    /// </summary>
+    [TestMethod]
+    public void LiveModelArtifacts_CoverEverySnapshotOnDiskAndStillCarryOwnedKeys()
+    {
+        var snapshotsOnDisk = Directory
+            .GetFiles(SrcRoot, "*ModelSnapshot.cs", SearchOption.AllDirectories)
+            .Select(RelativeToRepoRoot)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        snapshotsOnDisk.Should().NotBeEmpty(
+            "a context model snapshot is the artifact the model differ reads, so a run that finds none " +
+            $"under {RelativeToRepoRoot(SrcRoot)} is not a passing guard but a broken search");
+
+        LiveModelArtifacts
+            .Select(RelativeToRepoRoot)
+            .Should().Contain(snapshotsOnDisk,
+                "every *ModelSnapshot.cs under src/ is a live mirror of its context's current model and must " +
+                "be inspected");
+
+        LiveModelArtifacts
+            .Should().Contain(path => path.EndsWith(".Designer.cs", StringComparison.Ordinal),
+                "the newest migration designer per context is the second live mirror (R3-1 had to hand-fix " +
+                "both), so inspecting snapshots alone would leave half of that defect unguarded");
+
+        var ownedKeys = LiveModelArtifacts
+            .SelectMany(path => FindOwnedKeys(File.ReadAllText(path)))
+            .ToList();
+
+        ownedKeys.Should().NotBeEmpty(
+            "the scan found no owned key in " +
+            string.Join(", ", LiveModelArtifacts.Select(RelativeToRepoRoot)) +
+            " — either every owned collection has been removed (then delete this guard) or EF changed the " +
+            "shape it emits and the guard has silently gone blind, which is the failure mode it exists to " +
+            "prevent");
+    }
+
+    /// <summary>
+    /// The scanner's own control, on hand-written artifact text instead of the emitted artifacts — the only
+    /// place a parenthesis inside a string or a comment can be planted on purpose.
+    /// <para>
+    /// The text below is a faithful miniature of the shape EF emits, with four traps the guard must survive:
+    /// an unbalanced <c>)</c> inside a <c>.HasComment("…")</c> label (and one inside a <c>//</c> comment) in the
+    /// middle of the real owned block, a commented-out <c>OwnsMany(</c> in each comment form, and an
+    /// <c>OwnsMany(</c> quoted inside a label. A bare depth counter sees all four as structure: it ends the
+    /// real block at the label's <c>)</c>, opens two blocks in the comments and one inside the literal, and
+    /// then reports violations no line of the artifact contains — which is why the assertions below are the
+    /// ones that discriminate the token-aware walk from the counter it replaced.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void SyntheticArtifactWithParenthesesInsideStringsAndComments_KeepsBlockSpansOnTheRealOwnedKey()
+    {
+        const string realType = "SchoolCollab.Assignments.Core.Domain.AssignmentAttachment";
+
+        var synthetic = """
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Post", b =>
+            {
+                b.Property<string>("Instructions").HasComment("the label above quotes an opener: OwnsMany(");
+            });
+
+            // OwnsMany("SchoolCollab.Fake.CommentedOutType", "Comments", b1 =>
+            // {
+            //     b1.Property<Guid>("Id").ValueGeneratedOnAdd();
+            // });
+
+            /* OwnsMany("SchoolCollab.Fake.BlockCommentedType", "Comments", b1 =>
+               {
+                   b1.Property<Guid>("Id").ValueGeneratedOnAdd();
+               }); */
+
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
+            {
+                b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentAttachment", "Attachments", b1 =>
+                {
+                    b1.Property<Guid>("Id").ValueGeneratedNever();
+                    b1.Property<string>("ContentType").HasMaxLength(100).HasColumnType("character varying(100)");
+                    b1.Property<string>("ExtractionError").HasComment("Score out of 10)");
+                    // the label above is unbalanced on purpose, and so is this one: )
+                    b1.HasKey("Id").HasName("pk_assignment_attachments");
+                });
+            });
+            """;
+
+        synthetic.Should()
+            .Contain("// OwnsMany(", "the control must plant the line-comment opener it claims to test")
+            .And.Contain("/* OwnsMany(", "the control must plant the block-comment opener it claims to test")
+            .And.Contain("quotes an opener: OwnsMany(",
+                "the control must plant the opener quoted inside a label")
+            .And.Contain("\"Score out of 10)\"", "the control must plant the unbalanced label");
+
+        var blockStartIndex = synthetic.IndexOf("b.OwnsMany(", StringComparison.Ordinal) + "b.OwnsMany".Length;
+        var closeParenthesis = synthetic.IndexOf(
+            "});",
+            synthetic.IndexOf("b1.HasKey(\"Id\")", StringComparison.Ordinal),
+            StringComparison.Ordinal) + 1;
+
+        var blocks = FindOwnsManyBlocks(synthetic);
+        var ownedKeys = FindOwnedKeys(synthetic);
+
+        blocks.Should().ContainSingle(
+            "only the real b.OwnsMany( call is code: the two commented-out openers are not calls and neither is " +
+            "the quoted one inside a label, so a scanner that counts them has already mis-read the artifact");
+
+        var block = blocks.Single();
+        block.OwnedType.Should().Be(realType,
+            "the block's type comes from the call's own first literal, not from a fake opener's");
+        block.Start.Should().Be(blockStartIndex);
+        block.End.Should().Be(closeParenthesis,
+            "the block ends at the ) that closes the real call — a depth counter that counts the ) inside " +
+            "\"Score out of 10)\" stops at the label and reports a span the artifact does not have");
+
+        synthetic[(block.Start + 1)..block.End].Should()
+            .Contain("b1.Property<Guid>(\"Id\").ValueGeneratedNever()",
+                "the whole real block, key included, is inside the span")
+            .And.Contain("\"Score out of 10)\"", "the span runs past the unbalanced label")
+            .And.Contain("b1.HasKey(\"Id\")", "the span runs to the end of the real block")
+            .And.NotContain("SchoolCollab.Fake.", "no fake block is spliced into the real span");
+
+        KeyDeclaration.Matches(synthetic).Count.Should().BeGreaterThan(ownedKeys.Count,
+            "the synthetic text deliberately declares Property<Guid>(\"Id\") inside both comment forms, so the " +
+            "block scan must filter declarations down to the one real owned key rather than find them all");
+
+        ownedKeys.Should().ContainSingle(
+            "the commented-out declarations are not code and must not be attributed to an owned block");
+
+        var key = ownedKeys.Single();
+        key.OwnedType.Should().Be(realType);
+        key.Line.Should().Be(
+            LineAt(synthetic, synthetic.IndexOf("Property<Guid>(\"Id\")", blockStartIndex, StringComparison.Ordinal)),
+            "the one owned key must be the real declaration, not one of the commented-out ones");
+        key.DeclaresValueGeneratedOnAdd.Should().BeFalse(
+            "the real owned key declares ValueGeneratedNever(); the OnAdd declarations in the comments belong " +
+            "to no block, and reporting them would be the false positive the token-aware scan exists to avoid");
+
+        var escapedQuote = """
+            b.OwnsMany("SchoolCollab.Fake\"Quoted.Type", "Items", b1 =>
+            {
+                b1.Property<Guid>("Id").ValueGeneratedNever();
+            });
+            """;
+
+        FindOwnsManyBlocks(escapedQuote).Single().OwnedType.Should().Be("SchoolCollab.Fake\"Quoted.Type",
+            "an escaped quote ends nothing: the type literal is read as a literal, not as the regex-framed " +
+            "run the old FirstStringLiteral pattern would have cut short");
+    }
+
+    /// <summary>
+    /// Every <c>*ModelSnapshot.cs</c> under <c>src/</c>, plus the newest <c>*.Designer.cs</c> in each
+    /// migrations directory. Enumerated by directory rather than by a single glob, so a new bounded context
+    /// is covered without touching this file.
+    /// </summary>
+    private static IReadOnlyList<string> DiscoverLiveModelArtifacts()
+    {
+        var migrationsFiles = Directory
+            .EnumerateFiles(SrcRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(IsInMigrationsDirectory)
+            .ToList();
+
+        var snapshots = migrationsFiles
+            .Where(path => Path.GetFileName(path).EndsWith("ModelSnapshot.cs", StringComparison.Ordinal));
+
+        var newestDesignerPerDirectory = migrationsFiles
+            .Where(path => Path.GetFileName(path).EndsWith(".Designer.cs", StringComparison.Ordinal))
+            .GroupBy(path => Path.GetDirectoryName(path)!, StringComparer.OrdinalIgnoreCase)
+            .Select(designers => designers.OrderBy(MigrationIdOf, StringComparer.Ordinal).Last());
+
+        return snapshots
+            .Concat(newestDesignerPerDirectory)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static bool IsInMigrationsDirectory(string path) =>
+        string.Equals(
+            Path.GetFileName(Path.GetDirectoryName(path)),
+            "Migrations",
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The migration id is the file name's leading timestamp (<c>20261003154434_Name.Designer.cs</c>),
+    /// so ordering by it — not by file modification time — is what makes the newest designer the live one.</summary>
+    private static string MigrationIdOf(string path)
+    {
+        var name = Path.GetFileName(path);
+        var separator = name.IndexOf('_');
+        return separator > 0 ? name[..separator] : name;
+    }
+
+    /// <summary>
+    /// The owned keys of one generated artifact: every <c>Property&lt;Guid&gt;("Id")</c> whose offset lies
+    /// inside the balanced parentheses of an <c>OwnsMany(</c> opener, attributed to the innermost opener that
+    /// contains it and tested on its own statement (up to the next <c>;</c>) for the annotation.
+    /// </summary>
+    private static List<OwnedKey> FindOwnedKeys(string source)
+    {
+        var ownsManyBlocks = FindOwnsManyBlocks(source);
+        var ownedKeys = new List<OwnedKey>();
+
+        foreach (Match declaration in KeyDeclaration.Matches(source))
+        {
+            var block = ownsManyBlocks
+                .Where(candidate => candidate.Start <= declaration.Index && declaration.Index <= candidate.End)
+                .OrderByDescending(candidate => candidate.Start)
+                .FirstOrDefault();
+
+            if (block is null)
+            {
+                continue;
+            }
+
+            var statementEnd = source.IndexOf(';', declaration.Index);
+            var statement = statementEnd < 0
+                ? source[declaration.Index..]
+                : source[declaration.Index..(statementEnd + 1)];
+
+            ownedKeys.Add(new OwnedKey(
+                LineAt(source, declaration.Index),
+                block.OwnedType,
+                statement.Contains(OnAddAnnotation, StringComparison.Ordinal)));
+        }
+
+        return ownedKeys;
+    }
+
+    /// <summary>
+    /// Every <c>OwnsMany(...)</c> call in the artifact, as the span of its balanced parentheses. Only calls
+    /// written in real code count: an opener inside a string literal or inside a comment is not a call, so it
+    /// can neither open a block nor shift the span of the ones that are.
+    /// </summary>
+    private static List<OwnsManyBlock> FindOwnsManyBlocks(string source)
+    {
+        var blocks = new List<OwnsManyBlock>();
+        var searchFrom = 0;
+
+        while (true)
+        {
+            var openerIndex = IndexOfInCode(source, OwnsManyOpener, searchFrom);
+            if (openerIndex < 0)
+            {
+                break;
+            }
+
+            searchFrom = openerIndex + OwnsManyOpener.Length;
+            var openParenthesis = searchFrom - 1;
+            var closeParenthesis = FindClosingParenthesis(source, openParenthesis);
+            if (closeParenthesis < 0)
+            {
+                break;
+            }
+
+            blocks.Add(new OwnsManyBlock(
+                openParenthesis,
+                closeParenthesis,
+                OwnedTypeOf(source, openerIndex, closeParenthesis)));
+        }
+
+        return blocks;
+    }
+
+    /// <summary>
+    /// The index of the <c>)</c> that closes the <c>(</c> at <paramref name="openParenthesis"/>, or <c>-1</c>
+    /// when the call is unterminated. Only parentheses written in code move the depth counter: the walk steps
+    /// over string and character literals and over both comment forms, because an author-supplied
+    /// <c>.HasComment("…")</c> label may legally contain an unbalanced parenthesis and must not be able to end
+    /// the block early. A truncated span would leave the guard green while inspecting the wrong region — the
+    /// one failure mode a guard whose whole value is that it cannot silently lie cannot have.
+    /// </summary>
+    private static int FindClosingParenthesis(string source, int openParenthesis)
+    {
+        var depth = 0;
+
+        for (var index = openParenthesis; index < source.Length; index++)
+        {
+            if (IsNonCodeStarter(source[index]) && ScanNonCode(source, index, out var end) != NonCodeKind.None)
+            {
+                index = end - 1;
+                continue;
+            }
+
+            if (source[index] == '(')
+            {
+                depth++;
+            }
+            else if (source[index] == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return index;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The first occurrence of <paramref name="token"/> in real code at or after <paramref name="startIndex"/>,
+    /// or <c>-1</c>. A match inside a string literal or a comment is skipped, so a commented-out or quoted
+    /// <c>OwnsMany(</c> is never mistaken for an opener.
+    /// </summary>
+    private static int IndexOfInCode(string source, string token, int startIndex)
+    {
+        for (var index = startIndex; index <= source.Length - token.Length; index++)
+        {
+            if (IsNonCodeStarter(source[index]) && ScanNonCode(source, index, out var end) != NonCodeKind.None)
+            {
+                index = end - 1;
+                continue;
+            }
+
+            if (MatchesAt(source, index, token))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The single scanner the three walks in this file share — <see cref="FindClosingParenthesis"/>,
+    /// <see cref="IndexOfInCode"/> and <see cref="OwnedTypeOf"/>. It classifies the non-code text starting at
+    /// <paramref name="index"/> and reports its exclusive end in <paramref name="end"/>;
+    /// <see cref="NonCodeKind.None"/> leaves <paramref name="end"/> equal to <paramref name="index"/>, and every
+    /// recognised span advances past the offset it started at. Covered: <c>// …</c> and <c>/* … */</c> comments,
+    /// regular <c>"…"</c> literals (honouring <c>\"</c>), verbatim <c>@"…"</c> literals (where <c>""</c> is an
+    /// escaped quote), raw literals (<c>"""…"""</c> and longer fences, whose opening quote run is also the
+    /// length of the terminator) and character literals (<c>'x'</c>).
+    /// </summary>
+    private static NonCodeKind ScanNonCode(string source, int index, out int end)
+    {
+        const int rawStringFenceLength = 3;
+
+        end = index;
+
+        if (index >= source.Length)
+        {
+            return NonCodeKind.None;
+        }
+
+        if (source[index] == '/')
+        {
+            if (MatchesAt(source, index, "//"))
+            {
+                var lineFeed = source.IndexOf('\n', index + 2);
+                end = lineFeed < 0 ? source.Length : lineFeed;
+                return NonCodeKind.LineComment;
+            }
+
+            if (MatchesAt(source, index, "/*"))
+            {
+                var terminator = source.IndexOf("*/", index + 2, StringComparison.Ordinal);
+                end = terminator < 0 ? source.Length : terminator + 2;
+                return NonCodeKind.BlockComment;
+            }
+
+            return NonCodeKind.None;
+        }
+
+        // `@"` opens a verbatim literal (`""` is its escaped quote); a bare `@` is ordinary code.
+        if (source[index] == '@' && MatchesAt(source, index + 1, "\""))
+        {
+            end = EndOfVerbatimString(source, index + 1);
+            return NonCodeKind.VerbatimStringLiteral;
+        }
+
+        if (source[index] == '"')
+        {
+            var fenceLength = QuoteRunAt(source, index);
+            if (fenceLength >= rawStringFenceLength)
+            {
+                end = EndOfRawString(source, index, fenceLength);
+                return NonCodeKind.RawStringLiteral;
+            }
+
+            end = EndOfEscapedLiteral(source, index, '"');
+            return NonCodeKind.StringLiteral;
+        }
+
+        if (source[index] == '\'')
+        {
+            end = EndOfEscapedLiteral(source, index, '\'');
+            return NonCodeKind.CharacterLiteral;
+        }
+
+        return NonCodeKind.None;
+    }
+
+    /// <summary>Whether a character could open a C# string, character literal or comment — a cheap pre-filter
+    /// that keeps the scanner off the overwhelming majority of offsets.</summary>
+    private static bool IsNonCodeStarter(char character) => character is '"' or '\'' or '@' or '/';
+
+    private static bool MatchesAt(string source, int index, string text) =>
+        index >= 0 &&
+        index + text.Length <= source.Length &&
+        string.CompareOrdinal(source, index, text, 0, text.Length) == 0;
+
+    /// <summary>The length of the run of <c>"</c> characters starting at <paramref name="index"/>.</summary>
+    private static int QuoteRunAt(string source, int index)
+    {
+        var runLength = 0;
+        while (index + runLength < source.Length && source[index + runLength] == '"')
+        {
+            runLength++;
+        }
+
+        return runLength;
+    }
+
+    /// <summary>The exclusive end of a <c>"…"</c> or <c>'…'</c> literal whose opening
+    /// <paramref name="delimiter"/> is the first character of the span, honouring backslash escapes so that
+    /// <c>\"</c> or <c>\'</c> does not end it.</summary>
+    private static int EndOfEscapedLiteral(string source, int delimiter, char closingDelimiter)
+    {
+        for (var index = delimiter + 1; index < source.Length; index++)
+        {
+            if (source[index] == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (source[index] == closingDelimiter)
+            {
+                return index + 1;
+            }
+        }
+
+        return source.Length;
+    }
+
+    /// <summary>The exclusive end of the verbatim literal whose opening quote is at
+    /// <paramref name="openQuote"/>: it ends at the first quote that is not doubled.</summary>
+    private static int EndOfVerbatimString(string source, int openQuote)
+    {
+        for (var index = openQuote + 1; index < source.Length; index++)
+        {
+            if (source[index] != '"')
+            {
+                continue;
+            }
+
+            if (MatchesAt(source, index + 1, "\""))
+            {
+                index++;
+                continue;
+            }
+
+            return index + 1;
+        }
+
+        return source.Length;
+    }
+
+    /// <summary>The exclusive end of the raw literal whose <paramref name="fenceLength"/>-quote opening fence
+    /// starts at <paramref name="openQuote"/>: the terminator is the next run of at least that many quotes.</summary>
+    private static int EndOfRawString(string source, int openQuote, int fenceLength)
+    {
+        for (var index = openQuote + fenceLength; index + fenceLength <= source.Length; index++)
+        {
+            if (source[index] == '"' && QuoteRunAt(source, index) >= fenceLength)
+            {
+                return index + fenceLength;
+            }
+        }
+
+        return source.Length;
+    }
+
+    /// <summary>
+    /// The owned CLR type: the first string literal of the <c>OwnsMany(...)</c> call, read through the scanner so
+    /// that an escaped quote inside the literal cannot cut the name short the way the earlier
+    /// <c>"([^"]+)"</c> regex did, and so that a literal in a comment cannot be mistaken for it.
+    /// </summary>
+    private static string OwnedTypeOf(string source, int openerIndex, int closeParenthesis)
+    {
+        for (var index = openerIndex; index < closeParenthesis;)
+        {
+            var kind = ScanNonCode(source, index, out var end);
+            if (kind is NonCodeKind.StringLiteral or NonCodeKind.VerbatimStringLiteral)
+            {
+                return DecodeStringLiteral(source, index, end, kind);
+            }
+
+            index = end > index ? end : index + 1;
+        }
+
+        return "unknown owned type";
+    }
+
+    /// <summary>The content of a string-literal span, with the escape the regex could not see removed:
+    /// <c>\"</c> (and <c>\\</c>) in a regular literal, <c>""</c> in a verbatim one.</summary>
+    private static string DecodeStringLiteral(string source, int start, int end, NonCodeKind kind)
+    {
+        var openQuote = kind == NonCodeKind.VerbatimStringLiteral ? start + 1 : start;
+        var contentStart = openQuote + 1;
+        var contentEnd = end > contentStart && source[end - 1] == '"' ? end - 1 : end;
+        var content = source[contentStart..contentEnd];
+
+        return kind == NonCodeKind.VerbatimStringLiteral
+            ? content.Replace("\"\"", "\"", StringComparison.Ordinal)
+            : content.Replace("\\\"", "\"", StringComparison.Ordinal).Replace("\\\\", "\\", StringComparison.Ordinal);
+    }
+
+    /// <summary>The C# constructs that are not code: whatever a parenthesis or an opener inside one of these
+    /// looks like, it is not one.</summary>
+    private enum NonCodeKind
+    {
+        None,
+        LineComment,
+        BlockComment,
+        StringLiteral,
+        VerbatimStringLiteral,
+        RawStringLiteral,
+        CharacterLiteral,
+    }
+
+    private static int LineAt(string source, int index) => source.AsSpan(0, index).Count('\n') + 1;
+
+    private static string RelativeToRepoRoot(string path) =>
+        Path.GetRelativePath(RepoRoot, path).Replace('\\', '/');
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "documents", "specs")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName
+            ?? throw new InvalidOperationException(
+                "Could not locate the repo root (documents/specs) from " + AppContext.BaseDirectory);
+    }
+
+    /// <summary>An owned key declaration found in a generated model artifact.</summary>
+    private sealed record OwnedKey(int Line, string OwnedType, bool DeclaresValueGeneratedOnAdd);
+
+    /// <summary>The span of one <c>OwnsMany(...)</c> call, with the type it maps as owned.</summary>
+    private sealed record OwnsManyBlock(int Start, int End, string OwnedType);
+}
