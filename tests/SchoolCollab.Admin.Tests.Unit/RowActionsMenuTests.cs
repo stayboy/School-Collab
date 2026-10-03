@@ -72,6 +72,83 @@ public class RowActionsMenuTests : BunitContext
         cut.Markup.Should().Contain("row-actions-btn", "2+ actions render the kebab trigger");
     }
 
+    /// <summary>A disabled action that names its reason renders that reason as its accessible
+    /// description — on the single-action labeled button AND on the kebab item — so a greyed-out
+    /// action explains itself instead of being a dead end (F7).
+    /// <para>Discriminating: against the pre-F7 component the reason was never rendered (the
+    /// property does not exist and neither rendering read it).</para></summary>
+    [TestMethod]
+    public void DisabledActionWithReason_RendersTheReasonAsItsDescription()
+    {
+        var reason = "Not available for this combination — add questions by hand.";
+
+        // Single action → the labeled button.
+        var button = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[]
+            {
+                RowAction.Callback("Generate questions", () => { }, FluentIcons.Bot,
+                    disabled: true, disabledReason: reason)
+            })
+            .Add(x => x.UseMenuService, false));
+
+        button.Find("fluent-button").GetAttribute("title").Should().Be(reason,
+            "F7: the disabled button's title/accessible description carries the reason");
+
+        // Two actions → the kebab, whose item must carry it too. The items only render once the
+        // trigger is opened (the shared menu renders through FluentMenu).
+        var kebab = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[]
+            {
+                Edit(),
+                RowAction.Navigate("Generate questions", "#questions", FluentIcons.Bot,
+                    disabled: true, disabledReason: reason)
+            })
+            .Add(x => x.UseMenuService, false));
+        kebab.Find("fluent-button[title='More actions']").Click();
+
+        kebab.WaitForAssertion(() => kebab.FindAll("fluent-menu-item")
+            .Single(i => i.TextContent.Trim() == "Generate questions")
+            .GetAttribute("title").Should().Be(reason,
+                "F7: the kebab item's title/accessible description carries the reason too"));
+    }
+
+    /// <summary>F7's other half: an action with NO reason invents none. The enabled/disabled
+    /// single-action button keeps the label as its title and renders no description an author could
+    /// mistake for an explanation, and the kebab item renders no title attribute at all.
+    /// <para>Discriminating only for the absent-reason half: the pre-F7 component also rendered no
+    /// description, so this test guards the new property against inventing text rather than proving
+    /// the fix; the reason-rendering test above is the discriminating one.</para></summary>
+    [TestMethod]
+    public void ActionWithoutReason_KeepsItsLabelAndInventsNoDescription()
+    {
+        var enabled = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[] { Edit() })
+            .Add(x => x.UseMenuService, false));
+
+        enabled.Find("fluent-button").GetAttribute("title").Should().Be("Edit",
+            "an action with no reason is unaffected by F7");
+
+        var disabled = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[] { RowAction.Callback("Edit", () => { }, FluentIcons.Edit, disabled: true) })
+            .Add(x => x.UseMenuService, false));
+
+        disabled.Find("fluent-button").GetAttribute("title").Should().Be("Edit",
+            "a disabled action with no reason must not have one invented for it");
+
+        var kebab = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[]
+            {
+                Edit(),
+                RowAction.Callback("Delete", () => { }, FluentIcons.Delete, disabled: true)
+            })
+            .Add(x => x.UseMenuService, false));
+        kebab.Find("fluent-button[title='More actions']").Click();
+
+        kebab.WaitForAssertion(() => kebab.FindAll("fluent-menu-item")
+            .Single(i => i.TextContent.Trim() == "Delete")
+            .GetAttribute("title").Should().BeNull("no reason, no title attribute"));
+    }
+
     [TestMethod]
     public void HasKebabActions_True_OnlyForTwoOrMoreNonSeparators()
     {

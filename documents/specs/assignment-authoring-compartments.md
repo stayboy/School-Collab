@@ -425,7 +425,31 @@ new extraction dependency and a change to the AI generation contract.
 
 ---
 
-## 17. References
+## 17. Deferred / known gaps
+
+These residuals are **recorded, not silently dropped**: each was found by a review or UI-tester pass,
+judged non-blocking for the round that found it, and has no owner yet. `documents/rounds/` is
+declared ephemeral (`documents/rounds/README.md`), so this table is their durable home — extend it
+when a round defers something, and strike an entry (naming the round that closed it) when it is
+done rather than letting this list drift away from the code.
+
+| Gap | What is missing | What it takes to close |
+|---|---|---|
+| **P2-c — transaction rollback is unproven** (found in R2) | `LinkAssignmentGroupsHandler` performs the target update and the legacy link replace inside one explicit EF Core transaction, but that is **verified by inspection only**. No test proves a mid-transaction failure leaves targets and links consistent: the InMemory test fixture suppresses `TransactionIgnoredWarning`, so the rollback path is never exercised. | A failure-injection test in `tests/SchoolCollab.Assignments.Tests.Integration` (Testcontainers/PostgreSQL) that faults the second write and asserts the first was rolled back. |
+| **Archived-group relink is refused with 422** (R1) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore drops ids the picker cannot represent, and the author is told nothing. The link stays readable but is not re-writable. | Either a relink route that accepts an unchanged archived id, or a UX path that names the dead link on the page. |
+| **`ReloadAsync` re-reads the summary only** (R1) | After a lifecycle action (publish / unpublish / close / archive) the surface re-reads `GET /assignments/{id}` — the scalar summary — but **not** the authoring children or the target rows, so a status change that altered the persisted set is not reflected until the page is loaded again. | Reuse the initial load path (`LoadChildrenAsync` + `LoadLinkedGroupIdsAsync`) in the reload. |
+| **F4 — a restored student target renders a fallback chip** (R2) | Restoring the constraints Everyone replaced (F4) puts the ids back, but the student picker's option labels are not re-resolved, so a restored student target shows the `Student <id8>` fallback chip until the picker is touched. A **loaded** student target already renders that way, so this is consistent rather than new. | Re-run the student search for the restored ids and keep the option objects in `_selectedStudentOptions`. |
+| **A read-only View has no reason to convey** (R2, verified benign) | The grades / streams / students pickers carry a hard-coded `aria-describedby="authoring-audience-constraint-reason"`. The only state where that paragraph is absent is a plain read-only View, where no reason exists and the controls are disabled by `IsReadOnly` — so the idref does not actually dangle on a control that had something to say. | None while that reasoning holds; re-check if a reason is ever introduced on a read-only surface. |
+| **The students picker cannot name its reason** (F15, discovered on FluentUI 4.14.2) | `FluentAutocomplete` puts the component `Id` on its inner `<fluent-text-field>` and owns that element's aria surface (combobox role, `aria-label`, `aria-expanded`, `aria-controls`), so the `aria-describedby` the page declares on it is **dropped, not forwarded** — the picker disabled by the constraint gate has no accessible reason, while its four sibling controls do. | Wrap the autocomplete and set the attribute on the wrapper (or upgrade FluentUI and forward it). Pinned by `AssignmentAuthoringBunitTests.AssertEveryDisabledConstraintControlNamesARenderedReason`, which fails if a FluentUI version starts forwarding the attribute — extend its loop then. |
+
+The R2 UI P2 backlog (**F7** kebab disabled-without-reason, **F12** empty-state preview wording,
+**F13** first-render debounce delay, **F15** per-row reason placement, **F17** missing
+`OnParametersSet`) and the spec'd-but-unimplemented **UX-7** (§4) were closed by round
+`authoring-ux7-residuals`; the table above is what remains open.
+
+---
+
+## 18. References
 
 - `documents/specs/assignment-request-feature-spec.md` — AR feature set, personas, lifecycle.
 - `documents/specs/assignment-policy.md` — policy field set, resolution, enforcement, grade-detail UI.
