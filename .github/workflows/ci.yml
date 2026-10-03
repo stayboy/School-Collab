@@ -95,3 +95,32 @@ jobs:
           --no-build
           --configuration Release
           --filter "FullyQualifiedName~CrossModuleWiringTests"
+
+  portals-python:
+    # The portal (src/SchoolCollab.Portals/, Python: uv + FastAPI + Prefab UI) is
+    # hosted by the AppHost and contributes no project to the .NET solution, so
+    # `dotnet test` never runs its suite. This job gates it for the first time
+    # (round `portal-teacher-surface`, D8): pytest + httpx.MockTransport, no
+    # server, no Docker, no browser — the same container-free shape the .NET
+    # hosts use, and the reason the suite needs no services.
+    name: Portals (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync the portal environment
+        working-directory: src/SchoolCollab.Portals
+        run: uv sync
+
+      - name: Run the portal tests
+        working-directory: src/SchoolCollab.Portals
+        run: uv run pytest

@@ -13,7 +13,7 @@ The client is **async** (``httpx.AsyncClient``): it is created once in the
 FastAPI lifespan and awaited from async route handlers, so request handling
 never blocks the event loop on I/O.
 
-Adding an endpoint is one method, e.g. the plan's MVP-1 ward endpoints::
+Adding an endpoint is one method, e.g. the ward plan's next endpoints::
 
     async def list_ward_assignments(self, student_id: str) -> FetchResult:
         status, payload = await self._get_json(f"/{student_id}/assignments")
@@ -22,12 +22,13 @@ Adding an endpoint is one method, e.g. the plan's MVP-1 ward endpoints::
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-from api.dto import AssignmentRow
+from api.dto import AssignmentRow, SubmissionDetailRow, SubmissionForReviewRow
 from api.errors import ApiResponseError, ApiUnavailableError
 from api.service_discovery import ServiceEndpoint
 
@@ -46,8 +47,28 @@ class FetchResult:
         return len(self.rows)
 
 
+@dataclass(frozen=True)
+class ReviewQueueResult:
+    """A successful review-queue read: the HTTP status plus the parsed queue rows."""
+
+    status_code: int
+    rows: list[SubmissionForReviewRow]
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+
+@dataclass(frozen=True)
+class SubmissionResult:
+    """A successful submission read: the HTTP status plus the parsed detail."""
+
+    status_code: int
+    submission: SubmissionDetailRow
+
+
 class AssignmentsApiClient:
-    """The ward portal's view of the Assignments API."""
+    """The portal's view of the Assignments API — the ward list and the teacher drill-down."""
 
     def __init__(self, http: httpx.AsyncClient, endpoint: ServiceEndpoint) -> None:
         self._http = http
@@ -75,10 +96,58 @@ class AssignmentsApiClient:
         rows = [AssignmentRow.from_payload(item) for item in payload if isinstance(item, dict)]
         return FetchResult(status_code=status_code, rows=rows)
 
-    async def _get_json(self, path: str) -> tuple[int, Any]:
+    async def list_review_queue(
+        self, assignment_id: str, teacher_id: str
+    ) -> ReviewQueueResult:
+        """``GET /{id}/submissions/review-queue?teacherId=`` — one assignment's review queue.
+
+        ``teacher_id`` is the dev-bypass fallback the API reads
+        (``currentUser.TeacherId ?? (isRealAuth ? throw : teacherId)``), so it is inert
+        under real auth — where the claim wins — and the only teacher input under the
+        dev bypass, which is why the route refuses to call this without a configured
+        value rather than sending a placeholder.
+        """
+        status_code, payload = await self._get_json(
+            f"/{assignment_id}/submissions/review-queue", params={"teacherId": teacher_id}
+        )
+
+        # The API answers with a bare array; tolerate an envelope just in case.
+        if isinstance(payload, dict):
+            payload = payload.get("items") or payload.get("submissions") or []
+        if not isinstance(payload, list):
+            raise ApiResponseError(
+                self._endpoint.service,
+                self._endpoint.base_url,
+                f"expected a JSON array (or {{items: [...]}}), got {type(payload).__name__}",
+            )
+
+        rows = [
+            SubmissionForReviewRow.from_payload(item) for item in payload if isinstance(item, dict)
+        ]
+        return ReviewQueueResult(status_code=status_code, rows=rows)
+
+    async def get_submission(self, assignment_id: str, student_id: str) -> SubmissionResult:
+        """``GET /{id}/students/{studentId}/submission`` — one submission with its review."""
+        status_code, payload = await self._get_json(
+            f"/{assignment_id}/students/{student_id}/submission"
+        )
+        if not isinstance(payload, Mapping):
+            raise ApiResponseError(
+                self._endpoint.service,
+                self._endpoint.base_url,
+                f"expected a JSON object, got {type(payload).__name__}",
+            )
+
+        return SubmissionResult(
+            status_code=status_code, submission=SubmissionDetailRow.from_payload(payload)
+        )
+
+    async def _get_json(
+        self, path: str, params: Mapping[str, str] | None = None
+    ) -> tuple[int, Any]:
         """GET ``path`` and return ``(status, parsed_json)`` or raise a typed error."""
         try:
-            response = await self._http.get(f"{self._endpoint.base_url}{path}")
+            response = await self._http.get(f"{self._endpoint.base_url}{path}", params=params)
             response.raise_for_status()
         except httpx.HTTPStatusError as error:
             raise ApiResponseError(

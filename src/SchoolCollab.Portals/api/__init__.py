@@ -7,11 +7,23 @@ Prefab components — the two layers churn for different reasons (prefab-ui is
 0.x, and the plan's risk table asks for exactly this isolation).
 """
 
-from api.assignments_api_client import AssignmentsApiClient, FetchResult
-from api.dto import AssignmentRow
+from api.assignments_api_client import (
+    AssignmentsApiClient,
+    FetchResult,
+    ReviewQueueResult,
+    SubmissionResult,
+)
+from api.dto import (
+    AssignmentRow,
+    SubmissionDetailRow,
+    SubmissionForReviewRow,
+    SubmissionReviewRow,
+    SubmissionVersionRow,
+)
 from api.errors import (
     ApiResponseError,
     ApiUnavailableError,
+    MissingConfigurationError,
     PortalApiError,
     ServiceDiscoveryError,
 )
@@ -23,8 +35,15 @@ __all__ = [
     "AssignmentRow",
     "AssignmentsApiClient",
     "FetchResult",
+    "MissingConfigurationError",
     "PortalApiError",
+    "ReviewQueueResult",
     "ServiceDiscoveryError",
     "ServiceEndpoint",
+    "SubmissionDetailRow",
+    "SubmissionForReviewRow",
+    "SubmissionResult",
+    "SubmissionReviewRow",
+    "SubmissionVersionRow",
     "resolve_service_endpoint",
 ]
