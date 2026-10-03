@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Auth.Auth;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Constants;
 using SchoolCollab.Core.Features;
 using System.Security.Claims;
 
@@ -23,10 +24,6 @@ public static class AuthEndpointGroup
     /// <summary>Name of the fixed-window rate-limit policy applied to <c>POST /auth/exchange</c>.
     /// Registered by Program.cs (before <c>builder.Build()</c>) and required here.</summary>
     public const string ExchangeRateLimitPolicyName = "exchange-fixed-window";
-
-    /// <summary>The realm role that authorizes the <c>/auth/admin/*</c> groups
-    /// (<c>school-collab-realm.json</c> roles, spec §11.2).</summary>
-    public const string UserAdminRoleName = "user-admin";
 
     /// <summary>Maps the <c>/auth</c> group under the app's route builder.</summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
@@ -110,7 +107,7 @@ public static class AuthEndpointGroup
         policy
             .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
             .RequireAuthenticatedUser()
-            .RequireRole(UserAdminRoleName);
+            .RequireRole(RealmRoleNames.UserAdmin);
     }
 
     /// <summary>Maps an <see cref="AdminStatus"/> from the Keycloak Admin client onto a typed HTTP

@@ -46,7 +46,11 @@ public sealed class ListAssignmentsQueryHandler(
         var tenantId = tenantProvider.GetTenantContext().TenantId;
         var cacheKey = $"assignments:list:{tenantId}:{query.Status?.ToString() ?? "all"}";
 
-        return await cache.GetOrCreateAsync(
+        // The cached value is the TENANT-WIDE projection, deliberately: the key carries no scope
+        // hash, so the caller's filter must be applied to what the cache RETURNS ([P1-3]).
+        // Filtering inside the cached delegate would store one teacher's filtered list under the
+        // tenant's key and serve it to every other teacher and admin in the tenant.
+        var summaries = await cache.GetOrCreateAsync(
             cacheKey,
             (repository, query.Status, cache, assignmentPolicyResolver, featureFlags, tenantId, logger),
             static async (state, ct) =>
@@ -121,6 +125,25 @@ public sealed class ListAssignmentsQueryHandler(
             CacheOptions,
             tags: ["assignments"],
             cancellationToken: cancellationToken);
+
+        return ApplyScope(summaries, query.Scope);
+    }
+
+    /// <summary>
+    /// [P1-3]/D3 — the caller's visibility rule applied AFTER the cache read: a scoped teacher
+    /// sees the rows they created plus the grades/subjects they teach; an unrestricted (or
+    /// scope-less) caller sees the tenant-wide list unchanged.
+    /// </summary>
+    private static AssignmentSummaryDto[] ApplyScope(AssignmentSummaryDto[] summaries, TeacherScope? scope)
+    {
+        if (scope is null || scope.IsUnrestricted)
+        {
+            return summaries;
+        }
+
+        return summaries
+            .Where(s => scope.Allows(s.CreatedByTeacherId, s.GradeLevelId, s.TopicId))
+            .ToArray();
     }
 
     /// <summary>

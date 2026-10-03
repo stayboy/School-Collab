@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using SchoolCollab.Assignments.Api.Endpoints;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Constants;
 using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Assignments.Api;
@@ -21,6 +22,24 @@ public static class AssignmentEndpoints
                 .RequireAuthenticatedUser()
                 .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
         }
+
+        // ── Teacher-portal reads (round teacher-scope-auth D4 / [P1-1]) ──────────
+        // The reader policy is applied to this NESTED SUB-GROUP — never to the whole
+        // /assignments group. The group also serves the Families ward/guardian routes, the
+        // create-wizard reads (signature-default, ai-prompt-policy, recipient-preview, …) and
+        // every create/edit/publish/approve write, all reachable by principals that carry no
+        // role claim at all; a group-wide policy would 403 all of them. The sub-group carries
+        // exactly the six GETs in the Covered table, mapped by MapAssignmentReaderRoutes.
+        var readerGroup = group.MapGroup(string.Empty);
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+        {
+            // [P1-2] the policy lands behind FEATURE:DisableOIDCAuth: with the flag ON there
+            // is no policy and today's behaviour is unchanged. Rollout prerequisite: assign
+            // teacher/staff (or an admin role) to every existing assignment-reading user in
+            // Keycloak BEFORE the flag is flipped, or the policy 403s them.
+            readerGroup.RequireAuthorization(RequireAssignmentReader);
+        }
+        readerGroup.MapAssignmentReaderRoutes();
 
         group.MapAssignmentRoutes();
 
@@ -54,5 +73,29 @@ public static class AssignmentEndpoints
         }
 
         return app;
+    }
+
+    /// <summary>
+    /// The one disjunctive teacher-portal reader policy: <c>teacher</c> ∨ <c>staff</c> ∨
+    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the bearer scheme and authenticated. Built
+    /// inline (the <c>AuthEndpointGroup.ConfigurePortalFacingAdminPolicy</c> precedent) rather
+    /// than registered as a named policy: the hosts that compose this pipeline in tests call
+    /// <c>AddAuthAndTenancy</c> without Assignments' <c>Program.cs</c>, and an unresolvable named
+    /// policy throws out of <c>AuthorizationPolicy.Combine</c> on every request to a route that
+    /// names it. The scheme and authenticated-user requirements are restated here so the policy
+    /// is self-sufficient for the routes it decorates.
+    /// </summary>
+    internal static void RequireAssignmentReader(AuthorizationPolicyBuilder policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+
+        policy
+            .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)
+            .RequireAuthenticatedUser()
+            .RequireRole(
+                RealmRoleNames.Teacher,
+                RealmRoleNames.Staff,
+                RealmRoleNames.UserAdmin,
+                RealmRoleNames.PlatformAdmin);
     }
 }

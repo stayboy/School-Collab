@@ -542,6 +542,19 @@ still registers the **relying-party pipeline — cookie + OIDC** — even when t
 the carve-out is additive. Every other consumer's dev pipeline is unchanged. See round
 `keycloak-logout-oidc` D16.
 
+**Claim-less by default.** `TestAuthHandler` emits no role claims at all, and no `teacher_id`
+claim while `TestAuthHandlerOptions.TeacherId` is `Guid.Empty` — the CI/dev default. Round
+`teacher-scope-auth` D5 (Q5) added the one configuration point for that value:
+
+| Config key | Default | Purpose |
+| --- | --- | --- |
+| `TestAuth:TeacherId` | `00000000-0000-0000-0000-000000000000` (absent ⇒ no `teacher_id` claim) | Binds `TestAuthHandlerOptions.TeacherId` for the `TestAuth` scheme, wired by `Assignments.Api` (`AssignmentDevTeacherIdentity`). Set it to a real dev teacher row id to exercise the teacher-scoped assignment reads under the dev bypass. Read only by the dev pipeline (`FEATURE:DisableOIDCAuth=true`); inert in real auth. |
+
+> Role assignment to a user stays in Keycloak / the auth admin UI. A `teacher_id` claim alone does
+> **not** scope anything: the role posture is what decides (`teacher` ⇒ scoped, `staff`/admin ⇒
+> tenant-wide, no recognised role ⇒ tenant-wide). See `documents/specs/startup-flag-governance.md`
+> for the role-assignment prerequisite that precedes flipping `FEATURE:DisableOIDCAuth`.
+
 **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
 
 ```json
@@ -1066,6 +1079,7 @@ matching env-var form:
 | `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
 | `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
 | `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
+| `TestAuth:TeacherId` | `TestAuth__TeacherId` |
 | `AuthPortal:PublicBaseUrl` | `AuthPortal__PublicBaseUrl` |
 | `Auth:AppCallbackPrefixes` | `Auth__AppCallbackPrefixes` |
 | `AuthPortal:AppCallbackPrefixes` | `AuthPortal__AppCallbackPrefixes` |

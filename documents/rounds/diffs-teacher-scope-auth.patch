@@ -1,0 +1,3407 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 4da6d5f8..8f601452 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -542,6 +542,19 @@ still registers the **relying-party pipeline — cookie + OIDC** — even when t
+ the carve-out is additive. Every other consumer's dev pipeline is unchanged. See round
+ `keycloak-logout-oidc` D16.
+ 
++**Claim-less by default.** `TestAuthHandler` emits no role claims at all, and no `teacher_id`
++claim while `TestAuthHandlerOptions.TeacherId` is `Guid.Empty` — the CI/dev default. Round
++`teacher-scope-auth` D5 (Q5) added the one configuration point for that value:
++
++| Config key | Default | Purpose |
++| --- | --- | --- |
++| `TestAuth:TeacherId` | `00000000-0000-0000-0000-000000000000` (absent ⇒ no `teacher_id` claim) | Binds `TestAuthHandlerOptions.TeacherId` for the `TestAuth` scheme, wired by `Assignments.Api` (`AssignmentDevTeacherIdentity`). Set it to a real dev teacher row id to exercise the teacher-scoped assignment reads under the dev bypass. Read only by the dev pipeline (`FEATURE:DisableOIDCAuth=true`); inert in real auth. |
++
++> Role assignment to a user stays in Keycloak / the auth admin UI. A `teacher_id` claim alone does
++> **not** scope anything: the role posture is what decides (`teacher` ⇒ scoped, `staff`/admin ⇒
++> tenant-wide, no recognised role ⇒ tenant-wide). See `documents/specs/startup-flag-governance.md`
++> for the role-assignment prerequisite that precedes flipping `FEATURE:DisableOIDCAuth`.
++
+ **Example** — `src/SchoolCollab.Students.Api/appsettings.Production.json`:
+ 
+ ```json
+@@ -1066,6 +1079,7 @@ matching env-var form:
+ | `FeatureFlags:FEATURE:DisableKeycloakLoginUi` | `FeatureFlags__FEATURE__DisableKeycloakLoginUi` |
+ | `Auth:Portal:LoginUrl` | `Auth__Portal__LoginUrl` |
+ | `Auth:Portal:BootstrapRedirectUrl` | `Auth__Portal__BootstrapRedirectUrl` |
++| `TestAuth:TeacherId` | `TestAuth__TeacherId` |
+ | `AuthPortal:PublicBaseUrl` | `AuthPortal__PublicBaseUrl` |
+ | `Auth:AppCallbackPrefixes` | `Auth__AppCallbackPrefixes` |
+ | `AuthPortal:AppCallbackPrefixes` | `AuthPortal__AppCallbackPrefixes` |
+diff --git a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+index 02f67e2e..3752b7ae 100644
+--- a/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
++++ b/src/AppHost/SchoolCollab.AppHost/school-collab-realm.json
+@@ -7,7 +7,9 @@
+   "roles": {
+     "realm": [
+       { "name": "user-admin" },
+-      { "name": "platform-admin" }
++      { "name": "platform-admin" },
++      { "name": "teacher" },
++      { "name": "staff" }
+     ]
+   },
+   "requiredActions": [
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+index 7498dcb8..71d99d18 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+@@ -1,6 +1,7 @@
+ using Microsoft.AspNetCore.Authorization;
+ using SchoolCollab.Assignments.Api.Endpoints;
+ using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
+ using SchoolCollab.Core.Features;
+ 
+ namespace SchoolCollab.Assignments.Api;
+@@ -22,6 +23,24 @@ public static class AssignmentEndpoints
+                 .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
+         }
+ 
++        // ── Teacher-portal reads (round teacher-scope-auth D4 / [P1-1]) ──────────
++        // The reader policy is applied to this NESTED SUB-GROUP — never to the whole
++        // /assignments group. The group also serves the Families ward/guardian routes, the
++        // create-wizard reads (signature-default, ai-prompt-policy, recipient-preview, …) and
++        // every create/edit/publish/approve write, all reachable by principals that carry no
++        // role claim at all; a group-wide policy would 403 all of them. The sub-group carries
++        // exactly the six GETs in the Covered table, mapped by MapAssignmentReaderRoutes.
++        var readerGroup = group.MapGroup(string.Empty);
++        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
++        {
++            // [P1-2] the policy lands behind FEATURE:DisableOIDCAuth: with the flag ON there
++            // is no policy and today's behaviour is unchanged. Rollout prerequisite: assign
++            // teacher/staff (or an admin role) to every existing assignment-reading user in
++            // Keycloak BEFORE the flag is flipped, or the policy 403s them.
++            readerGroup.RequireAuthorization(RequireAssignmentReader);
++        }
++        readerGroup.MapAssignmentReaderRoutes();
++
+         group.MapAssignmentRoutes();
+ 
+         // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
+@@ -55,4 +74,28 @@ public static class AssignmentEndpoints
+ 
+         return app;
+     }
++
++    /// <summary>
++    /// The one disjunctive teacher-portal reader policy: <c>teacher</c> ∨ <c>staff</c> ∨
++    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the bearer scheme and authenticated. Built
++    /// inline (the <c>AuthEndpointGroup.ConfigurePortalFacingAdminPolicy</c> precedent) rather
++    /// than registered as a named policy: the hosts that compose this pipeline in tests call
++    /// <c>AddAuthAndTenancy</c> without Assignments' <c>Program.cs</c>, and an unresolvable named
++    /// policy throws out of <c>AuthorizationPolicy.Combine</c> on every request to a route that
++    /// names it. The scheme and authenticated-user requirements are restated here so the policy
++    /// is self-sufficient for the routes it decorates.
++    /// </summary>
++    internal static void RequireAssignmentReader(AuthorizationPolicyBuilder policy)
++    {
++        ArgumentNullException.ThrowIfNull(policy);
++
++        policy
++            .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)
++            .RequireAuthenticatedUser()
++            .RequireRole(
++                RealmRoleNames.Teacher,
++                RealmRoleNames.Staff,
++                RealmRoleNames.UserAdmin,
++                RealmRoleNames.PlatformAdmin);
++    }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Auth/AssignmentDevTeacherIdentity.cs b/src/Assignments/SchoolCollab.Assignments.Api/Auth/AssignmentDevTeacherIdentity.cs
+new file mode 100644
+index 00000000..947de240
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Auth/AssignmentDevTeacherIdentity.cs
+@@ -0,0 +1,40 @@
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Assignments.Api.Auth;
++
++/// <summary>
++/// D5 (Q5, round <c>teacher-scope-auth</c>): the dev bypass's <c>teacher_id</c> claim, bound from
++/// configuration.
++///
++/// <para>The claim emission already exists (<c>TestAuthHandler</c> omits the claim while
++/// <see cref="TestAuthHandlerOptions.TeacherId"/> is <see cref="Guid.Empty"/>, which is the CI
++/// default); what was missing was a configurable value, so the teacher-scoped read path could not
++/// be exercised under the dev bypass at all. Set <c>TestAuth:TeacherId</c> to a real dev teacher
++/// row id to opt in; an absent or empty value stays claim-less.</para>
++///
++/// <para>The scheme name is also the options instance name — the named-options pattern the auth
++/// pipeline already uses for this handler, so the value lands on exactly the options instance
++/// <c>TestAuthHandler</c> is built with.</para>
++/// </summary>
++public static class AssignmentDevTeacherIdentity
++{
++    /// <summary>Configuration key carrying the dev <c>teacher_id</c> claim value.</summary>
++    public const string TeacherIdConfigKey = "TestAuth:TeacherId";
++
++    /// <summary>Binds <see cref="TestAuthHandlerOptions.TeacherId"/> for the TestAuth scheme.</summary>
++    public static IServiceCollection AddAssignmentDevTeacherIdentity(
++        this IServiceCollection services,
++        IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        services.Configure<TestAuthHandlerOptions>(
++            TestAuthExtensions.TestAuthScheme,
++            options => options.TeacherId = configuration.GetValue(TeacherIdConfigKey, Guid.Empty));
++
++        return services;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Auth/AssignmentScopeResolver.cs b/src/Assignments/SchoolCollab.Assignments.Api/Auth/AssignmentScopeResolver.cs
+new file mode 100644
+index 00000000..15c56f00
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Auth/AssignmentScopeResolver.cs
+@@ -0,0 +1,56 @@
++using System.Security.Claims;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
++
++namespace SchoolCollab.Assignments.Api.Auth;
++
++/// <summary>
++/// Resolves the caller's <see cref="TeacherScope"/> at the endpoint (round
++/// <c>teacher-scope-auth</c> D3 / [P1-4]). The scope is resolved HERE and passed on the query —
++/// a Core handler must never fetch it.
++///
++/// <para>Posture:</para>
++/// <list type="bullet">
++/// <item><c>staff</c> / <c>user-admin</c> / <c>platform-admin</c> ⇒ tenant-wide
++/// (<see cref="TeacherScope.Unrestricted"/>).</item>
++/// <item>otherwise <c>teacher</c> ⇒ the scope the Students port resolves; <b>EMPTY</b> when the
++/// principal carries no usable <c>teacher_id</c> claim — never tenant-wide, and never widened by
++/// the review-queue route's dev <c>teacherId</c> fallback.</item>
++/// <item>no recognised role ⇒ tenant-wide. This is what keeps CI, the Integration suite and the
++/// dev TestAuth surface (whose principal carries no role claims at all) on today's behaviour; it
++/// cannot fail open in real auth, because the reader policy gates every covered read before this
++/// resolver is reached, and the realm roles in D1 are what an operator assigns before the flag
++/// flip.</item>
++/// </list>
++/// </summary>
++public static class AssignmentScopeResolver
++{
++    public static async Task<TeacherScope> ResolveAsync(
++        ClaimsPrincipal principal,
++        ICurrentUser currentUser,
++        ITeacherScopeProvider scopeProvider,
++        CancellationToken cancellationToken = default)
++    {
++        ArgumentNullException.ThrowIfNull(principal);
++        ArgumentNullException.ThrowIfNull(currentUser);
++        ArgumentNullException.ThrowIfNull(scopeProvider);
++
++        // The broader roles win: a caller who is staff AND a teacher reads tenant-wide.
++        if (principal.IsInRole(RealmRoleNames.Staff)
++            || principal.IsInRole(RealmRoleNames.UserAdmin)
++            || principal.IsInRole(RealmRoleNames.PlatformAdmin))
++        {
++            return TeacherScope.Unrestricted;
++        }
++
++        if (!principal.IsInRole(RealmRoleNames.Teacher))
++        {
++            return TeacherScope.Unrestricted;
++        }
++
++        return currentUser.TeacherId is { } teacherId
++            ? await scopeProvider.GetScopeAsync(teacherId, cancellationToken)
++            : TeacherScope.Empty;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index 2d18bbda..b82c8da0 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -1,5 +1,7 @@
+ using Microsoft.AspNetCore.Mvc;
+ using Microsoft.AspNetCore.Routing;
++using System.Security.Claims;
++using SchoolCollab.Assignments.Api.Auth;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ApproveAssignmentCommand;
+@@ -57,27 +59,174 @@ public sealed record StageQuestionsDraftBody(IReadOnlyList<NewQuestionDto> Quest
+ 
+ public static class AssignmentRoutes
+ {
+-    public static RouteGroupBuilder MapAssignmentRoutes(this RouteGroupBuilder group)
++    /// <summary>
++    /// The six teacher-portal GET reads (round <c>teacher-scope-auth</c> D3/D4) — exactly the
++    /// routes the reader policy decorates (see <see cref="AssignmentEndpoints"/>). Their caller's
++    /// <see cref="TeacherScope"/> is resolved HERE, at the endpoint, and threaded onto the query;
++    /// no Core handler fetches it. Everything else the <c>/assignments</c> group serves stays in
++    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal.
++    /// </summary>
++    public static RouteGroupBuilder MapAssignmentReaderRoutes(this RouteGroupBuilder group)
+     {
++        // GET /assignments — [P1-3] the scope filter is applied by the handler AFTER the
++        // tenant-wide cache read (assignments:list:{tenantId}:{status}), never inside the cached
++        // delegate: filtering there would serve one teacher's list to every other caller in the
++        // tenant.
+         group.MapGet("/", async (
+             [FromQuery] AssignmentStatus? status,
++            ClaimsPrincipal user,
++            [FromServices] ICurrentUser currentUser,
++            [FromServices] ITeacherScopeProvider scopeProvider,
+             [FromServices] IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]> handler,
+             CancellationToken ct) =>
+         {
+-            var query = new ListAssignmentsQuery(status);
+-            var results = await handler.HandleAsync(query, ct);
++            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
++            var results = await handler.HandleAsync(new ListAssignmentsQuery(status, scope), ct);
+             return Results.Ok(results);
+         });
+ 
++        // GET /assignments/{id} — [P2-2] the read is reachable by id, so it applies the same
++        // visibility rule as the list and answers 404 for an out-of-scope id.
+         group.MapGet("/{id:guid}", async (
+             Guid id,
++            ClaimsPrincipal user,
++            [FromServices] ICurrentUser currentUser,
++            [FromServices] ITeacherScopeProvider scopeProvider,
+             [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> handler,
+             CancellationToken ct) =>
+         {
+-            var result = await handler.HandleAsync(new GetAssignmentByIdQuery(id), ct);
++            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
++            var result = await handler.HandleAsync(new GetAssignmentByIdQuery(id, scope), ct);
++            return result is null ? Results.NotFound() : Results.Ok(result);
++        });
++
++        // Submissions for an assignment (teacher review/grade queue, spec §12).
++        // [P2-2] the id-addressed read is gated on the assignment's visibility first — an
++        // out-of-scope id is a 404, exactly like an unknown one.
++        group.MapGet("/{id:guid}/submissions", async (
++            Guid id,
++            ClaimsPrincipal user,
++            [FromServices] ICurrentUser currentUser,
++            [FromServices] ITeacherScopeProvider scopeProvider,
++            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
++            [FromServices] IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]> handler,
++            CancellationToken ct) =>
++        {
++            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
++            if (!await IsAssignmentVisibleAsync(id, scope, assignmentHandler, ct))
++            {
++                return Results.NotFound();
++            }
++
++            return Results.Ok(await handler.HandleAsync(new ListSubmissionsByAssignment(id), ct));
++        });
++
++        // Submission with version history + review (spec §9 GET .../submission).
++        // [P2-2] same visibility gate as the per-assignment submissions read above.
++        group.MapGet("/{id:guid}/students/{studentId:guid}/submission", async (
++            Guid id,
++            Guid studentId,
++            ClaimsPrincipal user,
++            [FromServices] ICurrentUser currentUser,
++            [FromServices] ITeacherScopeProvider scopeProvider,
++            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
++            [FromServices] IQueryHandler<GetSubmission, SubmissionDetailDto?> handler,
++            CancellationToken ct) =>
++        {
++            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
++            if (!await IsAssignmentVisibleAsync(id, scope, assignmentHandler, ct))
++            {
++                return Results.NotFound();
++            }
++
++            var result = await handler.HandleAsync(new GetSubmission(id, studentId), ct);
+             return result is null ? Results.NotFound() : Results.Ok(result);
+         });
+ 
++        group.MapGet("/{id:guid}/submissions/review-queue", async (
++            Guid id,
++            Guid teacherId,
++            ClaimsPrincipal user,
++            [FromServices] ICurrentUser currentUser,
++            [FromServices] IFeatureFlagService featureFlags,
++            [FromServices] ITeacherScopeProvider scopeProvider,
++            [FromServices] IQueryHandler<GetSubmissionsForReview, SubmissionForReviewDto[]> handler,
++            CancellationToken ct) =>
++        {
++            try
++            {
++                var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
++
++                // ar-24: the acting teacher is resolved principal-first (R4).
++                var isRealAuth = !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth);
++                var effectiveTeacherId = currentUser.TeacherId
++                    ?? (isRealAuth
++                        ? throw new MissingTeacherPrincipalException("GetSubmissionsForReview")
++                        : teacherId);
++
++                // [P1-4] the scope — not the wire value — decides what the queue returns: a
++                // teacher-only principal with no teacher_id claim carries an EMPTY scope, so the
++                // dev `teacherId` fallback above cannot widen the result set.
++                return Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(effectiveTeacherId, scope), ct));
++            }
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
++            catch (TeacherTenantMismatchException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
++        });
++
++        // Per-ward sign-off status rows for the teacher surface (the card on
++        // Detail). [P2-2] this read is id-addressed too, so it goes through the same
++        // visibility gate as `GET /{id}/submissions` — an out-of-scope id answers like an
++        // unknown one (404) instead of returning the rows behind it. 404 when the
++        // assignment is missing.
++        group.MapGet("/{id:guid}/sign-off-statuses", async (
++            Guid id,
++            ClaimsPrincipal user,
++            [FromServices] ICurrentUser currentUser,
++            [FromServices] ITeacherScopeProvider scopeProvider,
++            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
++            [FromServices] IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>> handler,
++            CancellationToken ct) =>
++        {
++            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
++            if (!await IsAssignmentVisibleAsync(id, scope, assignmentHandler, ct))
++            {
++                return Results.NotFound();
++            }
++
++            try
++            {
++                var statuses = await handler.HandleAsync(new ListSignOffStatusesQuery(id), ct);
++                return Results.Ok(statuses);
++            }
++            catch (AssignmentNotFoundException)
++            {
++                return Results.NotFound();
++            }
++        });
++
++        return group;
++    }
++
++    /// <summary>
++    /// [P2-2] Whether the id-addressed assignment is inside the caller's scope. The scope-aware
++    /// detail read is the single gate, so a scoped caller's out-of-scope id answers like an
++    /// unknown one (404) instead of leaking the rows behind it.
++    /// </summary>
++    private static async Task<bool> IsAssignmentVisibleAsync(
++        Guid id,
++        TeacherScope scope,
++        IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
++        CancellationToken ct)
++        => await assignmentHandler.HandleAsync(new GetAssignmentByIdQuery(id, scope), ct) is not null;
++
++    public static RouteGroupBuilder MapAssignmentRoutes(this RouteGroupBuilder group)
++    {
+         // ── Authoring child read (assignment-authoring P1 rework) ─────────────
+         // The Edit surface loads one assignment's persisted questions / attachments /
+         // resources BEFORE it renders those editors: a non-null-but-empty collection
+@@ -789,24 +938,6 @@ public static class AssignmentRoutes
+             return Results.NoContent();
+         });
+ 
+-        // Submissions for an assignment (teacher review/grade queue, spec §12).
+-        group.MapGet("/{id:guid}/submissions", async (
+-            Guid id,
+-            [FromServices] IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]> handler,
+-            CancellationToken ct) =>
+-            Results.Ok(await handler.HandleAsync(new ListSubmissionsByAssignment(id), ct)));
+-
+-        // Submission with version history + review (spec §9 GET .../submission).
+-        group.MapGet("/{id:guid}/students/{studentId:guid}/submission", async (
+-            Guid id,
+-            Guid studentId,
+-            [FromServices] IQueryHandler<GetSubmission, SubmissionDetailDto?> handler,
+-            CancellationToken ct) =>
+-        {
+-            var result = await handler.HandleAsync(new GetSubmission(id, studentId), ct);
+-            return result is null ? Results.NotFound() : Results.Ok(result);
+-        });
+-
+         // Guardian review (Primary). spec §9: .../students/{studentId}/guardian-review.
+         group.MapPost("/{id:guid}/students/{studentId:guid}/guardian-review", async (
+             Guid id,
+@@ -1007,54 +1138,8 @@ public static class AssignmentRoutes
+             }
+         });
+ 
+-        group.MapGet("/{id:guid}/submissions/review-queue", async (
+-            Guid id,
+-            Guid teacherId,
+-            [FromServices] ICurrentUser currentUser,
+-            [FromServices] IFeatureFlagService featureFlags,
+-            [FromServices] IQueryHandler<GetSubmissionsForReview, SubmissionForReviewDto[]> handler,
+-            CancellationToken ct) =>
+-        {
+-            try
+-            {
+-                // ar-24: the acting teacher is resolved principal-first (R4).
+-                var isRealAuth = !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth);
+-                var effectiveTeacherId = currentUser.TeacherId
+-                    ?? (isRealAuth
+-                        ? throw new MissingTeacherPrincipalException("GetSubmissionsForReview")
+-                        : teacherId);
+-                return Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(effectiveTeacherId), ct));
+-            }
+-            catch (MissingTeacherPrincipalException ex)
+-            {
+-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+-            }
+-            catch (TeacherTenantMismatchException ex)
+-            {
+-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+-            }
+-        });
+-
+         // ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ───────────────────
+ 
+-        // Per-ward sign-off status rows for the teacher surface (the card on
+-        // Detail). 404 when the assignment is missing.
+-        group.MapGet("/{id:guid}/sign-off-statuses", async (
+-            Guid id,
+-            [FromServices] IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>> handler,
+-            CancellationToken ct) =>
+-        {
+-            try
+-            {
+-                var statuses = await handler.HandleAsync(new ListSignOffStatusesQuery(id), ct);
+-                return Results.Ok(statuses);
+-            }
+-            catch (AssignmentNotFoundException)
+-            {
+-                return Results.NotFound();
+-            }
+-        });
+-
+         // Guardian e-signs a ward's submission. Captures the caller IP + user-agent
+         // at the endpoint and threads them into the command for the audit event
+         // (spec §3.2 line 53 / §6 auditability line 116). Returns the refreshed
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 10bde749..49ee0850 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
+ using StackExchange.Redis;
+ using Serilog;
+ using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Api.Auth;
+ using SchoolCollab.Assignments.Api.Endpoints;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core;
+@@ -10,6 +11,7 @@ using SchoolCollab.Settings.Core;
+ using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.DeepLinks;
+ using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Http;
+ 
+ var builder = WebApplication.CreateBuilder(args);
+ 
+@@ -123,7 +125,16 @@ builder.Services.AddSettingsCore(builder.Configuration);
+ // ar-24: real-auth bearer forwarding + fail-closed on a 302 challenge
+ // (AllowAutoRedirect=false — the strict-2xx existence check must not follow
+ // the OIDC challenge to a 200 login page).
+-builder.Services.AddHttpClient("students-api")
++//
++// [P1-6] MIGRATED (round teacher-scope-auth D2) from a bare AddHttpClient to the
++// documented AddCrossModuleHttpClient pattern (handlers/cross-module-http-client-pattern.md:
++// 30-minute handler lifetime + CrossModuleRetryDelegatingHandler), KEEPING the ar-24 chain.
++// This is the ONE registration of "students-api" in this host: the same named client also
++// feeds IContactResolver, ITeacherDirectory, IStudentDirectory, IActivityGroupLookup,
++// IAssignmentTargetResolver, ITopicAssignmentLookup and ITeacherScopeProvider — a second
++// registration of the same name would silently re-register it and drop those handler chains.
++// (The Assignments.Worker's own "students-api" client is a separate host and is untouched.)
++builder.Services.AddCrossModuleHttpClient("students-api", "https+http://students-api", propagateTenant: false)
+     .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
+     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolver, SchoolCollab.Assignments.Api.Services.StudentsContactResolver>();
+@@ -168,6 +179,12 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IStudentDirect
+ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherDirectory,
+     SchoolCollab.Assignments.Api.Services.TeacherDirectoryHttpClient>();
+ 
++// Teacher-scope port (round teacher-scope-auth D2): the grades/subjects a teacher teaches,
++// which the assignment reads use to decide visibility. Same "students-api" named client and
++// the same fail-closed posture as the directory check above.
++builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherScopeProvider,
++    SchoolCollab.Assignments.Api.Services.TeacherScopeHttpClient>();
++
+ // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
+ // port (Assignments → Students) for the link command and SelectedGroups publish.
+ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,
+@@ -210,6 +227,11 @@ builder.Services.AddNotificationDispatchSweep();
+ // Auth + tenancy (OIDC via Keycloak)
+ builder.Services.AddAuthAndTenancy(builder.Configuration);
+ 
++// D5 (Q5, round teacher-scope-auth): bind the dev bypass's teacher_id claim. Inert unless
++// FEATURE:DisableOIDCAuth registers TestAuthHandler; without a configured value the claim is
++// not emitted, which is the CI default.
++builder.Services.AddAssignmentDevTeacherIdentity(builder.Configuration);
++
+ var app = builder.Build();
+ 
+ if (app.Environment.IsDevelopment())
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherGradeAssignmentResponse.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherGradeAssignmentResponse.cs
+new file mode 100644
+index 00000000..8d6cb517
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherGradeAssignmentResponse.cs
+@@ -0,0 +1,22 @@
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// The wire shape of one row from the Students route
++/// <c>GET /teachers/{teacherId}/grade-assignments</c> (Students' <c>TeacherGradeAssignmentDto</c>).
++///
++/// <para>Deliberately a LOCAL mirror: an Assignments.Core/Assignments.Api signature must never
++/// carry a <c>Students.Core</c>/<c>Students.Application</c> type (the open
++/// <c>Assignments.Core → Students.Core</c> violation in <c>cross-context-rule-followups.md</c> §1
++/// must not be deepened). Only the three fields the scope needs are mirrored; the display fields
++/// the Students row also carries (RowId, GradeName, SubjectName, …) are ignored on read.</para>
++///
++/// <para><c>SubjectId</c> is the Students name for the scope's
++/// <c>TeacherSubjectGrade.TopicId</c>; <c>null</c> is a grade-wide row.</para>
++/// </summary>
++/// <param name="GradeLevelId">The taught grade.</param>
++/// <param name="SubjectId">The taught subject; <c>null</c> = grade-wide.</param>
++/// <param name="RoleCodedValueId">The optional teaching-role coded value.</param>
++internal sealed record TeacherGradeAssignmentResponse(
++    Guid GradeLevelId,
++    Guid? SubjectId,
++    Guid? RoleCodedValueId);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherScopeHttpClient.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherScopeHttpClient.cs
+new file mode 100644
+index 00000000..ca9aa297
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/TeacherScopeHttpClient.cs
+@@ -0,0 +1,87 @@
++using System.Net.Http.Json;
++using System.Text.Json;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// HTTP-backed <see cref="ITeacherScopeProvider"/> (round <c>teacher-scope-auth</c> D2/Q7). Calls
++/// the existing Students route <c>GET /teachers/{teacherId}/grade-assignments</c> through the
++/// shared <c>students-api</c> named client (Aspire service discovery + bearer forwarding + the
++/// ar-24 strict-2xx posture of the migrated registration). Mirrors
++/// <see cref="TeacherDirectoryHttpClient"/>.
++///
++/// <para>Failure posture — fail-<b>CLOSED</b>, never fail-open: an unknown/empty teacher id, a
++/// non-2xx response, a transport failure or a malformed body yields
++/// <see cref="TeacherScope.Empty"/>, never <see cref="TeacherScope.Unrestricted"/>. A resolved
++/// 2xx with an empty array yields a scope with an empty taught set: the taught set is then
++/// <i>known</i> (the teacher teaches nothing), so the caller's own creations stay visible — the
++/// alternative would hide a teacher's own drafts whenever they hold no grade rows.</para>
++/// </summary>
++public sealed class TeacherScopeHttpClient(
++    IHttpClientFactory httpClientFactory,
++    ILogger<TeacherScopeHttpClient> logger) : ITeacherScopeProvider
++{
++    /// <summary>Path of the Students grade-assignment read
++    /// (<c>GET /teachers/{teacherId}/grade-assignments</c> — TeacherRoutes.cs).</summary>
++    internal const string GradeAssignmentsPathTemplate = "teachers/{0}/grade-assignments";
++
++    public async Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default)
++    {
++        if (teacherId == Guid.Empty)
++        {
++            return TeacherScope.Empty;
++        }
++
++        var students = httpClientFactory.CreateClient("students-api");
++        try
++        {
++            using var response = await students.GetAsync(
++                string.Format(GradeAssignmentsPathTemplate, teacherId), cancellationToken);
++
++            if (!response.IsSuccessStatusCode)
++            {
++                logger.LogWarning(
++                    "Teacher scope read for {TeacherId} answered {StatusCode}; failing closed to an empty scope",
++                    teacherId, (int)response.StatusCode);
++                return TeacherScope.Empty;
++            }
++
++            var rows = await response.Content.ReadFromJsonAsync<TeacherGradeAssignmentResponse[]>(cancellationToken);
++            if (rows is null)
++            {
++                logger.LogWarning(
++                    "Teacher scope read for {TeacherId} returned no body; failing closed to an empty scope",
++                    teacherId);
++                return TeacherScope.Empty;
++            }
++
++            return TeacherScope.ForTeacher(
++                teacherId,
++                rows.Select(r => new TeacherSubjectGrade(r.GradeLevelId, r.SubjectId, r.RoleCodedValueId)).ToList());
++        }
++        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
++        {
++            // A client timeout (not the caller's own cancellation): fail closed.
++            logger.LogWarning("Teacher scope read for {TeacherId} timed out; failing closed to an empty scope", teacherId);
++            return TeacherScope.Empty;
++        }
++        catch (HttpRequestException ex)
++        {
++            logger.LogWarning(ex, "Teacher scope read for {TeacherId} failed; failing closed to an empty scope", teacherId);
++            return TeacherScope.Empty;
++        }
++        catch (JsonException ex)
++        {
++            logger.LogWarning(ex, "Teacher scope read for {TeacherId} returned a malformed body; failing closed to an empty scope", teacherId);
++            return TeacherScope.Empty;
++        }
++        catch (NotSupportedException ex)
++        {
++            // A 200 carrying a non-JSON content type cannot be read as JSON.
++            logger.LogWarning(ex, "Teacher scope read for {TeacherId} returned a non-JSON body; failing closed to an empty scope", teacherId);
++            return TeacherScope.Empty;
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQuery.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQuery.cs
+index 9ad8efc1..42611edd 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQuery.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQuery.cs
+@@ -1,7 +1,14 @@
+ using SchoolCollab.Core.CQRS;
+ 
+ using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.Services;
+ 
+ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
+ 
+-public sealed record GetAssignmentByIdQuery(Guid Id) : IQuery<AssignmentSummaryDto?>;
++/// <summary>
++/// The id-addressed assignment read. <paramref name="Scope"/> is the caller's resolved
++/// <see cref="TeacherScope"/> (round <c>teacher-scope-auth</c> [P2-2]) — the read is reachable by
++/// id, so it must apply the same visibility rule as the list and answer <c>null</c> (⇒ 404) for
++/// an out-of-scope id. <c>null</c> means unrestricted (the pre-existing callers' shape).
++/// </summary>
++public sealed record GetAssignmentByIdQuery(Guid Id, TeacherScope? Scope = null) : IQuery<AssignmentSummaryDto?>;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs
+index 8a960f47..6267c239 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetAssignmentByIdQuery/GetAssignmentByIdQueryHandler.cs
+@@ -38,7 +38,9 @@ public sealed class GetAssignmentByIdQueryHandler(
+ 
+         var cacheKey = $"assignment:{query.Id}:{db.CurrentTenantId}";
+ 
+-        return await cache.GetOrCreateAsync(
++        // The cached value is the tenant-wide row, deliberately — the scope check is applied to
++        // what the cache RETURNS ([P2-2], the same discipline as the list read's [P1-3]).
++        var summary = await cache.GetOrCreateAsync(
+             cacheKey,
+             (db, query.Id, cache, assignmentPolicyResolver, featureFlags, logger),
+             static async (state, ct) =>
+@@ -126,6 +128,21 @@ public sealed class GetAssignmentByIdQueryHandler(
+             CacheOptions,
+             tags: ["assignments"],
+             cancellationToken: cancellationToken);
++
++        // [P2-2] an out-of-scope id is indistinguishable from an unknown id (404) — the caller
++        // must not learn that the assignment exists.
++        if (summary is null)
++        {
++            return null;
++        }
++
++        if (query.Scope is { IsUnrestricted: false } scope
++            && !scope.Allows(summary.CreatedByTeacherId, summary.GradeLevelId, summary.TopicId))
++        {
++            return null;
++        }
++
++        return summary;
+     }
+ 
+     /// <summary>Per-(tenant, grade) effective-policy cache key; <c>none</c> is the sentinel for a
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReview.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReview.cs
+index 367b03c2..957f374a 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReview.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReview.cs
+@@ -1,4 +1,5 @@
+ using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.Services;
+ using SchoolCollab.Core.CQRS;
+ 
+ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsForReview;
+@@ -6,5 +7,11 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsF
+ /// <summary>
+ /// Teacher review queue: submissions for assignments owned by
+ /// <see cref="GetSubmissionsForReview.TeacherId"/> (spec §4.13).
++///
++/// <para>Round <c>teacher-scope-auth</c> D3 / [P1-4]: <paramref name="Scope"/> is the caller's
++/// resolved <see cref="TeacherScope"/>. A scoped caller also sees the grades/subjects they teach;
++/// an <b>empty</b> scope (a teacher-only principal with no usable <c>teacher_id</c> claim, or an
++/// unresolved taught set) yields an empty queue — so the route's dev <c>teacherId</c> fallback can
++/// never widen it. <c>null</c> means unrestricted (the pre-existing callers' shape).</para>
+ /// </summary>
+-public sealed record GetSubmissionsForReview(Guid TeacherId) : IQuery<SubmissionForReviewDto[]>;
++public sealed record GetSubmissionsForReview(Guid TeacherId, TeacherScope? Scope = null) : IQuery<SubmissionForReviewDto[]>;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReviewHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReviewHandler.cs
+index 12bf7c6b..a7b24055 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReviewHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/GetSubmissionsForReview/GetSubmissionsForReviewHandler.cs
+@@ -11,7 +11,19 @@ public sealed class GetSubmissionsForReviewHandler(
+ {
+     public async Task<SubmissionForReviewDto[]> HandleAsync(GetSubmissionsForReview query, CancellationToken cancellationToken = default)
+     {
++        // [P1-4] an EMPTY scope grants nothing: return an empty queue rather than let the
++        // teacherId the route threaded in (the dev fallback) decide. This is the containment that
++        // makes "teacher without a teacher_id claim" fail closed — never tenant-wide, and never
++        // the wire value.
++        if (query.Scope is { IsEmpty: true })
++        {
++            logger.LogDebug(
++                "GetSubmissionsForReview for teacher {TeacherId} resolves to an empty scope; returning an empty queue",
++                query.TeacherId);
++            return [];
++        }
++
+         logger.LogDebug("Handling GetSubmissionsForReview for teacher {TeacherId}", query.TeacherId);
+-        return await submissionRepository.ListSubmissionsForReviewAsync(query.TeacherId, cancellationToken);
++        return await submissionRepository.ListSubmissionsForReviewAsync(query.TeacherId, query.Scope, cancellationToken);
+     }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQuery.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQuery.cs
+index 2352cc07..5d3860af 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQuery.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQuery.cs
+@@ -2,7 +2,14 @@ using SchoolCollab.Core.CQRS;
+ 
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
+ 
+ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
+ 
+-public sealed record ListAssignmentsQuery(AssignmentStatus? Status) : IQuery<AssignmentSummaryDto[]>;
++/// <summary>
++/// The assignment list read. <paramref name="Scope"/> is the caller's resolved
++/// <see cref="TeacherScope"/> (round <c>teacher-scope-auth</c> D3) — resolved at the endpoint
++/// and passed here; <c>null</c> means "unrestricted", the shape pre-existing callers use and the
++/// posture for a principal with no recognised role.
++/// </summary>
++public sealed record ListAssignmentsQuery(AssignmentStatus? Status, TeacherScope? Scope = null) : IQuery<AssignmentSummaryDto[]>;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs
+index d5717843..7dc8f1eb 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/ListAssignmentsQuery/ListAssignmentsQueryHandler.cs
+@@ -46,7 +46,11 @@ public sealed class ListAssignmentsQueryHandler(
+         var tenantId = tenantProvider.GetTenantContext().TenantId;
+         var cacheKey = $"assignments:list:{tenantId}:{query.Status?.ToString() ?? "all"}";
+ 
+-        return await cache.GetOrCreateAsync(
++        // The cached value is the TENANT-WIDE projection, deliberately: the key carries no scope
++        // hash, so the caller's filter must be applied to what the cache RETURNS ([P1-3]).
++        // Filtering inside the cached delegate would store one teacher's filtered list under the
++        // tenant's key and serve it to every other teacher and admin in the tenant.
++        var summaries = await cache.GetOrCreateAsync(
+             cacheKey,
+             (repository, query.Status, cache, assignmentPolicyResolver, featureFlags, tenantId, logger),
+             static async (state, ct) =>
+@@ -121,6 +125,25 @@ public sealed class ListAssignmentsQueryHandler(
+             CacheOptions,
+             tags: ["assignments"],
+             cancellationToken: cancellationToken);
++
++        return ApplyScope(summaries, query.Scope);
++    }
++
++    /// <summary>
++    /// [P1-3]/D3 — the caller's visibility rule applied AFTER the cache read: a scoped teacher
++    /// sees the rows they created plus the grades/subjects they teach; an unrestricted (or
++    /// scope-less) caller sees the tenant-wide list unchanged.
++    /// </summary>
++    private static AssignmentSummaryDto[] ApplyScope(AssignmentSummaryDto[] summaries, TeacherScope? scope)
++    {
++        if (scope is null || scope.IsUnrestricted)
++        {
++            return summaries;
++        }
++
++        return summaries
++            .Where(s => scope.Allows(s.CreatedByTeacherId, s.GradeLevelId, s.TopicId))
++            .ToArray();
+     }
+ 
+     /// <summary>
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ISubmissionRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ISubmissionRepository.cs
+index c2c8a36e..9ee1bfc5 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ISubmissionRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ISubmissionRepository.cs
+@@ -1,5 +1,6 @@
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
+ 
+ namespace SchoolCollab.Assignments.Core.Data.Repositories;
+ 
+@@ -55,6 +56,19 @@ public interface ISubmissionRepository
+ 
+     // Read models (Contracts DTOs)
+     Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, CancellationToken ct = default);
++
++    /// <summary>Round <c>teacher-scope-auth</c> D3 — the scope-aware review queue: every submission
++    /// whose assignment the caller may see, i.e. one they created <b>or</b> one in a grade/subject
++    /// they teach. For a scoped caller the visibility is decided by <paramref name="scope"/> ALONE
++    /// (its <see cref="TeacherScope.TeacherId"/> comes from the authenticated principal, never from
++    /// the wire), so a request-supplied id cannot widen the result set ([P1-4]);
++    /// <paramref name="teacherId"/> carries the per-teacher filter only for the unrestricted
++    /// (dev/role-less/staff/admin) posture.
++    /// <para>The default implementation keeps the owner-only behaviour, so existing
++    /// implementations and test fakes stay valid.</para></summary>
++    Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, TeacherScope? scope, CancellationToken ct = default)
++        => ListSubmissionsForReviewAsync(teacherId, ct);
++
+     Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
+     Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
+     Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/SubmissionRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/SubmissionRepository.cs
+index bdb39a42..4a6ddacd 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/SubmissionRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/SubmissionRepository.cs
+@@ -1,6 +1,7 @@
+ using Microsoft.EntityFrameworkCore;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
+ 
+ namespace SchoolCollab.Assignments.Core.Data.Repositories;
+ 
+@@ -98,6 +99,58 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
+         return await query.ToArrayAsync(ct);
+     }
+ 
++    /// <summary>
++    /// Round <c>teacher-scope-auth</c> D3 — the scope-aware review queue: the caller's own
++    /// creations plus the grades/subjects they teach. Unrestricted/scopeless callers keep the
++    /// owner-only read above.
++    ///
++    /// <para>The scope filter is applied over the tenant's assignment <b>keys</b> and then used as
++    /// an id set (the "read, then filter" discipline the list query handler uses at the cached
++    /// boundary): the grade-wide leg is a null-subject-aware predicate that does not reduce to one
++    /// translatable SQL predicate over a client-side (grade, subject) pair set — a `Contains` over
++    /// the two columns separately would be a cross-product and could admit a subject the teacher
++    /// does not teach.</para>
++    /// </summary>
++    public async Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, TeacherScope? scope, CancellationToken ct = default)
++    {
++        if (scope is null || scope.IsUnrestricted)
++        {
++            return await ListSubmissionsForReviewAsync(teacherId, ct);
++        }
++
++        // The scope decides on its own — including the own-creation leg — so the request-supplied
++        // teacherId plays no part here.
++        var assignmentKeys = await db.Assignments
++            .AsNoTracking()
++            .Select(a => new { a.Id, a.CreatedByTeacherId, a.GradeLevelId, a.TopicId })
++            .ToListAsync(ct);
++
++        var visibleIds = assignmentKeys
++            .Where(a => scope.Allows(a.CreatedByTeacherId, a.GradeLevelId, a.TopicId))
++            .Select(a => a.Id)
++            .ToList();
++
++        if (visibleIds.Count == 0)
++        {
++            return [];
++        }
++
++        var query = from s in db.AssignmentSubmissions
++                    join a in db.Assignments on s.AssignmentId equals a.Id
++                    where visibleIds.Contains(s.AssignmentId)
++                    orderby s.LastSubmittedAt descending
++                    select new SubmissionForReviewDto(
++                        s.Id,
++                        a.Id,
++                        a.Title,
++                        s.StudentId,
++                        s.CurrentVersionNumber,
++                        (ReviewStateDto)(int)s.ReviewState,
++                        s.LastSubmittedAt);
++
++        return await query.ToArrayAsync(ct);
++    }
++
+     public async Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+     {
+         var query = from s in db.AssignmentSubmissions
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/ITeacherScopeProvider.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/ITeacherScopeProvider.cs
+new file mode 100644
+index 00000000..427c48f4
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/ITeacherScopeProvider.cs
+@@ -0,0 +1,27 @@
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// Teacher-scope port (Assignments → Students, round <c>teacher-scope-auth</c> D2/Q7): answers
++/// "which grades/subjects does this teacher teach?", which the assignment reads need to decide
++/// visibility. The interface lives in Assignments.Core; the HTTP implementation
++/// (<c>TeacherScopeHttpClient</c>, registered in Assignments.Api) calls the existing
++/// <c>students-api</c> route <c>GET /teachers/{teacherId}/grade-assignments</c> and maps the
++/// response onto the local <see cref="TeacherSubjectGrade"/> mirror — mirroring
++/// <see cref="ITeacherDirectory"/>. No cross-context project reference.
++///
++/// <para>Live-consistency, not replication, is deliberate: this data is <b>authorization
++/// input</b>, so a replicated copy would keep a teacher whose teaching link was revoked able to
++/// see those assignments until replication caught up — a fail-open window on an access decision.
++/// Cross-context events remain the mechanism for state changes, not for a read that gates
++/// access.</para>
++///
++/// <para>Failure posture: fail-<b>closed</b> — a transport failure, a non-2xx response, a
++/// malformed body or an unknown/empty teacher id yields <see cref="TeacherScope.Empty"/> (or, on
++/// a resolved 2xx, a scope with no taught rows); never <see cref="TeacherScope.Unrestricted"/>.</para>
++/// </summary>
++public interface ITeacherScopeProvider
++{
++    /// <summary>The scope for <paramref name="teacherId"/>. Never throws on a transport or
++    /// payload failure — an unresolvable taught set comes back as an empty scope.</summary>
++    Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/TeacherScope.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/TeacherScope.cs
+new file mode 100644
+index 00000000..4b555b20
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/TeacherScope.cs
+@@ -0,0 +1,110 @@
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// One grade-scoped teaching row — a local mirror of the Students
++/// <c>TeacherGradeAssignmentDto</c> shape (grade + optional subject + optional
++/// teaching-role coded value). It lives in Assignments.Core rather than referencing a
++/// <c>Students.Core</c>/<c>Students.Application</c> type, because the Assignments → Students
++/// edge is an HTTP port (see <see cref="ITeacherScopeProvider"/>); the open
++/// <c>Assignments.Core → Students.Core</c> violation recorded in
++/// <c>cross-context-rule-followups.md</c> §1 must not be deepened.
++/// </summary>
++/// <param name="GradeLevelId">The grade the teacher teaches.</param>
++/// <param name="TopicId">The subject taught in that grade; <c>null</c> means a
++/// <b>grade-wide</b> row (every subject of the grade) — <c>TeacherGradeLevel.TopicId</c> is
++/// optional, so an exact pair match would silently drop every grade-only teacher ([P1-5]).</param>
++/// <param name="RoleCodedValueId">The optional teaching-role coded value. Metadata on the
++/// teaching row, not an assignment dimension — the visibility rule needs no leg for it.</param>
++public sealed record TeacherSubjectGrade(Guid GradeLevelId, Guid? TopicId, Guid? RoleCodedValueId);
++
++/// <summary>
++/// The caller's assignment-visibility scope (round <c>teacher-scope-auth</c> D2/D3), resolved at
++/// the endpoint by <see cref="ITeacherScopeProvider"/> and threaded onto the read queries —
++/// never fetched inside a Core handler.
++///
++/// <para>Visibility rule (D3): a row is visible when the caller created it
++/// (<c>CreatedByTeacherId</c>) <b>or</b> its grade/subject is in <see cref="Taught"/>.</para>
++///
++/// <para>The three legal postures ([P1-4]): <see cref="Unrestricted"/> for staff/admins and for
++/// a principal carrying no recognised role (which is what keeps CI, the Integration suite and
++/// the dev TestAuth surface working — it cannot fail open in real auth, because the reader policy
++/// gates every teacher-scoped read before the filter is reached), a scoped value built by
++/// <see cref="ForTeacher"/> for a teacher whose claim resolved, and <see cref="Empty"/> for a
++/// teacher-only principal with no usable <c>teacher_id</c> claim (or an unresolved taught set) —
++/// never tenant-wide.</para>
++/// </summary>
++public sealed class TeacherScope
++{
++    /// <summary>staff / admin / no recognised role: the tenant-wide read.</summary>
++    public static TeacherScope Unrestricted { get; } = new(isUnrestricted: true, teacherId: null, taught: []);
++
++    /// <summary>A teacher-only principal whose scope could not be established: grants nothing,
++    /// and is never tenant-wide. Fail-closed.</summary>
++    public static TeacherScope Empty { get; } = new(isUnrestricted: false, teacherId: null, taught: []);
++
++    private TeacherScope(bool isUnrestricted, Guid? teacherId, IReadOnlyList<TeacherSubjectGrade> taught)
++    {
++        IsUnrestricted = isUnrestricted;
++        TeacherId = teacherId;
++        Taught = taught;
++    }
++
++    /// <summary>When true the scope restricts nothing — the tenant-wide read.</summary>
++    public bool IsUnrestricted { get; }
++
++    /// <summary>The calling teacher's id, taken from the authenticated principal (never from a
++    /// request body or query string). <c>null</c> when unrestricted or unresolved.</summary>
++    public Guid? TeacherId { get; }
++
++    /// <summary>The resolved grade/subject teaching rows; empty when the caller teaches nothing
++    /// or the taught set is unresolved.</summary>
++    public IReadOnlyList<TeacherSubjectGrade> Taught { get; }
++
++    /// <summary>Whether this scope grants nothing at all — the caller's own creations included.</summary>
++    public bool IsEmpty => !IsUnrestricted && TeacherId is null && Taught.Count == 0;
++
++    /// <summary>
++    /// The resolved scope for a teacher: their own creations plus every taught grade/subject.
++    /// </summary>
++    public static TeacherScope ForTeacher(Guid teacherId, IReadOnlyList<TeacherSubjectGrade> taught)
++    {
++        ArgumentNullException.ThrowIfNull(taught);
++        return new TeacherScope(isUnrestricted: false, teacherId, taught);
++    }
++
++    /// <summary>
++    /// The D3 visibility rule for one assignment row: the caller created it, or its grade is
++    /// taught by the caller — with a <c>null</c> teaching <see cref="TeacherSubjectGrade.TopicId"/>
++    /// matching the whole grade ([P1-5]) and a non-null one matching that subject only.
++    /// </summary>
++    /// <param name="createdByTeacherId">The assignment's creator.</param>
++    /// <param name="gradeLevelId">The assignment's grade (a null grade matches no teaching row).</param>
++    /// <param name="topicId">The assignment's subject.</param>
++    public bool Allows(Guid createdByTeacherId, Guid? gradeLevelId, Guid? topicId)
++    {
++        if (IsUnrestricted)
++        {
++            return true;
++        }
++
++        if (TeacherId is { } teacherId && createdByTeacherId == teacherId)
++        {
++            return true;
++        }
++
++        if (gradeLevelId is null)
++        {
++            return false;
++        }
++
++        foreach (var row in Taught)
++        {
++            if (row.GradeLevelId == gradeLevelId && (row.TopicId is null || row.TopicId == topicId))
++            {
++                return true;
++            }
++        }
++
++        return false;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+index 1984cdab..cc39525f 100644
+--- a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
++++ b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
+ using Microsoft.Extensions.DependencyInjection;
+ using SchoolCollab.Auth.Auth;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Constants;
+ using SchoolCollab.Core.Features;
+ using System.Security.Claims;
+ 
+@@ -24,10 +25,6 @@ public static class AuthEndpointGroup
+     /// Registered by Program.cs (before <c>builder.Build()</c>) and required here.</summary>
+     public const string ExchangeRateLimitPolicyName = "exchange-fixed-window";
+ 
+-    /// <summary>The realm role that authorizes the <c>/auth/admin/*</c> groups
+-    /// (<c>school-collab-realm.json</c> roles, spec §11.2).</summary>
+-    public const string UserAdminRoleName = "user-admin";
+-
+     /// <summary>Maps the <c>/auth</c> group under the app's route builder.</summary>
+     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
+     {
+@@ -110,7 +107,7 @@ public static class AuthEndpointGroup
+         policy
+             .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
+             .RequireAuthenticatedUser()
+-            .RequireRole(UserAdminRoleName);
++            .RequireRole(RealmRoleNames.UserAdmin);
+     }
+ 
+     /// <summary>Maps an <see cref="AdminStatus"/> from the Keycloak Admin client onto a typed HTTP
+diff --git a/src/SchoolCollab.Core/Constants/RealmRoleNames.cs b/src/SchoolCollab.Core/Constants/RealmRoleNames.cs
+new file mode 100644
+index 00000000..ce01d56c
+--- /dev/null
++++ b/src/SchoolCollab.Core/Constants/RealmRoleNames.cs
+@@ -0,0 +1,32 @@
++namespace SchoolCollab.Core.Constants;
++
++/// <summary>
++/// The Keycloak realm roles this solution recognises — the C# spelling of
++/// <c>SchoolCollab.AppHost/school-collab-realm.json</c> → <c>roles.realm</c>.
++///
++/// <para>One constants type, referenced from every C# site that gates on a role
++/// (authorization policies, role checks). The realm import file stays literal: it is
++/// Keycloak configuration that Keycloak parses, not a C# consumer — but a rename must
++/// not be able to half-land on the C# side, which is exactly how <c>user-admin</c> was
++/// duplicated between the realm file and <c>AuthEndpointGroup</c> before this type
++/// (round <c>teacher-scope-auth</c> D1 / [P2-4]).</para>
++///
++/// <para>Role assignment to users stays in Keycloak / the auth admin UI — these constants
++/// name the roles, they do not grant them.</para>
++/// </summary>
++public static class RealmRoleNames
++{
++    /// <summary>Administrator of a tenant's users and role assignments — the role the
++    /// <c>/auth/admin/*</c> endpoints require.</summary>
++    public const string UserAdmin = "user-admin";
++
++    /// <summary>Platform-wide administrator. No route gates on it alone; it is an
++    /// assignment-reader role in the teacher-scope policy.</summary>
++    public const string PlatformAdmin = "platform-admin";
++
++    /// <summary>Teacher — the read role the teacher portal's assignment scope keys off.</summary>
++    public const string Teacher = "teacher";
++
++    /// <summary>Non-teaching school staff — a tenant-wide assignment reader.</summary>
++    public const string Staff = "staff";
++}
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/TeacherScopeWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/TeacherScopeWiringArchitectureTests.cs
+new file mode 100644
+index 00000000..a9bebbbe
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/TeacherScopeWiringArchitectureTests.cs
+@@ -0,0 +1,207 @@
++using System;
++using System.IO;
++using System.Linq;
++using System.Reflection;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Constants;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> — the source-shape guards for D2's port and its wiring, which no
++/// behavioural test can pin:
++///
++/// <list type="number">
++/// <item><b>[P1-6] one registration, the documented form.</b> <c>Assignments.Api/Program.cs</c> must
++/// carry the migrated <c>AddCrossModuleHttpClient("students-api", …)</c> form and NO bare
++/// <c>AddHttpClient("students-api")</c>: that one named client also feeds
++/// <c>IContactResolver</c>, <c>ITeacherDirectory</c>, <c>IStudentDirectory</c>,
++/// <c>IActivityGroupLookup</c>, <c>IAssignmentTargetResolver</c>, <c>ITopicAssignmentLookup</c> and
++/// <c>ITeacherScopeProvider</c>, so a second registration of the same name would silently drop the
++/// ar-24 handler chain. The <c>Assignments.Worker</c>'s own client is a separate host and is pinned
++/// as untouched.</item>
++/// <item><b>[Q7] the port's file placement.</b> The interface lives in Assignments.Core, the HTTP
++/// implementation + the local DTO mirror in Assignments.Api — and none of the three names a
++/// <c>Students.Core</c>/<c>Students.Application</c> type.</item>
++/// <item><b>[Q7] no new cross-context project reference.</b> The recorded
++/// <c>Assignments.Core → Students.Core</c> violation
++/// (<c>cross-context-rule-followups.md</c> §1) is counted, not repaired: the count must not grow.</item>
++/// </list>
++///
++/// Follows the <c>BearerForwardingWiringArchitectureTests</c> walk-up precedent.
++/// </summary>
++[TestClass]
++public class TeacherScopeWiringArchitectureTests
++{
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    private const string CrossModuleRegistration =
++        "AddCrossModuleHttpClient(\"students-api\", \"https+http://students-api\", propagateTenant: false)";
++
++    /// <summary>
++    /// D1 ([P2-4]) — the realm file declares every role <see cref="RealmRoleNames"/> names, and
++    /// the C# constants carry no value the realm does not define. The realm file stays literal
++    /// (it is Keycloak configuration); this guard is what keeps the single C# spelling honest.
++    ///
++    /// <para><b>Weakly discriminating</b> (the plan says so): it fails only if a role is ABSENT —
++    /// it cannot prove Keycloak assigns it, which stays the D11/admin-UI step.</para>
++    /// </summary>
++    [TestMethod]
++    public void RealmFile_DeclaresEveryRoleNameTheCodeGatesOn()
++    {
++        var realm = JsonDocument.Parse(File.ReadAllText(RealmFile()));
++        var declared = realm.RootElement.GetProperty("roles").GetProperty("realm")
++            .EnumerateArray()
++            .Select(r => r.GetProperty("name").GetString()!)
++            .ToList();
++
++        var constants = typeof(RealmRoleNames)
++            .GetFields(BindingFlags.Public | BindingFlags.Static)
++            .Where(f => f is { IsLiteral: true, IsInitOnly: false })
++            .Select(f => (string)f.GetRawConstantValue()!)
++            .ToList();
++
++        constants.Should().NotBeEmpty("the shared role-name constants are what the policies read");
++        constants.Should().OnlyHaveUniqueItems();
++        declared.Should().Contain(constants,
++            "every RealmRoleNames constant must exist as a realm role — otherwise role assignment in "
++            + "Keycloak cannot satisfy the policies that gate on it");
++        declared.Should().Contain(new[] { "user-admin", "platform-admin", "teacher", "staff" },
++            "the four roles this solution recognises (D1) are declared in the realm import");
++    }
++
++    [TestMethod]
++    public void AssignmentsApi_StudentsApiClient_IsTheSingleCrossModuleRegistration()
++    {
++        var program = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Program.cs");
++
++        program.Should().Contain(CrossModuleRegistration,
++            "the students-api client must use the documented cross-module registration (30-minute "
++            + "handler lifetime + CrossModuleRetryDelegatingHandler)");
++
++        Count(program, "AddHttpClient(\"students-api\"")
++            .Should().Be(0,
++                "[P1-6] the bare registration must be MIGRATED, not duplicated: a second registration "
++                + "of the same name silently re-registers the named client and drops the bearer/"
++                + "strict-2xx chain every cross-context consumer shares");
++
++        Count(program, "(\"students-api\"").Should().Be(1,
++            "exactly one registration of the students-api named client exists in this host");
++
++        // The ar-24 posture that the pattern doc omits is kept on the migrated client.
++        program.Should().Contain("AddHttpMessageHandler<BearerForwardingDelegatingHandler>()");
++        program.Should().Contain("AllowAutoRedirect = false");
++    }
++
++    [TestMethod]
++    public void AssignmentsWorker_StudentsApiClient_IsUntouched()
++    {
++        var worker = Read("src", "Assignments", "SchoolCollab.Assignments.Worker", "Program.cs");
++
++        worker.Should().Contain("AddHttpClient(\"students-api\")",
++            "the Worker's own named client is a separate host with no caller token to forward — the "
++            + "round deliberately leaves it alone");
++    }
++
++    [TestMethod]
++    public void TeacherScopePort_InterfaceInCore_ClientAndMirrorInApi_NoStudentsTypeInAnySignature()
++    {
++        var interfaceFile = Read("src", "Assignments", "SchoolCollab.Assignments.Core", "Services", "ITeacherScopeProvider.cs");
++        Read("src", "Assignments", "SchoolCollab.Assignments.Core", "Services", "TeacherScope.cs");
++        var clientFile = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Services", "TeacherScopeHttpClient.cs");
++        var mirrorFile = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Services", "TeacherGradeAssignmentResponse.cs");
++
++        interfaceFile.Should().Contain("interface ITeacherScopeProvider");
++        clientFile.Should().Contain("ITeacherScopeProvider");
++        interfaceFile.Should().Contain("GetScopeAsync",
++            "the port's shape is what the endpoint resolves through");
++
++        foreach (var (name, text) in new[]
++                 {
++                     ("ITeacherScopeProvider.cs", interfaceFile),
++                     ("TeacherScope.cs", Read("src", "Assignments", "SchoolCollab.Assignments.Core", "Services", "TeacherScope.cs")),
++                     ("TeacherScopeHttpClient.cs", clientFile),
++                     ("TeacherGradeAssignmentResponse.cs", mirrorFile),
++                 })
++        {
++            // The comment above each file NAMES the forbidden namespaces on purpose (that is how a
++            // reader learns why the mirror exists); what must not appear is a real reference to a
++            // Students type — an import or a fully-qualified use.
++            text.Should().NotContain("using SchoolCollab.Students.",
++                $"{name} must not import a Students.Core/Students.Application type — the port is an "
++                + "HTTP hop and the DTO is mirrored locally");
++            text.Should().NotContain("SchoolCollab.Students.",
++                $"{name} must not name a fully-qualified Students type either");
++        }
++    }
++
++    [TestMethod]
++    public void CrossContextProjectReferences_DoNotGrow()
++    {
++        // The pre-existing Assignments.Core → Students.Core edge is the OPEN violation recorded in
++        // cross-context-rule-followups.md §1 (a separate docs/cleanup task). This round must not
++        // deepen it: the counts below are the recorded ones, and a new reference fails here.
++        CountStudentsProjectReferences("SchoolCollab.Assignments.Core").Should().Be(1,
++            "the recorded Core → Students.Core violation is not repaired here, but it must not grow");
++        CountStudentsProjectReferences("SchoolCollab.Assignments.Api").Should().Be(1,
++            "Assignments.Api already referenced Students.Core before this round; no new edge may be added");
++        CountStudentsProjectReferences("SchoolCollab.Assignments.Contracts").Should().Be(0,
++            "the contracts project carries no cross-context reference at all");
++    }
++
++    private static int CountStudentsProjectReferences(string projectName)
++    {
++        var csproj = Read("src", "Assignments", projectName, $"{projectName}.csproj");
++        return csproj
++            .Split('\n')
++            .Count(line => line.Contains("ProjectReference", StringComparison.Ordinal)
++                        && line.Contains("Students", StringComparison.Ordinal));
++    }
++
++    private static int Count(string source, string needle)
++    {
++        var count = 0;
++        var index = 0;
++        while ((index = source.IndexOf(needle, index, StringComparison.Ordinal)) != -1)
++        {
++            count++;
++            index += needle.Length;
++        }
++
++        return count;
++    }
++
++    private static string Read(params string[] relative)
++    {
++        var path = Path.Combine([RepoRoot, .. relative]);
++        return File.Exists(path)
++            ? File.ReadAllText(path)
++            : throw new FileNotFoundException($"Expected source file not found under the repo: {string.Join('/', relative)}");
++    }
++
++    /// <summary>The realm import file, discovered by the <c>&lt;realm&gt;-realm.json</c> naming
++    /// rule that <c>AppHostRealmImportArchitectureTests</c> already guards.</summary>
++    private static string RealmFile()
++    {
++        var files = Directory.EnumerateFiles(
++                Path.Combine(RepoRoot, "src", "AppHost", "SchoolCollab.AppHost"), "*-realm.json")
++            .ToList();
++        files.Should().ContainSingle("the AppHost carries exactly one realm import file");
++        return files[0];
++    }
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repository root from " + AppContext.BaseDirectory);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentDevTeacherIdentityTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentDevTeacherIdentityTests.cs
+new file mode 100644
+index 00000000..b3ce35fc
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentDevTeacherIdentityTests.cs
+@@ -0,0 +1,83 @@
++using System;
++using System.Security.Claims;
++using System.Text.Encodings.Web;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Api.Auth;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D5 (Q5) — the dev bypass's <c>teacher_id</c> claim, configurable
++/// through <c>TestAuth:TeacherId</c>.
++///
++/// <para><b>Regression guard, not a discriminator</b> (the plan's acceptance criterion 6 says so
++/// explicitly): the claim-emitting/omitting leg already existed in
++/// <c>TestAuthHandler</c>; what this file pins is that the NEW binding reaches the handler's own
++/// options instance — claim-less by default (the CI posture), honoured when
++/// <c>TestAuth:TeacherId</c> is configured.</para>
++/// </summary>
++[TestClass]
++public class AssignmentDevTeacherIdentityTests
++{
++    private static readonly Guid DevTeacherId = Guid.Parse("00000000-0000-0000-0000-0000000000d7");
++
++    private static IOptionsMonitor<TestAuthHandlerOptions> OptionsFor(string? configuredTeacherId)
++    {
++        var configuration = new ConfigurationBuilder()
++            .AddInMemoryCollection(new Dictionary<string, string?>
++            {
++                [AssignmentDevTeacherIdentity.TeacherIdConfigKey] = configuredTeacherId,
++            })
++            .Build();
++
++        var services = new ServiceCollection();
++        services.AddAssignmentDevTeacherIdentity(configuration);
++        return services.BuildServiceProvider().GetRequiredService<IOptionsMonitor<TestAuthHandlerOptions>>();
++    }
++
++    /// <summary>Runs the REAL handler with the options the binding produced, and reports whether a
++    /// <c>teacher_id</c> claim was emitted.</summary>
++    private static async Task<bool> EmitsTeacherIdClaimAsync(IOptionsMonitor<TestAuthHandlerOptions> options)
++    {
++        var httpContext = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
++        var scheme = new AuthenticationScheme(
++            TestAuthExtensions.TestAuthScheme, TestAuthExtensions.TestAuthScheme, typeof(TestAuthHandler));
++
++        var handler = new TestAuthHandler(options, LoggerFactory.Create(_ => { }), UrlEncoder.Default);
++        await handler.InitializeAsync(scheme, httpContext);
++        var result = await handler.AuthenticateAsync();
++
++        result.Succeeded.Should().BeTrue();
++        return result.Principal!.FindFirst("teacher_id") is not null;
++    }
++
++    [TestMethod]
++    public async Task NoConfiguredTeacherId_EmitsNoClaim_RegressionGuard()
++    {
++        var options = OptionsFor(configuredTeacherId: null);
++
++        options.Get(TestAuthExtensions.TestAuthScheme).TeacherId.Should().Be(Guid.Empty);
++        (await EmitsTeacherIdClaimAsync(options)).Should().BeFalse(
++            "regression guard: the CI/dev default stays claim-less unless a test/dev host opts in");
++    }
++
++    [TestMethod]
++    public async Task ConfiguredTeacherId_IsBoundAndClaimed_RegressionGuard()
++    {
++        var options = OptionsFor(DevTeacherId.ToString());
++
++        options.Get(TestAuthExtensions.TestAuthScheme).TeacherId.Should().Be(DevTeacherId,
++            "the binding lands on the options instance the TestAuth scheme handler is built with");
++        (await EmitsTeacherIdClaimAsync(options)).Should().BeTrue(
++            "regression guard: the claim leg already existed — the new part is that the value is configurable");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs
+new file mode 100644
+index 00000000..b4f394ef
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs
+@@ -0,0 +1,623 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Net;
++using System.Net.Http;
++using System.Net.Http.Json;
++using System.Security.Claims;
++using System.Text.Encodings.Web;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Authorization.Infrastructure;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListSubmissionsByAssignment;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D4 / D6.5 / [P1-1] — the reader policy and, above all, its
++/// <b>route coverage</b>. Two layers:
++///
++/// <list type="number">
++/// <item>the endpoint-metadata matrix: the six covered GETs carry a disjunctive role policy that
++/// every one of teacher / staff / user-admin / platform-admin satisfies while a role-less or
++/// anonymous principal does not; and every explicitly NOT-covered route carries no role
++/// requirement at all, so a role-less principal is still admitted (the Families ward/guardian
++/// flows and the create-wizard reads).</item>
++/// <item>HTTP status on the container-free TestServer harness (no Postgres / RabbitMQ): 401
++/// anonymous, 403 role-less, 200 for a teacher whose scope is threaded onto the query, and the
++/// [P2-2] direct-id gate — an out-of-scope id is a 404 on every id-addressed covered read.</item>
++/// </list>
++///
++/// <para>Discriminating: pre-fix, none of the covered routes carried a role requirement and
++/// <c>AuthorizeAsync</c> for a role-less principal succeeded everywhere.</para>
++/// </summary>
++[TestClass]
++public class AssignmentReaderPolicyRouteTests
++{
++    private static readonly Guid AssignmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid StudentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid TeacherClaimId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid GradeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++
++    private static readonly string[] AssignmentReaderRoles =
++        [RealmRoleNames.Teacher, RealmRoleNames.Staff, RealmRoleNames.UserAdmin, RealmRoleNames.PlatformAdmin];
++
++    /// <summary>The Covered table: exactly these six routes get the reader policy.</summary>
++    private static readonly (string Method, string Pattern)[] CoveredRoutes =
++    [
++        ("GET", "assignments/"),
++        ("GET", "assignments/{id:guid}"),
++        ("GET", "assignments/{id:guid}/submissions"),
++        ("GET", "assignments/{id:guid}/submissions/review-queue"),
++        ("GET", "assignments/{id:guid}/students/{studentId:guid}/submission"),
++        ("GET", "assignments/{id:guid}/sign-off-statuses"),
++    ];
++
++    /// <summary>
++    /// The Explicitly NOT covered table: the ward/guardian reads, the create-wizard reads, the
++    /// sibling ward + activity-group groups, and every write.
++    /// </summary>
++    private static readonly (string Method, string Pattern)[] NotCoveredRoutes =
++    [
++        ("GET", "students/{studentId:guid}/assignments"),
++        ("GET", "assignments/{id:guid}/students/{studentId:guid}/modules"),
++        ("GET", "assignments/{id:guid}/students/{studentId:guid}/sign-off"),
++        ("GET", "assignments/{id:guid}/gates/student/{studentId:guid}"),
++        ("GET", "assignments/{id:guid}/authoring"),
++        ("GET", "assignments/{id:guid}/questions-draft"),
++        ("GET", "assignments/{id:guid}/recipients"),
++        ("GET", "assignments/signature-default"),
++        ("GET", "assignments/signature-consent-text"),
++        ("GET", "assignments/ai-prompt-policy"),
++        ("GET", "assignments/recipient-preview"),
++        ("GET", "activity-groups/{groupId:guid}/assignments"),
++        ("POST", "assignments/"),
++        ("PUT", "assignments/{id:guid}"),
++        ("DELETE", "assignments/{id:guid}"),
++        ("POST", "assignments/{id:guid}/publish"),
++        ("POST", "assignments/{id:guid}/approve"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/submission"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/submit-on-behalf"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/guardian-review"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/sign-off"),
++        ("POST", "assignments/{id:guid}/recipients/{contactId:guid}/opened"),
++    ];
++
++    private sealed class StubFeatureFlags(bool disableOidcAuth, bool enableActivityGroups = true) : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey switch
++        {
++            FeatureFlagKeys.DisableOIDCAuth => disableOidcAuth,
++            FeatureFlagKeys.EnableActivityGroups => enableActivityGroups,
++            _ => false,
++        };
++
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(IsEnabled(featureKey));
++        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
++            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
++    }
++
++    private sealed class StubCurrentUser : ICurrentUser
++    {
++        public bool IsAuthenticated => true;
++        public Guid? TeacherId => TeacherClaimId;
++        public TenantContext CurrentTenant => new(Guid.Empty, "Test", TenantType.School);
++    }
++
++    private sealed class StubScopeProvider : ITeacherScopeProvider
++    {
++        public List<Guid> RequestedTeacherIds { get; } = [];
++        public TeacherScope Result { get; set; } =
++            TeacherScope.ForTeacher(TeacherClaimId, [new TeacherSubjectGrade(GradeId, null, null)]);
++
++        public Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default)
++        {
++            RequestedTeacherIds.Add(teacherId);
++            return Task.FromResult(Result);
++        }
++    }
++
++    private sealed class CapturingListHandler : IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>
++    {
++        public ListAssignmentsQuery? LastQuery { get; private set; }
++
++        public Task<AssignmentSummaryDto[]> HandleAsync(ListAssignmentsQuery query, CancellationToken ct = default)
++        {
++            LastQuery = query;
++            return Task.FromResult(Array.Empty<AssignmentSummaryDto>());
++        }
++    }
++
++    /// <summary>
++    /// The bearer scheme, authenticating per request from headers so ONE host can act as any
++    /// principal: <c>x-test-roles</c> comma-separated role names, <c>x-test-teacher-id</c>, and
++    /// <c>x-test-anonymous: 1</c> for an unauthenticated caller.
++    /// </summary>
++    private sealed class HeaderPrincipalAuthHandler(
++        IOptionsMonitor<AuthenticationSchemeOptions> options,
++        ILoggerFactory logger,
++        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
++    {
++        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
++        {
++            if (Request.Headers["x-test-anonymous"] == "1")
++            {
++                return Task.FromResult(AuthenticateResult.NoResult());
++            }
++
++            var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, "test-user") };
++            foreach (var role in Request.Headers["x-test-roles"].ToString()
++                         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
++            {
++                claims.Add(new Claim(ClaimTypes.Role, role));
++            }
++
++            if (Request.Headers.TryGetValue("x-test-teacher-id", out var teacherId) && Guid.TryParse(teacherId, out var parsed))
++            {
++                claims.Add(new Claim("teacher_id", parsed.ToString()));
++            }
++
++            var identity = new ClaimsIdentity(claims, Scheme.Name);
++            return Task.FromResult(AuthenticateResult.Success(
++                new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
++        }
++    }
++
++    private static async Task<WebApplication> StartHostAsync(
++        bool disableOidcAuth,
++        Action<IServiceCollection>? configure = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags(disableOidcAuth));
++        builder.Services.AddAuthentication(AuthTenancyExtensions.BearerScheme)
++            .AddScheme<AuthenticationSchemeOptions, HeaderPrincipalAuthHandler>(
++                AuthTenancyExtensions.BearerScheme, _ => { });
++        builder.Services.AddAuthorization();
++        configure?.Invoke(builder.Services);
++
++        var app = builder.Build();
++        app.UseAuthentication();
++        app.UseAuthorization();
++        app.MapAssignmentEndpoints(app.Services.GetRequiredService<IFeatureFlagService>());
++        await app.StartAsync();
++        return app;
++    }
++
++    private static HttpClient CreateClient(WebApplication app, string? roles = null, bool anonymous = false)
++    {
++        var client = ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++        if (roles is not null)
++        {
++            client.DefaultRequestHeaders.Add("x-test-roles", roles);
++        }
++
++        if (anonymous)
++        {
++            client.DefaultRequestHeaders.Add("x-test-anonymous", "1");
++        }
++
++        return client;
++    }
++
++    // ── Layer 1: the endpoint-metadata matrix ─────────────────────────────
++
++    private static RouteEndpoint Find(WebApplication app, string method, string pattern)
++    {
++        var wanted = Normalize(pattern);
++        var match = ((IEndpointRouteBuilder)app).DataSources
++            .SelectMany(d => d.Endpoints)
++            .OfType<RouteEndpoint>()
++            .Where(e => Normalize(e.RoutePattern.RawText) == wanted)
++            .Where(e => e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(method) == true)
++            .ToList();
++
++        match.Should().ContainSingle(
++            $"exactly one {method} route should match '{wanted}' — the policy coverage test enumerates real endpoints");
++        return match[0];
++    }
++
++    private static string Normalize(string? rawText) => (rawText ?? string.Empty).Trim('/');
++
++    private static ClaimsPrincipal Principal(params string[] roles) =>
++        new(new ClaimsIdentity(roles.Select(r => new Claim(ClaimTypes.Role, r)), "TestBearer"));
++
++    private static ClaimsPrincipal RoleLess() =>
++        new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "role-less")], "TestBearer"));
++
++    private static ClaimsPrincipal Anonymous() => new(new ClaimsIdentity());
++
++    private static async Task<bool> IsAuthorizedAsync(WebApplication app, AuthorizationPolicy policy, ClaimsPrincipal user) =>
++        (await app.Services.GetRequiredService<IAuthorizationService>()
++            .AuthorizeAsync(user, resource: null, policy: policy)).Succeeded;
++
++    [TestMethod]
++    public async Task CoveredRoutes_CarryTheDisjunctiveReaderPolicy()
++    {
++        await using var app = await StartHostAsync(disableOidcAuth: false);
++
++        foreach (var (method, pattern) in CoveredRoutes)
++        {
++            var endpoint = Find(app, method, pattern);
++            var policies = endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>();
++
++            policies.Should().HaveCount(2,
++                $"{method} /{pattern} carries the group's authenticated-user policy AND the reader policy");
++
++            var reader = policies.Where(p => p.Requirements.OfType<RolesAuthorizationRequirement>().Any()).ToList();
++            reader.Should().ContainSingle($"{method} /{pattern} must carry exactly one role-bearing policy");
++            reader[0].Requirements.OfType<RolesAuthorizationRequirement>().Single().AllowedRoles.Should()
++                .BeEquivalentTo(AssignmentReaderRoles,
++                    $"{method} /{pattern} is the disjunctive teacher ∨ staff ∨ user-admin ∨ platform-admin policy");
++            reader[0].AuthenticationSchemes.Should().Equal([AuthTenancyExtensions.BearerScheme],
++                "the reader policy restates the bearer scheme so it is self-sufficient for its routes");
++        }
++    }
++
++    [TestMethod]
++    public async Task CoveredRoutes_TeacherStaffAndBothAdmins_Pass()
++    {
++        await using var app = await StartHostAsync(disableOidcAuth: false);
++
++        foreach (var (method, pattern) in CoveredRoutes)
++        {
++            var endpoint = Find(app, method, pattern);
++            foreach (var role in AssignmentReaderRoles)
++            {
++                (await AuthorizeEndpointAsync(app, endpoint, Principal(role))).Should().BeTrue(
++                    $"{method} /{pattern} must admit a caller holding '{role}'");
++            }
++
++            (await AuthorizeEndpointAsync(app, endpoint, Principal(RealmRoleNames.UserAdmin, RealmRoleNames.PlatformAdmin)))
++                .Should().BeTrue("an admin-only principal is the P1-2 compatibility case the rollout must not break");
++            (await AuthorizeEndpointAsync(app, endpoint, RoleLess())).Should().BeFalse(
++                $"{method} /{pattern} must reject an authenticated principal with no recognised role");
++            (await AuthorizeEndpointAsync(app, endpoint, Anonymous())).Should().BeFalse(
++                $"{method} /{pattern} must reject an unauthenticated caller");
++        }
++    }
++
++    [TestMethod]
++    public async Task NotCoveredRoutes_CarryNoRoleRequirement_AndAdmitARoleLessPrincipal()
++    {
++        await using var app = await StartHostAsync(disableOidcAuth: false);
++
++        foreach (var (method, pattern) in NotCoveredRoutes)
++        {
++            var endpoint = Find(app, method, pattern);
++            var policies = endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>();
++
++            policies.Should().HaveCount(1,
++                $"{method} /{pattern} keeps only the group's authenticated-user policy");
++            policies.SelectMany(p => p.Requirements).Should().NotContain(r => r is RolesAuthorizationRequirement,
++                $"{method} /{pattern} is NOT covered by the reader policy ([P1-1] — a group-wide policy "
++                + "would break the Families ward/guardian flows and the create wizard)");
++            (await AuthorizeEndpointAsync(app, endpoint, RoleLess())).Should().BeTrue(
++                $"{method} /{pattern} must still admit a role-less principal");
++        }
++    }
++
++    /// <summary>Endpoint authorization as the middleware applies it: EVERY policy attached to
++    /// the endpoint must pass (the reader policy is additive, not a replacement).</summary>
++    private static async Task<bool> AuthorizeEndpointAsync(WebApplication app, RouteEndpoint endpoint, ClaimsPrincipal user)
++    {
++        var policies = endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>();
++        policies.Should().NotBeEmpty("every endpoint under test is authorized in real-auth mode");
++
++        foreach (var policy in policies)
++        {
++            if (!await IsAuthorizedAsync(app, policy, user))
++            {
++                return false;
++            }
++        }
++
++        return true;
++    }
++
++    // ── Layer 2: HTTP status ─────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task Http_TeacherRole_IsAdmitted_AndItsScopeRidesTheListQuery()
++    {
++        var listHandler = new CapturingListHandler();
++        var scopeProvider = new StubScopeProvider();
++        await using var app = await StartHostAsync(
++            disableOidcAuth: false,
++            s =>
++            {
++                s.AddSingleton<IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>>(listHandler);
++                s.AddSingleton<ITeacherScopeProvider>(scopeProvider);
++                s.AddSingleton<ICurrentUser, StubCurrentUser>();
++            });
++        using var client = CreateClient(app, roles: RealmRoleNames.Teacher);
++
++        var response = await client.GetAsync("/assignments");
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        scopeProvider.RequestedTeacherIds.Should().Equal([TeacherClaimId],
++            "the endpoint resolves the scope from the principal's teacher_id claim");
++        listHandler.LastQuery.Should().NotBeNull();
++        listHandler.LastQuery!.Scope.Should().BeSameAs(scopeProvider.Result,
++            "D3: the scope is resolved at the ENDPOINT and passed on the query, never fetched in a Core handler");
++    }
++
++    [TestMethod]
++    public async Task Http_RoleLessPrincipal_IsForbidden_AndAnonymousIsUnauthorized()
++    {
++        await using var app = await StartHostAsync(
++            disableOidcAuth: false,
++            s =>
++            {
++                s.AddSingleton<IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>>(new CapturingListHandler());
++                s.AddSingleton<ITeacherScopeProvider>(new StubScopeProvider());
++                s.AddSingleton<ICurrentUser, StubCurrentUser>();
++            });
++
++        using var roleLess = CreateClient(app, roles: null);
++        (await roleLess.GetAsync("/assignments")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
++
++        using var anonymous = CreateClient(app, anonymous: true);
++        (await anonymous.GetAsync("/assignments")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    [TestMethod]
++    public async Task Http_WardListAndAWrite_StillAdmitARoleLessPrincipal()
++    {
++        await using var app = await StartHostAsync(
++            disableOidcAuth: false,
++            s =>
++            {
++                s.AddSingleton<IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>>(new StubWardListHandler());
++                s.AddSingleton<ICommandHandler<PublishAssignmentCommand>>(new StubPublishHandler());
++            });
++
++        using var client = CreateClient(app, roles: null);
++
++        (await client.GetAsync($"/students/{StudentId}/assignments")).StatusCode
++            .Should().Be(HttpStatusCode.OK, "the Families ward list is explicitly NOT covered (P1-1)");
++        (await client.PostAsync($"/assignments/{AssignmentId}/publish", content: null)).StatusCode
++            .Should().Be(HttpStatusCode.NoContent, "writes are explicitly NOT covered (P1-1)");
++    }
++
++    /// <summary>[PR — regression guard] With FEATURE:DisableOIDCAuth ON the policy block is
++    /// skipped, so a covered route is no longer 401 for an unauthenticated caller. This is TRUE
++    /// PRE-FIX as well (the block sits inside the same <c>if</c>), so it is a regression guard,
++    /// not a discriminator.</summary>
++    [TestMethod]
++    public async Task Http_DisableOidcAuthOn_NoGroupRequiresAuthorization_RegressionGuard()
++    {
++        await using var app = await StartHostAsync(
++            disableOidcAuth: true,
++            s =>
++            {
++                s.AddSingleton<IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>>(new CapturingListHandler());
++                s.AddSingleton<ITeacherScopeProvider>(new StubScopeProvider());
++                s.AddSingleton<ICurrentUser, StubCurrentUser>();
++            });
++
++        using var anonymous = CreateClient(app, anonymous: true);
++        (await anonymous.GetAsync("/assignments")).StatusCode.Should().Be(
++            HttpStatusCode.OK,
++            "regression guard: with the flag ON the reader policy is not applied at all, which is "
++            + "already true pre-fix — the flag is what the operational prerequisite gates");
++    }
++
++    [TestMethod]
++    public async Task Http_OutOfScopeDirectIdReads_Are404_AndTheScopeGateIsConsulted()
++    {
++        var foreignId = Guid.NewGuid();
++        var detailGate = new ScopeAwareDetailHandler(
++        [
++            new AssignmentRow(AssignmentId, TeacherClaimId, GradeId, null),
++            new AssignmentRow(foreignId, Guid.NewGuid(), Guid.NewGuid(), null),
++        ]);
++        await using var app = await StartHostAsync(
++            disableOidcAuth: false,
++            s =>
++            {
++                s.AddSingleton<IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>>(detailGate);
++                s.AddSingleton<IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]>>(new StubSubmissionsHandler());
++                s.AddSingleton<IQueryHandler<GetSubmission, SubmissionDetailDto?>>(new StubSubmissionDetailHandler());
++                s.AddSingleton<ITeacherScopeProvider>(new StubScopeProvider());
++                s.AddSingleton<ICurrentUser, StubCurrentUser>();
++            });
++        using var client = CreateClient(app, roles: RealmRoleNames.Teacher);
++
++        // [P2-2] the three id-addressed reads are gated by the scope-aware detail read, so an
++        // out-of-scope id answers exactly like an unknown one.
++        (await client.GetAsync($"/assignments/{foreignId}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await client.GetAsync($"/assignments/{foreignId}/submissions")).StatusCode.Should().Be(
++            HttpStatusCode.NotFound,
++            "the per-assignment submissions read is reachable by id and must apply the same visibility rule");
++        (await client.GetAsync($"/assignments/{foreignId}/students/{StudentId}/submission")).StatusCode.Should().Be(
++            HttpStatusCode.NotFound,
++            "the per-ward submission read is reachable by id and must apply the same visibility rule");
++
++        detailGate.RequestedIds.Should().Contain(foreignId,
++            "the gate is the scope-aware detail read, consulted with the id the caller asked for");
++
++        // …and the in-scope id still resolves.
++        (await client.GetAsync($"/assignments/{AssignmentId}/submissions")).StatusCode.Should().Be(HttpStatusCode.OK);
++        (await client.GetAsync($"/assignments/{AssignmentId}/students/{StudentId}/submission")).StatusCode.Should().Be(HttpStatusCode.OK);
++    }
++
++    /// <summary>
++    /// [REWORK — closed residual] <c>GET /assignments/{id}/sign-off-statuses</c> is reachable by
++    /// id and the D4 reader policy admits a <c>teacher</c>, so the read must apply the same [P2-2]
++    /// visibility gate as <c>GET /{id}/submissions</c>: a teacher-only caller gets the per-ward
++    /// rows for an assignment they created or whose grade they teach grade-wide, and <b>404</b> —
++    /// indistinguishable from an unknown id — for one they cannot see. Staff (unrestricted) is
++    /// unaffected.
++    ///
++    /// <para>Discriminating: pre-fix the route resolved no scope at all and passed the raw id to
++    /// <c>ListSignOffStatusesQuery</c>, which answered <c>200</c> with the stub's rows for the
++    /// foreign id — so the first assertion below fails.</para>
++    /// </summary>
++    [TestMethod]
++    public async Task Http_SignOffStatuses_OutOfScopeId_Is404_AndTheInScopeIdsReadTheRows()
++    {
++        var ownId = Guid.NewGuid();
++        var taughtGradeWideId = Guid.NewGuid();
++        var foreignId = Guid.NewGuid();
++        var foreignTeacherId = Guid.NewGuid();
++        var foreignGradeId = Guid.NewGuid();
++
++        var detailGate = new ScopeAwareDetailHandler(
++        [
++            // The caller's own creation, in a grade they do not teach.
++            new AssignmentRow(ownId, TeacherClaimId, foreignGradeId, null),
++            // A colleague's grade-wide creation in a grade the caller teaches (TopicId null ⇒
++            // the whole grade — the [P1-5] leg).
++            new AssignmentRow(taughtGradeWideId, foreignTeacherId, GradeId, null),
++            // A colleague's creation in a grade the caller does not teach.
++            new AssignmentRow(foreignId, foreignTeacherId, foreignGradeId, null),
++        ]);
++        var signOffHandler = new StubSignOffStatusesHandler([SignOffRow()]);
++
++        await using var app = await StartHostAsync(
++            disableOidcAuth: false,
++            s =>
++            {
++                s.AddSingleton<IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>>(detailGate);
++                s.AddSingleton<IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>>>(signOffHandler);
++                s.AddSingleton<ITeacherScopeProvider>(new StubScopeProvider());
++                s.AddSingleton<ICurrentUser, StubCurrentUser>();
++            });
++
++        using var teacher = CreateClient(app, roles: RealmRoleNames.Teacher);
++
++        var foreign = await teacher.GetAsync($"/assignments/{foreignId}/sign-off-statuses");
++        foreign.StatusCode.Should().Be(
++            HttpStatusCode.NotFound,
++            "a teacher-only caller must not read another teacher's per-ward sign-off rows by id — the "
++            + "out-of-scope id answers like an unknown one, with no distinct status confirming it exists");
++        detailGate.RequestedIds.Should().Contain(foreignId,
++            "the route applies the [P2-2] gate rather than handing the raw id to the handler");
++        signOffHandler.RequestedAssignmentIds.Should().NotContain(foreignId,
++            "the rows behind an out-of-scope id are never even read");
++
++        var own = await teacher.GetAsync($"/assignments/{ownId}/sign-off-statuses");
++        own.StatusCode.Should().Be(HttpStatusCode.OK, "the caller's own creation stays readable");
++        (await own.Content.ReadFromJsonAsync<List<SignOffStatusDto>>())
++            .Should().ContainSingle("the in-scope read still returns the per-ward rows");
++
++        (await teacher.GetAsync($"/assignments/{taughtGradeWideId}/sign-off-statuses")).StatusCode.Should().Be(
++            HttpStatusCode.OK,
++            "a grade-wide taught row ([P1-5]) is in scope, so its per-ward rows are still returned");
++
++        using var staff = CreateClient(app, roles: RealmRoleNames.Staff);
++        var staffRead = await staff.GetAsync($"/assignments/{foreignId}/sign-off-statuses");
++        staffRead.StatusCode.Should().Be(
++            HttpStatusCode.OK,
++            "an unrestricted (staff/admin) caller is unaffected by the gate");
++        (await staffRead.Content.ReadFromJsonAsync<List<SignOffStatusDto>>()).Should().ContainSingle();
++    }
++
++    private static SignOffStatusDto SignOffRow() =>
++        new(StudentId, "Ward One", null, null, null, null, SignOffStateDto.AwaitingSignature,
++            null, null, Delivered: false, Opened: false, CurrentVersionNumber: 1, Score: null, Passed: null);
++
++    private sealed class StubSignOffStatusesHandler(IReadOnlyList<SignOffStatusDto> rows)
++        : IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>>
++    {
++        public List<Guid> RequestedAssignmentIds { get; } = [];
++
++        public Task<IReadOnlyList<SignOffStatusDto>> HandleAsync(
++            ListSignOffStatusesQuery query, CancellationToken ct = default)
++        {
++            RequestedAssignmentIds.Add(query.AssignmentId);
++            return Task.FromResult(rows);
++        }
++    }
++
++    /// <summary>
++    /// A faithful stand-in for the [P2-2] gate. <c>GetAssignmentByIdQueryHandler</c> applies the
++    /// real D3 rule (<see cref="TeacherScope.Allows"/>) to the row the tenant-wide cache returned
++    /// and answers <c>null</c> for an out-of-scope id; this stub applies the same call to a fixed
++    /// row set, so a route test observes the production rule without Postgres.
++    /// </summary>
++    private sealed class ScopeAwareDetailHandler(IReadOnlyList<AssignmentRow> rows)
++        : IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>
++    {
++        private readonly Dictionary<Guid, AssignmentRow> _rows = rows.ToDictionary(r => r.Id);
++
++        public List<Guid> RequestedIds { get; } = [];
++
++        public Task<AssignmentSummaryDto?> HandleAsync(GetAssignmentByIdQuery query, CancellationToken ct = default)
++        {
++            RequestedIds.Add(query.Id);
++
++            if (!_rows.TryGetValue(query.Id, out var row))
++            {
++                return Task.FromResult<AssignmentSummaryDto?>(null);
++            }
++
++            var visible = query.Scope is not { IsUnrestricted: false } scope
++                || scope.Allows(row.CreatedByTeacherId, row.GradeLevelId, row.TopicId);
++
++            return Task.FromResult(visible ? Summary(row) : null);
++        }
++
++        private static AssignmentSummaryDto Summary(AssignmentRow row) => new(
++            row.Id, "Scoped assignment", null, AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
++            TargetAudienceTypeDto.AllStudents, row.TopicId ?? Guid.Empty, null, row.GradeLevelId, null,
++            AssignmentStatusDto.Draft, null, null, false, row.CreatedByTeacherId,
++            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
++    }
++
++    private sealed record AssignmentRow(Guid Id, Guid CreatedByTeacherId, Guid? GradeLevelId, Guid? TopicId);
++
++    private sealed class StubSubmissionsHandler : IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]>
++    {
++        public Task<SubmissionForReviewDto[]> HandleAsync(ListSubmissionsByAssignment query, CancellationToken ct = default) =>
++            Task.FromResult(Array.Empty<SubmissionForReviewDto>());
++    }
++
++    private sealed class StubSubmissionDetailHandler : IQueryHandler<GetSubmission, SubmissionDetailDto?>
++    {
++        public Task<SubmissionDetailDto?> HandleAsync(GetSubmission query, CancellationToken ct = default) =>
++            Task.FromResult<SubmissionDetailDto?>(new SubmissionDetailDto(
++                Guid.NewGuid(), AssignmentId, StudentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow, [], null));
++    }
++
++    private sealed class StubWardListHandler : IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>
++    {
++        public Task<WardAssignmentListItemDto[]> HandleAsync(ListWardAssignments query, CancellationToken ct = default) =>
++            Task.FromResult(Array.Empty<WardAssignmentListItemDto>());
++    }
++
++    private sealed class StubPublishHandler : ICommandHandler<PublishAssignmentCommand>
++    {
++        public Task HandleAsync(PublishAssignmentCommand command, CancellationToken ct = default) => Task.CompletedTask;
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentScopeResolverTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentScopeResolverTests.cs
+new file mode 100644
+index 00000000..639f6a05
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentScopeResolverTests.cs
+@@ -0,0 +1,140 @@
++using System;
++using System.Collections.Generic;
++using System.Security.Claims;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Api.Auth;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D6.6 / [P1-4] — the endpoint-side role posture, which is what
++/// turns "roles" into a scope. Discriminating: the pre-fix code had no resolver at all, and each
++/// posture below (role-less ⇒ tenant-wide, teacher without a claim ⇒ EMPTY) is asserted directly
++/// rather than inferred from a list result.
++/// </summary>
++[TestClass]
++public class AssignmentScopeResolverTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid ClaimTeacherId = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid GradeId = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
++    private static readonly Guid OwnAssignmentId = Guid.Parse("00000000-0000-0000-0000-0000000000f1");
++    private static readonly Guid OtherTeacherId = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++
++    private sealed class RecordingScopeProvider : ITeacherScopeProvider
++    {
++        public List<Guid> RequestedTeacherIds { get; } = [];
++        public TeacherScope Result { get; set; } = TeacherScope.Empty;
++
++        public Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default)
++        {
++            RequestedTeacherIds.Add(teacherId);
++            return Task.FromResult(Result);
++        }
++    }
++
++    private sealed class StubCurrentUser(Guid? teacherId) : ICurrentUser
++    {
++        public bool IsAuthenticated => true;
++        public Guid? TeacherId => teacherId;
++        public TenantContext CurrentTenant => new(TenantId, "SchoolA", TenantType.School);
++    }
++
++    /// <summary>A principal carrying the given roles on <see cref="ClaimTypes.Role"/> — the type
++    /// the OIDC/JwtBearer handlers' <c>RoleClaimType</c> pin produces.</summary>
++    private static ClaimsPrincipal Principal(params string[] roles) =>
++        new(new ClaimsIdentity(roles.Select(r => new Claim(ClaimTypes.Role, r)), "TestBearer"));
++
++    private static Task<TeacherScope> ResolveAsync(ClaimsPrincipal principal, Guid? teacherId, RecordingScopeProvider provider) =>
++        AssignmentScopeResolver.ResolveAsync(principal, new StubCurrentUser(teacherId), provider, CancellationToken.None);
++
++    [TestMethod]
++    public async Task NoRoleClaims_IsTenantWide_AndDoesNotConsultTheStudentsPort()
++    {
++        var provider = new RecordingScopeProvider();
++
++        var scope = await ResolveAsync(Principal(), teacherId: ClaimTeacherId, provider);
++
++        scope.IsUnrestricted.Should().BeTrue(
++            "[P1-4] a role-less principal (CI / Integration / dev TestAuth) keeps today's tenant-wide read");
++        provider.RequestedTeacherIds.Should().BeEmpty(
++            "the posture is decided from the principal alone; no Students hop is needed");
++    }
++
++    [TestMethod]
++    public async Task StaffRole_IsTenantWide()
++    {
++        var provider = new RecordingScopeProvider();
++
++        var scope = await ResolveAsync(Principal(RealmRoleNames.Staff), teacherId: ClaimTeacherId, provider);
++
++        scope.IsUnrestricted.Should().BeTrue();
++        provider.RequestedTeacherIds.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task AdminRoles_AreTenantWide()
++    {
++        var provider = new RecordingScopeProvider();
++
++        (await ResolveAsync(Principal(RealmRoleNames.UserAdmin), teacherId: null, provider)).IsUnrestricted.Should().BeTrue();
++        (await ResolveAsync(Principal(RealmRoleNames.PlatformAdmin), teacherId: null, provider)).IsUnrestricted.Should().BeTrue();
++        provider.RequestedTeacherIds.Should().BeEmpty("admins need no taught set");
++    }
++
++    [TestMethod]
++    public async Task StaffAndTeacher_IsTenantWide()
++    {
++        var provider = new RecordingScopeProvider();
++
++        var scope = await ResolveAsync(
++            Principal(RealmRoleNames.Teacher, RealmRoleNames.Staff), teacherId: ClaimTeacherId, provider);
++
++        scope.IsUnrestricted.Should().BeTrue("the broader role wins — staff reads tenant-wide");
++        provider.RequestedTeacherIds.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task TeacherWithTeacherIdClaim_IsScopedByTheStudentsPort()
++    {
++        var provider = new RecordingScopeProvider
++        {
++            Result = TeacherScope.ForTeacher(ClaimTeacherId, [new TeacherSubjectGrade(GradeId, null, null)]),
++        };
++
++        var scope = await ResolveAsync(Principal(RealmRoleNames.Teacher), teacherId: ClaimTeacherId, provider);
++
++        scope.IsUnrestricted.Should().BeFalse();
++        scope.TeacherId.Should().Be(ClaimTeacherId);
++        scope.Taught.Should().ContainSingle().Which.GradeLevelId.Should().Be(GradeId);
++        provider.RequestedTeacherIds.Should().Equal([ClaimTeacherId], "the id comes from the claim");
++    }
++
++    [TestMethod]
++    public async Task TeacherWithoutTeacherIdClaim_IsEmpty_NeverTenantWide()
++    {
++        var provider = new RecordingScopeProvider
++        {
++            // Even a permissive provider answer must not be reachable without a claim.
++            Result = TeacherScope.Unrestricted,
++        };
++
++        var scope = await ResolveAsync(Principal(RealmRoleNames.Teacher), teacherId: null, provider);
++
++        scope.IsUnrestricted.Should().BeFalse("a teacher-only principal without a teacher_id is never tenant-wide");
++        scope.IsEmpty.Should().BeTrue();
++        scope.Allows(OwnAssignmentId, GradeId, null).Should().BeFalse(
++            "an empty scope grants nothing — not even the caller's own creations");
++        scope.Allows(OtherTeacherId, GradeId, null).Should().BeFalse();
++        provider.RequestedTeacherIds.Should().BeEmpty(
++            "there is no id to ask the Students port about, and the review-queue route's dev "
++            + "teacherId fallback must never be used as one");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/ListAssignmentsFailClosedTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/ListAssignmentsFailClosedTests.cs
+new file mode 100644
+index 00000000..71cfa3d9
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/ListAssignmentsFailClosedTests.cs
+@@ -0,0 +1,197 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Net;
++using System.Net.Http;
++using System.Security.Claims;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Api.Auth;
++using SchoolCollab.Assignments.Api.Services;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.AssignmentPolicies;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D6.3 / acceptance criterion 3 — <b>fail-closed proven at the
++/// LIST level</b>, end to end across the real seams: a failing / malformed / non-2xx
++/// <c>students-api</c> hop resolved through the REAL <see cref="TeacherScopeHttpClient"/> and
++/// <see cref="AssignmentScopeResolver"/>, fed to the REAL
++/// <see cref="ListAssignmentsQueryHandler"/> over seeded rows.
++///
++/// <para>Discriminating: the seed deliberately contains a row the caller did NOT create. An
++/// implementation that falls back to tenant-wide — or that fails open anywhere on the path —
++/// returns it and fails these assertions; only the empty-scope posture returns none. The control
++/// case (same seed, a 200 that teaches the seeded grade) returns both rows, so the empty result
++/// is caused by the failed hop and not by a broken harness.</para>
++/// </summary>
++[TestClass]
++public class ListAssignmentsFailClosedTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid CallerTeacherId = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid ForeignTeacherId = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++    private static readonly Guid GradeId = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
++    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-0000000000b1");
++
++    private sealed class SeedRepository : IAssignmentRepository
++    {
++        public List<AssignmentSummary> Rows { get; } = [];
++
++        public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? status, CancellationToken ct = default) =>
++            Task.FromResult(Rows);
++
++        public Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult<Assignment?>(null);
++        public Task AddAsync(Assignment assignment, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task UpdateAsync(Assignment assignment, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task DeleteAsync(Assignment assignment, CancellationToken ct = default) => throw new NotSupportedException();
++        public void DetectChanges() { }
++        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
++            => Task.FromResult(new List<AssignmentSweepCandidate>());
++        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
++            => Task.FromResult(new List<AssignmentSweepCandidate>());
++    }
++
++    private sealed class StubTenantProvider : ITenantProvider
++    {
++        public TenantContext GetTenantContext() => new(TenantId, "SchoolA", TenantType.School);
++    }
++
++    /// <summary>The teacher-role principal's id, as the endpoint resolves it (never the wire).</summary>
++    private sealed class StubCurrentUser(Guid? teacherId) : ICurrentUser
++    {
++        public bool IsAuthenticated => true;
++        public Guid? TeacherId => teacherId;
++        public TenantContext CurrentTenant => new(TenantId, "SchoolA", TenantType.School);
++    }
++
++    private sealed class StubPolicyResolver : IAssignmentPolicyResolver
++    {
++        public Task<EffectiveAssignmentPolicy> ResolveAsync(Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(new EffectiveAssignmentPolicyResolver().Resolve(tenantDefault: null, gradeOverride: null));
++    }
++
++    private sealed class OffFlags : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => false;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(false);
++        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
++            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
++    }
++
++    /// <summary>Pass-through cache: this test is about the fail-closed path, not about TTLs.</summary>
++    private sealed class PassThroughHybridCache : HybridCache
++    {
++        public override async ValueTask<T> GetOrCreateAsync<TState, T>(
++            string key, TState state, Func<TState, CancellationToken, ValueTask<T>> factory,
++            HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null,
++            CancellationToken cancellationToken = default) =>
++            await factory(state, cancellationToken);
++
++        public override ValueTask SetAsync<T>(string key, T value, HybridCacheEntryOptions? options = null,
++            IEnumerable<string>? tags = null, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++
++        public override ValueTask RemoveAsync(string key, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++
++        public override ValueTask RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++    }
++
++    private static ClaimsPrincipal TeacherPrincipal() =>
++        new(new ClaimsIdentity([new Claim(ClaimTypes.Role, RealmRoleNames.Teacher)], "TestBearer"));
++
++    private static AssignmentSummary Row(string title, Guid creator) =>
++        new(
++            Guid.NewGuid(), title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, SubjectId, GradeId, AssignmentStatus.Draft,
++            DueDate: null, MaxScore: null, MandatoryReview: false,
++            CreatedByTeacherId: creator, CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow);
++
++    private static async Task<string[]> TitlesAsTeacherAsync(MockHttpMessageHandler students)
++    {
++        var factory = new Mock<IHttpClientFactory>();
++        factory.Setup(f => f.CreateClient("students-api"))
++            .Returns(new HttpClient(students) { BaseAddress = new Uri("http://students-api") });
++        var client = new TeacherScopeHttpClient(factory.Object, NullLogger<TeacherScopeHttpClient>.Instance);
++
++        var repo = new SeedRepository();
++        // The caller's own draft, plus a foreign row in the grade the caller would teach — the
++        // fail-OPEN hazard.
++        repo.Rows.Add(Row("own-draft", CallerTeacherId));
++        repo.Rows.Add(Row("foreign-in-grade", ForeignTeacherId));
++
++        var scope = await AssignmentScopeResolver.ResolveAsync(
++            TeacherPrincipal(), new StubCurrentUser(CallerTeacherId), client, CancellationToken.None);
++
++        var handler = new ListAssignmentsQueryHandler(
++            repo, new PassThroughHybridCache(), new StubTenantProvider(),
++            new StubPolicyResolver(), new OffFlags(), NullLogger<ListAssignmentsQueryHandler>.Instance);
++
++        var rows = await handler.HandleAsync(new ListAssignmentsQuery(null, scope));
++        return rows.Select(r => r.Title).ToArray();
++    }
++
++    [TestMethod]
++    public async Task List_FailingStudentsHop_ReturnsNoRows_EvenWithForeignSeeds()
++    {
++        var students = new MockHttpMessageHandler();
++        students.When("*/teachers/*").Throw(new HttpRequestException("students-api unreachable"));
++
++        (await TitlesAsTeacherAsync(students)).Should().BeEmpty(
++            "a failed taught-set read must fail CLOSED: the seeded foreign row (and, under a "
++            + "tenant-wide fallback, the whole tenant list) must not be returned");
++    }
++
++    [TestMethod]
++    public async Task List_MalformedStudentsBody_ReturnsNoRows_EvenWithForeignSeeds()
++    {
++        var students = new MockHttpMessageHandler();
++        students.When("*/teachers/*").Respond("application/json", "{ not json ]");
++
++        (await TitlesAsTeacherAsync(students)).Should().BeEmpty(
++            "a malformed taught-set body is an unresolved scope, not a licence to read the tenant");
++    }
++
++    [TestMethod]
++    public async Task List_StudentsError_ReturnsNoRows_EvenWithForeignSeeds()
++    {
++        var students = new MockHttpMessageHandler();
++        students.When("*/teachers/*").Respond(HttpStatusCode.ServiceUnavailable);
++
++        (await TitlesAsTeacherAsync(students)).Should().BeEmpty(
++            "a non-2xx taught-set read is an unresolved scope");
++    }
++
++    [TestMethod]
++    public async Task List_Control_ResolvedTaughtGrade_ReturnsTheTaughtRowAndTheOwnRow()
++    {
++        // Control for the three cases above: the SAME seed, but the hop resolves and teaches the
++        // seeded grade — so the empty results above are caused by the failed hop, not the harness.
++        var students = new MockHttpMessageHandler();
++        students.When("*/teachers/*").Respond("application/json",
++            $$"""[{ "gradeLevelId": "{{GradeId}}", "subjectId": "{{SubjectId}}", "roleCodedValueId": null }]""");
++
++        (await TitlesAsTeacherAsync(students)).Should().BeEquivalentTo(
++            new[] { "own-draft", "foreign-in-grade" },
++            "a resolved grade-wide teaching row matches both the caller's own row and the row in "
++            + "that grade (the same subject) — the control that makes the empty cases above meaningful");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/SignOffRoutesTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/SignOffRoutesTests.cs
+index a1de0db7..104ba14f 100644
+--- a/tests/SchoolCollab.Assignments.Api.Tests.Unit/SignOffRoutesTests.cs
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/SignOffRoutesTests.cs
+@@ -13,12 +13,15 @@ using Moq;
+ using SchoolCollab.Assignments.Api;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
+ using SchoolCollab.Assignments.Core.Domain;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
+ 
+ namespace SchoolCollab.Assignments.Api.Tests.Unit;
+ 
+@@ -57,6 +60,15 @@ public class SignOffRoutesTests
+         builder.WebHost.UseTestServer();
+         builder.Logging.SetMinimumLevel(LogLevel.Warning);
+         builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
++        // Harness completion (round teacher-scope-auth rework): `GET /assignments/{id}/sign-off-statuses`
++        // is an id-addressed reader read and now applies the [P2-2] scope gate, so it resolves the
++        // caller, their taught set and the assignment detail. This host (FEATURE:DisableOIDCAuth ON,
++        // role-less) never had to register them, so the request failed with "No service for type
++        // 'ICurrentUser' has been registered" instead of exercising the route. The three registrations
++        // below supply that dependency surface; no assertion in this file changed.
++        builder.Services.AddSingleton<ICurrentUser, TestAuthCurrentUser>();
++        builder.Services.AddSingleton<ITeacherScopeProvider, UnrestrictedScopeProvider>();
++        builder.Services.AddSingleton<IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>, StubAssignmentDetailHandler>();
+         builder.Services.ConfigureHttpJsonOptions(options =>
+         {
+             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignOffStateDto>());
+@@ -249,4 +261,42 @@ public class SignOffRoutesTests
+         public Task<string> ResolveConsentTextAsync(CancellationToken cancellationToken = default) =>
+             Task.FromResult("consent-text-from-resolver");
+     }
++
++    /// <summary>
++    /// The principal this host's requests carry: FEATURE:DisableOIDCAuth is ON and the minimal host
++    /// maps no authentication scheme, so there is no role and no <c>teacher_id</c> claim —
++    /// <see cref="ICurrentUser.TeacherId"/> is null, matching the TestAuth default posture.
++    /// </summary>
++    private sealed class TestAuthCurrentUser : ICurrentUser
++    {
++        public bool IsAuthenticated => true;
++        public Guid? TeacherId => null;
++        public TenantContext CurrentTenant => new(Guid.Empty, "Test", TenantType.School);
++    }
++
++    /// <summary>
++    /// [P1-4] the posture of a principal carrying no recognised role: tenant-wide (this host's
++    /// caller is role-less, so <c>AssignmentScopeResolver</c> never consults the port — the
++    /// unrestricted default is the honest value here, never a scope crafted to suit an assertion).
++    /// </summary>
++    private sealed class UnrestrictedScopeProvider : ITeacherScopeProvider
++    {
++        public Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(TeacherScope.Unrestricted);
++    }
++
++    /// <summary>
++    /// The [P2-2] gate's detail read for this host. Its premise is that the assignment the route is
++    /// asked about exists — the sign-off list handler answers that same id with a row — so the
++    /// honest stand-in is "the row exists", exactly as the production detail read answers for a
++    /// caller whose scope is unrestricted.
++    /// </summary>
++    private sealed class StubAssignmentDetailHandler : IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>
++    {
++        public Task<AssignmentSummaryDto?> HandleAsync(GetAssignmentByIdQuery query, CancellationToken ct = default) =>
++            Task.FromResult<AssignmentSummaryDto?>(new AssignmentSummaryDto(
++                query.Id, "Assignment", null, AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
++                TargetAudienceTypeDto.AllStudents, Guid.Empty, null, null, null, AssignmentStatusDto.Draft,
++                null, null, false, Guid.Empty, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
++    }
+ }
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/TeacherScopeHttpClientTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/TeacherScopeHttpClientTests.cs
+new file mode 100644
+index 00000000..8ca4ce14
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/TeacherScopeHttpClientTests.cs
+@@ -0,0 +1,135 @@
++using System;
++using System.Net;
++using System.Net.Http;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Api.Services;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D2 / D6.3 (client half) — the teacher-scope HTTP port's
++/// fail-CLOSED posture. Every failure mode the plan enumerates (non-2xx, transport failure,
++/// malformed body, no body) must yield an EMPTY scope, never the tenant-wide
++/// <see cref="TeacherScope.Unrestricted"/>; a teacher-only caller must never be widened by a
++/// Students outage.
++///
++/// <para>Note: a scripted handler never follows redirects, so this file cannot by itself
++/// discriminate <c>AllowAutoRedirect=false</c> — that stays the architecture guard's source
++/// assertion on the migrated registration.</para>
++/// </summary>
++[TestClass]
++public class TeacherScopeHttpClientTests
++{
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid GradeId = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
++    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-0000000000b1");
++
++    private static TeacherScopeHttpClient Create(MockHttpMessageHandler handler) =>
++        Create(handler, out _);
++
++    private static TeacherScopeHttpClient Create(MockHttpMessageHandler handler, out Mock<IHttpClientFactory> factory)
++    {
++        factory = new Mock<IHttpClientFactory>();
++        factory.Setup(f => f.CreateClient("students-api"))
++            .Returns(new HttpClient(handler) { BaseAddress = new Uri("http://students-api") });
++        return new TeacherScopeHttpClient(factory.Object, NullLogger<TeacherScopeHttpClient>.Instance);
++    }
++
++    [TestMethod]
++    public async Task GetScopeAsync_NonSuccessStatus_FailsClosedToEmpty()
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/teachers/*").Respond(HttpStatusCode.InternalServerError);
++
++        var scope = await Create(handler).GetScopeAsync(TeacherId, CancellationToken.None);
++
++        scope.IsUnrestricted.Should().BeFalse("a Students error must never widen a teacher to tenant-wide");
++        scope.IsEmpty.Should().BeTrue();
++        scope.Taught.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task GetScopeAsync_TransportFailure_FailsClosedToEmpty()
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/teachers/*").Throw(new HttpRequestException("students-api unreachable"));
++
++        var scope = await Create(handler).GetScopeAsync(TeacherId, CancellationToken.None);
++
++        scope.IsUnrestricted.Should().BeFalse();
++        scope.IsEmpty.Should().BeTrue();
++    }
++
++    [TestMethod]
++    public async Task GetScopeAsync_MalformedBody_FailsClosedToEmpty()
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/teachers/*").Respond("application/json", "{ not json ]");
++
++        var scope = await Create(handler).GetScopeAsync(TeacherId, CancellationToken.None);
++
++        scope.IsUnrestricted.Should().BeFalse();
++        scope.IsEmpty.Should().BeTrue();
++    }
++
++    [TestMethod]
++    public async Task GetScopeAsync_EmptyTeacherId_IsEmptyWithoutCallingStudents()
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/teachers/*").Respond(HttpStatusCode.OK, "application/json", "[]");
++
++        var scope = await Create(handler, out var factory).GetScopeAsync(Guid.Empty, CancellationToken.None);
++
++        scope.IsEmpty.Should().BeTrue();
++        factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Never,
++            "an empty teacher id cannot resolve a scope, so no hop is attempted");
++    }
++
++    [TestMethod]
++    public async Task GetScopeAsync_OkWithRows_MapsGradeAndSubjectMirror()
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/teachers/*").Respond("application/json",
++            $$"""
++            [
++              { "rowId": "11111111-1111-1111-1111-111111111111", "gradeLevelId": "{{GradeId}}", "gradeName": "Grade 7",
++                "gradeLevel": 7, "subjectId": "{{SubjectId}}", "subjectName": "Art", "roleCodedValueId": null },
++              { "rowId": "22222222-2222-2222-2222-222222222222", "gradeLevelId": "{{GradeId}}", "gradeName": "Grade 7",
++                "gradeLevel": 7, "subjectId": null, "subjectName": null, "roleCodedValueId": null }
++            ]
++            """);
++
++        var scope = await Create(handler).GetScopeAsync(TeacherId, CancellationToken.None);
++
++        scope.IsUnrestricted.Should().BeFalse();
++        scope.IsEmpty.Should().BeFalse();
++        scope.TeacherId.Should().Be(TeacherId);
++        scope.Taught.Should().BeEquivalentTo(new[]
++        {
++            new TeacherSubjectGrade(GradeId, SubjectId, null),
++            new TeacherSubjectGrade(GradeId, null, null),
++        }, "the local mirror carries the grade and the optional subject through unchanged");
++    }
++
++    [TestMethod]
++    public async Task GetScopeAsync_OkWithNoRows_IsResolvedNotUnrestricted()
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/teachers/*").Respond("application/json", "[]");
++
++        var scope = await Create(handler).GetScopeAsync(TeacherId, CancellationToken.None);
++
++        scope.IsUnrestricted.Should().BeFalse();
++        scope.IsEmpty.Should().BeFalse("a 200 with no rows is a RESOLVED answer — the teacher teaches nothing");
++        scope.Taught.Should().BeEmpty();
++        scope.TeacherId.Should().Be(TeacherId,
++            "the caller's own creations stay visible: the own-creation leg does not depend on the Students hop");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Integration/TeacherScopeReviewQueuePostgresTests.cs b/tests/SchoolCollab.Assignments.Tests.Integration/TeacherScopeReviewQueuePostgresTests.cs
+new file mode 100644
+index 00000000..8ed4b540
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Integration/TeacherScopeReviewQueuePostgresTests.cs
+@@ -0,0 +1,79 @@
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Integration;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D3 — the scope-aware review queue on REAL Postgres/Npgsql.
++///
++/// <para>The in-memory provider evaluates the whole expression tree locally, which is exactly how an
++/// untranslatable read survives a unit suite. The scope-aware queue adds one construct that MUST
++/// translate: the visible-assignment id set is filtered in memory (a null-subject-aware predicate
++/// over the tenant's assignment keys) and then used as a parameterized <c>Contains</c> against
++/// <c>assignment_submissions.assignment_id</c>. This test proves the translation and the
++/// own-OR-taught / never-foreign semantics on the real provider.</para>
++/// </summary>
++[TestClass]
++public sealed class TeacherScopeReviewQueuePostgresTests
++{
++    private static readonly Guid TenantId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
++    private static readonly Guid TeacherA = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid TeacherB = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++    private static readonly Guid GradeA = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
++    private static readonly Guid SubjectArt = Guid.Parse("00000000-0000-0000-0000-000000000042");
++    private static readonly Guid Ward = Guid.Parse("00000000-0000-0000-0000-0000000000f1");
++
++    [TestMethod]
++    public async Task ScopeAwareReviewQueue_TranslatesAndGates_OnRealPostgres()
++    {
++        var connectionString = await AssignmentsDbFactory.CreateMigratedDatabaseAsync(Guid.NewGuid().ToString("N"));
++
++        Guid ownId, taughtId, foreignId;
++        await using (var seed = AssignmentsDbFactory.CreateContext(connectionString, tenantId: TenantId))
++        {
++            var own = NewAssignment("own", TeacherA, GradeA);
++            var taught = NewAssignment("taught-grade", TeacherB, GradeA);
++            var foreign = NewAssignment("foreign-grade", TeacherB, null);
++            seed.Assignments.AddRange(own, taught, foreign);
++            await seed.SaveChangesAsync();
++
++            seed.AssignmentSubmissions.AddRange(
++                AssignmentSubmission.Create(TenantId, own.Id, Ward, null),
++                AssignmentSubmission.Create(TenantId, taught.Id, Ward, null),
++                AssignmentSubmission.Create(TenantId, foreign.Id, Ward, null));
++            await seed.SaveChangesAsync();
++
++            ownId = own.Id;
++            taughtId = taught.Id;
++            foreignId = foreign.Id;
++        }
++
++        await using var read = AssignmentsDbFactory.CreateContext(connectionString, tenantId: TenantId);
++        var repository = new SubmissionRepository(read);
++
++        var scope = TeacherScope.ForTeacher(TeacherA, [new TeacherSubjectGrade(GradeA, TopicId: null, RoleCodedValueId: null)]);
++
++        var scoped = await repository.ListSubmissionsForReviewAsync(TeacherA, scope);
++        scoped.Select(r => r.AssignmentId).Should().BeEquivalentTo(
++            new[] { ownId, taughtId },
++            "on real Postgres the queue covers the caller's own assignment AND the grade they teach, "
++            + "and never the untaught foreign one");
++
++        var unrestricted = await repository.ListSubmissionsForReviewAsync(TeacherA, TeacherScope.Unrestricted);
++        unrestricted.Select(r => r.AssignmentId).Should().BeEquivalentTo(
++            new[] { ownId },
++            "the unrestricted posture keeps the owner-only read (the dev/role-less/staff/admin shape)");
++    }
++
++    /// <summary>The tenant-scoped context: the read is filtered by the global query filter as well as
++    /// by the explicit tenant id, matching the runtime path.</summary>
++    private static Assignment NewAssignment(string title, Guid creator, Guid? gradeLevelId) =>
++        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, SubjectArt, gradeLevelId, null, null, creator)
++            .WithTenant(TenantId);
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentByIdScopeTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentByIdScopeTests.cs
+new file mode 100644
+index 00000000..f4bf2cf5
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/GetAssignmentByIdScopeTests.cs
+@@ -0,0 +1,150 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.AssignmentPolicies;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> [P2-2] / D6.7 — the <b>direct-id</b> read. The assignment is
++/// reachable by id, so it must apply the same visibility rule as the list and answer null (which
++/// the endpoint maps to 404) for an out-of-scope id; otherwise a teacher-only principal reads any
++/// assignment in the tenant even with the list filtered.
++///
++/// <para>Discriminating: pre-fix the handler returned the row for every id.</para>
++/// </summary>
++[TestClass]
++public class GetAssignmentByIdScopeTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid TeacherA = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid TeacherB = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++    private static readonly Guid GradeA = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
++    private static readonly Guid GradeB = Guid.Parse("00000000-0000-0000-0000-0000000000b1");
++    private static readonly Guid SubjectArt = Guid.Parse("00000000-0000-0000-0000-000000000042");
++    private static readonly Guid SubjectMath = Guid.Parse("00000000-0000-0000-0000-0000000000c1");
++
++    private sealed class Scope : IDisposable
++    {
++        public required AssignmentsDbContext Db { get; init; }
++        public required GetAssignmentByIdQueryHandler Handler { get; init; }
++
++        public void Dispose() => Db.Dispose();
++    }
++
++    private sealed class PolicyResolver : IAssignmentPolicyResolver
++    {
++        public Task<EffectiveAssignmentPolicy> ResolveAsync(Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(FakeAssignmentPolicyResolver.BuiltInDefault);
++    }
++
++    private sealed class OffFlags : SchoolCollab.Core.Features.IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => false;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(false);
++        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
++            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
++    }
++
++    private sealed class PassThroughHybridCache : HybridCache
++    {
++        public override async ValueTask<T> GetOrCreateAsync<TState, T>(
++            string key, TState state, Func<TState, CancellationToken, ValueTask<T>> factory,
++            HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null,
++            CancellationToken cancellationToken = default) =>
++            await factory(state, cancellationToken);
++
++        public override ValueTask SetAsync<T>(string key, T value, HybridCacheEntryOptions? options = null,
++            IEnumerable<string>? tags = null, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++
++        public override ValueTask RemoveAsync(string key, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++
++        public override ValueTask RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++    }
++
++    private static Scope Build(string database)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        ((TenantProvider)provider.GetRequiredService<ITenantProvider>())
++            .SetTenant(new TenantContext(TenantId, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++
++        return new Scope
++        {
++            Db = db,
++            Handler = new GetAssignmentByIdQueryHandler(
++                db, new PassThroughHybridCache(), new PolicyResolver(), new OffFlags(),
++                NullLogger<GetAssignmentByIdQueryHandler>.Instance),
++        };
++    }
++
++    private static Assignment NewAssignment(string title, Guid creator, Guid? grade, Guid subject) =>
++        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, subject, grade, null, null, creator)
++            .WithTenant(TenantId);
++
++    [TestMethod]
++    public async Task ById_OwnAndTaughtRows_Resolve_ForeignRowIsNull()
++    {
++        using var s = Build(nameof(ById_OwnAndTaughtRows_Resolve_ForeignRowIsNull));
++
++        var own = NewAssignment("own", TeacherA, GradeB, SubjectArt);
++        var taughtGradeWide = NewAssignment("taught-grade-wide", TeacherB, GradeA, SubjectArt);
++        var taughtExact = NewAssignment("taught-exact", TeacherB, GradeB, SubjectArt);
++        var foreignSubject = NewAssignment("foreign-subject", TeacherB, GradeB, SubjectMath);
++        var foreignGrade = NewAssignment("foreign-grade", TeacherB, null, SubjectArt);
++        s.Db.Assignments.AddRange(own, taughtGradeWide, taughtExact, foreignSubject, foreignGrade);
++        await s.Db.SaveChangesAsync();
++
++        var scope = TeacherScope.ForTeacher(TeacherA,
++            [new TeacherSubjectGrade(GradeA, TopicId: null, RoleCodedValueId: null),
++             new TeacherSubjectGrade(GradeB, TopicId: SubjectArt, RoleCodedValueId: null)]);
++
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(own.Id, scope))).Should().NotBeNull(
++            "the caller's own row stays readable by id");
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(taughtGradeWide.Id, scope))).Should().NotBeNull(
++            "[P1-5] a null-topic teaching row matches the whole grade");
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(taughtExact.Id, scope))).Should().NotBeNull(
++            "an exact (subject, grade) teaching row matches");
++
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(foreignSubject.Id, scope))).Should().BeNull(
++            "[P2-2] out-of-scope id ⇒ null ⇒ 404 — a different subject in a taught grade is still foreign");
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(foreignGrade.Id, scope))).Should().BeNull(
++            "[P2-2] out-of-scope id ⇒ null ⇒ 404");
++
++        // The unrestricted postures keep today's behaviour.
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(foreignSubject.Id, TeacherScope.Unrestricted)))
++            .Should().NotBeNull("staff/admin read tenant-wide");
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(foreignSubject.Id, Scope: null)))
++            .Should().NotBeNull("the scope-less query shape pre-existing callers use stays unrestricted");
++    }
++
++    [TestMethod]
++    public async Task ById_EmptyScope_ResolvesNothing_IncludingTheOwnRow()
++    {
++        using var s = Build(nameof(ById_EmptyScope_ResolvesNothing_IncludingTheOwnRow));
++        var own = NewAssignment("own", TeacherA, GradeA, SubjectArt);
++        s.Db.Assignments.Add(own);
++        await s.Db.SaveChangesAsync();
++
++        (await s.Handler.HandleAsync(new GetAssignmentByIdQuery(own.Id, TeacherScope.Empty)))
++            .Should().BeNull("[P1-4] an empty scope grants nothing");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/GetSubmissionsForReviewScopeTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/GetSubmissionsForReviewScopeTests.cs
+new file mode 100644
+index 00000000..b318e007
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/GetSubmissionsForReviewScopeTests.cs
+@@ -0,0 +1,233 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsForReview;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListSubmissionsByAssignment;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D3 / [P2-1] / [P1-4] — the review queue
++/// (<see cref="GetSubmissionsForReview"/> + <see cref="GetSubmissionsForReviewHandler"/>) and the
++/// per-assignment read (<c>ListSubmissionsByAssignment</c>).
++///
++/// <para>Discriminating: pre-fix the queue had no scope at all, so the empty-scope case returned
++/// the caller's rows and the taught-grade case returned nothing.</para>
++/// </summary>
++[TestClass]
++public class GetSubmissionsForReviewScopeTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid TeacherA = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid TeacherB = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++    private static readonly Guid GradeA = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
++    private static readonly Guid SubjectArt = Guid.Parse("00000000-0000-0000-0000-000000000042");
++    private static readonly Guid Ward = Guid.Parse("00000000-0000-0000-0000-0000000000f1");
++
++    private sealed class Harness : IDisposable
++    {
++        public required AssignmentsDbContext Db { get; init; }
++        public required SubmissionRepository Repository { get; init; }
++
++        public void Dispose() => Db.Dispose();
++    }
++
++    private static Harness Build(string database)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        ((TenantProvider)provider.GetRequiredService<ITenantProvider>())
++            .SetTenant(new TenantContext(TenantId, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++
++        return new Harness { Db = db, Repository = new SubmissionRepository(db) };
++    }
++
++    private static Assignment NewAssignment(string title, Guid creator, Guid? grade) =>
++        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, SubjectArt, grade, null, null, creator)
++            .WithTenant(TenantId);
++
++    private static AssignmentSubmission SubmissionFor(Guid assignmentId) =>
++        AssignmentSubmission.Create(TenantId, assignmentId, Ward, null);
++
++    /// <summary>Records which overload the handler selected, and returns a sentinel row so a
++    /// leak-through is observable.</summary>
++    private sealed class RecordingSubmissionRepository : ISubmissionRepository
++    {
++        public bool LegacyCalled { get; private set; }
++        public TeacherScope? ReceivedScope { get; private set; }
++
++        public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, CancellationToken ct = default)
++        {
++            LegacyCalled = true;
++            return Task.FromResult(new[] { Row("legacy") });
++        }
++
++        public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, TeacherScope? scope, CancellationToken ct = default)
++        {
++            // Mirrors the interface default + the real repository: an unrestricted (or scope-less)
++            // caller keeps the owner-only read.
++            if (scope is null || scope.IsUnrestricted)
++            {
++                return ListSubmissionsForReviewAsync(teacherId, ct);
++            }
++
++            ReceivedScope = scope;
++            return Task.FromResult(new[] { Row("scoped") });
++        }
++
++        private static SubmissionForReviewDto Row(string title) =>
++            new(Guid.NewGuid(), Guid.NewGuid(), title, Ward, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow);
++
++        // Unused in this test — the handler touches only the review-queue read.
++        public Task<AssignmentRecipient?> GetRecipientAsync(Guid a, Guid c, CancellationToken ct = default) => throw new NotSupportedException();
++        public void Add(AssignmentRecipient r) => throw new NotSupportedException();
++        public void Update(AssignmentRecipient r) => throw new NotSupportedException();
++        public Task<int> DeleteRecipientsForAssignmentAsync(Guid a, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<GuardianSubmissionGate?> GetGateAsync(Guid g, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<GuardianSubmissionGate?> GetGateByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => throw new NotSupportedException();
++        public void Add(GuardianSubmissionGate g) => throw new NotSupportedException();
++        public void Update(GuardianSubmissionGate g) => throw new NotSupportedException();
++        public Task<List<GuardianSubmissionGate>> ListGatesForAssignmentAsync(Guid a, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<AssignmentSubmission?> GetSubmissionAsync(Guid s, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<AssignmentSubmission?> GetSubmissionByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => throw new NotSupportedException();
++        public void Add(AssignmentSubmission s) => throw new NotSupportedException();
++        public void Update(AssignmentSubmission s) => throw new NotSupportedException();
++        public void Add(SignatureEvent e) => throw new NotSupportedException();
++        public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default) => throw new NotSupportedException();
++        public void Add(AssignmentSubmissionVersion v) => throw new NotSupportedException();
++        public void Add(SubmissionReview r) => throw new NotSupportedException();
++        public void Add(SubmissionAnswer a) => throw new NotSupportedException();
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid a, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid a, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid a, Guid s, CancellationToken ct = default) => throw new NotSupportedException();
++        public Task<GuardianGateDto?> GetGuardianGateAsync(Guid a, Guid s, CancellationToken ct = default) => throw new NotSupportedException();
++    }
++
++    // ── [P1-4] the empty scope is the containment ─────────────────────────
++
++    [TestMethod]
++    public async Task ReviewQueue_EmptyScope_ReturnsNothing_AndDoesNotTouchTheRepository()
++    {
++        var repository = new RecordingSubmissionRepository();
++        var handler = new GetSubmissionsForReviewHandler(repository, NullLogger<GetSubmissionsForReviewHandler>.Instance);
++
++        // The route's dev fallback threads a teacherId through; the scope is EMPTY because the
++        // teacher-only principal carries no teacher_id claim.
++        var rows = await handler.HandleAsync(new GetSubmissionsForReview(TeacherB, TeacherScope.Empty));
++
++        rows.Should().BeEmpty(
++            "[P1-4] a teacher without a teacher_id claim gets an empty queue — never the dev "
++            + "teacherId fallback the route resolved, and never tenant-wide");
++        repository.LegacyCalled.Should().BeFalse();
++        repository.ReceivedScope.Should().BeNull("the repository is not consulted at all");
++    }
++
++    [TestMethod]
++    public async Task ReviewQueue_ScopedCaller_PassesTheScopeToTheScopeAwareRead()
++    {
++        var repository = new RecordingSubmissionRepository();
++        var handler = new GetSubmissionsForReviewHandler(repository, NullLogger<GetSubmissionsForReviewHandler>.Instance);
++        var scope = TeacherScope.ForTeacher(TeacherA, [new TeacherSubjectGrade(GradeA, null, null)]);
++
++        var rows = await handler.HandleAsync(new GetSubmissionsForReview(TeacherA, scope));
++
++        rows.Should().ContainSingle().Which.AssignmentTitle.Should().Be("scoped");
++        repository.ReceivedScope.Should().BeSameAs(scope);
++    }
++
++    [TestMethod]
++    public async Task ReviewQueue_UnrestrictedCaller_KeepsTheOwnerOnlyRead()
++    {
++        var repository = new RecordingSubmissionRepository();
++        var handler = new GetSubmissionsForReviewHandler(repository, NullLogger<GetSubmissionsForReviewHandler>.Instance);
++
++        var rows = await handler.HandleAsync(new GetSubmissionsForReview(TeacherB, TeacherScope.Unrestricted));
++
++        rows.Should().ContainSingle().Which.AssignmentTitle.Should().Be("legacy",
++            "the unrestricted (dev/role-less/staff/admin) posture keeps the per-teacher owner filter");
++        repository.LegacyCalled.Should().BeTrue();
++    }
++
++    // ── the repository's scope-aware read (own OR taught, never foreign) ──
++
++    [TestMethod]
++    public async Task ReviewQueue_ScopedRepositoryRead_ReturnsOwnAndTaught_NotForeign()
++    {
++        using var h = Build(nameof(ReviewQueue_ScopedRepositoryRead_ReturnsOwnAndTaught_NotForeign));
++
++        var own = NewAssignment("own", TeacherA, GradeA);
++        var taught = NewAssignment("taught", TeacherB, GradeA);
++        var foreign = NewAssignment("foreign", TeacherB, null);
++        h.Db.Assignments.AddRange(own, taught, foreign);
++        h.Db.AssignmentSubmissions.AddRange(SubmissionFor(own.Id), SubmissionFor(taught.Id), SubmissionFor(foreign.Id));
++        await h.Db.SaveChangesAsync();
++
++        var scope = TeacherScope.ForTeacher(TeacherA, [new TeacherSubjectGrade(GradeA, null, null)]);
++
++        var scoped = await h.Repository.ListSubmissionsForReviewAsync(TeacherA, scope, CancellationToken.None);
++
++        scoped.Select(r => r.AssignmentId).Should().BeEquivalentTo(
++            new[] { own.Id, taught.Id },
++            "the queue covers the caller's own assignments AND the grade they teach — the foreign "
++            + "assignment (a different, untaught grade) stays out");
++    }
++
++    [TestMethod]
++    public async Task ReviewQueue_UnrestrictedRepositoryRead_KeepsTheOwnerFilter()
++    {
++        using var h = Build(nameof(ReviewQueue_UnrestrictedRepositoryRead_KeepsTheOwnerFilter));
++
++        var own = NewAssignment("own", TeacherA, GradeA);
++        var other = NewAssignment("other", TeacherB, GradeA);
++        h.Db.Assignments.AddRange(own, other);
++        h.Db.AssignmentSubmissions.AddRange(SubmissionFor(own.Id), SubmissionFor(other.Id));
++        await h.Db.SaveChangesAsync();
++
++        var unrestricted = await h.Repository.ListSubmissionsForReviewAsync(TeacherA, TeacherScope.Unrestricted, CancellationToken.None);
++        var legacyShape = await h.Repository.ListSubmissionsForReviewAsync(TeacherA, CancellationToken.None);
++
++        unrestricted.Select(r => r.AssignmentId).Should().BeEquivalentTo(new[] { own.Id });
++        legacyShape.Select(r => r.AssignmentId).Should().BeEquivalentTo(new[] { own.Id },
++            "the 2-arg read (existing callers and fakes) is unchanged");
++    }
++
++    // ── [P2-1]: the per-assignment read keeps its own shape ───────────────
++
++    [TestMethod]
++    public async Task ListSubmissionsByAssignment_KeepsReturningTheAssignmentsRows()
++    {
++        using var h = Build(nameof(ListSubmissionsByAssignment_KeepsReturningTheAssignmentsRows));
++
++        var assignment = NewAssignment("own", TeacherA, GradeA);
++        h.Db.Assignments.Add(assignment);
++        h.Db.AssignmentSubmissions.Add(SubmissionFor(assignment.Id));
++        await h.Db.SaveChangesAsync();
++
++        var handler = new ListSubmissionsByAssignmentHandler(
++            h.Repository, NullLogger<ListSubmissionsByAssignmentHandler>.Instance);
++
++        var rows = await handler.HandleAsync(new ListSubmissionsByAssignment(assignment.Id));
++
++        rows.Should().ContainSingle().Which.AssignmentId.Should().Be(assignment.Id,
++            "the per-assignment read is gated at the route by the scope-aware detail read ([P2-2]), "
++            + "so its own contract is unchanged");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/ListAssignmentsScopeFilterTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/ListAssignmentsScopeFilterTests.cs
+new file mode 100644
+index 00000000..a843c17a
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/ListAssignmentsScopeFilterTests.cs
+@@ -0,0 +1,256 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.AssignmentPolicies;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Round <c>teacher-scope-auth</c> D3 / D6.2 + D6.4 + D6.6 — the assignment-list scope filter,
++/// exercised through the REAL <see cref="ListAssignmentsQueryHandler"/> over the real repository
++/// (EF InMemory) so the assertion is on the <b>list</b>, not on the scope object.
++///
++/// <para>Discriminating: the scope cases fail against the pre-fix code, which had no scope
++/// concept at all (the seeded foreign rows would be returned). The two-caller case is the
++/// [P1-3] guard — with the filter applied inside the cached delegate, caller B observes caller
++/// A's filtered list. <b>One case is a posture guard, not a discriminator</b> —
++/// <see cref="List_NoRecognisedRole_IsTenantWide"/>, which passes pre-fix by construction because
++/// there was no scope concept to fail against; it is labelled as such, per the acceptance-honesty
++/// rule the plan gate applied.</para>
++/// </summary>
++[TestClass]
++public class ListAssignmentsScopeFilterTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++    private static readonly Guid TeacherA = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid TeacherB = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
++    private static readonly Guid GradeA = Guid.Parse("00000000-0000-0000-0000-00000000a001");
++    private static readonly Guid GradeB = Guid.Parse("00000000-0000-0000-0000-00000000b001");
++    private static readonly Guid SubjectMath = Guid.Parse("00000000-0000-0000-0000-0000000000c1");
++    private static readonly Guid SubjectArt = Guid.Parse("00000000-0000-0000-0000-000000000042");
++
++    private sealed class Scope : IDisposable
++    {
++        public required AssignmentsDbContext Db { get; init; }
++        public required AssignmentRepository Repository { get; init; }
++        public required ITenantProvider Tenants { get; init; }
++
++        public ListAssignmentsQueryHandler Handler(HybridCache cache) =>
++            new(Repository, cache, Tenants, new NoPolicyResolver(), new OffFlags(),
++                NullLogger<ListAssignmentsQueryHandler>.Instance);
++
++        public void Dispose() => Db.Dispose();
++    }
++
++    /// <summary>Only the scope paths are under test — approval is off for every row.</summary>
++    private sealed class NoPolicyResolver : IAssignmentPolicyResolver
++    {
++        public Task<EffectiveAssignmentPolicy> ResolveAsync(
++            Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
++            Task.FromResult(FakeAssignmentPolicyResolver.BuiltInDefault);
++    }
++
++    private sealed class OffFlags : SchoolCollab.Core.Features.IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => false;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(false);
++        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
++            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
++    }
++
++    /// <summary>A cache that really caches and records every key it was asked for: the observable
++    /// for "the cached value stayed tenant-wide" and for "no bleed between callers".</summary>
++    private sealed class RecordingHybridCache : HybridCache
++    {
++        private readonly Dictionary<string, object?> _store = new();
++        public List<string> RequestedKeys { get; } = [];
++
++        public override async ValueTask<T> GetOrCreateAsync<TState, T>(
++            string key, TState state, Func<TState, CancellationToken, ValueTask<T>> factory,
++            HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null,
++            CancellationToken cancellationToken = default)
++        {
++            RequestedKeys.Add(key);
++            if (_store.TryGetValue(key, out var cached) && cached is T typed)
++            {
++                return typed;
++            }
++
++            var value = await factory(state, cancellationToken);
++            _store[key] = value;
++            return value;
++        }
++
++        public override ValueTask SetAsync<T>(string key, T value, HybridCacheEntryOptions? options = null,
++            IEnumerable<string>? tags = null, CancellationToken cancellationToken = default)
++        {
++            _store[key] = value;
++            return ValueTask.CompletedTask;
++        }
++
++        public override ValueTask RemoveAsync(string key, CancellationToken cancellationToken = default)
++        {
++            _store.Remove(key);
++            return ValueTask.CompletedTask;
++        }
++
++        public override ValueTask RemoveByTagAsync(string tag, CancellationToken cancellationToken = default)
++        {
++            _store.Clear();
++            return ValueTask.CompletedTask;
++        }
++    }
++
++    private static Scope Build(string database)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
++        var provider = services.BuildServiceProvider();
++
++        var db = provider.GetRequiredService<AssignmentsDbContext>();
++        var tenants = (TenantProvider)provider.GetRequiredService<ITenantProvider>();
++        tenants.SetTenant(new TenantContext(TenantId, "SchoolA", TenantType.School));
++        db.Database.EnsureCreated();
++
++        return new Scope { Db = db, Repository = new AssignmentRepository(db), Tenants = tenants };
++    }
++
++    private static Assignment NewAssignment(string title, Guid creator, Guid? grade, Guid subject) =>
++        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, subject, grade, null, null, creator)
++            .WithTenant(TenantId);
++
++    // ── D6.2 — both directions: own creation OR taught grade/subject ──────
++
++    [TestMethod]
++    public async Task List_TeacherScope_KeepsOwnCreationAndTaughtRows_DropsForeignRows()
++    {
++        using var s = Build(nameof(List_TeacherScope_KeepsOwnCreationAndTaughtRows_DropsForeignRows));
++
++        // A's own creation in a grade A does NOT teach.
++        s.Db.Assignments.Add(NewAssignment("own", TeacherA, GradeB, SubjectArt));
++        // A's own creation with no grade at all (the null-grade leg).
++        s.Db.Assignments.Add(NewAssignment("own-gradeless", TeacherA, null, SubjectArt));
++        // A teaches grade A grade-wide (null subject — [P1-5]) → the subject is irrelevant.
++        s.Db.Assignments.Add(NewAssignment("grade-wide", TeacherB, GradeA, SubjectArt));
++        // A teaches grade B + subject Art exactly.
++        s.Db.Assignments.Add(NewAssignment("subject-exact", TeacherB, GradeB, SubjectArt));
++        // B's row in grade B with a DIFFERENT subject: neither creator nor taught.
++        s.Db.Assignments.Add(NewAssignment("foreign-other-subject", TeacherB, GradeB, SubjectMath));
++        // B's row in a grade A does not teach.
++        s.Db.Assignments.Add(NewAssignment("foreign-other-grade", TeacherB, null, SubjectArt));
++        await s.Db.SaveChangesAsync();
++
++        var scope = TeacherScope.ForTeacher(TeacherA,
++            [new TeacherSubjectGrade(GradeA, TopicId: null, RoleCodedValueId: null),
++             new TeacherSubjectGrade(GradeB, TopicId: SubjectArt, RoleCodedValueId: null)]);
++
++        var rows = await s.Handler(new RecordingHybridCache())
++            .HandleAsync(new ListAssignmentsQuery(null, scope));
++
++        rows.Select(r => r.Title).Should().BeEquivalentTo(
++            new[] { "own", "own-gradeless", "grade-wide", "subject-exact" },
++            "the caller's own creations stay visible (including a grade-less one), a grade-wide "
++            + "teaching row matches any subject of that grade ([P1-5]), an exact (subject, grade) "
++            + "row matches its own subject only, and another teacher's untaught rows are dropped");
++    }
++
++    [TestMethod]
++    public async Task List_TeacherWithoutTaughtRows_StillSeesOwnCreations()
++    {
++        using var s = Build(nameof(List_TeacherWithoutTaughtRows_StillSeesOwnCreations));
++        s.Db.Assignments.Add(NewAssignment("mine", TeacherA, GradeA, SubjectArt));
++        s.Db.Assignments.Add(NewAssignment("not-mine", TeacherB, GradeA, SubjectArt));
++        await s.Db.SaveChangesAsync();
++
++        var rows = await s.Handler(new RecordingHybridCache())
++            .HandleAsync(new ListAssignmentsQuery(null, TeacherScope.ForTeacher(TeacherA, [])));
++
++        rows.Select(r => r.Title).Should().BeEquivalentTo(new[] { "mine" },
++            "a resolved scope with no taught rows still carries the caller's own creations");
++    }
++
++    [TestMethod]
++    public async Task List_EmptyScope_ReturnsNothing()
++    {
++        using var s = Build(nameof(List_EmptyScope_ReturnsNothing));
++        s.Db.Assignments.Add(NewAssignment("mine", TeacherA, GradeA, SubjectArt));
++        s.Db.Assignments.Add(NewAssignment("not-mine", TeacherB, GradeB, SubjectArt));
++        await s.Db.SaveChangesAsync();
++
++        var rows = await s.Handler(new RecordingHybridCache())
++            .HandleAsync(new ListAssignmentsQuery(null, TeacherScope.Empty));
++
++        rows.Should().BeEmpty(
++            "[P1-4] a teacher-only principal whose scope could not be established sees nothing — "
++            + "tenant-wide would have returned both rows");
++    }
++
++    /// <summary>Posture guard, <b>NOT a discriminator</b>: the tenant-wide posture for a role-less or
++    /// scope-less caller passes against the pre-fix code by construction, because there was no scope
++    /// concept to fail against. Labelled so a reader cannot mistake it for coverage of the filter.</summary>
++    [TestMethod]
++    public async Task List_NoRecognisedRole_IsTenantWide()
++    {
++        using var s = Build(nameof(List_NoRecognisedRole_IsTenantWide));
++        s.Db.Assignments.AddRange(
++            NewAssignment("mine", TeacherA, GradeA, SubjectArt),
++            NewAssignment("not-mine", TeacherB, GradeB, SubjectArt));
++        await s.Db.SaveChangesAsync();
++
++        var cache = new RecordingHybridCache();
++        var unrestricted = await s.Handler(cache).HandleAsync(new ListAssignmentsQuery(null, TeacherScope.Unrestricted));
++        var legacyShape = await s.Handler(cache).HandleAsync(new ListAssignmentsQuery(null, Scope: null));
++
++        unrestricted.Should().HaveCount(2, "[P1-4] staff/admin/no-role posture is tenant-wide");
++        legacyShape.Should().HaveCount(2,
++            "the scope-less query shape pre-existing callers use stays tenant-wide");
++    }
++
++    // ── D6.4 / [P1-3] — the two-caller cache-bleed test ───────────────────
++
++    [TestMethod]
++    public async Task List_TwoCallers_ShareTheTenantWideCacheEntry_WithoutBleeding()
++    {
++        using var s = Build(nameof(List_TwoCallers_ShareTheTenantWideCacheEntry_WithoutBleeding));
++        s.Db.Assignments.AddRange(
++            NewAssignment("a-only", TeacherA, GradeA, SubjectArt),
++            NewAssignment("b-only", TeacherB, GradeB, SubjectArt));
++        await s.Db.SaveChangesAsync();
++
++        var cache = new RecordingHybridCache();
++        var handler = s.Handler(cache);
++        var tenantKey = $"assignments:list:{TenantId}:all";
++
++        var scopeA = TeacherScope.ForTeacher(TeacherA, []);
++        var scopeB = TeacherScope.ForTeacher(TeacherB, []);
++
++        var forA = await handler.HandleAsync(new ListAssignmentsQuery(null, scopeA));
++        // Caller B reads the SAME cache entry. A filter applied inside the cached delegate would
++        // hand B the list cached for A.
++        var forB = await handler.HandleAsync(new ListAssignmentsQuery(null, scopeB));
++        var tenantWide = await handler.HandleAsync(new ListAssignmentsQuery(null, TeacherScope.Unrestricted));
++
++        forA.Select(r => r.Title).Should().BeEquivalentTo(new[] { "a-only" });
++        forB.Select(r => r.Title).Should().BeEquivalentTo(new[] { "b-only" },
++            "[P1-3] caller B must never observe caller A's filtered list — the filter is applied "
++            + "AFTER the tenant-wide cache read, not inside the cached delegate");
++        tenantWide.Should().HaveCount(2,
++            "the cached value itself stays the tenant-wide projection, so a later unrestricted "
++            + "caller still sees every row");
++
++        cache.RequestedKeys.Count(k => k == tenantKey).Should().Be(3,
++            "all three callers read the one tenant-wide list key (no scope hash in the key)");
++    }
++}

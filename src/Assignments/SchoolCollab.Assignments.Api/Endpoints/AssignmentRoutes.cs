@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using System.Security.Claims;
+using SchoolCollab.Assignments.Api.Auth;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ApproveAssignmentCommand;
@@ -57,27 +59,174 @@ public sealed record StageQuestionsDraftBody(IReadOnlyList<NewQuestionDto> Quest
 
 public static class AssignmentRoutes
 {
-    public static RouteGroupBuilder MapAssignmentRoutes(this RouteGroupBuilder group)
+    /// <summary>
+    /// The six teacher-portal GET reads (round <c>teacher-scope-auth</c> D3/D4) — exactly the
+    /// routes the reader policy decorates (see <see cref="AssignmentEndpoints"/>). Their caller's
+    /// <see cref="TeacherScope"/> is resolved HERE, at the endpoint, and threaded onto the query;
+    /// no Core handler fetches it. Everything else the <c>/assignments</c> group serves stays in
+    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal.
+    /// </summary>
+    public static RouteGroupBuilder MapAssignmentReaderRoutes(this RouteGroupBuilder group)
     {
+        // GET /assignments — [P1-3] the scope filter is applied by the handler AFTER the
+        // tenant-wide cache read (assignments:list:{tenantId}:{status}), never inside the cached
+        // delegate: filtering there would serve one teacher's list to every other caller in the
+        // tenant.
         group.MapGet("/", async (
             [FromQuery] AssignmentStatus? status,
+            ClaimsPrincipal user,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] ITeacherScopeProvider scopeProvider,
             [FromServices] IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]> handler,
             CancellationToken ct) =>
         {
-            var query = new ListAssignmentsQuery(status);
-            var results = await handler.HandleAsync(query, ct);
+            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
+            var results = await handler.HandleAsync(new ListAssignmentsQuery(status, scope), ct);
             return Results.Ok(results);
         });
 
+        // GET /assignments/{id} — [P2-2] the read is reachable by id, so it applies the same
+        // visibility rule as the list and answers 404 for an out-of-scope id.
         group.MapGet("/{id:guid}", async (
             Guid id,
+            ClaimsPrincipal user,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] ITeacherScopeProvider scopeProvider,
             [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> handler,
             CancellationToken ct) =>
         {
-            var result = await handler.HandleAsync(new GetAssignmentByIdQuery(id), ct);
+            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
+            var result = await handler.HandleAsync(new GetAssignmentByIdQuery(id, scope), ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
+        // Submissions for an assignment (teacher review/grade queue, spec §12).
+        // [P2-2] the id-addressed read is gated on the assignment's visibility first — an
+        // out-of-scope id is a 404, exactly like an unknown one.
+        group.MapGet("/{id:guid}/submissions", async (
+            Guid id,
+            ClaimsPrincipal user,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] ITeacherScopeProvider scopeProvider,
+            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
+            [FromServices] IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]> handler,
+            CancellationToken ct) =>
+        {
+            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
+            if (!await IsAssignmentVisibleAsync(id, scope, assignmentHandler, ct))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(await handler.HandleAsync(new ListSubmissionsByAssignment(id), ct));
+        });
+
+        // Submission with version history + review (spec §9 GET .../submission).
+        // [P2-2] same visibility gate as the per-assignment submissions read above.
+        group.MapGet("/{id:guid}/students/{studentId:guid}/submission", async (
+            Guid id,
+            Guid studentId,
+            ClaimsPrincipal user,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] ITeacherScopeProvider scopeProvider,
+            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
+            [FromServices] IQueryHandler<GetSubmission, SubmissionDetailDto?> handler,
+            CancellationToken ct) =>
+        {
+            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
+            if (!await IsAssignmentVisibleAsync(id, scope, assignmentHandler, ct))
+            {
+                return Results.NotFound();
+            }
+
+            var result = await handler.HandleAsync(new GetSubmission(id, studentId), ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        group.MapGet("/{id:guid}/submissions/review-queue", async (
+            Guid id,
+            Guid teacherId,
+            ClaimsPrincipal user,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] IFeatureFlagService featureFlags,
+            [FromServices] ITeacherScopeProvider scopeProvider,
+            [FromServices] IQueryHandler<GetSubmissionsForReview, SubmissionForReviewDto[]> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
+
+                // ar-24: the acting teacher is resolved principal-first (R4).
+                var isRealAuth = !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth);
+                var effectiveTeacherId = currentUser.TeacherId
+                    ?? (isRealAuth
+                        ? throw new MissingTeacherPrincipalException("GetSubmissionsForReview")
+                        : teacherId);
+
+                // [P1-4] the scope — not the wire value — decides what the queue returns: a
+                // teacher-only principal with no teacher_id claim carries an EMPTY scope, so the
+                // dev `teacherId` fallback above cannot widen the result set.
+                return Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(effectiveTeacherId, scope), ct));
+            }
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            catch (TeacherTenantMismatchException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+        });
+
+        // Per-ward sign-off status rows for the teacher surface (the card on
+        // Detail). [P2-2] this read is id-addressed too, so it goes through the same
+        // visibility gate as `GET /{id}/submissions` — an out-of-scope id answers like an
+        // unknown one (404) instead of returning the rows behind it. 404 when the
+        // assignment is missing.
+        group.MapGet("/{id:guid}/sign-off-statuses", async (
+            Guid id,
+            ClaimsPrincipal user,
+            [FromServices] ICurrentUser currentUser,
+            [FromServices] ITeacherScopeProvider scopeProvider,
+            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
+            [FromServices] IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>> handler,
+            CancellationToken ct) =>
+        {
+            var scope = await AssignmentScopeResolver.ResolveAsync(user, currentUser, scopeProvider, ct);
+            if (!await IsAssignmentVisibleAsync(id, scope, assignmentHandler, ct))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var statuses = await handler.HandleAsync(new ListSignOffStatusesQuery(id), ct);
+                return Results.Ok(statuses);
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        return group;
+    }
+
+    /// <summary>
+    /// [P2-2] Whether the id-addressed assignment is inside the caller's scope. The scope-aware
+    /// detail read is the single gate, so a scoped caller's out-of-scope id answers like an
+    /// unknown one (404) instead of leaking the rows behind it.
+    /// </summary>
+    private static async Task<bool> IsAssignmentVisibleAsync(
+        Guid id,
+        TeacherScope scope,
+        IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> assignmentHandler,
+        CancellationToken ct)
+        => await assignmentHandler.HandleAsync(new GetAssignmentByIdQuery(id, scope), ct) is not null;
+
+    public static RouteGroupBuilder MapAssignmentRoutes(this RouteGroupBuilder group)
+    {
         // ── Authoring child read (assignment-authoring P1 rework) ─────────────
         // The Edit surface loads one assignment's persisted questions / attachments /
         // resources BEFORE it renders those editors: a non-null-but-empty collection
@@ -789,24 +938,6 @@ public static class AssignmentRoutes
             return Results.NoContent();
         });
 
-        // Submissions for an assignment (teacher review/grade queue, spec §12).
-        group.MapGet("/{id:guid}/submissions", async (
-            Guid id,
-            [FromServices] IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]> handler,
-            CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListSubmissionsByAssignment(id), ct)));
-
-        // Submission with version history + review (spec §9 GET .../submission).
-        group.MapGet("/{id:guid}/students/{studentId:guid}/submission", async (
-            Guid id,
-            Guid studentId,
-            [FromServices] IQueryHandler<GetSubmission, SubmissionDetailDto?> handler,
-            CancellationToken ct) =>
-        {
-            var result = await handler.HandleAsync(new GetSubmission(id, studentId), ct);
-            return result is null ? Results.NotFound() : Results.Ok(result);
-        });
-
         // Guardian review (Primary). spec §9: .../students/{studentId}/guardian-review.
         group.MapPost("/{id:guid}/students/{studentId:guid}/guardian-review", async (
             Guid id,
@@ -1007,53 +1138,7 @@ public static class AssignmentRoutes
             }
         });
 
-        group.MapGet("/{id:guid}/submissions/review-queue", async (
-            Guid id,
-            Guid teacherId,
-            [FromServices] ICurrentUser currentUser,
-            [FromServices] IFeatureFlagService featureFlags,
-            [FromServices] IQueryHandler<GetSubmissionsForReview, SubmissionForReviewDto[]> handler,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                // ar-24: the acting teacher is resolved principal-first (R4).
-                var isRealAuth = !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth);
-                var effectiveTeacherId = currentUser.TeacherId
-                    ?? (isRealAuth
-                        ? throw new MissingTeacherPrincipalException("GetSubmissionsForReview")
-                        : teacherId);
-                return Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(effectiveTeacherId), ct));
-            }
-            catch (MissingTeacherPrincipalException ex)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
-            }
-            catch (TeacherTenantMismatchException ex)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
-            }
-        });
-
         // ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ───────────────────
-
-        // Per-ward sign-off status rows for the teacher surface (the card on
-        // Detail). 404 when the assignment is missing.
-        group.MapGet("/{id:guid}/sign-off-statuses", async (
-            Guid id,
-            [FromServices] IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>> handler,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                var statuses = await handler.HandleAsync(new ListSignOffStatusesQuery(id), ct);
-                return Results.Ok(statuses);
-            }
-            catch (AssignmentNotFoundException)
-            {
-                return Results.NotFound();
-            }
-        });
 
         // Guardian e-signs a ward's submission. Captures the caller IP + user-agent
         // at the endpoint and threads them into the command for the audit event
