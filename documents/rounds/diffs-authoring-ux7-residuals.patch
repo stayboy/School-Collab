@@ -1,0 +1,1407 @@
+diff --git a/documents/specs/assignment-authoring-compartments.md b/documents/specs/assignment-authoring-compartments.md
+index 9e8b6e33..7f46e6d4 100644
+--- a/documents/specs/assignment-authoring-compartments.md
++++ b/documents/specs/assignment-authoring-compartments.md
+@@ -425,7 +425,31 @@ new extraction dependency and a change to the AI generation contract.
+ 
+ ---
+ 
+-## 17. References
++## 17. Deferred / known gaps
++
++These residuals are **recorded, not silently dropped**: each was found by a review or UI-tester pass,
++judged non-blocking for the round that found it, and has no owner yet. `documents/rounds/` is
++declared ephemeral (`documents/rounds/README.md`), so this table is their durable home — extend it
++when a round defers something, and strike an entry (naming the round that closed it) when it is
++done rather than letting this list drift away from the code.
++
++| Gap | What is missing | What it takes to close |
++|---|---|---|
++| **P2-c — transaction rollback is unproven** (found in R2) | `LinkAssignmentGroupsHandler` performs the target update and the legacy link replace inside one explicit EF Core transaction, but that is **verified by inspection only**. No test proves a mid-transaction failure leaves targets and links consistent: the InMemory test fixture suppresses `TransactionIgnoredWarning`, so the rollback path is never exercised. | A failure-injection test in `tests/SchoolCollab.Assignments.Tests.Integration` (Testcontainers/PostgreSQL) that faults the second write and asserts the first was rolled back. |
++| **Archived-group relink is refused with 422** (R1) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore drops ids the picker cannot represent, and the author is told nothing. The link stays readable but is not re-writable. | Either a relink route that accepts an unchanged archived id, or a UX path that names the dead link on the page. |
++| **`ReloadAsync` re-reads the summary only** (R1) | After a lifecycle action (publish / unpublish / close / archive) the surface re-reads `GET /assignments/{id}` — the scalar summary — but **not** the authoring children or the target rows, so a status change that altered the persisted set is not reflected until the page is loaded again. | Reuse the initial load path (`LoadChildrenAsync` + `LoadLinkedGroupIdsAsync`) in the reload. |
++| **F4 — a restored student target renders a fallback chip** (R2) | Restoring the constraints Everyone replaced (F4) puts the ids back, but the student picker's option labels are not re-resolved, so a restored student target shows the `Student <id8>` fallback chip until the picker is touched. A **loaded** student target already renders that way, so this is consistent rather than new. | Re-run the student search for the restored ids and keep the option objects in `_selectedStudentOptions`. |
++| **A read-only View has no reason to convey** (R2, verified benign) | The grades / streams / students pickers carry a hard-coded `aria-describedby="authoring-audience-constraint-reason"`. The only state where that paragraph is absent is a plain read-only View, where no reason exists and the controls are disabled by `IsReadOnly` — so the idref does not actually dangle on a control that had something to say. | None while that reasoning holds; re-check if a reason is ever introduced on a read-only surface. |
++| **The students picker cannot name its reason** (F15, discovered on FluentUI 4.14.2) | `FluentAutocomplete` puts the component `Id` on its inner `<fluent-text-field>` and owns that element's aria surface (combobox role, `aria-label`, `aria-expanded`, `aria-controls`), so the `aria-describedby` the page declares on it is **dropped, not forwarded** — the picker disabled by the constraint gate has no accessible reason, while its four sibling controls do. | Wrap the autocomplete and set the attribute on the wrapper (or upgrade FluentUI and forward it). Pinned by `AssignmentAuthoringBunitTests.AssertEveryDisabledConstraintControlNamesARenderedReason`, which fails if a FluentUI version starts forwarding the attribute — extend its loop then. |
++
++The R2 UI P2 backlog (**F7** kebab disabled-without-reason, **F12** empty-state preview wording,
++**F13** first-render debounce delay, **F15** per-row reason placement, **F17** missing
++`OnParametersSet`) and the spec'd-but-unimplemented **UX-7** (§4) were closed by round
++`authoring-ux7-residuals`; the table above is what remains open.
++
++---
++
++## 18. References
+ 
+ - `documents/specs/assignment-request-feature-spec.md` — AR feature set, personas, lifecycle.
+ - `documents/specs/assignment-policy.md` — policy field set, resolution, enforcement, grade-detail UI.
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+index e092cf21..326966e4 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+@@ -4,13 +4,15 @@
+ @using SchoolCollab.Core.Features
+ @using SchoolCollab.Students.Application.Services
+ @using SchoolCollab.Students.Core.Domain
++@using Microsoft.JSInterop
+ @inject AssignmentsApiClient Api
+ @inject StudentsApiClient StudentsApi
+ @inject IFeatureFlagService FeatureFlags
+ @inject IDialogService DialogService
+ @inject NavigationManager Nav
++@inject IJSRuntime JS
+ @inject ILogger<AssignmentAuthoring> Logger
+-@implements IDisposable
++@implements IAsyncDisposable
+ 
+ @*
+     The ONE compartmentalized assignment authoring surface
+@@ -29,6 +31,12 @@
+     Policy-derived values follow UX-13 — read-only resolved values with an
+     "Inherited from Grade/Tenant policy" badge, never an editable control.
+ 
++    UX-7 (D2/D3): leaving the page with unsaved changes is guarded on BOTH paths — an in-app
++    navigation is cancelled by a registered location-changing handler and confirmed with the
++    shared FluentUI dialog, while a tab close / reload / external URL is covered by the collocated
++    ``AssignmentAuthoring.razor.js`` module's ``window.beforeunload`` listener. "Unsaved" is a
++    BASELINE COMPARISON against the loaded state, never an event flag.
++
+     Out of scope for R1 (R2/R3): multi-constraint targeting + recipient preview, attachment
+     grounded AI generation.
+ *@
+@@ -199,6 +207,16 @@
+                                         Disabled="@(IsReadOnly || AudienceEditorDisabledReason is not null)" />
+                     </FormRow>
+ 
++                    @* F15: the reason the four constraint pickers below are unavailable renders
++                       WITH the group it explains — immediately after the Everyone toggle and above
++                       the first picker row — instead of after the last one, so the paragraph a
++                       reader (or an assistive tech idref) reaches is beside the controls it
++                       describes. *@
++                    @if (ConstraintPickersDisabledReason is not null)
++                    {
++                        <p class="authoring-reason" id="authoring-audience-constraint-reason">@ConstraintPickersDisabledReason</p>
++                    }
++
+                     <FormRow Label="Grade levels" For="authoring-audience-grades" AlignTop>
+                         <FluentSelect TOption="PickerOption" Id="authoring-audience-grades"
+                                       Items="@_gradeLevelOptions"
+@@ -273,11 +291,6 @@
+                         <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
+                     }
+ 
+-                    @if (ConstraintPickersDisabledReason is not null)
+-                    {
+-                        <p class="authoring-reason" id="authoring-audience-constraint-reason">@ConstraintPickersDisabledReason</p>
+-                    }
+-
+                     @* The selected constraints as chips in DisplayOrder; removal re-indexes 0..n-1. *@
+                     <div class="authoring-target-chips" id="authoring-audience-targets">
+                         @if (TargetChips.Count == 0)
+@@ -533,6 +546,28 @@
+         "The activity groups already linked to this assignment could not be loaded, so this picker is " +
+         "disabled — saving would replace the existing links. Reload the page to try again.";
+ 
++    // ── UX-7: the unsaved-changes guard (D2/D3) ─────────────────────────────
++
++    /// <summary>UX-7 (D2) in-app half: the confirmation shown when a navigation would discard
++    /// authored-but-unsaved values.</summary>
++    public const string UnsavedChangesMessage =
++        "This assignment has unsaved changes — leaving now discards them.";
++
++    /// <summary>UX-7 (D2): the confirmation's primary action — leaves and discards.</summary>
++    public const string UnsavedChangesDiscardAction = "Discard changes";
++
++    /// <summary>UX-7 (D2): the confirmation's secondary action — cancels the navigation and stays.
++    /// The guard cancels on ANY non-discard outcome (secondary, ESC, overlay click), so staying is
++    /// always the safe default.</summary>
++    public const string UnsavedChangesKeepEditingAction = "Keep editing";
++
++    /// <summary>UX-7 (D2) browser-unload half: the collocated module that owns
++    /// <c>window.beforeunload</c>. Collocated <c>*.razor.js</c> is served from the Razor class
++    /// library's static-web-asset root (<c>_content/{assembly}/…</c>), the
++    /// <c>fileDownload.js</c> precedent.</summary>
++    public const string BeforeUnloadModulePath =
++        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor.js";
++
+     /// <summary>The requested mode (UX-9). <see cref="AssignmentAuthoringMode.Edit"/> degrades
+     /// to <see cref="AssignmentAuthoringMode.View"/> for a Published/Closed/Archived
+     /// assignment — see <see cref="EffectiveMode"/>.</summary>
+@@ -559,6 +594,32 @@
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+ 
++    /// <summary>F17: the <see cref="Id"/> and <see cref="Mode"/> the current instance state was
++    /// loaded from. <see cref="OnParametersSetAsync"/> reloads when either CHANGES (the host page
++    /// swapping the route parameter reuses this instance) and returns immediately when the same
++    /// values are re-set, so the reload can never loop.</summary>
++    private Guid? _loadedId;
++    private AssignmentAuthoringMode? _loadedMode;
++
++    /// <summary>UX-7 (D3): the save payload the LOADED state implies — the baseline the current
++    /// form is compared against. Null until the first load settles (there is nothing to compare
++    /// yet); refreshed whenever the form's content becomes the persisted state again.
++    /// <para>A baseline rather than an event flag on purpose: a field changed and then changed back
++    /// compares equal, so reverting an edit does not leave a phantom prompt behind. That false
++    /// prompt is how authors learn to click through a guard.</para></summary>
++    private string? _dirtyBaseline;
++
++    /// <summary>UX-7 (D2): the in-app navigation registration, owned and disposed by this
++    /// component.</summary>
++    private IDisposable? _locationChangingRegistration;
++
++    /// <summary>UX-7 (D2): the collocated module that owns <c>window.beforeunload</c>, plus whether
++    /// its listener is currently attached — so each dirty-state change crosses the JS boundary once
++    /// and the listener exists exactly while there is something to lose. Lazy: a form that was never
++    /// edited never imports the module.</summary>
++    private IJSObjectReference? _beforeUnloadModule;
++    private bool _beforeUnloadRegistered;
++
+     /// <summary>D-4 (TGT-16): the trailing preview debounce interval, and the CTS that cancels a
+     /// pending/stale preview call whenever a further constraint change lands.</summary>
+     private static readonly TimeSpan PreviewDebounce = TimeSpan.FromMilliseconds(500);
+@@ -949,6 +1010,12 @@
+     public const string PreviewAuthorOnlyNote =
+         "Recipient counts are resolved for authors on the edit surface.";
+ 
++    /// <summary>F12: with no audience target authored the preview area points at the missing step
++    /// instead of rendering "Students matched: 0" — the server answers zero for an empty audience,
++    /// so a bare count reads as a resolved audience of nobody rather than as work not done yet.</summary>
++    public const string PreviewNoTargetsHint =
++        "No audience targets yet — add one above to see how many students this assignment reaches.";
++
+     private string PreviewText
+     {
+         get
+@@ -958,6 +1025,13 @@
+                 return PreviewAuthorOnlyNote;
+             }
+ 
++            // F12: nothing is authored to preview, so the hint replaces both the pending line and
++            // the meaningless zero the server would report.
++            if (_model.Targets.Count == 0)
++            {
++                return PreviewNoTargetsHint;
++            }
++
+             return _preview is null
+                 ? "Preview pending…"
+                 : $"Students matched: {_preview.StudentsMatched} \u00b7 Contacts reachable: " +
+@@ -1033,13 +1107,161 @@
+         .Distinct()
+         .ToList();
+ 
+-    // ── Lifecycle ─────────────────────────────────────────────────────────────
++    // ── UX-7: the unsaved-changes guard (D2) ─────────────────────────────────
++
++    /// <summary>
++    /// UX-7 (D3): true when a save from this form would write something different from what was
++    /// loaded — a BASELINE COMPARISON of the save payload, not an edit event. Read-only surfaces
++    /// carry no unsaved work, and a load in flight is not an author edit.
++    /// </summary>
++    private bool IsDirty =>
++        !IsReadOnly && !_loading && _dirtyBaseline is not null && CaptureSaveSnapshot() != _dirtyBaseline;
++
++    /// <summary>UX-7 (D3): the payload this form would save — the model's own fields plus the
++    /// page-level values that live outside it, passed exactly as the save passes them, so "dirty"
++    /// means "the next save would differ" and nothing else.</summary>
++    private string CaptureSaveSnapshot() => _model.CaptureSaveSnapshot(
++        SelectedType ?? AssignmentTypeDto.Manual,
++        SelectedGradingFormat,
++        DerivedTargetAudience,
++        TopicId ?? Guid.Empty,
++        GradeLevelId,
++        _mandatoryReview,
++        _requiresSignature);
++
++    /// <summary>UX-7 (D3): moves the baseline onto the form's current content — the two moments the
++    /// form IS the persisted state: the end of a load, and the component's own exit after a save
++    /// (see <see cref="NavigateToSavedState"/>).</summary>
++    private void CaptureDirtyBaseline() => _dirtyBaseline = CaptureSaveSnapshot();
++
++    /// <summary>
++    /// UX-7 (D2) in-app half: cancels a navigation that would discard unsaved work, after
++    /// confirming the discard with the shared FluentUI dialog. A non-dirty form returns immediately,
++    /// so the guard never stands between an author and an ordinary link.
++    /// </summary>
++    private async ValueTask OnLocationChangingAsync(LocationChangingContext context)
++    {
++        if (!IsDirty)
++        {
++            return;
++        }
++
++        var discard = await DialogService.ShowConfirmDialogAsync(
++            UnsavedChangesMessage,
++            UnsavedChangesDiscardAction,
++            UnsavedChangesKeepEditingAction,
++            title: "Unsaved changes");
++
++        if (!discard)
++        {
++            context.PreventNavigation();
++        }
++    }
++
++    /// <summary>
++    /// UX-7 (D2) browser-unload half: mirrors the dirty state onto the collocated module's
++    /// <c>window.beforeunload</c> listener — the only mechanism covering a tab close, a reload or an
++    /// external URL, none of which an in-app handler sees. It can only trigger the browser's own
++    /// prompt (a beforeunload handler is not allowed to show anything of its own), which is why both
++    /// halves exist. The listener is attached exactly while the form is dirty.
++    /// <para>Read-only is deliberately NOT an early return: <see cref="IsDirty"/> is already false
++    /// on a read-only surface, so the state machine still has to run through to the unregister on
++    /// the dirty→clean transition a lifecycle action performs (Publish/Unpublish/Close/Archive
++    /// flip <see cref="EffectiveMode"/> to View) — returning early there would leave the listener
++    /// armed on a page with nothing left to lose. The module import stays lazy: it happens on the
++    /// dirty edge only.</para>
++    /// </summary>
++    private async Task SyncBeforeUnloadGuardAsync()
++    {
++        if (_disposed)
++        {
++            return;
++        }
++
++        var dirty = IsDirty;
++        if (dirty == _beforeUnloadRegistered)
++        {
++            return;
++        }
++
++        try
++        {
++            _beforeUnloadModule ??= await JS.InvokeAsync<IJSObjectReference>("import", BeforeUnloadModulePath);
++            await _beforeUnloadModule.InvokeVoidAsync(
++                dirty ? "registerBeforeUnload" : "unregisterBeforeUnload");
++            _beforeUnloadRegistered = dirty;
++        }
++        catch (JSDisconnectedException)
++        {
++            // The circuit closed between the render and the call — nothing to surface, and the
++            // listener went with the page it belonged to.
++        }
++        catch (TaskCanceledException)
++        {
++        }
++    }
++
++    /// <summary>UX-7 (D3): the component's own exit after a successful save — the baseline moves
++    /// with the form, so the guard cannot prompt on a navigation the page itself started.</summary>
++    private void NavigateToSavedState(string url)
++    {
++        CaptureDirtyBaseline();
++        Nav.NavigateTo(url);
++    }
++
++    // ── Lifecycle ───────────────────────────────────────────────────────────
++
++    protected override Task OnInitializedAsync() => LoadAsync();
++
++    /// <summary>
++    /// F17: Blazor reuses this component instance when the host swaps the route parameter —
++    /// <c>/assignments/{a}/edit</c> → <c>/assignments/{b}/edit</c> is the same component type at the
++    /// same render-tree position, so only <see cref="Id"/> changes and assignment A's loaded state
++    /// would stay on screen under B's URL (the R2 F1 defect class: a stale-write path). Reload when
++    /// — and only when — <see cref="Id"/> or <see cref="Mode"/> CHANGED, compared against what the
++    /// current state was loaded from, so a re-set of the same values never re-enters the load.
++    /// <para>Unsaved work is protected upstream by the UX-7 navigation guard, which runs before a
++    /// navigation can change the parameter — by the time this reload happens the author has accepted
++    /// the discard, so the reload is never silent.</para>
++    /// </summary>
++    protected override async Task OnParametersSetAsync()
++    {
++        if (_loadedId == Id && _loadedMode == Mode)
++        {
++            return;
++        }
++
++        await LoadAsync();
++    }
++
++    protected override async Task OnAfterRenderAsync(bool firstRender)
++    {
++        if (firstRender)
++        {
++            // UX-7 (D2): registered once per instance — a reload for another assignment keeps this
++            // same instance and needs no second registration — and disposed with the component.
++            _locationChangingRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
++        }
++
++        await SyncBeforeUnloadGuardAsync();
++    }
+ 
+-    protected override async Task OnInitializedAsync()
++    /// <summary>
++    /// The one load path: <see cref="OnInitializedAsync"/> runs it for a fresh instance and
++    /// <see cref="OnParametersSetAsync"/> runs it again when the host swapped <see cref="Id"/> or
++    /// <see cref="Mode"/> (F17).
++    /// </summary>
++    private async Task LoadAsync()
+     {
++        _loadedId = Id;
++        _loadedMode = Mode;
++
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
+         _loadCts = new CancellationTokenSource();
+         var ct = _loadCts.Token;
+-        _loading = Mode != AssignmentAuthoringMode.Create;
++
++        ResetLoadState();
+ 
+         try
+         {
+@@ -1102,9 +1324,6 @@
+ 
+             // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock (best-effort, fail-open).
+             await LoadAiPromptPolicyAsync(ct);
+-
+-            // TGT-16/D-4: the preview resolves in every editable mode; it never persists.
+-            await SchedulePreviewAsync();
+         }
+         catch (OperationCanceledException) { }
+         catch (Exception ex)
+@@ -1117,6 +1336,60 @@
+         {
+             if (!_disposed) _loading = false;
+         }
++
++        // UX-7 (D3): what was just loaded is the baseline the guard compares against.
++        CaptureDirtyBaseline();
++
++        // F13 (D6): the advisory preview does not hold the first render behind its own 500 ms
++        // trailing debounce — awaiting it here kept a spinner in front of a form that was already
++        // fully loaded. The debounce's CTS owns this call's lifetime (a further constraint change
++        // cancels it), so an unawaited schedule is well-defined.
++        _ = SchedulePreviewAsync();
++    }
++
++    /// <summary>
++    /// F17: clears every projection the load re-derives, so a reused instance (the host page swapped
++    /// <see cref="Id"/>/<see cref="Mode"/>) can never render the previous assignment's picker
++    /// selection, search results or preview beside the new assignment's fields. The form model's own
++    /// fields are re-projected wholesale by <c>LoadFrom</c> + <c>LoadChildren</c>, so only the
++    /// page-level mirrors are cleared here.
++    /// </summary>
++    private void ResetLoadState()
++    {
++        _item = null;
++        _error = null;
++        _loading = Mode != AssignmentAuthoringMode.Create;
++
++        _selectedType = null;
++        _selectedGradingFormat = null;
++        _mandatoryReview = true;
++        _requiresSignature = false;
++        _signatureMandatory = false;
++        _resolvedSignatureMode = null;
++        _aiPromptLocked = false;
++
++        _childrenLoaded = false;
++        _groupLinksLoaded = false;
++        _loadedGroupIds.Clear();
++        _groupLinksUnavailableReason = null;
++
++        _gradeLevels = null;
++        _gradeLevelOptions = [];
++        _selectedGradeLevel = null;
++        _subjects = null;
++        _subjectOptions = [];
++        _selectedSubject = null;
++        _activityGroupOptions = [];
++        _selectedGroupIds = [];
++        _groupSubjects = null;
++        _groupSubjectOptions = [];
++        _streamOptions = [];
++        _studentOptions = [];
++        _selectedStudentOptions.Clear();
++
++        _everyone = false;
++        _preview = null;
++        _previewDegraded = false;
+     }
+ 
+     /// <summary>Loads grade levels, activity groups (flag-gated) and, for a loaded assignment,
+@@ -1750,7 +2023,11 @@
+     }
+ 
+     private RowAction GenerateQuestionsAction() =>
+-        RowAction.Navigate("Generate questions", "#authoring-questions", FluentIcons.Bot, disabled: !GateEnabled);
++        RowAction.Navigate("Generate questions", "#authoring-questions", FluentIcons.Bot,
++            disabled: !GateEnabled,
++            // F7: a greyed-out action explains itself instead of being a dead end (the compartment's
++            // own hint is shown there too, but the kebab is where the author meets the refusal).
++            disabledReason: GateEnabled ? null : QuestionGenerationGate.DisabledHint);
+ 
+     private async Task OnPrimaryActionAsync()
+     {
+@@ -1813,7 +2090,7 @@
+                 }
+ 
+                 await Changed.InvokeAsync();
+-                Nav.NavigateTo("/assignments");
++                NavigateToSavedState("/assignments");
+                 return;
+             }
+ 
+@@ -1849,7 +2126,7 @@
+ 
+             await ReloadAsync();
+             await Changed.InvokeAsync();
+-            Nav.NavigateTo($"/assignments/{Id}");
++            NavigateToSavedState($"/assignments/{Id}");
+         }
+         catch (OperationCanceledException) { }
+         catch (Exception ex)
+@@ -2102,7 +2379,7 @@
+ 
+     private void BackToList() => Nav.NavigateTo("/assignments");
+ 
+-    public void Dispose()
++    public async ValueTask DisposeAsync()
+     {
+         _disposed = true;
+         _loadCts?.Cancel();
+@@ -2113,5 +2390,40 @@
+         _previewCts?.Cancel();
+         _previewCts?.Dispose();
+         _previewCts = null;
++
++        // UX-7 (D2): the in-app navigation registration belongs to this component's lifetime.
++        _locationChangingRegistration?.Dispose();
++        _locationChangingRegistration = null;
++
++        if (_beforeUnloadModule is null)
++        {
++            return;
++        }
++
++        try
++        {
++            // UX-7 (D2): detach the browser-unload listener before releasing the module, so a stale
++            // listener cannot outlive the page it guards.
++            if (_beforeUnloadRegistered)
++            {
++                await _beforeUnloadModule.InvokeVoidAsync("unregisterBeforeUnload");
++            }
++
++            await _beforeUnloadModule.DisposeAsync();
++        }
++        catch (JSDisconnectedException)
++        {
++            // Server-side Blazor: the circuit can be lost between the call and the awaited disposal
++            // — the listener died with the page it belonged to.
++        }
++        catch (TaskCanceledException)
++        {
++            // Disposal in flight when the circuit closed — same deal.
++        }
++        finally
++        {
++            _beforeUnloadModule = null;
++            _beforeUnloadRegistered = false;
++        }
+     }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor.js b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor.js
+new file mode 100644
+index 00000000..f5211446
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor.js
+@@ -0,0 +1,43 @@
++// UX-7 (D2) — the browser-unload half of the assignment authoring page's unsaved-changes guard.
++//
++// An in-app navigation never reaches the browser (the Blazor-side location-changing handler
++// cancels it and confirms with the shared FluentUI dialog), but a tab close, a reload or a URL
++// typed into the address bar does. `window.beforeunload` is the only hook for those, and the
++// platform forbids it from showing anything of its own: setting `preventDefault()` (or returning
++// a non-empty string, in the legacy spelling) makes the browser raise ITS OWN leave-site prompt.
++// That is why the two mechanisms coexist rather than one replacing the other.
++//
++// The module owns one listener, attached exactly while the .NET component reports unsaved work
++// and detached as soon as the work is saved, reverted or discarded — and detached again on
++// disposal, so a stale listener cannot guard a page that no longer exists. The dirty decision is
++// made in .NET (a baseline comparison against the loaded state) and pushed across the boundary
++// with register/unregister; no JavaScript callback into .NET is involved, because a synchronous
++// browser event cannot await a Blazor Server round trip.
++
++let dirtyRegistered = false;
++
++function onBeforeUnload(event) {
++    // Both spellings are required: `preventDefault()` is the standard one, and `returnValue` is
++    // what Chrome/Firefox still need to raise the prompt at all.
++    event.preventDefault();
++    event.returnValue = '';
++    return '';
++}
++
++export function registerBeforeUnload() {
++    if (dirtyRegistered) {
++        return;
++    }
++
++    window.addEventListener('beforeunload', onBeforeUnload);
++    dirtyRegistered = true;
++}
++
++export function unregisterBeforeUnload() {
++    if (!dirtyRegistered) {
++        return;
++    }
++
++    window.removeEventListener('beforeunload', onBeforeUnload);
++    dirtyRegistered = false;
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
+index f251ee85..574bbf76 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
+@@ -1,5 +1,6 @@
+ using SchoolCollab.AI.Abstractions;
+ using SchoolCollab.Assignments.Contracts;
++using System.Text.Json;
+ 
+ namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+ 
+@@ -736,6 +737,28 @@ public sealed class AssignmentEditFormModel
+         ResourceUrls.RemoveAt(index);
+     }
+ 
++    /// <summary>
++    /// UX-7 (D3): a canonical snapshot of everything a save from this form would write — the update
++    /// payload, serialized. Page-level values that live outside the model are passed in exactly as
++    /// <see cref="ToUpdateRequest"/> takes them, so two form states compare equal exactly when the
++    /// next save would write the same thing; a value changed and then changed back is equal again,
++    /// which is what makes the page's unsaved-changes guard a BASELINE comparison rather than an
++    /// event flag (an event flag prompts for a difference that no longer exists).
++    /// <para>The authored target rows always ride the snapshot — never the update path's
++    /// null-means-preserve gate — so an untouched targeting editor compares equal to itself.</para>
++    /// </summary>
++    public string CaptureSaveSnapshot(
++        AssignmentTypeDto assignmentType,
++        GradingFormatDto gradingFormat,
++        TargetAudienceTypeDto targetAudienceType,
++        Guid topicId,
++        Guid? gradeLevelId,
++        bool mandatoryReview,
++        bool requiresSignature) =>
++        JsonSerializer.Serialize(ToUpdateRequest(
++            assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
++            mandatoryReview, requiresSignature, ToTargetDtos()));
++
+     /// <summary>WS-A3 (spec §3.3 + §7 Q4) — client-side submit gate
+     /// mirroring the server-side <c>Assignment.Create</c> /
+     /// <c>Assignment.Update</c> validation rules on
+diff --git a/src/SchoolCollab.Admin.Shared/Components/RowAction.cs b/src/SchoolCollab.Admin.Shared/Components/RowAction.cs
+index d293934e..f1afcb48 100644
+--- a/src/SchoolCollab.Admin.Shared/Components/RowAction.cs
++++ b/src/SchoolCollab.Admin.Shared/Components/RowAction.cs
+@@ -31,6 +31,15 @@ public sealed class RowAction
+     /// <summary>When true, the item is greyed out and non-clickable.</summary>
+     public bool Disabled { get; init; }
+ 
++    /// <summary>
++    /// F7: WHY the action is disabled — rendered as the item's accessible description (its
++    /// <c>title</c>) on both the single-action button and the kebab item, so a greyed-out action
++    /// explains itself instead of being a dead end. Null (the default) renders no description at
++    /// all: an action that cannot name a reason must not invent one, and every existing caller keeps
++    /// its current rendering. Additive on purpose — <c>init</c>-only with a null default.
++    /// </summary>
++    public string? DisabledReason { get; init; }
++
+     /// <summary>When true, renders a horizontal divider instead of a menu item.</summary>
+     public bool IsSeparator { get; init; }
+ 
+@@ -49,18 +58,24 @@ public sealed class RowAction
+     public string? ConfirmMessage { get; init; }
+ 
+     // ── Factory helpers ──────────────────────────────────────────────────
++    //
++    // Optional parameters are APPENDED, never inserted: a new one placed beside `disabled` would
++    // silently shift every positional `destructive` / `confirmMessage` argument already passing
++    // through these factories, and this type has 22 call sites across Assignments, Settings and
++    // Students.
+ 
+     /// <summary>A menu item that navigates to <paramref name="href"/>.</summary>
+-    public static RowAction Navigate(string label, string href, Icon? icon = null, bool disabled = false) =>
+-        new() { Label = label, Href = href, Icon = icon, Disabled = disabled };
++    public static RowAction Navigate(
++        string label, string href, Icon? icon = null, bool disabled = false, string? disabledReason = null) =>
++        new() { Label = label, Href = href, Icon = icon, Disabled = disabled, DisabledReason = disabledReason };
+ 
+     /// <summary>A menu item that invokes the async <paramref name="onClick"/> callback.</summary>
+-    public static RowAction Callback(string label, Func<Task> onClick, Icon? icon = null, bool disabled = false, bool destructive = false, string? confirmMessage = null) =>
+-        new() { Label = label, OnClick = onClick, Icon = icon, Disabled = disabled, Destructive = destructive, ConfirmMessage = confirmMessage };
++    public static RowAction Callback(string label, Func<Task> onClick, Icon? icon = null, bool disabled = false, bool destructive = false, string? confirmMessage = null, string? disabledReason = null) =>
++        new() { Label = label, OnClick = onClick, Icon = icon, Disabled = disabled, Destructive = destructive, ConfirmMessage = confirmMessage, DisabledReason = disabledReason };
+ 
+     /// <summary>A menu item that invokes the synchronous <paramref name="onClick"/> callback.</summary>
+-    public static RowAction Callback(string label, Action onClick, Icon? icon = null, bool disabled = false, bool destructive = false, string? confirmMessage = null) =>
+-        new() { Label = label, OnClick = () => { onClick(); return Task.CompletedTask; }, Icon = icon, Disabled = disabled, Destructive = destructive, ConfirmMessage = confirmMessage };
++    public static RowAction Callback(string label, Action onClick, Icon? icon = null, bool disabled = false, bool destructive = false, string? confirmMessage = null, string? disabledReason = null) =>
++        new() { Label = label, OnClick = () => { onClick(); return Task.CompletedTask; }, Icon = icon, Disabled = disabled, Destructive = destructive, ConfirmMessage = confirmMessage, DisabledReason = disabledReason };
+ 
+     /// <summary>A horizontal divider between groups of actions.</summary>
+     public static RowAction Separator() =>
+diff --git a/src/SchoolCollab.Admin.Shared/Components/RowActionsMenu.razor b/src/SchoolCollab.Admin.Shared/Components/RowActionsMenu.razor
+index ec646512..dda519d9 100644
+--- a/src/SchoolCollab.Admin.Shared/Components/RowActionsMenu.razor
++++ b/src/SchoolCollab.Admin.Shared/Components/RowActionsMenu.razor
+@@ -38,7 +38,7 @@
+            destructive-confirm behavior is identical between the two
+            renderings. *@
+         <FluentButton Appearance="Appearance.Stealth"
+-                      Title="@singleAction.Label"
++                      Title="@(singleAction.DisabledReason ?? singleAction.Label)"
+                       Disabled="@singleAction.Disabled"
+                       OnClick="@(() => InvokeActionAsync(singleAction))">
+             @if (singleAction.Icon is not null)
+@@ -73,8 +73,12 @@
+             }
+             else
+             {
++                @* F7: FluentMenuItem exposes no Title parameter, so this renders as its HTML
++                   title attribute — the accessible description a disabled item would otherwise not
++                   have. A null reason renders no attribute at all (no invented text). *@
+                 <FluentMenuItem Label="@action.Label"
+                                 Disabled="@action.Disabled"
++                                Title="@action.DisabledReason"
+                                 OnClick="@(async () => await InvokeActionAsync(action))">
+                     @if (action.Icon is not null)
+                     {
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/RowActionsMenuTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/RowActionsMenuTests.cs
+index 0dc5c553..3954c0eb 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/RowActionsMenuTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/RowActionsMenuTests.cs
+@@ -72,6 +72,83 @@ public class RowActionsMenuTests : BunitContext
+         cut.Markup.Should().Contain("row-actions-btn", "2+ actions render the kebab trigger");
+     }
+ 
++    /// <summary>A disabled action that names its reason renders that reason as its accessible
++    /// description — on the single-action labeled button AND on the kebab item — so a greyed-out
++    /// action explains itself instead of being a dead end (F7).
++    /// <para>Discriminating: against the pre-F7 component the reason was never rendered (the
++    /// property does not exist and neither rendering read it).</para></summary>
++    [TestMethod]
++    public void DisabledActionWithReason_RendersTheReasonAsItsDescription()
++    {
++        var reason = "Not available for this combination — add questions by hand.";
++
++        // Single action → the labeled button.
++        var button = Render<RowActionsMenu>(p => p
++            .Add(x => x.Actions, new[]
++            {
++                RowAction.Callback("Generate questions", () => { }, FluentIcons.Bot,
++                    disabled: true, disabledReason: reason)
++            })
++            .Add(x => x.UseMenuService, false));
++
++        button.Find("fluent-button").GetAttribute("title").Should().Be(reason,
++            "F7: the disabled button's title/accessible description carries the reason");
++
++        // Two actions → the kebab, whose item must carry it too. The items only render once the
++        // trigger is opened (the shared menu renders through FluentMenu).
++        var kebab = Render<RowActionsMenu>(p => p
++            .Add(x => x.Actions, new[]
++            {
++                Edit(),
++                RowAction.Navigate("Generate questions", "#questions", FluentIcons.Bot,
++                    disabled: true, disabledReason: reason)
++            })
++            .Add(x => x.UseMenuService, false));
++        kebab.Find("fluent-button[title='More actions']").Click();
++
++        kebab.WaitForAssertion(() => kebab.FindAll("fluent-menu-item")
++            .Single(i => i.TextContent.Trim() == "Generate questions")
++            .GetAttribute("title").Should().Be(reason,
++                "F7: the kebab item's title/accessible description carries the reason too"));
++    }
++
++    /// <summary>F7's other half: an action with NO reason invents none. The enabled/disabled
++    /// single-action button keeps the label as its title and renders no description an author could
++    /// mistake for an explanation, and the kebab item renders no title attribute at all.
++    /// <para>Discriminating only for the absent-reason half: the pre-F7 component also rendered no
++    /// description, so this test guards the new property against inventing text rather than proving
++    /// the fix; the reason-rendering test above is the discriminating one.</para></summary>
++    [TestMethod]
++    public void ActionWithoutReason_KeepsItsLabelAndInventsNoDescription()
++    {
++        var enabled = Render<RowActionsMenu>(p => p
++            .Add(x => x.Actions, new[] { Edit() })
++            .Add(x => x.UseMenuService, false));
++
++        enabled.Find("fluent-button").GetAttribute("title").Should().Be("Edit",
++            "an action with no reason is unaffected by F7");
++
++        var disabled = Render<RowActionsMenu>(p => p
++            .Add(x => x.Actions, new[] { RowAction.Callback("Edit", () => { }, FluentIcons.Edit, disabled: true) })
++            .Add(x => x.UseMenuService, false));
++
++        disabled.Find("fluent-button").GetAttribute("title").Should().Be("Edit",
++            "a disabled action with no reason must not have one invented for it");
++
++        var kebab = Render<RowActionsMenu>(p => p
++            .Add(x => x.Actions, new[]
++            {
++                Edit(),
++                RowAction.Callback("Delete", () => { }, FluentIcons.Delete, disabled: true)
++            })
++            .Add(x => x.UseMenuService, false));
++        kebab.Find("fluent-button[title='More actions']").Click();
++
++        kebab.WaitForAssertion(() => kebab.FindAll("fluent-menu-item")
++            .Single(i => i.TextContent.Trim() == "Delete")
++            .GetAttribute("title").Should().BeNull("no reason, no title attribute"));
++    }
++
+     [TestMethod]
+     public void HasKebabActions_True_OnlyForTwoOrMoreNonSeparators()
+     {
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/AssignmentAuthoringSpecGapsTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/AssignmentAuthoringSpecGapsTests.cs
+new file mode 100644
+index 00000000..7bc72d3e
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/AssignmentAuthoringSpecGapsTests.cs
+@@ -0,0 +1,86 @@
++using System;
++using System.IO;
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// D7 (round <c>authoring-ux7-residuals</c>): the durable spec carries the DEFERRED residual list.
++/// <para>
++/// This is a source-inspection guard of the kind only this project can hold: the invariants live in a
++/// document rather than in code, so no unit test of the authoring surface can see them. The reason
++/// the section has to exist at all is the repo's own folder policy — <c>documents/rounds/</c> is
++/// declared ephemeral (<c>documents/rounds/README.md</c>), so a residual "recorded" only in a round doc
++/// is deleted the next time the folder is bulk-trashed. The spec is the durable home: an open gap
++/// someone can still act on, in the file a reader consults before changing this page.
++/// </para>
++/// <para>
++/// The assertions deliberately check for FACTS about the entries (the residual's identifier, the
++/// mechanism that makes it unproven, where the proof has to live, and the other carried-over gaps)
++/// rather than for prose, so the section can be reworded freely while still having to stay honest.
++/// </para>
++/// </summary>
++[TestClass]
++public class AssignmentAuthoringSpecGapsTests
++{
++    private static readonly string SpecPath = Path.Combine(
++        FindRepoRoot(), "documents", "specs", "assignment-authoring-compartments.md");
++
++    private static readonly string Spec = File.ReadAllText(SpecPath);
++
++    /// <summary>Everything after the "Deferred / known gaps" heading, up to the next level-2 heading —
++    /// the section under test, so an assertion cannot be satisfied by text from a neighbour.</summary>
++    private static readonly string GapsSection = ExtractSection(Spec);
++
++    /// <summary>The gaps section is present, uniquely, and is a level-2 section of the durable spec.</summary>
++    [TestMethod]
++    public void Spec_CarriesTheDeferredGapsSection()
++    {
++        Regex.Matches(Spec, @"^## \d+\. Deferred / known gaps\r?$", RegexOptions.Multiline)
++            .Should().ContainSingle(
++                "D7: the residual list needs a durable home — documents/rounds/ is ephemeral, so a gap " +
++                "recorded only there is deleted with the folder");
++
++        GapsSection.Length.Should().BeGreaterThan(400,
++            "a one-line section is not an actionable record: an open gap has to say what is missing and " +
++            "what closing it takes");
++    }
++
++    /// <summary>The section names the still-open residuals with the context that makes them
++    /// actionable — at minimum the P2-c transaction-rollback proof the round deferred, plus the other
++    /// residuals carried forward rather than dropped.</summary>
++    [TestMethod]
++    public void DeferredGapsSection_NamesTheOpenResidualsWithTheirActionableContext()
++    {
++        GapsSection.Should().Contain("P2-c",
++            "the transaction-rollback proof is the residual the round explicitly deferred");
++        GapsSection.Should().Contain("rollback",
++            "and the entry has to say WHAT is unproven, not merely carry an identifier");
++        GapsSection.Should().Contain("Integration",
++            "the proof cannot live in the InMemory unit fixture, so the entry names the suite that can " +
++            "actually hold it");
++        GapsSection.Should().Contain("archived",
++            "the R1 archived-group relink residual travels with this page and must not be silently dropped");
++    }
++
++    private static string ExtractSection(string spec)
++    {
++        var match = Regex.Match(spec, @"^## \d+\. Deferred / known gaps\r?$(?<body>.*?)^## ", RegexOptions.Multiline | RegexOptions.Singleline);
++        return match.Success ? match.Groups["body"].Value : string.Empty;
++    }
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "documents", "specs")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repo root (documents/specs) from " + AppContext.BaseDirectory);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+index 338b1a4c..e802f445 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+@@ -4,11 +4,13 @@ using System.Text.Json;
+ using System.Text.Json.Serialization;
+ using Bunit;
+ using FluentAssertions;
++using Microsoft.AspNetCore.Components;
+ using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Logging;
+ using Microsoft.FluentUI.AspNetCore.Components;
+ using Moq;
+ using RichardSzalay.MockHttp;
++using SchoolCollab.Admin.Shared.Components.Dialogs;
+ using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+ using SchoolCollab.Assignments.Application.Helpers;
+ using SchoolCollab.Assignments.Application.Services;
+@@ -1394,6 +1396,536 @@ public class AssignmentAuthoringBunitTests : BunitContext
+         createBody.Should().BeNull("the FR-58 union gate blocks the save before any request is sent");
+     }
+ 
++    // ── UX-7 (D2/D3): the unsaved-changes guard ──────────────────────────────
++
++    /// <summary>
++    /// Registers a mocked <see cref="IDialogService"/> whose confirmation outcome is fixed
++    /// (<c>true</c> = the discard was confirmed) and which records every confirmation the page asks
++    /// for (the <c>PeriodEditPageTests</c> / <c>ContactsEditorTests</c> pattern; the mocked service
++    /// must be registered BEFORE rendering, because the page resolves it at construction). The
++    /// <see cref="ConfirmDialogContent"/> is what <c>ShowConfirmDialogAsync</c> hands FluentUI, so
++    /// recording it pins the wording and the button roles the author actually reads.
++    /// </summary>
++    private void RegisterConfirmationDialog(bool confirm, List<ConfirmDialogContent> captured)
++    {
++        var dialogRef = new Mock<IDialogReference>();
++        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
++            confirm ? DialogResult.Ok<object>(null!) : DialogResult.Cancel()));
++
++        var dialogMock = new Mock<IDialogService>();
++        dialogMock
++            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
++                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
++            .Callback<ConfirmDialogContent, DialogParameters>((content, _) => captured.Add(content))
++            .ReturnsAsync(dialogRef.Object);
++
++        Services.AddSingleton(dialogMock.Object);
++    }
++
++    /// <summary>
++    /// Mocks the PublishDialog shell open so the primary action's publish round trip completes:
++    /// <c>ShowShellDialogAsync&lt;PublishDialog, PublishFormModel, PublishResult&gt;</c> resolves to
++    /// <c>ShowDialogAsync&lt;PublishDialog, DialogShellData&lt;PublishFormModel&gt;&gt;</c>, and the
++    /// dialog Result carries the <see cref="DialogShellResult{TResult}"/> the extension unwraps into
++    /// the typed result (the <c>AssignmentDetailBunitTests</c> schedule-dialog pattern).
++    /// </summary>
++    private void RegisterPublishDialog()
++    {
++        var dialogRef = new Mock<IDialogReference>();
++        var payload = new DialogShellResult<PublishResult>(new PublishResult(null));
++        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(payload)));
++
++        var dialogMock = new Mock<IDialogService>();
++        dialogMock
++            .Setup(d => d.ShowDialogAsync<PublishDialog, DialogShellData<PublishFormModel>>(
++                It.IsAny<DialogShellData<PublishFormModel>>(), It.IsAny<DialogParameters>()))
++            .ReturnsAsync(dialogRef.Object);
++
++        Services.AddSingleton(dialogMock.Object);
++    }
++
++    /// <summary>The rendered fragment's navigation target, i.e. what an in-app navigation would
++    /// commit to if no location-changing handler cancelled it.</summary>
++    private NavigationManager Navigation => Services.GetRequiredService<NavigationManager>();
++
++    /// <summary>UX-7 criterion 1 (D2 in-app half): a navigation away from a form with unsaved work is
++    /// cancelled and confirmed through the shared FluentUI dialog. The target here is ANOTHER
++    /// assignment's edit URL — the exact reuse case F17 covers — so the guard is what stands between
++    /// the author and their unsaved work being replaced.
++    /// <para>Discriminating: against `66c2676a` the page registered no handler, so the fake
++    /// navigation committed and no confirmation was ever asked for.</para></summary>
++    [TestMethod]
++    public async Task UnsavedChanges_InAppNavigation_IsCancelledAndConfirmed()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: false, captured);
++
++        var dto = MakeDto(AssignmentStatusDto.Draft);
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        await SetTitleAsync(cut, "Edited title");
++
++        var before = Navigation.Uri;
++        Navigation.NavigateTo($"/assignments/{Guid.NewGuid()}/edit");
++
++        cut.WaitForAssertion(() => captured.Should().HaveCount(1,
++            "UX-7: leaving a form with unsaved changes raises the confirmation"));
++        captured[0].Message.Should().Be(Authoring.UnsavedChangesMessage);
++        captured[0].PrimaryText.Should().Be(Authoring.UnsavedChangesDiscardAction);
++        captured[0].SecondaryText.Should().Be(Authoring.UnsavedChangesKeepEditingAction);
++
++        Navigation.Uri.Should().Be(before,
++            "the navigation was cancelled — a guard that prompts but navigates anyway has lost the work " +
++            "it was asked to protect");
++        cut.Markup.Should().Contain("Edited title", "the authored value is still on screen");
++    }
++
++    /// <summary>UX-7 criterion 1 (the fail-safe half): a form with NOTHING unsaved navigates through
++    /// untouched — a guard that always prompts is as broken as none at all, and asking here would
++    /// train the author to dismiss the one prompt that matters.
++    /// <para>Not itself discriminating (both trees navigate); it is the non-vacuity anchor for the
++    /// interception above.</para></summary>
++    [TestMethod]
++    public void UnchangedForm_InAppNavigation_ProceedsWithoutAConfirmation()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: false, captured);
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        Navigation.NavigateTo("/assignments");
++
++        cut.WaitForAssertion(() => Navigation.Uri.Should().EndWith("/assignments"));
++        captured.Should().BeEmpty("a clean form is never questioned");
++    }
++
++    /// <summary>UX-7 (D2): confirming the discard lets the navigation through — the guard cancels
++    /// only on a non-discard outcome. Discriminating: against `66c2676a` no confirmation was raised
++    /// at all (the second assertion), so the interception's contract is not vacuous.
++    /// <para>The confirmation is asked for as part of the navigation; the navigation then proceeds on
++    /// the same call, so the "asked" and "proceeded" halves are asserted together.</para></summary>
++    [TestMethod]
++    public async Task UnsavedChanges_DiscardConfirmed_NavigationProceeds()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: true, captured);
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++        await SetTitleAsync(cut, "Edited title");
++
++        Navigation.NavigateTo("/assignments");
++
++        cut.WaitForAssertion(() => Navigation.Uri.Should().EndWith("/assignments"));
++        captured.Should().HaveCount(1, "the discard was confirmed only after the prompt was raised");
++    }
++
++    /// <summary>UX-7 criterion 2 (D3, the baseline comparison): a value changed and then changed back
++    /// to what was loaded is NOT dirty, so no guard remains — neither the browser-unload listener nor
++    /// an in-app prompt. This is the test that proves the guard compares against a baseline rather
++    /// than carrying an edit flag: with a flag the revert would leave a phantom prompt behind.
++    /// <para>Discriminating: against `66c2676a` the collocated module was never invoked at all, so the
++    /// register/unregister pair the assertions hinge on does not exist.</para></summary>
++    [TestMethod]
++    public async Task ChangedThenRevertedValue_IsNotDirty_SoNoGuardRemains()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: false, captured);
++        var module = JSInterop.SetupModule(Authoring.BeforeUnloadModulePath);
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        await SetTitleAsync(cut, "Edited title");
++        cut.WaitForAssertion(() => module.Invocations.Should()
++            .Contain(i => i.Identifier == "registerBeforeUnload",
++                "a real edit arms the browser-unload guard"));
++
++        await SetTitleAsync(cut, "Math HW");
++        cut.WaitForAssertion(() => module.Invocations.Should()
++            .Contain(i => i.Identifier == "unregisterBeforeUnload",
++                "D3: back at the loaded value there is nothing to lose, so the guard is detached"));
++
++        Navigation.NavigateTo("/assignments");
++
++        // The guard is genuinely gone rather than merely quiet: the navigation commits with no prompt.
++        cut.WaitForAssertion(() => Navigation.Uri.Should().EndWith("/assignments"));
++        captured.Should().BeEmpty("no phantom prompt for an edit that was undone");
++    }
++
++    /// <summary>UX-7 criterion 3 (D2 browser-unload half): the collocated module is imported and told
++    /// to register exactly while the form is dirty, and detached again on disposal. The browser's own
++    /// prompt cannot be asserted from here (the platform owns it, and the handler is not allowed to
++    /// show anything else) — what IS assertable, and is what this test pins, is the dirty-state
++    /// contract across the boundary and the listener's lifetime.
++    /// <para>Discriminating: against `66c2676a` the module was never imported, so both invocations the
++    /// test waits for are absent.</para></summary>
++    [TestMethod]
++    public async Task UnsavedChanges_UnloadGuard_IsAttachedWhileDirty_AndDetachedOnDispose()
++    {
++        var module = JSInterop.SetupModule(Authoring.BeforeUnloadModulePath);
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        module.Invocations.Should().BeEmpty(
++            "a form with nothing unsaved does not even import the module — there is no listener to own");
++
++        await SetTitleAsync(cut, "Edited title");
++        cut.WaitForAssertion(() => module.Invocations.Should()
++            .ContainSingle(i => i.Identifier == "registerBeforeUnload"));
++
++        await cut.Instance.DisposeAsync();
++
++        module.Invocations.Should().Contain(i => i.Identifier == "unregisterBeforeUnload",
++            "the listener is detached with the component, so it cannot outlive the page it guards");
++    }
++
++    /// <summary>UX-7 criterion 3 (P1 rework — the dirty→read-only transition): a lifecycle action
++    /// that ends the author's participation in the form (Publish here; Unpublish/Close/Archive are
++    /// the same transition) flips <c>EffectiveMode</c> to View. The listener was attached while the
++    /// form was dirty and the form is now clean, so the guard MUST detach — a beforeunload prompt on
++    /// a page with nothing unsaved is exactly the false alarm the criterion forbids, and it would
++    /// train the author to dismiss the one prompt that matters.
++    /// <para>The transition is driven through the real primary action and its API round trip (the
++    /// reloaded detail read reports Published), not by mutating state: that is the path on which the
++    /// listener was left armed.</para>
++    /// <para>Discriminating: the P1 pre-fix code returned early on <c>IsReadOnly</c> — before the
++    /// <c>dirty == _beforeUnloadRegistered</c> check and the unregister call — so the only
++    /// <c>unregisterBeforeUnload</c> left is the disposal one, which this test does not reach
++    /// (verified failing against that revision before the fix was applied).</para></summary>
++    [TestMethod]
++    public async Task ReadOnlyTransition_UnregistersTheUnloadGuard_SoACleanPageDoesNotPrompt()
++    {
++        var module = JSInterop.SetupModule(Authoring.BeforeUnloadModulePath);
++        var dto = MakeDto(AssignmentStatusDto.Draft);
++
++        // The detail read answers from a variable so the publish POST can move the assignment to
++        // Published: the reload the lifecycle action performs then lands the surface in View mode.
++        // Registered BEFORE RenderAuthoring's SetupAssignment because MockHttp v6 matches in
++        // registration order.
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
++            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
++            {
++                Content = new StringContent(
++                    JsonSerializer.Serialize(dto, _apiJsonOptions), Encoding.UTF8, "application/json")
++            });
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/publish")
++            .Respond(_ =>
++            {
++                dto = dto with { Status = AssignmentStatusDto.Published };
++                return new HttpResponseMessage(HttpStatusCode.NoContent);
++            });
++        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed*")
++            .Respond(HttpStatusCode.OK, "application/json", "[]");
++        RegisterPublishDialog();
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        await SetTitleAsync(cut, "Edited title");
++        cut.WaitForAssertion(() => module.Invocations.Should()
++            .ContainSingle(i => i.Identifier == "registerBeforeUnload",
++                "the unsaved edit armed the browser-unload guard"));
++
++        cut.Find("#authoring-primary-action").Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Unpublish",
++                "the publish landed and the surface is now the read-only View");
++            module.Invocations.Should().Contain(i => i.Identifier == "unregisterBeforeUnload",
++                "P1: the dirty→read-only transition leaves nothing to lose, so the listener must be " +
++                "detached rather than left to prompt on a clean page");
++        }, TimeSpan.FromSeconds(15));
++    }
++
++    // ── F17: a swapped Id/Mode reloads the reused instance ────────────────
++
++    /// <summary>F17: the host page renders <c>&lt;AssignmentAuthoring Mode="Edit" Id="Id" /&gt;</c>, and
++    /// <c>/assignments/{a}/edit</c> → <c>/assignments/{b}/edit</c> is the same component type at the
++    /// same render-tree position, so Blazor only updates <c>Id</c> — leaving A's loaded state on
++    /// screen under B's URL (a stale-write path). The reused instance must reload the assignment the
++    /// route now names.
++    /// <para>Discriminating: against `66c2676a` the component had no <c>OnParametersSet</c>, so B's
++    /// title never appears and A's stays.</para></summary>
++    [TestMethod]
++    public void IdParameterChanged_ReloadsTheAssignmentTheRouteNowNames()
++    {
++        var dtoA = MakeDto(AssignmentStatusDto.Draft);
++        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        SetupAssignment(dtoB);
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dtoB.Id));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Science HW",
++                "F17: the reused instance reloads the assignment the route now names");
++            cut.Markup.Should().NotContain("Math HW",
++                "F17: and A's state is gone rather than merely left behind the new URL");
++        }, TimeSpan.FromSeconds(5));
++    }
++
++    /// <summary>F17 (the loop guard): a parameter set that repeats the SAME <c>Id</c>/<c>Mode</c> must
++    /// not re-enter the load — <c>OnParametersSetAsync</c> runs on every parameter set, so reloading
++    /// unconditionally would be an endless re-read (and would make every render a fresh load).
++    /// <para>Discriminating only in combination with the reload above: against `66c2676a` this passes
++    /// vacuously (nothing ever reloads), which is why the reload test is the discriminating one.</para></summary>
++    [TestMethod]
++    public void SameParametersReset_DoesNotReloadTheAssignment()
++    {
++        var dto = MakeDto(AssignmentStatusDto.Draft);
++        var detailReads = 0;
++
++        // Registered BEFORE SetupAssignment: MockHttp matches in registration order, and
++        // SetupAssignment registers its own detail read (this one therefore wins) — the counter would
++        // never move with the registrations the other way round.
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
++            .Respond(_ =>
++            {
++                detailReads++;
++                return new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(
++                        JsonSerializer.Serialize(dto, _apiJsonOptions), Encoding.UTF8, "application/json")
++                };
++            });
++        SetupAssignment(dto);
++
++        var cut = Render<Authoring>(parameters => parameters
++            .Add(p => p.Mode, AssignmentAuthoringMode.Edit)
++            .Add(p => p.Id, dto.Id));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++        var afterFirstLoad = detailReads;
++        afterFirstLoad.Should().BeGreaterThan(0, "vacuity guard: the first load DID read the assignment");
++
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dto.Id));
++
++        detailReads.Should().Be(afterFirstLoad,
++            "F17: re-setting the same Id/Mode is not a change — reloading on every parameter set is the " +
++            "infinite loop the guard exists to prevent");
++        cut.Markup.Should().Contain("Math HW");
++    }
++
++    // ── F12: the empty-audience preview wording ───────────────────────────────
++
++    /// <summary>F12: with no audience target authored, the preview area does not render
++    /// "Students matched: 0" — an empty audience resolves to zero, so the bare count reads as a
++    /// settled audience of nobody instead of as work not yet done. It points at the missing step
++    /// instead. The mocked read really did answer zero (the vacuity guard), so the hint is the
++    /// rendering choice and not an unresolved state.
++    /// <para>Discriminating: against `66c2676a` the area rendered the zero count.</para></summary>
++    [TestMethod]
++    public async Task NoTargets_PreviewRendersAnActionableHint_NotAZeroCount()
++    {
++        var previewRequests = 0;
++        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
++            .Respond(_ =>
++            {
++                previewRequests++;
++                return PreviewResponse(
++                    "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":false}");
++            });
++
++        var clock = new FakeTimeProvider();
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
++            timeProvider: clock);
++
++        // The read settles (and answered zero-matched) before the wording is judged.
++        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Find("#authoring-audience-preview").TextContent.Trim()
++                .Should().Be(Authoring.PreviewNoTargetsHint,
++                    "F12: nothing is authored to preview, so the area asks for the missing step");
++            cut.Markup.Should().NotContain("Students matched",
++                "F12: the server's zero for an empty audience is never rendered as a count");
++        });
++    }
++
++    /// <summary>F12 (non-regression): once a target IS authored the server-resolved counts render
++    /// exactly as before. Not itself discriminating — it is the anchor that keeps the new hint from
++    /// swallowing the normal case.</summary>
++    [TestMethod]
++    public async Task WithTargets_PreviewStillRendersTheServerResolvedCounts()
++    {
++        var previewRequests = 0;
++        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
++            .Respond(_ =>
++            {
++                previewRequests++;
++                return PreviewResponse(
++                    "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}");
++            });
++
++        var clock = new FakeTimeProvider();
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
++            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]),
++            timeProvider: clock);
++
++        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
++
++        cut.WaitForAssertion(() => cut.Find("#authoring-audience-preview").TextContent.Trim()
++            .Should().Be("Students matched: 7 \u00b7 Contacts reachable: 7 (5 primary / 2 other)"),
++            TimeSpan.FromSeconds(2));
++    }
++
++    // ── F13: the initial load does not wait for the preview debounce ────────
++
++    /// <summary>F13 (D6): the initial load must not await the advisory preview's 500 ms trailing
++    /// debounce — an already-loaded form sat behind a progress ring for the length of a debounce that
++    /// only the preview cares about. The form renders with the fake clock NEVER advanced (which is
++    /// only reachable if the load does not await the debounce), the read is still pending, and it
++    /// settles once the clock is advanced.
++    /// <para>Discriminating: against `66c2676a` the load awaited the debounce, so with a clock that
++    /// never advances the ring stays up forever and the first assertion times out.</para></summary>
++    [TestMethod]
++    public async Task InitialLoad_RendersWithoutWaitingForThePreviewDebounce()
++    {
++        var previewRequests = 0;
++        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
++            .Respond(_ =>
++            {
++                previewRequests++;
++                return PreviewResponse(
++                    "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}");
++            });
++
++        var clock = new FakeTimeProvider();
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
++            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]),
++            timeProvider: clock);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Math HW", "F13: the loaded form is on screen");
++            cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
++                "F13: and the loading ring is gone without the clock having moved");
++        }, TimeSpan.FromSeconds(5));
++
++        previewRequests.Should().Be(0, "the preview read is scheduled behind the debounce, not awaited in front of the form");
++
++        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
++        cut.WaitForAssertion(() => cut.Find("#authoring-audience-preview").TextContent.Trim()
++            .Should().Contain("Students matched: 7", "the scheduled read still settles once the debounce elapses"));
++    }
++
++    // ── F15: the constraint reason sits with the pickers it explains ───────
++
++    /// <summary>F15: the paragraph that explains WHY the four constraint pickers are unavailable must be
++    /// reachable from the group it governs — positioned with the picker rows rather than after the last
++    /// one — and every control it disables must name a paragraph that actually renders in that state
++    /// (NFR-1; the R2-10 derived-idref fix, re-checked through the new placement).
++    /// <para>Discriminating: against `66c2676a` the paragraph rendered AFTER the group row, so the
++    /// placement assertions fail.</para></summary>
++    [TestMethod]
++    public async Task ConstraintReason_SitsWithThePickerRows_AndEveryDisabledControlNamesARenderedReason()
++    {
++        var everyoneState = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        everyoneState.WaitForAssertion(() => everyoneState.Markup.Should().Contain("Math HW"));
++
++        await SelectEveryoneAsync(everyoneState);
++
++        everyoneState.WaitForAssertion(() =>
++        {
++            var markup = everyoneState.Markup;
++            var toggle = markup.IndexOf("id=\"authoring-audience-everyone\"", StringComparison.Ordinal);
++            var reason = markup.IndexOf("id=\"authoring-audience-constraint-reason\"", StringComparison.Ordinal);
++            var firstPicker = markup.IndexOf("id=\"authoring-audience-grades\"", StringComparison.Ordinal);
++            var lastPicker = markup.IndexOf("id=\"authoring-audience-groups\"", StringComparison.Ordinal);
++
++            toggle.Should().BeGreaterThanOrEqualTo(0).And.BeLessThan(reason,
++                "F15: the reason follows the toggle that explains the constraint gate");
++            reason.Should().BeLessThan(firstPicker,
++                "F15: and stands with the picker rows it governs, above the first of them");
++            reason.Should().BeLessThan(lastPicker, "F15: never after the last picker in the group");
++
++            AssertEveryDisabledConstraintControlNamesARenderedReason(everyoneState);
++        }, TimeSpan.FromSeconds(5));
++
++        // The same contract in the UX-21 case (persisted targets did not load): the placement moved, so
++        // the R2-10 derived-idref guarantee is re-checked against the new position.
++        var ux21 = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
++            childrenReadFails: true);
++
++        ux21.WaitForAssertion(() =>
++        {
++            ux21.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle();
++            AssertEveryDisabledConstraintControlNamesARenderedReason(ux21);
++        }, TimeSpan.FromSeconds(5));
++    }
++
++    /// <summary>NFR-1: every control the Audience compartment disables names a reason paragraph that
++    /// really renders in the state under test — a dangling idref is worse than none, because it
++    /// silently tells assistive tech nothing.</summary>
++    private static void AssertEveryDisabledConstraintControlNamesARenderedReason(IRenderedComponent<Authoring> cut)
++    {
++        var describedBy = new[]
++        {
++            "authoring-audience-everyone",
++            "authoring-audience-grades",
++            "authoring-audience-streams",
++            "authoring-audience-groups"
++        };
++
++        foreach (var id in describedBy)
++        {
++            var control = cut.Find($"#{id}");
++            var idref = control.GetAttribute("aria-describedby");
++            idref.Should().NotBeNullOrEmpty($"NFR-1: the disabled {id} explains itself");
++            cut.FindAll($"#{idref}").Should().ContainSingle(
++                $"NFR-1: {id}'s idref must resolve to a paragraph that actually renders in this state");
++        }
++
++        // The students picker is the one constraint control whose declaration FluentUI SWALLOWS:
++        // FluentAutocomplete puts the Id on its inner <fluent-text-field> and owns that element's aria
++        // surface (combobox role, aria-label, aria-expanded, aria-controls), so the aria-describedby
++        // the page declares is dropped rather than forwarded. Pinned instead of skipped, so the
++        // limitation is visible to the next reader and a FluentUI version that starts forwarding the
++        // attribute fails HERE — extend the loop above when that happens. Recorded in the spec's
++        // "Deferred / known gaps".
++        cut.Find("#authoring-audience-students").GetAttribute("aria-describedby").Should().BeNull(
++            "documented limitation (FluentUI 4.14.2): FluentAutocomplete drops the declared " +
++            "aria-describedby, so this picker has no idref to resolve — unlike the four in the loop above");
++    }
++
++    // ── F7: a disabled action explains itself (the authoring call site) ────
++
++    /// <summary>F7 at its call site: the kebab's "Generate questions" is disabled when the type/grading
++    /// gate is closed, and it now carries the reason the compartment states (AI-4). The shared
++    /// component's own rendering contract is asserted in
++    /// <c>SchoolCollab.Admin.Tests.Unit.RowActionsMenuTests</c>.
++    /// <para>Discriminating: against `66c2676a` the item carried no description at all.</para></summary>
++    [TestMethod]
++    public void AuthoringKebab_DisabledGenerateAction_CarriesTheReason()
++    {
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
++            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Manual, grading: GradingFormatDto.TeacherGraded));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        cut.Find("fluent-button[title=\"More assignment actions\"]").Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            var item = cut.FindAll("fluent-menu-item")
++                .Single(i => i.TextContent.Trim() == "Generate questions");
++            item.GetAttribute("title").Should().Be(QuestionGenerationGate.DisabledHint,
++                "F7: a greyed-out action names the reason instead of being a dead end");
++        });
++    }
++
+     /// <summary>Drives the authoring page to the state <paramref name="settled"/> describes while
+     /// the injected fake clock keeps advancing past the trailing preview debounce. The page arms
+     /// that debounce from a POSTED continuation (Blazor dispatches the event through the renderer,
