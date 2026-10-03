@@ -38,7 +38,7 @@
            destructive-confirm behavior is identical between the two
            renderings. *@
         <FluentButton Appearance="Appearance.Stealth"
-                      Title="@singleAction.Label"
+                      Title="@(singleAction.DisabledReason ?? singleAction.Label)"
                       Disabled="@singleAction.Disabled"
                       OnClick="@(() => InvokeActionAsync(singleAction))">
             @if (singleAction.Icon is not null)
@@ -73,8 +73,12 @@
             }
             else
             {
+                @* F7: FluentMenuItem exposes no Title parameter, so this renders as its HTML
+                   title attribute — the accessible description a disabled item would otherwise not
+                   have. A null reason renders no attribute at all (no invented text). *@
                 <FluentMenuItem Label="@action.Label"
                                 Disabled="@action.Disabled"
+                                Title="@action.DisabledReason"
                                 OnClick="@(async () => await InvokeActionAsync(action))">
                     @if (action.Icon is not null)
                     {

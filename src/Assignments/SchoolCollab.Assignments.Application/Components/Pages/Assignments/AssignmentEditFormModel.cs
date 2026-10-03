@@ -1,5 +1,6 @@
 using SchoolCollab.AI.Abstractions;
 using SchoolCollab.Assignments.Contracts;
+using System.Text.Json;
 
 namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 
@@ -735,6 +736,28 @@ public sealed class AssignmentEditFormModel
         }
         ResourceUrls.RemoveAt(index);
     }
+
+    /// <summary>
+    /// UX-7 (D3): a canonical snapshot of everything a save from this form would write — the update
+    /// payload, serialized. Page-level values that live outside the model are passed in exactly as
+    /// <see cref="ToUpdateRequest"/> takes them, so two form states compare equal exactly when the
+    /// next save would write the same thing; a value changed and then changed back is equal again,
+    /// which is what makes the page's unsaved-changes guard a BASELINE comparison rather than an
+    /// event flag (an event flag prompts for a difference that no longer exists).
+    /// <para>The authored target rows always ride the snapshot — never the update path's
+    /// null-means-preserve gate — so an untouched targeting editor compares equal to itself.</para>
+    /// </summary>
+    public string CaptureSaveSnapshot(
+        AssignmentTypeDto assignmentType,
+        GradingFormatDto gradingFormat,
+        TargetAudienceTypeDto targetAudienceType,
+        Guid topicId,
+        Guid? gradeLevelId,
+        bool mandatoryReview,
+        bool requiresSignature) =>
+        JsonSerializer.Serialize(ToUpdateRequest(
+            assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
+            mandatoryReview, requiresSignature, ToTargetDtos()));
 
     /// <summary>WS-A3 (spec §3.3 + §7 Q4) — client-side submit gate
     /// mirroring the server-side <c>Assignment.Create</c> /

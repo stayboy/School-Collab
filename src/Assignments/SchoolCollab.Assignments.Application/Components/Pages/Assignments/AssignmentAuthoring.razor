@@ -4,13 +4,15 @@
 @using SchoolCollab.Core.Features
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
+@using Microsoft.JSInterop
 @inject AssignmentsApiClient Api
 @inject StudentsApiClient StudentsApi
 @inject IFeatureFlagService FeatureFlags
 @inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @inject ILogger<AssignmentAuthoring> Logger
-@implements IDisposable
+@implements IAsyncDisposable
 
 @*
     The ONE compartmentalized assignment authoring surface
@@ -28,6 +30,12 @@
     with an inline reason, never hidden, so changing type/grading never reflows the page.
     Policy-derived values follow UX-13 — read-only resolved values with an
     "Inherited from Grade/Tenant policy" badge, never an editable control.
+
+    UX-7 (D2/D3): leaving the page with unsaved changes is guarded on BOTH paths — an in-app
+    navigation is cancelled by a registered location-changing handler and confirmed with the
+    shared FluentUI dialog, while a tab close / reload / external URL is covered by the collocated
+    ``AssignmentAuthoring.razor.js`` module's ``window.beforeunload`` listener. "Unsaved" is a
+    BASELINE COMPARISON against the loaded state, never an event flag.
 
     Out of scope for R1 (R2/R3): multi-constraint targeting + recipient preview, attachment
     grounded AI generation.
@@ -199,6 +207,16 @@
                                         Disabled="@(IsReadOnly || AudienceEditorDisabledReason is not null)" />
                     </FormRow>
 
+                    @* F15: the reason the four constraint pickers below are unavailable renders
+                       WITH the group it explains — immediately after the Everyone toggle and above
+                       the first picker row — instead of after the last one, so the paragraph a
+                       reader (or an assistive tech idref) reaches is beside the controls it
+                       describes. *@
+                    @if (ConstraintPickersDisabledReason is not null)
+                    {
+                        <p class="authoring-reason" id="authoring-audience-constraint-reason">@ConstraintPickersDisabledReason</p>
+                    }
+
                     <FormRow Label="Grade levels" For="authoring-audience-grades" AlignTop>
                         <FluentSelect TOption="PickerOption" Id="authoring-audience-grades"
                                       Items="@_gradeLevelOptions"
@@ -271,11 +289,6 @@
                     @if (GroupPickerReason is not null)
                     {
                         <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
-                    }
-
-                    @if (ConstraintPickersDisabledReason is not null)
-                    {
-                        <p class="authoring-reason" id="authoring-audience-constraint-reason">@ConstraintPickersDisabledReason</p>
                     }
 
                     @* The selected constraints as chips in DisplayOrder; removal re-indexes 0..n-1. *@
@@ -533,6 +546,28 @@
         "The activity groups already linked to this assignment could not be loaded, so this picker is " +
         "disabled — saving would replace the existing links. Reload the page to try again.";
 
+    // ── UX-7: the unsaved-changes guard (D2/D3) ─────────────────────────────
+
+    /// <summary>UX-7 (D2) in-app half: the confirmation shown when a navigation would discard
+    /// authored-but-unsaved values.</summary>
+    public const string UnsavedChangesMessage =
+        "This assignment has unsaved changes — leaving now discards them.";
+
+    /// <summary>UX-7 (D2): the confirmation's primary action — leaves and discards.</summary>
+    public const string UnsavedChangesDiscardAction = "Discard changes";
+
+    /// <summary>UX-7 (D2): the confirmation's secondary action — cancels the navigation and stays.
+    /// The guard cancels on ANY non-discard outcome (secondary, ESC, overlay click), so staying is
+    /// always the safe default.</summary>
+    public const string UnsavedChangesKeepEditingAction = "Keep editing";
+
+    /// <summary>UX-7 (D2) browser-unload half: the collocated module that owns
+    /// <c>window.beforeunload</c>. Collocated <c>*.razor.js</c> is served from the Razor class
+    /// library's static-web-asset root (<c>_content/{assembly}/…</c>), the
+    /// <c>fileDownload.js</c> precedent.</summary>
+    public const string BeforeUnloadModulePath =
+        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor.js";
+
     /// <summary>The requested mode (UX-9). <see cref="AssignmentAuthoringMode.Edit"/> degrades
     /// to <see cref="AssignmentAuthoringMode.View"/> for a Published/Closed/Archived
     /// assignment — see <see cref="EffectiveMode"/>.</summary>
@@ -558,6 +593,32 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    /// <summary>F17: the <see cref="Id"/> and <see cref="Mode"/> the current instance state was
+    /// loaded from. <see cref="OnParametersSetAsync"/> reloads when either CHANGES (the host page
+    /// swapping the route parameter reuses this instance) and returns immediately when the same
+    /// values are re-set, so the reload can never loop.</summary>
+    private Guid? _loadedId;
+    private AssignmentAuthoringMode? _loadedMode;
+
+    /// <summary>UX-7 (D3): the save payload the LOADED state implies — the baseline the current
+    /// form is compared against. Null until the first load settles (there is nothing to compare
+    /// yet); refreshed whenever the form's content becomes the persisted state again.
+    /// <para>A baseline rather than an event flag on purpose: a field changed and then changed back
+    /// compares equal, so reverting an edit does not leave a phantom prompt behind. That false
+    /// prompt is how authors learn to click through a guard.</para></summary>
+    private string? _dirtyBaseline;
+
+    /// <summary>UX-7 (D2): the in-app navigation registration, owned and disposed by this
+    /// component.</summary>
+    private IDisposable? _locationChangingRegistration;
+
+    /// <summary>UX-7 (D2): the collocated module that owns <c>window.beforeunload</c>, plus whether
+    /// its listener is currently attached — so each dirty-state change crosses the JS boundary once
+    /// and the listener exists exactly while there is something to lose. Lazy: a form that was never
+    /// edited never imports the module.</summary>
+    private IJSObjectReference? _beforeUnloadModule;
+    private bool _beforeUnloadRegistered;
 
     /// <summary>D-4 (TGT-16): the trailing preview debounce interval, and the CTS that cancels a
     /// pending/stale preview call whenever a further constraint change lands.</summary>
@@ -949,6 +1010,12 @@
     public const string PreviewAuthorOnlyNote =
         "Recipient counts are resolved for authors on the edit surface.";
 
+    /// <summary>F12: with no audience target authored the preview area points at the missing step
+    /// instead of rendering "Students matched: 0" — the server answers zero for an empty audience,
+    /// so a bare count reads as a resolved audience of nobody rather than as work not done yet.</summary>
+    public const string PreviewNoTargetsHint =
+        "No audience targets yet — add one above to see how many students this assignment reaches.";
+
     private string PreviewText
     {
         get
@@ -956,6 +1023,13 @@
             if (IsReadOnly)
             {
                 return PreviewAuthorOnlyNote;
+            }
+
+            // F12: nothing is authored to preview, so the hint replaces both the pending line and
+            // the meaningless zero the server would report.
+            if (_model.Targets.Count == 0)
+            {
+                return PreviewNoTargetsHint;
             }
 
             return _preview is null
@@ -1033,13 +1107,161 @@
         .Distinct()
         .ToList();
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    // ── UX-7: the unsaved-changes guard (D2) ─────────────────────────────────
 
-    protected override async Task OnInitializedAsync()
+    /// <summary>
+    /// UX-7 (D3): true when a save from this form would write something different from what was
+    /// loaded — a BASELINE COMPARISON of the save payload, not an edit event. Read-only surfaces
+    /// carry no unsaved work, and a load in flight is not an author edit.
+    /// </summary>
+    private bool IsDirty =>
+        !IsReadOnly && !_loading && _dirtyBaseline is not null && CaptureSaveSnapshot() != _dirtyBaseline;
+
+    /// <summary>UX-7 (D3): the payload this form would save — the model's own fields plus the
+    /// page-level values that live outside it, passed exactly as the save passes them, so "dirty"
+    /// means "the next save would differ" and nothing else.</summary>
+    private string CaptureSaveSnapshot() => _model.CaptureSaveSnapshot(
+        SelectedType ?? AssignmentTypeDto.Manual,
+        SelectedGradingFormat,
+        DerivedTargetAudience,
+        TopicId ?? Guid.Empty,
+        GradeLevelId,
+        _mandatoryReview,
+        _requiresSignature);
+
+    /// <summary>UX-7 (D3): moves the baseline onto the form's current content — the two moments the
+    /// form IS the persisted state: the end of a load, and the component's own exit after a save
+    /// (see <see cref="NavigateToSavedState"/>).</summary>
+    private void CaptureDirtyBaseline() => _dirtyBaseline = CaptureSaveSnapshot();
+
+    /// <summary>
+    /// UX-7 (D2) in-app half: cancels a navigation that would discard unsaved work, after
+    /// confirming the discard with the shared FluentUI dialog. A non-dirty form returns immediately,
+    /// so the guard never stands between an author and an ordinary link.
+    /// </summary>
+    private async ValueTask OnLocationChangingAsync(LocationChangingContext context)
     {
+        if (!IsDirty)
+        {
+            return;
+        }
+
+        var discard = await DialogService.ShowConfirmDialogAsync(
+            UnsavedChangesMessage,
+            UnsavedChangesDiscardAction,
+            UnsavedChangesKeepEditingAction,
+            title: "Unsaved changes");
+
+        if (!discard)
+        {
+            context.PreventNavigation();
+        }
+    }
+
+    /// <summary>
+    /// UX-7 (D2) browser-unload half: mirrors the dirty state onto the collocated module's
+    /// <c>window.beforeunload</c> listener — the only mechanism covering a tab close, a reload or an
+    /// external URL, none of which an in-app handler sees. It can only trigger the browser's own
+    /// prompt (a beforeunload handler is not allowed to show anything of its own), which is why both
+    /// halves exist. The listener is attached exactly while the form is dirty.
+    /// <para>Read-only is deliberately NOT an early return: <see cref="IsDirty"/> is already false
+    /// on a read-only surface, so the state machine still has to run through to the unregister on
+    /// the dirty→clean transition a lifecycle action performs (Publish/Unpublish/Close/Archive
+    /// flip <see cref="EffectiveMode"/> to View) — returning early there would leave the listener
+    /// armed on a page with nothing left to lose. The module import stays lazy: it happens on the
+    /// dirty edge only.</para>
+    /// </summary>
+    private async Task SyncBeforeUnloadGuardAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var dirty = IsDirty;
+        if (dirty == _beforeUnloadRegistered)
+        {
+            return;
+        }
+
+        try
+        {
+            _beforeUnloadModule ??= await JS.InvokeAsync<IJSObjectReference>("import", BeforeUnloadModulePath);
+            await _beforeUnloadModule.InvokeVoidAsync(
+                dirty ? "registerBeforeUnload" : "unregisterBeforeUnload");
+            _beforeUnloadRegistered = dirty;
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit closed between the render and the call — nothing to surface, and the
+            // listener went with the page it belonged to.
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    /// <summary>UX-7 (D3): the component's own exit after a successful save — the baseline moves
+    /// with the form, so the guard cannot prompt on a navigation the page itself started.</summary>
+    private void NavigateToSavedState(string url)
+    {
+        CaptureDirtyBaseline();
+        Nav.NavigateTo(url);
+    }
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    /// <summary>
+    /// F17: Blazor reuses this component instance when the host swaps the route parameter —
+    /// <c>/assignments/{a}/edit</c> → <c>/assignments/{b}/edit</c> is the same component type at the
+    /// same render-tree position, so only <see cref="Id"/> changes and assignment A's loaded state
+    /// would stay on screen under B's URL (the R2 F1 defect class: a stale-write path). Reload when
+    /// — and only when — <see cref="Id"/> or <see cref="Mode"/> CHANGED, compared against what the
+    /// current state was loaded from, so a re-set of the same values never re-enters the load.
+    /// <para>Unsaved work is protected upstream by the UX-7 navigation guard, which runs before a
+    /// navigation can change the parameter — by the time this reload happens the author has accepted
+    /// the discard, so the reload is never silent.</para>
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id && _loadedMode == Mode)
+        {
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // UX-7 (D2): registered once per instance — a reload for another assignment keeps this
+            // same instance and needs no second registration — and disposed with the component.
+            _locationChangingRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
+        }
+
+        await SyncBeforeUnloadGuardAsync();
+    }
+
+    /// <summary>
+    /// The one load path: <see cref="OnInitializedAsync"/> runs it for a fresh instance and
+    /// <see cref="OnParametersSetAsync"/> runs it again when the host swapped <see cref="Id"/> or
+    /// <see cref="Mode"/> (F17).
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        _loadedId = Id;
+        _loadedMode = Mode;
+
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
-        _loading = Mode != AssignmentAuthoringMode.Create;
+
+        ResetLoadState();
 
         try
         {
@@ -1102,9 +1324,6 @@
 
             // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock (best-effort, fail-open).
             await LoadAiPromptPolicyAsync(ct);
-
-            // TGT-16/D-4: the preview resolves in every editable mode; it never persists.
-            await SchedulePreviewAsync();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -1117,6 +1336,60 @@
         {
             if (!_disposed) _loading = false;
         }
+
+        // UX-7 (D3): what was just loaded is the baseline the guard compares against.
+        CaptureDirtyBaseline();
+
+        // F13 (D6): the advisory preview does not hold the first render behind its own 500 ms
+        // trailing debounce — awaiting it here kept a spinner in front of a form that was already
+        // fully loaded. The debounce's CTS owns this call's lifetime (a further constraint change
+        // cancels it), so an unawaited schedule is well-defined.
+        _ = SchedulePreviewAsync();
+    }
+
+    /// <summary>
+    /// F17: clears every projection the load re-derives, so a reused instance (the host page swapped
+    /// <see cref="Id"/>/<see cref="Mode"/>) can never render the previous assignment's picker
+    /// selection, search results or preview beside the new assignment's fields. The form model's own
+    /// fields are re-projected wholesale by <c>LoadFrom</c> + <c>LoadChildren</c>, so only the
+    /// page-level mirrors are cleared here.
+    /// </summary>
+    private void ResetLoadState()
+    {
+        _item = null;
+        _error = null;
+        _loading = Mode != AssignmentAuthoringMode.Create;
+
+        _selectedType = null;
+        _selectedGradingFormat = null;
+        _mandatoryReview = true;
+        _requiresSignature = false;
+        _signatureMandatory = false;
+        _resolvedSignatureMode = null;
+        _aiPromptLocked = false;
+
+        _childrenLoaded = false;
+        _groupLinksLoaded = false;
+        _loadedGroupIds.Clear();
+        _groupLinksUnavailableReason = null;
+
+        _gradeLevels = null;
+        _gradeLevelOptions = [];
+        _selectedGradeLevel = null;
+        _subjects = null;
+        _subjectOptions = [];
+        _selectedSubject = null;
+        _activityGroupOptions = [];
+        _selectedGroupIds = [];
+        _groupSubjects = null;
+        _groupSubjectOptions = [];
+        _streamOptions = [];
+        _studentOptions = [];
+        _selectedStudentOptions.Clear();
+
+        _everyone = false;
+        _preview = null;
+        _previewDegraded = false;
     }
 
     /// <summary>Loads grade levels, activity groups (flag-gated) and, for a loaded assignment,
@@ -1750,7 +2023,11 @@
     }
 
     private RowAction GenerateQuestionsAction() =>
-        RowAction.Navigate("Generate questions", "#authoring-questions", FluentIcons.Bot, disabled: !GateEnabled);
+        RowAction.Navigate("Generate questions", "#authoring-questions", FluentIcons.Bot,
+            disabled: !GateEnabled,
+            // F7: a greyed-out action explains itself instead of being a dead end (the compartment's
+            // own hint is shown there too, but the kebab is where the author meets the refusal).
+            disabledReason: GateEnabled ? null : QuestionGenerationGate.DisabledHint);
 
     private async Task OnPrimaryActionAsync()
     {
@@ -1813,7 +2090,7 @@
                 }
 
                 await Changed.InvokeAsync();
-                Nav.NavigateTo("/assignments");
+                NavigateToSavedState("/assignments");
                 return;
             }
 
@@ -1849,7 +2126,7 @@
 
             await ReloadAsync();
             await Changed.InvokeAsync();
-            Nav.NavigateTo($"/assignments/{Id}");
+            NavigateToSavedState($"/assignments/{Id}");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -2102,7 +2379,7 @@
 
     private void BackToList() => Nav.NavigateTo("/assignments");
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _disposed = true;
         _loadCts?.Cancel();
@@ -2113,5 +2390,40 @@
         _previewCts?.Cancel();
         _previewCts?.Dispose();
         _previewCts = null;
+
+        // UX-7 (D2): the in-app navigation registration belongs to this component's lifetime.
+        _locationChangingRegistration?.Dispose();
+        _locationChangingRegistration = null;
+
+        if (_beforeUnloadModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // UX-7 (D2): detach the browser-unload listener before releasing the module, so a stale
+            // listener cannot outlive the page it guards.
+            if (_beforeUnloadRegistered)
+            {
+                await _beforeUnloadModule.InvokeVoidAsync("unregisterBeforeUnload");
+            }
+
+            await _beforeUnloadModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Server-side Blazor: the circuit can be lost between the call and the awaited disposal
+            // — the listener died with the page it belonged to.
+        }
+        catch (TaskCanceledException)
+        {
+            // Disposal in flight when the circuit closed — same deal.
+        }
+        finally
+        {
+            _beforeUnloadModule = null;
+            _beforeUnloadRegistered = false;
+        }
     }
 }
