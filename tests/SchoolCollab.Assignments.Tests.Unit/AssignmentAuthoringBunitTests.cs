@@ -238,6 +238,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<Authoring> cut, string id) =>
         cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
+    /// <summary>The students picker is the one FluentAutocomplete on the page (TGT-6).</summary>
+    private static FluentAutocomplete<Authoring.PickerOption> StudentPicker(IRenderedComponent<Authoring> cut) =>
+        cut.FindComponents<FluentAutocomplete<Authoring.PickerOption>>().Single().Instance;
+
+    /// <summary>A student exactly as the students API answers it — both the picker's search and the
+    /// restored-id read deserialize this shape, so one helper keeps their labels identical.</summary>
+    private static StudentDto Student(Guid id, string firstName, string lastName, string studentNumber) =>
+        new(id, studentNumber, firstName, lastName, null, null, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
     /// <summary>Drives a picker's real <c>SelectedOptionChanged</c> callback — never a raw DOM
     /// event (the AssignmentCreateBunitTests / AssignmentPolicyFieldEditDialogTests pattern).</summary>
     private static Task SelectAsync(IRenderedComponent<Authoring> cut, string pickerId, string value, string label) =>
@@ -281,8 +290,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.InvokeAsync(() => Picker(cut, "authoring-audience-groups").SelectedOptionsChanged.InvokeAsync(
             groups.Select(g => new Authoring.PickerOption(g.Id.ToString(), g.Name)).ToArray()));
 
-    private static ActivityGroupDto Group(Guid id, string name) =>
-        new(id, name, null, null, null, true, "span", null, null, false, [], 0,
+    private static ActivityGroupDto Group(Guid id, string name, bool isActive = true) =>
+        new(id, name, null, null, null, isActive, "span", null, null, false, [], 0,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <summary>Fills the Basics title through the bound text field's own callback — the save
@@ -1642,6 +1651,342 @@ public class AssignmentAuthoringBunitTests : BunitContext
         }, TimeSpan.FromSeconds(15));
     }
 
+    // ── §17 item 1: a lifecycle action re-reads the persisted set ─────────
+
+    /// <summary>§17 (item 1, this round): <c>ReloadAsync</c> re-read only the scalar summary, so a lifecycle
+    /// action that moved the assignment to a status whose surface edits again — Published → Unpublish →
+    /// Draft is the visible one — landed the author on an editable form whose editors were still
+    /// DISABLED-with-reason ("the saved questions could not be loaded"), with the audience chips empty.
+    /// The re-read now runs the same persisted-set load the initial Edit load runs.
+    /// <para>Discriminating: pre-fix the children/targets read is never issued on this path, so
+    /// <c>#authoring-content-reason</c> still renders and the chip list is empty — neither assertion
+    /// can be satisfied by the summary refresh alone.</para></summary>
+    [TestMethod]
+    public async Task Unpublish_IntoAnEditableDraft_ReadsThePersistedChildrenAndTargets()
+    {
+        var captured = new List<ConfirmDialogContent>();
+        RegisterConfirmationDialog(confirm: true, captured);
+
+        var gradeId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        _gradeLevels =
+        [
+            new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        ];
+
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        var children = MakeChildren(
+            questions: [LoadedQuestion()],
+            targets: [new AssignmentTargetDto(TargetKindDto.GradeLevel, gradeId, 0)]);
+
+        // The detail read answers the CURRENT status, so the reload the lifecycle action performs lands
+        // in Draft; both registrations come BEFORE RenderAuthoring's own detail read (MockHttp v6
+        // matches in registration order).
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
+            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(dto, _apiJsonOptions),
+                    Encoding.UTF8, "application/json")
+            });
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/unpublish")
+            .Respond(_ =>
+            {
+                dto = dto with { Status = AssignmentStatusDto.Draft };
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            });
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, children);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        cut.Find("#authoring-primary-action").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            captured.Should().ContainSingle("Unpublish asks before it acts");
+
+            cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Publish",
+                "the unpublish landed and the surface is an editable Draft again");
+
+            // Only the fresh read can produce these: a read-only View never reads the persisted set, so
+            // the surface had none until the re-read ran.
+            cut.FindAll("#authoring-content-reason").Should().BeEmpty(
+                "§17 item 1: the persisted children were re-read, so the content editors are live");
+
+            var questions = cut.FindComponents<QuestionEditorSection>().Single().Instance.Model.Questions;
+            questions.Should().HaveCount(1);
+            questions[0].QuestionText.Should().Be("Loaded question?",
+                "... and they carry what the server holds");
+
+            ChipLabels(cut).Should().Equal(new[] { "Grade 5" },
+                "§17 item 1: the target rows came back with them");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    /// <summary>§17 (item 1, this round) — the half the re-read must NOT break: Unpublish from a still-editable
+    /// Scheduled assignment leaves the author on a form they can save, without having saved it, so the
+    /// persisted rows must not be written over the ones they are still editing. (The scalar refresh is the
+    /// reload's pre-existing behaviour and is untouched.)
+    /// <para>Non-regression anchor by construction: pre-fix the child rows were never re-read at all, so this
+    /// passes there too. It exists to keep the new re-read from becoming the data-loss path — removing the
+    /// unsaved-edits gate fails it.</para></summary>
+    [TestMethod]
+    public async Task Unpublish_FromScheduled_WithUnsavedRows_KeepsTheAuthorsEdits()
+    {
+        var captured = new List<ConfirmDialogContent>();
+        RegisterConfirmationDialog(confirm: true, captured);
+
+        var dto = MakeDto(AssignmentStatusDto.Scheduled);
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
+            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(dto, _apiJsonOptions),
+                    Encoding.UTF8, "application/json")
+            });
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/unpublish")
+            .Respond(_ =>
+            {
+                dto = dto with { Status = AssignmentStatusDto.Draft };
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            });
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, MakeChildren(questions: [LoadedQuestion()]));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"));
+
+        // The author's unsaved edit, written exactly the way the editor's own binding writes it.
+        var section = cut.FindComponents<QuestionEditorSection>().Single();
+        await cut.InvokeAsync(() => section.Instance.Model.Questions[0].QuestionText = "Author's unsaved edit");
+
+        cut.Find("#authoring-primary-action").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            captured.Should().ContainSingle();
+            cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Publish",
+                "the unpublish landed");
+            cut.FindComponents<QuestionEditorSection>().Single().Instance.Model.Questions[0].QuestionText
+                .Should().Be("Author's unsaved edit",
+                    "§17 item 1: re-reading the persisted rows onto a form with unsaved work would discard " +
+                    "the author's questions — the reload holds back instead");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── §17 item 5: the dirty snapshot is a fingerprint of the payload ─────
+
+    private static readonly Guid SnapshotProbeTopicId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid SnapshotProbeGradeId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+
+    /// <summary>§17 (item 5): a form model carrying a value in every field the save payload projects, so one
+    /// mutation of any of them can be exercised against the snapshot.</summary>
+    private static AssignmentEditFormModel SnapshotProbeModel(
+        Action<AssignmentEditFormModel>? configure = null,
+        int questions = 1)
+    {
+        var model = new AssignmentEditFormModel
+        {
+            Title = "Math HW",
+            Description = "internal note",
+            Instructions = "Do the odd numbers",
+            DueDate = new DateTime(2026, 5, 1, 9, 0, 0),
+            MaxScore = 10m,
+            ArchiveGraceDays = 30,
+            PassScore = 5m,
+            MaxAttempts = 2,
+            RequiresSignature = true,
+            AiPromptOverride = "be gentle",
+            DifficultyEasyCount = 1,
+            DifficultyMediumCount = 2,
+            DifficultyHardCount = 3
+        };
+
+        for (var i = 0; i < questions; i++)
+        {
+            model.AddQuestion(new QuestionEditorRow
+            {
+                QuestionText = $"Question {i}",
+                Type = QuestionTypeDto.MultipleChoice,
+                ModelAnswer = "answer",
+                Options = { new OptionEditorRow { OptionText = "A" }, new OptionEditorRow { OptionText = "B" } },
+                CorrectOptionIndex = 0
+            });
+        }
+
+        model.AddAttachment(new AttachmentEditorRow
+        {
+            FileName = "syllabus.pdf",
+            ContentType = "application/pdf",
+            FileSize = 2048,
+            StoragePath = "tenants/t/staging/syllabus.pdf"
+        });
+        model.AddResourceUrl("https://example.test/ref");
+        model.LoadTargets([new AssignmentTargetDto(TargetKindDto.GradeLevel, SnapshotProbeGradeId, 0)]);
+
+        configure?.Invoke(model);
+        return model;
+    }
+
+    /// <summary>§17 (item 5): both spellings of the save payload for one model state — the round's
+    /// fingerprint, and the payload itself serialized exactly as the pre-fix snapshot serialized it.</summary>
+    private static (string Snapshot, string Payload) CaptureProbe(AssignmentEditFormModel model) =>
+        (model.CaptureSaveSnapshot(
+             AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.SelectedGrades,
+             SnapshotProbeTopicId, SnapshotProbeGradeId, mandatoryReview: true, requiresSignature: true),
+         JsonSerializer.Serialize(model.ToUpdateRequest(
+             AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.SelectedGrades,
+             SnapshotProbeTopicId, SnapshotProbeGradeId, mandatoryReview: true, requiresSignature: true,
+             targets: model.ToTargetDtos())));
+
+    /// <summary>§17 (item 5): asserts the snapshot's equality relation matches the payload's, in whichever
+    /// direction the case runs — a payload-relevant change must move the digest, and a difference the
+    /// payload normalizes away must not.</summary>
+    private static void AssertSnapshotTracksPayload(string what, AssignmentEditFormModel baseline, AssignmentEditFormModel mutated)
+    {
+        var (beforeSnapshot, beforePayload) = CaptureProbe(baseline);
+        var (afterSnapshot, afterPayload) = CaptureProbe(mutated);
+
+        (afterSnapshot != beforeSnapshot).Should().Be(afterPayload != beforePayload,
+            $"§17 item 5: the dirty snapshot must track the save payload exactly ({what})");
+    }
+
+    /// <summary>§17 (item 5, this round): the dirty guard reads the save snapshot on EVERY render, so the
+    /// snapshot is a fixed-width fingerprint of the payload instead of the payload itself.
+    /// <para>Discriminating: pre-fix <c>CaptureSaveSnapshot</c> returned <c>JsonSerializer.Serialize</c> of the
+    /// whole update request — a JSON document whose length tracks the question list — so neither the digest
+    /// assertion nor the fixed-width one can hold against it.</para></summary>
+    [TestMethod]
+    public void SaveSnapshot_IsAFixedWidthFingerprint_NotTheMaterializedPayload()
+    {
+        var small = CaptureProbe(SnapshotProbeModel(questions: 1));
+        var large = CaptureProbe(SnapshotProbeModel(questions: 40));
+
+        small.Snapshot.Should().MatchRegex("^[0-9a-f]{32}$",
+            "§17 item 5: the per-render dirty comparison reads a digest of the save payload");
+        large.Snapshot.Should().HaveLength(small.Snapshot.Length,
+            "the snapshot's cost must not track the size of the form — materializing it per render is the residual");
+
+        small.Payload.Should().NotBe(large.Payload,
+            "vacuity guard: the two models really are two different payloads");
+        small.Snapshot.Should().NotBe(large.Snapshot,
+            "... and the digest still tells them apart");
+    }
+
+    /// <summary>§17 (item 5, this round): the semantic guard for the fingerprint. The dirty guard is correct
+    /// only while "the digests differ" means exactly "the next save would write something different", so
+    /// every payload-relevant field is exercised in BOTH directions: a state that changes the payload must
+    /// change the digest, and a difference the payload normalizes away (a null Title and an empty one, a
+    /// DateTime differing only in <c>Kind</c>, a blank option text) must not.
+    /// <para>Non-regression anchor by construction: pre-fix the snapshot WAS the serialized payload, so the
+    /// equivalence held trivially — it is here for the implementation that replaced it.</para></summary>
+    [TestMethod]
+    public void SaveSnapshot_MatchesTheSerializedPayload_OnEveryDirtyRelevantField()
+    {
+        // ── Scalars
+        AssertSnapshotTracksPayload("Title", SnapshotProbeModel(), SnapshotProbeModel(m => m.Title = "Other"));
+        AssertSnapshotTracksPayload("Title null→empty (payload-equal)",
+            SnapshotProbeModel(m => m.Title = null), SnapshotProbeModel(m => m.Title = string.Empty));
+        AssertSnapshotTracksPayload("Description", SnapshotProbeModel(), SnapshotProbeModel(m => m.Description = null));
+        AssertSnapshotTracksPayload("Instructions", SnapshotProbeModel(), SnapshotProbeModel(m => m.Instructions = "Other"));
+        AssertSnapshotTracksPayload("DueDate", SnapshotProbeModel(), SnapshotProbeModel(m => m.DueDate = m.DueDate!.Value.AddDays(1)));
+        AssertSnapshotTracksPayload("DueDate Kind only (payload-equal)",
+            SnapshotProbeModel(m => m.DueDate = DateTime.SpecifyKind(m.DueDate!.Value, DateTimeKind.Utc)),
+            SnapshotProbeModel(m => m.DueDate = DateTime.SpecifyKind(m.DueDate!.Value, DateTimeKind.Unspecified)));
+        AssertSnapshotTracksPayload("MaxScore", SnapshotProbeModel(), SnapshotProbeModel(m => m.MaxScore = 20m));
+        AssertSnapshotTracksPayload("MaxScore null→zero", SnapshotProbeModel(m => m.MaxScore = null), SnapshotProbeModel(m => m.MaxScore = 0m));
+        AssertSnapshotTracksPayload("ArchiveGraceDays", SnapshotProbeModel(), SnapshotProbeModel(m => m.ArchiveGraceDays = 31));
+        AssertSnapshotTracksPayload("PassScore", SnapshotProbeModel(), SnapshotProbeModel(m => m.PassScore = 6m));
+        AssertSnapshotTracksPayload("MaxAttempts", SnapshotProbeModel(), SnapshotProbeModel(m => m.MaxAttempts = 3));
+        AssertSnapshotTracksPayload("difficulty mix", SnapshotProbeModel(), SnapshotProbeModel(m => m.DifficultyHardCount = 4));
+        AssertSnapshotTracksPayload("AiPromptOverride", SnapshotProbeModel(), SnapshotProbeModel(m => m.AiPromptOverride = null));
+
+        // ── Questions
+        AssertSnapshotTracksPayload("question text", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].QuestionText = "Other"));
+        AssertSnapshotTracksPayload("question type", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].Type = QuestionTypeDto.ShortAnswer));
+        AssertSnapshotTracksPayload("model answer", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].ModelAnswer = null));
+        AssertSnapshotTracksPayload("option text", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].Options[1].OptionText = "Other"));
+        AssertSnapshotTracksPayload("option text null→empty (payload-equal)",
+            SnapshotProbeModel(m => m.Questions[0].Options[1].OptionText = null),
+            SnapshotProbeModel(m => m.Questions[0].Options[1].OptionText = string.Empty));
+        AssertSnapshotTracksPayload("correct option", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].CorrectOptionIndex = 1));
+        AssertSnapshotTracksPayload("added question", SnapshotProbeModel(), SnapshotProbeModel(questions: 2));
+        AssertSnapshotTracksPayload("removed question", SnapshotProbeModel(questions: 2), SnapshotProbeModel(questions: 1));
+        AssertSnapshotTracksPayload("reordered questions", SnapshotProbeModel(questions: 2), SnapshotProbeModel(
+            m =>
+            {
+                var first = m.Questions[0];
+                m.Questions.RemoveAt(0);
+                m.Questions.Add(first);
+            },
+            questions: 2));
+
+        // ── Attachments
+        AssertSnapshotTracksPayload("attachment file name", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].FileName = "other.pdf"));
+        AssertSnapshotTracksPayload("attachment content type", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].ContentType = null));
+        AssertSnapshotTracksPayload("attachment size", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].FileSize = 4096));
+        AssertSnapshotTracksPayload("attachment storage path", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].StoragePath = null));
+        AssertSnapshotTracksPayload("removed attachment", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments.Clear()));
+
+        // ── ContentModules: the payload field no editor owns yet — the matrix covers it anyway, so a
+        // field that lands on the wire without a matching mix in the walk fails here instead of
+        // turning a real edit into a silent "clean" (P2-1, this round's rework).
+        static IReadOnlyList<NewContentModuleDto> Modules(
+            string url = "https://example.test/guide", int threshold = 100) =>
+            [new NewContentModuleDto(ModuleTypeDto.Guide, "Guide", url, null, 0, threshold)];
+
+        AssertSnapshotTracksPayload("added content module", SnapshotProbeModel(),
+            SnapshotProbeModel(m => m.ContentModules = Modules()));
+        AssertSnapshotTracksPayload("removed content module",
+            SnapshotProbeModel(m => m.ContentModules = Modules()), SnapshotProbeModel());
+        AssertSnapshotTracksPayload("content module url",
+            SnapshotProbeModel(m => m.ContentModules = Modules()),
+            SnapshotProbeModel(m => m.ContentModules = Modules(url: "https://example.test/other")));
+        AssertSnapshotTracksPayload("content module threshold",
+            SnapshotProbeModel(m => m.ContentModules = Modules()),
+            SnapshotProbeModel(m => m.ContentModules = Modules(threshold: 80)));
+        AssertSnapshotTracksPayload("content modules empty→null (payload-equal)",
+            SnapshotProbeModel(m => m.ContentModules = null),
+            SnapshotProbeModel(m => m.ContentModules = []));
+        CaptureProbe(SnapshotProbeModel(m => m.ContentModules = Modules())).Snapshot.Should().NotBe(
+            CaptureProbe(SnapshotProbeModel()).Snapshot,
+            "P2-1: ContentModules rides ToUpdateRequest, so the walk must mix it — a payload field the " +
+            "snapshot omits makes a real edit read as clean and the navigation prompt never fires");
+
+        // ── Resources
+        AssertSnapshotTracksPayload("resource url", SnapshotProbeModel(),
+            SnapshotProbeModel(m => m.ResourceUrls[0] = new ResourceUrlRow("https://example.test/other", null)));
+        AssertSnapshotTracksPayload("resource display name", SnapshotProbeModel(),
+            SnapshotProbeModel(m => m.ResourceUrls[0] = new ResourceUrlRow("https://example.test/ref", "Ref")));
+        AssertSnapshotTracksPayload("removed url resource", SnapshotProbeModel(), SnapshotProbeModel(m => m.ResourceUrls.Clear()));
+        AssertSnapshotTracksPayload("preserved resource", SnapshotProbeModel(),
+            SnapshotProbeModel(m => m.PreservedResources.Add(
+                new NewResourceDto(ResourceKindDto.File, null, "tenants/t/staging/x.pdf", "Syllabus", true))));
+
+        // ── Targets
+        AssertSnapshotTracksPayload("added target", SnapshotProbeModel(),
+            SnapshotProbeModel(m => m.SetTargetsOfKind(TargetKindDto.Stream, [Guid.NewGuid()])));
+        AssertSnapshotTracksPayload("removed target", SnapshotProbeModel(), SnapshotProbeModel(m => m.LoadTargets([])));
+        AssertSnapshotTracksPayload("everyone target", SnapshotProbeModel(), SnapshotProbeModel(m => m.SetEveryoneTarget(true)));
+        AssertSnapshotTracksPayload("reordered targets",
+            SnapshotProbeModel(m => m.LoadTargets(
+            [
+                new AssignmentTargetDto(TargetKindDto.GradeLevel, SnapshotProbeGradeId, 0),
+                new AssignmentTargetDto(TargetKindDto.Stream, SnapshotProbeTopicId, 1)
+            ])),
+            SnapshotProbeModel(m => m.LoadTargets(
+            [
+                new AssignmentTargetDto(TargetKindDto.Stream, SnapshotProbeTopicId, 0),
+                new AssignmentTargetDto(TargetKindDto.GradeLevel, SnapshotProbeGradeId, 1)
+            ])));
+        AssertSnapshotTracksPayload("loaded-empty vs never loaded (payload-equal)",
+            SnapshotProbeModel(m => m.LoadTargets(null)), SnapshotProbeModel(m => m.LoadTargets([])));
+
+        // ── Non-vacuity: the matrix runs in both directions (a case that must move the payload, and one
+        // that must not), so a helper that compared nothing would fail here rather than pass silently.
+        CaptureProbe(SnapshotProbeModel()).Payload.Should().NotBe(
+            CaptureProbe(SnapshotProbeModel(m => m.Title = "Other")).Payload,
+            "a payload-relevant change really does move the reference payload");
+        CaptureProbe(SnapshotProbeModel(m => m.Title = null)).Payload.Should().Be(
+            CaptureProbe(SnapshotProbeModel(m => m.Title = string.Empty)).Payload,
+            "... and a normalized-away difference really does not");
+    }
+
     // ── F17: a swapped Id/Mode reloads the reused instance ────────────────
 
     /// <summary>F17: the host page renders <c>&lt;AssignmentAuthoring Mode="Edit" Id="Id" /&gt;</c>, and
@@ -1715,6 +2060,166 @@ public class AssignmentAuthoringBunitTests : BunitContext
             "F17: re-setting the same Id/Mode is not a change — reloading on every parameter set is the " +
             "infinite loop the guard exists to prevent");
         cut.Markup.Should().Contain("Math HW");
+    }
+
+    // ── UX-7 / F17 defence-in-depth: the reload path's own dirty gate (this round) ──
+
+    /// <summary>The notice the parameter-change reload renders when it discarded unsaved edits no
+    /// confirmation consented to. Pinned here as a literal because the component keeps it
+    /// <c>private</c> — this round adds no public API member (D3), so the element id plus this wording
+    /// is what the suite holds the page to.</summary>
+    private const string UnsavedEditsDiscardedNoticeText =
+        "This form was reloaded for a different assignment or mode without a confirmation, so the unsaved " +
+        "edits you had made were discarded.";
+
+    /// <summary>The notice element, addressed by the component's own id.</summary>
+    private const string UnsavedEditsDiscardedNoticeId = "#authoring-unsaved-edits-discarded";
+
+    /// <summary>UX-7 / F17 defence-in-depth (this round, criterion 3): a host that swaps <c>Id</c>
+    /// WITHOUT a <c>NavigationManager</c> navigation — no location-changing handler ran, so nothing
+    /// asked the author — still reloads the assignment the route now names (D2: refusing the reload
+    /// would keep A's state on screen under B's URL, the stale-write path F17 removed), and the discard
+    /// is announced instead of silent.
+    /// <para>Discriminating: before this round the reload carried no notice at all, so the second half
+    /// fails while the first passes — the reload half is F17's, already in place.</para></summary>
+    [TestMethod]
+    public async Task UnsavedEdits_UnconsentedIdChange_ReloadsAndAnnouncesTheDiscard()
+    {
+        var dtoA = MakeDto(AssignmentStatusDto.Draft);
+        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        await SetTitleAsync(cut, "Edited title");
+        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
+            "vacuity anchor: a dirty form whose parameters did NOT change has nothing to announce");
+
+        SetupAssignment(dtoB);
+        cut.Render(p => p
+            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
+            .Add(x => x.Id, dtoB.Id));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Science HW",
+                "D2: the reload still happens — refusing it would keep A's state under B's URL");
+            cut.Markup.Should().NotContain("Edited title", "A's unsaved edit left with A's state");
+        });
+
+        var notices = cut.FindAll(UnsavedEditsDiscardedNoticeId);
+        notices.Should().ContainSingle(
+            "exactly one notice: the discarded work is announced once, on the surface that replaced it");
+        notices[0].TextContent.Should().Be(UnsavedEditsDiscardedNoticeText,
+            "the notice has to say what actually happened — the discard — not make a claim about the new " +
+            "assignment");
+    }
+
+    /// <summary>UX-7 / F17 defence-in-depth (this round, criterion 3, the fail-safe half): a CLEAN form
+    /// that swaps <c>Id</c> reloads without a notice — nothing was discarded, so an announcement would
+    /// be a lie, and a page that cries wolf teaches authors to read past the one that is true.
+    /// <para>Not on its own discriminating (both trees reload silently); it is the non-vacuity anchor for
+    /// the notice above, and it pins that the reload itself is still unguarded by dirtiness.</para></summary>
+    [TestMethod]
+    public void CleanForm_IdChange_ReloadsWithoutTheDiscardNotice()
+    {
+        var dtoA = MakeDto(AssignmentStatusDto.Draft);
+        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        SetupAssignment(dtoB);
+        cut.Render(p => p
+            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
+            .Add(x => x.Id, dtoB.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science HW"));
+        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
+            "an untouched form loses nothing, so the reload stays silent");
+    }
+
+    /// <summary>UX-7 / F17 defence-in-depth (this round, criterion 4): the in-app confirmation's
+    /// DISCARD path records the consent, so the reload that navigation reaches — the already-guarded
+    /// path — does not announce the author's own decision back at them.
+    /// <para>Non-vacuity anchors: the guard really did ask (the confirmation was captured), the
+    /// navigation really did proceed (the fake navigation committed), and the form really was dirty at
+    /// the time (the same edit shape as the announced case above). The parameter set is then driven by
+    /// hand because bUnit renders the component directly rather than through a <c>Router</c>.
+    /// </para></summary>
+    [TestMethod]
+    public async Task UnsavedEdits_ConsentedDiscard_IdChange_ReloadsWithoutTheDiscardNotice()
+    {
+        var captured = new List<ConfirmDialogContent>();
+        RegisterConfirmationDialog(confirm: true, captured);
+
+        var dtoA = MakeDto(AssignmentStatusDto.Draft);
+        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+        await SetTitleAsync(cut, "Edited title");
+
+        Navigation.NavigateTo($"/assignments/{dtoB.Id}/edit");
+        cut.WaitForAssertion(() => captured.Should().HaveCount(1,
+            "the guard asked before the navigation could change the parameter"));
+        Navigation.Uri.Should().EndWith($"/assignments/{dtoB.Id}/edit",
+            "vacuity anchor: the discard was confirmed, so this navigation is the author's own decision");
+
+        SetupAssignment(dtoB);
+        cut.Render(p => p
+            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
+            .Add(x => x.Id, dtoB.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science HW"));
+        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
+            "D2: a consented discard is not announced back at the author — the notice is for the swap " +
+            "nothing guarded");
+    }
+
+    /// <summary>UX-7 / F17 defence-in-depth (this round, the leak the consent flag could carry): the
+    /// consent belongs to the navigation that produced it. A navigation the author consented to which
+    /// never reached a parameter change (a same-route jump) is a real state on this page — the sticky
+    /// jump-nav navigates within the route — so the flag is consumed on every parameter set and cannot
+    /// be left armed to silence a LATER, genuinely unguarded swap. That later swap is the silent discard
+    /// this round exists to remove.
+    /// <para>Discriminating: with the flag consumed only on a changed parameter set, the last assertion
+    /// fails — the stale consent suppresses a notice the author should have seen.</para></summary>
+    [TestMethod]
+    public async Task ConsentThatReachedNoParameterChange_DoesNotSilenceALaterUnguardedDiscard()
+    {
+        var captured = new List<ConfirmDialogContent>();
+        RegisterConfirmationDialog(confirm: true, captured);
+
+        var dtoA = MakeDto(AssignmentStatusDto.Draft);
+        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+        await SetTitleAsync(cut, "Edited title");
+
+        Navigation.NavigateTo($"/assignments/{dtoA.Id}/edit#authoring-questions");
+        cut.WaitForAssertion(() => captured.Should().HaveCount(1,
+            "vacuity anchor: the guard asked about the unsaved work before letting the jump through"));
+
+        // The host re-renders with the SAME Id/Mode (the no-op parameter set), so the consented
+        // navigation reached no change at all. It discarded nothing, so it must announce nothing.
+        cut.Render(p => p
+            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
+            .Add(x => x.Id, dtoA.Id));
+        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
+            "the consented navigation changed nothing, so there was no discard to announce");
+
+        // The real swap is still unguarded and still dirty: it must be announced.
+        SetupAssignment(dtoB);
+        cut.Render(p => p
+            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
+            .Add(x => x.Id, dtoB.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science HW"));
+        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().ContainSingle(
+            "the consent was spent on the navigation that reached no parameter change — it may not " +
+            "silence the next unguarded swap");
     }
 
     // ── F12: the empty-audience preview wording ───────────────────────────────
@@ -1888,16 +2393,156 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 $"NFR-1: {id}'s idref must resolve to a paragraph that actually renders in this state");
         }
 
-        // The students picker is the one constraint control whose declaration FluentUI SWALLOWS:
-        // FluentAutocomplete puts the Id on its inner <fluent-text-field> and owns that element's aria
-        // surface (combobox role, aria-label, aria-expanded, aria-controls), so the aria-describedby
-        // the page declares is dropped rather than forwarded. Pinned instead of skipped, so the
-        // limitation is visible to the next reader and a FluentUI version that starts forwarding the
-        // attribute fails HERE — extend the loop above when that happens. Recorded in the spec's
-        // "Deferred / known gaps".
-        cut.Find("#authoring-audience-students").GetAttribute("aria-describedby").Should().BeNull(
-            "documented limitation (FluentUI 4.14.2): FluentAutocomplete drops the declared " +
-            "aria-describedby, so this picker has no idref to resolve — unlike the four in the loop above");
+        // §17 (item 3, this round): the students picker is the one constraint control FluentAutocomplete
+        // owns the aria surface of — it routes a declared attribute to its own root <div> rather than to
+        // the inner <fluent-text-field> that carries the combobox role and the idref's target, so the page
+        // declares the reason on the row's GROUP instead (see the Students FormRow). Either carrier is
+        // accepted here: a FluentUI version that starts forwarding the declared attribute to the inner
+        // field satisfies the first half, and this round's group satisfies it meanwhile — the assertion
+        // states the contract (the reason reaches an element of the students row that renders) without
+        // pinning the mechanism, so it does not have to be rewritten on a package upgrade.
+        var students = cut.Find("#authoring-audience-students");
+        var studentsIdref = students.GetAttribute("aria-describedby")
+            ?? cut.Find("#authoring-audience-students-group").GetAttribute("aria-describedby");
+        studentsIdref.Should().Be("authoring-audience-constraint-reason",
+            "NFR-1/§17: the disabled students picker names the reason paragraph the constraint gate renders");
+        cut.FindAll($"#{studentsIdref}").Should().ContainSingle(
+            "NFR-1: the students picker's idref must resolve to a paragraph that actually renders here");
+    }
+
+    /// <summary>§17 (item 3, this round): with the constraint gate engaged the students picker names its
+    /// reason like its four siblings. FluentAutocomplete routes the page's declared attributes to its own
+    /// root <c>&lt;div&gt;</c> while the element it takes the component Id on is the INNER
+    /// <c>&lt;fluent-text-field&gt;</c> that carries the combobox role — so a declared aria-describedby
+    /// reached nothing a screen reader reads, and this was the one disabled constraint control with no
+    /// reason. The reason is declared on the row's own labelled group, which the control cannot rewrite.
+    /// <para>Discriminating: against the pre-fix page there is no <c>#authoring-audience-students-group</c>
+    /// at all, so the row-group assertion cannot hold.</para></summary>
+    [TestMethod]
+    public async Task StudentsPicker_NamesItsReasonFromItsOwnRow_WhenTheConstraintGateDisablesIt()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        await SelectEveryoneAsync(cut);
+
+        cut.WaitForAssertion(() =>
+        {
+            // The gate really is engaged and the picker really is disabled — NFR-1 binds on that state.
+            cut.Find("#authoring-audience-students").HasAttribute("disabled").Should().BeTrue(
+                "vacuity guard: the reason is only owed to a picker the gate actually disables");
+
+            var rowGroup = cut.Find("#authoring-audience-students-group");
+            rowGroup.GetAttribute("aria-describedby").Should().Be("authoring-audience-constraint-reason",
+                "§17: the students row carries the reason on the group that keeps it");
+            rowGroup.GetAttribute("aria-label").Should().NotBeNullOrEmpty(
+                "a description on an UNNAMED group is inert for assistive tech — the reason is only exposed " +
+                "because the group is announced");
+            rowGroup.QuerySelector("#authoring-audience-students").Should().NotBeNull(
+                "the group is the students control's own row, not a page-wide carrier");
+
+            cut.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle()
+                .Which.TextContent.Should().NotBeNullOrWhiteSpace(
+                    "NFR-1: the idref names a paragraph that renders the reason in this state");
+
+            // ... and all five disabled controls, not just this one.
+            AssertEveryDisabledConstraintControlNamesARenderedReason(cut);
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    // ── §17 item 2: a restored student target keeps its resolved label ─────
+
+    /// <summary>F4/§17 (item 2, this round): switching Everyone OFF restores the target rows it replaced,
+    /// which puts the student IDS back — but a chip renders from its OPTION object and Everyone ON clears
+    /// the ones the picker reported. The restored student therefore rendered the <c>Student &lt;id8&gt;</c>
+    /// fallback until the author touched the picker. The page re-resolves the restored ids.
+    /// <para>Discriminating: pre-fix the restore path re-added nothing to
+    /// <c>_selectedStudentOptions</c>, so the chip assertion fails on the id-labelled fallback.</para></summary>
+    [TestMethod]
+    public async Task EveryoneOff_RestoresAResolvedStudentChip_NotTheIdFallback()
+    {
+        var studentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        // The restored-id re-resolve reads the student by id; the picker's own search answers the pick.
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/students/{studentId}")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
+                Student(studentId, "Ada", "Lovelace", "S1001"), _apiJsonOptions));
+        _mockHttp.When(HttpMethod.Get, "http://localhost/students?search=Ada")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
+                new[] { Student(studentId, "Ada", "Lovelace", "S1001") }, _apiJsonOptions));
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        var search = new OptionsSearchEventArgs<Authoring.PickerOption> { Text = "Ada" };
+        await cut.InvokeAsync(() => StudentPicker(cut).OnOptionsSearch.InvokeAsync(search));
+        search.Items.Should().ContainSingle("the stubbed search answered the picker");
+        await cut.InvokeAsync(() => StudentPicker(cut).SelectedOptionsChanged.InvokeAsync(search.Items));
+
+        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal(new[] { "Ada Lovelace (S1001)" }),
+            TimeSpan.FromSeconds(5));
+
+        await SelectEveryoneAsync(cut);
+        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal(new[] { "Everyone" }), TimeSpan.FromSeconds(5));
+
+        await SelectEveryoneAsync(cut, everyone: false);
+
+        cut.WaitForAssertion(() =>
+        {
+            ChipLabels(cut).Should().Equal(new[] { "Ada Lovelace (S1001)" },
+                "§17 item 2: the restored student target renders the name it was re-resolved to, not the id fallback");
+            cut.Markup.Should().NotContain($"Student {studentId.ToString()[..8]}",
+                "the id-labelled fallback chip is what the author used to be shown here");
+            StudentPicker(cut).SelectedOptions!.Select(o => o.Value)
+                .Should().BeEquivalentTo(new[] { studentId.ToString() },
+                    "the restored option is kept, so the picker's own selection projection shows it too");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    // ── §17 item 4: an unrepresentable persisted link is named ─────────────
+
+    /// <summary>§17 (item 4, this round): a persisted link to an activity group the picker cannot
+    /// represent (an archived one — the replace-set route would refuse it) used to be dropped from the
+    /// selection without a word, so the author saw a shorter list and nothing explained it. The note names
+    /// the dropped link and states what is true of it: the link survives while the selection is left alone.
+    /// <para>Discriminating: pre-fix no note is rendered at all, so the first half cannot pass.</para></summary>
+    [TestMethod]
+    public void ArchivedLinkedGroup_IsNamedOnThePage_AndTheNoteIsAbsentWhenNothingIsDropped()
+    {
+        var activeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var archivedId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        _activityGroups = [Group(activeId, "Robotics"), Group(archivedId, "Retired Choir", isActive: false)];
+
+        var dropped = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            linkedGroupIds: [archivedId]);
+
+        dropped.WaitForAssertion(() =>
+        {
+            var note = dropped.Find("#authoring-groups-dropped-links");
+            note.TextContent.Should().Contain("Retired Choir",
+                "§17 item 4: the note names the archived group the name-bearing read carried");
+            note.TextContent.Should().Contain(Authoring.DroppedGroupLinksNoteLead);
+            note.TextContent.Should().NotContain("lost",
+                "the link is not re-writable, which is not the same as lost");
+        }, TimeSpan.FromSeconds(5));
+
+        // The picker still cannot represent it — the note is the only thing that says so.
+        Picker(dropped, "authoring-audience-groups").SelectedOptions.Should().BeEmpty(
+            "vacuity guard: an archived group is genuinely not selectable, which is why it needs naming");
+
+        // Nothing dropped → no note: the paragraph can never become permanent furniture. The link and the
+        // target row are in step here — the state the save path keeps them in — so the picker really does
+        // represent the link.
+        var intact = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, activeId, 0)]),
+            linkedGroupIds: [activeId]);
+
+        intact.WaitForAssertion(() =>
+        {
+            Picker(intact, "authoring-audience-groups").SelectedOptions.Should().NotBeEmpty(
+                "vacuity guard: the representable link really was selected");
+            intact.FindAll("#authoring-groups-dropped-links").Should().BeEmpty(
+                "§17 item 4: no dropped link, no note");
+        }, TimeSpan.FromSeconds(5));
     }
 
     // ── F7: a disabled action explains itself (the authoring call site) ────

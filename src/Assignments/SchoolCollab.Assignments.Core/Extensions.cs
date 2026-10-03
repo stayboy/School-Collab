@@ -30,6 +30,10 @@ public static class Extensions
             configuration.GetSection(AssignmentFileStoreOptions.SectionName));
         services.Configure<AttachmentUploadOptions>(
             configuration.GetSection(AttachmentUploadOptions.SectionName));
+        // R3 (D8(a)): the per-file extraction wall clock. The size/character caps stay constants on
+        // AttachmentExtractionLimits because the EF column lengths are taken from them.
+        services.Configure<AttachmentExtractionOptions>(
+            configuration.GetSection(AttachmentExtractionOptions.SectionName));
         services.AddScoped<IFileStore, LocalFileStore>();
 
         var connectionString = configuration.GetConnectionString("assignments-db")
@@ -48,6 +52,10 @@ public static class Extensions
         services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
         services.AddScoped<IWardAssignmentProjectionRepository, WardAssignmentProjectionRepository>();
         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
+        // R3 (D4/P1-2): append-only AI generation headers. Registered in Core like the other
+        // standalone-entity repositories; the extractor that feeds the stage path is registered by
+        // the API host (it owns the PdfPig/OpenXml dependencies) — see Program.cs.
+        services.AddScoped<IAssignmentQuestionGenerationRepository, AssignmentQuestionGenerationRepository>();
         // WS-E2 (ar-16): delivery channel senders (MailKit when Smtp:Host is set, null
         // sender otherwise) + the store-driven dispatch drain.
         services.AddAssignmentNotificationDelivery(configuration);

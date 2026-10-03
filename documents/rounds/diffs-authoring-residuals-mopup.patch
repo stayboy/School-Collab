@@ -1,0 +1,1285 @@
+diff --git a/documents/specs/assignment-authoring-compartments.md b/documents/specs/assignment-authoring-compartments.md
+index 7f46e6d4..5a3c3a0e 100644
+--- a/documents/specs/assignment-authoring-compartments.md
++++ b/documents/specs/assignment-authoring-compartments.md
+@@ -436,11 +436,18 @@ done rather than letting this list drift away from the code.
+ | Gap | What is missing | What it takes to close |
+ |---|---|---|
+ | **P2-c — transaction rollback is unproven** (found in R2) | `LinkAssignmentGroupsHandler` performs the target update and the legacy link replace inside one explicit EF Core transaction, but that is **verified by inspection only**. No test proves a mid-transaction failure leaves targets and links consistent: the InMemory test fixture suppresses `TransactionIgnoredWarning`, so the rollback path is never exercised. | A failure-injection test in `tests/SchoolCollab.Assignments.Tests.Integration` (Testcontainers/PostgreSQL) that faults the second write and asserts the first was rolled back. |
+-| **Archived-group relink is refused with 422** (R1) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore drops ids the picker cannot represent, and the author is told nothing. The link stays readable but is not re-writable. | Either a relink route that accepts an unchanged archived id, or a UX path that names the dead link on the page. |
+-| **`ReloadAsync` re-reads the summary only** (R1) | After a lifecycle action (publish / unpublish / close / archive) the surface re-reads `GET /assignments/{id}` — the scalar summary — but **not** the authoring children or the target rows, so a status change that altered the persisted set is not reflected until the page is loaded again. | Reuse the initial load path (`LoadChildrenAsync` + `LoadLinkedGroupIdsAsync`) in the reload. |
+-| **F4 — a restored student target renders a fallback chip** (R2) | Restoring the constraints Everyone replaced (F4) puts the ids back, but the student picker's option labels are not re-resolved, so a restored student target shows the `Student <id8>` fallback chip until the picker is touched. A **loaded** student target already renders that way, so this is consistent rather than new. | Re-run the student search for the restored ids and keep the option objects in `_selectedStudentOptions`. |
++| **Archived-group relink is refused with 422 — the route half** (R1; the UX half was closed by round `authoring-residuals-mopup`) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore still drops ids the picker cannot represent. The link stays readable but is not re-writable, and the page now names what it dropped (`#authoring-groups-dropped-links`) instead of discarding it silently, which tells the author what is true of the link without making it writable. | A relink route (or a handler rule) that accepts an **unchanged** archived id. |
+ | **A read-only View has no reason to convey** (R2, verified benign) | The grades / streams / students pickers carry a hard-coded `aria-describedby="authoring-audience-constraint-reason"`. The only state where that paragraph is absent is a plain read-only View, where no reason exists and the controls are disabled by `IsReadOnly` — so the idref does not actually dangle on a control that had something to say. | None while that reasoning holds; re-check if a reason is ever introduced on a read-only surface. |
+-| **The students picker cannot name its reason** (F15, discovered on FluentUI 4.14.2) | `FluentAutocomplete` puts the component `Id` on its inner `<fluent-text-field>` and owns that element's aria surface (combobox role, `aria-label`, `aria-expanded`, `aria-controls`), so the `aria-describedby` the page declares on it is **dropped, not forwarded** — the picker disabled by the constraint gate has no accessible reason, while its four sibling controls do. | Wrap the autocomplete and set the attribute on the wrapper (or upgrade FluentUI and forward it). Pinned by `AssignmentAuthoringBunitTests.AssertEveryDisabledConstraintControlNamesARenderedReason`, which fails if a FluentUI version starts forwarding the attribute — extend its loop then. |
++| **UX-7 / F17 defence-in-depth** (found by the `authoring-ux7-residuals` review) | `OnParametersSetAsync` does not itself refuse a reload while the form is dirty: it reloads whenever `Id` or `Mode` **changed**, and the dirty state is only enforced upstream by the registered location-changing handler. That handler runs before a navigation commits, so the guard does win on this repo's routes — and the persisted-set re-read `ReloadAsync` performs is held back while the form carries unsaved work — but a host that swapped `Id` without a `NavigationManager` navigation would reload unprompted. | A dirty gate inside the reload path itself (the belt-and-braces half). |
++
++Round `authoring-residuals-mopup` closed **`ReloadAsync` re-reads the summary only** (the reload now runs
++the same persisted-set load as the initial Edit load, and holds it back while the form has unsaved work),
++**F4 — a restored student target renders a fallback chip** (the restored ids are re-resolved, so the chip
++renders the name the picker would have shown), **The students picker cannot name its reason** (the reason
++is declared on the row's own labelled group, which `FluentAutocomplete` cannot rewrite away), the **UX
++half of the archived-group relink** (the dropped link is named on the page), and the ux7 round's
++**`IsDirty` cost per render** (the snapshot is a 128-bit fingerprint of the save payload rather than the
++serialized payload, so the per-render comparison no longer materializes the request).
+ 
+ The R2 UI P2 backlog (**F7** kebab disabled-without-reason, **F12** empty-state preview wording,
+ **F13** first-render debounce delay, **F15** per-row reason placement, **F17** missing
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+index 326966e4..54af29c3 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+@@ -246,19 +246,35 @@
+ 
+                     <FormRow Label="Students" For="authoring-audience-students" AlignTop>
+                         @* TGT-6: individual students via server search (never a full roster load). *@
+-                        <FluentAutocomplete TOption="PickerOption" Id="authoring-audience-students"
+-                                            Multiple="true"
+-                                            MaximumOptionsSearch="20"
+-                                            ImmediateDelay="300"
+-                                            Placeholder="Search students by name or number…"
+-                                            Items="@_studentOptions"
+-                                            OptionText="@(o => o.Label)"
+-                                            OptionValue="@(o => o.Value)"
+-                                            SelectedOptions="@SelectedStudentTargetOptions"
+-                                            SelectedOptionsChanged="@OnSelectedStudentTargetsChangedAsync"
+-                                            OnOptionsSearch="@OnStudentSearchAsync"
+-                                            aria-describedby="authoring-audience-constraint-reason"
+-                                            Disabled="@ConstraintPickersDisabled" class="full-width" />
++                        @* NFR-1 / §17 (F15): FluentAutocomplete routes the page's declared attributes to its
++                           OWN root element — a bare <div> — while the element it takes the component Id on is
++                           the inner <fluent-text-field>, which is the one carrying the combobox role,
++                           aria-expanded/controls and the label association. A declared aria-describedby
++                           therefore never reaches an element assistive tech reads, and this was the one
++                           constraint picker whose disabled state named no reason. The reason is declared on a
++                           labelled group the control cannot rewrite; the four sibling pickers need no such
++                           wrapper because their own host element is the one their Id lands on. The
++                           declaration stays on the control as well, so a FluentUI version that starts
++                           forwarding it to the inner field keeps working. *@
++                        <div id="authoring-audience-students-group"
++                             class="full-width"
++                             role="group"
++                             aria-label="Students"
++                             aria-describedby="authoring-audience-constraint-reason">
++                            <FluentAutocomplete TOption="PickerOption" Id="authoring-audience-students"
++                                                Multiple="true"
++                                                MaximumOptionsSearch="20"
++                                                ImmediateDelay="300"
++                                                Placeholder="Search students by name or number…"
++                                                Items="@_studentOptions"
++                                                OptionText="@(o => o.Label)"
++                                                OptionValue="@(o => o.Value)"
++                                                SelectedOptions="@SelectedStudentTargetOptions"
++                                                SelectedOptionsChanged="@OnSelectedStudentTargetsChangedAsync"
++                                                OnOptionsSearch="@OnStudentSearchAsync"
++                                                aria-describedby="authoring-audience-constraint-reason"
++                                                Disabled="@ConstraintPickersDisabled" class="full-width" />
++                        </div>
+                     </FormRow>
+ 
+                     <FormRow Label="Activity groups" For="authoring-audience-groups" AlignTop>
+@@ -291,6 +307,16 @@
+                         <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
+                     }
+ 
++                    @* §17 (item 4, this round): a persisted link the picker cannot represent (an archived
++                       group) used to be discarded from the selection without a word, so the author saw a
++                       shorter list and nothing explained it. The note names the dropped link(s) and states
++                       what is actually true — the link is kept while the selection is left alone — rather
++                       than claiming anything was lost. *@
++                    @if (DroppedGroupLinksNote is not null)
++                    {
++                        <p class="authoring-reason" id="authoring-groups-dropped-links">@DroppedGroupLinksNote</p>
++                    }
++
+                     @* The selected constraints as chips in DisplayOrder; removal re-indexes 0..n-1. *@
+                     <div class="authoring-target-chips" id="authoring-audience-targets">
+                         @if (TargetChips.Count == 0)
+@@ -546,6 +572,18 @@
+         "The activity groups already linked to this assignment could not be loaded, so this picker is " +
+         "disabled — saving would replace the existing links. Reload the page to try again.";
+ 
++    /// <summary>§17 (item 4, this round): the note the Audience compartment renders when the persisted
++    /// link set carries an activity group the picker cannot represent — an archived one, which the
++    /// replace-set link route would refuse. It leads with the group(s) and states what is actually true
++    /// of the link (it is kept while the selection is left alone) rather than claiming it was lost. See
++    /// <see cref="DroppedGroupLinksNote"/> for the tail.</summary>
++    public const string DroppedGroupLinksNoteLead = "Not shown here — archived activity group: ";
++
++    /// <summary>§17 (item 4, this round): the half of the note that says what the author can rely on.</summary>
++    public const string DroppedGroupLinksNoteTail =
++        ". The link is kept while the group selection is left unchanged; changing the selection and " +
++        "saving replaces the whole link set, and an archived group cannot be re-linked from this page.";
++
+     // ── UX-7: the unsaved-changes guard (D2/D3) ─────────────────────────────
+ 
+     /// <summary>UX-7 (D2) in-app half: the confirmation shown when a navigation would discard
+@@ -675,6 +713,15 @@
+     private readonly HashSet<Guid> _loadedGroupIds = [];
+     private string? _groupLinksUnavailableReason;
+ 
++    /// <summary>§17 (item 4, this round): every activity group the last list read returned — including the
++    /// inactive (archived) ones the picker does not offer — so a persisted link the picker cannot
++    /// represent can still be named to the author instead of silently disappearing from the selection.</summary>
++    private ActivityGroupDto[] _fetchedActivityGroups = [];
++
++    /// <summary>§17 (item 4, this round): the persisted link ids <see cref="LoadLinkedGroupIdsAsync"/>
++    /// could not select — the ones <see cref="DroppedGroupLinksNote"/> names.</summary>
++    private readonly List<Guid> _droppedGroupLinkIds = [];
++
+     /// <summary>One dropdown item for every picker on this page (grade, subject, group,
+     /// assignment type, grading format, target audience). Kept public so the pickers can be
+     /// driven by tests through their real <c>SelectedOptionChanged</c> callback.</summary>
+@@ -914,6 +961,25 @@
+         : ConstraintPickersDisabledReason is not null ? "authoring-audience-constraint-reason"
+         : null;
+ 
++    /// <summary>
++    /// §17 (item 4, this round): the persisted activity-group links this page cannot show, named for
++    /// the author. Null — and therefore absent from the DOM — whenever the picker could represent every
++    /// link it found, so the note can never become permanent furniture.
++    /// </summary>
++    private string? DroppedGroupLinksNote => _droppedGroupLinkIds.Count == 0
++        ? null
++        : DroppedGroupLinksNoteLead
++          + string.Join(", ", _droppedGroupLinkIds.Select(GroupLinkDisplayName))
++          + DroppedGroupLinksNoteTail;
++
++    /// <summary>The dropped link's group name, taken from the same list read that produced the picker's
++    /// options (an archived group is still IN that read — it is only filtered out of the option list).
++    /// Falls back to the id when the group is not in the read at all, so the note always names something
++    /// the author can act on.</summary>
++    private string GroupLinkDisplayName(Guid groupId) =>
++        _fetchedActivityGroups.FirstOrDefault(g => g.Id == groupId)?.Name
++        ?? $"group {groupId.ToString()[..8]}";
++
+     // ── Policy-derived read-only values (UX-13) ───────────────────────────────
+ 
+     private string ApprovalPolicyValueText => _item is null
+@@ -1296,26 +1362,21 @@
+             // payload.
+             if (EffectiveMode == AssignmentAuthoringMode.Edit && Id is Guid authoringId)
+             {
+-                await LoadChildrenAsync(authoringId, ct);
+-                await LoadLinkedGroupIdsAsync(authoringId, ct);
++                await LoadPersistedSelectionAsync(authoringId, ct);
+             }
+-            else if (Mode == AssignmentAuthoringMode.Create)
++            else
+             {
+-                // Create has no persisted targets to lose, so its targeting editor is live.
+-                _model.LoadTargets([]);
+-            }
+-
+-            // D-2 / TGT-7: mirror the loaded target set onto the pickers.
+-            SyncTargetPickerState();
+-            SyncGroupsFromTargets();
+-            _everyone = _model.HasAllStudents;
++                if (Mode == AssignmentAuthoringMode.Create)
++                {
++                    // Create has no persisted targets to lose, so its targeting editor is live.
++                    _model.LoadTargets([]);
++                }
+ 
+-            // FR-58: a persisted group target needs its group-subject union loaded up front —
+-            // the submit gate and the subject picker both read it, and the union otherwise only
+-            // loads when the author touches the group picker (which would silently block the save).
+-            if (_selectedGroupIds.Count > 0)
+-            {
+-                await LoadGroupSubjectsAsync();
++                // Create has no persisted set to read and View does not read one either, so only the
++                // mirrors run here — they carry whatever the surface already holds.
++                SyncTargetPickerState();
++                SyncGroupsFromTargets();
++                _everyone = _model.HasAllStudents;
+             }
+ 
+             // WS-C1 (spec §7 Q1) / D2: resolve the effective signature requirement — the
+@@ -1372,6 +1433,8 @@
+         _groupLinksLoaded = false;
+         _loadedGroupIds.Clear();
+         _groupLinksUnavailableReason = null;
++        _fetchedActivityGroups = [];
++        _droppedGroupLinkIds.Clear();
+ 
+         _gradeLevels = null;
+         _gradeLevelOptions = [];
+@@ -1392,6 +1455,36 @@
+         _previewDegraded = false;
+     }
+ 
++    /// <summary>
++    /// P1/P2-1/R2 — the ONE read of the assignment's persisted authoring set: the children (which carry
++    /// the targeting rows, D-8.3) and the linked activity groups, followed by the picker mirrors that
++    /// make the loaded set visible. <see cref="LoadAsync"/> runs it before the editors first render (so
++    /// an author's first add can never turn an empty collection into a full-replacement payload) and
++    /// <see cref="ReloadAsync"/> runs it again after a lifecycle action, so the surface shows the set
++    /// the server actually holds rather than the one it held before the action.
++    /// <para>It re-reads NOTHING else: the picker option sources (grade levels, streams, activity groups)
++    /// are tenant-level data no lifecycle action changes, and the scalar summary is refreshed by the
++    /// callers from their own detail read.</para>
++    /// </summary>
++    private async Task LoadPersistedSelectionAsync(Guid assignmentId, CancellationToken ct)
++    {
++        await LoadChildrenAsync(assignmentId, ct);
++        await LoadLinkedGroupIdsAsync(assignmentId, ct);
++
++        // D-2 / TGT-7: mirror the loaded target set onto the pickers.
++        SyncTargetPickerState();
++        SyncGroupsFromTargets();
++        _everyone = _model.HasAllStudents;
++
++        // FR-58: a persisted group target needs its group-subject union loaded up front — the submit
++        // gate and the subject picker both read it, and the union otherwise only loads when the author
++        // touches the group picker (which would silently block the save).
++        if (_selectedGroupIds.Count > 0)
++        {
++            await LoadGroupSubjectsAsync();
++        }
++    }
++
+     /// <summary>Loads grade levels, activity groups (flag-gated) and, for a loaded assignment,
+     /// the subject option that carries its persisted topic. Every fetch is isolated so one
+     /// optional backend being absent can never take down the rest of the page (the
+@@ -1454,6 +1547,7 @@
+     private async Task LoadActivityGroupsAsync(CancellationToken ct)
+     {
+         _activityGroupOptions = [];
++        _fetchedActivityGroups = [];
+         _selectedGroupIds.Clear();
+         _loadedGroupIds.Clear();
+         _groupLinksLoaded = false;
+@@ -1470,6 +1564,9 @@
+             var groups = await StudentsApi.ListActivityGroupsAsync(ct);
+             if (groups is null) return;
+ 
++            // §17 (item 4): the WHOLE read is kept — the archived rows are what a dropped link has to
++            // be named from — while only the active ones become picker options.
++            _fetchedActivityGroups = groups;
+             _activityGroupOptions = groups
+                 .Where(g => g.IsActive)
+                 .OrderBy(g => g.Name)
+@@ -1527,6 +1624,7 @@
+     {
+         _groupLinksLoaded = false;
+         _loadedGroupIds.Clear();
++        _droppedGroupLinkIds.Clear();
+         _groupLinksUnavailableReason = null;
+ 
+         if (!_activityGroupsEnabled)
+@@ -1555,6 +1653,12 @@
+                     _loadedGroupIds.Add(groupId);
+                     _selectedGroupIds.Add(groupId);
+                 }
++                else
++                {
++                    // §17 (item 4, this round): the drop is reported instead of silent — the author
++                    // sees a shorter list below, and this is what tells them why.
++                    _droppedGroupLinkIds.Add(groupId);
++                }
+             }
+ 
+             _groupLinksLoaded = true;
+@@ -1695,10 +1799,50 @@
+             _groupSubjectOptions = [];
+             _groupSubjects = null;
+         }
++        else
++        {
++            await ResolveRestoredStudentTargetsAsync();
++        }
+ 
+         await OnTargetsChangedAsync();
+     }
+ 
++    /// <summary>
++    /// F4 / §17 (item 2, this round): switching Everyone OFF restores the target rows the toggle
++    /// replaced, which puts the student IDS back — but a chip renders from its OPTION object, and
++    /// Everyone ON cleared <see cref="_selectedStudentOptions"/>. Without this re-resolve a restored
++    /// student target rendered the <c>Student &lt;id8&gt;</c> fallback until the author touched the
++    /// picker. Fail-open: a student that cannot be read keeps that fallback chip, which stays removable.
++    /// </summary>
++    private async Task ResolveRestoredStudentTargetsAsync()
++    {
++        var ct = _loadCts?.Token ?? CancellationToken.None;
++        foreach (var studentId in TargetIds(TargetKindDto.Student))
++        {
++            if (_selectedStudentOptions.Any(o => o.Value == studentId.ToString()))
++            {
++                continue;
++            }
++
++            try
++            {
++                var student = await StudentsApi.GetStudentByIdAsync(studentId, ct);
++                if (student is null || student.IsDeleted)
++                {
++                    continue;
++                }
++
++                _selectedStudentOptions.Add(new PickerOption(student.Id.ToString(), StudentLabel(student)));
++            }
++            catch (OperationCanceledException) { return; }
++            catch (Exception ex)
++            {
++                if (_disposed) return;
++                Logger.LogWarning(ex, "Failed to resolve the restored student target {StudentId}", studentId);
++            }
++        }
++    }
++
+     private Task OnSelectedGradeTargetsChangedAsync(IEnumerable<PickerOption>? selected)
+     {
+         _model.SetTargetsOfKind(
+@@ -1850,9 +1994,7 @@
+             e.Items = students
+                 .Where(s => !s.IsDeleted)
+                 .Take(20)
+-                .Select(s => new PickerOption(
+-                    s.Id.ToString(),
+-                    $"{s.FirstName} {s.LastName} ({s.StudentNumber})"))
++                .Select(s => new PickerOption(s.Id.ToString(), StudentLabel(s)))
+                 .ToArray();
+         }
+         catch (OperationCanceledException) { e.Items = []; }
+@@ -1863,6 +2005,11 @@
+         }
+     }
+ 
++    /// <summary>TGT-6: the student option label — one spelling for the search results and the
++    /// restored-id re-resolve (F4/§17), so a chip and the picker always render the same name.</summary>
++    private static string StudentLabel(StudentDto student) =>
++        $"{student.FirstName} {student.LastName} ({student.StudentNumber})";
++
+     private async Task LoadGroupSubjectsAsync()
+     {
+         _loadingGroupSubjects = true;
+@@ -1941,6 +2088,17 @@
+     {
+         if (Id is not Guid id) return;
+         var ct = _loadCts?.Token ?? CancellationToken.None;
++
++        // §17 (item 1, this round): the persisted authoring set is only re-read onto a form that carries
++        // no unsaved work. Two of this method's callers leave the author on a surface they can still
++        // save from — Unpublish from Scheduled, and Schedule from Draft — and re-reading the persisted
++        // questions/attachments there would replace the rows they are still editing: the data-loss path
++        // the re-read must not create. Sampled BEFORE the summary refresh below, because that refresh
++        // itself rewrites the scalar fields the comparison reads. Every path on which the fresh set is
++        // REQUIRED is clean here: a read-only View is never dirty, and a save navigates away instead of
++        // leaving the author on the reloaded form.
++        var unsavedEdits = IsDirty;
++
+         try
+         {
+             _item = await Api.GetByIdAsync(id, ct);
+@@ -1949,6 +2107,31 @@
+                 _model.LoadFrom(_item);
+                 _mandatoryReview = _item.MandatoryReview;
+                 _requiresSignature = _item.RequiresSignature;
++
++                // §17 (item 1, this round): a lifecycle action can move the assignment to a status whose
++                // surface is editable again (Published → Unpublish → Draft) or change the persisted
++                // children, so the re-read happens against the mode the refreshed summary selects.
++                if (!unsavedEdits && EffectiveMode == AssignmentAuthoringMode.Edit)
++                {
++                    // Re-read AFTER the summary refresh, and deliberately not held behind it: the status
++                    // change is what the author acted on, so it shows even if this read fails. Accepted
++                    // posture on that failure — the refreshed scalars stay, the child/target set stays as
++                    // it was (nothing is cleared), i.e. a partial refresh rather than a broken form. Caught
++                    // separately from the summary failure below so the log says which half of the reload
++                    // was lost.
++                    try
++                    {
++                        await LoadPersistedSelectionAsync(id, ct);
++                    }
++                    catch (OperationCanceledException) { }
++                    catch (Exception ex)
++                    {
++                        if (_disposed) return;
++                        Logger.LogWarning(ex,
++                            "Assignment {AssignmentId} reloaded its summary but its persisted children/targets could not be re-read; the form keeps the rows it already had",
++                            id);
++                    }
++                }
+             }
+         }
+         catch (OperationCanceledException) { }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
+index 574bbf76..7b5a9990 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
+@@ -1,6 +1,5 @@
+ using SchoolCollab.AI.Abstractions;
+ using SchoolCollab.Assignments.Contracts;
+-using System.Text.Json;
+ 
+ namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+ 
+@@ -40,6 +39,14 @@ public sealed class AssignmentEditFormModel
+     /// (decision (a)).</summary>
+     public List<AttachmentEditorRow> Attachments { get; } = [];
+ 
++    /// <summary>WS-A1 (spec §4.10 / FR-210–212): the content modules this save would send. Carried,
++    /// not authored — no editor loads or mutates the collection yet, so a real form state always
++    /// leaves it null and the projection hands the wire its null-means-preserve value (the
++    /// <see cref="ArchiveGraceDays"/> posture). It is part of the update payload all the same, so
++    /// <see cref="CaptureSaveSnapshot"/> mixes it: the snapshot covers every payload field, not only
++    /// the ones some editor happens to own today.</summary>
++    public IReadOnlyList<NewContentModuleDto>? ContentModules { get; set; }
++
+     /// <summary>WS-B2 (spec §3.4 / decision g): the URL rows the author added
+     /// as AI reference material. Mapped into the create request's
+     /// <c>Resources</c> as <see cref="ResourceKindDto.Url"/> rows and fed to the
+@@ -412,6 +419,11 @@ public sealed class AssignmentEditFormModel
+                 .ToList();
+         }
+ 
++        // WS-A1 (spec §4.10): no editor authors content modules yet, so this is normally null; an
++        // empty collection is normalized to the wire's null (preserve) rather than a clear, exactly
++        // as the question/attachment collections above are.
++        var contentModules = ContentModules is { Count: > 0 } ? ContentModules : null;
++
+         IReadOnlyList<NewResourceDto>? resources = null;
+         if (ResourceUrls.Count > 0 || PreservedResources.Count > 0)
+         {
+@@ -442,6 +454,7 @@ public sealed class AssignmentEditFormModel
+             AiPromptOverride: AiPromptOverride,
+             Questions: questions,
+             Attachments: attachments,
++            ContentModules: contentModules,
+             Resources: resources,
+             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
+             // cap threaded to the wire surface.
+@@ -739,13 +752,28 @@ public sealed class AssignmentEditFormModel
+ 
+     /// <summary>
+     /// UX-7 (D3): a canonical snapshot of everything a save from this form would write — the update
+-    /// payload, serialized. Page-level values that live outside the model are passed in exactly as
++    /// payload, fingerprinted. Page-level values that live outside the model are passed in exactly as
+     /// <see cref="ToUpdateRequest"/> takes them, so two form states compare equal exactly when the
+     /// next save would write the same thing; a value changed and then changed back is equal again,
+     /// which is what makes the page's unsaved-changes guard a BASELINE comparison rather than an
+     /// event flag (an event flag prompts for a difference that no longer exists).
+     /// <para>The authored target rows always ride the snapshot — never the update path's
+     /// null-means-preserve gate — so an untouched targeting editor compares equal to itself.</para>
++    /// <para>Completeness rule for the walk below: it mixes <b>every</b> field
++    /// <see cref="ToUpdateRequest"/> hands to the wire — the scalars in the order the projection
++    /// takes them, then each child collection at the position it occupies on the request
++    /// (questions, attachments, content modules, resources, targets) — not merely the fields some
++    /// editor mutates today. The equivalence matrix is written to the same rule. A payload field
++    /// added later without its mix would make a real edit read as "clean", so the navigation prompt
++    /// would never fire and the edit would be lost silently.</para>
++    /// <para>§17 (round <c>authoring-residuals-mopup</c>) item 5: the guard reads this on EVERY render
++    /// (<c>OnAfterRenderAsync</c> → <c>SyncBeforeUnloadGuardAsync</c> → <c>IsDirty</c>), so building and
++    /// serializing the whole update request here made the cost of a large assignment's question list
++    /// proportional to how often the page re-rendered. The snapshot is therefore a 128-bit
++    /// fingerprint of the same payload, mixed straight from the form's own values by
++    /// <see cref="SaveSnapshotHash"/>: same equality semantics, no payload materialization.
++    /// <c>AssignmentAuthoringBunitTests.SaveSnapshot_MatchesTheSerializedPayload_OnEveryDirtyRelevantField</c>
++    /// is the guard that keeps the two spellings of the payload in step.</para>
+     /// </summary>
+     public string CaptureSaveSnapshot(
+         AssignmentTypeDto assignmentType,
+@@ -754,10 +782,115 @@ public sealed class AssignmentEditFormModel
+         Guid topicId,
+         Guid? gradeLevelId,
+         bool mandatoryReview,
+-        bool requiresSignature) =>
+-        JsonSerializer.Serialize(ToUpdateRequest(
+-            assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
+-            mandatoryReview, requiresSignature, ToTargetDtos()));
++        bool requiresSignature)
++    {
++        var hash = new SaveSnapshotHash();
++
++        // ── Scalars, in the order ToCreateRequest hands them to the wire, each normalized exactly
++        // as that projection normalizes it: a null Title and an empty Title save the same bytes, so
++        // they must fingerprint the same, while a null Description and an empty one are two
++        // different payloads.
++        hash.Add(Title ?? string.Empty);
++        hash.Add(Description);
++        hash.Add((int)assignmentType);
++        hash.Add((int)gradingFormat);
++        hash.Add((int)targetAudienceType);
++        hash.Add(topicId);
++        hash.Add(gradeLevelId);
++        // DueDate rides the wire as a DateTimeOffset pinned to +00:00, so only its ticks are payload:
++        // two DateTime values with the same ticks but a different Kind save the same instant.
++        hash.Add(DueDate.HasValue);
++        hash.Add(DueDate?.Ticks ?? 0L);
++        hash.Add(MaxScore);
++        hash.Add(mandatoryReview);
++        hash.Add(AiPromptOverride);
++        hash.Add(ArchiveGraceDays);
++        hash.Add(PassScore);
++        hash.Add(MaxAttempts);
++        hash.Add(requiresSignature);
++        hash.Add(DifficultyEasyCount);
++        hash.Add(DifficultyMediumCount);
++        hash.Add(DifficultyHardCount);
++        hash.Add(Instructions);
++
++        // ── Questions. The payload's DisplayOrder is the list POSITION (EC-7 re-indexing), and the
++        // option rows ride the payload only for the two option-bearing types — mirror both.
++        hash.Add(Questions.Count);
++        foreach (var row in Questions)
++        {
++            hash.Add(row.QuestionText ?? string.Empty);
++            hash.Add((int)row.Type);
++            hash.Add(row.ModelAnswer);
++
++            var hasOptions = row.Type is QuestionTypeDto.MultipleChoice or QuestionTypeDto.TrueFalse;
++            hash.Add(hasOptions);
++            if (hasOptions)
++            {
++                hash.Add(row.Options.Count);
++                for (var i = 0; i < row.Options.Count; i++)
++                {
++                    hash.Add(row.Options[i].OptionText ?? string.Empty);
++                    hash.Add(row.CorrectOptionIndex == i);
++                }
++            }
++        }
++
++        hash.Add(Attachments.Count);
++        foreach (var attachment in Attachments)
++        {
++            hash.Add(attachment.FileName ?? string.Empty);
++            hash.Add(attachment.ContentType ?? string.Empty);
++            hash.Add(attachment.FileSize);
++            hash.Add(attachment.StoragePath ?? string.Empty);
++        }
++
++        // ── ContentModules, at the wire position ToUpdateRequest hands them (between the attachments
++        // and the resources). The sentinel is what the projection emits — null and empty both mean
++        // "preserve", a populated list means "replace" — and the field is mixed whether or not an
++        // editor owns it (the completeness rule on this method). Each module rides through with its
++        // own fields: unlike question rows, nothing re-indexes a module's DisplayOrder.
++        hash.Add(ContentModules is { Count: > 0 });
++        foreach (var module in ContentModules ?? [])
++        {
++            hash.Add((int)module.ModuleType);
++            hash.Add(module.Title);
++            hash.Add(module.Url);
++            hash.Add(module.StoragePath);
++            hash.Add(module.DisplayOrder);
++            hash.Add(module.MinCompletionThresholdPercent);
++            hash.Add(module.IsRequired);
++        }
++
++        // ── Resources: the preserved (File/Video) rows first, then the URL rows the editor owns.
++        hash.Add(PreservedResources.Count > 0 || ResourceUrls.Count > 0);
++        foreach (var resource in PreservedResources)
++        {
++            hash.Add((int)resource.ResourceKind);
++            hash.Add(resource.Url);
++            hash.Add(resource.StoragePath);
++            hash.Add(resource.DisplayName);
++            hash.Add(resource.IncludedInGeneration);
++        }
++
++        foreach (var url in ResourceUrls)
++        {
++            hash.Add((int)ResourceKindDto.Url);
++            hash.Add(url.Url);
++            hash.AddMissing();          // StoragePath is always null for a URL row
++            hash.Add(url.DisplayName);
++            hash.Add(true);             // IncludedInGeneration is always true for a URL row
++        }
++
++        // ── Targets, in authored display order (the payload's DisplayOrder is the list position).
++        hash.Add(_targets.Count);
++        foreach (var target in _targets)
++        {
++            hash.Add((int)target.Kind);
++            hash.Add(target.RefId);
++        }
++
++        return hash.Value;
++    }
+ 
+     /// <summary>WS-A3 (spec §3.3 + §7 Q4) — client-side submit gate
+     /// mirroring the server-side <c>Assignment.Create</c> /
+@@ -799,4 +932,141 @@ public sealed class AssignmentEditFormModel
+         error = null;
+         return true;
+     }
++
++    /// <summary>
++    /// §17 (round <c>authoring-residuals-mopup</c>) item 5: the 128-bit, allocation-free digest behind
++    /// <see cref="CaptureSaveSnapshot"/>. <see cref="Mix(byte)"/> is FNV-1a in two independently seeded
++    /// lanes and <see cref="Value"/> renders them as a fixed 32-character hex string, so the UX-7
++    /// dirty guard compares two 32-character digests where it used to compare two serialized update
++    /// requests. This is a change-detector, not a security control: a deliberate collision is not in
++    /// its threat model, and an accidental one is what the width is for.
++    /// <para>Every value is mixed at a fixed width and every string is length-prefixed, so two
++    /// different field layouts cannot produce the same byte stream.</para>
++    /// </summary>
++    private struct SaveSnapshotHash
++    {
++        /// <summary>FNV-1a 64 as lane A's step multiplier.</summary>
++        private const ulong LaneAPrime = 1099511628211UL;
++
++        /// <summary>xxHash64 prime 1 as lane B's step multiplier — a different constant, so the two
++        /// lanes do not move in lockstep.</summary>
++        private const ulong LaneBPrime = 0x9E3779B185EBCA87UL;
++
++        /// <summary>The FNV-1a 64 offset basis: lane A's seed.</summary>
++        private const ulong LaneASeed = 14695981039346656037UL;
++
++        /// <summary>xxHash64 prime 5: lane B's seed.</summary>
++        private const ulong LaneBSeed = 0xC2B2AE3D27D4EB4FUL;
++
++        private ulong _laneA;
++        private ulong _laneB;
++
++        /// <summary>Both lanes start from their own seed, so neither can be reconstructed from the
++        /// other and the pair is worth the 128 bits it renders as.</summary>
++        public SaveSnapshotHash()
++        {
++            _laneA = LaneASeed;
++            _laneB = LaneBSeed;
++        }
++
++        /// <summary>The digest as <c>laneA</c><c>laneB</c> in lowercase hex — always 32 characters, so
++        /// the snapshot's size never tracks the size of the form.</summary>
++        public readonly string Value => $"{_laneA:x16}{_laneB:x16}";
++
++        /// <summary>The marker a payload field that is genuinely absent contributes (the null
++        /// <c>StoragePath</c> of a URL resource row).</summary>
++        public void AddMissing() => Mix(0);
++
++        public void Add(bool value) => Mix(value ? (byte)1 : (byte)0);
++
++        public void Add(int value) => AddWide((ulong)(uint)value, 4);
++
++        public void Add(long value) => AddWide((ulong)value, 8);
++
++        public void Add(int? value)
++        {
++            Mix(value.HasValue ? (byte)1 : (byte)0);
++            if (value is int present)
++            {
++                Add(present);
++            }
++        }
++
++        public void Add(long? value)
++        {
++            Mix(value.HasValue ? (byte)1 : (byte)0);
++            if (value is long present)
++            {
++                Add(present);
++            }
++        }
++
++        /// <summary>A nullable decimal as its four 32-bit parts — <c>GetBits</c> keeps the scale, so
++        /// <c>1.0m</c> and <c>1.00m</c> (two different payloads) hash differently.</summary>
++        public void Add(decimal? value)
++        {
++            Mix(value.HasValue ? (byte)1 : (byte)0);
++            if (!value.HasValue)
++            {
++                return;
++            }
++
++            Span<int> bits = stackalloc int[4];
++            decimal.GetBits(value.Value, bits);
++            foreach (var part in bits)
++            {
++                Add(part);
++            }
++        }
++
++        public void Add(Guid? value)
++        {
++            Mix(value.HasValue ? (byte)1 : (byte)0);
++            if (!value.HasValue)
++            {
++                return;
++            }
++
++            Span<byte> bytes = stackalloc byte[16];
++            value.Value.TryWriteBytes(bytes);
++            foreach (var b in bytes)
++            {
++                Mix(b);
++            }
++        }
++
++        /// <summary>A nullable string, length-prefixed so <c>"ab"+"c"</c> and <c>"a"+"bc"</c> are
++        /// two different streams in two adjacent fields.</summary>
++        public void Add(string? value)
++        {
++            Mix(value is null ? (byte)0 : (byte)1);
++            if (value is null)
++            {
++                return;
++            }
++
++            Add(value.Length);
++            foreach (var character in value)
++            {
++                Mix((byte)character);
++                Mix((byte)(character >> 8));
++            }
++        }
++
++        /// <summary>Mixes the low <paramref name="byteCount"/> bytes of <paramref name="value"/>,
++        /// little-endian — a fixed width per value type.</summary>
++        private void AddWide(ulong value, int byteCount)
++        {
++            for (var i = 0; i < byteCount; i++)
++            {
++                Mix((byte)(value >> (i * 8)));
++            }
++        }
++
++        private void Mix(byte value)
++        {
++            _laneA = (_laneA ^ value) * LaneAPrime;
++            _laneB = (_laneB ^ value) * LaneBPrime;
++        }
++    }
+ }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+index e802f445..b323a46d 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+@@ -238,6 +238,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
+     private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<Authoring> cut, string id) =>
+         cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
+ 
++    /// <summary>The students picker is the one FluentAutocomplete on the page (TGT-6).</summary>
++    private static FluentAutocomplete<Authoring.PickerOption> StudentPicker(IRenderedComponent<Authoring> cut) =>
++        cut.FindComponents<FluentAutocomplete<Authoring.PickerOption>>().Single().Instance;
++
++    /// <summary>A student exactly as the students API answers it — both the picker's search and the
++    /// restored-id read deserialize this shape, so one helper keeps their labels identical.</summary>
++    private static StudentDto Student(Guid id, string firstName, string lastName, string studentNumber) =>
++        new(id, studentNumber, firstName, lastName, null, null, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
++
+     /// <summary>Drives a picker's real <c>SelectedOptionChanged</c> callback — never a raw DOM
+     /// event (the AssignmentCreateBunitTests / AssignmentPolicyFieldEditDialogTests pattern).</summary>
+     private static Task SelectAsync(IRenderedComponent<Authoring> cut, string pickerId, string value, string label) =>
+@@ -281,8 +290,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
+         cut.InvokeAsync(() => Picker(cut, "authoring-audience-groups").SelectedOptionsChanged.InvokeAsync(
+             groups.Select(g => new Authoring.PickerOption(g.Id.ToString(), g.Name)).ToArray()));
+ 
+-    private static ActivityGroupDto Group(Guid id, string name) =>
+-        new(id, name, null, null, null, true, "span", null, null, false, [], 0,
++    private static ActivityGroupDto Group(Guid id, string name, bool isActive = true) =>
++        new(id, name, null, null, null, isActive, "span", null, null, false, [], 0,
+             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+ 
+     /// <summary>Fills the Basics title through the bound text field's own callback — the save
+@@ -1642,6 +1651,342 @@ public class AssignmentAuthoringBunitTests : BunitContext
+         }, TimeSpan.FromSeconds(15));
+     }
+ 
++    // ── §17 item 1: a lifecycle action re-reads the persisted set ─────────
++
++    /// <summary>§17 (item 1, this round): <c>ReloadAsync</c> re-read only the scalar summary, so a lifecycle
++    /// action that moved the assignment to a status whose surface edits again — Published → Unpublish →
++    /// Draft is the visible one — landed the author on an editable form whose editors were still
++    /// DISABLED-with-reason ("the saved questions could not be loaded"), with the audience chips empty.
++    /// The re-read now runs the same persisted-set load the initial Edit load runs.
++    /// <para>Discriminating: pre-fix the children/targets read is never issued on this path, so
++    /// <c>#authoring-content-reason</c> still renders and the chip list is empty — neither assertion
++    /// can be satisfied by the summary refresh alone.</para></summary>
++    [TestMethod]
++    public async Task Unpublish_IntoAnEditableDraft_ReadsThePersistedChildrenAndTargets()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: true, captured);
++
++        var gradeId = Guid.Parse("66666666-6666-6666-6666-666666666666");
++        _gradeLevels =
++        [
++            new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
++        ];
++
++        var dto = MakeDto(AssignmentStatusDto.Published);
++        var children = MakeChildren(
++            questions: [LoadedQuestion()],
++            targets: [new AssignmentTargetDto(TargetKindDto.GradeLevel, gradeId, 0)]);
++
++        // The detail read answers the CURRENT status, so the reload the lifecycle action performs lands
++        // in Draft; both registrations come BEFORE RenderAuthoring's own detail read (MockHttp v6
++        // matches in registration order).
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
++            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
++            {
++                Content = new StringContent(JsonSerializer.Serialize(dto, _apiJsonOptions),
++                    Encoding.UTF8, "application/json")
++            });
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/unpublish")
++            .Respond(_ =>
++            {
++                dto = dto with { Status = AssignmentStatusDto.Draft };
++                return new HttpResponseMessage(HttpStatusCode.NoContent);
++            });
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, children);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        cut.Find("#authoring-primary-action").Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            captured.Should().ContainSingle("Unpublish asks before it acts");
++
++            cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Publish",
++                "the unpublish landed and the surface is an editable Draft again");
++
++            // Only the fresh read can produce these: a read-only View never reads the persisted set, so
++            // the surface had none until the re-read ran.
++            cut.FindAll("#authoring-content-reason").Should().BeEmpty(
++                "§17 item 1: the persisted children were re-read, so the content editors are live");
++
++            var questions = cut.FindComponents<QuestionEditorSection>().Single().Instance.Model.Questions;
++            questions.Should().HaveCount(1);
++            questions[0].QuestionText.Should().Be("Loaded question?",
++                "... and they carry what the server holds");
++
++            ChipLabels(cut).Should().Equal(new[] { "Grade 5" },
++                "§17 item 1: the target rows came back with them");
++        }, TimeSpan.FromSeconds(15));
++    }
++
++    /// <summary>§17 (item 1, this round) — the half the re-read must NOT break: Unpublish from a still-editable
++    /// Scheduled assignment leaves the author on a form they can save, without having saved it, so the
++    /// persisted rows must not be written over the ones they are still editing. (The scalar refresh is the
++    /// reload's pre-existing behaviour and is untouched.)
++    /// <para>Non-regression anchor by construction: pre-fix the child rows were never re-read at all, so this
++    /// passes there too. It exists to keep the new re-read from becoming the data-loss path — removing the
++    /// unsaved-edits gate fails it.</para></summary>
++    [TestMethod]
++    public async Task Unpublish_FromScheduled_WithUnsavedRows_KeepsTheAuthorsEdits()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: true, captured);
++
++        var dto = MakeDto(AssignmentStatusDto.Scheduled);
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
++            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
++            {
++                Content = new StringContent(JsonSerializer.Serialize(dto, _apiJsonOptions),
++                    Encoding.UTF8, "application/json")
++            });
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/unpublish")
++            .Respond(_ =>
++            {
++                dto = dto with { Status = AssignmentStatusDto.Draft };
++                return new HttpResponseMessage(HttpStatusCode.NoContent);
++            });
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, MakeChildren(questions: [LoadedQuestion()]));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"));
++
++        // The author's unsaved edit, written exactly the way the editor's own binding writes it.
++        var section = cut.FindComponents<QuestionEditorSection>().Single();
++        await cut.InvokeAsync(() => section.Instance.Model.Questions[0].QuestionText = "Author's unsaved edit");
++
++        cut.Find("#authoring-primary-action").Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            captured.Should().ContainSingle();
++            cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Publish",
++                "the unpublish landed");
++            cut.FindComponents<QuestionEditorSection>().Single().Instance.Model.Questions[0].QuestionText
++                .Should().Be("Author's unsaved edit",
++                    "§17 item 1: re-reading the persisted rows onto a form with unsaved work would discard " +
++                    "the author's questions — the reload holds back instead");
++        }, TimeSpan.FromSeconds(15));
++    }
++
++    // ── §17 item 5: the dirty snapshot is a fingerprint of the payload ─────
++
++    private static readonly Guid SnapshotProbeTopicId = Guid.Parse("77777777-7777-7777-7777-777777777777");
++    private static readonly Guid SnapshotProbeGradeId = Guid.Parse("88888888-8888-8888-8888-888888888888");
++
++    /// <summary>§17 (item 5): a form model carrying a value in every field the save payload projects, so one
++    /// mutation of any of them can be exercised against the snapshot.</summary>
++    private static AssignmentEditFormModel SnapshotProbeModel(
++        Action<AssignmentEditFormModel>? configure = null,
++        int questions = 1)
++    {
++        var model = new AssignmentEditFormModel
++        {
++            Title = "Math HW",
++            Description = "internal note",
++            Instructions = "Do the odd numbers",
++            DueDate = new DateTime(2026, 5, 1, 9, 0, 0),
++            MaxScore = 10m,
++            ArchiveGraceDays = 30,
++            PassScore = 5m,
++            MaxAttempts = 2,
++            RequiresSignature = true,
++            AiPromptOverride = "be gentle",
++            DifficultyEasyCount = 1,
++            DifficultyMediumCount = 2,
++            DifficultyHardCount = 3
++        };
++
++        for (var i = 0; i < questions; i++)
++        {
++            model.AddQuestion(new QuestionEditorRow
++            {
++                QuestionText = $"Question {i}",
++                Type = QuestionTypeDto.MultipleChoice,
++                ModelAnswer = "answer",
++                Options = { new OptionEditorRow { OptionText = "A" }, new OptionEditorRow { OptionText = "B" } },
++                CorrectOptionIndex = 0
++            });
++        }
++
++        model.AddAttachment(new AttachmentEditorRow
++        {
++            FileName = "syllabus.pdf",
++            ContentType = "application/pdf",
++            FileSize = 2048,
++            StoragePath = "tenants/t/staging/syllabus.pdf"
++        });
++        model.AddResourceUrl("https://example.test/ref");
++        model.LoadTargets([new AssignmentTargetDto(TargetKindDto.GradeLevel, SnapshotProbeGradeId, 0)]);
++
++        configure?.Invoke(model);
++        return model;
++    }
++
++    /// <summary>§17 (item 5): both spellings of the save payload for one model state — the round's
++    /// fingerprint, and the payload itself serialized exactly as the pre-fix snapshot serialized it.</summary>
++    private static (string Snapshot, string Payload) CaptureProbe(AssignmentEditFormModel model) =>
++        (model.CaptureSaveSnapshot(
++             AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.SelectedGrades,
++             SnapshotProbeTopicId, SnapshotProbeGradeId, mandatoryReview: true, requiresSignature: true),
++         JsonSerializer.Serialize(model.ToUpdateRequest(
++             AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.SelectedGrades,
++             SnapshotProbeTopicId, SnapshotProbeGradeId, mandatoryReview: true, requiresSignature: true,
++             targets: model.ToTargetDtos())));
++
++    /// <summary>§17 (item 5): asserts the snapshot's equality relation matches the payload's, in whichever
++    /// direction the case runs — a payload-relevant change must move the digest, and a difference the
++    /// payload normalizes away must not.</summary>
++    private static void AssertSnapshotTracksPayload(string what, AssignmentEditFormModel baseline, AssignmentEditFormModel mutated)
++    {
++        var (beforeSnapshot, beforePayload) = CaptureProbe(baseline);
++        var (afterSnapshot, afterPayload) = CaptureProbe(mutated);
++
++        (afterSnapshot != beforeSnapshot).Should().Be(afterPayload != beforePayload,
++            $"§17 item 5: the dirty snapshot must track the save payload exactly ({what})");
++    }
++
++    /// <summary>§17 (item 5, this round): the dirty guard reads the save snapshot on EVERY render, so the
++    /// snapshot is a fixed-width fingerprint of the payload instead of the payload itself.
++    /// <para>Discriminating: pre-fix <c>CaptureSaveSnapshot</c> returned <c>JsonSerializer.Serialize</c> of the
++    /// whole update request — a JSON document whose length tracks the question list — so neither the digest
++    /// assertion nor the fixed-width one can hold against it.</para></summary>
++    [TestMethod]
++    public void SaveSnapshot_IsAFixedWidthFingerprint_NotTheMaterializedPayload()
++    {
++        var small = CaptureProbe(SnapshotProbeModel(questions: 1));
++        var large = CaptureProbe(SnapshotProbeModel(questions: 40));
++
++        small.Snapshot.Should().MatchRegex("^[0-9a-f]{32}$",
++            "§17 item 5: the per-render dirty comparison reads a digest of the save payload");
++        large.Snapshot.Should().HaveLength(small.Snapshot.Length,
++            "the snapshot's cost must not track the size of the form — materializing it per render is the residual");
++
++        small.Payload.Should().NotBe(large.Payload,
++            "vacuity guard: the two models really are two different payloads");
++        small.Snapshot.Should().NotBe(large.Snapshot,
++            "... and the digest still tells them apart");
++    }
++
++    /// <summary>§17 (item 5, this round): the semantic guard for the fingerprint. The dirty guard is correct
++    /// only while "the digests differ" means exactly "the next save would write something different", so
++    /// every payload-relevant field is exercised in BOTH directions: a state that changes the payload must
++    /// change the digest, and a difference the payload normalizes away (a null Title and an empty one, a
++    /// DateTime differing only in <c>Kind</c>, a blank option text) must not.
++    /// <para>Non-regression anchor by construction: pre-fix the snapshot WAS the serialized payload, so the
++    /// equivalence held trivially — it is here for the implementation that replaced it.</para></summary>
++    [TestMethod]
++    public void SaveSnapshot_MatchesTheSerializedPayload_OnEveryDirtyRelevantField()
++    {
++        // ── Scalars
++        AssertSnapshotTracksPayload("Title", SnapshotProbeModel(), SnapshotProbeModel(m => m.Title = "Other"));
++        AssertSnapshotTracksPayload("Title null→empty (payload-equal)",
++            SnapshotProbeModel(m => m.Title = null), SnapshotProbeModel(m => m.Title = string.Empty));
++        AssertSnapshotTracksPayload("Description", SnapshotProbeModel(), SnapshotProbeModel(m => m.Description = null));
++        AssertSnapshotTracksPayload("Instructions", SnapshotProbeModel(), SnapshotProbeModel(m => m.Instructions = "Other"));
++        AssertSnapshotTracksPayload("DueDate", SnapshotProbeModel(), SnapshotProbeModel(m => m.DueDate = m.DueDate!.Value.AddDays(1)));
++        AssertSnapshotTracksPayload("DueDate Kind only (payload-equal)",
++            SnapshotProbeModel(m => m.DueDate = DateTime.SpecifyKind(m.DueDate!.Value, DateTimeKind.Utc)),
++            SnapshotProbeModel(m => m.DueDate = DateTime.SpecifyKind(m.DueDate!.Value, DateTimeKind.Unspecified)));
++        AssertSnapshotTracksPayload("MaxScore", SnapshotProbeModel(), SnapshotProbeModel(m => m.MaxScore = 20m));
++        AssertSnapshotTracksPayload("MaxScore null→zero", SnapshotProbeModel(m => m.MaxScore = null), SnapshotProbeModel(m => m.MaxScore = 0m));
++        AssertSnapshotTracksPayload("ArchiveGraceDays", SnapshotProbeModel(), SnapshotProbeModel(m => m.ArchiveGraceDays = 31));
++        AssertSnapshotTracksPayload("PassScore", SnapshotProbeModel(), SnapshotProbeModel(m => m.PassScore = 6m));
++        AssertSnapshotTracksPayload("MaxAttempts", SnapshotProbeModel(), SnapshotProbeModel(m => m.MaxAttempts = 3));
++        AssertSnapshotTracksPayload("difficulty mix", SnapshotProbeModel(), SnapshotProbeModel(m => m.DifficultyHardCount = 4));
++        AssertSnapshotTracksPayload("AiPromptOverride", SnapshotProbeModel(), SnapshotProbeModel(m => m.AiPromptOverride = null));
++
++        // ── Questions
++        AssertSnapshotTracksPayload("question text", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].QuestionText = "Other"));
++        AssertSnapshotTracksPayload("question type", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].Type = QuestionTypeDto.ShortAnswer));
++        AssertSnapshotTracksPayload("model answer", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].ModelAnswer = null));
++        AssertSnapshotTracksPayload("option text", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].Options[1].OptionText = "Other"));
++        AssertSnapshotTracksPayload("option text null→empty (payload-equal)",
++            SnapshotProbeModel(m => m.Questions[0].Options[1].OptionText = null),
++            SnapshotProbeModel(m => m.Questions[0].Options[1].OptionText = string.Empty));
++        AssertSnapshotTracksPayload("correct option", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].CorrectOptionIndex = 1));
++        AssertSnapshotTracksPayload("added question", SnapshotProbeModel(), SnapshotProbeModel(questions: 2));
++        AssertSnapshotTracksPayload("removed question", SnapshotProbeModel(questions: 2), SnapshotProbeModel(questions: 1));
++        AssertSnapshotTracksPayload("reordered questions", SnapshotProbeModel(questions: 2), SnapshotProbeModel(
++            m =>
++            {
++                var first = m.Questions[0];
++                m.Questions.RemoveAt(0);
++                m.Questions.Add(first);
++            },
++            questions: 2));
++
++        // ── Attachments
++        AssertSnapshotTracksPayload("attachment file name", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].FileName = "other.pdf"));
++        AssertSnapshotTracksPayload("attachment content type", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].ContentType = null));
++        AssertSnapshotTracksPayload("attachment size", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].FileSize = 4096));
++        AssertSnapshotTracksPayload("attachment storage path", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments[0].StoragePath = null));
++        AssertSnapshotTracksPayload("removed attachment", SnapshotProbeModel(), SnapshotProbeModel(m => m.Attachments.Clear()));
++
++        // ── ContentModules: the payload field no editor owns yet — the matrix covers it anyway, so a
++        // field that lands on the wire without a matching mix in the walk fails here instead of
++        // turning a real edit into a silent "clean" (P2-1, this round's rework).
++        static IReadOnlyList<NewContentModuleDto> Modules(
++            string url = "https://example.test/guide", int threshold = 100) =>
++            [new NewContentModuleDto(ModuleTypeDto.Guide, "Guide", url, null, 0, threshold)];
++
++        AssertSnapshotTracksPayload("added content module", SnapshotProbeModel(),
++            SnapshotProbeModel(m => m.ContentModules = Modules()));
++        AssertSnapshotTracksPayload("removed content module",
++            SnapshotProbeModel(m => m.ContentModules = Modules()), SnapshotProbeModel());
++        AssertSnapshotTracksPayload("content module url",
++            SnapshotProbeModel(m => m.ContentModules = Modules()),
++            SnapshotProbeModel(m => m.ContentModules = Modules(url: "https://example.test/other")));
++        AssertSnapshotTracksPayload("content module threshold",
++            SnapshotProbeModel(m => m.ContentModules = Modules()),
++            SnapshotProbeModel(m => m.ContentModules = Modules(threshold: 80)));
++        AssertSnapshotTracksPayload("content modules empty→null (payload-equal)",
++            SnapshotProbeModel(m => m.ContentModules = null),
++            SnapshotProbeModel(m => m.ContentModules = []));
++        CaptureProbe(SnapshotProbeModel(m => m.ContentModules = Modules())).Snapshot.Should().NotBe(
++            CaptureProbe(SnapshotProbeModel()).Snapshot,
++            "P2-1: ContentModules rides ToUpdateRequest, so the walk must mix it — a payload field the " +
++            "snapshot omits makes a real edit read as clean and the navigation prompt never fires");
++
++        // ── Resources
++        AssertSnapshotTracksPayload("resource url", SnapshotProbeModel(),
++            SnapshotProbeModel(m => m.ResourceUrls[0] = new ResourceUrlRow("https://example.test/other", null)));
++        AssertSnapshotTracksPayload("resource display name", SnapshotProbeModel(),
++            SnapshotProbeModel(m => m.ResourceUrls[0] = new ResourceUrlRow("https://example.test/ref", "Ref")));
++        AssertSnapshotTracksPayload("removed url resource", SnapshotProbeModel(), SnapshotProbeModel(m => m.ResourceUrls.Clear()));
++        AssertSnapshotTracksPayload("preserved resource", SnapshotProbeModel(),
++            SnapshotProbeModel(m => m.PreservedResources.Add(
++                new NewResourceDto(ResourceKindDto.File, null, "tenants/t/staging/x.pdf", "Syllabus", true))));
++
++        // ── Targets
++        AssertSnapshotTracksPayload("added target", SnapshotProbeModel(),
++            SnapshotProbeModel(m => m.SetTargetsOfKind(TargetKindDto.Stream, [Guid.NewGuid()])));
++        AssertSnapshotTracksPayload("removed target", SnapshotProbeModel(), SnapshotProbeModel(m => m.LoadTargets([])));
++        AssertSnapshotTracksPayload("everyone target", SnapshotProbeModel(), SnapshotProbeModel(m => m.SetEveryoneTarget(true)));
++        AssertSnapshotTracksPayload("reordered targets",
++            SnapshotProbeModel(m => m.LoadTargets(
++            [
++                new AssignmentTargetDto(TargetKindDto.GradeLevel, SnapshotProbeGradeId, 0),
++                new AssignmentTargetDto(TargetKindDto.Stream, SnapshotProbeTopicId, 1)
++            ])),
++            SnapshotProbeModel(m => m.LoadTargets(
++            [
++                new AssignmentTargetDto(TargetKindDto.Stream, SnapshotProbeTopicId, 0),
++                new AssignmentTargetDto(TargetKindDto.GradeLevel, SnapshotProbeGradeId, 1)
++            ])));
++        AssertSnapshotTracksPayload("loaded-empty vs never loaded (payload-equal)",
++            SnapshotProbeModel(m => m.LoadTargets(null)), SnapshotProbeModel(m => m.LoadTargets([])));
++
++        // ── Non-vacuity: the matrix runs in both directions (a case that must move the payload, and one
++        // that must not), so a helper that compared nothing would fail here rather than pass silently.
++        CaptureProbe(SnapshotProbeModel()).Payload.Should().NotBe(
++            CaptureProbe(SnapshotProbeModel(m => m.Title = "Other")).Payload,
++            "a payload-relevant change really does move the reference payload");
++        CaptureProbe(SnapshotProbeModel(m => m.Title = null)).Payload.Should().Be(
++            CaptureProbe(SnapshotProbeModel(m => m.Title = string.Empty)).Payload,
++            "... and a normalized-away difference really does not");
++    }
++
+     // ── F17: a swapped Id/Mode reloads the reused instance ────────────────
+ 
+     /// <summary>F17: the host page renders <c>&lt;AssignmentAuthoring Mode="Edit" Id="Id" /&gt;</c>, and
+@@ -1888,16 +2233,156 @@ public class AssignmentAuthoringBunitTests : BunitContext
+                 $"NFR-1: {id}'s idref must resolve to a paragraph that actually renders in this state");
+         }
+ 
+-        // The students picker is the one constraint control whose declaration FluentUI SWALLOWS:
+-        // FluentAutocomplete puts the Id on its inner <fluent-text-field> and owns that element's aria
+-        // surface (combobox role, aria-label, aria-expanded, aria-controls), so the aria-describedby
+-        // the page declares is dropped rather than forwarded. Pinned instead of skipped, so the
+-        // limitation is visible to the next reader and a FluentUI version that starts forwarding the
+-        // attribute fails HERE — extend the loop above when that happens. Recorded in the spec's
+-        // "Deferred / known gaps".
+-        cut.Find("#authoring-audience-students").GetAttribute("aria-describedby").Should().BeNull(
+-            "documented limitation (FluentUI 4.14.2): FluentAutocomplete drops the declared " +
+-            "aria-describedby, so this picker has no idref to resolve — unlike the four in the loop above");
++        // §17 (item 3, this round): the students picker is the one constraint control FluentAutocomplete
++        // owns the aria surface of — it routes a declared attribute to its own root <div> rather than to
++        // the inner <fluent-text-field> that carries the combobox role and the idref's target, so the page
++        // declares the reason on the row's GROUP instead (see the Students FormRow). Either carrier is
++        // accepted here: a FluentUI version that starts forwarding the declared attribute to the inner
++        // field satisfies the first half, and this round's group satisfies it meanwhile — the assertion
++        // states the contract (the reason reaches an element of the students row that renders) without
++        // pinning the mechanism, so it does not have to be rewritten on a package upgrade.
++        var students = cut.Find("#authoring-audience-students");
++        var studentsIdref = students.GetAttribute("aria-describedby")
++            ?? cut.Find("#authoring-audience-students-group").GetAttribute("aria-describedby");
++        studentsIdref.Should().Be("authoring-audience-constraint-reason",
++            "NFR-1/§17: the disabled students picker names the reason paragraph the constraint gate renders");
++        cut.FindAll($"#{studentsIdref}").Should().ContainSingle(
++            "NFR-1: the students picker's idref must resolve to a paragraph that actually renders here");
++    }
++
++    /// <summary>§17 (item 3, this round): with the constraint gate engaged the students picker names its
++    /// reason like its four siblings. FluentAutocomplete routes the page's declared attributes to its own
++    /// root <c>&lt;div&gt;</c> while the element it takes the component Id on is the INNER
++    /// <c>&lt;fluent-text-field&gt;</c> that carries the combobox role — so a declared aria-describedby
++    /// reached nothing a screen reader reads, and this was the one disabled constraint control with no
++    /// reason. The reason is declared on the row's own labelled group, which the control cannot rewrite.
++    /// <para>Discriminating: against the pre-fix page there is no <c>#authoring-audience-students-group</c>
++    /// at all, so the row-group assertion cannot hold.</para></summary>
++    [TestMethod]
++    public async Task StudentsPicker_NamesItsReasonFromItsOwnRow_WhenTheConstraintGateDisablesIt()
++    {
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        await SelectEveryoneAsync(cut);
++
++        cut.WaitForAssertion(() =>
++        {
++            // The gate really is engaged and the picker really is disabled — NFR-1 binds on that state.
++            cut.Find("#authoring-audience-students").HasAttribute("disabled").Should().BeTrue(
++                "vacuity guard: the reason is only owed to a picker the gate actually disables");
++
++            var rowGroup = cut.Find("#authoring-audience-students-group");
++            rowGroup.GetAttribute("aria-describedby").Should().Be("authoring-audience-constraint-reason",
++                "§17: the students row carries the reason on the group that keeps it");
++            rowGroup.GetAttribute("aria-label").Should().NotBeNullOrEmpty(
++                "a description on an UNNAMED group is inert for assistive tech — the reason is only exposed " +
++                "because the group is announced");
++            rowGroup.QuerySelector("#authoring-audience-students").Should().NotBeNull(
++                "the group is the students control's own row, not a page-wide carrier");
++
++            cut.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle()
++                .Which.TextContent.Should().NotBeNullOrWhiteSpace(
++                    "NFR-1: the idref names a paragraph that renders the reason in this state");
++
++            // ... and all five disabled controls, not just this one.
++            AssertEveryDisabledConstraintControlNamesARenderedReason(cut);
++        }, TimeSpan.FromSeconds(5));
++    }
++
++    // ── §17 item 2: a restored student target keeps its resolved label ─────
++
++    /// <summary>F4/§17 (item 2, this round): switching Everyone OFF restores the target rows it replaced,
++    /// which puts the student IDS back — but a chip renders from its OPTION object and Everyone ON clears
++    /// the ones the picker reported. The restored student therefore rendered the <c>Student &lt;id8&gt;</c>
++    /// fallback until the author touched the picker. The page re-resolves the restored ids.
++    /// <para>Discriminating: pre-fix the restore path re-added nothing to
++    /// <c>_selectedStudentOptions</c>, so the chip assertion fails on the id-labelled fallback.</para></summary>
++    [TestMethod]
++    public async Task EveryoneOff_RestoresAResolvedStudentChip_NotTheIdFallback()
++    {
++        var studentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++        // The restored-id re-resolve reads the student by id; the picker's own search answers the pick.
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/students/{studentId}")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
++                Student(studentId, "Ada", "Lovelace", "S1001"), _apiJsonOptions));
++        _mockHttp.When(HttpMethod.Get, "http://localhost/students?search=Ada")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
++                new[] { Student(studentId, "Ada", "Lovelace", "S1001") }, _apiJsonOptions));
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        var search = new OptionsSearchEventArgs<Authoring.PickerOption> { Text = "Ada" };
++        await cut.InvokeAsync(() => StudentPicker(cut).OnOptionsSearch.InvokeAsync(search));
++        search.Items.Should().ContainSingle("the stubbed search answered the picker");
++        await cut.InvokeAsync(() => StudentPicker(cut).SelectedOptionsChanged.InvokeAsync(search.Items));
++
++        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal(new[] { "Ada Lovelace (S1001)" }),
++            TimeSpan.FromSeconds(5));
++
++        await SelectEveryoneAsync(cut);
++        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal(new[] { "Everyone" }), TimeSpan.FromSeconds(5));
++
++        await SelectEveryoneAsync(cut, everyone: false);
++
++        cut.WaitForAssertion(() =>
++        {
++            ChipLabels(cut).Should().Equal(new[] { "Ada Lovelace (S1001)" },
++                "§17 item 2: the restored student target renders the name it was re-resolved to, not the id fallback");
++            cut.Markup.Should().NotContain($"Student {studentId.ToString()[..8]}",
++                "the id-labelled fallback chip is what the author used to be shown here");
++            StudentPicker(cut).SelectedOptions!.Select(o => o.Value)
++                .Should().BeEquivalentTo(new[] { studentId.ToString() },
++                    "the restored option is kept, so the picker's own selection projection shows it too");
++        }, TimeSpan.FromSeconds(5));
++    }
++
++    // ── §17 item 4: an unrepresentable persisted link is named ─────────────
++
++    /// <summary>§17 (item 4, this round): a persisted link to an activity group the picker cannot
++    /// represent (an archived one — the replace-set route would refuse it) used to be dropped from the
++    /// selection without a word, so the author saw a shorter list and nothing explained it. The note names
++    /// the dropped link and states what is true of it: the link survives while the selection is left alone.
++    /// <para>Discriminating: pre-fix no note is rendered at all, so the first half cannot pass.</para></summary>
++    [TestMethod]
++    public void ArchivedLinkedGroup_IsNamedOnThePage_AndTheNoteIsAbsentWhenNothingIsDropped()
++    {
++        var activeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++        var archivedId = Guid.Parse("55555555-5555-5555-5555-555555555555");
++        _activityGroups = [Group(activeId, "Robotics"), Group(archivedId, "Retired Choir", isActive: false)];
++
++        var dropped = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
++            linkedGroupIds: [archivedId]);
++
++        dropped.WaitForAssertion(() =>
++        {
++            var note = dropped.Find("#authoring-groups-dropped-links");
++            note.TextContent.Should().Contain("Retired Choir",
++                "§17 item 4: the note names the archived group the name-bearing read carried");
++            note.TextContent.Should().Contain(Authoring.DroppedGroupLinksNoteLead);
++            note.TextContent.Should().NotContain("lost",
++                "the link is not re-writable, which is not the same as lost");
++        }, TimeSpan.FromSeconds(5));
++
++        // The picker still cannot represent it — the note is the only thing that says so.
++        Picker(dropped, "authoring-audience-groups").SelectedOptions.Should().BeEmpty(
++            "vacuity guard: an archived group is genuinely not selectable, which is why it needs naming");
++
++        // Nothing dropped → no note: the paragraph can never become permanent furniture. The link and the
++        // target row are in step here — the state the save path keeps them in — so the picker really does
++        // represent the link.
++        var intact = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
++            children: MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, activeId, 0)]),
++            linkedGroupIds: [activeId]);
++
++        intact.WaitForAssertion(() =>
++        {
++            Picker(intact, "authoring-audience-groups").SelectedOptions.Should().NotBeEmpty(
++                "vacuity guard: the representable link really was selected");
++            intact.FindAll("#authoring-groups-dropped-links").Should().BeEmpty(
++                "§17 item 4: no dropped link, no note");
++        }, TimeSpan.FromSeconds(5));
+     }
+ 
+     // ── F7: a disabled action explains itself (the authoring call site) ────

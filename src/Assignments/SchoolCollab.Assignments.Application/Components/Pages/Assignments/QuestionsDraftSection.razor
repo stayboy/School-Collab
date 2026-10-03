@@ -76,6 +76,11 @@
         <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_error</FluentMessageBar>
     }
 
+    @if (!string.IsNullOrEmpty(_attachmentWarning))
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning" class="mt-2">@_attachmentWarning</FluentMessageBar>
+    }
+
     @if (_draft is not null)
     {
         <ul class="questions-draft-preview">
@@ -103,6 +108,11 @@
     /// <summary>The assignment whose draft is being edited. Draft-only
     /// (rendered by the Edit page only for Draft assignments).</summary>
     [Parameter, EditorRequired] public Guid AssignmentId { get; set; }
+
+    /// <summary>R3 (P1-6/AI-3): the page's form model, read for the staged attachments' extracted
+    /// text. This section owns no editor of its own — it borrows the page's rows so attachment
+    /// grounding behaves identically on the draft surface and compartment 6.</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
 
     /// <summary>True when the type + grading-format combination supports
     /// AI question generation (FR-220 / EC-3) — the wizard gate mirrored.</summary>
@@ -137,9 +147,20 @@
     private IReadOnlyList<NewQuestionDto>? _draft;
     private bool _busy;
     private string? _error;
+    private string? _attachmentWarning;
     private CancellationTokenSource? _cts;
 
     private string? PromptPlaceholder => PromptLocked ? "Your organization has locked the AI prompt." : null;
+
+    /// <summary>R3-2: the draft surface's attachment-budget warning, mirroring the compartment-6 one.
+    /// This surface sends no URL texts, so the only action that frees a slot here is removing an
+    /// attachment — the message names exactly that.</summary>
+    private static string? BuildAttachmentWarning(int droppedAttachmentCount) =>
+        droppedAttachmentCount > 0
+            ? $"{droppedAttachmentCount} attachment(s) were read but not included in this generation: " +
+              $"the {ResourceTextBudget.MaxResourceTexts}-text grounding budget is full. " +
+              "Remove an attachment to include them."
+            : null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -186,6 +207,27 @@
         if (_includeShortAnswer) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.ShortAnswer));
         if (picked.Count > 0) types = picked;
 
+        // R3 (P1-2): the author's actual selection as wire enum names — the shape the header records.
+        var requestedTypes = new List<QuestionTypeDto>(3);
+        if (_includeMultipleChoice) requestedTypes.Add(QuestionTypeDto.MultipleChoice);
+        if (_includeTrueFalse) requestedTypes.Add(QuestionTypeDto.TrueFalse);
+        if (_includeShortAnswer) requestedTypes.Add(QuestionTypeDto.ShortAnswer);
+
+        // R3 (P1-6 / AI-3): attachment-derived reference material shares the AI host's budget with
+        // the URL texts. The draft section has no URL rows of its own, so attachments fill from slot
+        // zero; per-attachment overflow is a fail-open drop. Attachment grounding applies to the
+        // draft path too — this is the surface the kebab's "Generate questions" action anchors to.
+        // R3-2: the budget reports its own overflow, and that count (never a re-derived one) drives the
+        // warning below — an attachment that grounded nothing must not read as if it had.
+        var attachmentTexts = Model.Attachments
+            .Where(a => a.ExtractionStatus == AttachmentExtractionStatusDto.Succeeded
+                && !string.IsNullOrEmpty(a.ExtractedText))
+            .Select(a => a.ExtractedText!)
+            .ToList();
+        var composition = ResourceTextBudget.ComposeWithReport(urlTexts: null, attachmentTexts);
+        var resourceTexts = composition.Texts;
+        _attachmentWarning = BuildAttachmentWarning(composition.DroppedAttachmentCount);
+
         var request = new QuestionGenerationRequest(
             TopicId: TopicId.Value,
             TopicName: TopicName ?? string.Empty,
@@ -196,15 +238,37 @@
             PromptOverride: _prompt,
             DifficultyEasyCount: _difficultyEasy,
             DifficultyMediumCount: _difficultyMedium,
-            DifficultyHardCount: _difficultyHard);
+            DifficultyHardCount: _difficultyHard,
+            ResourceTexts: resourceTexts);
 
         try
         {
-            var generated = await QuestionGenerator.GenerateAsync(request, ct);
-            var draft = new List<NewQuestionDto>(generated.Count);
-            for (var i = 0; i < generated.Count; i++)
+            var response = await QuestionGenerator.GenerateAsync(request, ct);
+
+            // R3 (D4/P1-2): THIS is the draft-stage write point. The header is recorded before the
+            // draft is staged, and its id rides inside the draft blob (NewQuestionDto.GenerationId),
+            // so it reaches AddQuestion through ConfirmQuestionsDraftCommandHandler's re-mint.
+            var generationId = await Api.RecordQuestionGenerationAsync(
+                AssignmentId,
+                new RecordQuestionGenerationRequest(
+                    QuestionCount: _questionCount,
+                    Types: requestedTypes.Count > 0 ? requestedTypes : null,
+                    DifficultyEasyCount: _difficultyEasy,
+                    DifficultyMediumCount: _difficultyMedium,
+                    DifficultyHardCount: _difficultyHard,
+                    // P1-1: the AI host's own resolved tuple, relayed — the author never names a model.
+                    Provider: response.Provider,
+                    Model: response.Model),
+                ct);
+
+            var draft = new List<NewQuestionDto>(response.Questions.Count);
+            for (var i = 0; i < response.Questions.Count; i++)
             {
-                draft.Add(GeneratedQuestionMapper.ToNewQuestionDto(generated[i]) with { DisplayOrder = i });
+                draft.Add(GeneratedQuestionMapper.ToNewQuestionDto(response.Questions[i]) with
+                {
+                    DisplayOrder = i,
+                    GenerationId = generationId,
+                });
             }
             await Api.StageQuestionsDraftAsync(AssignmentId, draft, ct);
             _draft = draft;

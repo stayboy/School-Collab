@@ -62,7 +62,9 @@ public sealed class ConfirmQuestionsDraftCommandHandler(
         for (var i = 0; i < drafted.Count; i++)
         {
             var q = drafted[i];
-            var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer);
+            // R3 (D4/P1-2): the draft blob is where GenerationId is FIRST stamped by the UI, and this
+            // re-mint is where it would otherwise be lost — the drafted rows are replaced wholesale.
+            var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer, q.GenerationId);
             if (q.Options is { Count: > 0 })
             {
                 foreach (var opt in q.Options)

@@ -95,6 +95,15 @@
     <!-- C3 certificate PDF rendering. PINNED at 2026.8.0: 2026.9.0 (2026-09-14)
          shipped font-system breaking changes. Community license tier. -->
     <PackageVersion Include="QuestPDF" Version="2026.8.0" />
+    <!-- R3 (assignment-authoring-compartments §14) attachment text extraction.
+         The NuGet id for UglyToad's PdfPig reader is **"PdfPig"**, NOT
+         "UglyToad.PdfPig" — that id is an unrelated two-version placeholder with
+         no licence element and no project url, so it must never replace this one.
+         Authors="UglyToad", licenseExpression="Apache-2.0". -->
+    <PackageVersion Include="PdfPig" Version="0.1.16" />
+    <!-- R3 DOCX extraction. MIT; the OpenXmlReader SAX API is what keeps the read
+         streaming (see AttachmentTextExtractor). -->
+    <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
   </ItemGroup>
   <ItemGroup Label="Transitive Security Overrides">
     <!-- AngleSharp is pulled in transitively by bunit. The 1.4.0 version has

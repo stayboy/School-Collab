@@ -21,6 +21,8 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentOn
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionsDraft;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionGeneration;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RegenerateAttachmentExtraction;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAuthoringChildren;
@@ -1265,6 +1267,69 @@ public static class AssignmentRoutes
                 return Results.BadRequest(new { ex.Message });
             }
         }).DisableAntiforgery();
+
+        // ── R3 (D4/P1-2): record one AI question generation ───────────
+        // The header is written at draft-stage / generate time, by the host that owns the
+        // assignment, so the AI host stays stateless. The provider/model are RELAYED from the AI
+        // host's own resolution (P1-1) — this host never resolves one and the author never supplies
+        // one. The returned id is stamped onto every produced question so provenance survives the
+        // next full-replacement save.
+        group.MapPost("/{id:guid}/question-generations", async (
+            Guid id,
+            [FromBody] RecordQuestionGenerationRequest body,
+            [FromServices] ICommandHandler<RecordQuestionGenerationCommand, Guid> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var generationId = await handler.HandleAsync(
+                    new RecordQuestionGenerationCommand(
+                        id,
+                        body.QuestionCount,
+                        body.Types,
+                        body.DifficultyEasyCount,
+                        body.DifficultyMediumCount,
+                        body.DifficultyHardCount,
+                        body.Provider,
+                        body.Model),
+                    ct);
+                return Results.Ok(new RecordQuestionGenerationResponse(generationId));
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (AssignmentContentValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // ── R3 (D3, criterion 5): regenerate one attachment's extraction ──
+        // The ONLY path that rewrites a stored extraction (D3). Re-reads the blob by StoragePath,
+        // replaces the outcome in place — no new attachment row, no duplicate — and fail-opens to a
+        // Failed status (200 with the new status) when the blob is gone or unreadable.
+        group.MapPost("/{id:guid}/attachments/{attachmentId:guid}/extract", async (
+            Guid id,
+            Guid attachmentId,
+            [FromServices] ICommandHandler<RegenerateAttachmentExtractionCommand, AssignmentAttachmentReadDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var attachment = await handler.HandleAsync(
+                    new RegenerateAttachmentExtractionCommand(id, attachmentId), ct);
+                return Results.Ok(attachment);
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (AttachmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
 
         // ── WS-D1 (spec §3.3): per-ward module-progress heartbeats ─────
         // 204 on a recorded/upserted report; 404 when the assignment or the

@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Data.Configurations;
@@ -121,15 +122,35 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         // child read, so they are auto-included like the other structural children.
         builder.Navigation(x => x.Targets).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
 
+        // ── Owned children: the key MUST be ValueGeneratedNever (R3 scope exception) ──────────
+        // Every owned collection below declares `HasKey(x => x.Id)` over a Guid. Without
+        // `ValueGeneratedNever()` the Guid key keeps the `ValueGeneratedOnAdd` convention, and EF Core
+        // then treats an explicitly-set key on a newly-attached owned instance as an ALREADY EXISTING
+        // row: the new element is tracked as `Modified`, so EF emits
+        // `UPDATE <child table> SET ... WHERE id = <the new id>` and NO INSERT. On PostgreSQL that
+        // affects 0 rows and `SaveChanges` throws `DbUpdateConcurrencyException` — i.e. adding or
+        // replacing any question/attachment/option/review on a PERSISTED assignment failed outright.
+        // (The root aggregates are immune because EntityTypeConfigurationBase.ConfigureGuidId() calls
+        // ValueGeneratedNever() for them.) This was a PRE-EXISTING defect, found by R3's Postgres
+        // round-trip tests and fixed here — see §17 of documents/specs/assignment-authoring-compartments.md.
+        // Do NOT remove these four calls: they are load-bearing, not stylistic.
         builder.OwnsMany(x => x.Attachments, a =>
         {
             a.ToTable("assignment_attachments");
             a.WithOwner().HasForeignKey(a => a.AssignmentId);
             a.HasKey(a => a.Id);
+            a.Property(a => a.Id).ValueGeneratedNever();
             a.Property(a => a.FileName).IsRequired().HasMaxLength(255);
             a.Property(a => a.ContentType).IsRequired().HasMaxLength(100);
             a.Property(a => a.FileSize).IsRequired();
             a.Property(a => a.StoragePath).IsRequired().HasMaxLength(500);
+            // R3 (D4/P1-3): the persisted extraction outcome. MaxCharacters mirrors
+            // AttachmentExtractionLimits.MaxCharacters — the extractor's own ceiling — so the
+            // column can never truncate what the extractor retained.
+            a.Property(a => a.ExtractionStatus).IsRequired().HasDefaultValue(AttachmentExtractionStatus.NotAttempted);
+            a.Property(a => a.ExtractedText).HasMaxLength(AttachmentExtractionLimits.MaxCharacters);
+            a.Property(a => a.ExtractedAt);
+            a.Property(a => a.ExtractionError).HasMaxLength(AttachmentExtractionLimits.MaxErrorLength);
         });
 
         builder.OwnsMany(x => x.Questions, q =>
@@ -137,17 +158,23 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             q.ToTable("assignment_questions");
             q.WithOwner().HasForeignKey(q => q.AssignmentId);
             q.HasKey(q => q.Id);
+            q.Property(q => q.Id).ValueGeneratedNever();
             q.Property(q => q.QuestionText).IsRequired().HasMaxLength(2000);
             q.Property(q => q.QuestionType).IsRequired().HasDefaultValue(QuestionType.MultipleChoice);
             q.Property(q => q.DisplayOrder).IsRequired();
             q.Property(q => q.CorrectOptionId);
             q.Property(q => q.ModelAnswer).HasMaxLength(2000);
+            // R3 (D4/P1-2): provenance link to the generation header. Nullable — hand-written
+            // questions have none — and deliberately not a required relationship, so an
+            // assignment whose generation header was never recorded still round-trips.
+            q.Property(q => q.GenerationId);
 
             q.OwnsMany(q => q.Options, o =>
             {
                 o.ToTable("question_options");
                 o.WithOwner().HasForeignKey(o => o.QuestionId);
                 o.HasKey(o => o.Id);
+                o.Property(o => o.Id).ValueGeneratedNever();
                 o.Property(o => o.OptionText).IsRequired().HasMaxLength(500);
                 o.Property(o => o.IsCorrect).IsRequired().HasDefaultValue(false);
             });
@@ -158,6 +185,7 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             r.ToTable("assignment_reviews");
             r.WithOwner().HasForeignKey(r => r.AssignmentId);
             r.HasKey(r => r.Id);
+            r.Property(r => r.Id).ValueGeneratedNever();
             r.Property(r => r.TeacherId).IsRequired();
             r.Property(r => r.Score).HasPrecision(5, 2);
             r.Property(r => r.Comments).HasMaxLength(2000);

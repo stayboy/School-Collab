@@ -102,6 +102,15 @@
                     <FluentMessageBar Id="authoring-error" Intent="MessageIntent.Error" class="authoring-message">@_error</FluentMessageBar>
                 }
 
+                @* UX-7 / F17 (this round): the parameter change reloaded this instance and took unsaved
+                   edits with it — the one case the in-app guard cannot see (a host swapping Id/Mode without
+                   a NavigationManager navigation). It sits beside the error bar so it is read with the
+                   surface it describes, not buried in a compartment. *@
+                @if (_unsavedEditsDiscarded)
+                {
+                    <p class="authoring-reason" id="authoring-unsaved-edits-discarded">@UnsavedEditsDiscardedNotice</p>
+                }
+
                 @* ── 1 · Basics (the always-on spine, §3/UX-12) ───────────────── *@
                 <section id="authoring-basics" class="authoring-compartment">
                     <h3 class="authoring-compartment-title">Basics</h3>
@@ -246,19 +255,35 @@
 
                     <FormRow Label="Students" For="authoring-audience-students" AlignTop>
                         @* TGT-6: individual students via server search (never a full roster load). *@
-                        <FluentAutocomplete TOption="PickerOption" Id="authoring-audience-students"
-                                            Multiple="true"
-                                            MaximumOptionsSearch="20"
-                                            ImmediateDelay="300"
-                                            Placeholder="Search students by name or number…"
-                                            Items="@_studentOptions"
-                                            OptionText="@(o => o.Label)"
-                                            OptionValue="@(o => o.Value)"
-                                            SelectedOptions="@SelectedStudentTargetOptions"
-                                            SelectedOptionsChanged="@OnSelectedStudentTargetsChangedAsync"
-                                            OnOptionsSearch="@OnStudentSearchAsync"
-                                            aria-describedby="authoring-audience-constraint-reason"
-                                            Disabled="@ConstraintPickersDisabled" class="full-width" />
+                        @* NFR-1 / §17 (F15): FluentAutocomplete routes the page's declared attributes to its
+                           OWN root element — a bare <div> — while the element it takes the component Id on is
+                           the inner <fluent-text-field>, which is the one carrying the combobox role,
+                           aria-expanded/controls and the label association. A declared aria-describedby
+                           therefore never reaches an element assistive tech reads, and this was the one
+                           constraint picker whose disabled state named no reason. The reason is declared on a
+                           labelled group the control cannot rewrite; the four sibling pickers need no such
+                           wrapper because their own host element is the one their Id lands on. The
+                           declaration stays on the control as well, so a FluentUI version that starts
+                           forwarding it to the inner field keeps working. *@
+                        <div id="authoring-audience-students-group"
+                             class="full-width"
+                             role="group"
+                             aria-label="Students"
+                             aria-describedby="authoring-audience-constraint-reason">
+                            <FluentAutocomplete TOption="PickerOption" Id="authoring-audience-students"
+                                                Multiple="true"
+                                                MaximumOptionsSearch="20"
+                                                ImmediateDelay="300"
+                                                Placeholder="Search students by name or number…"
+                                                Items="@_studentOptions"
+                                                OptionText="@(o => o.Label)"
+                                                OptionValue="@(o => o.Value)"
+                                                SelectedOptions="@SelectedStudentTargetOptions"
+                                                SelectedOptionsChanged="@OnSelectedStudentTargetsChangedAsync"
+                                                OnOptionsSearch="@OnStudentSearchAsync"
+                                                aria-describedby="authoring-audience-constraint-reason"
+                                                Disabled="@ConstraintPickersDisabled" class="full-width" />
+                        </div>
                     </FormRow>
 
                     <FormRow Label="Activity groups" For="authoring-audience-groups" AlignTop>
@@ -289,6 +314,16 @@
                     @if (GroupPickerReason is not null)
                     {
                         <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
+                    }
+
+                    @* §17 (item 4, this round): a persisted link the picker cannot represent (an archived
+                       group) used to be discarded from the selection without a word, so the author saw a
+                       shorter list and nothing explained it. The note names the dropped link(s) and states
+                       what is actually true — the link is kept while the selection is left alone — rather
+                       than claiming anything was lost. *@
+                    @if (DroppedGroupLinksNote is not null)
+                    {
+                        <p class="authoring-reason" id="authoring-groups-dropped-links">@DroppedGroupLinksNote</p>
                     }
 
                     @* The selected constraints as chips in DisplayOrder; removal re-indexes 0..n-1. *@
@@ -460,7 +495,7 @@
                     }
                     else
                     {
-                        <ResourcesSection Model="_model" Changed="OnModelChanged" />
+                        <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" />
                     }
                 </section>
 
@@ -486,6 +521,7 @@
                                                    TopicName="@_selectedSubject?.Label"
                                                    GradeLevelId="@GradeLevelId"
                                                    PromptLocked="_aiPromptLocked"
+                                                   AssignmentId="_item?.Id"
                                                    OnQuestionsChanged="OnModelChanged" />
                         <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
                     }
@@ -497,11 +533,13 @@
                                                    TopicName="@_selectedSubject?.Label"
                                                    GradeLevelId="@GradeLevelId"
                                                    PromptLocked="_aiPromptLocked"
+                                                   AssignmentId="_item?.Id"
                                                    OnQuestionsChanged="OnModelChanged" />
                         <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
                         @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
                         {
                             <QuestionsDraftSection AssignmentId="_item.Id"
+                                                   Model="_model"
                                                    GateEnabled="true"
                                                    PromptLocked="_aiPromptLocked"
                                                    TopicId="@TopicId"
@@ -546,6 +584,18 @@
         "The activity groups already linked to this assignment could not be loaded, so this picker is " +
         "disabled — saving would replace the existing links. Reload the page to try again.";
 
+    /// <summary>§17 (item 4, this round): the note the Audience compartment renders when the persisted
+    /// link set carries an activity group the picker cannot represent — an archived one, which the
+    /// replace-set link route would refuse. It leads with the group(s) and states what is actually true
+    /// of the link (it is kept while the selection is left alone) rather than claiming it was lost. See
+    /// <see cref="DroppedGroupLinksNote"/> for the tail.</summary>
+    public const string DroppedGroupLinksNoteLead = "Not shown here — archived activity group: ";
+
+    /// <summary>§17 (item 4, this round): the half of the note that says what the author can rely on.</summary>
+    public const string DroppedGroupLinksNoteTail =
+        ". The link is kept while the group selection is left unchanged; changing the selection and " +
+        "saving replaces the whole link set, and an archived group cannot be re-linked from this page.";
+
     // ── UX-7: the unsaved-changes guard (D2/D3) ─────────────────────────────
 
     /// <summary>UX-7 (D2) in-app half: the confirmation shown when a navigation would discard
@@ -560,6 +610,17 @@
     /// The guard cancels on ANY non-discard outcome (secondary, ESC, overlay click), so staying is
     /// always the safe default.</summary>
     public const string UnsavedChangesKeepEditingAction = "Keep editing";
+
+    /// <summary>UX-7 / F17 (this round) defence-in-depth: the notice the parameter-change reload
+    /// renders when it discarded unsaved edits that <b>no</b> confirmation consented to. D2 — the reload
+    /// itself still proceeds (refusing it would leave the previous assignment's state on screen under
+    /// the new assignment's URL, the stale-write path F17 removed), so what is removed here is only the
+    /// <i>silence</i>. Deliberately not a public const: it is page wording, not a contract, and this
+    /// round adds no public API member (D3) — the bUnit suite pins the rendered element by id.
+    /// </summary>
+    private const string UnsavedEditsDiscardedNotice =
+        "This form was reloaded for a different assignment or mode without a confirmation, so the unsaved " +
+        "edits you had made were discarded.";
 
     /// <summary>UX-7 (D2) browser-unload half: the collocated module that owns
     /// <c>window.beforeunload</c>. Collocated <c>*.razor.js</c> is served from the Razor class
@@ -600,6 +661,20 @@
     /// values are re-set, so the reload can never loop.</summary>
     private Guid? _loadedId;
     private AssignmentAuthoringMode? _loadedMode;
+
+    /// <summary>UX-7 / F17 (this round): whether the surface currently on screen is showing the
+    /// aftermath of a reload that discarded unsaved edits <b>without</b> a confirmation — what
+    /// <see cref="UnsavedEditsDiscardedNotice"/> announces. Set by <see cref="OnParametersSetAsync"/>,
+    /// retired by <see cref="CaptureDirtyBaseline"/> (the next load that succeeds, and the component's own
+    /// exit after a save) so it cannot outlive the swap it describes.</summary>
+    private bool _unsavedEditsDiscarded;
+
+    /// <summary>UX-7 (D2): set once the author accepted the in-app confirmation's discard action.
+    /// <see cref="OnLocationChangingAsync"/> records it because that navigation is the author's own
+    /// decision and must not be announced back at them — and <see cref="OnParametersSetAsync"/> consumes
+    /// it on the very next parameter set, so a consent that never reached a parameter change cannot
+    /// silence a LATER unguarded swap.</summary>
+    private bool _discardConsented;
 
     /// <summary>UX-7 (D3): the save payload the LOADED state implies — the baseline the current
     /// form is compared against. Null until the first load settles (there is nothing to compare
@@ -674,6 +749,15 @@
     private bool _groupLinksLoaded;
     private readonly HashSet<Guid> _loadedGroupIds = [];
     private string? _groupLinksUnavailableReason;
+
+    /// <summary>§17 (item 4, this round): every activity group the last list read returned — including the
+    /// inactive (archived) ones the picker does not offer — so a persisted link the picker cannot
+    /// represent can still be named to the author instead of silently disappearing from the selection.</summary>
+    private ActivityGroupDto[] _fetchedActivityGroups = [];
+
+    /// <summary>§17 (item 4, this round): the persisted link ids <see cref="LoadLinkedGroupIdsAsync"/>
+    /// could not select — the ones <see cref="DroppedGroupLinksNote"/> names.</summary>
+    private readonly List<Guid> _droppedGroupLinkIds = [];
 
     /// <summary>One dropdown item for every picker on this page (grade, subject, group,
     /// assignment type, grading format, target audience). Kept public so the pickers can be
@@ -914,6 +998,25 @@
         : ConstraintPickersDisabledReason is not null ? "authoring-audience-constraint-reason"
         : null;
 
+    /// <summary>
+    /// §17 (item 4, this round): the persisted activity-group links this page cannot show, named for
+    /// the author. Null — and therefore absent from the DOM — whenever the picker could represent every
+    /// link it found, so the note can never become permanent furniture.
+    /// </summary>
+    private string? DroppedGroupLinksNote => _droppedGroupLinkIds.Count == 0
+        ? null
+        : DroppedGroupLinksNoteLead
+          + string.Join(", ", _droppedGroupLinkIds.Select(GroupLinkDisplayName))
+          + DroppedGroupLinksNoteTail;
+
+    /// <summary>The dropped link's group name, taken from the same list read that produced the picker's
+    /// options (an archived group is still IN that read — it is only filtered out of the option list).
+    /// Falls back to the id when the group is not in the read at all, so the note always names something
+    /// the author can act on.</summary>
+    private string GroupLinkDisplayName(Guid groupId) =>
+        _fetchedActivityGroups.FirstOrDefault(g => g.Id == groupId)?.Name
+        ?? $"group {groupId.ToString()[..8]}";
+
     // ── Policy-derived read-only values (UX-13) ───────────────────────────────
 
     private string ApprovalPolicyValueText => _item is null
@@ -1131,8 +1234,21 @@
 
     /// <summary>UX-7 (D3): moves the baseline onto the form's current content — the two moments the
     /// form IS the persisted state: the end of a load, and the component's own exit after a save
-    /// (see <see cref="NavigateToSavedState"/>).</summary>
-    private void CaptureDirtyBaseline() => _dirtyBaseline = CaptureSaveSnapshot();
+    /// (see <see cref="NavigateToSavedState"/>).
+    /// <para>UX-7 / F17 (this round): it also retires <see cref="UnsavedEditsDiscardedNotice"/> on
+    /// those same two moments, because the notice describes the swap that produced the <i>previous</i>
+    /// state — a load that has settled or a save that has been accepted has moved the surface past it.
+    /// Gated on <see cref="_error"/> so a load that FAILED retires nothing: the only thing that may
+    /// retire the notice is a read that actually succeeded, or the component's own successful exit.
+    /// </para></summary>
+    private void CaptureDirtyBaseline()
+    {
+        _dirtyBaseline = CaptureSaveSnapshot();
+        if (_error is null)
+        {
+            _unsavedEditsDiscarded = false;
+        }
+    }
 
     /// <summary>
     /// UX-7 (D2) in-app half: cancels a navigation that would discard unsaved work, after
@@ -1155,7 +1271,13 @@
         if (!discard)
         {
             context.PreventNavigation();
+            return;
         }
+
+        // UX-7 / F17 (this round): the author just told us the discard is fine, so the reload this
+        // navigation reaches is a consented one — OnParametersSetAsync reads this and stays quiet
+        // (D2: announce the unguarded discard, never nag about the author's own decision).
+        _discardConsented = true;
     }
 
     /// <summary>
@@ -1220,18 +1342,37 @@
     /// would stay on screen under B's URL (the R2 F1 defect class: a stale-write path). Reload when
     /// — and only when — <see cref="Id"/> or <see cref="Mode"/> CHANGED, compared against what the
     /// current state was loaded from, so a re-set of the same values never re-enters the load.
-    /// <para>Unsaved work is protected upstream by the UX-7 navigation guard, which runs before a
-    /// navigation can change the parameter — by the time this reload happens the author has accepted
-    /// the discard, so the reload is never silent.</para>
+    /// <para>UX-7 (D2): the load this reaches is guarded upstream by the registered location-changing
+    /// handler, which runs before a navigation can change the parameter — but a host that swaps
+    /// <see cref="Id"/> without a <c>NavigationManager</c> navigation reaches it unguarded. The reload
+    /// still happens there (refusing it would keep A's state under B's URL — the stale-write path F17
+    /// exists to remove), so the belt-and-braces half is that an UNCONSENTED discard is announced
+    /// instead of silent; see <see cref="UnsavedEditsDiscardedNotice"/>.</para>
     /// </summary>
     protected override async Task OnParametersSetAsync()
     {
+        // Consumed on every parameter set, not only on a change: a consented navigation that never
+        // reached a parameter change (a same-URL navigation) must not leave the consent behind to
+        // silence a later, genuinely unguarded swap.
+        var consented = _discardConsented;
+        _discardConsented = false;
+
         if (_loadedId == Id && _loadedMode == Mode)
         {
             return;
         }
 
+        // Sampled BEFORE the load: it resets the form and moves the dirty baseline, so afterwards
+        // there is nothing left to compare and the discard would go unrecorded. Read-only surfaces
+        // and a load still in flight are never dirty, so neither can raise the notice.
+        var discardedUnsavedEdits = IsDirty && !consented;
+
         await LoadAsync();
+
+        if (discardedUnsavedEdits)
+        {
+            _unsavedEditsDiscarded = true;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1296,26 +1437,21 @@
             // payload.
             if (EffectiveMode == AssignmentAuthoringMode.Edit && Id is Guid authoringId)
             {
-                await LoadChildrenAsync(authoringId, ct);
-                await LoadLinkedGroupIdsAsync(authoringId, ct);
+                await LoadPersistedSelectionAsync(authoringId, ct);
             }
-            else if (Mode == AssignmentAuthoringMode.Create)
+            else
             {
-                // Create has no persisted targets to lose, so its targeting editor is live.
-                _model.LoadTargets([]);
-            }
+                if (Mode == AssignmentAuthoringMode.Create)
+                {
+                    // Create has no persisted targets to lose, so its targeting editor is live.
+                    _model.LoadTargets([]);
+                }
 
-            // D-2 / TGT-7: mirror the loaded target set onto the pickers.
-            SyncTargetPickerState();
-            SyncGroupsFromTargets();
-            _everyone = _model.HasAllStudents;
-
-            // FR-58: a persisted group target needs its group-subject union loaded up front —
-            // the submit gate and the subject picker both read it, and the union otherwise only
-            // loads when the author touches the group picker (which would silently block the save).
-            if (_selectedGroupIds.Count > 0)
-            {
-                await LoadGroupSubjectsAsync();
+                // Create has no persisted set to read and View does not read one either, so only the
+                // mirrors run here — they carry whatever the surface already holds.
+                SyncTargetPickerState();
+                SyncGroupsFromTargets();
+                _everyone = _model.HasAllStudents;
             }
 
             // WS-C1 (spec §7 Q1) / D2: resolve the effective signature requirement — the
@@ -1372,6 +1508,8 @@
         _groupLinksLoaded = false;
         _loadedGroupIds.Clear();
         _groupLinksUnavailableReason = null;
+        _fetchedActivityGroups = [];
+        _droppedGroupLinkIds.Clear();
 
         _gradeLevels = null;
         _gradeLevelOptions = [];
@@ -1390,6 +1528,36 @@
         _everyone = false;
         _preview = null;
         _previewDegraded = false;
+    }
+
+    /// <summary>
+    /// P1/P2-1/R2 — the ONE read of the assignment's persisted authoring set: the children (which carry
+    /// the targeting rows, D-8.3) and the linked activity groups, followed by the picker mirrors that
+    /// make the loaded set visible. <see cref="LoadAsync"/> runs it before the editors first render (so
+    /// an author's first add can never turn an empty collection into a full-replacement payload) and
+    /// <see cref="ReloadAsync"/> runs it again after a lifecycle action, so the surface shows the set
+    /// the server actually holds rather than the one it held before the action.
+    /// <para>It re-reads NOTHING else: the picker option sources (grade levels, streams, activity groups)
+    /// are tenant-level data no lifecycle action changes, and the scalar summary is refreshed by the
+    /// callers from their own detail read.</para>
+    /// </summary>
+    private async Task LoadPersistedSelectionAsync(Guid assignmentId, CancellationToken ct)
+    {
+        await LoadChildrenAsync(assignmentId, ct);
+        await LoadLinkedGroupIdsAsync(assignmentId, ct);
+
+        // D-2 / TGT-7: mirror the loaded target set onto the pickers.
+        SyncTargetPickerState();
+        SyncGroupsFromTargets();
+        _everyone = _model.HasAllStudents;
+
+        // FR-58: a persisted group target needs its group-subject union loaded up front — the submit
+        // gate and the subject picker both read it, and the union otherwise only loads when the author
+        // touches the group picker (which would silently block the save).
+        if (_selectedGroupIds.Count > 0)
+        {
+            await LoadGroupSubjectsAsync();
+        }
     }
 
     /// <summary>Loads grade levels, activity groups (flag-gated) and, for a loaded assignment,
@@ -1454,6 +1622,7 @@
     private async Task LoadActivityGroupsAsync(CancellationToken ct)
     {
         _activityGroupOptions = [];
+        _fetchedActivityGroups = [];
         _selectedGroupIds.Clear();
         _loadedGroupIds.Clear();
         _groupLinksLoaded = false;
@@ -1470,6 +1639,9 @@
             var groups = await StudentsApi.ListActivityGroupsAsync(ct);
             if (groups is null) return;
 
+            // §17 (item 4): the WHOLE read is kept — the archived rows are what a dropped link has to
+            // be named from — while only the active ones become picker options.
+            _fetchedActivityGroups = groups;
             _activityGroupOptions = groups
                 .Where(g => g.IsActive)
                 .OrderBy(g => g.Name)
@@ -1527,6 +1699,7 @@
     {
         _groupLinksLoaded = false;
         _loadedGroupIds.Clear();
+        _droppedGroupLinkIds.Clear();
         _groupLinksUnavailableReason = null;
 
         if (!_activityGroupsEnabled)
@@ -1554,6 +1727,12 @@
                 {
                     _loadedGroupIds.Add(groupId);
                     _selectedGroupIds.Add(groupId);
+                }
+                else
+                {
+                    // §17 (item 4, this round): the drop is reported instead of silent — the author
+                    // sees a shorter list below, and this is what tells them why.
+                    _droppedGroupLinkIds.Add(groupId);
                 }
             }
 
@@ -1695,8 +1874,48 @@
             _groupSubjectOptions = [];
             _groupSubjects = null;
         }
+        else
+        {
+            await ResolveRestoredStudentTargetsAsync();
+        }
 
         await OnTargetsChangedAsync();
+    }
+
+    /// <summary>
+    /// F4 / §17 (item 2, this round): switching Everyone OFF restores the target rows the toggle
+    /// replaced, which puts the student IDS back — but a chip renders from its OPTION object, and
+    /// Everyone ON cleared <see cref="_selectedStudentOptions"/>. Without this re-resolve a restored
+    /// student target rendered the <c>Student &lt;id8&gt;</c> fallback until the author touched the
+    /// picker. Fail-open: a student that cannot be read keeps that fallback chip, which stays removable.
+    /// </summary>
+    private async Task ResolveRestoredStudentTargetsAsync()
+    {
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        foreach (var studentId in TargetIds(TargetKindDto.Student))
+        {
+            if (_selectedStudentOptions.Any(o => o.Value == studentId.ToString()))
+            {
+                continue;
+            }
+
+            try
+            {
+                var student = await StudentsApi.GetStudentByIdAsync(studentId, ct);
+                if (student is null || student.IsDeleted)
+                {
+                    continue;
+                }
+
+                _selectedStudentOptions.Add(new PickerOption(student.Id.ToString(), StudentLabel(student)));
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogWarning(ex, "Failed to resolve the restored student target {StudentId}", studentId);
+            }
+        }
     }
 
     private Task OnSelectedGradeTargetsChangedAsync(IEnumerable<PickerOption>? selected)
@@ -1850,9 +2069,7 @@
             e.Items = students
                 .Where(s => !s.IsDeleted)
                 .Take(20)
-                .Select(s => new PickerOption(
-                    s.Id.ToString(),
-                    $"{s.FirstName} {s.LastName} ({s.StudentNumber})"))
+                .Select(s => new PickerOption(s.Id.ToString(), StudentLabel(s)))
                 .ToArray();
         }
         catch (OperationCanceledException) { e.Items = []; }
@@ -1862,6 +2079,11 @@
             e.Items = [];
         }
     }
+
+    /// <summary>TGT-6: the student option label — one spelling for the search results and the
+    /// restored-id re-resolve (F4/§17), so a chip and the picker always render the same name.</summary>
+    private static string StudentLabel(StudentDto student) =>
+        $"{student.FirstName} {student.LastName} ({student.StudentNumber})";
 
     private async Task LoadGroupSubjectsAsync()
     {
@@ -1941,6 +2163,17 @@
     {
         if (Id is not Guid id) return;
         var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        // §17 (item 1, this round): the persisted authoring set is only re-read onto a form that carries
+        // no unsaved work. Two of this method's callers leave the author on a surface they can still
+        // save from — Unpublish from Scheduled, and Schedule from Draft — and re-reading the persisted
+        // questions/attachments there would replace the rows they are still editing: the data-loss path
+        // the re-read must not create. Sampled BEFORE the summary refresh below, because that refresh
+        // itself rewrites the scalar fields the comparison reads. Every path on which the fresh set is
+        // REQUIRED is clean here: a read-only View is never dirty, and a save navigates away instead of
+        // leaving the author on the reloaded form.
+        var unsavedEdits = IsDirty;
+
         try
         {
             _item = await Api.GetByIdAsync(id, ct);
@@ -1949,6 +2182,31 @@
                 _model.LoadFrom(_item);
                 _mandatoryReview = _item.MandatoryReview;
                 _requiresSignature = _item.RequiresSignature;
+
+                // §17 (item 1, this round): a lifecycle action can move the assignment to a status whose
+                // surface is editable again (Published → Unpublish → Draft) or change the persisted
+                // children, so the re-read happens against the mode the refreshed summary selects.
+                if (!unsavedEdits && EffectiveMode == AssignmentAuthoringMode.Edit)
+                {
+                    // Re-read AFTER the summary refresh, and deliberately not held behind it: the status
+                    // change is what the author acted on, so it shows even if this read fails. Accepted
+                    // posture on that failure — the refreshed scalars stay, the child/target set stays as
+                    // it was (nothing is cleared), i.e. a partial refresh rather than a broken form. Caught
+                    // separately from the summary failure below so the log says which half of the reload
+                    // was lost.
+                    try
+                    {
+                        await LoadPersistedSelectionAsync(id, ct);
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        if (_disposed) return;
+                        Logger.LogWarning(ex,
+                            "Assignment {AssignmentId} reloaded its summary but its persisted children/targets could not be re-read; the form keeps the rows it already had",
+                            id);
+                    }
+                }
             }
         }
         catch (OperationCanceledException) { }

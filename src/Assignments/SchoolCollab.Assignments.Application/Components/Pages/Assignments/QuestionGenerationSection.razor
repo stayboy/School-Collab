@@ -6,6 +6,7 @@
 @inject IAssignmentQuestionGenerator QuestionGenerator
 @inject ILogger<QuestionGenerationSection> Logger
 @inject IUrlTextExtractor UrlTextExtractor
+@inject AssignmentsApiClient Api
 
 <section class="question-generation-section">
     <div class="question-generation-controls">
@@ -74,6 +75,11 @@
         {
             <FluentMessageBar Intent="MessageIntent.Warning" class="mt-2">@_urlWarning</FluentMessageBar>
         }
+
+        @if (!string.IsNullOrEmpty(_attachmentWarning))
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning" class="mt-2">@_attachmentWarning</FluentMessageBar>
+        }
     </div>
 </section>
 
@@ -104,6 +110,11 @@
     /// generation request when known.</summary>
     [Parameter] public Guid? GradeLevelId { get; set; }
 
+    /// <summary>R3 (D4/P1-2): the assignment being authored, or null in Create mode (where no row
+    /// exists yet to hang a generation header off). When set, every successful generate records one
+    /// <c>AssignmentQuestionGeneration</c> header and stamps its id onto the appended rows.</summary>
+    [Parameter] public Guid? AssignmentId { get; set; }
+
     /// <summary>Raised after a successful append so the page can re-render
     /// review counts and the submit gate. The page is the
     /// orchestrator; this component owns the generation call only.</summary>
@@ -116,6 +127,7 @@
     private bool _generating;
     private string? _generationError;
     private string? _urlWarning;
+    private string? _attachmentWarning;
     private CancellationTokenSource? _generateCts;
 
     private async Task OnGenerateAsync()
@@ -152,27 +164,45 @@
         if (_includeShortAnswer) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.ShortAnswer));
         if (picked.Count > 0) types = picked;
 
-        // WS-B2 + URL ingestion (decision g): fetch up to 3 included URLs as
-        // reference material; per-URL failure is fail-open with a warning.
+        // R3 (P1-2): the same selection as wire enum names, for the generation header's requested
+        // shape. Derived from the checkboxes rather than the GeneratedQuestionType list so the
+        // recorded shape is the author's request, not the AI host's wire mirror of it.
+        var requestedTypes = new List<QuestionTypeDto>(3);
+        if (_includeMultipleChoice) requestedTypes.Add(QuestionTypeDto.MultipleChoice);
+        if (_includeTrueFalse) requestedTypes.Add(QuestionTypeDto.TrueFalse);
+        if (_includeShortAnswer) requestedTypes.Add(QuestionTypeDto.ShortAnswer);
+
+        // WS-B2 + URL ingestion (decision g): fetch up to 3 included URLs as reference material;
+        // per-URL failure is fail-open with a warning.
         var allUrls = Model.ResourceUrls.Select(r => r.Url).ToList();
         var urls = allUrls.Take(3).ToList();
         var overCapSkipped = allUrls.Count - urls.Count;
         var failedUrls = new List<string>();
-        IReadOnlyList<string>? resourceTexts = null;
-        if (urls.Count > 0)
+        var urlTexts = new List<string>(urls.Count);
+        foreach (var url in urls)
         {
-            var texts = new List<string>(urls.Count);
-            foreach (var url in urls)
-            {
-                var result = await UrlTextExtractor.ExtractAsync(url, ct);
-                if (result.Success && result.Text is not null)
-                    texts.Add(result.Text);
-                else
-                    failedUrls.Add(url);
-            }
-            if (texts.Count > 0) resourceTexts = texts;
+            var result = await UrlTextExtractor.ExtractAsync(url, ct);
+            if (result.Success && result.Text is not null)
+                urlTexts.Add(result.Text);
+            else
+                failedUrls.Add(url);
         }
         _urlWarning = BuildUrlWarning(overCapSkipped, failedUrls);
+
+        // R3 (P1-6 / AI-3): attachment texts are grounded through the SAME seam and the SAME budget as
+        // the URL texts — URL first, attachments into the remaining slots, per-attachment fail-open
+        // drop when the slots run out. Extending the budget would need an AI-host constant change,
+        // which this round forbids; the AI host rejects > 5 entries with a 400.
+        // R3-2: the budget reports its own overflow, and that count (never a re-derived one) drives the
+        // warning below — an attachment that grounded nothing must not read as if it had.
+        var attachmentTexts = Model.Attachments
+            .Where(a => a.ExtractionStatus == AttachmentExtractionStatusDto.Succeeded
+                && !string.IsNullOrEmpty(a.ExtractedText))
+            .Select(a => a.ExtractedText!)
+            .ToList();
+        var composition = ResourceTextBudget.ComposeWithReport(urlTexts, attachmentTexts);
+        var resourceTexts = composition.Texts;
+        _attachmentWarning = BuildAttachmentWarning(composition.DroppedAttachmentCount);
 
         var request = new QuestionGenerationRequest(
             TopicId: TopicId.Value,
@@ -197,8 +227,30 @@
 
         try
         {
-            var questions = await QuestionGenerator.GenerateAsync(request, ct);
-            Model.AppendGenerated(questions);
+            var response = await QuestionGenerator.GenerateAsync(request, ct);
+
+            // R3 (D4/P1-2): record the generation BEFORE the questions land on the form, so the rows
+            // carry the header id from the moment they exist. Only possible once the assignment
+            // exists (Edit) — a Create has no row to hang the header off, and the questions it saves
+            // then correctly carry a null GenerationId.
+            Guid? generationId = null;
+            if (AssignmentId is Guid assignmentId)
+            {
+                generationId = await Api.RecordQuestionGenerationAsync(
+                    assignmentId,
+                    new RecordQuestionGenerationRequest(
+                        QuestionCount: _questionCount,
+                        Types: requestedTypes.Count > 0 ? requestedTypes : null,
+                        DifficultyEasyCount: Model.DifficultyEasyCount,
+                        DifficultyMediumCount: Model.DifficultyMediumCount,
+                        DifficultyHardCount: Model.DifficultyHardCount,
+                        // P1-1: the AI host's own resolution, relayed — never a client-chosen model.
+                        Provider: response.Provider,
+                        Model: response.Model),
+                    ct);
+            }
+
+            Model.AppendGenerated(response.Questions, generationId);
             await OnQuestionsChanged.InvokeAsync();
         }
         catch (QuestionGenerationFailed ex)
@@ -250,6 +302,15 @@
         }
         return parts.Count > 0 ? string.Join(" ", parts) : null;
     }
+
+    /// <summary>R3-2: the attachment half's warning, mirroring <see cref="BuildUrlWarning"/>. The drop is
+    /// fail-open by design, so the only thing the author can act on is knowing it happened and why.</summary>
+    private static string? BuildAttachmentWarning(int droppedAttachmentCount) =>
+        droppedAttachmentCount > 0
+            ? $"{droppedAttachmentCount} attachment(s) were read but not included in this generation: " +
+              $"the {ResourceTextBudget.MaxResourceTexts}-text grounding budget is full. " +
+              "Remove a reference URL or attachment to include them."
+            : null;
 
     public void Dispose()
     {

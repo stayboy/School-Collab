@@ -56,7 +56,7 @@ full four-agent) per repo `AGENTS.md` — do not default silently.
 - Existing tests cover it, or the plan states why a test change is unnecessary.
 - No interplay with other in-flight work.
 
-### UI-only work is NEVER Tier 3 (owner rule 2026-09-30)
+### UI-only work is NEVER Tier 3
 
 A **UI-only** change — presentation in the broadest sense: markup, `*.razor.css`,
 dialog size/height, icon or button placement, grid columns, column order, labels,
@@ -83,28 +83,24 @@ Owner workflow for this class of work:
 
 ### Tier 3 lean (no-UI feature rounds)
 
-Formalized 2026-09-17 (owner), codifying what ar-17 already practised: when a
-Tier 3 round's UI trigger does **not** fire, the round runs **lean** — the
+When a Tier 3 round's UI trigger does **not** fire, the round runs **lean** — the
 orchestrator-plan, worker, and reviewer runs and the Tier-3 model ladder are
 unchanged, but the parent **transcribes the acceptance** (on the reviewer's
 verdict + its own authoritative pass) instead of dispatching an
 orchestrator-accept run, and no UI tester is dispatched (there is nothing to
 bug-hunt). Rework bound stays ≤2.
 
-**The plan-review pass is NOT part of the lean/full split** (added 2026-09-18,
-owner): every Tier 3 round — lean or full — has the static reviewer read the
-**plan before the worker runs** (procedure step 2b). The plan is the round's most
-load-bearing artifact and a defect in it is the cheapest defect to fix; ar-19
-proved a diff-review alone cannot catch an unworkable premise (an EF helper that
-would not translate survived the entire implementation and surfaced only in the
-parent's own verification).
+**The plan-review pass is NOT part of the lean/full split:** every Tier 3 round
+— lean or full — has the static reviewer read the **plan before the worker
+runs** (procedure step 2b). The plan is the round's most load-bearing artifact
+and a defect in it is the cheapest defect to fix; a diff-review alone cannot
+catch an unworkable premise.
 
-**Plan-review model per sub-mode (owner default 2026-09-18):** on **Tier 3 full**
+**Plan-review model per sub-mode:** on **Tier 3 full**
 the plan gate runs on the round's **higher model** — `ollama/glm-5.3:cloud` on the
 pi profile, `cline-pass/glm-5.3` on clinepass — because it is the
-highest-leverage review in the round (ar-20's plan review found 7 P1s before any
-code was accepted, including a security hole in a pinned decision). On **Tier 3
-lean** it runs on **`ollama-cloud/kimi-k2.7-code`** — **the diff reviewer's model**, **owner rule 2026-09-30** (reverting the 2026-09-24 default): the plan gate must **never** share the worker's model, because the plan is the round's most load-bearing artifact and its reviewer must not be its implementer. Lean therefore runs the plan gate and the diff review on one independent model (`kimi-k2.7-code`; clinepass: `cline-pass/deepseek-v4.1-flash`) facing a `deepseek-v4.1-flash` worker. The 2026-09-24 arrangement is **withdrawn**. Both use
+highest-leverage review in the round. On **Tier 3
+lean** it runs on **`ollama-cloud/kimi-k2.7-code`** — **the diff reviewer's model**: the plan gate must **never** share the worker's model, because the plan is the round's most load-bearing artifact and its reviewer must not be its implementer. Lean therefore runs the plan gate and the diff review on one independent model (`kimi-k2.7-code`; clinepass: `cline-pass/deepseek-v4.1-flash`) facing a `deepseek-v4.1-flash` worker. Both use
 the read-only `reviewer` shell; a user-named model still wins (precedence item 1).
 
 **Hand rule: lean drops the accept-run, never the plan-run.** The
@@ -119,8 +115,8 @@ the plan's author to adjudicate the REVIEW personally.
 There is no defined tier between 2 and 3. A round that fails the Tier-2
 checklist only on file-level gates (migration, contracts, new project, diff
 size) with its design fully settled may be run at Tier 2 as an explicit
-**owner override**, recorded as a deviation on round-doc line 1 (the ar-16
-precedent); if the design is open, the round is Tier 3.
+**owner override**, recorded as a deviation on round-doc line 1; if the
+design is open, the round is Tier 3.
 
 ### Mid-round escalation
 
@@ -131,22 +127,13 @@ a light tier through. Record escalations in the round doc.
 
 ## Round docs — one doc, one diff artifact
 
-- `documents/rounds/round-<round-slug>.md` — the **single round doc** with
-  sections `## Plan`, `## Worker Report`, `## Review`, `## Acceptance`,
-  `## UI Tester` (fill only the tier-appropriate ones). Sole writer: the
-  orchestrator run (Tier 3) or the parent (Tiers 1–2). Reviewer and tester
-  never write files — they return structured blocks inline and the parent
-  persists them into the doc. On Tier 3, `## Review` carries the **PLAN REVIEW**
-  verdict first (from step 2b, with its dispatch timestamp) and the
-  diff-review verdict beneath it, so the plan's own review is traceable.
-- `documents/rounds/diffs-<round-slug>.patch` — written **once** by the parent
-  from `git diff` immediately after the worker run; passed by path to the
-  reviewer and tester instead of inline hunks.
-- Round doc line 1 records provider + models (traceability — format in
-  `references/models.md`).
-- Never write durable specs here; fold a round's durable outcomes into
-  `documents/specs/` when it closes. `documents/rounds/` is ephemeral — see
-  `documents/rounds/README.md`.
+- `documents/rounds/diffs-<round-slug>.patch` is written **once** by the parent
+  and passed **by path** to the reviewer and tester instead of inline hunks;
+  the round doc's **sole writer** is the orchestrator run (Tier 3) or the
+  parent (Tiers 1–2) — reviewers and testers never write files; they return
+  structured blocks inline and the parent persists them into the doc.
+- Round-doc format, line-1 provider/model traceability, and the ephemerality
+  rules live in `documents/rounds/README.md` and `references/models.md`.
 
 ## Models and per-tier strategy
 
@@ -161,25 +148,25 @@ verbatim (the `ollama*` ids have drifted historically — verify, don't assume).
 
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) | Tiers |
 |---|---|---|---|
-| Orchestrator | `ollama-cloud/glm-5.3-flash` (owner 2026-09-22, **Option A**) | `cline-pass/glm-5.3` | 3 only |
-| Worker | `ollama-cloud/deepseek-v4.1-flash` (owner 2026-09-22, **Option A**) | `cline-pass/deepseek-v4-flash` | 1–3 |
-| Reviewer | `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | `cline-pass/deepseek-v4.1-flash` | 2–3 |
-| **Plan reviewer** (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 3 full only — owner default 2026-09-18; **lean rounds run `kimi-k2.7-code` (owner rule 2026-09-30 — the diff reviewer's model; the plan gate must never share the worker's model)** |
+| Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` | 3 only |
+| Worker | `ollama-cloud/deepseek-v4.1-flash` | `cline-pass/deepseek-v4-flash` | 1–3 |
+| Reviewer | `ollama-cloud/kimi-k2.7-code` (both tiers) | `cline-pass/deepseek-v4.1-flash` | 2–3 |
+| **Plan reviewer** (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 3 full only; **lean rounds run `kimi-k2.7-code` — the diff reviewer's model; the plan gate must never share the worker's model** |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
-| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, pinned — **under Option A this is also the Tier-3 reviewer, so an escalated rework and its verifier would share a model; the light tier already behaves this way by design, and the owner has not ruled on it**); otherwise the round's reviewer model | the round's reviewer model | on block |
+| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (pinned — this is also the Tier-3 reviewer, so an escalated rework and its verifier share a model, as the light tier already does by design); otherwise the round's reviewer model | the round's reviewer model | on block |
 | Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | on escalation |
 
 From pi, opt into the clinepass profile for a round by passing
 `clinepass/cline-pass/<id>` (e.g. `clinepass/cline-pass/deepseek-v4.1-flash`) in
 every role's `runs.run` — and record that choice in the round doc header.
 
-**Per-mode model sets (owner overrides 2026-09-16):**
+**Per-mode model sets:**
 
 | Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
 |---|---|---|---|---|
 | **Solo** | the single agent does plan + implement + check itself | — | — | ask the user first (see the solo rule) |
 | **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `kimi-k2.7-code` | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model. **Option A: Tier 3 now uses this same set** |
-| **Tier 3** | `deepseek-v4.1-flash` | `glm-5.3-flash` | `kimi-k2.7-code` | **Option A (owner 2026-09-22): the role set is now IDENTICAL to the light tier** — Tier 3 adds the UI tester `minimax-m3` and, on full rounds, the plan-review on `glm-5.3:cloud`; **on lean rounds the plan gate runs the diff reviewer's model, `kimi-k2.7-code` (owner rule 2026-09-30 — never the worker's model)**. **escalator = `kimi-k2.7-code`** (pinned — coincides with the reviewer; see the role table) |
+| **Tier 3** | `deepseek-v4.1-flash` | `glm-5.3-flash` | `kimi-k2.7-code` | **Option A: the role set is now IDENTICAL to the light tier** — Tier 3 adds the UI tester `minimax-m3` and, on full rounds, the plan-review on `glm-5.3:cloud`; **on lean rounds the plan gate runs the diff reviewer's model, `kimi-k2.7-code` — never the worker's model**. **escalator = `kimi-k2.7-code`** (pinned — coincides with the reviewer; see the role table) |
 
 **Solo rule:** a solo round is ONE agent doing everything (planner, implementer
 and its own acceptance check) — the same shape as a light round's worker. Before
@@ -197,10 +184,8 @@ round-doc line 1.
 3. **The profile already recorded in the round doc** (resumed or continuing
    rounds — the earlier decision carries forward).
 4. **The skill default: the pi `ollama` profile** in the table above, per tier —
-   subject to the **per-mode model sets** below it (solo / light / Tier 3), which
-   the owner overrode on 2026-09-16; the pi-profile reviewer default was
-   replaced on 2026-09-22; **Option A applied 2026-09-22**). Light and Tier 3 now
-   run the SAME role set: worker `deepseek-v4.1-flash`, orchestrator
+   subject to the **per-mode model sets** below it (solo / light / Tier 3). Light
+   and Tier 3 run the SAME role set: worker `deepseek-v4.1-flash`, orchestrator
    `glm-5.3-flash`, reviewer `kimi-k2.7-code` — deliberately different models, so
    the verifier never shares the implementer's model. Tier 3 differs only by
    adding the UI tester and, on full rounds, the `glm-5.3:cloud` plan-review.
@@ -301,7 +286,7 @@ the tester never derives or expands its own scope.
    is never dispatched on a plan with an open P1. The pass is static — any
    build/test numbers it volunteers are discarded like any other child's.
    **Model:** Tier 3 **full** → `ollama/glm-5.3:cloud` (`cline-pass/glm-5.3`);
-   Tier 3 **lean** → **`ollama-cloud/kimi-k2.7-code`** (owner rule 2026-09-30; the diff reviewer's model — see the plan-review sub-mode note). Read-only `reviewer` shell in
+   Tier 3 **lean** → **`ollama-cloud/kimi-k2.7-code`** (the diff reviewer's model — see the plan-review sub-mode note). Read-only `reviewer` shell in
    both cases; a user-named model wins.
 3. **Worker run.** Task = worker contract + the plan inline + expected files +
    round-doc path (the worker does not edit it). The worker implements, runs
@@ -311,16 +296,16 @@ the tester never derives or expands its own scope.
    out, stalls, or hangs mid-round (30-min cap, runaway shell command, repeated
    build failures it cannot recover from), the parent interrupts it and
    re-dispatches the SAME pass scope as an ESCALATION PASS on
-   the round's reviewer model (Tier 3: `kimi-k2.7-code`, pinned by owner 2026-09-22 — not the Tier-3 reviewer) — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
+   the round's reviewer model (Tier 3: `kimi-k2.7-code`, pinned — coincides with
+   the Tier-3 reviewer) — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
    agent; the `reviewer` agent shell is read-only by design and cannot
    execute passes) — which reconciles the on-disk state first, then
    completes the blocked pass. Subsequent worker passes revert to the worker
    model. **Escalated work is reviewed by the HIGHER model: the static
    re-verification of any pass completed via escalation runs on
    the round's provider's higher model (`ollama/glm-5.3:cloud` on the ollama
-   profile, `clinepass/cline-pass/glm-5.3` on clinepass)** (user-set default
-   2026-09-08; the escalator never
-   re-verifies its own pass). One escalation per blocked pass; record
+   profile, `clinepass/cline-pass/glm-5.3` on clinepass)** — the escalator never
+   re-verifies its own pass. One escalation per blocked pass; record
    the provenance in the round doc (e.g. "pass 3 completed via escalation").
    Do not steer or revive a run whose bash has been open past a plausible
    build/test window — interrupt it; a hung process never settles.
@@ -344,8 +329,8 @@ the tester never derives or expands its own scope.
    list or CLOSED, residual P2s). Tier 3 full: the orchestrator-accept run
    receives the REVIEW block + the parent's build/test numbers and writes
    `## Acceptance`. Tier 3 **lean** (no-UI rounds): the parent transcribes the
-   acceptance itself, on the reviewer's verdict plus its own authoritative pass
-   — the ar-17 precedent. When the verdict is CLOSED and the UI trigger fires,
+   acceptance itself, on the reviewer's verdict plus its own authoritative pass.
+   When the verdict is CLOSED and the UI trigger fires,
    the acceptance also appends the tester-scope handover.
 6. **UI tester pass (Tier 3, UI rounds).** Task = tester contract + the
    handover verbatim + patch path. The tester bug-hunts only the handed-over
@@ -365,16 +350,10 @@ the tester never derives or expands its own scope.
 
 ## Pitfalls
 
-- **Keep a Tier-1–2 diff reviewable; a large patch buys no review.** Round
-  `assignment-authoring-r1` shipped a ~358 KB / 41-file Tier-2 patch: the static
-  reviewer read it in nine 800-line chunks, blew its 30-minute deadline
-  mid-reasoning and returned **no verdict**; even after a resume it gave a
-  `CLOSED` verdict that had missed **two P1s** — a destructive full-replacement of
-  child collections from an Edit form whose children were never loaded, and a dead
-  `@bind-SelectedValues` on FluentUI `FluentListbox<T>` that broke `Create`'s
-  By-Group submit gate. Bound the diff for a light round, or **split the review by
-  area** (one reviewer per patch slice) instead of handing one reviewer an
-  unbounded patch.
+- **Keep a Tier-1–2 diff reviewable; a large patch buys no review.** An unbounded
+  patch times the static reviewer out into a missed-P1 verdict. Bound the diff for
+  a light round, or **split the review by area** (one reviewer per patch slice)
+  instead of handing one reviewer an unbounded patch.
 - **An empty reviewer verdict means "no review", never "clean".** A reviewer that
   times out, errors, or returns without a REVIEW block has verified nothing. Treat
   the round as unreviewed (resume or re-dispatch it) and never transcribe `CLOSED`
@@ -389,19 +368,18 @@ the tester never derives or expands its own scope.
   `.github/skills/fluentui-component-props/SKILL.md`; findings and the fix pattern:
   `documents/solution/fluentui-dead-selectedvalues-binding.md`.
 - **Never combine structured single-child execution with `workflowScript`.**
-- **Test-output starvation kills worker passes.** Two worker timeouts in
-  round ar-15 were self-reported as *"I cannot clearly see pass/fail due to
-  tooling"* — the worker burned its 30-minute cap fighting truncated MSTest
-  output, not the code. Treat the output rule as a hard gate in every worker
+- **Test-output starvation kills worker passes.** A worker fighting truncated
+  MSTest output can burn its entire 30-minute cap on tooling instead of the
+  code — self-reporting it cannot clearly see pass/fail. Treat the output rule as a hard gate in every worker
   task spec: exactly one `dotnet test tests/<X> 2>&1 | grep -E "^\s*failed
   |total:|failed:" | head -40`; no ad-hoc pipelines, no `zz*.log` debug
   files; at most 2 attempts per result read; if output is truncated, redirect
   to a file once and read the tail. A worker that starts narrating tooling
   problems instead of failures is on the timeout path — interrupt early.
 - **A MockHttp matcher without an explicit HTTP method shadows later
-  method-specific matchers** (first match wins). In ar-15 the context mock's
-  method-agnostic `When(url)` swallowed the sign **POST**, so the bUnit test
-  named for that POST never exercised it and failed on a 2 s
+  method-specific matchers** (first match wins). A context mock's
+  method-agnostic `When(url)` can swallow the sign **POST**, so the bUnit test
+  named for that POST never exercises it and fails on a 2 s
   `WaitForAssertion`. Always pass `HttpMethod.Get`/`HttpMethod.Post`; when the
   same URL answers before *and* after a mutation, use a counter-based
   `.Respond(_ => …)` sequence, not two same-URL matchers.
@@ -436,9 +414,8 @@ the tester never derives or expands its own scope.
 - **Escalate instead of forcing a light tier through.**
 - Children may pause for supervisor decisions via intercom (pi) — reply, then
   wait for the child to settle.
-- **Runaway shell commands hang worker runs** — a worker once launched
-  `find / -name "..."` (a filesystem-wide scan from the root) and blocked
-  the run for 28 minutes. Worker task specs must carry the guard: repo-scoped
+- **Runaway shell commands hang worker runs** — a filesystem-wide scan from the
+  root (`find /`) can block a run for its full cap. Worker task specs must carry the guard: repo-scoped
   searches only (`grep`/`rg` under `src/`, `tests/`, or the NuGet cache under
   `~/.nuget/packages`), never `find /`. If a worker's bash stays open past a
   plausible build/test window, interrupt and escalate the pass per the
@@ -446,24 +423,21 @@ the tester never derives or expands its own scope.
   quota. **Escalating is not enough on its own:** the re-dispatched brief must carry the
   same guard *plus* **bounded per-command timeouts and a skip-if-slow rule** — the escalation
   inherits the identical hang risk, and a second hang on a test/Testcontainers suite burns
-  another full cycle (observed 2026-10-02: a 44-minute open `bash` on an R2 rework produced
-  **zero** files). **Reconcile the tree first** — a hung pass may have produced nothing, so
+  another full cycle. **Reconcile the tree first** — a hung pass may have produced nothing, so
   never assume partial work exists — and **kill that run's orphaned `dotnet`/testhost
   processes before re-dispatching**, or the next build fails on MSB3021/MSB3027 locks.
-- **Adjudicate a tester's/reviewer's findings against source BEFORE dispatching a rework.** A UI
-  tester reported five P1s; two rested on a single wrong premise — that the Publish action submits the
-  in-memory form, when it publishes the *persisted* entity (`Api.PublishAsync(_item.Id, …)`) — so their
-  repros were unreachable, and a third was mis-severed (real behaviour, but caught downstream so not a
-  data-loss path). Verifying each claimed P1 in the code yourself is what separates the one genuine
-  data-loss bug from the two that do not exist; relaying a plausible-sounding repro into a rework brief
-  spends a whole cycle on phantom defects **and** hides the real one. A tester's severity is a claim,
-  not a fact — the parent owns the triage.
-- **Orphaned `dotnet` processes hang the PARENT too, not just the child.** A parent verification run
-  (`dotnet build` then `dotnet test`) sat for the full 40-minute timeout — build green, first suite
-  apparently stuck. After killing ~11 stale `dotnet` processes the *same* suite passed in **26 s**.
-  The identical root cause had already killed a worker run earlier the same session. So: after any
-  hung/killed child — and before a parent verification run — clear stale `dotnet`/`testhost` processes
-  first; and when a parent test run looks hung, suspect process contention *before* concluding that the
+- **Adjudicate a tester's/reviewer's findings against source BEFORE dispatching a rework.** A
+  severity is a claim, not a fact — the parent owns the triage; verify each claimed P1 in the
+  code before spending a rework cycle. Relaying a plausible-sounding repro into a rework brief
+  spends a whole cycle on phantom defects **and** hides the real one.
+- **A round that builds on an UNMERGED layer must branch from THAT layer's tip, not `main` — and when the
+  plan's named symbols don't exist at HEAD, suspect the base before the plan.** Pre-flight is two
+  commands: `git merge-base --is-ancestor <prereq-tip> HEAD`, plus one `grep` for a symbol the plan
+  names. `git checkout -B <branch> <prereq-tip>` re-mounts the plan losslessly when the branch has no
+  commits of its own (untracked round docs survive either that or `reset --hard`).
+- **Orphaned `dotnet` processes hang the PARENT too, not just the child.** After any
+  hung/killed child — and before a parent verification run — clear stale
+  `dotnet`/`testhost` processes first; and when a parent test run looks hung, suspect process contention *before* concluding that the
   suite (or the code) hangs. A false "the tests hang" diagnosis sends you hunting a defect that does not
   exist, in a change you were about to accept.
 

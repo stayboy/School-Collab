@@ -238,6 +238,68 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.ToTable("assignment_activity_groups", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentQuestionGeneration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assignment_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("DifficultyEasyCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("difficulty_easy_count");
+
+                    b.Property<int?>("DifficultyHardCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("difficulty_hard_count");
+
+                    b.Property<int?>("DifficultyMediumCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("difficulty_medium_count");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("model");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<int>("QuestionCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("question_count");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Types")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("types");
+
+                    b.HasKey("Id")
+                        .HasName("pk_assignment_question_generations");
+
+                    b.HasIndex("AssignmentId")
+                        .HasDatabaseName("ix_assignment_question_generations_assignment_id");
+
+                    b.HasIndex("TenantId", "AssignmentId")
+                        .HasDatabaseName("ix_assignment_question_generations_tenant_assignment");
+
+                    b.ToTable("assignment_question_generations", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentRecipient", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1171,7 +1233,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentAttachment", "Attachments", b1 =>
                         {
                             b1.Property<Guid>("Id")
-                                .ValueGeneratedOnAdd()
                                 .HasColumnType("uuid")
                                 .HasColumnName("id");
 
@@ -1184,6 +1245,26 @@ namespace SchoolCollab.Assignments.Core.Migrations
                                 .HasMaxLength(100)
                                 .HasColumnType("character varying(100)")
                                 .HasColumnName("content_type");
+
+                            b1.Property<DateTimeOffset?>("ExtractedAt")
+                                .HasColumnType("timestamp with time zone")
+                                .HasColumnName("extracted_at");
+
+                            b1.Property<string>("ExtractedText")
+                                .HasMaxLength(20000)
+                                .HasColumnType("character varying(20000)")
+                                .HasColumnName("extracted_text");
+
+                            b1.Property<string>("ExtractionError")
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("extraction_error");
+
+                            b1.Property<int>("ExtractionStatus")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer")
+                                .HasDefaultValue(0)
+                                .HasColumnName("extraction_status");
 
                             b1.Property<string>("FileName")
                                 .IsRequired()
@@ -1217,7 +1298,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentQuestion", "Questions", b1 =>
                         {
                             b1.Property<Guid>("Id")
-                                .ValueGeneratedOnAdd()
                                 .HasColumnType("uuid")
                                 .HasColumnName("id");
 
@@ -1232,6 +1312,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                             b1.Property<int>("DisplayOrder")
                                 .HasColumnType("integer")
                                 .HasColumnName("display_order");
+
+                            b1.Property<Guid?>("GenerationId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("generation_id");
 
                             b1.Property<string>("ModelAnswer")
                                 .HasMaxLength(2000)
@@ -1265,7 +1349,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                             b1.OwnsMany("SchoolCollab.Assignments.Core.Domain.QuestionOption", "Options", b2 =>
                                 {
                                     b2.Property<Guid>("Id")
-                                        .ValueGeneratedOnAdd()
                                         .HasColumnType("uuid")
                                         .HasColumnName("id");
 
@@ -1304,7 +1387,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentReview", "Reviews", b1 =>
                         {
                             b1.Property<Guid>("Id")
-                                .ValueGeneratedOnAdd()
                                 .HasColumnType("uuid")
                                 .HasColumnName("id");
 
@@ -1358,6 +1440,16 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_assignment_activity_groups_assignments_assignment_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentQuestionGeneration", b =>
+                {
+                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_assignment_question_generations_assignments_assignment_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>

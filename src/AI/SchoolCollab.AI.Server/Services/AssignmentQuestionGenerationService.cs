@@ -63,14 +63,14 @@ public sealed class AssignmentQuestionGenerationService
     {
         ValidateRequest(request);
 
-        var (_, model) = ChatModelResolver.Resolve(
+        var (provider, model) = ChatModelResolver.Resolve(
             _config["codedvalue-ai-provider"],
             _config["Ollama:DefaultModel"],
             _config["OpenRouter:DefaultModel"]);
 
         _logger.LogInformation(
-            "Generating {Count} assignment questions for topic {TopicName} via {Model}",
-            request.QuestionCount, request.TopicName, model);
+            "Generating {Count} assignment questions for topic {TopicName} via {Provider}/{Model}",
+            request.QuestionCount, request.TopicName, provider, model);
 
         var chatOptions = new ChatOptions { ModelId = model };
 
@@ -110,7 +110,15 @@ public sealed class AssignmentQuestionGenerationService
             throw new AssignmentQuestionGenerationException(ProviderErrorFormatter.Format(ex), 502);
         }
 
-        return AssignmentQuestionResponseParser.Parse(modelText);
+        // P1-1: surface the tuple THIS host resolved. It is the only place it is known — the
+        // Assignments host cannot resolve it (no ChatModelResolver, no config-based AI resolver) and
+        // must not accept one from the client. No new resolution and no config change: the values
+        // above are exactly what this request already used.
+        return AssignmentQuestionResponseParser.Parse(modelText) with
+        {
+            Provider = provider,
+            Model = model,
+        };
     }
 
     private static void ValidateRequest(QuestionGenerationRequest request)

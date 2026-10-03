@@ -49,11 +49,24 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
                 (QuestionTypeDto)q.QuestionType,
                 q.DisplayOrder,
                 q.ModelAnswer,
-                q.Options.Select(o => new AssignmentQuestionOptionReadDto(o.Id, o.OptionText, o.IsCorrect)).ToList()))
+                q.Options.Select(o => new AssignmentQuestionOptionReadDto(o.Id, o.OptionText, o.IsCorrect)).ToList(),
+                // R3 (P1-2): so the Edit surface round-trips provenance instead of stripping it.
+                q.GenerationId))
             .ToList();
 
         var attachments = assignment.Attachments
-            .Select(a => new AssignmentAttachmentReadDto(a.Id, a.FileName, a.ContentType, a.FileSize, a.StoragePath))
+            .Select(a => new AssignmentAttachmentReadDto(
+                a.Id,
+                a.FileName,
+                a.ContentType,
+                a.FileSize,
+                a.StoragePath,
+                // R3 (P1-3): the extraction outcome, so opening Edit does not blank it and the next
+                // save re-writes the same values.
+                (AttachmentExtractionStatusDto)a.ExtractionStatus,
+                a.ExtractedText,
+                a.ExtractedAt,
+                a.ExtractionError))
             .ToList();
 
         var resources = assignment.Resources

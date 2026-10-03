@@ -123,7 +123,7 @@ public sealed class CreateAssignmentCommandHandler(
             for (var i = 0; i < command.Questions.Count; i++)
             {
                 var q = command.Questions[i];
-                var question = assignment.AddQuestion(q.QuestionText, (QuestionType)q.QuestionType, i, q.ModelAnswer);
+                var question = assignment.AddQuestion(q.QuestionText, (QuestionType)q.QuestionType, i, q.ModelAnswer, q.GenerationId);
                 if (q.Options is { Count: > 0 })
                 {
                     foreach (var opt in q.Options)
@@ -138,7 +138,18 @@ public sealed class CreateAssignmentCommandHandler(
         {
             foreach (var attachment in command.Attachments)
             {
-                assignment.AddAttachment(attachment.FileName, attachment.ContentType, attachment.FileSize, attachment.StoragePath);
+                // R3 (D4/P1-3): the extraction outcome rides this DTO exactly as StoragePath does.
+                // AddAttachment mints a fresh row on every save, so anything not carried here is
+                // silently wiped by the author's next edit.
+                assignment.AddAttachment(
+                    attachment.FileName,
+                    attachment.ContentType,
+                    attachment.FileSize,
+                    attachment.StoragePath,
+                    (AttachmentExtractionStatus)attachment.ExtractionStatus,
+                    attachment.ExtractedText,
+                    attachment.ExtractedAt,
+                    attachment.ExtractionError);
             }
         }
 

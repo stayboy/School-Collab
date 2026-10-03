@@ -45,6 +45,10 @@ public class QuestionsDraftSectionBunitTests : BunitContext
     private static readonly Guid AssignmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TopicId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
+    /// <summary>R3 (P1-2): the header id the fake Assignments API returns; the staged draft must
+    /// carry it on every question row.</summary>
+    private static readonly Guid GenerationId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
     private readonly MockHttpMessageHandler _mockHttp;
     private readonly JsonSerializerOptions _apiJsonOptions;
 
@@ -80,13 +84,21 @@ public class QuestionsDraftSectionBunitTests : BunitContext
         FakeQuestionGenerator fake,
         bool gateEnabled = true,
         bool promptLocked = false,
-        EventCallback? onConfirmed = null)
+        EventCallback? onConfirmed = null,
+        AssignmentEditFormModel? model = null)
     {
         Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
+
+        // R3 (P1-2): the draft-stage write point records a generation header first; the default route
+        // returns a fixed id so the staged draft's GenerationId is deterministic.
+        _mockHttp.When(HttpMethod.Post, "http://localhost/assignments/*/question-generations")
+            .Respond(HttpStatusCode.OK, "application/json",
+                $"{{\"generationId\":\"{GenerationId}\"}}");
 
         return Render<QuestionsDraftSection>(parameters =>
         {
             parameters.Add(p => p.AssignmentId, AssignmentId);
+            parameters.Add(p => p.Model, model ?? new AssignmentEditFormModel());
             parameters.Add(p => p.GateEnabled, gateEnabled);
             parameters.Add(p => p.PromptLocked, promptLocked);
             parameters.Add(p => p.TopicId, TopicId);
@@ -161,6 +173,109 @@ public class QuestionsDraftSectionBunitTests : BunitContext
                 "the preview clears after a successful confirm");
         });
         _mockHttp.VerifyNoOutstandingExpectation();
+    }
+
+    // ── R3 (P1-2): the draft-stage write point ──────────────────────────
+
+    [TestMethod]
+    public void Generate_StagesADraftWhoseQuestionsAllCarryTheRecordedGenerationId()
+    {
+        // P1-2: the header is written at draft-stage / generate time and its id rides INSIDE the draft
+        // blob, so ConfirmQuestionsDraftCommandHandler's re-mint can re-attach it. If this hop dropped it,
+        // the author's first save would silently strip provenance from every generated question.
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+        string? stagedBody = null;
+        _mockHttp.When(HttpMethod.Put, "http://localhost/assignments/*/questions-draft")
+            .Respond(request =>
+            {
+                stagedBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            });
+
+        var fake = new FakeQuestionGenerator();
+        var cut = RenderSection(fake);
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => stagedBody.Should().NotBeNull("the draft is staged after the header is recorded"));
+        stagedBody.Should().Contain($"\"generationId\":\"{GenerationId}\"");
+        // One occurrence per drafted question — three here — plus nothing else that looks like it.
+        stagedBody!.Split("generationId").Length.Should().Be(
+            4, "every drafted question carries the header id (3 rows = 4 split fragments)");
+    }
+
+    [TestMethod]
+    public void Generate_WithStagedAttachments_GroundsTheDraftOnTheirExtractedText()
+    {
+        // P1-6/AI-3: the kebab's "Generate questions" action anchors to this surface, so attachment
+        // grounding must behave here exactly as it does in compartment 6.
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+        _mockHttp.When(HttpMethod.Put, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+
+        var model = new AssignmentEditFormModel();
+        model.AddAttachment(new AttachmentEditorRow
+        {
+            FileName = "readable.pdf", ContentType = "application/pdf", FileSize = 10, StoragePath = "p1",
+            ExtractionStatus = AttachmentExtractionStatusDto.Succeeded, ExtractedText = "attachment body",
+        });
+        var fake = new FakeQuestionGenerator();
+        var cut = RenderSection(fake, model: model);
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().Equal(
+            ["attachment body"],
+            "the extracted attachment text grounds the draft through the same ResourceTexts seam");
+    }
+
+    [TestMethod]
+    public void Generate_WithMoreAttachmentsThanTheBudget_SurfacesTheDroppedAttachmentWarning()
+    {
+        // R3-2: the draft surface's attachment half gets the same surface as compartment 6. Six readable
+        // attachments, five slots — the sixth cannot ground this draft, and the author must be told here
+        // too (this is the surface the kebab's "Generate questions" action anchors to).
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+        _mockHttp.When(HttpMethod.Put, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+
+        var model = new AssignmentEditFormModel();
+        for (var i = 0; i < 6; i++)
+        {
+            model.AddAttachment(new AttachmentEditorRow
+            {
+                FileName = $"readable-{i}.pdf", ContentType = "application/pdf", FileSize = 10,
+                StoragePath = $"p{i}",
+                ExtractionStatus = AttachmentExtractionStatusDto.Succeeded,
+                ExtractedText = $"attachment body {i}",
+            });
+        }
+
+        var fake = new FakeQuestionGenerator();
+        var cut = RenderSection(fake, model: model);
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().HaveCount(ResourceTextBudget.MaxResourceTexts,
+            "the draft path fills the budget from slot zero with attachment text");
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain(
+                "1 attachment(s) were read but not included in this generation",
+                "the draft surface warns about the dropped attachment exactly as compartment 6 does");
+            cut.Markup.Should().Contain("grounding budget is full");
+        });
     }
 
     [TestMethod]
@@ -261,19 +376,29 @@ public class QuestionsDraftSectionBunitTests : BunitContext
     {
         public int GenerateCalls { get; private set; }
 
-        public Task<IReadOnlyList<GeneratedQuestionDto>> GenerateAsync(
+        /// <summary>R3 (P1-6): the last request the section built, so the shared ResourceTexts budget
+        /// can be asserted on the draft surface too.</summary>
+        public QuestionGenerationRequest? LastRequest { get; private set; }
+
+        public Task<QuestionGenerationResponse> GenerateAsync(
             QuestionGenerationRequest request,
             CancellationToken ct = default)
         {
             GenerateCalls++;
-            return Task.FromResult<IReadOnlyList<GeneratedQuestionDto>>(new[]
-            {
-                new GeneratedQuestionDto("G-Q1", GeneratedQuestionType.MultipleChoice,
-                    new[] { new GeneratedQuestionOptionDto("A", true), new GeneratedQuestionOptionDto("B") }),
-                new GeneratedQuestionDto("G-Q2", GeneratedQuestionType.TrueFalse,
-                    new[] { new GeneratedQuestionOptionDto("True", true), new GeneratedQuestionOptionDto("False") }),
-                new GeneratedQuestionDto("G-Q3", GeneratedQuestionType.ShortAnswer, null, "model"),
-            });
+            LastRequest = request;
+            return Task.FromResult(new QuestionGenerationResponse(
+                new[]
+                {
+                    new GeneratedQuestionDto("G-Q1", GeneratedQuestionType.MultipleChoice,
+                        new[] { new GeneratedQuestionOptionDto("A", true), new GeneratedQuestionOptionDto("B") }),
+                    new GeneratedQuestionDto("G-Q2", GeneratedQuestionType.TrueFalse,
+                        new[] { new GeneratedQuestionOptionDto("True", true), new GeneratedQuestionOptionDto("False") }),
+                    new GeneratedQuestionDto("G-Q3", GeneratedQuestionType.ShortAnswer, null, "model"),
+                },
+                // R3 (P1-1): the AI host's own resolved tuple, which the draft section relays onto
+                // the generation-header request.
+                Provider: "ollama",
+                Model: "gemma4:31b-cloud"));
         }
     }
 }

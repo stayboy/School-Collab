@@ -22,5 +22,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <!-- C3 certificate PDF rendering (Community license; pin 2026.8.0 in CPM). -->
     <PackageReference Include="QuestPDF" />
+    <!-- R3 attachment text extraction (AttachmentTextExtractor, D1/D2/D8).
+         "PdfPig" is the real UglyToad package id (Apache-2.0); the similarly-spelled
+         "UglyToad.PdfPig" id is an unrelated placeholder — do not "correct" this. -->
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
   </ItemGroup>
 </Project>

@@ -92,7 +92,10 @@ public sealed class UpdateAssignmentCommandHandler(
             for (var i = 0; i < command.Questions.Count; i++)
             {
                 var q = command.Questions[i];
-                var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer);
+                // R3 (D4/P1-2): carry GenerationId across the re-mint. The rows removed just above
+                // are gone for good, so this hop is the ONLY thing that keeps provenance from being
+                // stripped by the author's first save of a generated question set.
+                var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer, q.GenerationId);
                 if (q.Options is { Count: > 0 })
                 {
                     foreach (var opt in q.Options)
@@ -113,7 +116,17 @@ public sealed class UpdateAssignmentCommandHandler(
 
             foreach (var attachment in command.Attachments)
             {
-                assignment.AddAttachment(attachment.FileName, attachment.ContentType, attachment.FileSize, attachment.StoragePath);
+                // R3 (D4/P1-3): the extraction outcome rides this DTO exactly as StoragePath does —
+                // AddAttachment mints a new row, so anything omitted here is wiped by the next save.
+                assignment.AddAttachment(
+                    attachment.FileName,
+                    attachment.ContentType,
+                    attachment.FileSize,
+                    attachment.StoragePath,
+                    (AttachmentExtractionStatus)attachment.ExtractionStatus,
+                    attachment.ExtractedText,
+                    attachment.ExtractedAt,
+                    attachment.ExtractionError);
             }
         }
 

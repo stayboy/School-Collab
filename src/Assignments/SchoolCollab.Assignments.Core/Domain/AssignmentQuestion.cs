@@ -6,7 +6,7 @@ public sealed class AssignmentQuestion
 
     private AssignmentQuestion() { }
 
-    internal AssignmentQuestion(Guid assignmentId, string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)
+    internal AssignmentQuestion(Guid assignmentId, string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null, Guid? generationId = null)
     {
         Id = Guid.NewGuid();
         AssignmentId = assignmentId;
@@ -14,6 +14,7 @@ public sealed class AssignmentQuestion
         QuestionType = questionType;
         DisplayOrder = displayOrder;
         ModelAnswer = modelAnswer;
+        GenerationId = generationId;
     }
 
     public Guid Id { get; private set; }
@@ -26,6 +27,14 @@ public sealed class AssignmentQuestion
     /// (AI spec decision 10 / §5). Free-text for <see cref="QuestionType.ShortAnswer"/>
     /// (teacher grades manually); null for MC/TF.</summary>
     public string? ModelAnswer { get; private set; }
+
+    /// <summary>R3 / D4 (P1-2): the <see cref="AssignmentQuestionGeneration"/> header this question
+    /// was produced by, or null for a hand-written question. Nullable on purpose — the ratified
+    /// requirement is "every *generation* is saved", not "every question came from one".
+    /// <para>These rows are re-minted on every save (<c>RemoveQuestion</c> → <c>AddQuestion</c>), so
+    /// this value survives only because it rides <c>NewQuestionDto</c> through the create/update and
+    /// the questions-draft confirm path. Dropping it there silently strips provenance.</para></summary>
+    public Guid? GenerationId { get; private set; }
 
     public IReadOnlyList<QuestionOption> Options => _options.AsReadOnly();
 

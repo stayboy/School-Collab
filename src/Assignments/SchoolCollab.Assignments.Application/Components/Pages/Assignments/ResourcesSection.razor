@@ -2,6 +2,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Assignments.Application.Services
+@using SchoolCollab.Assignments.Contracts
 @inject AssignmentsApiClient Api
 @inject IDialogService DialogService
 @inject ILogger<ResourcesSection> Logger
@@ -79,6 +80,27 @@
                                 aria-hidden="true" />
                     <span class="resources-section-row-name">@row.FileName</span>
                     <span class="resources-section-row-size">@AttachmentUploadPolicy.FormatFileSize(row.FileSize)</span>
+                    @* R3 (D2/D4): an unreadable or unsupported upload is SURFACED, never silently
+                       dropped — this badge is the fail-open surface the author sees. *@
+                    @if (row.ExtractionStatus != AttachmentExtractionStatusDto.Succeeded)
+                    {
+                        <FluentBadge Appearance="Appearance.Lightweight"
+                                    class="resources-section-extraction-badge"
+                                    title="@row.ExtractionError">
+                            @ExtractionStatusText(row.ExtractionStatus)
+                        </FluentBadge>
+                    }
+                    @if (AssignmentId is not null && row.Id is not null)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      IconStart="@FluentIcons.ArrowClockwise"
+                                      Disabled="@(_reextractingIndex is not null)"
+                                      OnClick="@(() => RegenerateExtractionAsync(index))"
+                                      aria-label="@($"Re-read text from {row.FileName}")"
+                                      title="Re-read the text from this file">
+                            @(_reextractingIndex == index ? "Reading…" : "Re-read")
+                        </FluentButton>
+                    }
                     <FluentButton Appearance="Appearance.Neutral"
                                   IconEnd="@(FluentIcons.Dismiss)"
                                   OnClick="@(() => RemoveAtAsync(index))"
@@ -101,8 +123,16 @@
     /// (the same pattern the question section uses).</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
+    /// <summary>R3 (D3): the assignment whose persisted attachments can be re-extracted, or null on a
+    /// Create surface (nothing is stored yet).</summary>
+    [Parameter] public Guid? AssignmentId { get; set; }
+
     private string? _error;
     private bool _staging;
+
+    /// <summary>R3: the row currently being re-extracted, so its button shows progress and cannot be
+    /// pressed twice.</summary>
+    private int? _reextractingIndex;
     // WS-B2 (decision g): reference-URL rows for AI question generation.
     private string? _newUrl;
     private string? _urlError;
@@ -146,6 +176,12 @@
                 ContentType = staged.ContentType,
                 FileSize = staged.FileSize,
                 StoragePath = staged.StoragePath,
+                // R3 (P1-3): carry the extraction outcome the stage response reported, so it is on the
+                // save payload and is not wiped when the server re-mints this row.
+                ExtractionStatus = staged.ExtractionStatus,
+                ExtractedText = staged.ExtractedText,
+                ExtractedAt = staged.ExtractedAt,
+                ExtractionError = staged.ExtractionError,
             });
             _error = null;
             await Changed.InvokeAsync();
@@ -189,6 +225,49 @@
         await Changed.InvokeAsync();
     }
 
+    /// <summary>
+    /// R3 (D3, criterion 5) — the testable seam for the user-triggered re-extraction of one
+    /// <b>persisted</b> attachment row. The only path that rewrites a stored extraction; it replaces
+    /// the outcome in place rather than appending a row, so running it twice leaves one attachment.
+    /// A row staged in this session has no server id yet, so the action is offered only for loaded
+    /// rows.
+    /// </summary>
+    public async Task RegenerateExtractionAsync(int index)
+    {
+        if (AssignmentId is not Guid assignmentId
+            || index < 0 || index >= Model.Attachments.Count
+            || Model.Attachments[index].Id is not Guid attachmentId)
+        {
+            return;
+        }
+
+        _reextractingIndex = index;
+        _error = null;
+        try
+        {
+            var updated = await Api.RegenerateAttachmentExtractionAsync(assignmentId, attachmentId);
+            var row = Model.Attachments[index];
+            row.ExtractionStatus = updated.ExtractionStatus;
+            row.ExtractedText = updated.ExtractedText;
+            row.ExtractedAt = updated.ExtractedAt;
+            row.ExtractionError = updated.ExtractionError;
+            await Changed.InvokeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // navigation cancellation — swallow (mirrors the other sections)
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Re-extracting attachment {AttachmentId} failed", attachmentId);
+            _error = "Could not re-read that file. Please try again.";
+        }
+        finally
+        {
+            _reextractingIndex = null;
+        }
+    }
+
     private Task OnFileCountExceededAsync(int exceededCount)
     {
         // FluentUI 4.14.2's callback parameter is "the total number of files
@@ -225,6 +304,17 @@
             _urlError = ex.Message;
         }
     }
+
+    /// <summary>R3 (D2/D4): the author-facing label for a non-succeeded extraction. Unsupported and
+    /// Failed are distinguished because they call for different author action — convert the file vs.
+    /// check it uploaded intact.</summary>
+    private static string ExtractionStatusText(AttachmentExtractionStatusDto status) => status switch
+    {
+        AttachmentExtractionStatusDto.Succeeded => "Text read",
+        AttachmentExtractionStatusDto.Unsupported => "Not read (unsupported)",
+        AttachmentExtractionStatusDto.Failed => "Not read (failed)",
+        _ => "Not read yet",
+    };
 
     /// <summary>WS-B2 (decision g) — removes the reference-URL row at
     /// <paramref name="index"/>.</summary>
