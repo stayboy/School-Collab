@@ -1,7 +1,7 @@
 # Teachers & Ward Portal — Prefab UI (Python) integration plan
 
 Status: **Phase-0 spike LANDED (ar-23, PR #247 → `8d1c8a20`, 2026-09-21)** — phases 1+ remain a proposal pending the owner's MVP go/no-go. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
-Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7)
+Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1)
 Branch context: authored alongside the AR-13 round (branch `stack/13-ar-13-families-ward-surface`, since squash-merged to `main` as PR #236); the AR train (ar-13/ar-14/ar-15 — #236/#237/#239) has since fully merged to `main`. No code for this plan has landed.
 
 ## 1. Goal
@@ -64,6 +64,28 @@ only.** T2–T4 require backend work the ward portal does not:
   (existing Students queries `ListGradeLevelsForTeacher` / `ListTeacherGradeAssignments`,
   routes in `TeacherRoutes.cs`). `ListAssignmentsQueryHandler` does **not** filter
   by teacher today.
+
+**Two prerequisites must land before `FEATURE:DisableOIDCAuth` flips** (recorded
+2026-10-03, round `portal-teacher-surface`). Both block the same flip and neither is
+visible from the flag's own value — the flag only decides which auth scheme is
+registered:
+
+- **Assign the roles (§1 T2, D11).** Declaring `teacher` + `staff` in the realm import
+  assigns them to nobody, and the seeded `dev-teacher` carries attributes without a
+  realm role, so the T4 policy would 403 the very users the flip is meant to admit.
+  Assignment is manual, in the auth admin UI's realm-role screen
+  (`documents/specs/keycloak-ui-auth-integration.md` §8, D11) — every existing
+  assignment-reading user needs a role **before** the flip.
+- **Give the portal a credential path.** The portal sends **no** credentials — no
+  cookie, no bearer — which the dev bypass hides, because `TestAuthHandler`
+  authenticates every request without one. With the flag OFF, all **six** reads this
+  plan consumes answer **401** (`GET /assignments` · `GET /assignments/{id}` ·
+  `GET /{id}/submissions` · `GET /{id}/submissions/review-queue` ·
+  `GET /{id}/students/{studentId}/submission` · `GET /{id}/sign-off-statuses` — the
+  set `stack/8-teacher-scope-auth` gates), and every portal surface renders its
+  degraded card. Forwarding a bearer from the portal is the ar-24 delegation
+  pattern and needs its own design round (the Phase 3 OIDC item below); until then
+  the portal is a **dev-bypass-only** surface.
 
 ## 2. Findings — Prefab UI
 
@@ -173,7 +195,7 @@ School-Collab/
         ├── app.py                    (thin FastAPI app; entrypoint launched solely by AddUvicornApp)
         ├── api/                      (typed client + service discovery + DTOs + typed errors)
         ├── views/ward.py             (Prefab component trees — ward portal, MVP 1)
-        ├── views/teacher/            (Prefab component trees — teacher portal, MVP 2, deferred)
+        ├── views/teacher.py          (Prefab component trees — teacher portal, MVP 2; a flat module per round-2 grill Q5)
         └── tests/                    (pytest + httpx.MockTransport — no server, no Docker)
 ```
 
@@ -224,7 +246,8 @@ School-Collab/
 - Test story: Playwright per `.github/copilot/rules/testing.md`.
 
 ### Phase 2 — Teacher review portal spike (2026-10-01 decisions T1–T7)
-- **Read-only** teacher workspace in `views/teacher/`: assignment list (scoped per
+- **Read-only** teacher workspace in `views/teacher.py` (a **flat module** — round-2
+  grill Q5, superseding T1's `views/teacher/` wording): assignment list (scoped per
   T3) → review queue (principal-first, ar-24) → submission detail → submission
   review/grade. No create/edit/publish in the spike (T5).
 - **Auth/roles (T2, T4, T6)**: add `teacher` + `staff` realm roles, the
@@ -233,8 +256,15 @@ School-Collab/
 - **T7**: the Blazor compartment spec
   (`documents/specs/assignment-authoring-compartments.md`) remains the authoring
   destination; both tracks run.
-- Test story: Playwright per `.github/copilot/rules/testing.md`; pytest +
-  `httpx.MockTransport` for the view/client layer.
+- Test story: **pytest + `httpx.MockTransport` + FastAPI's `TestClient`** over the
+  view/client/route layer (`src/SchoolCollab.Portals/tests/`), gating the portal in
+  CI. *Correction (round `portal-teacher-surface`, 2026-10-03):* this line used to
+  cite `.github/copilot/rules/testing.md` **for Playwright** — that rule covers the
+  .NET stack only (MSTest on MTP, Moq, FluentAssertions, bUnit) and never mentions
+  Playwright (verified). Playwright is **deferred**: it needs the full AppHost (the
+  `*.Tests.Playwright` projects assume a running stack), which round-2 grill Q3
+  rejected for this surface — the suite stays server-free, Docker-free and
+  browser-free.
 
 ### Phase 3 — Auth & tenancy (partially pulled forward)
 - The **role/policy** half of this phase is pulled into Phase 2 (§1 T2–T6).
