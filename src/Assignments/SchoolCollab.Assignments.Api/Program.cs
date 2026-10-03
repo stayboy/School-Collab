@@ -35,6 +35,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // round-trip as strings to keep the wizard's payload self-describing.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ModuleTypeDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ResourceKindDto>());
+    // R3 (D4/P1-3): the attachment extraction status rides the stage response, the create/update
+    // payload and the authoring child read. Registered on the REAL host options block, not only in a
+    // test host — the ar-15/ar-18 lesson: a converter registered only in a test host hides the live gap.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AttachmentExtractionStatusDto>());
     // WS-A2 / spec §7 Q2: approval status is nullable on the wire — the
     // converter is registered on the same options block so the field
     // round-trips as the string name (Pending / Approved / Rejected)
@@ -104,6 +108,11 @@ builder.Services.AddAssignmentsCore(builder.Configuration);
 // AddAssignmentsCore so the Scrutor-scanned Core finalize handler resolves it.
 builder.Services.AddTransient<SchoolCollab.Assignments.Core.Services.IAssignmentCertificateGenerator,
     SchoolCollab.Assignments.Api.Services.AssignmentCertificateGenerator>();
+// R3 (D1/D7): attachment text extraction. Registered here, not in AddAssignmentsCore, because the
+// implementation is the only part of the module that carries the PdfPig + OpenXml dependencies and
+// the AI host must stay file-blind. The handler that consumes it lives in Core.
+builder.Services.AddSingleton<SchoolCollab.Assignments.Core.Services.IAttachmentTextExtractor,
+    SchoolCollab.Assignments.Api.Services.AttachmentTextExtractor>();
 // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
 // is resolvable by the CreateAssignmentCommandHandler.
 builder.Services.AddSettingsCore(builder.Configuration);

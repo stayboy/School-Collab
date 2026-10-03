@@ -83,6 +83,17 @@ public enum QuestionTypeDto
     ShortAnswer = 2
 }
 
+/// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Services.AttachmentExtractionStatus</c>
+/// (R3 / D4). The status of the one text-extraction attempt made against a staged upload;
+/// <see cref="NotAttempted"/> is what every pre-R3 row and every never-parsed upload carries.</summary>
+public enum AttachmentExtractionStatusDto
+{
+    NotAttempted = 0,
+    Succeeded = 1,
+    Failed = 2,
+    Unsupported = 3
+}
+
 /// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.ModuleType</c>
 /// (WS-A1 / spec §4.10). Student-facing content module kind on an
 /// assignment — video or guide.</summary>
@@ -286,16 +297,31 @@ public record NewQuestionDto(
     QuestionTypeDto QuestionType,
     int DisplayOrder,
     IReadOnlyList<NewQuestionOptionDto>? Options,
-    string? ModelAnswer = null);
+    string? ModelAnswer = null,
+    /// <summary>R3 (D4/P1-2): the <c>AssignmentQuestionGeneration</c> header that produced this
+    /// question, or null for a hand-written row. Carried here — not resolved server-side — because
+    /// the question rows are re-minted on every save, so this is the only path by which provenance
+    /// survives the author's first edit.</summary>
+    Guid? GenerationId = null);
 
 /// <summary>An inbound attachment metadata record on the create/update request
 /// (AI spec §3.2). <see cref="StoragePath"/> is opaque to the UI — the file is
 /// already staged to storage before submit (EC-4).</summary>
+/// <remarks>R3 (D4/P1-3): the extraction outcome rides along for exactly the same reason
+/// <see cref="StoragePath"/> does — <c>Assignment.AddAttachment</c> mints a fresh row on every
+/// save, so anything not carried here is wiped by the next one.</remarks>
 public record NewAttachmentDto(
     string FileName,
     string ContentType,
     long FileSize,
-    string StoragePath);
+    string StoragePath,
+    /// <summary>R3: the extraction status the stage response reported. Only
+    /// <see cref="AttachmentExtractionStatusDto.Succeeded"/> keeps <see cref="ExtractedText"/>;
+    /// the server re-validates and normalises both.</summary>
+    AttachmentExtractionStatusDto ExtractionStatus = AttachmentExtractionStatusDto.NotAttempted,
+    string? ExtractedText = null,
+    DateTimeOffset? ExtractedAt = null,
+    string? ExtractionError = null);
 
 /// <summary>An inbound content module on the create/update request
 /// (WS-A1 / spec §4.10 / FR-210–212). The wizard's Step-2 Resources UI
@@ -417,7 +443,10 @@ public record AssignmentQuestionReadDto(
     QuestionTypeDto QuestionType,
     int DisplayOrder,
     string? ModelAnswer = null,
-    IReadOnlyList<AssignmentQuestionOptionReadDto>? Options = null);
+    IReadOnlyList<AssignmentQuestionOptionReadDto>? Options = null,
+    /// <summary>R3 (D4/P1-2): the generation header this row came from, so the Edit surface can
+    /// round-trip it instead of stripping provenance on the next save.</summary>
+    Guid? GenerationId = null);
 
 /// <summary>One persisted attachment (assignment-authoring P1 rework). The metadata
 /// round-trips verbatim onto the editor row, so a loaded attachment survives an
@@ -427,7 +456,13 @@ public record AssignmentAttachmentReadDto(
     string FileName,
     string ContentType,
     long FileSize,
-    string StoragePath);
+    string StoragePath,
+    /// <summary>R3 (D4/P1-3): the persisted extraction outcome, so opening Edit does not blank it
+    /// and the author's next save re-writes the same values.</summary>
+    AttachmentExtractionStatusDto ExtractionStatus = AttachmentExtractionStatusDto.NotAttempted,
+    string? ExtractedText = null,
+    DateTimeOffset? ExtractedAt = null,
+    string? ExtractionError = null);
 
 /// <summary>The persisted children of one assignment as the authoring Edit surface
 /// needs them (assignment-authoring P1 rework): questions, attachments and AI-generation
@@ -463,12 +498,39 @@ public record RecipientPreviewDto(
 
 /// <summary>Result of <c>POST /assignments/attachments/stage</c> (WS-A1 /
 /// FR-210 / EC-4). The wizard stages one file at selection time and
-/// rides <see cref="StoragePath"/> on the create payload.</summary>
+/// rides <see cref="StoragePath"/> on the create payload.
+/// <para>R3 (D7/P1-4): extraction runs in that same request, immediately after the store, and its
+/// outcome is reported here. It never fails the upload — a non-<see cref="AttachmentExtractionStatusDto.Succeeded"/>
+/// status is the fail-open surface the author sees.</para></summary>
 public record StagedAttachmentDto(
     string FileName,
     string ContentType,
     long FileSize,
-    string StoragePath);
+    string StoragePath,
+    AttachmentExtractionStatusDto ExtractionStatus = AttachmentExtractionStatusDto.NotAttempted,
+    string? ExtractedText = null,
+    DateTimeOffset? ExtractedAt = null,
+    string? ExtractionError = null);
+
+/// <summary>R3 (D4/P1-2) — the body of <c>POST /assignments/{id}/question-generations</c>: the
+/// requested generation shape plus the provider/model the <b>AI host</b> resolved for it.
+/// <para><see cref="Provider"/>/<see cref="Model"/> are relayed from the AI host's response (P1-1),
+/// never resolved or invented here and never taken from the author's request: the Assignments host
+/// is forbidden from registering <c>ChatModelResolver</c> or any config-based AI resolver
+/// (<c>.github/copilot/rules/ai-services.md</c>). <see cref="Model"/> is required — a generation with
+/// no resolved model is a bug, not a row.</para></summary>
+public record RecordQuestionGenerationRequest(
+    int QuestionCount,
+    IReadOnlyList<QuestionTypeDto>? Types = null,
+    int? DifficultyEasyCount = null,
+    int? DifficultyMediumCount = null,
+    int? DifficultyHardCount = null,
+    string? Provider = null,
+    string? Model = null);
+
+/// <summary>R3 (P1-2) — the id of the header row just written. The caller stamps it onto every
+/// question the generation produced so provenance survives the next full-replacement save.</summary>
+public record RecordQuestionGenerationResponse(Guid GenerationId);
 
 /// <summary>Publish an assignment (spec §8). Optional contact selection:
 /// when <see cref="ContactIds"/> is non-empty, only those subscribed contacts

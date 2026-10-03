@@ -52,6 +52,12 @@ public sealed class QuestionEditorRow
     /// <c>NewQuestionDto.ModelAnswer</c> at submit.</summary>
     public string? ModelAnswer { get; set; }
 
+    /// <summary>R3 (P1-2): the generation header this row was produced by, or null when the teacher
+    /// wrote it by hand. Set from <c>AssignmentQuestionReadDto.GenerationId</c> on load and from
+    /// <c>AppendGenerated(..., generationId)</c> after a generation; projected onto
+    /// <c>NewQuestionDto.GenerationId</c> so the server's full-replacement re-mint re-attaches it.</summary>
+    public Guid? GenerationId { get; set; }
+
     /// <summary>Max options for a MultipleChoice question (spec §4.3 / EC-5 note).</summary>
     public const int MaxOptions = 6;
 
@@ -217,4 +223,24 @@ public sealed class AttachmentEditorRow
     /// <summary>The opaque storage path returned by the file-store
     /// staging endpoint. Populated by ar-4 at selection time (decision (b)).</summary>
     public string? StoragePath { get; set; }
+
+    /// <summary>R3 (P1-3/D4): the persisted attachment row's id when this row was loaded from the
+    /// server, null for a row staged in this session. Needed only by the regenerate-extraction
+    /// action, which addresses a stored row by id — it never rides the save payload, because the save
+    /// mints a fresh row regardless.</summary>
+    public Guid? Id { get; set; }
+
+    /// <summary>R3 (P1-3/D4): the extraction outcome for this attachment's staged bytes.</summary>
+    public AttachmentExtractionStatusDto ExtractionStatus { get; set; } = AttachmentExtractionStatusDto.NotAttempted;
+
+    /// <summary>R3: the extracted text (only for <see cref="AttachmentExtractionStatusDto.Succeeded"/>).
+    /// Round-trips through the payload and grounds AI generation in compartment 6.</summary>
+    public string? ExtractedText { get; set; }
+
+    /// <summary>R3: when the current <see cref="ExtractionStatus"/> was recorded.</summary>
+    public DateTimeOffset? ExtractedAt { get; set; }
+
+    /// <summary>R3: the fail-open reason shown to the author when extraction did not succeed, so an
+    /// unreadable upload is surfaced rather than silently dropped (D2).</summary>
+    public string? ExtractionError { get; set; }
 }

@@ -11,12 +11,15 @@ namespace SchoolCollab.Assignments.Application.Services;
 public interface IAssignmentQuestionGenerator
 {
     /// <summary>
-    /// Sends a generation request to the AI host and returns the validated
-    /// questions. Throws <see cref="QuestionGenerationFailed"/> on any
-    /// provider error, transport failure, or malformed response body so
-    /// the wizard can render a friendly retryable message (EC-1 / EC-8).
+    /// Sends a generation request to the AI host and returns the validated response: the questions
+    /// plus the <b>AI host's own</b> resolved provider/model (R3 / P1-1). Throws
+    /// <see cref="QuestionGenerationFailed"/> on any provider error, transport failure, or malformed
+    /// response body so the wizard can render a friendly retryable message (EC-1 / EC-8).
+    /// <para>The tuple is surfaced rather than invented here: the AI host is the only party that may
+    /// resolve a model (D6), and the Assignments host records the header it is handed — it never asks
+    /// the author, and never puts a model on <see cref="QuestionGenerationRequest"/>.</para>
     /// </summary>
-    Task<IReadOnlyList<GeneratedQuestionDto>> GenerateAsync(
+    Task<QuestionGenerationResponse> GenerateAsync(
         QuestionGenerationRequest request,
         CancellationToken ct = default);
 }

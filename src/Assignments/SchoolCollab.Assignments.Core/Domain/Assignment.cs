@@ -1,5 +1,6 @@
 using SchoolCollab.Assignments.Core.Domain.Events;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
 
@@ -562,9 +563,22 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         _domainEvents.Add(new AssignmentRejectedEvent(Id, approverId));
     }
 
-    public AssignmentQuestion AddQuestion(string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)
+    /// <summary>
+    /// Appends a question to the assignment. <paramref name="generationId"> is R3's (P1-2)
+    /// provenance link to the <see cref="AssignmentQuestionGeneration"/> header that produced it,
+    /// or null for a hand-written row.
+    /// <para>Declared as an optional parameter rather than a new overload on purpose: the existing
+    /// fourth parameter is <c>string? ModelAnswer</c>, so a 4-argument overload would make the call
+    /// <c>AddQuestion(text, type, 0, null)</c> ambiguous at the call site.</para>
+    /// </summary>
+    public AssignmentQuestion AddQuestion(
+        string questionText,
+        QuestionType questionType,
+        int displayOrder,
+        string? modelAnswer = null,
+        Guid? generationId = null)
     {
-        var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder, modelAnswer);
+        var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder, modelAnswer, generationId);
         _questions.Add(question);
         UpdatedAt = DateTimeOffset.UtcNow;
         return question;
@@ -580,9 +594,24 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         }
     }
 
-    public AssignmentAttachment AddAttachment(string fileName, string contentType, long fileSize, string storagePath)
+    /// <summary>
+    /// Appends an attachment to the assignment (WS-A1). The R3 (D4/P1-3) extraction outcome is an
+    /// optional tail mirrored from <c>NewAttachmentDto</c> so it survives this row being re-minted by
+    /// the next save; omitting it reproduces the pre-R3 shape exactly.
+    /// </summary>
+    public AssignmentAttachment AddAttachment(
+        string fileName,
+        string contentType,
+        long fileSize,
+        string storagePath,
+        AttachmentExtractionStatus extractionStatus = AttachmentExtractionStatus.NotAttempted,
+        string? extractedText = null,
+        DateTimeOffset? extractedAt = null,
+        string? extractionError = null)
     {
-        var attachment = new AssignmentAttachment(Id, fileName, contentType, fileSize, storagePath);
+        var attachment = new AssignmentAttachment(
+            Id, fileName, contentType, fileSize, storagePath,
+            extractionStatus, extractedText, extractedAt, extractionError);
         _attachments.Add(attachment);
         UpdatedAt = DateTimeOffset.UtcNow;
         return attachment;

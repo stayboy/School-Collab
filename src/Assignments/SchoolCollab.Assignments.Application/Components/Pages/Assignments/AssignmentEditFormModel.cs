@@ -1,6 +1,5 @@
 using SchoolCollab.AI.Abstractions;
 using SchoolCollab.Assignments.Contracts;
-using System.Text.Json;
 
 namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 
@@ -39,6 +38,14 @@ public sealed class AssignmentEditFormModel
     /// stage-at-submit (EC-4) are owned by ar-4-modules-resources
     /// (decision (a)).</summary>
     public List<AttachmentEditorRow> Attachments { get; } = [];
+
+    /// <summary>WS-A1 (spec §4.10 / FR-210–212): the content modules this save would send. Carried,
+    /// not authored — no editor loads or mutates the collection yet, so a real form state always
+    /// leaves it null and the projection hands the wire its null-means-preserve value (the
+    /// <see cref="ArchiveGraceDays"/> posture). It is part of the update payload all the same, so
+    /// <see cref="CaptureSaveSnapshot"/> mixes it: the snapshot covers every payload field, not only
+    /// the ones some editor happens to own today.</summary>
+    public IReadOnlyList<NewContentModuleDto>? ContentModules { get; set; }
 
     /// <summary>WS-B2 (spec §3.4 / decision g): the URL rows the author added
     /// as AI reference material. Mapped into the create request's
@@ -302,6 +309,9 @@ public sealed class AssignmentEditFormModel
                 QuestionText = question.QuestionText,
                 Type = question.QuestionType,
                 ModelAnswer = question.ModelAnswer,
+                // R3 (P1-2): provenance round-trips, so saving an untouched generated question keeps
+                // pointing at the generation that produced it instead of being re-minted without one.
+                GenerationId = question.GenerationId,
             };
 
             var options = question.Options ?? [];
@@ -321,10 +331,17 @@ public sealed class AssignmentEditFormModel
         {
             Attachments.Add(new AttachmentEditorRow
             {
+                Id = attachment.Id,
                 FileName = attachment.FileName,
                 ContentType = attachment.ContentType,
                 FileSize = attachment.FileSize,
                 StoragePath = attachment.StoragePath,
+                // R3 (P1-3): the loaded extraction outcome, so Edit neither blanks it nor loses it
+                // on the next save (the projection re-emits exactly these values).
+                ExtractionStatus = attachment.ExtractionStatus,
+                ExtractedText = attachment.ExtractedText,
+                ExtractedAt = attachment.ExtractedAt,
+                ExtractionError = attachment.ExtractionError,
             });
         }
 
@@ -395,7 +412,10 @@ public sealed class AssignmentEditFormModel
                     QuestionType: row.Type,
                     DisplayOrder: i,
                     Options: options,
-                    ModelAnswer: row.ModelAnswer));
+                    ModelAnswer: row.ModelAnswer,
+                    // R3 (P1-2): the provenance link rides the payload; without this hop the server
+                    // has no way to re-attach it after the full-replacement re-mint.
+                    GenerationId: row.GenerationId));
             }
             questions = list;
         }
@@ -408,9 +428,20 @@ public sealed class AssignmentEditFormModel
                     a.FileName ?? string.Empty,
                     a.ContentType ?? string.Empty,
                     a.FileSize,
-                    a.StoragePath ?? string.Empty))
+                    a.StoragePath ?? string.Empty,
+                    // R3 (P1-3): mirrors StoragePath — the row is re-minted on every save, so this
+                    // is the only route by which the extraction outcome survives.
+                    a.ExtractionStatus,
+                    a.ExtractedText,
+                    a.ExtractedAt,
+                    a.ExtractionError))
                 .ToList();
         }
+
+        // WS-A1 (spec §4.10): no editor authors content modules yet, so this is normally null; an
+        // empty collection is normalized to the wire's null (preserve) rather than a clear, exactly
+        // as the question/attachment collections above are.
+        var contentModules = ContentModules is { Count: > 0 } ? ContentModules : null;
 
         IReadOnlyList<NewResourceDto>? resources = null;
         if (ResourceUrls.Count > 0 || PreservedResources.Count > 0)
@@ -442,6 +473,7 @@ public sealed class AssignmentEditFormModel
             AiPromptOverride: AiPromptOverride,
             Questions: questions,
             Attachments: attachments,
+            ContentModules: contentModules,
             Resources: resources,
             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
             // cap threaded to the wire surface.
@@ -657,8 +689,10 @@ public sealed class AssignmentEditFormModel
     /// <summary>Appends generated questions to the list (never replaces;
     /// see decision (d)). Maps each DTO via
     /// <see cref="QuestionEditorRow.FromGenerated"/>, then re-indexes
-    /// <c>DisplayOrder</c> 0..n (EC-7).</summary>
-    public void AppendGenerated(IReadOnlyList<GeneratedQuestionDto> generated)
+    /// <c>DisplayOrder</c> 0..n (EC-7). <paramref name="generationId"> is the R3 (P1-2) header the
+    /// call recorded, stamped onto every appended row so provenance is on the payload before the
+    /// first save can re-mint the rows.</summary>
+    public void AppendGenerated(IReadOnlyList<GeneratedQuestionDto> generated, Guid? generationId = null)
     {
         if (generated is null || generated.Count == 0)
         {
@@ -666,7 +700,9 @@ public sealed class AssignmentEditFormModel
         }
         foreach (var dto in generated)
         {
-            Questions.Add(QuestionEditorRow.FromGenerated(dto));
+            var row = QuestionEditorRow.FromGenerated(dto);
+            row.GenerationId = generationId;
+            Questions.Add(row);
         }
         ReindexQuestions();
     }
@@ -739,13 +775,28 @@ public sealed class AssignmentEditFormModel
 
     /// <summary>
     /// UX-7 (D3): a canonical snapshot of everything a save from this form would write — the update
-    /// payload, serialized. Page-level values that live outside the model are passed in exactly as
+    /// payload, fingerprinted. Page-level values that live outside the model are passed in exactly as
     /// <see cref="ToUpdateRequest"/> takes them, so two form states compare equal exactly when the
     /// next save would write the same thing; a value changed and then changed back is equal again,
     /// which is what makes the page's unsaved-changes guard a BASELINE comparison rather than an
     /// event flag (an event flag prompts for a difference that no longer exists).
     /// <para>The authored target rows always ride the snapshot — never the update path's
     /// null-means-preserve gate — so an untouched targeting editor compares equal to itself.</para>
+    /// <para>Completeness rule for the walk below: it mixes <b>every</b> field
+    /// <see cref="ToUpdateRequest"/> hands to the wire — the scalars in the order the projection
+    /// takes them, then each child collection at the position it occupies on the request
+    /// (questions, attachments, content modules, resources, targets) — not merely the fields some
+    /// editor mutates today. The equivalence matrix is written to the same rule. A payload field
+    /// added later without its mix would make a real edit read as "clean", so the navigation prompt
+    /// would never fire and the edit would be lost silently.</para>
+    /// <para>§17 (round <c>authoring-residuals-mopup</c>) item 5: the guard reads this on EVERY render
+    /// (<c>OnAfterRenderAsync</c> → <c>SyncBeforeUnloadGuardAsync</c> → <c>IsDirty</c>), so building and
+    /// serializing the whole update request here made the cost of a large assignment's question list
+    /// proportional to how often the page re-rendered. The snapshot is therefore a 128-bit
+    /// fingerprint of the same payload, mixed straight from the form's own values by
+    /// <see cref="SaveSnapshotHash"/>: same equality semantics, no payload materialization.
+    /// <c>AssignmentAuthoringBunitTests.SaveSnapshot_MatchesTheSerializedPayload_OnEveryDirtyRelevantField</c>
+    /// is the guard that keeps the two spellings of the payload in step.</para>
     /// </summary>
     public string CaptureSaveSnapshot(
         AssignmentTypeDto assignmentType,
@@ -754,10 +805,127 @@ public sealed class AssignmentEditFormModel
         Guid topicId,
         Guid? gradeLevelId,
         bool mandatoryReview,
-        bool requiresSignature) =>
-        JsonSerializer.Serialize(ToUpdateRequest(
-            assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
-            mandatoryReview, requiresSignature, ToTargetDtos()));
+        bool requiresSignature)
+    {
+        var hash = new SaveSnapshotHash();
+
+        // ── Scalars, in the order ToCreateRequest hands them to the wire, each normalized exactly
+        // as that projection normalizes it: a null Title and an empty Title save the same bytes, so
+        // they must fingerprint the same, while a null Description and an empty one are two
+        // different payloads.
+        hash.Add(Title ?? string.Empty);
+        hash.Add(Description);
+        hash.Add((int)assignmentType);
+        hash.Add((int)gradingFormat);
+        hash.Add((int)targetAudienceType);
+        hash.Add(topicId);
+        hash.Add(gradeLevelId);
+        // DueDate rides the wire as a DateTimeOffset pinned to +00:00, so only its ticks are payload:
+        // two DateTime values with the same ticks but a different Kind save the same instant.
+        hash.Add(DueDate.HasValue);
+        hash.Add(DueDate?.Ticks ?? 0L);
+        hash.Add(MaxScore);
+        hash.Add(mandatoryReview);
+        hash.Add(AiPromptOverride);
+        hash.Add(ArchiveGraceDays);
+        hash.Add(PassScore);
+        hash.Add(MaxAttempts);
+        hash.Add(requiresSignature);
+        hash.Add(DifficultyEasyCount);
+        hash.Add(DifficultyMediumCount);
+        hash.Add(DifficultyHardCount);
+        hash.Add(Instructions);
+
+        // ── Questions. The payload's DisplayOrder is the list POSITION (EC-7 re-indexing), and the
+        // option rows ride the payload only for the two option-bearing types — mirror both.
+        hash.Add(Questions.Count);
+        foreach (var row in Questions)
+        {
+            hash.Add(row.QuestionText ?? string.Empty);
+            hash.Add((int)row.Type);
+            hash.Add(row.ModelAnswer);
+            // R3 (P1-2): GenerationId is a payload field on NewQuestionDto, so the completeness rule
+            // on this method applies to it too.
+            hash.Add(row.GenerationId);
+
+            var hasOptions = row.Type is QuestionTypeDto.MultipleChoice or QuestionTypeDto.TrueFalse;
+            hash.Add(hasOptions);
+            if (hasOptions)
+            {
+                hash.Add(row.Options.Count);
+                for (var i = 0; i < row.Options.Count; i++)
+                {
+                    hash.Add(row.Options[i].OptionText ?? string.Empty);
+                    hash.Add(row.CorrectOptionIndex == i);
+                }
+            }
+        }
+
+        hash.Add(Attachments.Count);
+        foreach (var attachment in Attachments)
+        {
+            hash.Add(attachment.FileName ?? string.Empty);
+            hash.Add(attachment.ContentType ?? string.Empty);
+            hash.Add(attachment.FileSize);
+            hash.Add(attachment.StoragePath ?? string.Empty);
+            // R3 (P1-3): the extraction outcome rides NewAttachmentDto, so it is payload too. The
+            // row's persisted Id is deliberately NOT mixed — it never reaches the wire (the save
+            // re-mints the row), so a changed id must not read as an unsaved edit.
+            hash.Add((int)attachment.ExtractionStatus);
+            hash.Add(attachment.ExtractedText);
+            // ExtractedAt rides the wire as a DateTimeOffset; only its ticks are payload.
+            hash.Add(attachment.ExtractedAt.HasValue);
+            hash.Add(attachment.ExtractedAt?.Ticks ?? 0L);
+            hash.Add(attachment.ExtractionError);
+        }
+
+        // ── ContentModules, at the wire position ToUpdateRequest hands them (between the attachments
+        // and the resources). The sentinel is what the projection emits — null and empty both mean
+        // "preserve", a populated list means "replace" — and the field is mixed whether or not an
+        // editor owns it (the completeness rule on this method). Each module rides through with its
+        // own fields: unlike question rows, nothing re-indexes a module's DisplayOrder.
+        hash.Add(ContentModules is { Count: > 0 });
+        foreach (var module in ContentModules ?? [])
+        {
+            hash.Add((int)module.ModuleType);
+            hash.Add(module.Title);
+            hash.Add(module.Url);
+            hash.Add(module.StoragePath);
+            hash.Add(module.DisplayOrder);
+            hash.Add(module.MinCompletionThresholdPercent);
+            hash.Add(module.IsRequired);
+        }
+
+        // ── Resources: the preserved (File/Video) rows first, then the URL rows the editor owns.
+        hash.Add(PreservedResources.Count > 0 || ResourceUrls.Count > 0);
+        foreach (var resource in PreservedResources)
+        {
+            hash.Add((int)resource.ResourceKind);
+            hash.Add(resource.Url);
+            hash.Add(resource.StoragePath);
+            hash.Add(resource.DisplayName);
+            hash.Add(resource.IncludedInGeneration);
+        }
+
+        foreach (var url in ResourceUrls)
+        {
+            hash.Add((int)ResourceKindDto.Url);
+            hash.Add(url.Url);
+            hash.AddMissing();          // StoragePath is always null for a URL row
+            hash.Add(url.DisplayName);
+            hash.Add(true);             // IncludedInGeneration is always true for a URL row
+        }
+
+        // ── Targets, in authored display order (the payload's DisplayOrder is the list position).
+        hash.Add(_targets.Count);
+        foreach (var target in _targets)
+        {
+            hash.Add((int)target.Kind);
+            hash.Add(target.RefId);
+        }
+
+        return hash.Value;
+    }
 
     /// <summary>WS-A3 (spec §3.3 + §7 Q4) — client-side submit gate
     /// mirroring the server-side <c>Assignment.Create</c> /
@@ -798,5 +966,142 @@ public sealed class AssignmentEditFormModel
 
         error = null;
         return true;
+    }
+
+    /// <summary>
+    /// §17 (round <c>authoring-residuals-mopup</c>) item 5: the 128-bit, allocation-free digest behind
+    /// <see cref="CaptureSaveSnapshot"/>. <see cref="Mix(byte)"/> is FNV-1a in two independently seeded
+    /// lanes and <see cref="Value"/> renders them as a fixed 32-character hex string, so the UX-7
+    /// dirty guard compares two 32-character digests where it used to compare two serialized update
+    /// requests. This is a change-detector, not a security control: a deliberate collision is not in
+    /// its threat model, and an accidental one is what the width is for.
+    /// <para>Every value is mixed at a fixed width and every string is length-prefixed, so two
+    /// different field layouts cannot produce the same byte stream.</para>
+    /// </summary>
+    private struct SaveSnapshotHash
+    {
+        /// <summary>FNV-1a 64 as lane A's step multiplier.</summary>
+        private const ulong LaneAPrime = 1099511628211UL;
+
+        /// <summary>xxHash64 prime 1 as lane B's step multiplier — a different constant, so the two
+        /// lanes do not move in lockstep.</summary>
+        private const ulong LaneBPrime = 0x9E3779B185EBCA87UL;
+
+        /// <summary>The FNV-1a 64 offset basis: lane A's seed.</summary>
+        private const ulong LaneASeed = 14695981039346656037UL;
+
+        /// <summary>xxHash64 prime 5: lane B's seed.</summary>
+        private const ulong LaneBSeed = 0xC2B2AE3D27D4EB4FUL;
+
+        private ulong _laneA;
+        private ulong _laneB;
+
+        /// <summary>Both lanes start from their own seed, so neither can be reconstructed from the
+        /// other and the pair is worth the 128 bits it renders as.</summary>
+        public SaveSnapshotHash()
+        {
+            _laneA = LaneASeed;
+            _laneB = LaneBSeed;
+        }
+
+        /// <summary>The digest as <c>laneA</c><c>laneB</c> in lowercase hex — always 32 characters, so
+        /// the snapshot's size never tracks the size of the form.</summary>
+        public readonly string Value => $"{_laneA:x16}{_laneB:x16}";
+
+        /// <summary>The marker a payload field that is genuinely absent contributes (the null
+        /// <c>StoragePath</c> of a URL resource row).</summary>
+        public void AddMissing() => Mix(0);
+
+        public void Add(bool value) => Mix(value ? (byte)1 : (byte)0);
+
+        public void Add(int value) => AddWide((ulong)(uint)value, 4);
+
+        public void Add(long value) => AddWide((ulong)value, 8);
+
+        public void Add(int? value)
+        {
+            Mix(value.HasValue ? (byte)1 : (byte)0);
+            if (value is int present)
+            {
+                Add(present);
+            }
+        }
+
+        public void Add(long? value)
+        {
+            Mix(value.HasValue ? (byte)1 : (byte)0);
+            if (value is long present)
+            {
+                Add(present);
+            }
+        }
+
+        /// <summary>A nullable decimal as its four 32-bit parts — <c>GetBits</c> keeps the scale, so
+        /// <c>1.0m</c> and <c>1.00m</c> (two different payloads) hash differently.</summary>
+        public void Add(decimal? value)
+        {
+            Mix(value.HasValue ? (byte)1 : (byte)0);
+            if (!value.HasValue)
+            {
+                return;
+            }
+
+            Span<int> bits = stackalloc int[4];
+            decimal.GetBits(value.Value, bits);
+            foreach (var part in bits)
+            {
+                Add(part);
+            }
+        }
+
+        public void Add(Guid? value)
+        {
+            Mix(value.HasValue ? (byte)1 : (byte)0);
+            if (!value.HasValue)
+            {
+                return;
+            }
+
+            Span<byte> bytes = stackalloc byte[16];
+            value.Value.TryWriteBytes(bytes);
+            foreach (var b in bytes)
+            {
+                Mix(b);
+            }
+        }
+
+        /// <summary>A nullable string, length-prefixed so <c>"ab"+"c"</c> and <c>"a"+"bc"</c> are
+        /// two different streams in two adjacent fields.</summary>
+        public void Add(string? value)
+        {
+            Mix(value is null ? (byte)0 : (byte)1);
+            if (value is null)
+            {
+                return;
+            }
+
+            Add(value.Length);
+            foreach (var character in value)
+            {
+                Mix((byte)character);
+                Mix((byte)(character >> 8));
+            }
+        }
+
+        /// <summary>Mixes the low <paramref name="byteCount"/> bytes of <paramref name="value"/>,
+        /// little-endian — a fixed width per value type.</summary>
+        private void AddWide(ulong value, int byteCount)
+        {
+            for (var i = 0; i < byteCount; i++)
+            {
+                Mix((byte)(value >> (i * 8)));
+            }
+        }
+
+        private void Mix(byte value)
+        {
+            _laneA = (_laneA ^ value) * LaneAPrime;
+            _laneB = (_laneB ^ value) * LaneBPrime;
+        }
     }
 }

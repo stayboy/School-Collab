@@ -435,12 +435,49 @@ done rather than letting this list drift away from the code.
 
 | Gap | What is missing | What it takes to close |
 |---|---|---|
-| **P2-c — transaction rollback is unproven** (found in R2) | `LinkAssignmentGroupsHandler` performs the target update and the legacy link replace inside one explicit EF Core transaction, but that is **verified by inspection only**. No test proves a mid-transaction failure leaves targets and links consistent: the InMemory test fixture suppresses `TransactionIgnoredWarning`, so the rollback path is never exercised. | A failure-injection test in `tests/SchoolCollab.Assignments.Tests.Integration` (Testcontainers/PostgreSQL) that faults the second write and asserts the first was rolled back. |
-| **Archived-group relink is refused with 422** (R1) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore drops ids the picker cannot represent, and the author is told nothing. The link stays readable but is not re-writable. | Either a relink route that accepts an unchanged archived id, or a UX path that names the dead link on the page. |
-| **`ReloadAsync` re-reads the summary only** (R1) | After a lifecycle action (publish / unpublish / close / archive) the surface re-reads `GET /assignments/{id}` — the scalar summary — but **not** the authoring children or the target rows, so a status change that altered the persisted set is not reflected until the page is loaded again. | Reuse the initial load path (`LoadChildrenAsync` + `LoadLinkedGroupIdsAsync`) in the reload. |
-| **F4 — a restored student target renders a fallback chip** (R2) | Restoring the constraints Everyone replaced (F4) puts the ids back, but the student picker's option labels are not re-resolved, so a restored student target shows the `Student <id8>` fallback chip until the picker is touched. A **loaded** student target already renders that way, so this is consistent rather than new. | Re-run the student search for the restored ids and keep the option objects in `_selectedStudentOptions`. |
+| **Archived-group relink is refused with 422 — the route half** (R1; the UX half was closed by round `authoring-residuals-mopup`) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore still drops ids the picker cannot represent. The link stays readable but is not re-writable, and the page now names what it dropped (`#authoring-groups-dropped-links`) instead of discarding it silently, which tells the author what is true of the link without making it writable. | A relink route (or a handler rule) that accepts an **unchanged** archived id. |
 | **A read-only View has no reason to convey** (R2, verified benign) | The grades / streams / students pickers carry a hard-coded `aria-describedby="authoring-audience-constraint-reason"`. The only state where that paragraph is absent is a plain read-only View, where no reason exists and the controls are disabled by `IsReadOnly` — so the idref does not actually dangle on a control that had something to say. | None while that reasoning holds; re-check if a reason is ever introduced on a read-only surface. |
-| **The students picker cannot name its reason** (F15, discovered on FluentUI 4.14.2) | `FluentAutocomplete` puts the component `Id` on its inner `<fluent-text-field>` and owns that element's aria surface (combobox role, `aria-label`, `aria-expanded`, `aria-controls`), so the `aria-describedby` the page declares on it is **dropped, not forwarded** — the picker disabled by the constraint gate has no accessible reason, while its four sibling controls do. | Wrap the autocomplete and set the attribute on the wrapper (or upgrade FluentUI and forward it). Pinned by `AssignmentAuthoringBunitTests.AssertEveryDisabledConstraintControlNamesARenderedReason`, which fails if a FluentUI version starts forwarding the attribute — extend its loop then. |
+| **Structured output for question generation** (R3 / D5) | `AssignmentQuestionGenerationService` builds a prompt and then parses free text back into JSON (`AssignmentQuestionResponseParser` + `AiTextCleaner`) instead of using `Microsoft.Extensions.AI` 10.6.0's response-format / structured-output support. Real, but orthogonal to R3 — that round already carried a schema migration, a new extraction dependency and a cross-host contract change. | Move the question-generation call to a structured response format and delete the tolerant parser, once a provider in the supported set is known to honour it. |
+| **Question rows have no stable identity across a save** (R3 / P2-5) | The create/update paths implement the child contract as full replacement — snapshot the ids, `RemoveQuestion` each, `AddQuestion` the inbound set — so every question row is re-minted with a fresh `Id` on every save. R3's `GenerationId` survives that because it rides the wire DTOs, but any future feature that needs to *refer* to a question across saves (a publish-time selection, a per-question sort, an answer keyed to a question id) has no stable id to bind to. | Either give the save path a key-preserving merge (match inbound rows to persisted rows by id and update in place), or snapshot the selection at publish time instead of referencing live rows. |
+| **Snapshot-vs-config equality is enforced only by review** (R3; found by the R3-1 re-verify) | `dotnet ef migrations has-pending-model-changes` is **insensitive** to the `ValueGeneratedOnAdd` annotation on an owned key, so a generated mirror can contradict the model and the gate still passes: it could neither catch R3-1's drift (the snapshot and designer still declared `ValueGeneratedOnAdd` after `AssignmentConfiguration` gained `ValueGeneratedNever()`) nor will it regress-detect a recurrence. The gate reports "No changes have been made to the model since the last migration" on **both** the stale and the correct artifact. | An architecture test asserting that no owned key whose configuration declares `ValueGeneratedNever()` carries the annotation in `*DbContextModelSnapshot.cs` or a migration `.Designer.cs` — or a CI step that regenerates the migration and fails on a non-empty diff. |
+
+Round `authoring-ai-attachments-r3` closed **a pre-existing P0: owned children could not be added to a persisted
+assignment on PostgreSQL**. Found by R3's Postgres round-trip tests, not by a review: every owned
+collection under `Assignment` (`AssignmentAttachment`, `AssignmentQuestion`, `QuestionOption`,
+`AssignmentReview`) declared `HasKey(x => x.Id)` over a `Guid` but never `ValueGeneratedNever()`, so the
+key kept the `ValueGeneratedOnAdd` convention and EF Core read an explicitly-set key on a newly-attached
+owned instance as an **already existing** row — tracking it as `Modified` and emitting
+`UPDATE <child table> SET … WHERE id = <the new id>` with **no INSERT**. On PostgreSQL that affected zero
+rows, so `SaveChanges` threw `DbUpdateConcurrencyException`: adding or replacing any question,
+attachment, option or review on a persisted assignment failed outright, while the InMemory provider
+silently "succeeded" (it performs no row-count check) and the unit suites therefore never saw it. Closed
+by adding `ValueGeneratedNever()` to all four owned keys in `AssignmentConfiguration` — **no migration is
+required** (`dotnet ef migrations has-pending-model-changes` reports none), because the key's store
+generation is not part of the physical schema. Guarded by
+`tests/SchoolCollab.Assignments.Tests.Integration/OwnedChildInsertPostgresTests`, which asserts the new
+child row is actually present when read back from a fresh context and which threw
+`DbUpdateConcurrencyException` at the pre-fix snapshot.
+
+Round `authoring-residuals-closeout` closed **P2-c — transaction rollback is unproven** (the mid-transaction
+failure is now fault-injected in `tests/SchoolCollab.Assignments.Tests.Integration` against real Postgres:
+the second write fails with the first already inside the open transaction, and the committed state read
+back from a fresh context is asserted equal to the pre-handler state — the rollback test fails when
+`BeginTransactionAsync`/`CommitAsync` are removed, so the rollback and not the fixture is what passes) and
+**UX-7 / F17 defence-in-depth** (the reload path carries its own gate
+instead of relying solely on the upstream location-changing handler; the reload itself still proceeds when
+the form is dirty, because refusing it would leave A's state on screen under B's URL — the stale-write path
+F17 removed — but the discard is no longer silent: an unconsented `Id`/`Mode` swap renders
+`#authoring-unsaved-edits-discarded`, while a discard the author confirmed in the in-app confirmation is
+not announced back at them).
+
+Round `authoring-residuals-mopup` closed **`ReloadAsync` re-reads the summary only** (the reload now runs
+the same persisted-set load as the initial Edit load, and holds it back while the form has unsaved work),
+**F4 — a restored student target renders a fallback chip** (the restored ids are re-resolved, so the chip
+renders the name the picker would have shown), **The students picker cannot name its reason** (the reason
+is declared on the row's own labelled group, which `FluentAutocomplete` cannot rewrite away), the **UX
+half of the archived-group relink** (the dropped link is named on the page), and the ux7 round's
+**`IsDirty` cost per render** (the snapshot is a 128-bit fingerprint of the save payload rather than the
+serialized payload, so the per-render comparison no longer materializes the request).
 
 The R2 UI P2 backlog (**F7** kebab disabled-without-reason, **F12** empty-state preview wording,
 **F13** first-render debounce delay, **F15** per-row reason placement, **F17** missing

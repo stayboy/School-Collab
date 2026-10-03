@@ -62,6 +62,10 @@ public sealed class AssignmentsApiClient
                 // create payload.
                 new JsonStringEnumConverter<ModuleTypeDto>(),
                 new JsonStringEnumConverter<ResourceKindDto>(),
+                // R3 (D4/P1-3): the attachment extraction status round-trips as its name on the
+                // stage response, the create/update payload and the authoring child read —
+                // registered here AND on the API host so neither side hides the other's gap.
+                new JsonStringEnumConverter<AttachmentExtractionStatusDto>(),
                 // WS-A2 / spec §7 Q2: approval status is nullable on the wire
                 // (null = not yet submitted). The string converter serializes
                 // Pending / Approved / Rejected; null stays null.
@@ -535,6 +539,45 @@ public sealed class AssignmentsApiClient
     /// <summary>WS-B2 — the always-200 <c>{"aiPromptLocked": ...}</c> body of the
     /// /assignments/ai-prompt-policy route (round-7 <see cref="IdResponse"/> precedent).</summary>
     private sealed record AiPromptPolicyResponse(bool AiPromptLocked);
+
+    // ── R3 (D3/D4): generation headers + attachment extraction regeneration ──
+
+    /// <summary>
+    /// R3 (D4/P1-2) — records one AI question generation and returns the new header's id, which the
+    /// caller stamps onto every produced question. <paramref name="provider"/>/<paramref name="model"/> are
+    /// the AI host's own resolution relayed from its response (P1-1): the author never supplies them
+    /// and this client never invents them.
+    /// </summary>
+    public async Task<Guid> RecordQuestionGenerationAsync(
+        Guid assignmentId,
+        RecordQuestionGenerationRequest request,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug("Recording question generation for assignment {AssignmentId}", assignmentId);
+        var response = await _http.PostAsJsonAsync(
+            $"/assignments/{assignmentId}/question-generations", request, _jsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<RecordQuestionGenerationResponse>(_jsonOptions, ct);
+        return body!.GenerationId;
+    }
+
+    /// <summary>
+    /// R3 (D3, criterion 5) — re-runs extraction for one persisted attachment and returns the row with
+    /// its new status. The only path that rewrites a stored extraction.
+    /// </summary>
+    public async Task<AssignmentAttachmentReadDto> RegenerateAttachmentExtractionAsync(
+        Guid assignmentId,
+        Guid attachmentId,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "Regenerating extraction for attachment {AttachmentId} of assignment {AssignmentId}",
+            attachmentId, assignmentId);
+        var response = await _http.PostAsync(
+            $"/assignments/{assignmentId}/attachments/{attachmentId}/extract", null, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<AssignmentAttachmentReadDto>(_jsonOptions, ct))!;
+    }
 
     /// <summary>Route body for staging a draft (PUT /assignments/{id}/questions-draft).</summary>
     private sealed record StageQuestionsDraftRequest(IReadOnlyList<NewQuestionDto> Questions);

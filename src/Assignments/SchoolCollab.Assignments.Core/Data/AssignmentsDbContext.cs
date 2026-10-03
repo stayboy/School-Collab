@@ -21,6 +21,9 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     // R2 (assignment-authoring-compartments §7.1 TGT-1): the authored multi-constraint
     // targeting rows — standalone tenant child entities of the assignment aggregate.
     public DbSet<AssignmentTarget> AssignmentTargets => Set<AssignmentTarget>();
+    // R3 (D4/P1-2): append-only AI generation headers — one per generation, written at
+    // draft-stage/generate time by the host that owns the assignment.
+    public DbSet<AssignmentQuestionGeneration> AssignmentQuestionGenerations => Set<AssignmentQuestionGeneration>();
     public DbSet<ContentModule> ContentModules => Set<ContentModule>();
     public DbSet<AssignmentResource> AssignmentResources => Set<AssignmentResource>();
     // WS-A3 (spec §3.3): structured per-question submission answers
@@ -66,6 +69,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         // R2 (TGT-1): authored assignment targets. Same explicit configuration pattern
         // (constructor-injected tenant-id accessor).
         modelBuilder.ApplyConfiguration(new AssignmentTargetConfiguration(() => CurrentTenantId));
+        // R3 (D4/P1-2): append-only generation headers. Same explicit configuration pattern.
+        modelBuilder.ApplyConfiguration(new AssignmentQuestionGenerationConfiguration(() => CurrentTenantId));
         // WS-A1: standalone child entities (content modules + AI-generation
         // resources) — configurations follow the explicit-ApplyConfiguration
         // pattern so constructor-injected tenant-id accessors are available.

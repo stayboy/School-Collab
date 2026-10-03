@@ -23,4 +23,10 @@
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- R3: AttachmentTextExtractorTests builds a real PDF and DOCX in-process so the extractor is
+         exercised against genuine formats, not fixtures. Both are already in CPM; no new version. -->
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
+  </ItemGroup>
 </Project>

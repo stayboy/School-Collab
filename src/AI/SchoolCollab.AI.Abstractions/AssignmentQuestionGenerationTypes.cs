@@ -70,6 +70,13 @@ public sealed record GeneratedQuestionDto(
 /// <summary>
 /// The validated response body returned by the question-generation endpoint
 /// (spec §4.3). <see cref="Questions"/> is always non-empty.
+/// <para>R3 (P1-1): <see cref="Provider"/>/<see cref="Model"/> surface the tuple this host's own
+/// <c>ChatModelResolver</c> resolved for the request. They exist because the caller (the
+/// Assignments host) is forbidden from resolving a provider/model itself, yet the generation
+/// header it persists must record which model answered. There is deliberately <b>no</b> inbound
+/// counterpart on <see cref="QuestionGenerationRequest"/> — a client may never name the model.</para>
 /// </summary>
 public sealed record QuestionGenerationResponse(
-    IReadOnlyList<GeneratedQuestionDto> Questions);
+    IReadOnlyList<GeneratedQuestionDto> Questions,
+    string? Provider = null,
+    string? Model = null);

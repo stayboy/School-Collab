@@ -32,7 +32,7 @@ public sealed class AssignmentQuestionGenerator : IAssignmentQuestionGenerator
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<GeneratedQuestionDto>> GenerateAsync(
+    public async Task<QuestionGenerationResponse> GenerateAsync(
         QuestionGenerationRequest request,
         CancellationToken ct = default)
     {
@@ -83,7 +83,10 @@ public sealed class AssignmentQuestionGenerator : IAssignmentQuestionGenerator
                 "The AI returned an unreadable response. Please try again.");
         }
 
-        return payload.Questions;
+        // R3 (P1-1): hand back the whole validated response, not just its question list — the
+        // provider/model the AI host resolved rides on it and is the only copy of that tuple the
+        // Assignments side will ever see.
+        return payload;
     }
 
     private async Task<string?> TryReadErrorBodyAsync(HttpResponseMessage response, CancellationToken ct)

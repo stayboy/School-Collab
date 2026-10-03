@@ -1,3 +1,4 @@
+using System.Net;
 using Bunit;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
@@ -5,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
+using RichardSzalay.MockHttp;
 using SchoolCollab.AI.Abstractions;
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Helpers;
@@ -39,11 +41,23 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 [TestClass]
 public class QuestionGenerationSectionBunitTests : BunitContext
 {
+    private readonly MockHttpMessageHandler _mockHttp;
+
     public QuestionGenerationSectionBunitTests()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
         Services.AddSingleton(Mock.Of<ILogger<QuestionGenerationSection>>());
+
+        // R3 (P1-2): the section now records a generation header before the rows land, so it needs
+        // the Assignments client. Registered always; the route itself is added per render so a test
+        // that sets AssignmentId gets a deterministic generation id and one that does not never calls.
+        _mockHttp = new MockHttpMessageHandler();
+        var httpClient = _mockHttp.ToHttpClient();
+        httpClient.BaseAddress = new Uri("http://localhost");
+        Services.AddSingleton(httpClient);
+        Services.AddSingleton<AssignmentsApiClient>();
+        Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
     }
 
     private IRenderedComponent<QuestionGenerationSection> RenderSection(
@@ -55,13 +69,23 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         string? topicName = null,
         Guid? gradeLevelId = null,
         EventCallback? onQuestionsChanged = null,
-        IUrlTextExtractor? urlExtractor = null)
+        IUrlTextExtractor? urlExtractor = null,
+        Guid? assignmentId = null)
     {
         Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
         // WS-B2 (step 6): the section depends on the reference-URL extraction
         // seam. A benign fake (always succeeds) by default; a caller may
         // supply its own to exercise the 4-URL cap / per-URL failure paths.
         Services.AddSingleton<IUrlTextExtractor>(urlExtractor ?? DefaultUrlExtractor());
+
+        // R3: the generation-header route. Registered last, so a test can pre-register its own
+        // capture handler for the same URL and win (MockHttp matches in registration order).
+        if (assignmentId is not null)
+        {
+            _mockHttp.When(HttpMethod.Post, "http://localhost/assignments/*/question-generations")
+                .Respond(HttpStatusCode.OK, "application/json",
+                    $"{{\"generationId\":\"{GenerationId}\"}}");
+        }
 
         return Render<QuestionGenerationSection>(parameters =>
         {
@@ -71,10 +95,14 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             parameters.Add(p => p.TopicId, topicId);
             parameters.Add(p => p.TopicName, topicName);
             parameters.Add(p => p.GradeLevelId, gradeLevelId);
+            parameters.Add(p => p.AssignmentId, assignmentId);
             parameters.Add(p => p.OnQuestionsChanged,
                 onQuestionsChanged ?? EventCallback.Empty);
         });
     }
+
+    /// <summary>R3: the id the fake Assignments API returns for a recorded generation header.</summary>
+    private static readonly Guid GenerationId = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
     [TestMethod]
     public void GateEnabled_GenerateClick_AppendsRowsAndInvokesOnQuestionsChanged()
@@ -363,6 +391,83 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         });
     }
 
+    // ── R3-2 (F1): the attachment-side budget drop is surfaced, never silent ──
+
+    [TestMethod]
+    public async Task BudgetFull_DroppedAttachment_SurfacesAnAttachmentWarning()
+    {
+        // F1: 3 reference URLs + 3 readable attachments = 6 candidates for 5 slots, so the third
+        // attachment never grounds this generation — while its row still reads as successfully extracted.
+        // The URL half already warns about its own losses; the attachment half must do the same.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/a");
+        model.AddResourceUrl("https://example.com/b");
+        model.AddResourceUrl("https://example.com/c");
+        for (var i = 0; i < 3; i++)
+        {
+            model.AddAttachment(new AttachmentEditorRow
+            {
+                FileName = $"readable-{i}.pdf", ContentType = "application/pdf", FileSize = 10,
+                StoragePath = $"p{i}",
+                ExtractionStatus = AttachmentExtractionStatusDto.Succeeded,
+                ExtractedText = $"attachment body {i}",
+            });
+        }
+
+        var fake = new FakeQuestionGenerator();
+        var cut = RenderSection(model, fake, topicId: Guid.NewGuid(), topicName: "Topic");
+        var generateButton = cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
+        await cut.InvokeAsync(() => generateButton.Click());
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().HaveCount(ResourceTextBudget.MaxResourceTexts,
+            "three URL texts plus two attachments fill the five-slot budget");
+        fake.LastRequest.ResourceTexts.Should().NotContain("attachment body 2",
+            "the third attachment is the one the full budget drops");
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain(
+                "1 attachment(s) were read but not included in this generation",
+                "the author is told an attachment they can see as extracted did not ground the generation");
+            cut.Markup.Should().Contain("grounding budget is full",
+                "the warning names the cause, so the remedy (free a slot) is actionable");
+        });
+    }
+
+    [TestMethod]
+    public async Task NothingDroppedFromTheBudget_RendersNoAttachmentWarning()
+    {
+        // The negative half: a warning that fires on every generation would train the author to ignore
+        // it. One URL + two attachments = 3 candidates for 5 slots — nothing is lost, so nothing is said.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/a");
+        for (var i = 0; i < 2; i++)
+        {
+            model.AddAttachment(new AttachmentEditorRow
+            {
+                FileName = $"readable-{i}.pdf", ContentType = "application/pdf", FileSize = 10,
+                StoragePath = $"p{i}",
+                ExtractionStatus = AttachmentExtractionStatusDto.Succeeded,
+                ExtractedText = $"attachment body {i}",
+            });
+        }
+
+        var fake = new FakeQuestionGenerator();
+        var cut = RenderSection(model, fake, topicId: Guid.NewGuid(), topicName: "Topic");
+        var generateButton = cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
+        await cut.InvokeAsync(() => generateButton.Click());
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().HaveCount(3,
+            "the setup really did put candidates in front of the budget, so the no-warning assertion " +
+            "below is not vacuous");
+        cut.Markup.Should().NotContain("were read but not included in this generation",
+            "nothing was dropped, so no attachment warning is rendered");
+    }
+
     // ── WS-B2 (round-10 binding list): difficulty, lock, URL cases ────────
 
     [TestMethod]
@@ -427,6 +532,159 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         fake.LastRequest!.ResourceTexts.Should().NotBeNull(
             "reference-URL texts are passed to the generator (decision g)");
         fake.LastRequest.ResourceTexts!.Should().HaveCount(2, "one extracted text per included URL");
+    }
+
+    // ── R3 (criteria 4/6; P1-1/P1-2/P1-6): attachment grounding + the generation header ──
+
+    [TestMethod]
+    public void Attachments_GroundTheGeneration_InsideTheSharedBudget_AndAnUnreadableOneIsDropped()
+    {
+        // Criterion 6 (presence-asserted): with two attachments, one readable, the captured request
+        // carries the READABLE one's extracted text inside ResourceTexts, within the budget shared with
+        // the URL texts. Before R3 nothing but URL text could reach ResourceTexts at all.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/a");
+        model.AddAttachment(new AttachmentEditorRow
+        {
+            FileName = "readable.pdf", ContentType = "application/pdf", FileSize = 10, StoragePath = "p1",
+            ExtractionStatus = AttachmentExtractionStatusDto.Succeeded, ExtractedText = "attachment body",
+        });
+        model.AddAttachment(new AttachmentEditorRow
+        {
+            FileName = "unreadable.pdf", ContentType = "application/pdf", FileSize = 10, StoragePath = "p2",
+            ExtractionStatus = AttachmentExtractionStatusDto.Failed, ExtractionError = "unreadable",
+        });
+        var fake = new FakeQuestionGenerator();
+        var extractor = Mock.Of<IUrlTextExtractor>(x =>
+            x.ExtractAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())
+                == Task.FromResult(new UrlTextExtractionResult(true, "url body", null)));
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Topic", urlExtractor: extractor);
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().Equal(
+            ["url body", "attachment body"],
+            "the URL text comes first and the readable attachment fills the next slot; the unreadable " +
+            "attachment contributes nothing");
+    }
+
+    [TestMethod]
+    public void NoAttachments_LeavesTheRequestByteEquivalentToThePreR3UrlOnlyRequest()
+    {
+        // Criterion 6's second half. The pre-R3 composition was exactly the list of successful URL
+        // texts (or null when there were none) — reproduced literally here.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/a");
+        var fake = new FakeQuestionGenerator();
+        var extractor = Mock.Of<IUrlTextExtractor>(x =>
+            x.ExtractAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())
+                == Task.FromResult(new UrlTextExtractionResult(true, "url body", null)));
+        IReadOnlyList<string>? preR3 = ["url body"];
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Topic", urlExtractor: extractor);
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().Equal(preR3!);
+    }
+
+    [TestMethod]
+    public void UnsupportedAttachment_ContributesNoText_AndDoesNotBlockGeneration()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddAttachment(new AttachmentEditorRow
+        {
+            FileName = "photo.png", ContentType = "image/png", FileSize = 10, StoragePath = "p1",
+            ExtractionStatus = AttachmentExtractionStatusDto.Unsupported,
+            ExtractionError = "'.png' files are not extracted (PDF and DOCX only).",
+        });
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(model, fake, topicId: Guid.NewGuid(), topicName: "Topic");
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.GenerateCalls.Should().Be(1));
+        fake.LastRequest!.ResourceTexts.Should().BeNull(
+            "an unsupported upload yields no grounding text but never blocks the generation");
+    }
+
+    [TestMethod]
+    public void Generate_WithAnAssignment_RecordsOneHeader_RelayingTheAiHostsResolvedModel()
+    {
+        // P1-1: the recorded provider/model must be the AI host's own resolution, relayed verbatim.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        var fake = new FakeQuestionGenerator { NextProvider = "openrouter", NextModel = "google/gemma-4-31b-it" };
+        string? capturedHeaderBody = null;
+        _mockHttp.When(HttpMethod.Post, "http://localhost/assignments/*/question-generations")
+            .Respond(request =>
+            {
+                capturedHeaderBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        $"{{\"generationId\":\"{GenerationId}\"}}",
+                        System.Text.Encoding.UTF8, "application/json"),
+                };
+            });
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Topic",
+            assignmentId: Guid.Parse("55555555-5555-5555-5555-555555555555"));
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => capturedHeaderBody.Should().NotBeNull(
+            "an Edit-mode generation records exactly one header row"));
+        capturedHeaderBody.Should().Contain("\"provider\":\"openrouter\"");
+        capturedHeaderBody.Should().Contain("\"model\":\"google/gemma-4-31b-it\"");
+        capturedHeaderBody.Should().Contain("\"questionCount\":5");
+    }
+
+    [TestMethod]
+    public void GeneratedRows_CarryTheRecordedGenerationId()
+    {
+        // P1-2: the header id is stamped onto every produced row BEFORE the first save can re-mint
+        // them, so provenance is on the payload rather than lost.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Topic",
+            assignmentId: Guid.Parse("55555555-5555-5555-5555-555555555555"));
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => model.Questions.Should().HaveCount(3));
+        model.Questions.Should().OnlyContain(q => q.GenerationId == GenerationId);
+        model.Questions.Should().HaveCount(3, "every row of this generation points at the one header");
+    }
+
+    [TestMethod]
+    public void CreateMode_RecordsNoHeader_AndLeavesProvenanceNull()
+    {
+        // No assignment row exists yet on a Create, so there is nothing to hang a header off. The rows
+        // must still be produced (the request itself succeeded) and simply carry no provenance.
+        var model = new AssignmentEditFormModel { Title = "T" };
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(model, fake, topicId: Guid.NewGuid(), topicName: "Topic");
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => model.Questions.Should().HaveCount(3));
+        model.Questions.Should().OnlyContain(q => q.GenerationId == null);
     }
 
     [TestMethod]
@@ -525,7 +783,15 @@ public class QuestionGenerationSectionBunitTests : BunitContext
 
         public IReadOnlyList<GeneratedQuestionDto> NextResults { get; set; }
 
-        public async Task<IReadOnlyList<GeneratedQuestionDto>> GenerateAsync(
+        /// <summary>R3 (P1-1): the provider/model the fake "AI host" reports it resolved. The UI
+        /// relays these onto the generation-header request; the tests assert the relayed values are
+        /// the fake's own, i.e. that nothing client-side invents or overrides a model.</summary>
+        public string? NextProvider { get; set; } = "ollama";
+
+        /// <summary>See <see cref="NextProvider"/>.</summary>
+        public string? NextModel { get; set; } = "gemma4:31b-cloud";
+
+        public async Task<QuestionGenerationResponse> GenerateAsync(
             QuestionGenerationRequest request,
             CancellationToken ct = default)
         {
@@ -539,7 +805,7 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             {
                 throw NextException;
             }
-            return NextResults;
+            return new QuestionGenerationResponse(NextResults, NextProvider, NextModel);
         }
     }
 }

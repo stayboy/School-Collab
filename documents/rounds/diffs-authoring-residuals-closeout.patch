@@ -1,0 +1,592 @@
+diff --git a/documents/specs/assignment-authoring-compartments.md b/documents/specs/assignment-authoring-compartments.md
+index 5a3c3a0e..a2c55581 100644
+--- a/documents/specs/assignment-authoring-compartments.md
++++ b/documents/specs/assignment-authoring-compartments.md
+@@ -435,10 +435,20 @@ done rather than letting this list drift away from the code.
+ 
+ | Gap | What is missing | What it takes to close |
+ |---|---|---|
+-| **P2-c — transaction rollback is unproven** (found in R2) | `LinkAssignmentGroupsHandler` performs the target update and the legacy link replace inside one explicit EF Core transaction, but that is **verified by inspection only**. No test proves a mid-transaction failure leaves targets and links consistent: the InMemory test fixture suppresses `TransactionIgnoredWarning`, so the rollback path is never exercised. | A failure-injection test in `tests/SchoolCollab.Assignments.Tests.Integration` (Testcontainers/PostgreSQL) that faults the second write and asserts the first was rolled back. |
+ | **Archived-group relink is refused with 422 — the route half** (R1; the UX half was closed by round `authoring-residuals-mopup`) | A persisted link to a group that has since been **archived** cannot be re-written through the replace-set route, so a save that re-asserts such a set would fail — `LoadLinkedGroupIdsAsync` therefore still drops ids the picker cannot represent. The link stays readable but is not re-writable, and the page now names what it dropped (`#authoring-groups-dropped-links`) instead of discarding it silently, which tells the author what is true of the link without making it writable. | A relink route (or a handler rule) that accepts an **unchanged** archived id. |
+ | **A read-only View has no reason to convey** (R2, verified benign) | The grades / streams / students pickers carry a hard-coded `aria-describedby="authoring-audience-constraint-reason"`. The only state where that paragraph is absent is a plain read-only View, where no reason exists and the controls are disabled by `IsReadOnly` — so the idref does not actually dangle on a control that had something to say. | None while that reasoning holds; re-check if a reason is ever introduced on a read-only surface. |
+-| **UX-7 / F17 defence-in-depth** (found by the `authoring-ux7-residuals` review) | `OnParametersSetAsync` does not itself refuse a reload while the form is dirty: it reloads whenever `Id` or `Mode` **changed**, and the dirty state is only enforced upstream by the registered location-changing handler. That handler runs before a navigation commits, so the guard does win on this repo's routes — and the persisted-set re-read `ReloadAsync` performs is held back while the form carries unsaved work — but a host that swapped `Id` without a `NavigationManager` navigation would reload unprompted. | A dirty gate inside the reload path itself (the belt-and-braces half). |
++
++Round `authoring-residuals-closeout` closed **P2-c — transaction rollback is unproven** (the mid-transaction
++failure is now fault-injected in `tests/SchoolCollab.Assignments.Tests.Integration` against real Postgres:
++the second write fails with the first already inside the open transaction, and the committed state read
++back from a fresh context is asserted equal to the pre-handler state — the rollback test fails when
++`BeginTransactionAsync`/`CommitAsync` are removed, so the rollback and not the fixture is what passes) and
++**UX-7 / F17 defence-in-depth** (the reload path carries its own gate
++instead of relying solely on the upstream location-changing handler; the reload itself still proceeds when
++the form is dirty, because refusing it would leave A's state on screen under B's URL — the stale-write path
++F17 removed — but the discard is no longer silent: an unconsented `Id`/`Mode` swap renders
++`#authoring-unsaved-edits-discarded`, while a discard the author confirmed in the in-app confirmation is
++not announced back at them).
+ 
+ Round `authoring-residuals-mopup` closed **`ReloadAsync` re-reads the summary only** (the reload now runs
+ the same persisted-set load as the initial Edit load, and holds it back while the form has unsaved work),
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+index 54af29c3..217c20ab 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+@@ -102,6 +102,15 @@
+                     <FluentMessageBar Id="authoring-error" Intent="MessageIntent.Error" class="authoring-message">@_error</FluentMessageBar>
+                 }
+ 
++                @* UX-7 / F17 (this round): the parameter change reloaded this instance and took unsaved
++                   edits with it — the one case the in-app guard cannot see (a host swapping Id/Mode without
++                   a NavigationManager navigation). It sits beside the error bar so it is read with the
++                   surface it describes, not buried in a compartment. *@
++                @if (_unsavedEditsDiscarded)
++                {
++                    <p class="authoring-reason" id="authoring-unsaved-edits-discarded">@UnsavedEditsDiscardedNotice</p>
++                }
++
+                 @* ── 1 · Basics (the always-on spine, §3/UX-12) ───────────────── *@
+                 <section id="authoring-basics" class="authoring-compartment">
+                     <h3 class="authoring-compartment-title">Basics</h3>
+@@ -599,6 +608,17 @@
+     /// always the safe default.</summary>
+     public const string UnsavedChangesKeepEditingAction = "Keep editing";
+ 
++    /// <summary>UX-7 / F17 (this round) defence-in-depth: the notice the parameter-change reload
++    /// renders when it discarded unsaved edits that <b>no</b> confirmation consented to. D2 — the reload
++    /// itself still proceeds (refusing it would leave the previous assignment's state on screen under
++    /// the new assignment's URL, the stale-write path F17 removed), so what is removed here is only the
++    /// <i>silence</i>. Deliberately not a public const: it is page wording, not a contract, and this
++    /// round adds no public API member (D3) — the bUnit suite pins the rendered element by id.
++    /// </summary>
++    private const string UnsavedEditsDiscardedNotice =
++        "This form was reloaded for a different assignment or mode without a confirmation, so the unsaved " +
++        "edits you had made were discarded.";
++
+     /// <summary>UX-7 (D2) browser-unload half: the collocated module that owns
+     /// <c>window.beforeunload</c>. Collocated <c>*.razor.js</c> is served from the Razor class
+     /// library's static-web-asset root (<c>_content/{assembly}/…</c>), the
+@@ -639,6 +659,20 @@
+     private Guid? _loadedId;
+     private AssignmentAuthoringMode? _loadedMode;
+ 
++    /// <summary>UX-7 / F17 (this round): whether the surface currently on screen is showing the
++    /// aftermath of a reload that discarded unsaved edits <b>without</b> a confirmation — what
++    /// <see cref="UnsavedEditsDiscardedNotice"/> announces. Set by <see cref="OnParametersSetAsync"/>,
++    /// retired by <see cref="CaptureDirtyBaseline"/> (the next load that succeeds, and the component's own
++    /// exit after a save) so it cannot outlive the swap it describes.</summary>
++    private bool _unsavedEditsDiscarded;
++
++    /// <summary>UX-7 (D2): set once the author accepted the in-app confirmation's discard action.
++    /// <see cref="OnLocationChangingAsync"/> records it because that navigation is the author's own
++    /// decision and must not be announced back at them — and <see cref="OnParametersSetAsync"/> consumes
++    /// it on the very next parameter set, so a consent that never reached a parameter change cannot
++    /// silence a LATER unguarded swap.</summary>
++    private bool _discardConsented;
++
+     /// <summary>UX-7 (D3): the save payload the LOADED state implies — the baseline the current
+     /// form is compared against. Null until the first load settles (there is nothing to compare
+     /// yet); refreshed whenever the form's content becomes the persisted state again.
+@@ -1197,8 +1231,21 @@
+ 
+     /// <summary>UX-7 (D3): moves the baseline onto the form's current content — the two moments the
+     /// form IS the persisted state: the end of a load, and the component's own exit after a save
+-    /// (see <see cref="NavigateToSavedState"/>).</summary>
+-    private void CaptureDirtyBaseline() => _dirtyBaseline = CaptureSaveSnapshot();
++    /// (see <see cref="NavigateToSavedState"/>).
++    /// <para>UX-7 / F17 (this round): it also retires <see cref="UnsavedEditsDiscardedNotice"/> on
++    /// those same two moments, because the notice describes the swap that produced the <i>previous</i>
++    /// state — a load that has settled or a save that has been accepted has moved the surface past it.
++    /// Gated on <see cref="_error"/> so a load that FAILED retires nothing: the only thing that may
++    /// retire the notice is a read that actually succeeded, or the component's own successful exit.
++    /// </para></summary>
++    private void CaptureDirtyBaseline()
++    {
++        _dirtyBaseline = CaptureSaveSnapshot();
++        if (_error is null)
++        {
++            _unsavedEditsDiscarded = false;
++        }
++    }
+ 
+     /// <summary>
+     /// UX-7 (D2) in-app half: cancels a navigation that would discard unsaved work, after
+@@ -1221,7 +1268,13 @@
+         if (!discard)
+         {
+             context.PreventNavigation();
++            return;
+         }
++
++        // UX-7 / F17 (this round): the author just told us the discard is fine, so the reload this
++        // navigation reaches is a consented one — OnParametersSetAsync reads this and stays quiet
++        // (D2: announce the unguarded discard, never nag about the author's own decision).
++        _discardConsented = true;
+     }
+ 
+     /// <summary>
+@@ -1286,18 +1339,37 @@
+     /// would stay on screen under B's URL (the R2 F1 defect class: a stale-write path). Reload when
+     /// — and only when — <see cref="Id"/> or <see cref="Mode"/> CHANGED, compared against what the
+     /// current state was loaded from, so a re-set of the same values never re-enters the load.
+-    /// <para>Unsaved work is protected upstream by the UX-7 navigation guard, which runs before a
+-    /// navigation can change the parameter — by the time this reload happens the author has accepted
+-    /// the discard, so the reload is never silent.</para>
++    /// <para>UX-7 (D2): the load this reaches is guarded upstream by the registered location-changing
++    /// handler, which runs before a navigation can change the parameter — but a host that swaps
++    /// <see cref="Id"/> without a <c>NavigationManager</c> navigation reaches it unguarded. The reload
++    /// still happens there (refusing it would keep A's state under B's URL — the stale-write path F17
++    /// exists to remove), so the belt-and-braces half is that an UNCONSENTED discard is announced
++    /// instead of silent; see <see cref="UnsavedEditsDiscardedNotice"/>.</para>
+     /// </summary>
+     protected override async Task OnParametersSetAsync()
+     {
++        // Consumed on every parameter set, not only on a change: a consented navigation that never
++        // reached a parameter change (a same-URL navigation) must not leave the consent behind to
++        // silence a later, genuinely unguarded swap.
++        var consented = _discardConsented;
++        _discardConsented = false;
++
+         if (_loadedId == Id && _loadedMode == Mode)
+         {
+             return;
+         }
+ 
++        // Sampled BEFORE the load: it resets the form and moves the dirty baseline, so afterwards
++        // there is nothing left to compare and the discard would go unrecorded. Read-only surfaces
++        // and a load still in flight are never dirty, so neither can raise the notice.
++        var discardedUnsavedEdits = IsDirty && !consented;
++
+         await LoadAsync();
++
++        if (discardedUnsavedEdits)
++        {
++            _unsavedEditsDiscarded = true;
++        }
+     }
+ 
+     protected override async Task OnAfterRenderAsync(bool firstRender)
+diff --git a/tests/SchoolCollab.Assignments.Tests.Integration/LinkAssignmentGroupsRollbackPostgresTests.cs b/tests/SchoolCollab.Assignments.Tests.Integration/LinkAssignmentGroupsRollbackPostgresTests.cs
+new file mode 100644
+index 00000000..8404a582
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Integration/LinkAssignmentGroupsRollbackPostgresTests.cs
+@@ -0,0 +1,250 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.LinkAssignmentGroups;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Integration;
++
++/// <summary>
++/// P2-c (§17 of <c>documents/specs/assignment-authoring-compartments.md</c>): the explicit EF Core
++/// transaction <see cref="LinkAssignmentGroupsHandler"/> wraps around its two writes — the target
++/// replacement on the assignment aggregate (<c>IAssignmentRepository.UpdateAsync</c>) and the legacy
++/// link-table replace (<see cref="IAssignmentActivityGroupRepository.ReplaceForAssignmentAsync"/>) —
++/// really does roll the FIRST write back when the second faults. R2 shipped the transaction and verified
++/// it by inspection only; the unit fixture runs InMemory with the transaction ignored, so nothing
++/// exercised the rollback. This test does, against real Postgres: it runs the real handler over the real
++/// <see cref="AssignmentsDbContext"/> with an open <c>DbTransaction</c>.
++///
++/// <para><b>Why it cannot live in the unit suite.</b> The rollback is a property of the Postgres
++/// transaction, not of the C# code around it: an in-memory provider (or a mocked
++/// <c>Database</c>) would satisfy every assertion below without ever opening a transaction.</para>
++///
++/// <para><b>Discrimination (verified, see the report).</b> Deleting
++/// <c>BeginTransactionAsync</c>/<c>CommitAsync</c> from the handler makes the second write's failure
++/// leave the FIRST write committed — the assignment's own row moves (<c>TargetAudienceType</c> to
++/// <c>SelectedGroups</c>, <c>UpdatedAt</c> stamped) and the group target row the handler added survives
++/// — and the assertion on the pre-handler state catches that as a failure. A rollback test that passes
++/// with the transaction removed proves nothing, so this one was run both ways.</para>
++/// </summary>
++[TestClass]
++public sealed class LinkAssignmentGroupsRollbackPostgresTests
++{
++    private static readonly Guid TenantId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000002");
++    private static readonly Guid StreamCodedValueId = Guid.Parse("00000000-0000-0000-0000-000000000003");
++    private static readonly Guid LinkedGroupId = Guid.Parse("00000000-0000-0000-0000-000000000004");
++
++    /// <summary>
++    /// The second write faults with the first already executed inside the handler's transaction, so the
++    /// three things P2-c was missing are asserted from a FRESH context — the only reader that can show
++    /// what actually committed:
++    /// <list type="number">
++    /// <item>(i) the assignment's own row <b>and</b> its target rows equal the pre-handler state exactly,
++    /// i.e. the first write rolled back;</item>
++    /// <item>(ii) no link row exists — the two halves of the replace-set are still consistent with each
++    /// other, which is the invariant the transaction exists for;</item>
++    /// <item>(iii) the fault reaches the caller — the handler does not swallow it and leave the caller
++    /// believing the link set was replaced.</item>
++    /// </list>
++    /// </summary>
++    [TestMethod]
++    public async Task SecondWriteFault_RollsBackTheFirstWrite_OnRealPostgres()
++    {
++        var connectionString = await AssignmentsDbFactory.CreateMigratedDatabaseAsync(Guid.NewGuid().ToString("N"));
++
++        // The seeded set is non-empty on purpose, and it is a STREAM target: the handler preserves the
++        // non-group targets, so its SetTargets then moves the assignment ROW itself — the D-1 derived
++        // compat column leaves Mixed for SelectedGroups (a grade target would NOT, since the derivation
++        // prefers GradeLevel) — as well as stamping UpdatedAt. "The first write rolled back" is therefore
++        // visible on the assignment row, not only on its child rows.
++        Guid assignmentId;
++        await using (var seed = AssignmentsDbFactory.CreateContext(connectionString, tenantId: TenantId))
++        {
++            var assignment = Assignment.Create(
++                "Math — rollback fixture", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++                TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
++                .WithTenant(TenantId);
++            assignment.SetTargets([(TargetKind.Stream, (Guid?)StreamCodedValueId)], TenantId);
++            assignmentId = assignment.Id;
++
++            seed.Assignments.Add(assignment);
++            await seed.SaveChangesAsync();
++        }
++
++        var before = await ReadPersistedStateAsync(connectionString, assignmentId);
++        before.Audience.Should().Be(TargetAudienceType.Mixed,
++            "fixture precondition: the lone stream target derives the compat column to Mixed, NOT to the " +
++            "SelectedGroups the handler's group target will derive");
++        before.TargetRows.Should().Contain($"Stream:{StreamCodedValueId}:0",
++            "fixture precondition: the assignment starts with the one target the handler preserves");
++        before.LinkRows.Should().Be(0, "fixture precondition: the legacy link table starts empty");
++
++        var fault = new InvalidOperationException("fault injected: the link-table replace failed");
++        var probe = new SecondWriteProbe();
++
++        await using (var db = AssignmentsDbFactory.CreateContext(connectionString, tenantId: TenantId))
++        {
++            // The real context, the real repositories and therefore the real transaction: only the
++            // handler's SECOND write is faulted, and it faults after the first has run.
++            var handler = new LinkAssignmentGroupsHandler(
++                db,
++                new AssignmentRepository(db),
++                new SecondWriteFaultingLinkRepository(new AssignmentActivityGroupRepository(db), db, fault, probe),
++                new StubActivityGroupLookup(LinkedGroupId),
++                TenantFor(TenantId),
++                new StubHybridCache(),
++                NullLogger<LinkAssignmentGroupsHandler>.Instance);
++
++            var thrown = await FluentActions
++                .Awaiting(() => handler.HandleAsync(new LinkAssignmentGroups(assignmentId, [LinkedGroupId])))
++                .Should().ThrowAsync<InvalidOperationException>(
++                    "the link write's failure must reach the caller — swallowing it would report a " +
++                    "replace-set that was never written");
++
++            thrown.Which.Should().BeSameAs(fault, "the handler surfaces the failure itself, unwrapped");
++        }
++
++        // (iii)-adjacent, and the guard against a vacuous fixture: the fault really was injected AFTER the
++        // first write had already executed inside the transaction — its target row was readable on the
++        // handler's own connection at fault time. Without that, "the first write rolled back" would be
++        // asserting that nothing happened at all.
++        probe.TargetRowsVisibleAtFault.Should().BeTrue(
++            "the fault has to land after the first write, inside the same open transaction");
++
++        // (i)+(ii) from a FRESH context, after the handler's context (and with it the transaction) is gone.
++        var after = await ReadPersistedStateAsync(connectionString, assignmentId);
++        after.Should().Be(before,
++            "the transaction's rollback is what the two writes' atomicity rests on: the committed " +
++            "assignment row, its target rows and its link rows must all be exactly what they were before " +
++            "the handler ran");
++        after.LinkRows.Should().Be(0, "the faulted replace-set wrote no link row");
++    }
++
++    /// <summary>The assignment's persisted authoring state, read through a context of its own. Record
++    /// equality is the assertion, so every column the handler's first write can touch is in here.</summary>
++    private sealed record PersistedState(
++        TargetAudienceType Audience,
++        DateTimeOffset UpdatedAt,
++        string TargetRows,
++        int LinkRows);
++
++    private static async Task<PersistedState> ReadPersistedStateAsync(string connectionString, Guid assignmentId)
++    {
++        await using var read = AssignmentsDbFactory.CreateContext(connectionString, tenantId: TenantId);
++
++        // TargetAudienceType + UpdatedAt are the two assignment-row columns SetTargets writes (the D-1
++        // derived compat column and the timestamp), and the target rows are what it replaces.
++        var row = await read.Assignments.AsNoTracking().SingleAsync(a => a.Id == assignmentId);
++        var targets = await read.AssignmentTargets.AsNoTracking()
++            .Where(t => t.AssignmentId == assignmentId)
++            .OrderBy(t => t.DisplayOrder)
++            .Select(t => new { t.Kind, t.RefId, t.DisplayOrder })
++            .ToArrayAsync();
++        var links = await read.AssignmentActivityGroups.AsNoTracking()
++            .CountAsync(l => l.AssignmentId == assignmentId);
++
++        return new PersistedState(
++            row.TargetAudienceType,
++            row.UpdatedAt,
++            string.Join(" | ", targets.Select(t => $"{t.Kind}:{t.RefId}:{t.DisplayOrder}")),
++            links);
++    }
++
++    /// <summary>What the faulting second write observes at fault time.</summary>
++    private sealed class SecondWriteProbe
++    {
++        public bool TargetRowsVisibleAtFault { get; set; }
++    }
++
++    /// <summary>
++    /// The real <see cref="AssignmentActivityGroupRepository"/> with only
++    /// <c>ReplaceForAssignmentAsync</c> — the handler's second write, and the one that follows the
++    /// target write inside the transaction — replaced by a fault. Its reads still delegate, and, more
++    /// importantly, it shares the handler's <see cref="AssignmentsDbContext"/>: the probe below reads on
++    /// that context's own connection, so it sees exactly what the transaction has written so far.
++    /// </summary>
++    private sealed class SecondWriteFaultingLinkRepository(
++        IAssignmentActivityGroupRepository inner,
++        AssignmentsDbContext db,
++        Exception fault,
++        SecondWriteProbe probe) : IAssignmentActivityGroupRepository
++    {
++        public async Task ReplaceForAssignmentAsync(
++            Guid assignmentId, Guid tenantId, IReadOnlyList<Guid> activityGroupIds, CancellationToken ct = default)
++        {
++            // The order matters more than the exception: the handler's first write (UpdateAsync) has
++            // already run, so its group target row is visible here through the same open transaction.
++            probe.TargetRowsVisibleAtFault = await db.AssignmentTargets.AsNoTracking()
++                .AnyAsync(t => t.AssignmentId == assignmentId
++                    && t.Kind == TargetKind.ActivityGroup
++                    && t.RefId == LinkedGroupId, ct);
++
++            throw fault;
++        }
++
++        public Task<Guid[]> GetGroupIdsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) =>
++            inner.GetGroupIdsForAssignmentAsync(assignmentId, ct);
++
++        public Task<Guid[]> GetAssignmentIdsByGroupAsync(Guid activityGroupId, CancellationToken ct = default) =>
++            inner.GetAssignmentIdsByGroupAsync(activityGroupId, ct);
++
++        public Task<AssignmentGroupSummaryDto[]> GetAssignmentsByGroupAsync(
++            Guid activityGroupId, CancellationToken ct = default) =>
++            inner.GetAssignmentsByGroupAsync(activityGroupId, ct);
++    }
++
++    /// <summary>The group port, answering the linked group as active in the caller's tenant. It is not
++    /// part of what this test proves (the transaction is), so a stub keeps the fixture to the DB path
++    /// under test.</summary>
++    private sealed class StubActivityGroupLookup(Guid groupId) : IActivityGroupLookup
++    {
++        public Task<ActivityGroupRefDto[]> GetByIdsAsync(
++            IReadOnlyList<Guid> activityGroupIds, CancellationToken cancellationToken = default) =>
++            Task.FromResult(activityGroupIds
++                .Where(id => id == groupId)
++                .Select(id => new ActivityGroupRefDto(id, "Chess", IsActive: true))
++                .ToArray());
++
++        public Task<Guid[]> GetActiveMemberIdsAsync(
++            IReadOnlyList<Guid> activityGroupIds, CancellationToken cancellationToken = default) =>
++            Task.FromResult(Array.Empty<Guid>());
++    }
++
++    /// <summary>The tenant the handler resolves — the same one the fixture's rows belong to, so the
++    /// FR-6 save guards accept the writes.</summary>
++    private static TenantProvider TenantFor(Guid tenantId)
++    {
++        var tenants = new TenantProvider();
++        tenants.SetTenant(new TenantContext(tenantId, "TestTenant", TenantType.School));
++        return tenants;
++    }
++
++    /// <summary>The handler invalidates the <c>assignments</c> cache tag only after a commit, which this
++    /// test never reaches; the stub keeps the fixture on the DB path.</summary>
++    private sealed class StubHybridCache : HybridCache
++    {
++        public override ValueTask<T> GetOrCreateAsync<TState, T>(
++            string key, TState state, Func<TState, CancellationToken, ValueTask<T>> factory,
++            HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null,
++            CancellationToken cancellationToken = default) => factory(state, cancellationToken);
++
++        public override ValueTask SetAsync<T>(
++            string key, T value, HybridCacheEntryOptions? options = null, IEnumerable<string>? tags = null,
++            CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
++
++        public override ValueTask RemoveAsync(string key, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++
++        public override ValueTask RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) =>
++            ValueTask.CompletedTask;
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+index b323a46d..e83607fd 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+@@ -2062,6 +2062,166 @@ public class AssignmentAuthoringBunitTests : BunitContext
+         cut.Markup.Should().Contain("Math HW");
+     }
+ 
++    // ── UX-7 / F17 defence-in-depth: the reload path's own dirty gate (this round) ──
++
++    /// <summary>The notice the parameter-change reload renders when it discarded unsaved edits no
++    /// confirmation consented to. Pinned here as a literal because the component keeps it
++    /// <c>private</c> — this round adds no public API member (D3), so the element id plus this wording
++    /// is what the suite holds the page to.</summary>
++    private const string UnsavedEditsDiscardedNoticeText =
++        "This form was reloaded for a different assignment or mode without a confirmation, so the unsaved " +
++        "edits you had made were discarded.";
++
++    /// <summary>The notice element, addressed by the component's own id.</summary>
++    private const string UnsavedEditsDiscardedNoticeId = "#authoring-unsaved-edits-discarded";
++
++    /// <summary>UX-7 / F17 defence-in-depth (this round, criterion 3): a host that swaps <c>Id</c>
++    /// WITHOUT a <c>NavigationManager</c> navigation — no location-changing handler ran, so nothing
++    /// asked the author — still reloads the assignment the route now names (D2: refusing the reload
++    /// would keep A's state on screen under B's URL, the stale-write path F17 removed), and the discard
++    /// is announced instead of silent.
++    /// <para>Discriminating: before this round the reload carried no notice at all, so the second half
++    /// fails while the first passes — the reload half is F17's, already in place.</para></summary>
++    [TestMethod]
++    public async Task UnsavedEdits_UnconsentedIdChange_ReloadsAndAnnouncesTheDiscard()
++    {
++        var dtoA = MakeDto(AssignmentStatusDto.Draft);
++        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        await SetTitleAsync(cut, "Edited title");
++        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
++            "vacuity anchor: a dirty form whose parameters did NOT change has nothing to announce");
++
++        SetupAssignment(dtoB);
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dtoB.Id));
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Science HW",
++                "D2: the reload still happens — refusing it would keep A's state under B's URL");
++            cut.Markup.Should().NotContain("Edited title", "A's unsaved edit left with A's state");
++        });
++
++        var notices = cut.FindAll(UnsavedEditsDiscardedNoticeId);
++        notices.Should().ContainSingle(
++            "exactly one notice: the discarded work is announced once, on the surface that replaced it");
++        notices[0].TextContent.Should().Be(UnsavedEditsDiscardedNoticeText,
++            "the notice has to say what actually happened — the discard — not make a claim about the new " +
++            "assignment");
++    }
++
++    /// <summary>UX-7 / F17 defence-in-depth (this round, criterion 3, the fail-safe half): a CLEAN form
++    /// that swaps <c>Id</c> reloads without a notice — nothing was discarded, so an announcement would
++    /// be a lie, and a page that cries wolf teaches authors to read past the one that is true.
++    /// <para>Not on its own discriminating (both trees reload silently); it is the non-vacuity anchor for
++    /// the notice above, and it pins that the reload itself is still unguarded by dirtiness.</para></summary>
++    [TestMethod]
++    public void CleanForm_IdChange_ReloadsWithoutTheDiscardNotice()
++    {
++        var dtoA = MakeDto(AssignmentStatusDto.Draft);
++        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++
++        SetupAssignment(dtoB);
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dtoB.Id));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science HW"));
++        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
++            "an untouched form loses nothing, so the reload stays silent");
++    }
++
++    /// <summary>UX-7 / F17 defence-in-depth (this round, criterion 4): the in-app confirmation's
++    /// DISCARD path records the consent, so the reload that navigation reaches — the already-guarded
++    /// path — does not announce the author's own decision back at them.
++    /// <para>Non-vacuity anchors: the guard really did ask (the confirmation was captured), the
++    /// navigation really did proceed (the fake navigation committed), and the form really was dirty at
++    /// the time (the same edit shape as the announced case above). The parameter set is then driven by
++    /// hand because bUnit renders the component directly rather than through a <c>Router</c>.
++    /// </para></summary>
++    [TestMethod]
++    public async Task UnsavedEdits_ConsentedDiscard_IdChange_ReloadsWithoutTheDiscardNotice()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: true, captured);
++
++        var dtoA = MakeDto(AssignmentStatusDto.Draft);
++        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++        await SetTitleAsync(cut, "Edited title");
++
++        Navigation.NavigateTo($"/assignments/{dtoB.Id}/edit");
++        cut.WaitForAssertion(() => captured.Should().HaveCount(1,
++            "the guard asked before the navigation could change the parameter"));
++        Navigation.Uri.Should().EndWith($"/assignments/{dtoB.Id}/edit",
++            "vacuity anchor: the discard was confirmed, so this navigation is the author's own decision");
++
++        SetupAssignment(dtoB);
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dtoB.Id));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science HW"));
++        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
++            "D2: a consented discard is not announced back at the author — the notice is for the swap " +
++            "nothing guarded");
++    }
++
++    /// <summary>UX-7 / F17 defence-in-depth (this round, the leak the consent flag could carry): the
++    /// consent belongs to the navigation that produced it. A navigation the author consented to which
++    /// never reached a parameter change (a same-route jump) is a real state on this page — the sticky
++    /// jump-nav navigates within the route — so the flag is consumed on every parameter set and cannot
++    /// be left armed to silence a LATER, genuinely unguarded swap. That later swap is the silent discard
++    /// this round exists to remove.
++    /// <para>Discriminating: with the flag consumed only on a changed parameter set, the last assertion
++    /// fails — the stale consent suppresses a notice the author should have seen.</para></summary>
++    [TestMethod]
++    public async Task ConsentThatReachedNoParameterChange_DoesNotSilenceALaterUnguardedDiscard()
++    {
++        var captured = new List<ConfirmDialogContent>();
++        RegisterConfirmationDialog(confirm: true, captured);
++
++        var dtoA = MakeDto(AssignmentStatusDto.Draft);
++        var dtoB = dtoA with { Id = Guid.NewGuid(), Title = "Science HW" };
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dtoA);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++        await SetTitleAsync(cut, "Edited title");
++
++        Navigation.NavigateTo($"/assignments/{dtoA.Id}/edit#authoring-questions");
++        cut.WaitForAssertion(() => captured.Should().HaveCount(1,
++            "vacuity anchor: the guard asked about the unsaved work before letting the jump through"));
++
++        // The host re-renders with the SAME Id/Mode (the no-op parameter set), so the consented
++        // navigation reached no change at all. It discarded nothing, so it must announce nothing.
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dtoA.Id));
++        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().BeEmpty(
++            "the consented navigation changed nothing, so there was no discard to announce");
++
++        // The real swap is still unguarded and still dirty: it must be announced.
++        SetupAssignment(dtoB);
++        cut.Render(p => p
++            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
++            .Add(x => x.Id, dtoB.Id));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science HW"));
++        cut.FindAll(UnsavedEditsDiscardedNoticeId).Should().ContainSingle(
++            "the consent was spent on the navigation that reached no parameter change — it may not " +
++            "silence the next unguarded swap");
++    }
++
+     // ── F12: the empty-audience preview wording ───────────────────────────────
+ 
+     /// <summary>F12: with no audience target authored, the preview area does not render

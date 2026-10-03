@@ -62,6 +62,25 @@ internal static class AssignmentContentValidator
             if (a.FileSize < 0)
                 throw new AssignmentContentValidationException(
                     $"Attachments: entry at position {i} has a negative FileSize.");
+
+            // R3 (D4/P1-3): the extraction outcome round-trips through the CLIENT (stage response →
+            // editor row → create/update payload), so its sizes are re-checked here rather than
+            // trusted. Without this a hand-edited payload could push a multi-megabyte string at the
+            // bounded ExtractedText column and fail the whole save with a 22001 instead of a 400.
+            if (a.ExtractedText is { Length: > AttachmentExtractionLimits.MaxCharacters })
+                throw new AssignmentContentValidationException(
+                    $"Attachments: entry at position {i} has extracted text longer than " +
+                    $"{AttachmentExtractionLimits.MaxCharacters} characters.");
+
+            if (a.ExtractionError is { Length: > AttachmentExtractionLimits.MaxErrorLength })
+                throw new AssignmentContentValidationException(
+                    $"Attachments: entry at position {i} has an extraction error longer than " +
+                    $"{AttachmentExtractionLimits.MaxErrorLength} characters.");
+
+            if (!Enum.IsDefined(typeof(AttachmentExtractionStatus), (int)a.ExtractionStatus))
+                throw new AssignmentContentValidationException(
+                    $"Attachments: entry at position {i} has an unknown extraction status '{a.ExtractionStatus}'.");
+
             total += a.FileSize;
         }
 

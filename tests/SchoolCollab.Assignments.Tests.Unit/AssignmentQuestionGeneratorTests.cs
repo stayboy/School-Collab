@@ -31,7 +31,7 @@ public class AssignmentQuestionGeneratorTests
                     {"text":"Q1?","type":"multipleChoice","options":[{"text":"A","isCorrect":true},{"text":"B","isCorrect":false}],"modelAnswer":null},
                     {"text":"Q2?","type":"trueFalse","options":[{"text":"True","isCorrect":true},{"text":"False","isCorrect":false}],"modelAnswer":null},
                     {"text":"Q3?","type":"shortAnswer","options":null,"modelAnswer":"Glucose"}
-                ]}
+                ],"provider":"ollama","model":"gemma4:31b-cloud"}
                 """);
 
         var http = handler.ToHttpClient();
@@ -41,15 +41,21 @@ public class AssignmentQuestionGeneratorTests
         var request = NewValidRequest();
 
         // Act
-        var questions = await sut.GenerateAsync(request, CancellationToken.None);
+        var response = await sut.GenerateAsync(request, CancellationToken.None);
 
         // Assert
+        var questions = response.Questions;
         questions.Should().HaveCount(3);
         questions[0].Type.Should().Be(GeneratedQuestionType.MultipleChoice);
         questions[0].Options!.Single(o => o.IsCorrect).Text.Should().Be("A");
         questions[1].Type.Should().Be(GeneratedQuestionType.TrueFalse);
         questions[2].Type.Should().Be(GeneratedQuestionType.ShortAnswer);
         questions[2].ModelAnswer.Should().Be("Glucose");
+
+        // R3 (P1-1): the AI host's own resolved tuple is surfaced, not discarded — it is the only
+        // copy of it the Assignments host will ever see, and the generation header must record it.
+        response.Provider.Should().Be("ollama");
+        response.Model.Should().Be("gemma4:31b-cloud");
     }
 
     [TestMethod]
