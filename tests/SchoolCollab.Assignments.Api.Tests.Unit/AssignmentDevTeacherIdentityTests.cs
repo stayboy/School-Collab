@@ -24,25 +24,36 @@ namespace SchoolCollab.Assignments.Api.Tests.Unit;
 /// <c>TestAuthHandler</c>; what this file pins is that the NEW binding reaches the handler's own
 /// options instance — claim-less by default (the CI posture), honoured when
 /// <c>TestAuth:TeacherId</c> is configured.</para>
+///
+/// <para>Round <c>dev-teacher-identity-wiring</c> adds the <b>blank-value</b> cases: the AppHost
+/// fans its fail-closed <c>dev-teacher-id</c> base default in as <c>TestAuth__TeacherId=""</c>,
+/// and a typed <c>GetValue&lt;Guid&gt;(key, Guid.Empty)</c> fallback does NOT cover a present empty
+/// string — it converts, and throws. Absent, empty and whitespace must all resolve to
+/// <see cref="Guid.Empty"/> (claim-less, no crash), and a real Guid must still bind.</para>
 /// </summary>
 [TestClass]
 public class AssignmentDevTeacherIdentityTests
 {
     private static readonly Guid DevTeacherId = Guid.Parse("00000000-0000-0000-0000-0000000000d7");
 
-    private static IOptionsMonitor<TestAuthHandlerOptions> OptionsFor(string? configuredTeacherId)
+    /// <summary>Builds the options instance the TestAuth scheme handler is built with, from the raw
+    /// configuration map — no entries means the key is absent, a <c>""</c> value means present but
+    /// blank (the two are NOT the same to a typed <c>GetValue</c> call).</summary>
+    private static IOptionsMonitor<TestAuthHandlerOptions> OptionsFor(
+        params (string Key, string? Value)[] configurationEntries)
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [AssignmentDevTeacherIdentity.TeacherIdConfigKey] = configuredTeacherId,
-            })
+            .AddInMemoryCollection(configurationEntries.ToDictionary(e => e.Key, e => e.Value))
             .Build();
 
         var services = new ServiceCollection();
         services.AddAssignmentDevTeacherIdentity(configuration);
         return services.BuildServiceProvider().GetRequiredService<IOptionsMonitor<TestAuthHandlerOptions>>();
     }
+
+    /// <summary>The configured-path shorthand used by the tests below.</summary>
+    private static IOptionsMonitor<TestAuthHandlerOptions> OptionsForTeacherId(string? value)
+        => OptionsFor((AssignmentDevTeacherIdentity.TeacherIdConfigKey, value));
 
     /// <summary>Runs the REAL handler with the options the binding produced, and reports whether a
     /// <c>teacher_id</c> claim was emitted.</summary>
@@ -61,9 +72,9 @@ public class AssignmentDevTeacherIdentityTests
     }
 
     [TestMethod]
-    public async Task NoConfiguredTeacherId_EmitsNoClaim_RegressionGuard()
+    public async Task AbsentTeacherId_EmitsNoClaim_RegressionGuard()
     {
-        var options = OptionsFor(configuredTeacherId: null);
+        var options = OptionsFor();
 
         options.Get(TestAuthExtensions.TestAuthScheme).TeacherId.Should().Be(Guid.Empty);
         (await EmitsTeacherIdClaimAsync(options)).Should().BeFalse(
@@ -71,9 +82,36 @@ public class AssignmentDevTeacherIdentityTests
     }
 
     [TestMethod]
+    public async Task EmptyTeacherId_IsClaimLess_AndDoesNotThrow()
+    {
+        // THE P1 (round `dev-teacher-identity-wiring`): the AppHost's fail-closed base default
+        // reaches the API as `TestAuth__TeacherId=""`. `GetValue<Guid>(key, Guid.Empty)` does not
+        // cover that — it converts the present empty string and throws
+        // "Failed to convert configuration value '' at 'TestAuth:TeacherId' to type 'System.Guid'",
+        // so the fail-closed default crashed the host instead of staying claim-less.
+        var options = OptionsForTeacherId(string.Empty);
+
+        options.Get(TestAuthExtensions.TestAuthScheme).TeacherId.Should().Be(Guid.Empty,
+            "a present but empty value must resolve to no dev identity, exactly like an absent one");
+        (await EmitsTeacherIdClaimAsync(options)).Should().BeFalse(
+            "an empty value names no teacher, so the dev bypass must stay claim-less");
+    }
+
+    [TestMethod]
+    public async Task WhitespaceTeacherId_IsClaimLess_AndDoesNotThrow()
+    {
+        var options = OptionsForTeacherId("   ");
+
+        options.Get(TestAuthExtensions.TestAuthScheme).TeacherId.Should().Be(Guid.Empty,
+            "whitespace is a blank value, not a Guid — the same fail-closed posture as empty");
+        (await EmitsTeacherIdClaimAsync(options)).Should().BeFalse(
+            "a blank value names no teacher, so the dev bypass must stay claim-less");
+    }
+
+    [TestMethod]
     public async Task ConfiguredTeacherId_IsBoundAndClaimed_RegressionGuard()
     {
-        var options = OptionsFor(DevTeacherId.ToString());
+        var options = OptionsForTeacherId(DevTeacherId.ToString());
 
         options.Get(TestAuthExtensions.TestAuthScheme).TeacherId.Should().Be(DevTeacherId,
             "the binding lands on the options instance the TestAuth scheme handler is built with");
