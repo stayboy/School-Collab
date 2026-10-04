@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using StackExchange.Redis;
 using Serilog;
 using SchoolCollab.Assignments.Api;
+using SchoolCollab.Assignments.Api.Auth;
 using SchoolCollab.Assignments.Api.Endpoints;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
@@ -10,6 +11,7 @@ using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.DeepLinks;
 using SchoolCollab.Core.Features;
+using SchoolCollab.Core.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -123,7 +125,16 @@ builder.Services.AddSettingsCore(builder.Configuration);
 // ar-24: real-auth bearer forwarding + fail-closed on a 302 challenge
 // (AllowAutoRedirect=false — the strict-2xx existence check must not follow
 // the OIDC challenge to a 200 login page).
-builder.Services.AddHttpClient("students-api")
+//
+// [P1-6] MIGRATED (round teacher-scope-auth D2) from a bare AddHttpClient to the
+// documented AddCrossModuleHttpClient pattern (handlers/cross-module-http-client-pattern.md:
+// 30-minute handler lifetime + CrossModuleRetryDelegatingHandler), KEEPING the ar-24 chain.
+// This is the ONE registration of "students-api" in this host: the same named client also
+// feeds IContactResolver, ITeacherDirectory, IStudentDirectory, IActivityGroupLookup,
+// IAssignmentTargetResolver, ITopicAssignmentLookup and ITeacherScopeProvider — a second
+// registration of the same name would silently re-register it and drop those handler chains.
+// (The Assignments.Worker's own "students-api" client is a separate host and is untouched.)
+builder.Services.AddCrossModuleHttpClient("students-api", "https+http://students-api", propagateTenant: false)
     .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolver, SchoolCollab.Assignments.Api.Services.StudentsContactResolver>();
@@ -168,6 +179,12 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IStudentDirect
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherDirectory,
     SchoolCollab.Assignments.Api.Services.TeacherDirectoryHttpClient>();
 
+// Teacher-scope port (round teacher-scope-auth D2): the grades/subjects a teacher teaches,
+// which the assignment reads use to decide visibility. Same "students-api" named client and
+// the same fail-closed posture as the directory check above.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITeacherScopeProvider,
+    SchoolCollab.Assignments.Api.Services.TeacherScopeHttpClient>();
+
 // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
 // port (Assignments → Students) for the link command and SelectedGroups publish.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,
@@ -209,6 +226,11 @@ builder.Services.AddNotificationDispatchSweep();
 
 // Auth + tenancy (OIDC via Keycloak)
 builder.Services.AddAuthAndTenancy(builder.Configuration);
+
+// D5 (Q5, round teacher-scope-auth): bind the dev bypass's teacher_id claim. Inert unless
+// FEATURE:DisableOIDCAuth registers TestAuthHandler; without a configured value the claim is
+// not emitted, which is the CI default.
+builder.Services.AddAssignmentDevTeacherIdentity(builder.Configuration);
 
 var app = builder.Build();
 

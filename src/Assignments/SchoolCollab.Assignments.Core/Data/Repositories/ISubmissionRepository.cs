@@ -1,5 +1,6 @@
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 
 namespace SchoolCollab.Assignments.Core.Data.Repositories;
 
@@ -55,6 +56,19 @@ public interface ISubmissionRepository
 
     // Read models (Contracts DTOs)
     Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, CancellationToken ct = default);
+
+    /// <summary>Round <c>teacher-scope-auth</c> D3 — the scope-aware review queue: every submission
+    /// whose assignment the caller may see, i.e. one they created <b>or</b> one in a grade/subject
+    /// they teach. For a scoped caller the visibility is decided by <paramref name="scope"/> ALONE
+    /// (its <see cref="TeacherScope.TeacherId"/> comes from the authenticated principal, never from
+    /// the wire), so a request-supplied id cannot widen the result set ([P1-4]);
+    /// <paramref name="teacherId"/> carries the per-teacher filter only for the unrestricted
+    /// (dev/role-less/staff/admin) posture.
+    /// <para>The default implementation keeps the owner-only behaviour, so existing
+    /// implementations and test fakes stay valid.</para></summary>
+    Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, TeacherScope? scope, CancellationToken ct = default)
+        => ListSubmissionsForReviewAsync(teacherId, ct);
+
     Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
     Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
     Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);

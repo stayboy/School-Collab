@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 
 namespace SchoolCollab.Assignments.Core.Data.Repositories;
 
@@ -85,6 +86,58 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
         var query = from s in db.AssignmentSubmissions
                     join a in db.Assignments on s.AssignmentId equals a.Id
                     where a.CreatedByTeacherId == teacherId
+                    orderby s.LastSubmittedAt descending
+                    select new SubmissionForReviewDto(
+                        s.Id,
+                        a.Id,
+                        a.Title,
+                        s.StudentId,
+                        s.CurrentVersionNumber,
+                        (ReviewStateDto)(int)s.ReviewState,
+                        s.LastSubmittedAt);
+
+        return await query.ToArrayAsync(ct);
+    }
+
+    /// <summary>
+    /// Round <c>teacher-scope-auth</c> D3 — the scope-aware review queue: the caller's own
+    /// creations plus the grades/subjects they teach. Unrestricted/scopeless callers keep the
+    /// owner-only read above.
+    ///
+    /// <para>The scope filter is applied over the tenant's assignment <b>keys</b> and then used as
+    /// an id set (the "read, then filter" discipline the list query handler uses at the cached
+    /// boundary): the grade-wide leg is a null-subject-aware predicate that does not reduce to one
+    /// translatable SQL predicate over a client-side (grade, subject) pair set — a `Contains` over
+    /// the two columns separately would be a cross-product and could admit a subject the teacher
+    /// does not teach.</para>
+    /// </summary>
+    public async Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, TeacherScope? scope, CancellationToken ct = default)
+    {
+        if (scope is null || scope.IsUnrestricted)
+        {
+            return await ListSubmissionsForReviewAsync(teacherId, ct);
+        }
+
+        // The scope decides on its own — including the own-creation leg — so the request-supplied
+        // teacherId plays no part here.
+        var assignmentKeys = await db.Assignments
+            .AsNoTracking()
+            .Select(a => new { a.Id, a.CreatedByTeacherId, a.GradeLevelId, a.TopicId })
+            .ToListAsync(ct);
+
+        var visibleIds = assignmentKeys
+            .Where(a => scope.Allows(a.CreatedByTeacherId, a.GradeLevelId, a.TopicId))
+            .Select(a => a.Id)
+            .ToList();
+
+        if (visibleIds.Count == 0)
+        {
+            return [];
+        }
+
+        var query = from s in db.AssignmentSubmissions
+                    join a in db.Assignments on s.AssignmentId equals a.Id
+                    where visibleIds.Contains(s.AssignmentId)
                     orderby s.LastSubmittedAt descending
                     select new SubmissionForReviewDto(
                         s.Id,

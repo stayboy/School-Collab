@@ -266,7 +266,25 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
 
 ## Architecture reminders
 
-- No direct project references between bounded contexts — use MassTransit contracts.
+- **Cross-context access** — the mechanism depends on **what crosses the boundary**. (The single bullet
+  here used to read "use MassTransit contracts", which conflated two mechanisms and named a library this
+  repo does not use: the bus is **RabbitMQ** — `RabbitMQ.Client` + the transactional outbox.)
+  - **No direct project references between bounded contexts.** The shared kernel (`SchoolCollab.Core`,
+    `SchoolCollab.ServiceDefaults`) and `*.Contracts` are allowed; another context's `.Core` is not.
+  - **Events** (state changes) → the transactional outbox + integration contracts. **Never publish to a
+    bus from a handler.**
+  - **Synchronous reads** → a port interface in the calling context's `.Core` with the HTTP client in its
+    `.Api`, registered via `AddCrossModuleHttpClient`, plus an AppHost `.WithReference` on the calling
+    project (enforced by `CrossModuleWiringTests`).
+  - **No new sync hop on a command's write path for reference data** — replicate it via events and read a
+    local projection; a sync reference-data hop is acceptable only after replication was considered and
+    **rejected on record**. Live-consistency write-path hops stay sync but must be hardened (explicit
+    timeout, circuit breaker, long handler lifetime, retryable `ObjectDisposedException`) with a documented
+    degradation policy. Read/enrichment hops are allowed and must degrade gracefully (never fail the parent
+    operation). Any PR adding a **write-path** sync hop carries the `adr-cross-module-calls` tag and needs
+    architect sign-off.
+  - Governing docs: `documents/solution/adr-cross-module-calls.md` (which class is which) and
+    `documents/solution/cross-module-http-client-pattern.md` (the HTTP reference pattern).
 - No MediatR — CQRS is implemented via `ICommandHandler<T>` / `IQueryHandler<T,R>` with
   Scrutor assembly scanning.
 - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.

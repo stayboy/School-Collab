@@ -2,7 +2,7 @@
 
 - **When:** 2026-09-26, while writing `documents/specs/subject-enrollment-requirement-flag.md` and checking its `Assignments.Api` hop against the repo's cross-context rules.
 - **Owner:** parent / orchestrator. **Deferred** — deliberately not actioned during the spec pass.
-- **Status:** §1 ⬜ open (needs an architect decision before it can be scheduled) · §2 ⬜ open (mechanical, cheap) · §3 ⬜ open (recorded for completeness)
+- **Status:** §1 ⬜ open (needs an architect decision before it can be scheduled) · §2 ⬜ open (mechanical, cheap) · §3 ✅ **closed 2026-10-03** — `AGENTS.md` § Architecture reminders now splits the rule into events-vs-synchronous-reads with the governing docs named, and drops "MassTransit" (the bus is RabbitMQ: `RabbitMQ.Client` + the transactional outbox) and the ADR's three hop classes are stated inline
 
 > This doc lives in `documents/solution/` as durable technical memory. Update each
 > item's status here as it is completed or explicitly deferred, rather than

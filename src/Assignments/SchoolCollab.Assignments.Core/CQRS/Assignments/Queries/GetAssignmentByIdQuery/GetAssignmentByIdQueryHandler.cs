@@ -38,7 +38,9 @@ public sealed class GetAssignmentByIdQueryHandler(
 
         var cacheKey = $"assignment:{query.Id}:{db.CurrentTenantId}";
 
-        return await cache.GetOrCreateAsync(
+        // The cached value is the tenant-wide row, deliberately — the scope check is applied to
+        // what the cache RETURNS ([P2-2], the same discipline as the list read's [P1-3]).
+        var summary = await cache.GetOrCreateAsync(
             cacheKey,
             (db, query.Id, cache, assignmentPolicyResolver, featureFlags, logger),
             static async (state, ct) =>
@@ -126,6 +128,21 @@ public sealed class GetAssignmentByIdQueryHandler(
             CacheOptions,
             tags: ["assignments"],
             cancellationToken: cancellationToken);
+
+        // [P2-2] an out-of-scope id is indistinguishable from an unknown id (404) — the caller
+        // must not learn that the assignment exists.
+        if (summary is null)
+        {
+            return null;
+        }
+
+        if (query.Scope is { IsUnrestricted: false } scope
+            && !scope.Allows(summary.CreatedByTeacherId, summary.GradeLevelId, summary.TopicId))
+        {
+            return null;
+        }
+
+        return summary;
     }
 
     /// <summary>Per-(tenant, grade) effective-policy cache key; <c>none</c> is the sentinel for a

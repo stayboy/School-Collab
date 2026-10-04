@@ -13,12 +13,15 @@ using Moq;
 using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Features;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Api.Tests.Unit;
 
@@ -57,6 +60,15 @@ public class SignOffRoutesTests
         builder.WebHost.UseTestServer();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
         builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
+        // Harness completion (round teacher-scope-auth rework): `GET /assignments/{id}/sign-off-statuses`
+        // is an id-addressed reader read and now applies the [P2-2] scope gate, so it resolves the
+        // caller, their taught set and the assignment detail. This host (FEATURE:DisableOIDCAuth ON,
+        // role-less) never had to register them, so the request failed with "No service for type
+        // 'ICurrentUser' has been registered" instead of exercising the route. The three registrations
+        // below supply that dependency surface; no assertion in this file changed.
+        builder.Services.AddSingleton<ICurrentUser, TestAuthCurrentUser>();
+        builder.Services.AddSingleton<ITeacherScopeProvider, UnrestrictedScopeProvider>();
+        builder.Services.AddSingleton<IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>, StubAssignmentDetailHandler>();
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignOffStateDto>());
@@ -248,5 +260,43 @@ public class SignOffRoutesTests
     {
         public Task<string> ResolveConsentTextAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult("consent-text-from-resolver");
+    }
+
+    /// <summary>
+    /// The principal this host's requests carry: FEATURE:DisableOIDCAuth is ON and the minimal host
+    /// maps no authentication scheme, so there is no role and no <c>teacher_id</c> claim —
+    /// <see cref="ICurrentUser.TeacherId"/> is null, matching the TestAuth default posture.
+    /// </summary>
+    private sealed class TestAuthCurrentUser : ICurrentUser
+    {
+        public bool IsAuthenticated => true;
+        public Guid? TeacherId => null;
+        public TenantContext CurrentTenant => new(Guid.Empty, "Test", TenantType.School);
+    }
+
+    /// <summary>
+    /// [P1-4] the posture of a principal carrying no recognised role: tenant-wide (this host's
+    /// caller is role-less, so <c>AssignmentScopeResolver</c> never consults the port — the
+    /// unrestricted default is the honest value here, never a scope crafted to suit an assertion).
+    /// </summary>
+    private sealed class UnrestrictedScopeProvider : ITeacherScopeProvider
+    {
+        public Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(TeacherScope.Unrestricted);
+    }
+
+    /// <summary>
+    /// The [P2-2] gate's detail read for this host. Its premise is that the assignment the route is
+    /// asked about exists — the sign-off list handler answers that same id with a row — so the
+    /// honest stand-in is "the row exists", exactly as the production detail read answers for a
+    /// caller whose scope is unrestricted.
+    /// </summary>
+    private sealed class StubAssignmentDetailHandler : IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>
+    {
+        public Task<AssignmentSummaryDto?> HandleAsync(GetAssignmentByIdQuery query, CancellationToken ct = default) =>
+            Task.FromResult<AssignmentSummaryDto?>(new AssignmentSummaryDto(
+                query.Id, "Assignment", null, AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
+                TargetAudienceTypeDto.AllStudents, Guid.Empty, null, null, null, AssignmentStatusDto.Draft,
+                null, null, false, Guid.Empty, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
     }
 }
