@@ -5,8 +5,10 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace SchoolCollab.ArchitectureTests.Unit;
 
 /// <summary>
-/// Guards the one piece of the portal that the .NET build cannot see: its entries in
-/// <c>SchoolCollab.slnx</c>.
+/// Guards the portal's .NET-visible seams: its explicit entries in <c>SchoolCollab.slnx</c>
+/// (the .NET build cannot see Python files otherwise) and the durable facts recorded in
+/// <c>documents/specs/teachers-ward-portal-prefab-plan.md</c> that are only enforceable by
+/// source inspection.
 ///
 /// <para>
 /// The portal projects (<c>src/SchoolCollab.Portals/</c> and <c>src/SchoolCollab.AuthPortal/</c>)
@@ -68,6 +70,14 @@ public class PortalsSolutionItemsArchitectureTests
     private static readonly string[] AllPortalSolutionFolderNodes = ParsePortalSolutionFolderNodes();
 
     private static readonly string[] PortalSourceFiles = EnumeratePortalSourceFiles();
+
+    private static readonly string SpecPath = Path.Combine(RepoRoot, "documents", "specs", "teachers-ward-portal-prefab-plan.md");
+
+    private static readonly string Spec = File.ReadAllText(SpecPath);
+
+    /// <summary>The T1 decision row in the teacher-portal grill table. Scoped so an assertion
+    /// about the flat-module fact cannot be satisfied by the Date line or a different section.</summary>
+    private static readonly string TeacherPortalT1Row = ExtractTeacherPortalT1Row(Spec);
 
     [TestMethod]
     public void EveryPortalFile_IsListedInTheSolution()
@@ -151,6 +161,67 @@ public class PortalsSolutionItemsArchitectureTests
                 "/src/SchoolCollab.Portals/views/",
             ],
             "each portal's solution folder nodes should mirror its package layout.");
+    }
+
+    /// <summary>The open-questions section where the landed CI job is recorded. Scoped so the
+    /// Date line cannot satisfy the job assertion.</summary>
+    private static readonly string OpenQuestionsSection = ExtractOpenQuestionsSection(Spec);
+
+    [TestMethod]
+    public void TeacherPortalSpec_RecordsFlatModule()
+    {
+        // Scoped to the T1 row so the Date line (which mentions the same phrase) cannot satisfy it.
+        TeacherPortalT1Row.Should().Contain("views/teacher.py",
+            "the T1 row must record the flat teacher module path in {0}", SpecPath);
+
+        // Independently checkable disk facts: the flat module exists and the package form does not.
+        File.Exists(Path.Combine(RepoRoot, "src/SchoolCollab.Portals/views/teacher.py"))
+            .Should().BeTrue("the flat module src/SchoolCollab.Portals/views/teacher.py must exist on disk");
+
+        Directory.Exists(Path.Combine(RepoRoot, "src/SchoolCollab.Portals/views/teacher"))
+            .Should().BeFalse("the teacher view must not be a package at src/SchoolCollab.Portals/views/teacher/");
+    }
+
+    [TestMethod]
+    public void TeacherPortalSpec_RecordsCiJobLanded()
+    {
+        // Assert the durable job identifier inside §7, not the surrounding prose, so edits like
+        // inserting "CI" do not flip the guard while the fact remains true. The Date line is
+        // deliberately excluded so the assertion cannot be satisfied by a changelog entry.
+        OpenQuestionsSection.Should().Contain("portals-python",
+            "the open-questions section must record the landed portal CI job id in {0}", SpecPath);
+
+        // Hermetic cross-check against the workflow file that declares the job.
+        var workflowPath = Path.Combine(RepoRoot, ".github/workflows/ci.yml");
+        File.ReadAllText(workflowPath)
+            .Should().Contain("portals-python:",
+                "the portals-python job must still be declared in {0}", workflowPath);
+    }
+
+    private static string ExtractTeacherPortalT1Row(string spec)
+    {
+        // Match the grill-me table row whose Branch is T1; capture everything from | T1 | to the
+        // end of that line (the row may contain `views/teacher/` inside a negation).
+        var match = Regex.Match(spec, @"\|\s*T1\s*\|.*?(\r?\n)", RegexOptions.Singleline);
+
+        match.Success.Should().BeTrue(
+            "the teacher-portal T1 decision row must exist in {0}", SpecPath);
+
+        return match.Value;
+    }
+
+    private static string ExtractOpenQuestionsSection(string spec)
+    {
+        // Capture the "Open questions → resolved / remaining" section to the end of the file,
+        // so the CI-job assertion is scoped to the durable record and not the Date line.
+        // Deliberately `\d+` for the section number (the AssignmentAuthoringSpecGapsTests precedent):
+        // a renumber must not redden six tests for a docs-only edit.
+        var match = Regex.Match(spec, @"^## \d+\.\s+Open questions.*$", RegexOptions.Multiline);
+
+        match.Success.Should().BeTrue(
+            "the open-questions section (§7) must exist in {0}", SpecPath);
+
+        return spec[match.Index..];
     }
 
     private static string ReadSolutionFile() => File.ReadAllText(Path.Combine(RepoRoot, "SchoolCollab.slnx"));

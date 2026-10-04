@@ -118,6 +118,7 @@ instead of duplicating it.
 | Coded values domain | `.github/skills/coded-values/SKILL.md` |
 | Azure AI OpenAI .NET | `.github/skills/azure-ai-openai-dotnet/SKILL.md` |
 | **.NET/C# best practices (all C# changes)** | `.github/copilot/rules/dotnet-best-practices.md` + `.github/skills/dotnet-best-practices/SKILL.md` |
+| **Portal (Python/FastAPI + Prefab UI)** | `documents/solution/portals-service-client-pattern.md` (pytest / `httpx.MockTransport` / FastAPI `TestClient` story, `.slnx` solution-items tripwire). The C# **code** rules do not apply to Python source in `src/SchoolCollab.Portals/` or `src/SchoolCollab.AuthPortal/`; their `.slnx` solution items are policed by .NET-side guards, and so is the auth portal's AppHost wiring. |
 
 **Default rule for C#:** For **any** change that touches a `.cs` or `.razor` code-behind, read
 `.github/copilot/rules/dotnet-best-practices.md` (and its backing skill
