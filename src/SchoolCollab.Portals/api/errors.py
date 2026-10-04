@@ -44,3 +44,19 @@ class ApiResponseError(PortalApiError):
         self.base_url = base_url
         self.detail = detail
         super().__init__(f"{service} at {base_url} returned an unusable response: {detail}")
+
+
+class MissingConfigurationError(PortalApiError):
+    """A configuration value the portal needs was not supplied, or is unusable.
+
+    Distinct from :class:`ServiceDiscoveryError`, which reports a *service base URL* the
+    AppHost did not inject and carries the discovery-shaped environment for diagnostics.
+    This one names a single value the portal must have — the first is the dev-bypass
+    teacher id the teacher surface's review-queue read requires — and why its absence
+    blocks the call, so the route can say so instead of rendering an empty result.
+    """
+
+    def __init__(self, key: str, detail: str) -> None:
+        self.key = key
+        self.detail = detail
+        super().__init__(f"{key} cannot be used: {detail}")

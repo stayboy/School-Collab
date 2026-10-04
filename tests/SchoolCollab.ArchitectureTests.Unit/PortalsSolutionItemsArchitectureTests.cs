@@ -123,8 +123,10 @@ public class PortalsSolutionItemsArchitectureTests
                 "src/SchoolCollab.Portals/tests/test_app_routes.py",
                 "src/SchoolCollab.Portals/tests/test_assignments_api_client.py",
                 "src/SchoolCollab.Portals/tests/test_service_discovery.py",
+                "src/SchoolCollab.Portals/tests/test_teacher_views.py",
                 "src/SchoolCollab.Portals/uv.lock",
                 "src/SchoolCollab.Portals/views/__init__.py",
+                "src/SchoolCollab.Portals/views/teacher.py",
                 "src/SchoolCollab.Portals/views/ward.py",
             ],
             "these are the reviewed portal solution items.");
