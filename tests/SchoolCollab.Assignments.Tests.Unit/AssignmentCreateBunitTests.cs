@@ -185,29 +185,127 @@ public class AssignmentCreateBunitTests : BunitContext
     private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<CreatePage> cut, string id) =>
         cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
+    /// <summary>Renders the create page and waits until the initial picker load has populated
+    /// the grade options, mirroring the sibling suite's load-complete settle
+    /// (<c>AssignmentAuthoringBunitTests.cs:1392-1393</c>). Create-mode <c>_loading</c> is false
+    /// from the start, so a rendered form is not evidence the load finished; this closes the
+    /// residual window before the first grade pick.
+    /// </summary>
+    private IRenderedComponent<CreatePage> RenderCreatePage()
+    {
+        var cut = Render<CreatePage>();
+        cut.WaitForAssertion(() =>
+            cut.FindAll("#authoring-basics-grade fluent-option").Should().NotBeEmpty(
+                "the initial grade-level load must finish before the first pick"),
+            TimeSpan.FromSeconds(5));
+        return cut;
+    }
+
     /// <summary>Drives a picker through its real <c>SelectedOptionChanged</c> callback (the
-    /// AssignmentPolicyFieldEditDialogTests pattern) — never a raw DOM event.</summary>
-    private static Task SelectAsync(IRenderedComponent<CreatePage> cut, string pickerId, Guid value, string label) =>
-        cut.InvokeAsync(() => Picker(cut, pickerId).SelectedOptionChanged.InvokeAsync(
-            new Authoring.PickerOption(value.ToString(), label)));
+    /// AssignmentPolicyFieldEditDialogTests pattern) — never a raw DOM event. Each pick is
+    /// followed by a wait-for-assertion so the bound state is observably applied before the next
+    /// interaction; this closes the FR-58 subject-reload race that otherwise lets a late cascade
+    /// clobber a just-set value.</summary>
+    private static async Task SelectAsync(IRenderedComponent<CreatePage> cut, string pickerId, Guid value, string label)
+    {
+        var option = new Authoring.PickerOption(value.ToString(), label);
+        await cut.InvokeAsync(() => Picker(cut, pickerId).SelectedOptionChanged.InvokeAsync(option));
+
+        cut.WaitForAssertion(() =>
+        {
+            var picker = Picker(cut, pickerId);
+            picker.SelectedOption.Should().NotBeNull($"picker {pickerId} should have a selected option after picking {label}");
+            picker.SelectedOption!.Value.Should().Be(value.ToString(),
+                $"picker {pickerId} should reflect the picked value {value}");
+        }, TimeSpan.FromSeconds(5));
+    }
 
     /// <summary>Selects the primary grade. The picker binds <c>SelectedOptionChanged</c>
     /// explicitly (it carries the FR-58 subject reload plus the signature re-resolve), so the
-    /// test drives that same callback — exactly what the select raises for a real user pick.</summary>
-    private static Task SelectGradeAsync(IRenderedComponent<CreatePage> cut, Guid value, string label) =>
-        SelectAsync(cut, "authoring-basics-grade", value, label);
+    /// test drives that same callback — exactly what the select raises for a real user pick. After
+    /// the grade picker reflects the value we also wait for the subject list to finish loading,
+    /// confirming the grade-dependent cascade has settled.</summary>
+    private static async Task SelectGradeAsync(IRenderedComponent<CreatePage> cut, Guid value, string label)
+    {
+        await SelectAsync(cut, "authoring-basics-grade", value, label);
+
+        cut.WaitForAssertion(() =>
+        {
+            var subjectPicker = Picker(cut, "authoring-basics-subject");
+            subjectPicker.Items.Should().NotBeNullOrEmpty(
+                "the FR-58 subject reload for the selected grade should have landed");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>R2 (TGT-2/TGT-13): ticks the compartment's "Everyone" toggle — the shortest route
+    /// to a valid authored target set on the create surface. The wait confirms the audience
+    /// cascade has settled before the next step.</summary>
+    private static async Task SelectEveryoneAsync(IRenderedComponent<CreatePage> cut)
+    {
+        await cut.InvokeAsync(() => cut.FindComponents<FluentCheckbox>()
+            .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance.ValueChanged.InvokeAsync(true));
+
+        cut.WaitForAssertion(() =>
+        {
+            var everyone = cut.FindComponents<FluentCheckbox>()
+                .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance;
+            everyone.Value.Should().BeTrue("the Everyone audience toggle should be checked");
+        }, TimeSpan.FromSeconds(5));
+    }
 
     /// <summary>Fills the Basics title through the bound text field's own callback — the create
     /// guards require a non-empty title before anything is posted.</summary>
-    /// <summary>R2 (TGT-2/TGT-13): ticks the compartment's "Everyone" toggle — the shortest route
-    /// to a valid authored target set on the create surface.</summary>
-    private static Task SelectEveryoneAsync(IRenderedComponent<CreatePage> cut) =>
-        cut.InvokeAsync(() => cut.FindComponents<FluentCheckbox>()
-            .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance.ValueChanged.InvokeAsync(true));
-
-    private static Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title) =>
-        cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
+    private static async Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title)
+    {
+        await cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
             .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
+
+        cut.WaitForAssertion(() =>
+        {
+            var field = cut.FindComponents<FluentTextField>()
+                .Single(f => f.Instance.Id == "authoring-basics-title").Instance;
+            field.Value.Should().Be(title, "the title field should reflect the typed value");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>Sets the guardian-signature checkbox and waits until the bound value is reflected,
+    /// closing the same late-cascade window as the other settled helpers.</summary>
+    private static async Task SetSignatureAsync(IRenderedComponent<CreatePage> cut, bool value)
+    {
+        await cut.InvokeAsync(() => SignatureCheckbox(cut).ValueChanged.InvokeAsync(value));
+
+        cut.WaitForAssertion(() =>
+        {
+            SignatureCheckbox(cut).Value.Should().Be(value,
+                $"the signature checkbox should reflect the author override {value}");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>Permanent diagnostic wrapper mandated by the flake-fix skill: if the primary action
+    /// never posts, dump the page's guard state so a recurrence names the bailed guard instead of
+    /// a bare <c>NotBeNull</c>.</summary>
+    private static void AssertCapturedBodyNotNull(string? capturedBody, IRenderedComponent<CreatePage> cut, List<string> createLogs)
+    {
+        if (capturedBody is not null) return;
+
+        var authoring = cut.FindComponents<Authoring>().FirstOrDefault()?.Instance;
+        var error = ReadPrivateField<string?>(authoring, "_error") ?? "(none)";
+        var subject = ReadPrivateField<Authoring.PickerOption?>(authoring, "_selectedSubject");
+        var subjectText = subject is not null ? $"{subject.Label} ({subject.Value})" : "(none)";
+
+        Assert.Fail(
+            "Expected capturedBody not to be <null> because the primary action saves the draft, " +
+            $"but the guard bailed. Page error: '{error}'; selected subject: {subjectText}; " +
+            $"create logs: [{string.Join("; ", createLogs)}].");
+    }
+
+    private static T? ReadPrivateField<T>(object? instance, string fieldName)
+    {
+        if (instance is null) return default;
+        var field = instance.GetType().GetField(fieldName,
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return field is null ? default : (T?)field.GetValue(instance);
+    }
 
     /// <summary>The D2 Mandatory-lock tooltip copy, bound once so the assertion and the
     /// component cannot drift silently (the <c>QuestionGenerationGate.DisabledTooltip</c>
@@ -364,7 +462,7 @@ public class AssignmentCreateBunitTests : BunitContext
         SetupSignatureDefault(SignatureRequirementMode.Disabled); // the init no-grade resolve
         SetupSubjects(GradeFiveId);
 
-        var cut = Render<CreatePage>();
+        var cut = RenderCreatePage();
         cut.WaitForAssertion(() => SignatureCheckbox(cut).Value.Should().BeFalse());
 
         await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
@@ -390,7 +488,7 @@ public class AssignmentCreateBunitTests : BunitContext
         SetupSignatureDefault(SignatureRequirementMode.Mandatory);
         SetupSubjects(GradeFiveId);
 
-        var cut = Render<CreatePage>();
+        var cut = RenderCreatePage();
 
         await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
 
@@ -416,7 +514,7 @@ public class AssignmentCreateBunitTests : BunitContext
         await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
         cut.Find("#authoring-primary-action").Click();
 
-        cut.WaitForAssertion(() => capturedBody.Should().NotBeNull("the primary action saves the draft"),
+        cut.WaitForAssertion(() => AssertCapturedBodyNotNull(capturedBody, cut, _createLogs),
             TimeSpan.FromSeconds(5));
         capturedBody.Should().Contain("\"requiresSignature\":true",
             "the locked value is what the author submits — the persisted assignment keeps the policy snapshot");
@@ -432,12 +530,12 @@ public class AssignmentCreateBunitTests : BunitContext
         SetupSignatureDefault(SignatureRequirementMode.Optional);
         SetupSubjects(GradeFiveId);
 
-        var cut = Render<CreatePage>();
+        var cut = RenderCreatePage();
 
         await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
 
         // The author overrides the pre-filled true back to false.
-        await cut.InvokeAsync(() => SignatureCheckbox(cut).ValueChanged.InvokeAsync(false));
+        await SetSignatureAsync(cut, false);
 
         string? capturedBody = null;
         _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
@@ -453,7 +551,7 @@ public class AssignmentCreateBunitTests : BunitContext
         await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
         cut.Find("#authoring-primary-action").Click();
 
-        cut.WaitForAssertion(() => capturedBody.Should().NotBeNull("the primary action saves the draft"),
+        cut.WaitForAssertion(() => AssertCapturedBodyNotNull(capturedBody, cut, _createLogs),
             TimeSpan.FromSeconds(5));
         capturedBody.Should().Contain("\"requiresSignature\":false",
             "the author's override is submitted in the create request");
