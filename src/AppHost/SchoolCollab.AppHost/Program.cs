@@ -175,6 +175,21 @@ var disableKeycloakLoginUi = builder.AddParameter("feature-flag-disable-keycloak
 // AddAuthAndTenancy.
 var disableOidcAuth = builder.AddParameter("feature-flag-disable-oidc-auth");
 
+// Dev-bypass teacher identity (round `dev-teacher-identity-wiring`): the fixed "Dev Teacher"
+// row id the MigrationService's DevIdentitySeeder inserts inside the "Dev School" tenant
+// (…0003 in tenant …0002 — EXACTLY the value the committed realm file's `teacher_id` protocol
+// mapper emits, so a real dev login and the dev bypass name the same backing row).
+// The claim emission already exists (TestAuthHandler omits `teacher_id` while
+// TestAuthHandlerOptions.TeacherId is Guid.Empty — the CI default); what was missing was the
+// value reaching the hosts. Same two-value posture as feature-flag-disable-oidc-auth above:
+// the committed base default is EMPTY (fail-closed — a publish must never bake a dev identity
+// into a manifest), and the real Guid is committed in appsettings.Development.json. Fanned
+// below to exactly two consumers — `assignments-api` (TestAuth__TeacherId, read by
+// AssignmentDevTeacherIdentity) and `portals` (PORTAL_DEV_TEACHER_ID, read by the ward
+// portal's resolve_dev_teacher_id) — so the claim and the portal's wire fallback cannot
+// disagree. See documents/configuration.md §2/§4 and documents/specs/startup-flag-governance.md.
+var devTeacherId = builder.AddParameter("dev-teacher-id");
+
 // Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist — the redirect
 // targets a one-time handshake code may be minted for. ONE parameter holds the browser-facing
 // apps' callbacks (the four Blazor hosts' /signin-handshake route, in both launch-profile
@@ -334,6 +349,10 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
     .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
     .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+    // The dev bypass's `teacher_id` claim value (D5 of round `teacher-scope-auth`; here the
+    // value finally reaches the host). Empty in a non-Development run, so
+    // TestAuthHandlerOptions.TeacherId stays Guid.Empty (claim-less).
+    .WithEnvironment("TestAuth__TeacherId", devTeacherId)
     .WithEnvironment("Smtp__Host", smtpHost)
     .WithEnvironment("Smtp__Port", smtpPort)
     .WithEnvironment("Smtp__User", smtpUser)
@@ -542,6 +561,11 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
 builder.AddUvicornApp("portals", "..\\..\\SchoolCollab.Portals", "app:app")
     .WithUv()
     .WithReference(assignmentsApi)
+    // The portal's dev-bypass teacher id (round `portal-teacher-surface` D5 seam): the SAME
+    // identity the assignments-api claim above carries, so the queue's `teacherId` wire
+    // fallback and the dev principal agree. Unset/empty makes the portal refuse loudly
+    // (MissingConfigurationError) instead of answering a fake empty queue.
+    .WithEnvironment("PORTAL_DEV_TEACHER_ID", devTeacherId)
     .WaitFor(assignmentsApi);
 
 builder.Build().Run();

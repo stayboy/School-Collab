@@ -31,9 +31,19 @@ public static class AssignmentDevTeacherIdentity
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
+        // Read the RAW string rather than `GetValue<Guid>(key, Guid.Empty)`: the fallback of a
+        // typed GetValue applies only when the key is absent (or null), so a PRESENT empty string
+        // goes through type conversion and throws ("Failed to convert configuration value '' … to
+        // type 'System.Guid'"). An empty value is exactly what the AppHost's fail-closed
+        // `dev-teacher-id` base default fans in as TestAuth__TeacherId, so the blank check must be
+        // here — never a crash, and never a claim for a teacher the value does not name.
         services.Configure<TestAuthHandlerOptions>(
             TestAuthExtensions.TestAuthScheme,
-            options => options.TeacherId = configuration.GetValue(TeacherIdConfigKey, Guid.Empty));
+            options =>
+            {
+                var raw = configuration[TeacherIdConfigKey];
+                options.TeacherId = string.IsNullOrWhiteSpace(raw) ? Guid.Empty : Guid.Parse(raw);
+            });
 
         return services;
     }
