@@ -11,8 +11,8 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) |
 |---|---|---|
 | Orchestrator | `ollama-cloud/glm-5.3-flash` (owner 2026-09-22, **Option A**) | `cline-pass/glm-5.3` |
-| Worker | `ollama-cloud/deepseek-v4.1-flash` (owner 2026-09-22, **Option A**) | `cline-pass/deepseek-v4-flash` |
-| Reviewer | `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | `cline-pass/deepseek-v4.1-flash` |
+| Worker | `ollama-cloud/deepseek-v4.1-flash` (owner 2026-09-22, **Option A**) | `cline-pass/deepseek-v4.1-flash` (owner 2026-10-05 **latest**, lean rounds — supersedes the same day's interim `glm-5.3-flash` ruling, which itself superseded `deepseek-v4-flash`; full rounds: `cline-pass/deepseek-v4-flash`) |
+| Reviewer | `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | `cline-pass/mimo-v2.6-flash` (owner 2026-10-05) |
 | Plan reviewer (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
 | Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22 — pinned; **under Option A this coincides with the Tier-3 reviewer, so an escalated rework and its verifier share a model — the light tier already does this by design, and the owner has not ruled**); otherwise the round's reviewer model | the round's reviewer model |
@@ -35,7 +35,12 @@ Clinepass equivalents: light worker `cline-pass/deepseek-v4.1-flash`, light
 orchestrator/reviewer `cline-pass/glm-5.3-flash` (ollama profile:
 `ollama-cloud/deepseek-v4.1-flash` and `ollama-cloud/glm-5.3-flash`).
 Tier 3 **lean** uses the standard Tier-3 ladder unchanged — only the
-accept-run is skipped (SKILL.md § "Tier 3 lean").
+accept-run is skipped (SKILL.md § "Tier 3 lean") — **with the owner rulings of
+2026-10-05 (latest wins): the clinepass lean worker is `cline-pass/deepseek-v4.1-flash`**
+(superseding the same day's interim `glm-5.3-flash` ruling, which itself superseded
+`deepseek-v4-flash`), **and the clinepass reviewer — plan-review and diff-review
+alike — is `cline-pass/mimo-v2.6-flash`**; the verifier stays distinct from the
+implementer.
 
 **Solo rule:** a solo round is ONE agent doing everything — planner, implementer,
 and its own acceptance check — the same single-agent shape as a light round's

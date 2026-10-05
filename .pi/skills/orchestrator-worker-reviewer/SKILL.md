@@ -100,7 +100,7 @@ catch an unworkable premise.
 the plan gate runs on the round's **higher model** — `ollama/glm-5.3:cloud` on the
 pi profile, `cline-pass/glm-5.3` on clinepass — because it is the
 highest-leverage review in the round. On **Tier 3
-lean** it runs on **`ollama-cloud/kimi-k2.7-code`** — **the diff reviewer's model**: the plan gate must **never** share the worker's model, because the plan is the round's most load-bearing artifact and its reviewer must not be its implementer. Lean therefore runs the plan gate and the diff review on one independent model (`kimi-k2.7-code`; clinepass: `cline-pass/deepseek-v4.1-flash`) facing a `deepseek-v4.1-flash` worker. Both use
+lean** it runs on **`ollama-cloud/kimi-k2.7-code`** — **the diff reviewer's model**: the plan gate must **never** share the worker's model, because the plan is the round's most load-bearing artifact and its reviewer must not be its implementer. Lean therefore runs the plan gate and the diff review on one independent model (`kimi-k2.7-code`; clinepass: `cline-pass/mimo-v2.6-flash`) facing a `deepseek-v4.1-flash` worker (`cline-pass/deepseek-v4.1-flash` on clinepass — owner 2026-10-05, latest). Both use
 the read-only `reviewer` shell; a user-named model still wins (precedence item 1).
 
 **Hand rule: lean drops the accept-run, never the plan-run.** The
@@ -149,8 +149,8 @@ verbatim (the `ollama*` ids have drifted historically — verify, don't assume).
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) | Tiers |
 |---|---|---|---|
 | Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` | 3 only |
-| Worker | `ollama-cloud/deepseek-v4.1-flash` | `cline-pass/deepseek-v4-flash` | 1–3 |
-| Reviewer | `ollama-cloud/kimi-k2.7-code` (both tiers) | `cline-pass/deepseek-v4.1-flash` | 2–3 |
+| Worker | `ollama-cloud/deepseek-v4.1-flash` | `cline-pass/deepseek-v4.1-flash` (lean, owner 2026-10-05 **latest** — supersedes the same day's `glm-5.3-flash` interim; full: `cline-pass/deepseek-v4-flash`) | 1–3 |
+| Reviewer | `ollama-cloud/kimi-k2.7-code` (both tiers) | `cline-pass/mimo-v2.6-flash` (owner 2026-10-05) | 2–3 |
 | **Plan reviewer** (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 3 full only; **lean rounds run `kimi-k2.7-code` — the diff reviewer's model; the plan gate must never share the worker's model** |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
 | Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (pinned — this is also the Tier-3 reviewer, so an escalated rework and its verifier share a model, as the light tier already does by design); otherwise the round's reviewer model | the round's reviewer model | on block |
