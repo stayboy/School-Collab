@@ -91,6 +91,41 @@ Workflow:
   `awesome-skills`, `kevintsengtw/*`, etc.) without an explicit user
   request.
 
+### Installed skills are read-only — refresh, never patch
+
+Skill folders installed outside this repo (e.g.
+`C:\Users\skwar\.pi\agent\pi-hermes-memory\skills\grill-me`) are **vendored
+copies of an external source** — provenance and the upstream URL live in the
+frontmatter `source:` field. Never edit them locally: a local patch drifts
+from upstream and silently changes how the skill behaves in later sessions —
+exactly how `grill-me` got polluted before its 2026-10-05 refresh from
+`mattpocock/skills`.
+
+- **Wrong or stale skill?** Re-fetch from the upstream URL in `source:`, bump
+  `version` / `updated` — do not patch in place.
+- **Enforcement (deny-ACL):** the skill file carries a deny on write `(W)`,
+  its folder a deny on write/delete `(W,D,DC)`, so neither overwrite nor
+  delete-and-recreate works. Unlock → refresh → re-apply:
+  ```powershell
+  icacls $file  /remove:d $env:USERNAME; icacls $folder /remove:d $env:USERNAME
+  # ...re-fetch from upstream...
+  icacls $file  /deny "${env:USERNAME}:(W)"
+  icacls $folder /deny "${env:USERNAME}:(W,D,DC)"
+  ```
+- **Cost to the author — updating to the latest upstream is now deliberately
+  awkward.** The skill can no longer be refreshed by simply editing the file:
+  every update must go through the unlock → re-fetch → re-lock sequence above,
+  or all writes fail with *Access denied*. Budget two extra `icacls` commands
+  per refresh; when several skills need updating, run all the unlocks in one
+  pass, re-fetch each, then re-apply every deny afterwards. If this friction
+  turns out to outweigh the protection, drop the ACL and rely on the rule
+  above alone.
+- The ACL is friction, not a security boundary — agents run as the file's
+  owner and can re-grant themselves write. Treat the rule above as the
+  primary guard; the ACL only makes accidental edits fail loudly.
+- Repo-authored skills under `.github/skills/` are ordinary repo content —
+  change them via branch + PR like any other file.
+
 ---
 
 ## Specialty instructions
