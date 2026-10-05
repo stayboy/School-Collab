@@ -352,10 +352,10 @@ def test_every_teacher_route_presents_the_session_header(
     assert [r.url.path for r in auth_seen] == [f"/auth/session/{SESSION_ID}"]
 
 
-def test_the_ward_route_presents_no_session_header(
+def test_the_root_route_presents_no_session_header(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only the teacher surface threads the session — the ward route is untouched (D19's scope)."""
+    """Only the teacher surface threads the session — ``/`` reads no assignments client (D19)."""
     _no_sign_in_target(monkeypatch)
     assignments_seen: list[httpx.Request] = []
 
@@ -363,11 +363,12 @@ def test_the_ward_route_presents_no_session_header(
         assignments=_assignments_transport(assignments_seen),
         auth=_auth_transport([]),
     ) as client:
-        response = client.get("/", headers=_session_headers())
+        response = client.get("/", headers=_session_headers(), follow_redirects=False)
 
-    assert response.status_code == 200
-    assert assignments_seen
-    assert all(_presented_session(request) is None for request in assignments_seen)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/teacher"
+    # No assignments call at all, so there is no call that could present a session header.
+    assert assignments_seen == []
 
 
 # ── the two dead-session states vs. a degraded read ────────────────────────────────
@@ -537,16 +538,17 @@ def test_the_gate_does_not_act_without_a_configured_sign_in_target(
     assert "auth-portal" not in response.text
 
 
-def test_the_ward_route_is_never_gated(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Rule 3 is scoped to the teacher surface: the ward route keeps rendering."""
+def test_the_root_route_is_never_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rule 3 is scoped to the teacher surface: ``/`` still answers its own redirect."""
     monkeypatch.setenv(portal_app.LOGIN_URL_KEY, SIGN_IN_URL)
     monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
 
     with _portal(assignments=_assignments_transport([])) as client:
         response = client.get("/", follow_redirects=False)
 
-    assert response.status_code == 200
-    assert "Ward" in response.text
+    assert response.status_code == 302
+    # /teacher, never the configured sign-in target: the gate did not act on this path.
+    assert response.headers["location"] == "/teacher"
 
 
 def test_the_sign_in_link_falls_back_to_the_origin_the_browser_reached(

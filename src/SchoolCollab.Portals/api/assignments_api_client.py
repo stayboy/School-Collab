@@ -21,8 +21,8 @@ the client, so no surface can acquire it by accident.
 
 Adding an endpoint is one method. A read returns a parsed result::
 
-    async def list_ward_assignments(self, student_id: str) -> FetchResult:
-        status, payload = await self._get_json(f"/{student_id}/assignments")
+    async def list_assignments(self, headers: Mapping[str, str] | None = None) -> FetchResult:
+        status, payload = await self._get_json("/assignments", headers=headers)
         ...
 
 and a write returns the status it was answered with::

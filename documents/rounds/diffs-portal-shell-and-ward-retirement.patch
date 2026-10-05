@@ -1,0 +1,1054 @@
+diff --git a/SchoolCollab.slnx b/SchoolCollab.slnx
+index 013e28c9..97f22dad 100644
+--- a/SchoolCollab.slnx
++++ b/SchoolCollab.slnx
+@@ -75,11 +75,12 @@
+     <File Path="src/SchoolCollab.Portals/tests/test_teacher_grade.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_teacher_session.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_teacher_views.py" />
++    <File Path="src/SchoolCollab.Portals/tests/test_views_shell.py" />
+   </Folder>
+   <Folder Name="/src/SchoolCollab.Portals/views/">
+     <File Path="src/SchoolCollab.Portals/views/__init__.py" />
++    <File Path="src/SchoolCollab.Portals/views/shell.py" />
+     <File Path="src/SchoolCollab.Portals/views/teacher.py" />
+-    <File Path="src/SchoolCollab.Portals/views/ward.py" />
+   </Folder>
+   <Folder Name="/src/ServiceDefaults/">
+     <Project Path="src/ServiceDefaults/SchoolCollab.ServiceDefaults/SchoolCollab.ServiceDefaults.csproj" />
+diff --git a/src/SchoolCollab.Portals/app.py b/src/SchoolCollab.Portals/app.py
+index 78c886d5..f79f4feb 100644
+--- a/src/SchoolCollab.Portals/app.py
++++ b/src/SchoolCollab.Portals/app.py
+@@ -1,8 +1,8 @@
+-"""Portal — the ward and teacher surfaces over the existing assignments-api.
++"""Portal — the teacher surface over the existing assignments-api.
+ 
+ Pure HTTP consumer of the existing assignments-api: no backend changes, no
+ direct database access. Hosted solely by the Aspire AppHost through
+-``AddUvicornApp`` (see documents/specs/teachers-ward-portal-prefab-plan.md, Q5).
++``AddUvicornApp``.
+ 
+ This module is deliberately thin — it owns only the FastAPI app, the
+ service-call dependency, and the routes:
+@@ -16,8 +16,8 @@ handlers never block the event loop.
+ See ``documents/solution/portals-service-client-pattern.md`` for the pattern.
+ 
+ Routes:
+-    GET /       -> the ward view, rendered by Prefab UI from a LIVE
+-                   assignments-api call made at request time.
++    GET /       -> a 302 redirect to the teacher assignment list, which is the
++                   only surface this portal serves.
+     GET /teacher -> the teacher assignment list, the entry point of the
+                    read-only teacher drill-down.
+     GET /teacher/assignments/{assignmentId} -> that assignment's review queue.
+@@ -108,7 +108,6 @@ from views.teacher import (
+     session_card_code,
+     submission_path,
+ )
+-from views.ward import build_error_view, build_ward_view
+ 
+ logger = logging.getLogger("portals")
+ 
+@@ -410,10 +409,9 @@ class TeacherSession:
+     """One request's portal-session outcome (D19): the session id and the D18 identity as data.
+ 
+     ``session_id`` is the value the gate presents as ``X-Portal-Session`` on every
+-    assignments-api call — so a view never sees a header, and the ward route can never acquire
+-    one. ``data`` is the claim set the auth service returned, rendered as data and never as a
+-    credential (AC11). On rule 2 (no cookie at all) both are absent and the routes behave exactly
+-    as they did before this round.
++    assignments-api call — so a view never sees a header. ``data`` is the claim set the auth
++    service returned, rendered as data and never as a credential (AC11). On rule 2 (no cookie at
++    all) both are absent and the routes behave exactly as they did before this round.
+     """
+ 
+     session_id: str | None = None
+@@ -579,7 +577,7 @@ async def require_teacher_session(
+     sent (the property above is empty). The dev id is never this gate's trigger.
+ 
+     **Rule 3 — the redirect is target-keyed, not dev-id-keyed.** Scoped to the routes that depend
+-    on this gate (the ward route is untouched), and acting only when there is no cookie **and**
++    on this gate, and acting only when there is no cookie **and**
+     ``PORTALS_LOGIN_URL`` is configured: 302 to the auth portal's login page with this portal's
+     callback as ``return_uri``. With no configured target (the dev posture) the gate does not act
+     and the request continues under rule 2 — today's honest render, never an invented URL.
+@@ -748,41 +746,10 @@ def resolve_dev_teacher_id() -> str:
+     return raw
+ 
+ 
+-@app.get("/", response_class=HTMLResponse)
+-async def ward_view(
+-    request: Request,
+-    client: AssignmentsApiClient = Depends(get_assignments_client),
+-) -> HTMLResponse:
+-    """Render the ward view from a live assignments-api call."""
+-    state = _portal_state(request)
+-    try:
+-        result = await client.list_assignments()
+-    except PortalApiError as error:
+-        logger.error("ward view degraded: %s", error)
+-        state.last_fetch = {
+-            "error": str(error),
+-            "base_url": client.endpoint.base_url,
+-            "env_var": client.endpoint.env_var,
+-        }
+-        return HTMLResponse(build_error_view(error=error, endpoint=client.endpoint).html())
+-
+-    logger.info(
+-        "ward view: %s row(s) from %s (HTTP %s)",
+-        result.row_count,
+-        client.endpoint.base_url,
+-        result.status_code,
+-    )
+-    state.last_fetch = {
+-        "status": result.status_code,
+-        "row_count": result.row_count,
+-        "base_url": client.endpoint.base_url,
+-        "env_var": client.endpoint.env_var,
+-    }
+-    return HTMLResponse(
+-        build_ward_view(
+-            rows=result.rows, endpoint=client.endpoint, status_code=result.status_code
+-        ).html()
+-    )
++@app.get("/", include_in_schema=False)
++async def root() -> RedirectResponse:
++    """The portal's entry point: the teacher surface is now the only one it serves."""
++    return RedirectResponse(url="/teacher", status_code=302)
+ 
+ 
+ def _teacher_degraded(
+@@ -1138,11 +1105,11 @@ def _logout_card(
+ 
+ 
+ def _teacher_surface_for(path: str) -> str | None:
+-    """The teacher surface a pre-route failure belongs to; ``None`` for the ward page.
++    """The teacher surface a pre-route failure belongs to; ``None`` when the path is not one.
+ 
+     A service-discovery failure is raised while resolving the dependency, so it never
+     reaches a route body — this keeps the page it renders honest about which surface
+-    was asked for, instead of showing the ward page for a teacher URL.
++    was asked for, instead of showing one surface's degraded page for another's URL.
+     """
+     if path.rstrip("/") == "/teacher":
+         return "assignment list"
+@@ -1176,8 +1143,10 @@ async def on_discovery_error(request: Request, error: ServiceDiscoveryError) ->
+             ).html()
+         )
+ 
+-    logger.error("ward view degraded: %s", error)
+-    return HTMLResponse(build_error_view(error=error, endpoint=state.endpoint).html())
++    logger.error("portal degraded: %s", error)
++    return HTMLResponse(
++        build_teacher_error_view(error=error, endpoint=state.endpoint, surface="portal").html()
++    )
+ 
+ 
+ @app.get("/health")
+diff --git a/src/SchoolCollab.Portals/tests/test_app_routes.py b/src/SchoolCollab.Portals/tests/test_app_routes.py
+index d4e34ee4..487b95e7 100644
+--- a/src/SchoolCollab.Portals/tests/test_app_routes.py
++++ b/src/SchoolCollab.Portals/tests/test_app_routes.py
+@@ -1,9 +1,10 @@
+-"""Route-level tests for the thin app, wired to a stubbed transport.
++"""Route-level tests for the thin app's entry point and diagnostics.
+ 
+-Uses FastAPI's ``TestClient`` (no uvicorn) plus ``app.dependency_overrides`` —
+-container-free coverage of the whole chain route -> client -> Prefab render,
+-which is the Python analogue of the ar-24 decision to test rejection on a
+-TestServer instead of a running host.
++Uses FastAPI's ``TestClient`` (no uvicorn) with the real service-discovery path
++driven from the environment: the redirect at ``/``, the degraded teacher-list
++renders, and ``/health``. The teacher surface's own route -> client -> Prefab
++chain (``test_teacher_views.py``) drives it through a stubbed transport via
++``app.dependency_overrides`` instead.
+ 
+ ``TestClient`` stays synchronous even though the routes are async: it drives the
+ ASGI app on its own event loop, which is exactly what the async client needs.
+@@ -11,80 +12,45 @@ ASGI app on its own event loop, which is exactly what the async client needs.
+ 
+ from __future__ import annotations
+ 
+-from typing import Any
+-
+-import httpx
+ import pytest
+ from fastapi.testclient import TestClient
+ 
+ import app as portal_app
+-from api import AssignmentsApiClient, ServiceEndpoint
+-
+-STUB_ENDPOINT = ServiceEndpoint(
+-    service="assignments-api", base_url="http://assignments-api.test", env_var="test"
+-)
+-
+-
+-def _stub_override(rows: list[dict[str, Any]]):
+-    """A dependency override serving ``rows`` from a MockTransport.
+-
+-    Declared ``async`` so FastAPI builds the client inside the running event
+-    loop, and deliberately left unclosed — ``httpx.MockTransport`` holds no
+-    resources.
+-    """
+-    handler = lambda request: httpx.Response(200, json=rows)  # noqa: E731
+-
+-    async def override() -> AssignmentsApiClient:
+-        return AssignmentsApiClient(
+-            httpx.AsyncClient(transport=httpx.MockTransport(handler)), STUB_ENDPOINT
+-        )
+-
+-    return override
+-
+-
+-def test_ward_view_renders_rows_through_the_injected_client() -> None:
+-    portal_app.app.dependency_overrides[portal_app.get_assignments_client] = _stub_override(
+-        [
+-            {
+-                "id": "a1",
+-                "title": "Reading response",
+-                "status": "Published",
+-                "dueDate": "2026-10-01",
+-                "createdAt": "2026-09-21",
+-            }
+-        ]
+-    )
+-    try:
+-        with TestClient(portal_app.app) as client:
+-            response = client.get("/")
+-    finally:
+-        portal_app.app.dependency_overrides.clear()
+ 
+-    assert response.status_code == 200
+-    assert "Reading response" in response.text
+-    assert "1 assignments" in response.text
++
++def test_root_redirects_to_the_teacher_list() -> None:
++    """The portal's entry point is a redirect: the teacher list is the only surface (AC2)."""
++    with TestClient(portal_app.app) as client:
++        response = client.get("/", follow_redirects=False)
++
++    assert response.status_code == 302
++    assert response.headers["location"] == "/teacher"
+ 
+ 
+-def test_ward_view_renders_an_error_card_when_the_api_is_unreachable(
++def test_teacher_list_renders_an_error_card_when_the_api_is_unreachable(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
++    """Retargeted from the retired portal-root page: the teacher list's transport failure is a
++    page."""
+     monkeypatch.setenv("services__assignments-api__http__0", "http://127.0.0.1:9")
+ 
+     with TestClient(portal_app.app) as client:
+-        response = client.get("/")
++        response = client.get("/teacher")
+ 
+     assert response.status_code == 200  # a page, never a traceback
+-    assert "unavailable" in response.text
++    assert "assignment list degraded" in response.text
++    assert "ApiUnavailableError" in response.text
+ 
+ 
+-def test_ward_view_renders_an_error_card_when_discovery_fails(
++def test_teacher_list_renders_an_error_card_when_discovery_fails(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
++    """Retargeted from the retired portal-root page: a discovery failure is a page, not a 500."""
+     monkeypatch.delenv("services__assignments-api__http__0", raising=False)
+     monkeypatch.delenv("ASSIGNMENTS_API_HTTP", raising=False)
+ 
+     with TestClient(portal_app.app) as client:
+-        response = client.get("/")
++        response = client.get("/teacher")
+ 
+     assert response.status_code == 200
+     assert "ServiceDiscoveryError" in response.text
+diff --git a/src/SchoolCollab.Portals/tests/test_teacher_session.py b/src/SchoolCollab.Portals/tests/test_teacher_session.py
+index a8fb14e3..236e8b74 100644
+--- a/src/SchoolCollab.Portals/tests/test_teacher_session.py
++++ b/src/SchoolCollab.Portals/tests/test_teacher_session.py
+@@ -352,10 +352,10 @@ def test_every_teacher_route_presents_the_session_header(
+     assert [r.url.path for r in auth_seen] == [f"/auth/session/{SESSION_ID}"]
+ 
+ 
+-def test_the_ward_route_presents_no_session_header(
++def test_the_root_route_presents_no_session_header(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+-    """Only the teacher surface threads the session — the ward route is untouched (D19's scope)."""
++    """Only the teacher surface threads the session — ``/`` reads no assignments client (D19)."""
+     _no_sign_in_target(monkeypatch)
+     assignments_seen: list[httpx.Request] = []
+ 
+@@ -363,11 +363,12 @@ def test_the_ward_route_presents_no_session_header(
+         assignments=_assignments_transport(assignments_seen),
+         auth=_auth_transport([]),
+     ) as client:
+-        response = client.get("/", headers=_session_headers())
++        response = client.get("/", headers=_session_headers(), follow_redirects=False)
+ 
+-    assert response.status_code == 200
+-    assert assignments_seen
+-    assert all(_presented_session(request) is None for request in assignments_seen)
++    assert response.status_code == 302
++    assert response.headers["location"] == "/teacher"
++    # No assignments call at all, so there is no call that could present a session header.
++    assert assignments_seen == []
+ 
+ 
+ # ── the two dead-session states vs. a degraded read ────────────────────────────────
+@@ -537,16 +538,17 @@ def test_the_gate_does_not_act_without_a_configured_sign_in_target(
+     assert "auth-portal" not in response.text
+ 
+ 
+-def test_the_ward_route_is_never_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+-    """Rule 3 is scoped to the teacher surface: the ward route keeps rendering."""
++def test_the_root_route_is_never_gated(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Rule 3 is scoped to the teacher surface: ``/`` still answers its own redirect."""
+     monkeypatch.setenv(portal_app.LOGIN_URL_KEY, SIGN_IN_URL)
+     monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
+ 
+     with _portal(assignments=_assignments_transport([])) as client:
+         response = client.get("/", follow_redirects=False)
+ 
+-    assert response.status_code == 200
+-    assert "Ward" in response.text
++    assert response.status_code == 302
++    # /teacher, never the configured sign-in target: the gate did not act on this path.
++    assert response.headers["location"] == "/teacher"
+ 
+ 
+ def test_the_sign_in_link_falls_back_to_the_origin_the_browser_reached(
+diff --git a/src/SchoolCollab.Portals/tests/test_views_shell.py b/src/SchoolCollab.Portals/tests/test_views_shell.py
+new file mode 100644
+index 00000000..11a7297e
+--- /dev/null
++++ b/src/SchoolCollab.Portals/tests/test_views_shell.py
+@@ -0,0 +1,145 @@
++"""The shared page chrome's own tests (round ``portal-shell-and-ward-retirement``, B3).
++
++Three parts, all about the *chrome* rather than one page's content:
++
++* the chrome is really shared — the same document root and the same brand bar appear on more
++  than one rendered page;
++* the refactor is real — ``PrefabApp`` is constructed exactly once in this package, in
++  :mod:`views.shell`, so a future page cannot quietly hand-roll its own app again (a
++  source-inspection assertion, in the spirit of ``PortalsSolutionItemsArchitectureTests``);
++* the document-level attributes a page carries beyond the chrome (the submission page's grade
++  form state and navigate handler) are forwarded, and omitted when a page carries neither.
++"""
++
++from __future__ import annotations
++
++import json
++import re
++from pathlib import Path
++from typing import Any
++
++from api import ServiceEndpoint
++from views.shell import shell
++from views.teacher import (
++    GRADE_ATTEMPTED_STATE,
++    NAVIGATE_HANDLER,
++    NAVIGATE_HANDLER_JS,
++    build_review_queue_view,
++    build_teacher_list_view,
++)
++
++ENDPOINT = ServiceEndpoint(
++    service="assignments-api", base_url="http://assignments-api.test", env_var="test"
++)
++
++ASSIGNMENT_ID = "11111111-1111-1111-1111-111111111111"
++
++_INITIAL_DATA = re.compile(
++    r'<script id="prefab:initial-data" type="application/json">(.*?)</script>', re.S
++)
++
++
++def _document(html: str) -> dict[str, Any]:
++    """A rendered page's wire envelope, parsed out of its initial-data script.
++
++    Takes the rendered HTML rather than the app: ``PrefabApp.html()`` stamps the root class on
++    first render, so rendering twice would nest a second wrapper around the same document.
++    """
++    match = _INITIAL_DATA.search(html)
++    assert match is not None, "every rendered page carries its initial-data envelope"
++    return json.loads(match.group(1))
++
++
++def _chrome(html: str) -> tuple[str, dict[str, Any]]:
++    """A page's document-root class and the shared column the chrome and its content live in."""
++    view = _document(html)["view"]
++    return view["cssClass"], view["children"][0]
++
++
++def test_the_shared_chrome_renders_on_more_than_one_page() -> None:
++    """One chrome, several pages: the same root and brand bar, each page's own heading in it."""
++    pages = [
++        (
++            build_teacher_list_view(rows=[], endpoint=ENDPOINT, status_code=200),
++            "Teacher portal — assignments",
++        ),
++        (
++            build_review_queue_view(
++                assignment_id=ASSIGNMENT_ID, rows=[], endpoint=ENDPOINT, status_code=200
++            ),
++            "Teacher portal — review queue",
++        ),
++    ]
++
++    for application, heading in pages:
++        html = application.html()
++        assert f"<title>{heading}</title>" in html  # the document title
++        root_class, column = _chrome(html)
++        assert root_class == "pf-app-root p-6"
++        assert column["cssClass"] == "gap-4"
++        # The brand bar is the shared column's first child on every page. A page whose visible
++        # heading differs from its document title passes ``heading=`` explicitly, which is what
++        # keeps every page's rendered strings exactly as they were before the shell existed.
++        assert column["children"][0] == {"content": heading, "type": "H3"}
++
++
++def test_the_teacher_pages_do_not_construct_their_own_prefab_app() -> None:
++    """AC3: the builders go through the shell — ``teacher.py`` names no ``PrefabApp`` at all.
++
++    A rendered page cannot show that no *other* page bypasses the shell, and the bypass is
++    exactly the regression this round exists to prevent — so it is pinned by source
++    inspection, and across every module of the package rather than this one file.
++    """
++    sites = {
++        path.name: path.read_text(encoding="utf-8").count("PrefabApp(")
++        for path in sorted(_package_directory().glob("*.py"))
++    }
++    teacher_source = _view_source("teacher.py")
++
++    assert teacher_source, "anti-vacuity: the module read must not be empty"
++    assert "PrefabApp(" not in teacher_source, (
++        "every teacher page is rendered through views.shell.shell"
++    )
++    assert {name for name, count in sites.items() if count} == {"shell.py"}, (
++        f"only shell.py may construct the page document: {sites}"
++    )
++    assert sites["shell.py"] == 1, f"the shell's one construction site: {sites}"
++
++
++def test_the_shell_forwards_a_pages_document_level_attributes() -> None:
++    """B1's pass-through: state and js_actions reach the document; a ``None`` is omitted.
++
++    ``build_submission_view`` is the one page that carries them (its grade form's submit-driven
++    attempted state and its navigate handler). The omission half is the load-bearing one: every
++    other page's document must stay byte-identical to the one it assembled for itself.
++    """
++    with shell(
++        title="Teacher portal — submission",
++        state={GRADE_ATTEMPTED_STATE: False},
++        js_actions={NAVIGATE_HANDLER: NAVIGATE_HANDLER_JS},
++    ) as application:
++        pass  # no page content: this is about the document the shell assembles
++
++    rendered = application.html()
++    assert _document(rendered)["state"] == {GRADE_ATTEMPTED_STATE: False}
++    assert NAVIGATE_HANDLER_JS in rendered
++
++    with shell(title="Teacher portal — assignments") as plain:
++        pass
++
++    plain_html = plain.html()
++    assert "state" not in _document(plain_html)
++    assert NAVIGATE_HANDLER_JS not in plain_html
++
++
++def _package_directory() -> Path:
++    """The ``views`` package's own directory."""
++    import views
++
++    assert views.__file__ is not None
++    return Path(views.__file__).resolve().parent
++
++
++def _view_source(name: str) -> str:
++    """One module of the ``views`` package, as source text."""
++    return (_package_directory() / name).read_text(encoding="utf-8")
+diff --git a/src/SchoolCollab.Portals/views/__init__.py b/src/SchoolCollab.Portals/views/__init__.py
+index ab1c9269..d2db499f 100644
+--- a/src/SchoolCollab.Portals/views/__init__.py
++++ b/src/SchoolCollab.Portals/views/__init__.py
+@@ -5,19 +5,18 @@ out. No HTTP, no environment reads — that keeps prefab-ui's 0.x churn isolated
+ from transport (plan section 6 risk row).
+ """
+ 
++from views.shell import shell
+ from views.teacher import (
+     build_review_queue_view,
+     build_submission_view,
+     build_teacher_error_view,
+     build_teacher_list_view,
+ )
+-from views.ward import build_error_view, build_ward_view
+ 
+ __all__ = [
+-    "build_error_view",
+     "build_review_queue_view",
+     "build_submission_view",
+     "build_teacher_error_view",
+     "build_teacher_list_view",
+-    "build_ward_view",
++    "shell",
+ ]
+diff --git a/src/SchoolCollab.Portals/views/shell.py b/src/SchoolCollab.Portals/views/shell.py
+new file mode 100644
+index 00000000..4a82ac29
+--- /dev/null
++++ b/src/SchoolCollab.Portals/views/shell.py
+@@ -0,0 +1,59 @@
++"""The portal's shared page chrome (round ``portal-shell-and-ward-retirement``, B1).
++
++:func:`shell` is the one place that assembles a page's document, so ``PrefabApp`` is
++constructed exactly once in the whole ``views/`` package and a page cannot quietly
++hand-roll a second chrome. It is the Prefab analogue of Blazor's ``MainLayout``
++**outcome** — one chrome for every page — not its mechanism: Prefab has no router,
++no outlet and no ``@layout`` selection, so the shared layout is a Python composition
++function that every page calls.
++
++The chrome stays minimal and static: the document title, the page title and the
++brand bar. A page's own affordances (the session badge and links, the breadcrumbs)
++stay with the page, because they are pure functions of that page's data — the shell
++reads none.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterator, Mapping
++from contextlib import contextmanager
++from typing import Any
++
++from prefab_ui.app import PrefabApp
++from prefab_ui.components import Column, H3
++
++
++@contextmanager
++def shell(
++    *,
++    title: str,
++    heading: str | None = None,
++    state: Mapping[str, Any] | None = None,
++    js_actions: Mapping[str, str] | None = None,
++) -> Iterator[PrefabApp]:
++    """The portal's shared page chrome: document title, page title, brand bar.
++
++    The Prefab analogue of Blazor's ``MainLayout`` **outcome** (one chrome for every page),
++    not its mechanism: Prefab has no router, no outlet and no ``@layout`` selection, so the
++    shared layout is a Python composition function every page calls.
++
++    ``heading`` defaults to the document title, and a page whose visible ``H3`` differs from
++    its document title passes it explicitly — that is what keeps every page's rendered
++    strings exactly as they were when each page assembled its own document.
++
++    ``state`` and ``js_actions`` are the two document-level attributes a page carries beyond
++    the chrome (``build_submission_view``'s grade form: its client-side
++    attempted-state key and its navigate handler). They are forwarded untouched, and a
++    ``None`` is omitted so ``PrefabApp`` applies its own field default — the pages that
++    carry neither render byte-identically to before this round.
++    """
++    document: dict[str, Any] = {"title": title, "css_class": "p-6"}
++    if state is not None:
++        document["state"] = state
++    if js_actions is not None:
++        document["js_actions"] = js_actions
++
++    with PrefabApp(**document) as application:
++        with Column(gap=4):
++            H3(heading or title)
++            yield application
+diff --git a/src/SchoolCollab.Portals/views/teacher.py b/src/SchoolCollab.Portals/views/teacher.py
+index fe9cf738..78e7cd35 100644
+--- a/src/SchoolCollab.Portals/views/teacher.py
++++ b/src/SchoolCollab.Portals/views/teacher.py
+@@ -1,10 +1,10 @@
+ """The teacher surface's Prefab component trees (round ``portal-teacher-surface``, D3).
+ 
+-Four states, all pure functions of data — the split ``views/ward.py`` established:
++Four states, all pure functions of data — the shape every view in this package keeps:
+ 
+ * :func:`build_teacher_list_view` — the assignment list the drill-down starts from.
+ * :func:`build_review_queue_view` — one assignment's review queue.
+-* :func:`build_submission_view` — one submission: version history (where the ward's
++* :func:`build_submission_view` — one submission: version history (where the student's
+   answers live), the teacher review, and the grade form.
+ * :func:`build_teacher_error_view` — the degraded state shared by all three, rendered
+   from a typed portal error. The surface never shows a raw 500 or a traceback.
+@@ -24,9 +24,13 @@ that re-renders it, are defined here as :data:`REVIEW_PATH` / :data:`SUBMISSION_
+ view and the app layer cannot drift.
+ 
+ This is a **flat module**, not a ``views/teacher/`` package (round-2 grill Q5, which
+-supersedes the plan's ``views/teacher/`` wording): one module per surface is the shape
+-``views/ward.py`` proved, and a one-module package would add a folder node to the
+-solution view for no reader benefit.
++supersedes the plan's ``views/teacher/`` wording): one module per surface is the shape this
++portal proved, and a one-module package would add a folder node to the solution view for
++no reader benefit.
++
++Round ``portal-shell-and-ward-retirement`` (B1) moves every page's document and chrome into
++:func:`views.shell.shell`, which is now the only place in this package that constructs
++``PrefabApp`` — so a future page cannot quietly hand-roll a second chrome.
+ 
+ Component variants stay within the two the spike proved (``default`` / ``success``).
+ """
+@@ -35,12 +39,12 @@ from __future__ import annotations
+ 
+ import re
+ from dataclasses import dataclass
++from typing import TYPE_CHECKING
+ from urllib.parse import quote
+ 
+ from pydantic import BaseModel
+ from pydantic import Field as ModelField
+ from prefab_ui.actions import Action, CallHandler, Fetch, SetState, ShowToast
+-from prefab_ui.app import PrefabApp
+ from prefab_ui.components import (
+     Alert,
+     AlertDescription,
+@@ -55,7 +59,6 @@ from prefab_ui.components import (
+     Field,
+     FieldError,
+     Form,
+-    H3,
+     Link,
+     Muted,
+     Row,
+@@ -75,6 +78,14 @@ from api import (
+     SubmissionForReviewRow,
+     TokenInResponseError,
+ )
++from views.shell import shell
++
++if TYPE_CHECKING:
++    # For the builders' return annotation only: the page document itself is built in
++    # ``views/shell.py``, which is the one place that constructs a ``PrefabApp``. Guarded
++    # because ``from __future__ import annotations`` makes the annotation lazy — the name is
++    # never needed at runtime.
++    from prefab_ui.app import PrefabApp
+ 
+ ColumnSpec = tuple[str, str, bool]
+ 
+@@ -414,27 +425,25 @@ def build_teacher_list_view(
+     links: TeacherSurfaceLinks | None = None,
+ ) -> PrefabApp:
+     """The teacher portal's entry page, from a live assignments-api response."""
+-    with PrefabApp(title="Teacher portal — assignments", css_class="p-6") as application:
+-        with Column(gap=4):
+-            H3("Teacher portal — assignments")
+-            Muted(f"Live data from {endpoint.label}.")
+-            with Row(gap=2):
+-                Badge(f"HTTP {status_code}", variant="success")
+-                Badge(f"{len(rows)} assignments", variant="default")
+-            _session_affordances(session, links)
+-            if not rows:
+-                Muted(
+-                    "No assignments came back for this teacher. An empty result is a "
+-                    "success, not a failure (the dev database may legitimately be empty)."
++    with shell(title="Teacher portal — assignments") as application:
++        Muted(f"Live data from {endpoint.label}.")
++        with Row(gap=2):
++            Badge(f"HTTP {status_code}", variant="success")
++            Badge(f"{len(rows)} assignments", variant="default")
++        _session_affordances(session, links)
++        if not rows:
++            Muted(
++                "No assignments came back for this teacher. An empty result is a "
++                "success, not a failure (the dev database may legitimately be empty)."
++            )
++        with Card():
++            with CardContent():
++                DataTable(
++                    columns=_columns(_ASSIGNMENT_COLUMNS),
++                    rows=[row.as_table_row() for row in rows],
++                    search=True,
+                 )
+-            with Card():
+-                with CardContent():
+-                    DataTable(
+-                        columns=_columns(_ASSIGNMENT_COLUMNS),
+-                        rows=[row.as_table_row() for row in rows],
+-                        search=True,
+-                    )
+-            Muted("Open a review queue at /teacher/assignments/{assignmentId}.")
++        Muted("Open a review queue at /teacher/assignments/{assignmentId}.")
+     return application
+ 
+ 
+@@ -448,31 +457,29 @@ def build_review_queue_view(
+     links: TeacherSurfaceLinks | None = None,
+ ) -> PrefabApp:
+     """One assignment's review queue, from a live assignments-api response."""
+-    with PrefabApp(title="Teacher portal — review queue", css_class="p-6") as application:
+-        with Column(gap=4):
+-            H3("Teacher portal — review queue")
+-            Muted(f"Assignment {assignment_id} · live data from {endpoint.label}.")
+-            with Row(gap=2):
+-                Badge(f"HTTP {status_code}", variant="success")
+-                Badge(f"{len(rows)} submissions", variant="default")
+-                Link("← All assignments", href="/teacher", target="_self")
+-            _session_affordances(session, links)
+-            if not rows:
+-                Muted(
+-                    "No submissions are waiting for review on this assignment. An empty "
+-                    "queue is a success, not a failure."
+-                )
+-            with Card():
+-                with CardContent():
+-                    DataTable(
+-                        columns=_columns(_QUEUE_COLUMNS),
+-                        rows=[row.as_table_row() for row in rows],
+-                        search=True,
+-                    )
++    with shell(title="Teacher portal — review queue") as application:
++        Muted(f"Assignment {assignment_id} · live data from {endpoint.label}.")
++        with Row(gap=2):
++            Badge(f"HTTP {status_code}", variant="success")
++            Badge(f"{len(rows)} submissions", variant="default")
++            Link("← All assignments", href="/teacher", target="_self")
++        _session_affordances(session, links)
++        if not rows:
+             Muted(
+-                "Open one submission at "
+-                "/teacher/assignments/{assignmentId}/students/{studentId}."
++                "No submissions are waiting for review on this assignment. An empty "
++                "queue is a success, not a failure."
+             )
++        with Card():
++            with CardContent():
++                DataTable(
++                    columns=_columns(_QUEUE_COLUMNS),
++                    rows=[row.as_table_row() for row in rows],
++                    search=True,
++                )
++        Muted(
++            "Open one submission at "
++            "/teacher/assignments/{assignmentId}/students/{studentId}."
++        )
+     return application
+ 
+ 
+@@ -641,67 +648,65 @@ def build_submission_view(
+     body it could not submit. ``error_code`` is a bounded failure code a refused grade
+     redirected back with, rendered as an alert above the form — the page the fetch lands on.
+     """
+-    with PrefabApp(
++    with shell(
+         title="Teacher portal — submission",
+-        css_class="p-6",
++        heading="Teacher portal — submission detail",
+         state={GRADE_ATTEMPTED_STATE: False},
+         js_actions={NAVIGATE_HANDLER: NAVIGATE_HANDLER_JS},
+     ) as application:
+-        with Column(gap=4):
+-            H3("Teacher portal — submission detail")
+-            Muted(
+-                f"Assignment {assignment_id} · student {student_id} · "
+-                f"live data from {endpoint.label}."
++        Muted(
++            f"Assignment {assignment_id} · student {student_id} · "
++            f"live data from {endpoint.label}."
++        )
++        with Row(gap=2):
++            Badge(f"HTTP {status_code}", variant="success")
++            Badge(f"Version {_shown(submission.current_version_number)}", variant="default")
++            Badge(f"Review: {_shown(submission.review_state)}", variant="default")
++            Badge(f"Sign-off: {_shown(submission.sign_off_state)}", variant="default")
++            Link(
++                "← Review queue",
++                href=f"/teacher/assignments/{assignment_id}",
++                target="_self",
+             )
+-            with Row(gap=2):
+-                Badge(f"HTTP {status_code}", variant="success")
+-                Badge(f"Version {_shown(submission.current_version_number)}", variant="default")
+-                Badge(f"Review: {_shown(submission.review_state)}", variant="default")
+-                Badge(f"Sign-off: {_shown(submission.sign_off_state)}", variant="default")
+-                Link(
+-                    "← Review queue",
+-                    href=f"/teacher/assignments/{assignment_id}",
+-                    target="_self",
+-                )
+-            _session_affordances(session, links)
+-            Muted(
+-                f"Submission {_shown(submission.submission_id)} · last submitted "
+-                f"{_shown(submission.last_submitted_at)}."
+-            )
+-            with Card():
+-                with CardContent():
+-                    with Column(gap=2):
+-                        Muted("Version history — each version carries the answer as submitted.")
+-                        if not submission.versions:
+-                            Muted("No versions recorded for this submission.")
+-                        DataTable(
+-                            columns=_columns(_VERSION_COLUMNS),
+-                            rows=[version.as_table_row() for version in submission.versions],
+-                            search=True,
++        _session_affordances(session, links)
++        Muted(
++            f"Submission {_shown(submission.submission_id)} · last submitted "
++            f"{_shown(submission.last_submitted_at)}."
++        )
++        with Card():
++            with CardContent():
++                with Column(gap=2):
++                    Muted("Version history — each version carries the answer as submitted.")
++                    if not submission.versions:
++                        Muted("No versions recorded for this submission.")
++                    DataTable(
++                        columns=_columns(_VERSION_COLUMNS),
++                        rows=[version.as_table_row() for version in submission.versions],
++                        search=True,
++                    )
++        with Card():
++            with CardContent():
++                with Column(gap=2):
++                    Muted("Teacher review")
++                    if submission.review is None:
++                        Muted("This submission has not been reviewed yet.")
++                    else:
++                        Muted(
++                            f"Score: {_shown(submission.review.score)} · "
++                            f"grade: {_shown(submission.review.grade)}"
+                         )
+-            with Card():
+-                with CardContent():
+-                    with Column(gap=2):
+-                        Muted("Teacher review")
+-                        if submission.review is None:
+-                            Muted("This submission has not been reviewed yet.")
+-                        else:
+-                            Muted(
+-                                f"Score: {_shown(submission.review.score)} · "
+-                                f"grade: {_shown(submission.review.grade)}"
+-                            )
+-                            Muted(f"Comments: {_shown(submission.review.comments)}")
+-                            Muted(
+-                                f"Recorded by teacher {_shown(submission.review.teacher_id)} "
+-                                f"at {_shown(submission.review.created_at)}."
+-                            )
+-            if antiforgery_token is not None:
+-                _grade_section(
+-                    antiforgery_token=antiforgery_token,
+-                    assignment_id=assignment_id,
+-                    student_id=student_id,
+-                    error_code=error_code,
+-                )
++                        Muted(f"Comments: {_shown(submission.review.comments)}")
++                        Muted(
++                            f"Recorded by teacher {_shown(submission.review.teacher_id)} "
++                            f"at {_shown(submission.review.created_at)}."
++                        )
++        if antiforgery_token is not None:
++            _grade_section(
++                antiforgery_token=antiforgery_token,
++                assignment_id=assignment_id,
++                student_id=student_id,
++                error_code=error_code,
++            )
+     return application
+ 
+ 
+@@ -721,9 +726,9 @@ def build_teacher_session_card(
+     state is either dead (card) or unknown (degraded card) — never "probably signed out".
+ 
+     ``detail`` is the typed error's own ``str()``: a class name plus the portal's bounded message
+-    (no token, no upstream body), kept visible for the dev loop the way the ward portal's error
+-    view keeps it. ``links`` offers the sign-in affordances when the environment configured them;
+-    a route that clears the cookie alongside this card renders the same links.
++    (no token, no upstream body), kept visible for the dev loop. ``links`` offers the sign-in
++    affordances when the environment configured them; a route that clears the cookie alongside
++    this card renders the same links.
+ 
+     ``signed_out`` is passed through to the affordances: a caller whose card means "the session is
+     gone" leaves it True, while the degraded states that keep the cookie pass False — asserting
+@@ -731,21 +736,19 @@ def build_teacher_session_card(
+     """
+     title, message = SESSION_COPY.get(code, _GENERIC_SESSION_COPY)
+ 
+-    with PrefabApp(title=f"Teacher portal — {title}", css_class="p-6") as application:
+-        with Column(gap=4):
+-            H3("Teacher portal")
+-            with Row(gap=2):
+-                Badge(title, variant="default")
+-                Badge(code, variant="default")
+-            with Card():
+-                with CardContent():
+-                    with Column(gap=2):
+-                        Muted(message)
+-                        if detail:
+-                            Muted(detail)
+-                        if endpoint_label:
+-                            Muted(f"Auth service: {endpoint_label}")
+-            _session_affordances(None, links, signed_out=signed_out)
++    with shell(title=f"Teacher portal — {title}", heading="Teacher portal") as application:
++        with Row(gap=2):
++            Badge(title, variant="default")
++            Badge(code, variant="default")
++        with Card():
++            with CardContent():
++                with Column(gap=2):
++                    Muted(message)
++                    if detail:
++                        Muted(detail)
++                    if endpoint_label:
++                        Muted(f"Auth service: {endpoint_label}")
++        _session_affordances(None, links, signed_out=signed_out)
+     return application
+ 
+ 
+@@ -753,24 +756,20 @@ def build_teacher_error_view(
+     *, error: PortalApiError, endpoint: ServiceEndpoint | None, surface: str
+ ) -> PrefabApp:
+     """The degraded teacher page: which surface failed, how, and where the portal looked."""
+-    with PrefabApp(
+-        title="Teacher portal — degraded", css_class="p-6"
+-    ) as application:
+-        with Column(gap=4):
+-            H3("Teacher portal — degraded")
+-            with Row(gap=2):
+-                Badge(f"{surface} degraded", variant="default")
+-                Badge(type(error).__name__, variant="default")
+-            with Card():
+-                with CardContent():
+-                    with Column(gap=2):
+-                        Muted(str(error))
+-                        Muted(
+-                            "Resolved endpoint: "
+-                            + (
+-                                endpoint.label
+-                                if endpoint
+-                                else "not resolved (service discovery failed)"
+-                            )
++    with shell(title="Teacher portal — degraded") as application:
++        with Row(gap=2):
++            Badge(f"{surface} degraded", variant="default")
++            Badge(type(error).__name__, variant="default")
++        with Card():
++            with CardContent():
++                with Column(gap=2):
++                    Muted(str(error))
++                    Muted(
++                        "Resolved endpoint: "
++                        + (
++                            endpoint.label
++                            if endpoint
++                            else "not resolved (service discovery failed)"
+                         )
++                    )
+     return application
+diff --git a/src/SchoolCollab.Portals/views/ward.py b/src/SchoolCollab.Portals/views/ward.py
+deleted file mode 100644
+index 47b2cfaa..00000000
+--- a/src/SchoolCollab.Portals/views/ward.py
++++ /dev/null
+@@ -1,79 +0,0 @@
+-"""The ward surface's Prefab component trees (plan: MVP 1).
+-
+-Two states, both pure functions of data:
+-
+-* :func:`build_ward_view` — the live table, rendered from rows the client parsed.
+-* :func:`build_error_view` — the degraded state, rendered from a typed portal
+-  error. The surface never shows a raw 500 or a traceback.
+-
+-Component variants here are limited to the two the spike proved
+-(``default`` / ``success``); colour polish is a later MVP concern.
+-"""
+-
+-from __future__ import annotations
+-
+-from prefab_ui.app import PrefabApp
+-from prefab_ui.components import (
+-    Badge,
+-    Card,
+-    CardContent,
+-    Column,
+-    DataTable,
+-    DataTableColumn,
+-    H3,
+-    Muted,
+-    Row,
+-)
+-
+-from api import AssignmentRow, PortalApiError, ServiceEndpoint
+-
+-_TABLE_COLUMNS: tuple[tuple[str, str, bool], ...] = (
+-    ("id", "Assignment id", False),
+-    ("title", "Title", True),
+-    ("status", "Status", True),
+-    ("dueDate", "Due", False),
+-    ("createdAt", "Created", False),
+-)
+-
+-
+-def build_ward_view(
+-    *, rows: list[AssignmentRow], endpoint: ServiceEndpoint, status_code: int
+-) -> PrefabApp:
+-    """The ward portal page, rendered from a live assignments-api response."""
+-    with PrefabApp(title="Ward portal — prefab spike", css_class="p-6") as application:
+-        with Column(gap=4):
+-            H3("Ward portal — Phase-0 prefab spike")
+-            Muted(f"Live data from {endpoint.label}.")
+-            with Row(gap=2):
+-                Badge(f"HTTP {status_code}", variant="success")
+-                Badge(f"{len(rows)} assignments", variant="default")
+-            with Card():
+-                with CardContent():
+-                    DataTable(
+-                        columns=[
+-                            DataTableColumn(key=key, header=header, sortable=sortable)
+-                            for key, header, sortable in _TABLE_COLUMNS
+-                        ],
+-                        rows=[row.as_table_row() for row in rows],
+-                        search=True,
+-                    )
+-    return application
+-
+-
+-def build_error_view(*, error: PortalApiError, endpoint: ServiceEndpoint | None) -> PrefabApp:
+-    """The degraded ward page: what went wrong, and where the portal looked."""
+-    with PrefabApp(title="Ward portal — prefab spike (degraded)", css_class="p-6") as application:
+-        with Column(gap=4):
+-            H3("Ward portal — Phase-0 prefab spike")
+-            with Row(gap=2):
+-                Badge("assignments-api unavailable", variant="default")
+-                Badge(type(error).__name__, variant="default")
+-            with Card():
+-                with CardContent():
+-                    with Column(gap=2):
+-                        Muted(str(error))
+-                        Muted(
+-                            "Resolved endpoint: "
+-                            + (endpoint.label if endpoint else "not resolved (service discovery failed)")
+-                        )
+-    return application
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+index faceed34..05aaa4c9 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+@@ -53,7 +53,7 @@ public class PortalsSolutionItemsArchitectureTests
+     private static readonly string RepoRoot = FindRepoRoot();
+ 
+     /// <summary>
+-    /// The ward portal's solution items. Its reviewed-set tripwire pins exactly this array, so the
++    /// The teacher portal's solution items. Its reviewed-set tripwire pins exactly this array, so the
+     /// pin stays scoped to <c>src/SchoolCollab.Portals/</c> while the assertions above cover every
+     /// portal project.
+     /// </summary>
+@@ -142,10 +142,11 @@ public class PortalsSolutionItemsArchitectureTests
+                 "src/SchoolCollab.Portals/tests/test_teacher_grade.py",
+                 "src/SchoolCollab.Portals/tests/test_teacher_session.py",
+                 "src/SchoolCollab.Portals/tests/test_teacher_views.py",
++                "src/SchoolCollab.Portals/tests/test_views_shell.py",
+                 "src/SchoolCollab.Portals/uv.lock",
+                 "src/SchoolCollab.Portals/views/__init__.py",
++                "src/SchoolCollab.Portals/views/shell.py",
+                 "src/SchoolCollab.Portals/views/teacher.py",
+-                "src/SchoolCollab.Portals/views/ward.py",
+             ],
+             "these are the reviewed portal solution items.");
+     }

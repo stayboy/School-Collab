@@ -1,8 +1,8 @@
-"""Portal — the ward and teacher surfaces over the existing assignments-api.
+"""Portal — the teacher surface over the existing assignments-api.
 
 Pure HTTP consumer of the existing assignments-api: no backend changes, no
 direct database access. Hosted solely by the Aspire AppHost through
-``AddUvicornApp`` (see documents/specs/teachers-ward-portal-prefab-plan.md, Q5).
+``AddUvicornApp``.
 
 This module is deliberately thin — it owns only the FastAPI app, the
 service-call dependency, and the routes:
@@ -16,8 +16,8 @@ handlers never block the event loop.
 See ``documents/solution/portals-service-client-pattern.md`` for the pattern.
 
 Routes:
-    GET /       -> the ward view, rendered by Prefab UI from a LIVE
-                   assignments-api call made at request time.
+    GET /       -> a 302 redirect to the teacher assignment list, which is the
+                   only surface this portal serves.
     GET /teacher -> the teacher assignment list, the entry point of the
                    read-only teacher drill-down.
     GET /teacher/assignments/{assignmentId} -> that assignment's review queue.
@@ -108,7 +108,6 @@ from views.teacher import (
     session_card_code,
     submission_path,
 )
-from views.ward import build_error_view, build_ward_view
 
 logger = logging.getLogger("portals")
 
@@ -410,10 +409,9 @@ class TeacherSession:
     """One request's portal-session outcome (D19): the session id and the D18 identity as data.
 
     ``session_id`` is the value the gate presents as ``X-Portal-Session`` on every
-    assignments-api call — so a view never sees a header, and the ward route can never acquire
-    one. ``data`` is the claim set the auth service returned, rendered as data and never as a
-    credential (AC11). On rule 2 (no cookie at all) both are absent and the routes behave exactly
-    as they did before this round.
+    assignments-api call — so a view never sees a header. ``data`` is the claim set the auth
+    service returned, rendered as data and never as a credential (AC11). On rule 2 (no cookie at
+    all) both are absent and the routes behave exactly as they did before this round.
     """
 
     session_id: str | None = None
@@ -579,7 +577,7 @@ async def require_teacher_session(
     sent (the property above is empty). The dev id is never this gate's trigger.
 
     **Rule 3 — the redirect is target-keyed, not dev-id-keyed.** Scoped to the routes that depend
-    on this gate (the ward route is untouched), and acting only when there is no cookie **and**
+    on this gate, and acting only when there is no cookie **and**
     ``PORTALS_LOGIN_URL`` is configured: 302 to the auth portal's login page with this portal's
     callback as ``return_uri``. With no configured target (the dev posture) the gate does not act
     and the request continues under rule 2 — today's honest render, never an invented URL.
@@ -748,41 +746,10 @@ def resolve_dev_teacher_id() -> str:
     return raw
 
 
-@app.get("/", response_class=HTMLResponse)
-async def ward_view(
-    request: Request,
-    client: AssignmentsApiClient = Depends(get_assignments_client),
-) -> HTMLResponse:
-    """Render the ward view from a live assignments-api call."""
-    state = _portal_state(request)
-    try:
-        result = await client.list_assignments()
-    except PortalApiError as error:
-        logger.error("ward view degraded: %s", error)
-        state.last_fetch = {
-            "error": str(error),
-            "base_url": client.endpoint.base_url,
-            "env_var": client.endpoint.env_var,
-        }
-        return HTMLResponse(build_error_view(error=error, endpoint=client.endpoint).html())
-
-    logger.info(
-        "ward view: %s row(s) from %s (HTTP %s)",
-        result.row_count,
-        client.endpoint.base_url,
-        result.status_code,
-    )
-    state.last_fetch = {
-        "status": result.status_code,
-        "row_count": result.row_count,
-        "base_url": client.endpoint.base_url,
-        "env_var": client.endpoint.env_var,
-    }
-    return HTMLResponse(
-        build_ward_view(
-            rows=result.rows, endpoint=client.endpoint, status_code=result.status_code
-        ).html()
-    )
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    """The portal's entry point: the teacher surface is now the only one it serves."""
+    return RedirectResponse(url="/teacher", status_code=302)
 
 
 def _teacher_degraded(
@@ -1138,11 +1105,11 @@ def _logout_card(
 
 
 def _teacher_surface_for(path: str) -> str | None:
-    """The teacher surface a pre-route failure belongs to; ``None`` for the ward page.
+    """The teacher surface a pre-route failure belongs to; ``None`` when the path is not one.
 
     A service-discovery failure is raised while resolving the dependency, so it never
     reaches a route body — this keeps the page it renders honest about which surface
-    was asked for, instead of showing the ward page for a teacher URL.
+    was asked for, instead of showing one surface's degraded page for another's URL.
     """
     if path.rstrip("/") == "/teacher":
         return "assignment list"
@@ -1176,8 +1143,10 @@ async def on_discovery_error(request: Request, error: ServiceDiscoveryError) -> 
             ).html()
         )
 
-    logger.error("ward view degraded: %s", error)
-    return HTMLResponse(build_error_view(error=error, endpoint=state.endpoint).html())
+    logger.error("portal degraded: %s", error)
+    return HTMLResponse(
+        build_teacher_error_view(error=error, endpoint=state.endpoint, surface="portal").html()
+    )
 
 
 @app.get("/health")

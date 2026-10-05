@@ -53,7 +53,7 @@ public class PortalsSolutionItemsArchitectureTests
     private static readonly string RepoRoot = FindRepoRoot();
 
     /// <summary>
-    /// The ward portal's solution items. Its reviewed-set tripwire pins exactly this array, so the
+    /// The teacher portal's solution items. Its reviewed-set tripwire pins exactly this array, so the
     /// pin stays scoped to <c>src/SchoolCollab.Portals/</c> while the assertions above cover every
     /// portal project.
     /// </summary>
@@ -142,10 +142,11 @@ public class PortalsSolutionItemsArchitectureTests
                 "src/SchoolCollab.Portals/tests/test_teacher_grade.py",
                 "src/SchoolCollab.Portals/tests/test_teacher_session.py",
                 "src/SchoolCollab.Portals/tests/test_teacher_views.py",
+                "src/SchoolCollab.Portals/tests/test_views_shell.py",
                 "src/SchoolCollab.Portals/uv.lock",
                 "src/SchoolCollab.Portals/views/__init__.py",
+                "src/SchoolCollab.Portals/views/shell.py",
                 "src/SchoolCollab.Portals/views/teacher.py",
-                "src/SchoolCollab.Portals/views/ward.py",
             ],
             "these are the reviewed portal solution items.");
     }
