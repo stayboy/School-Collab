@@ -239,6 +239,8 @@ public static class PasskeyEndpoints
     /// <c>redirectUri</c> is checked against the allowlist <b>and</b> against the code's own binding,
     /// so a code observed in one call site cannot be redeemed from another. Single-use, TTL-bound,
     /// and fail-closed on every rejection; the response carries only non-token data (AC12).
+    /// A missing or blank <c>code</c> is not a redeemable value at all: it answers the same
+    /// <c>invalid_code</c> 404, never a 500.
     /// </summary>
     public static IResult BootstrapRedeem(
         BootstrapRedeemRequest request,
@@ -261,6 +263,17 @@ public static class PasskeyEndpoints
             return Results.Json(
                 new { error = "redirect_uri_not_allowed" },
                 statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Code))
+        {
+            // An omitted/blank code is not a redeemable value at all: answer the taxonomy's
+            // unknown-code shape rather than letting the store's lookup throw on a null key and
+            // turn the redemption into a 500. Placed after the redirect-URI checks, so a blank
+            // or non-allowlisted redirect URI still answers its 400 first.
+            return Results.Json(
+                new { error = "invalid_code" },
+                statusCode: StatusCodes.Status404NotFound);
         }
 
         var redemption = bootstrapCodes.Redeem(request.Code, request.RedirectUri);
