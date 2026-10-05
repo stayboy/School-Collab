@@ -75,11 +75,12 @@
     <File Path="src/SchoolCollab.Portals/tests/test_teacher_grade.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_teacher_session.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_teacher_views.py" />
+    <File Path="src/SchoolCollab.Portals/tests/test_views_shell.py" />
   </Folder>
   <Folder Name="/src/SchoolCollab.Portals/views/">
     <File Path="src/SchoolCollab.Portals/views/__init__.py" />
+    <File Path="src/SchoolCollab.Portals/views/shell.py" />
     <File Path="src/SchoolCollab.Portals/views/teacher.py" />
-    <File Path="src/SchoolCollab.Portals/views/ward.py" />
   </Folder>
   <Folder Name="/src/ServiceDefaults/">
     <Project Path="src/ServiceDefaults/SchoolCollab.ServiceDefaults/SchoolCollab.ServiceDefaults.csproj" />
