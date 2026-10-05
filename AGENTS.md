@@ -96,27 +96,41 @@ Workflow:
 Skill folders installed outside this repo (e.g.
 `C:\Users\skwar\.pi\agent\pi-hermes-memory\skills\grill-me`) are **vendored
 copies of an external source** — provenance and the upstream URL live in the
-frontmatter `source:` field. Never edit them locally: a local patch drifts
+frontmatter `source:` field (or, for installer-managed skills, in
+`~/.agents/.skill-lock.json`, whose entry carries e.g. `source`, `sourceUrl`,
+`skillPath`, `skillFolderHash` and `updatedAt`). Never edit them locally: a
+local patch drifts
 from upstream and silently changes how the skill behaves in later sessions —
 exactly how `grill-me` got polluted before its 2026-10-05 refresh from
 `mattpocock/skills`.
 
-- **Wrong or stale skill?** Re-fetch from the upstream URL in `source:`, bump
+- **Wrong or stale skill?** Re-fetch from the upstream URL (frontmatter
+  `source:`, or the lock entry's `sourceUrl` for installer-managed skills), bump
   `version` / `updated` — do not patch in place.
-- **Enforcement (deny-ACL):** the skill file carries a deny on write `(W)`,
-  its folder a deny on write/delete `(W,D,DC)`, so neither overwrite nor
-  delete-and-recreate works. Unlock → refresh → re-apply:
+- **Enforcement (deny-ACL):** the locked skill file (today: `grill-me/SKILL.md`)
+  carries a deny `(W)` — which `icacls` renders as *Write, Synchronize*, and since
+  almost every open requests Synchronize it refuses **reads as well as writes**
+  (verified 2026-10-05: `.NET OpenRead`, `OpenText`, `Get-Content -ErrorAction
+  Stop` and `cmd /c type` all fail with *Access denied*, while an undenyed skill
+  such as `gh-stack` reads fine). To keep the skill usable, prefer the write-only
+  mask `(WD,AD)`, verified to allow `OpenRead`/`OpenText` while still refusing
+  `OpenWrite` and `Add-Content`. **Do not re-add a deny on the folder:** the
+  folder-level `(W,D,DC)` deny was removed on 2026-10-05 after the skill tooling
+  began failing against it (`skill_manage create` reported `EPERM … scandir
+  '<…>/grill-me'`) — that is the strongly-indicated cause, though the failing
+  `create` was never retried. With it gone, delete-and-recreate is no longer
+  blocked; the file deny is the whole enforcement. Unlock → refresh → re-apply:
   ```powershell
-  icacls $file  /remove:d $env:USERNAME; icacls $folder /remove:d $env:USERNAME
+  $file = "<skill-folder>/SKILL.md"
+  icacls $file /remove:d $env:USERNAME
   # ...re-fetch from upstream...
-  icacls $file  /deny "${env:USERNAME}:(W)"
-  icacls $folder /deny "${env:USERNAME}:(W,D,DC)"
+  icacls $file /deny "${env:USERNAME}:(WD,AD)"   # write-only; (W) also blocks reads
   ```
 - **Cost to the author — updating to the latest upstream is now deliberately
   awkward.** The skill can no longer be refreshed by simply editing the file:
   every update must go through the unlock → re-fetch → re-lock sequence above,
-  or all writes fail with *Access denied*. Budget two extra `icacls` commands
-  per refresh; when several skills need updating, run all the unlocks in one
+  or the write fails with *Access denied*. Budget one extra unlock + one re-lock
+  per refreshed file; when several skills need updating, run all the unlocks in one
   pass, re-fetch each, then re-apply every deny afterwards. If this friction
   turns out to outweigh the protection, drop the ACL and rely on the rule
   above alone.
