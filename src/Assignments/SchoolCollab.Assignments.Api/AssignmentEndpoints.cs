@@ -41,6 +41,22 @@ public static class AssignmentEndpoints
         }
         readerGroup.MapAssignmentReaderRoutes();
 
+        // ── Teacher-portal grade write (round portal-submission-grade D1) ────────
+        // The writer policy is applied to this NESTED SUB-GROUP — never to the whole
+        // /assignments group. The group's own policy pins the Bearer scheme, which a
+        // portal-session caller cannot satisfy, and widening that policy to the gateway
+        // would re-open every create/edit/publish/approve write to the four reader roles.
+        // The sub-group carries exactly the submission-grade POST, mapped by
+        // MapAssignmentGradeRoutes.
+        var writerGroup = group.MapGroup(string.Empty);
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+        {
+            // Same P1-2 pattern as the reader: with the flag ON there is no policy and
+            // today's dev posture is unchanged for this route too.
+            writerGroup.RequireAuthorization(RequireAssignmentWriter);
+        }
+        writerGroup.MapAssignmentGradeRoutes();
+
         group.MapAssignmentRoutes();
 
         // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
@@ -89,6 +105,34 @@ public static class AssignmentEndpoints
     /// so the policy is self-sufficient for the routes it decorates.
     /// </summary>
     internal static void RequireAssignmentReader(AuthorizationPolicyBuilder policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+
+        policy
+            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
+            .RequireAuthenticatedUser()
+            .RequireRole(
+                RealmRoleNames.Teacher,
+                RealmRoleNames.Staff,
+                RealmRoleNames.UserAdmin,
+                RealmRoleNames.PlatformAdmin);
+    }
+
+    /// <summary>
+    /// The one disjunctive teacher-portal writer policy: <c>teacher</c> ∨ <c>staff</c> ∨
+    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the portal-session GATEWAY scheme and
+    /// authenticated (round <c>portal-submission-grade</c> D1 — byte-for-byte the reader policy's
+    /// pattern, holding exactly the submission-grade POST). Deliberately the SAME four-role
+    /// disjunction as <see cref="RequireAssignmentReader"/>: the fine-grained grade authority is
+    /// the handler's creating-teacher and cross-tenant checks, so the policy's job is only the
+    /// coarse T4 role gate — and the grade route carried no role gate at all before this round,
+    /// so a narrower set would 403 a bearer caller that grades today. One role disjunction per
+    /// module, never two that can drift. Built inline for the reader's documented reason: the
+    /// hosts that compose this pipeline in tests call <c>AddAuthAndTenancy</c> without Assignments'
+    /// <c>Program.cs</c>, and an unresolvable named policy throws out of
+    /// <c>AuthorizationPolicy.Combine</c> on every request to a route that names it.
+    /// </summary>
+    internal static void RequireAssignmentWriter(AuthorizationPolicyBuilder policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
 

@@ -64,7 +64,9 @@ public static class AssignmentRoutes
     /// routes the reader policy decorates (see <see cref="AssignmentEndpoints"/>). Their caller's
     /// <see cref="TeacherScope"/> is resolved HERE, at the endpoint, and threaded onto the query;
     /// no Core handler fetches it. Everything else the <c>/assignments</c> group serves stays in
-    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal.
+    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal — except the
+    /// one submission-grade POST, which <see cref="MapAssignmentGradeRoutes"/> mounts under its own
+    /// writer sub-group (round <c>portal-submission-grade</c> D1).
     /// </summary>
     public static RouteGroupBuilder MapAssignmentReaderRoutes(this RouteGroupBuilder group)
     {
@@ -207,6 +209,56 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+        });
+
+        return group;
+    }
+
+    /// <summary>
+    /// The one teacher-portal WRITE route (round <c>portal-submission-grade</c> D1) — the
+    /// submission-grade POST the writer policy decorates (see <see cref="AssignmentEndpoints"/>).
+    /// Its body moved <b>verbatim</b> out of <see cref="MapAssignmentRoutes"/> when the route gained
+    /// the writer policy: same (assignment, student) → submission resolution, same 404 before
+    /// dispatching the command, same four catch arms. Unlike the reader's six GETs, this route is a
+    /// write, so it is the group's only route that is neither reader-decorated nor reachable by a
+    /// role-less principal.
+    /// </summary>
+    public static RouteGroupBuilder MapAssignmentGradeRoutes(this RouteGroupBuilder group)
+    {
+        // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/submission/review", async (
+            Guid id,
+            Guid studentId,
+            [FromBody] ReviewSubmissionRequest req,
+            [FromServices] ISubmissionRepository submissionRepo,
+            [FromServices] ICommandHandler<ReviewSubmissionCommand> handler,
+            CancellationToken ct) =>
+        {
+            var submission = await submissionRepo.GetSubmissionByAssignmentStudentAsync(id, studentId, ct);
+            if (submission is null) return Results.NotFound();
+            try
+            {
+                await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, req.TeacherId, req.Score, req.Grade, req.Comments), ct);
+                return Results.NoContent();
+            }
+            catch (SubmissionNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 403);
+            }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
+            catch (TeacherTenantMismatchException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
         });
 
@@ -1089,42 +1141,6 @@ public static class AssignmentRoutes
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { ex.Message });
-            }
-            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
-            catch (MissingTeacherPrincipalException ex)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
-            }
-            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
-            catch (TeacherTenantMismatchException ex)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
-            }
-        });
-
-        // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
-        group.MapPost("/{id:guid}/students/{studentId:guid}/submission/review", async (
-            Guid id,
-            Guid studentId,
-            [FromBody] ReviewSubmissionRequest req,
-            [FromServices] ISubmissionRepository submissionRepo,
-            [FromServices] ICommandHandler<ReviewSubmissionCommand> handler,
-            CancellationToken ct) =>
-        {
-            var submission = await submissionRepo.GetSubmissionByAssignmentStudentAsync(id, studentId, ct);
-            if (submission is null) return Results.NotFound();
-            try
-            {
-                await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, req.TeacherId, req.Score, req.Grade, req.Comments), ct);
-                return Results.NoContent();
-            }
-            catch (SubmissionNotFoundException)
-            {
-                return Results.NotFound();
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Results.Problem(ex.Message, statusCode: 403);
             }
             // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
             catch (MissingTeacherPrincipalException ex)

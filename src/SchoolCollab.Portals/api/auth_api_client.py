@@ -49,6 +49,7 @@ from api.errors import (
     SessionEndedError,
     SessionNotFoundError,
     TokenInResponseError,
+    token_shaped_keys,
 )
 
 #: The Aspire resource name of the auth service (the AppHost's ``WithReference(auth)`` on the
@@ -67,18 +68,10 @@ SESSION_PATH = "/auth/session/{session_id}"
 #: pins it for the same reason).
 SESSION_HEADER_NAME = "X-Portal-Session"
 
-#: Fields that must never appear in a portal-bound body (AC11). Every decoded response is scanned
-#: — nested objects and arrays included — and a body carrying one is refused, never ingested.
-TOKEN_SHAPED_KEYS = frozenset(
-    {
-        "access_token",
-        "accessToken",
-        "refresh_token",
-        "refreshToken",
-        "id_token",
-        "idToken",
-    }
-)
+#: The AC11 token-shape scan and its key set are shared by every portal client: they live in
+#: ``api/errors.py``, beside the ``TokenInResponseError`` they raise, so a client never imports
+#: another client's internals (round ``portal-submission-grade`` review P2-1). ``token_shaped_keys``
+#: is imported above.
 
 #: The auth service's typed failure codes -> the portal's exception taxonomy (fail-closed: an
 #: unrecognized code degrades as an unusable response, never as "probably fine").
@@ -145,22 +138,6 @@ def resolve_auth_service_endpoint() -> AuthServiceEndpoint:
         if key.lower().startswith("services") or any(hint in key.upper() for hint in _DISCOVERY_HINTS)
     }
     raise ServiceDiscoveryError(AUTH_SERVICE, tried, present)
-
-
-def _token_shaped_keys(payload: Any) -> tuple[str, ...]:
-    """Every token-shaped key in a decoded body, at any depth (AC11)."""
-    found: set[str] = set()
-    stack: list[Any] = [payload]
-    while stack:
-        item = stack.pop()
-        if isinstance(item, Mapping):
-            for key, value in item.items():
-                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
-                    found.add(key)
-                stack.append(value)
-        elif isinstance(item, (list, tuple)):
-            stack.extend(item)
-    return tuple(sorted(found))
 
 
 def _string(value: Any) -> str | None:
@@ -253,7 +230,7 @@ class AuthApiClient:
             raise ApiUnavailableError(self._endpoint.service, base_url, error) from error
 
         payload = self._decode(response, path)
-        leaked = _token_shaped_keys(payload)
+        leaked = token_shaped_keys(payload)
         if leaked:
             raise TokenInResponseError(self._endpoint.service, base_url, leaked)
 

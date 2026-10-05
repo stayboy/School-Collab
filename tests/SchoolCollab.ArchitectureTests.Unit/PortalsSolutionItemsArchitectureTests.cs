@@ -139,6 +139,7 @@ public class PortalsSolutionItemsArchitectureTests
                 "src/SchoolCollab.Portals/tests/test_app_routes.py",
                 "src/SchoolCollab.Portals/tests/test_assignments_api_client.py",
                 "src/SchoolCollab.Portals/tests/test_service_discovery.py",
+                "src/SchoolCollab.Portals/tests/test_teacher_grade.py",
                 "src/SchoolCollab.Portals/tests/test_teacher_session.py",
                 "src/SchoolCollab.Portals/tests/test_teacher_views.py",
                 "src/SchoolCollab.Portals/uv.lock",

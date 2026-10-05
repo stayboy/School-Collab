@@ -13,7 +13,9 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 ///        gateway</b> scheme — and no longer Bearer. The gateway is registered in every flag state,
 ///        so a listed scheme always has a handler (a policy-named scheme without one is a 500, not a
 ///        401), and it routes each request to the portal session, to Bearer, or to the dev
-///        TestAuth scheme;</item>
+///        TestAuth scheme. The round-<c>portal-submission-grade</c> writer policy
+///        (<c>RequireAssignmentWriter</c>) is guarded the same way, together with the route it
+///        holds and the general map it left;</item>
 ///   <item>the AppHost's <b>both</b> app-callback allowlist copies carry the teacher portal's
 ///        <c>/auth/callback</c> append — the auth service's (which enforces the list at code
 ///        issuance) and the auth portal's own copy (which re-validates the value it redirects to).
@@ -48,7 +50,6 @@ public class PortalSessionAdoptionArchitectureTests
         "AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)";
 
     private const string BearerSchemeOptIn = "AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)";
-
     private static readonly string RepoRoot = FindRepoRoot();
 
     /// <summary>A resource-creation chain: <c>var portals = builder.AddUvicornApp("portals", …)</c>.
@@ -94,6 +95,71 @@ public class PortalSessionAdoptionArchitectureTests
             "the three group-level Bearer opt-ins (the /assignments group and its two nested "
             + "sub-groups) are untouched — only the reader policy moved to the gateway.");
     }
+
+    [TestMethod]
+    public void WriterPolicy_NamesTheGateway_AndHoldsExactlyTheGradeRoute()
+    {
+        // The round-portal-submission-grade writer policy (D1) is the pair of facts no build and
+        // no unit test can see: which scheme it lists, and which route it decorates. Both are
+        // non-vacuous — removing the grade route from the writer sub-group, or dropping the
+        // gateway scheme from the policy, reddens this test.
+        //
+        // NOTE on the sub-group's inherited policy: the writer sub-group ALSO inherits the
+        // parent /assignments group's Bearer opt-in (as the reader sub-group does). That is
+        // correct and load-bearing — the authorization middleware COMBINES an endpoint's
+        // policies, so the union of {Bearer, gateway} authenticates a portal session through the
+        // gateway and an existing Bearer caller through the fallback. The route-level tests
+        // (AssignmentWriterPolicyRouteTests) prove that union over the real HTTP pipeline; this
+        // guard pins the SOURCE shape it depends on.
+        var endpoints = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "AssignmentEndpoints.cs");
+        var policy = ExtractMethod(endpoints, "void RequireAssignmentWriter(");
+
+        policy.Should().Contain(GatewaySchemeOptIn,
+            "the writer policy must list the portal-session gateway: it is the ONE scheme with a "
+            + "handler in every flag state, and it routes a portal session to the portal-session "
+            + "scheme while bearer and dev callers keep their own.");
+
+        policy.Should().NotContain("AuthTenancyExtensions.BearerScheme",
+            "the writer policy must list exactly one scheme (the reader's reason): authorization "
+            + "challenges every listed scheme, and Bearer has no handler under "
+            + "FEATURE:DisableOIDCAuth.");
+
+        policy.Should().Contain("RequireAuthenticatedUser()")
+            .And.Contain("RequireRole(",
+                "the writer policy stays self-sufficient for the route it decorates.");
+
+        // ONE role disjunction in the module: the writer's must be the reader's, exactly.
+        var readerPolicy = ExtractMethod(endpoints, "void RequireAssignmentReader(");
+        RoleNamesIn(policy).Should().Equal(RoleNamesIn(readerPolicy),
+            "the writer policy restates the reader's four-role disjunction verbatim — two "
+            + "disjunctions that can drift apart are exactly what the reader's P1-1 rework forbade.");
+
+        endpoints.Should().Contain("writerGroup.RequireAuthorization(RequireAssignmentWriter)",
+            "the writer sub-group is where the policy lands (never the whole /assignments group, "
+            + "whose widening would re-open every create/edit/publish write to the reader roles).");
+
+        endpoints.Should().Contain("writerGroup.MapAssignmentGradeRoutes()",
+            "the writer sub-group maps the grade route — the policy and the route it decorates "
+            + "must move together.");
+
+        Regex.Matches(endpoints, Regex.Escape(BearerSchemeOptIn)).Count.Should().Be(3,
+            "the writer sub-group must add NO group-level Bearer opt-in: the three the reader "
+            + "guard pins stay unchanged.");
+
+        // The route itself: mounted by the grade map, and gone from the general map.
+        var routes = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Endpoints", "AssignmentRoutes.cs");
+        ExtractMethod(routes, "RouteGroupBuilder MapAssignmentGradeRoutes(this RouteGroupBuilder")
+            .Should().Contain("/{id:guid}/students/{studentId:guid}/submission/review",
+                "the grade POST is the writer sub-group's one route.");
+        ExtractMethod(routes, "RouteGroupBuilder MapAssignmentRoutes(this RouteGroupBuilder")
+            .Should().NotContain("submission/review",
+                "the grade POST must no longer be mounted by MapAssignmentRoutes — that is the "
+                + "route move the writer policy depends on.");
+    }
+
+    /// <summary>The realm role names a policy body lists, in source order.</summary>
+    private static IReadOnlyList<string> RoleNamesIn(string policyBody)
+        => [.. Regex.Matches(policyBody, @"RealmRoleNames\.\w+").Select(match => match.Value)];
 
     [TestMethod]
     public void BothAppCallbackAllowlistCopies_CarryTheTeacherPortalCallback()

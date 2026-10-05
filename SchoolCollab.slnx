@@ -72,6 +72,7 @@
     <File Path="src/SchoolCollab.Portals/tests/test_app_routes.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_assignments_api_client.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_service_discovery.py" />
+    <File Path="src/SchoolCollab.Portals/tests/test_teacher_grade.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_teacher_session.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_teacher_views.py" />
   </Folder>

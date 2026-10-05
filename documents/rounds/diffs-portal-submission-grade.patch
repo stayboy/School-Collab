@@ -1,0 +1,2892 @@
+diff --git a/SchoolCollab.slnx b/SchoolCollab.slnx
+index f3371d01..013e28c9 100644
+--- a/SchoolCollab.slnx
++++ b/SchoolCollab.slnx
+@@ -72,6 +72,7 @@
+     <File Path="src/SchoolCollab.Portals/tests/test_app_routes.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_assignments_api_client.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_service_discovery.py" />
++    <File Path="src/SchoolCollab.Portals/tests/test_teacher_grade.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_teacher_session.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_teacher_views.py" />
+   </Folder>
+diff --git a/documents/specs/teachers-ward-portal-prefab-plan.md b/documents/specs/teachers-ward-portal-prefab-plan.md
+index e3769f9a..015e8aee 100644
+--- a/documents/specs/teachers-ward-portal-prefab-plan.md
++++ b/documents/specs/teachers-ward-portal-prefab-plan.md
+@@ -1,7 +1,7 @@
+ # Teachers & Ward Portal — Prefab UI (Python) integration plan
+ 
+-Status: **Phase 0 LANDED; Phase 2's read-only half LANDED** — the teacher surface, its auth/scope wiring and its CI all merged to `main` at `b78dc2ae` (stack #297: #295 → #296 → #298 → #299, 2026-10-04). Phases 1 and 3–4 remain a proposal pending the owner's MVP go/no-go, and Phase 2's **write** half (submission review/grade, T5) is not started. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
+-Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1; **2026-10-04:** the dev-teacher identity wiring landed (round `dev-teacher-identity-wiring`, PR #299) and the 4-layer train merged as stack #297 → `b78dc2ae`, closing the third prerequisite)
++Status: **Phase 0 LANDED; Phase 2 COMPLETE (read-only half + write half)** — the teacher surface, its auth/scope wiring and its CI all merged to `main` at `b78dc2ae` (stack #297: #295 → #296 → #298 → #299, 2026-10-04). Round `portal-submission-grade` (2026-10-06) landed Phase 2's **write** half: submission review/grade through the portal's own session-gated route, over the existing assignments-api grade endpoint (now reachable by a portal session). **T5's spike boundary — read-only review + submission review/grade — is therefore complete, and the Q5 MVP go/no-go is un-paused:** its named trigger was "after the teacher write half lands", and this round *is* that write half, so the owner re-decides Phases 1 and 3–4; nothing here pre-commits them. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
++Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1; **2026-10-04:** the dev-teacher identity wiring landed (round `dev-teacher-identity-wiring`, PR #299) and the 4-layer train merged as stack #297 → `b78dc2ae`, closing the third prerequisite; **2026-10-06:** the teacher write half landed (round `portal-submission-grade`) — submission review/grade through the portal's own session-gated route, completing T5's spike boundary and un-pausing the Q5 MVP go/no-go)
+ Branch context: authored alongside the AR-13 round (branch `stack/13-ar-13-families-ward-surface`, since squash-merged to `main` as PR #236); the AR train (ar-13/ar-14/ar-15 — #236/#237/#239) has since fully merged to `main`. **Code for this plan HAS landed** — see the Status line above. The claim that stood here ("No code for this plan has landed") was true when written and had been false since #296; corrected 2026-10-04.
+ 
+ ## 1. Goal
+@@ -265,10 +265,29 @@ School-Collab/
+ - Test story: Playwright per `.github/copilot/rules/testing.md`.
+ 
+ ### Phase 2 — Teacher review portal spike (2026-10-01 decisions T1–T7)
+-- **Read-only** teacher workspace in `views/teacher.py` (a **flat module** — round-2
+-  grill Q5, superseding T1's `views/teacher/` wording): assignment list (scoped per
++- Teacher workspace in `views/teacher.py` (a **flat module** — round-2 grill Q5,
++  superseding T1's `views/teacher/` wording): assignment list (scoped per
+   T3) → review queue (principal-first, ar-24) → submission detail → submission
+-  review/grade. No create/edit/publish in the spike (T5).
++  review/grade. The **read** half landed 2026-10-03; the **write** half (the grade
++  form and its route) landed 2026-10-06 — see the bullet below. No
++  create/edit/publish in the spike (T5).
++- **Write half (round `portal-submission-grade`, 2026-10-06) — T5 complete:** the
++  submission detail page carries a model-driven Prefab grade form whose
++  `Fetch.post` calls **this portal's own** session-gated route
++  (`POST /teacher/assignments/{assignmentId}/students/{studentId}/review`). That
++  route mirrors the auth portal's mechanics (a JSON-only body plus a one-time
++  antiforgery token, consumed before anything else), resolves the D19 gate, and
++  then calls the **existing** assignments-api grade endpoint — which the round
++  opened to a portal session by mounting it under a new flag-conditional
++  `RequireAssignmentWriter` sub-group (the reader policy's pattern and its
++  four-role disjunction), instead of widening the `/assignments` group's Bearer
++  policy. The portal still holds no credential (AC11): the opaque session id
++  travels in `X-Portal-Session`, and the body's `teacherId` is the D18 claim set
++  **as data**. Every refusal is a bounded code rendered on the page the fetch
++  lands on; the assignments-api grade POST is never called without a live session
++  and an unspent form token. Because this is the write half T5 named, it fires
++  the Q5 deferral's trigger: the ward-portal MVP go/no-go is **un-paused**, and
++  the owner re-decides Phases 1 and 3–4.
+ - **Auth/roles (T2, T4, T6)**: add `teacher` + `staff` realm roles, the
+   assignment endpoint-group authorization policies (flag-conditional), and the
+   teacher-scope filter fed by a new Assignments→Students `TeacherGradeLevel` port.
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+index 62fe0d5e..eb805231 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+@@ -41,6 +41,22 @@ public static class AssignmentEndpoints
+         }
+         readerGroup.MapAssignmentReaderRoutes();
+ 
++        // ── Teacher-portal grade write (round portal-submission-grade D1) ────────
++        // The writer policy is applied to this NESTED SUB-GROUP — never to the whole
++        // /assignments group. The group's own policy pins the Bearer scheme, which a
++        // portal-session caller cannot satisfy, and widening that policy to the gateway
++        // would re-open every create/edit/publish/approve write to the four reader roles.
++        // The sub-group carries exactly the submission-grade POST, mapped by
++        // MapAssignmentGradeRoutes.
++        var writerGroup = group.MapGroup(string.Empty);
++        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
++        {
++            // Same P1-2 pattern as the reader: with the flag ON there is no policy and
++            // today's dev posture is unchanged for this route too.
++            writerGroup.RequireAuthorization(RequireAssignmentWriter);
++        }
++        writerGroup.MapAssignmentGradeRoutes();
++
+         group.MapAssignmentRoutes();
+ 
+         // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
+@@ -101,4 +117,32 @@ public static class AssignmentEndpoints
+                 RealmRoleNames.UserAdmin,
+                 RealmRoleNames.PlatformAdmin);
+     }
++
++    /// <summary>
++    /// The one disjunctive teacher-portal writer policy: <c>teacher</c> ∨ <c>staff</c> ∨
++    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the portal-session GATEWAY scheme and
++    /// authenticated (round <c>portal-submission-grade</c> D1 — byte-for-byte the reader policy's
++    /// pattern, holding exactly the submission-grade POST). Deliberately the SAME four-role
++    /// disjunction as <see cref="RequireAssignmentReader"/>: the fine-grained grade authority is
++    /// the handler's creating-teacher and cross-tenant checks, so the policy's job is only the
++    /// coarse T4 role gate — and the grade route carried no role gate at all before this round,
++    /// so a narrower set would 403 a bearer caller that grades today. One role disjunction per
++    /// module, never two that can drift. Built inline for the reader's documented reason: the
++    /// hosts that compose this pipeline in tests call <c>AddAuthAndTenancy</c> without Assignments'
++    /// <c>Program.cs</c>, and an unresolvable named policy throws out of
++    /// <c>AuthorizationPolicy.Combine</c> on every request to a route that names it.
++    /// </summary>
++    internal static void RequireAssignmentWriter(AuthorizationPolicyBuilder policy)
++    {
++        ArgumentNullException.ThrowIfNull(policy);
++
++        policy
++            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
++            .RequireAuthenticatedUser()
++            .RequireRole(
++                RealmRoleNames.Teacher,
++                RealmRoleNames.Staff,
++                RealmRoleNames.UserAdmin,
++                RealmRoleNames.PlatformAdmin);
++    }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index b82c8da0..9b210e0c 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -64,7 +64,9 @@ public static class AssignmentRoutes
+     /// routes the reader policy decorates (see <see cref="AssignmentEndpoints"/>). Their caller's
+     /// <see cref="TeacherScope"/> is resolved HERE, at the endpoint, and threaded onto the query;
+     /// no Core handler fetches it. Everything else the <c>/assignments</c> group serves stays in
+-    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal.
++    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal — except the
++    /// one submission-grade POST, which <see cref="MapAssignmentGradeRoutes"/> mounts under its own
++    /// writer sub-group (round <c>portal-submission-grade</c> D1).
+     /// </summary>
+     public static RouteGroupBuilder MapAssignmentReaderRoutes(this RouteGroupBuilder group)
+     {
+@@ -213,6 +215,56 @@ public static class AssignmentRoutes
+         return group;
+     }
+ 
++    /// <summary>
++    /// The one teacher-portal WRITE route (round <c>portal-submission-grade</c> D1) — the
++    /// submission-grade POST the writer policy decorates (see <see cref="AssignmentEndpoints"/>).
++    /// Its body moved <b>verbatim</b> out of <see cref="MapAssignmentRoutes"/> when the route gained
++    /// the writer policy: same (assignment, student) → submission resolution, same 404 before
++    /// dispatching the command, same four catch arms. Unlike the reader's six GETs, this route is a
++    /// write, so it is the group's only route that is neither reader-decorated nor reachable by a
++    /// role-less principal.
++    /// </summary>
++    public static RouteGroupBuilder MapAssignmentGradeRoutes(this RouteGroupBuilder group)
++    {
++        // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
++        group.MapPost("/{id:guid}/students/{studentId:guid}/submission/review", async (
++            Guid id,
++            Guid studentId,
++            [FromBody] ReviewSubmissionRequest req,
++            [FromServices] ISubmissionRepository submissionRepo,
++            [FromServices] ICommandHandler<ReviewSubmissionCommand> handler,
++            CancellationToken ct) =>
++        {
++            var submission = await submissionRepo.GetSubmissionByAssignmentStudentAsync(id, studentId, ct);
++            if (submission is null) return Results.NotFound();
++            try
++            {
++                await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, req.TeacherId, req.Score, req.Grade, req.Comments), ct);
++                return Results.NoContent();
++            }
++            catch (SubmissionNotFoundException)
++            {
++                return Results.NotFound();
++            }
++            catch (UnauthorizedAccessException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 403);
++            }
++            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
++            catch (MissingTeacherPrincipalException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
++            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
++            catch (TeacherTenantMismatchException ex)
++            {
++                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
++            }
++        });
++
++        return group;
++    }
++
+     /// <summary>
+     /// [P2-2] Whether the id-addressed assignment is inside the caller's scope. The scope-aware
+     /// detail read is the single gate, so a scoped caller's out-of-scope id answers like an
+@@ -1102,42 +1154,6 @@ public static class AssignmentRoutes
+             }
+         });
+ 
+-        // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
+-        group.MapPost("/{id:guid}/students/{studentId:guid}/submission/review", async (
+-            Guid id,
+-            Guid studentId,
+-            [FromBody] ReviewSubmissionRequest req,
+-            [FromServices] ISubmissionRepository submissionRepo,
+-            [FromServices] ICommandHandler<ReviewSubmissionCommand> handler,
+-            CancellationToken ct) =>
+-        {
+-            var submission = await submissionRepo.GetSubmissionByAssignmentStudentAsync(id, studentId, ct);
+-            if (submission is null) return Results.NotFound();
+-            try
+-            {
+-                await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, req.TeacherId, req.Score, req.Grade, req.Comments), ct);
+-                return Results.NoContent();
+-            }
+-            catch (SubmissionNotFoundException)
+-            {
+-                return Results.NotFound();
+-            }
+-            catch (UnauthorizedAccessException ex)
+-            {
+-                return Results.Problem(ex.Message, statusCode: 403);
+-            }
+-            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+-            catch (MissingTeacherPrincipalException ex)
+-            {
+-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+-            }
+-            // ar-24: cross-tenant rejection — foreign-tenant teacher ⇒ 403 (never a 500).
+-            catch (TeacherTenantMismatchException ex)
+-            {
+-                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+-            }
+-        });
+-
+         // ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ───────────────────
+ 
+         // Guardian e-signs a ward's submission. Captures the caller IP + user-agent
+diff --git a/src/SchoolCollab.Portals/api/assignments_api_client.py b/src/SchoolCollab.Portals/api/assignments_api_client.py
+index daccef7f..2edeba2d 100644
+--- a/src/SchoolCollab.Portals/api/assignments_api_client.py
++++ b/src/SchoolCollab.Portals/api/assignments_api_client.py
+@@ -19,11 +19,16 @@ session id (``X-Portal-Session``) on teacher-route calls only, while the ward
+ route stays header-less — the header is passed per call, never defaulted onto
+ the client, so no surface can acquire it by accident.
+ 
+-Adding an endpoint is one method, e.g. the ward plan's next endpoints::
++Adding an endpoint is one method. A read returns a parsed result::
+ 
+     async def list_ward_assignments(self, student_id: str) -> FetchResult:
+         status, payload = await self._get_json(f"/{student_id}/assignments")
+         ...
++
++and a write returns the status it was answered with::
++
++    async def review_submission(self, ...) -> int:
++        return await self._post_json(f"/{assignment_id}/students/{student_id}/submission/review", body)
+ """
+ 
+ from __future__ import annotations
+@@ -34,12 +39,25 @@ from typing import Any
+ 
+ import httpx
+ 
++# The shared AC11 token-shape scan (``api/errors.py``, beside the ``TokenInResponseError`` it
++# raises): every decoded body the portal ingests is scanned with ONE implementation of the token key
++# set, never a second copy that could drift away from it — and never by importing another client's
++# internals (round ``portal-submission-grade`` review P2-1).
+ from api.dto import AssignmentRow, SubmissionDetailRow, SubmissionForReviewRow
+-from api.errors import ApiResponseError, ApiUnavailableError
++from api.errors import (
++    ApiResponseError,
++    ApiUnavailableError,
++    TokenInResponseError,
++    token_shaped_keys,
++)
+ from api.service_discovery import ServiceEndpoint
+ 
+ JSON_CONTENT_TYPE = "application/json"
+ 
++#: The two media types whose bodies this client decodes on a write: a success document
++#: and the Assignments API's bounded problem document (a refusal).
++PROBLEM_JSON_CONTENT_TYPE = "application/problem+json"
++
+ 
+ @dataclass(frozen=True)
+ class FetchResult:
+@@ -165,6 +183,86 @@ class AssignmentsApiClient:
+             status_code=status_code, submission=SubmissionDetailRow.from_payload(payload)
+         )
+ 
++    async def review_submission(
++        self,
++        assignment_id: str,
++        student_id: str,
++        *,
++        teacher_id: str,
++        score: float | None,
++        grade: str | None,
++        comments: str | None,
++        headers: Mapping[str, str] | None = None,
++    ) -> int:
++        """``POST /{id}/students/{studentId}/submission/review`` — record a teacher's grade.
++
++        The body is the Assignments API's **camelCase** binding spelling
++        (``teacherId``/``score``/``grade``/``comments``; ASP.NET's web defaults).
++        ``teacher_id`` is the dev-bypass fallback the API reads
++        (``currentUser.TeacherId ?? (isRealAuth ? throw : command.TeacherId)``), so it is
++        inert under real auth — where the principal's claim wins — and the only teacher
++        input under the dev bypass. On the session path ``headers`` carries the opaque
++        session id (D19's rule 1), and ``teacher_id`` is the session's claim data, never a
++        credential (AC9/AC11).
++
++        Returns the API's 2xx status (``204 No Content`` for a recorded grade): the write
++        has no response body to model, so there is no new result DTO to re-export.
++        """
++        return await self._post_json(
++            f"/{assignment_id}/students/{student_id}/submission/review",
++            {
++                "teacherId": teacher_id,
++                "score": score,
++                "grade": grade,
++                "comments": comments,
++            },
++            headers=headers,
++        )
++
++    async def _post_json(
++        self,
++        path: str,
++        body: dict[str, Any],
++        headers: Mapping[str, str] | None = None,
++    ) -> int:
++        """POST ``path`` with ``body`` and return its 2xx status, or raise a typed error.
++
++        Fail-closed in ``_get_json``'s reason order, with one deliberate difference: any
++        body is **decoded before the status is judged**, never cut short by
++        ``raise_for_status()``. The Assignments API answers a refusal with
++        ``application/problem+json``, and decoding first is what keeps that refusal
++        classified here rather than turned into a raw transport exception — while the
++        ``detail`` text itself is never carried into the error, so only the portal's own
++        bounded code can reach a page. A 204 carries no body at all, so the grade's own
++        success path is a status alone. Every decoded body is scanned for token-shaped
++        fields at any depth before anything trusts it (AC11).
++        """
++        try:
++            response = await self._http.post(
++                f"{self._endpoint.base_url}{path}", json=body, headers=headers
++            )
++        except httpx.HTTPError as error:  # ConnectError, TimeoutException, ...
++            raise ApiUnavailableError(
++                self._endpoint.service, self._endpoint.base_url, error
++            ) from error
++
++        if response.content:
++            decoded = self._decode(response, path)
++            leaked = token_shaped_keys(decoded)
++            if leaked:
++                raise TokenInResponseError(
++                    self._endpoint.service, self._endpoint.base_url, leaked
++                )
++
++        if response.status_code >= 400:
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                f"HTTP {response.status_code} for {path}",
++            )
++
++        return response.status_code
++
+     async def _get_json(
+         self,
+         path: str,
+@@ -205,3 +303,30 @@ class AssignmentsApiClient:
+             raise ApiResponseError(
+                 self._endpoint.service, self._endpoint.base_url, f"body was not valid JSON: {error}"
+             ) from error
++
++    def _decode(self, response: httpx.Response, path: str) -> Any:
++        """A POST body as JSON — a success document or a bounded refusal document.
++
++        Only these two media types are read: the Assignments API answers a success with
++        ``application/json`` and a refusal with ``application/problem+json``. Anything else
++        — an HTML challenge page, a proxy error page — is not a document this client will
++        ingest, and a body it will not read is a typed refusal, never data (the
++        ``_get_json`` guard's reason, kept stricter there where a refusal document must
++        not be mistaken for a row).
++        """
++        content_type = response.headers.get("content-type", "").lower()
++        if not content_type.startswith((JSON_CONTENT_TYPE, PROBLEM_JSON_CONTENT_TYPE)):
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                f"expected {JSON_CONTENT_TYPE}, got '{content_type or 'no content-type'}'",
++            )
++
++        try:
++            return response.json()
++        except ValueError as error:
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                f"body for {path} was not valid JSON: {error}",
++            ) from error
+diff --git a/src/SchoolCollab.Portals/api/auth_api_client.py b/src/SchoolCollab.Portals/api/auth_api_client.py
+index 5902545e..cb5539b0 100644
+--- a/src/SchoolCollab.Portals/api/auth_api_client.py
++++ b/src/SchoolCollab.Portals/api/auth_api_client.py
+@@ -49,6 +49,7 @@ from api.errors import (
+     SessionEndedError,
+     SessionNotFoundError,
+     TokenInResponseError,
++    token_shaped_keys,
+ )
+ 
+ #: The Aspire resource name of the auth service (the AppHost's ``WithReference(auth)`` on the
+@@ -67,18 +68,10 @@ SESSION_PATH = "/auth/session/{session_id}"
+ #: pins it for the same reason).
+ SESSION_HEADER_NAME = "X-Portal-Session"
+ 
+-#: Fields that must never appear in a portal-bound body (AC11). Every decoded response is scanned
+-#: — nested objects and arrays included — and a body carrying one is refused, never ingested.
+-TOKEN_SHAPED_KEYS = frozenset(
+-    {
+-        "access_token",
+-        "accessToken",
+-        "refresh_token",
+-        "refreshToken",
+-        "id_token",
+-        "idToken",
+-    }
+-)
++#: The AC11 token-shape scan and its key set are shared by every portal client: they live in
++#: ``api/errors.py``, beside the ``TokenInResponseError`` they raise, so a client never imports
++#: another client's internals (round ``portal-submission-grade`` review P2-1). ``token_shaped_keys``
++#: is imported above.
+ 
+ #: The auth service's typed failure codes -> the portal's exception taxonomy (fail-closed: an
+ #: unrecognized code degrades as an unusable response, never as "probably fine").
+@@ -147,22 +140,6 @@ def resolve_auth_service_endpoint() -> AuthServiceEndpoint:
+     raise ServiceDiscoveryError(AUTH_SERVICE, tried, present)
+ 
+ 
+-def _token_shaped_keys(payload: Any) -> tuple[str, ...]:
+-    """Every token-shaped key in a decoded body, at any depth (AC11)."""
+-    found: set[str] = set()
+-    stack: list[Any] = [payload]
+-    while stack:
+-        item = stack.pop()
+-        if isinstance(item, Mapping):
+-            for key, value in item.items():
+-                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
+-                    found.add(key)
+-                stack.append(value)
+-        elif isinstance(item, (list, tuple)):
+-            stack.extend(item)
+-    return tuple(sorted(found))
+-
+-
+ def _string(value: Any) -> str | None:
+     """A non-empty string, or ``None`` — the shape every id and URL here must have."""
+     return value if isinstance(value, str) and value else None
+@@ -253,7 +230,7 @@ class AuthApiClient:
+             raise ApiUnavailableError(self._endpoint.service, base_url, error) from error
+ 
+         payload = self._decode(response, path)
+-        leaked = _token_shaped_keys(payload)
++        leaked = token_shaped_keys(payload)
+         if leaked:
+             raise TokenInResponseError(self._endpoint.service, base_url, leaked)
+ 
+diff --git a/src/SchoolCollab.Portals/api/errors.py b/src/SchoolCollab.Portals/api/errors.py
+index f2ae8cd6..3c1d772f 100644
+--- a/src/SchoolCollab.Portals/api/errors.py
++++ b/src/SchoolCollab.Portals/api/errors.py
+@@ -8,6 +8,8 @@ lets a route catch ``PortalApiError`` and stay honest about the failure.
+ 
+ from __future__ import annotations
+ 
++from collections.abc import Mapping
++
+ 
+ class PortalApiError(RuntimeError):
+     """Base class for every failure raised by the portal's API clients."""
+@@ -113,3 +115,36 @@ class TokenInResponseError(PortalApiError):
+             f"{service} at {base_url} returned a body carrying token-shaped fields {list(keys)} "
+             "— the portal never holds a credential, so the response was refused"
+         )
++
++
++#: Fields that must never appear in a portal-bound body (AC11). Every decoded response is scanned
++#: — nested objects and arrays included — and a body carrying one is refused, never ingested.
++#: Shared by every portal client: one spelling of the key set, owned by no single client, so a new
++#: client adopts the scan without importing another client's internals (round
++#: ``portal-submission-grade`` review P2-1).
++TOKEN_SHAPED_KEYS = frozenset(
++    {
++        "access_token",
++        "accessToken",
++        "refresh_token",
++        "refreshToken",
++        "id_token",
++        "idToken",
++    }
++)
++
++
++def token_shaped_keys(payload: object) -> tuple[str, ...]:
++    """Every token-shaped key in a decoded body, at any depth (AC11)."""
++    found: set[str] = set()
++    stack: list[object] = [payload]
++    while stack:
++        item = stack.pop()
++        if isinstance(item, Mapping):
++            for key, value in item.items():
++                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
++                    found.add(key)
++                stack.append(value)
++        elif isinstance(item, (list, tuple)):
++            stack.extend(item)
++    return tuple(sorted(found))
+diff --git a/src/SchoolCollab.Portals/app.py b/src/SchoolCollab.Portals/app.py
+index 6511d459..78c886d5 100644
+--- a/src/SchoolCollab.Portals/app.py
++++ b/src/SchoolCollab.Portals/app.py
+@@ -24,7 +24,13 @@ Routes:
+                    The dev bypass's teacher id comes from the portal's own
+                    environment (``PORTAL_DEV_TEACHER_ID``, D5) — never a default.
+     GET /teacher/assignments/{assignmentId}/students/{studentId} -> the
+-                   submission detail (version history + review).
++                   submission detail (version history + review + the grade form).
++    POST /teacher/assignments/{assignmentId}/students/{studentId}/review ->
++                   the grade form's OWN route: the JSON-only and one-time-antiforgery
++                   guards, then the D19 gate, then the existing assignments-api grade
++                   POST. It answers {"redirect_uri": …} at HTTP 200 (the fetch's own
++                   shape); every refusal is a bounded code, and the assignments API is
++                   never called without a live session and an unspent form token.
+     GET /auth/callback -> the teacher portal's OWN session bootstrap (round
+                    ``portal-session-adoption``, D19): it redeems the single-use
+                    D6 handshake code the auth portal handed the browser for
+@@ -40,24 +46,30 @@ Session posture (D19's rule ladder, one place — ``require_teacher_session``):
+ ``/teacher*`` reads carry the opaque session id in the ``X-Portal-Session``
+ header on every assignments-api call; with no cookie at all the gate acts only
+ when a sign-in target is configured (``PORTALS_LOGIN_URL``), and otherwise the
+-routes behave exactly as before this round. Every surface renders its degraded
+-state as a typed error page — a page, never a raw 500 or a traceback.
++routes behave exactly as before this round. The grade POST depends on the same
++gate, and translates its page-shaped outcome into the fetch's shape, because a
++``Fetch`` action cannot consume a card and must never be handed a 302.
++Every surface renders its degraded state as a typed error page — a page, never
++a raw 500 or a traceback.
+ """
+ 
+ from __future__ import annotations
+ 
++import json
+ import logging
+ import os
++import secrets
+ import uuid
+-from collections.abc import AsyncIterator
++from collections.abc import AsyncIterator, Mapping
+ from contextlib import asynccontextmanager
+ from dataclasses import dataclass, field
++from datetime import datetime, timedelta, timezone
+ from typing import Any
+-from urllib.parse import quote
++from urllib.parse import quote, urlencode
+ 
+ import httpx
+ from fastapi import Depends, FastAPI, Request
+-from fastapi.responses import HTMLResponse, RedirectResponse, Response
++from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+ 
+ from api import (
+     SESSION_HEADER_NAME,
+@@ -74,13 +86,27 @@ from api import (
+     resolve_service_endpoint,
+ )
+ from views.teacher import (
++    ANTIFORGERY_FIELD,
++    ERROR_CODE_PARAMETER,
++    GRADE_ANTIFORGERY_REJECTED_CODE,
++    GRADE_COMMENTS_FIELD,
++    GRADE_FORM_REJECTED_CODE,
++    GRADE_GRADE_FIELD,
++    GRADE_IDENTITY_MISSING_CODE,
++    GRADE_SCORE_FIELD,
++    GRADE_SCORE_INVALID_CODE,
++    GRADE_SESSION_REQUIRED_CODE,
++    GRADE_TEACHER_UNCONFIGURED_CODE,
++    REVIEW_PATH,
+     TeacherSurfaceLinks,
+     build_review_queue_view,
+     build_submission_view,
+     build_teacher_error_view,
+     build_teacher_list_view,
+     build_teacher_session_card,
++    grade_failure_code,
+     session_card_code,
++    submission_path,
+ )
+ from views.ward import build_error_view, build_ward_view
+ 
+@@ -89,6 +115,12 @@ logger = logging.getLogger("portals")
+ ASSIGNMENTS_API = "assignments-api"
+ HTTP_TIMEOUT_SECONDS = 10.0
+ 
++#: How long an issued grade-form antiforgery token stays usable, and how many may live at once
++#: (the auth portal's ``ANTIFORGERY_TTL_SECONDS`` / ``MAX_LIVE_ANTIFORGERY_TOKENS``, spec §14).
++#: The cap keeps an anonymous drill-down render flood from growing the process unbounded.
++ANTIFORGERY_TTL_SECONDS = 600
++MAX_LIVE_ANTIFORGERY_TOKENS = 512
++
+ # D5 (round ``portal-teacher-surface``): the dev-bypass teacher id the review queue
+ # needs. The portal carries no identity, and the assignments-api's queue route reads
+ # the ``teacherId`` query parameter only as its dev fallback
+@@ -133,6 +165,53 @@ CODE_QUERY_PARAMETER = "code"
+ RETURN_URI_PARAMETER = "return_uri"
+ 
+ 
++class AntiforgeryTokenStore:
++    """The grade form's one-time tokens, held in this process's memory only (spec §14).
++
++    Each drill-down render mints a random token and stores it here; ``POST …/review`` requires
++    one and consumes it, so a body replayed from a page the teacher never loaded — or a second
++    submit of the same page — cannot grade anything. Nothing is signed: the token is a random
++    string this process happens to remember, which is why there is **no signing key in Python**
++    (D12). Transplanted from the auth portal's store so the two portals' antiforgery mechanics
++    are the same mechanism, not two spellings of one.
++
++    Expiry and a live cap keep the store bounded: the issuing page is a session-bearing teacher
++    page, and an unbounded dictionary is a memory DoS either way.
++    """
++
++    def __init__(self, *, ttl_seconds: int = ANTIFORGERY_TTL_SECONDS) -> None:
++        self._ttl = timedelta(seconds=ttl_seconds)
++        self._tokens: dict[str, datetime] = {}
++
++    def issue(self) -> str:
++        """Mint and store a token for the page about to render."""
++        self._sweep()
++        token = secrets.token_urlsafe(32)
++        self._tokens[token] = datetime.now(timezone.utc) + self._ttl
++        return token
++
++    def consume(self, token: str | None) -> bool:
++        """Whether ``token`` was issued and is unexpired — consuming it either way.
++
++        Single use by construction: the token is removed before its validity is judged, so a
++        replay of a *valid* token is rejected just like an unknown one.
++        """
++        if not token:
++            return False
++        expires_at = self._tokens.pop(token, None)
++        return expires_at is not None and expires_at > datetime.now(timezone.utc)
++
++    def _sweep(self) -> None:
++        now = datetime.now(timezone.utc)
++        for token, expires_at in list(self._tokens.items()):
++            if expires_at <= now:
++                del self._tokens[token]
++
++        # Insertion order is age order: the oldest tokens go first once the cap is reached.
++        for token in list(self._tokens)[: max(0, len(self._tokens) - MAX_LIVE_ANTIFORGERY_TOKENS)]:
++            del self._tokens[token]
++
++
+ @dataclass
+ class PortalState:
+     """Per-process portal state — no module-level mutable globals."""
+@@ -141,6 +220,7 @@ class PortalState:
+     endpoint: ServiceEndpoint | None = None
+     last_fetch: dict[str, Any] = field(default_factory=dict)
+     discovery_error: str | None = None
++    antiforgery: AntiforgeryTokenStore = field(default_factory=AntiforgeryTokenStore)
+ 
+ 
+ def _try_resolve() -> tuple[ServiceEndpoint | None, str | None]:
+@@ -358,11 +438,86 @@ class TeacherSessionOutcome(Exception):
+         super().__init__("the teacher-session gate answered instead of the route")
+ 
+ 
++class GradeFormRefused(Exception):
++    """The grade POST's own transport refusal: a request this portal will not read.
++
++    Deliberately distinct from the gate's outcome: nothing about a sign-in state is being
++    described here (a forged or malformed request is simply turned away), so it carries one of
++    the grade path's bounded codes and the route answers it in the fetch's own shape rather
++    than with a page.
++    """
++
++    def __init__(self, code: str) -> None:
++        self.code = code
++        super().__init__(f"the grade form's request was refused ({code})")
++
++
++def _grade_target(request: Request) -> tuple[str, str]:
++    """The (assignment, student) a grade request is about, from the matched route's params."""
++    return (
++        str(request.path_params.get("assignment_id", "")),
++        str(request.path_params.get("student_id", "")),
++    )
++
++
++def _grade_failure(request: Request, code: str) -> JSONResponse:
++    """A refused grade in the fetch's own shape: HTTP 200, the drill-down URL, a bounded code.
++
++    Mirrors the auth portal's ``_login_failure``: the browser is only ever sent back to this
++    portal's own page, which renders the code's bounded copy — never to a URL carrying an
++    upstream body, a Problem ``detail`` or an attacker-supplied string.
++    """
++    assignment_id, student_id = _grade_target(request)
++    location = (
++        f"{submission_path(assignment_id, student_id)}"
++        f"?{urlencode({ERROR_CODE_PARAMETER: code})}"
++    )
++    return JSONResponse({"redirect_uri": location})
++
++
++def _is_grade_review_post(request: Request) -> bool:
++    """Whether this request is the grade form's own POST, matched on the route's PATTERN.
++
++    The matched route's template — never a raw path: the assignment and student ids are
++    request-specific, so a raw-path comparison would silently miss the parameterized route.
++    """
++    route = request.scope.get("route")
++    return request.method == "POST" and getattr(route, "path", None) == REVIEW_PATH
++
++
++def _grade_gate_answer(request: Request, outcome: TeacherSessionOutcome) -> Response:
++    """The D19 gate's outcome, in the shape the grade form's fetch can actually consume.
++
++    The gate's rule-3 answer is a 302 to the configured sign-in target: the fetch is told to
++    navigate there (``Fetch`` follows redirects, so handing it the 302 itself would make the
++    browser fetch the sign-in page cross-origin, dropping cookies). Its other answers are cards
++    for a dead, degraded or unconfigured session: the fetch is sent to the **drill-down**, whose
++    GET re-gates and renders the truth — the POST never touches the session cookie, because the
++    GET is the one place the cookie lifecycle runs.
++    """
++    location = outcome.response.headers.get("location")
++    if location:
++        return JSONResponse({"redirect_uri": location})
++    return _grade_failure(request, GRADE_SESSION_REQUIRED_CODE)
++
++
++@app.exception_handler(GradeFormRefused)
++async def on_grade_form_refused(request: Request, refusal: GradeFormRefused) -> Response:
++    """A grade form refusal the route never read: bounded code, fetch shape, no upstream call."""
++    return _grade_failure(request, refusal.code)
++
++
+ @app.exception_handler(TeacherSessionOutcome)
+ async def on_teacher_session_outcome(
+     request: Request, outcome: TeacherSessionOutcome
+ ) -> Response:
+-    """Answer with what the gate built — the response is already the whole page/redirect."""
++    """Answer with what the gate built — the response is already the whole page/redirect.
++
++    One exception: the grade POST, which is matched on its route's parameterized pattern (see
++    :func:`_is_grade_review_post`) and answered in the fetch's shape instead.
++    """
++    if _is_grade_review_post(request):
++        return _grade_gate_answer(request, outcome)
+     return outcome.response
+ 
+ 
+@@ -479,6 +634,87 @@ async def require_teacher_session(
+     return TeacherSession(session_id=session_id, data=data)
+ 
+ 
++async def require_grade_form(request: Request) -> Mapping[str, Any]:
++    """The grade POST's two transport guards, resolved **before** the D19 gate.
++
++    A FastAPI dependency — not the route body — so the guards run before
++    :func:`require_teacher_session` is reached (dependencies resolve in declaration order): a
++    body this portal will not read is refused without spending the gate's auth-service session
++    read, and the assignments API is never called either way. The order is the whole point
++    (spec §14):
++
++    * **JSON only.** A cross-site page cannot POST ``application/json`` without a CORS
++      preflight, which this portal never answers — so the media type is the first guard, ahead
++      of any parsing.
++    * **A one-time antiforgery token**, minted with the drill-down render and consumed here.
++      It is required and single-use, and there is no signing key anywhere in Python (D12).
++
++    A refusal is a :class:`GradeFormRefused` — a bounded code, never an upstream body — and the
++    guards are deliberately not the gate's outcome type: nothing about a sign-in state is being
++    described by a malformed request.
++    """
++    if not _is_json_request(request):
++        logger.warning("grade POST refused: content type was not application/json")
++        raise GradeFormRefused(GRADE_FORM_REJECTED_CODE)
++
++    payload = await _json_object(request)
++    if payload is None:
++        logger.warning("grade POST refused: the body was not a JSON object")
++        raise GradeFormRefused(GRADE_FORM_REJECTED_CODE)
++
++    if not _portal_state(request).antiforgery.consume(_text_field(payload, ANTIFORGERY_FIELD)):
++        logger.warning("grade POST refused: missing or already-used antiforgery token")
++        raise GradeFormRefused(GRADE_ANTIFORGERY_REJECTED_CODE)
++
++    return payload
++
++
++def _is_json_request(request: Request) -> bool:
++    """Whether the request declares a JSON body (spec §14's first CSRF guard)."""
++    content_type = request.headers.get("content-type", "")
++    media_type = content_type.split(";", 1)[0].strip().lower()
++    return media_type == "application/json"
++
++
++async def _json_object(request: Request) -> Mapping[str, Any] | None:
++    """The request body as a JSON object, or ``None`` when it is not one."""
++    try:
++        payload = json.loads(await request.body())
++    except (ValueError, UnicodeDecodeError):
++        return None
++    return payload if isinstance(payload, Mapping) else None
++
++
++def _text_field(payload: Mapping[str, Any], name: str) -> str | None:
++    """One string field of a JSON request body (``None`` when absent or not a string)."""
++    value = payload.get(name)
++    return value.strip() if isinstance(value, str) and value.strip() else None
++
++
++def _grade_score(payload: Mapping[str, Any]) -> float | None:
++    """The submitted score as a JSON number, or ``None`` when it was left blank.
++
++    The form's number input carries text, while the Assignments API binds the request's
++    ``decimal? Score`` from a JSON number — so a numeric string becomes a number here. A blank
++    or absent value is ``None`` (the API records a review with no outcome), and anything that is
++    not a number is refused with a bounded code rather than silently dropped.
++    """
++    raw = payload.get(GRADE_SCORE_FIELD)
++    if raw is None:
++        return None
++    if isinstance(raw, bool):
++        raise GradeFormRefused(GRADE_SCORE_INVALID_CODE)
++    if isinstance(raw, (int, float)):
++        return float(raw)
++    text = raw.strip() if isinstance(raw, str) else ""
++    if not text:
++        return None
++    try:
++        return float(text)
++    except ValueError as error:
++        raise GradeFormRefused(GRADE_SCORE_INVALID_CODE) from error
++
++
+ def resolve_dev_teacher_id() -> str:
+     """The configured dev-bypass teacher id, or raise when the portal cannot use one (D5).
+ 
+@@ -664,10 +900,16 @@ async def teacher_submission(
+     request: Request,
+     assignment_id: str,
+     student_id: str,
++    error_code: str | None = None,
+     client: AssignmentsApiClient = Depends(get_assignments_client),
+     session: TeacherSession = Depends(require_teacher_session),
+ ) -> HTMLResponse:
+-    """Render one submission (version history + review) from a live assignments-api call."""
++    """Render one submission (version history + review + the grade form) from a live API read.
++
++    Each render mints the grade form's one-time antiforgery token (spec §14), and
++    ``error_code`` carries back a bounded failure the grade POST refused with — this GET is the
++    one place a refused grade's outcome becomes a page.
++    """
+     state = _portal_state(request)
+     try:
+         result = await client.get_submission(
+@@ -700,10 +942,85 @@ async def teacher_submission(
+             status_code=result.status_code,
+             session=session.data,
+             links=resolve_teacher_links(request),
++            antiforgery_token=state.antiforgery.issue(),
++            error_code=error_code,
+         ).html()
+     )
+ 
+ 
++@app.post(REVIEW_PATH)
++async def teacher_grade_submission(
++    request: Request,
++    assignment_id: str,
++    student_id: str,
++    form: Mapping[str, Any] = Depends(require_grade_form),
++    client: AssignmentsApiClient = Depends(get_assignments_client),
++    session: TeacherSession = Depends(require_teacher_session),
++) -> Response:
++    """The grade form's own route: transport guards, then the D19 gate, then the grade POST.
++
++    The form's ``Fetch.post`` targets this route — never the Assignments API directly and never
++    the auth service (mirroring the auth portal's ``POST /login``). Every answer is the fetch's
++    shape: HTTP 200 ``{"redirect_uri": …}``. Success names the drill-down, whose GET re-reads
++    the submission (now ``Graded``); a refusal names that same page with a bounded ``error_code``
++    the GET renders as an alert.
++
++    The opaque session id travels in ``X-Portal-Session`` (D19's rule 1) and nothing else does:
++    no token, secret or refresh reaches Python (AC9/AC11). The body's ``teacherId`` is the D18
++    claim set's data under real auth — where the API's claim-wins rule overrides it anyway —
++    and the dev fallback under the dev bypass, exactly as the review-queue read behaves.
++    """
++    state = _portal_state(request)
++
++    if session.data is not None:
++        # Rule 1: the session's own claim data is the identity, and a session that carries no
++        # usable teacher id has nothing to attribute a grade to — refused before any call.
++        teacher_id = session.data.teacher_id
++        if not teacher_id:
++            logger.warning("grade POST refused: the session carried no teacher identity")
++            return _grade_failure(request, GRADE_IDENTITY_MISSING_CODE)
++    else:
++        # Rule 2 (today's dev posture): the same dev fallback the review queue reads, with its
++        # refusal intact, and no session header — ``session.headers`` is empty on this path.
++        try:
++            teacher_id = resolve_dev_teacher_id()
++        except MissingConfigurationError as error:
++            logger.warning("grade POST refused: %s", error)
++            return _grade_failure(request, GRADE_TEACHER_UNCONFIGURED_CODE)
++
++    try:
++        status_code = await client.review_submission(
++            assignment_id,
++            student_id,
++            teacher_id=teacher_id,
++            score=_grade_score(form),
++            grade=_text_field(form, GRADE_GRADE_FIELD),
++            comments=_text_field(form, GRADE_COMMENTS_FIELD),
++            headers=session.headers,
++        )
++    except PortalApiError as error:
++        logger.warning("grade POST failed: %s", error)
++        state.last_fetch = {
++            "error": str(error),
++            "base_url": client.endpoint.base_url,
++            "env_var": client.endpoint.env_var,
++        }
++        return _grade_failure(request, grade_failure_code(error))
++
++    logger.info(
++        "grade POST: submission for assignment %s student %s recorded (HTTP %s)",
++        assignment_id,
++        student_id,
++        status_code,
++    )
++    state.last_fetch = {
++        "status": status_code,
++        "base_url": client.endpoint.base_url,
++        "env_var": client.endpoint.env_var,
++    }
++    return JSONResponse({"redirect_uri": submission_path(assignment_id, student_id)})
++
++
+ @app.get(AUTH_CALLBACK_PATH, response_class=HTMLResponse)
+ async def auth_callback(
+     request: Request,
+@@ -835,11 +1152,21 @@ def _teacher_surface_for(path: str) -> str | None:
+ 
+ 
+ @app.exception_handler(ServiceDiscoveryError)
+-async def on_discovery_error(request: Request, error: ServiceDiscoveryError) -> HTMLResponse:
+-    """A missing service endpoint is a page-level degraded state, never a 500."""
++async def on_discovery_error(request: Request, error: ServiceDiscoveryError) -> Response:
++    """A missing service endpoint is a page-level degraded state, never a 500.
++
++    The grade POST is the one exception: its caller is a ``Fetch`` action, which cannot consume
++    an HTML page any more than it can consume the gate's card — so it gets the same bounded-code
++    answer, and the drill-down it lands on is where an HTML page belongs.
++    """
+     state = _portal_state(request)
+     state.discovery_error = str(error)
+     state.last_fetch = {"error": str(error)}
++
++    if _is_grade_review_post(request):
++        logger.error("grade POST degraded: %s", error)
++        return _grade_failure(request, grade_failure_code(error))
++
+     surface = _teacher_surface_for(request.url.path)
+     if surface is not None:
+         logger.error("teacher %s degraded: %s", surface, error)
+diff --git a/src/SchoolCollab.Portals/tests/test_teacher_grade.py b/src/SchoolCollab.Portals/tests/test_teacher_grade.py
+new file mode 100644
+index 00000000..80486d82
+--- /dev/null
++++ b/src/SchoolCollab.Portals/tests/test_teacher_grade.py
+@@ -0,0 +1,725 @@
++"""The teacher portal's write half — the grade form's route (round ``portal-submission-grade``).
++
++FastAPI's ``TestClient`` plus ``app.dependency_overrides`` — the container-free shape
++``test_teacher_session.py`` established, with both upstreams stubbed by ``httpx.MockTransport``.
++No server, no Docker, no Keycloak, no browser.
++
++The wire contract *is* the assertion: the ``X-Portal-Session`` header the grade POST presents on
++the assignments-api call, the **camelCase** body it sends (``teacherId``/``score``/``grade``/
++``comments``), the bounded code every refusal answers with, and — above all — that the
++assignments-api grade POST is never fired without a live session and an unspent one-time form
++token. Every stubbed request is recorded: a header or a body that is *claimed* to be threaded is
++not a request on the wire.
++
++Covers AC3 (happy path), AC4 (antiforgery + JSON-only refusal, the API never called), AC5 (the
++D19 gate on the POST, in the fetch's shape), AC6 (bounded failure mapping, no upstream text in a
++page) and AC8 (no credential in Python).
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import re
++from collections.abc import Callable, Iterator
++from contextlib import contextmanager
++from typing import Any
++from urllib.parse import quote
++
++import httpx
++import pytest
++from fastapi.testclient import TestClient
++
++import app as portal_app
++from api import (
++    AssignmentsApiClient,
++    AuthApiClient,
++    AuthServiceEndpoint,
++    ServiceEndpoint,
++)
++from views.teacher import (
++    GRADE_ANTIFORGERY_REJECTED_CODE,
++    GRADE_FORM_REJECTED_CODE,
++    GRADE_IDENTITY_MISSING_CODE,
++    GRADE_REFUSED_CODE,
++    GRADE_RESPONSE_REFUSED_CODE,
++    GRADE_SCORE_INVALID_CODE,
++    GRADE_SESSION_REQUIRED_CODE,
++    GRADE_TEACHER_UNCONFIGURED_CODE,
++    GRADE_UNAVAILABLE_CODE,
++)
++
++Handler = Callable[[httpx.Request], httpx.Response]
++
++ASSIGNMENTS_ENDPOINT = ServiceEndpoint(
++    service="assignments-api", base_url="http://assignments-api.test", env_var="test"
++)
++AUTH_ENDPOINT = AuthServiceEndpoint(service="auth", base_url="http://auth.test", env_var="test")
++
++SESSION_COOKIE = portal_app.SESSION_COOKIE_NAME
++SESSION_ID = "opaque-session-id-7"
++
++ASSIGNMENT_ID = "11111111-1111-1111-1111-111111111111"
++STUDENT_ID = "22222222-2222-2222-2222-222222222222"
++SUBMISSION_ID = "44444444-4444-4444-4444-444444444444"
++CONFIGURED_DEV_TEACHER_ID = "33333333-3333-3333-3333-333333333333"
++SESSION_TEACHER_ID = "55555555-5555-5555-5555-555555555555"
++
++QUEUE_PATH = f"/teacher/assignments/{ASSIGNMENT_ID}"
++SUBMISSION_PATH = f"{QUEUE_PATH}/students/{STUDENT_ID}"
++REVIEW_PATH = f"{SUBMISSION_PATH}/review"
++
++PORTAL_BASE_URL = "http://portals.test"
++CALLBACK_URI = f"{PORTAL_BASE_URL}/auth/callback"
++SIGN_IN_URL = "http://auth-portal.test/login"
++
++#: The one-time form token as it lands in the rendered drill-down (the auth portal's test pin).
++_TOKEN_PATTERN = re.compile(r'"antiforgery_token":"([^"]+)"')
++
++#: The D18 session read's body, camelCase as the auth service serializes its record.
++SESSION_PAYLOAD: dict[str, Any] = {
++    "sessionId": SESSION_ID,
++    "tenantId": "00000000-0000-0000-0000-000000000002",
++    "tenantName": "Dev School",
++    "tenantType": "School",
++    "teacherId": SESSION_TEACHER_ID,
++    "roles": ["teacher"],
++    "expiresInSeconds": 3600,
++}
++
++SUBMISSION_PAYLOAD: dict[str, Any] = {
++    "submissionId": SUBMISSION_ID,
++    "assignmentId": ASSIGNMENT_ID,
++    "studentId": STUDENT_ID,
++    "currentVersionNumber": 2,
++    "reviewState": 1,
++    "lastSubmittedAt": "2026-10-02T09:00:00+00:00",
++    "signOffState": "AwaitingSignature",
++    "versions": [],
++    "review": None,
++}
++
++
++# ── stub transports ────────────────────────────────────────────────────────────────
++
++
++def _assignments_override(handler: Handler):
++    async def override() -> AssignmentsApiClient:
++        return AssignmentsApiClient(
++            httpx.AsyncClient(transport=httpx.MockTransport(handler)), ASSIGNMENTS_ENDPOINT
++        )
++
++    return override
++
++
++def _auth_override(handler: Handler):
++    async def override() -> AuthApiClient:
++        return AuthApiClient(
++            httpx.AsyncClient(transport=httpx.MockTransport(handler)), AUTH_ENDPOINT
++        )
++
++    return override
++
++
++def _session_ok(request: httpx.Request) -> httpx.Response:
++    return httpx.Response(200, json=SESSION_PAYLOAD)
++
++
++def _unreachable() -> Handler:
++    def handler(request: httpx.Request) -> httpx.Response:
++        raise httpx.ConnectError("connection refused", request=request)
++
++    return handler
++
++
++def _auth_transport(
++    seen: list[httpx.Request],
++    *,
++    sessions: list[Handler] | None = None,
++) -> Handler:
++    """A recording transport for the auth service's session read.
++
++    ``sessions`` is a queue consumed one answer per read (default: a live session), so one test
++    can render the drill-down under a live session and then grade under a dead one — the exact
++    ordering the two routes' cookie handling depends on.
++    """
++    queue = list(sessions or [])
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        path = request.url.path
++        if path.startswith("/auth/session/"):
++            assert request.method == "GET", f"unexpected method for {path}: {request.method}"
++            return (queue.pop(0) if queue else _session_ok)(request)
++        raise AssertionError(f"the portal called an un-stubbed auth route: {request.method} {path}")
++
++    return handler
++
++
++def _assignments_transport(
++    seen: list[httpx.Request],
++    *,
++    submission: Any = SUBMISSION_PAYLOAD,
++    review: Handler | None = None,
++) -> Handler:
++    """A recording transport for the two assignments-api routes the grade flow touches."""
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        path = request.url.path
++        if path.endswith("/submission") and request.method == "GET":
++            return httpx.Response(200, json=submission)
++        if path.endswith("/submission/review") and request.method == "POST":
++            return review(request) if review is not None else httpx.Response(204)
++        raise AssertionError(
++            f"the portal called an un-stubbed assignments route: {request.method} {path}"
++        )
++
++    return handler
++
++
++@contextmanager
++def _portal(
++    *, assignments: Handler | None = None, auth: Handler | None = None
++) -> Iterator[TestClient]:
++    """A ``TestClient`` with one or both upstreams stubbed by a ``MockTransport``."""
++    if assignments is not None:
++        portal_app.app.dependency_overrides[portal_app.get_assignments_client] = (
++            _assignments_override(assignments)
++        )
++    if auth is not None:
++        portal_app.app.dependency_overrides[portal_app.get_auth_client] = _auth_override(auth)
++    try:
++        with TestClient(portal_app.app) as client:
++            yield client
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++
++# ── helpers ───────────────────────────────────────────────────────────────────────
++
++
++def _session_headers() -> dict[str, str]:
++    """Present the portal's session cookie as a request header (never through the cookie jar)."""
++    return {"cookie": f"{SESSION_COOKIE}={SESSION_ID}"}
++
++
++def _no_sign_in_target(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Rule 2's posture: no ``PORTALS_LOGIN_URL``, so the gate does not redirect."""
++    monkeypatch.delenv(portal_app.LOGIN_URL_KEY, raising=False)
++    assert os.environ.get(portal_app.LOGIN_URL_KEY) is None
++
++
++def _no_dev_teacher_id(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.delenv(portal_app.DEV_TEACHER_ID_KEY, raising=False)
++
++
++def _drill_down_token(client: TestClient, *, headers: dict[str, str] | None = None) -> str:
++    """Render the drill-down and read the one-time token out of it (each render mints one)."""
++    match = _TOKEN_PATTERN.search(client.get(SUBMISSION_PATH, headers=headers).text)
++    assert match is not None, "the drill-down must render the grade form's one-time token"
++    return match.group(1)
++
++
++def _minted_token(client: TestClient) -> str:
++    """A one-time token taken straight from the process store.
++
++    For the states where the drill-down GET cannot render one — rule 3's redirect to the sign-in
++    page, a pre-route discovery failure — the guard's own ordering is what these tests are about,
++    so the token is issued rather than scraped.
++    """
++    return portal_app.app.state.portal.antiforgery.issue()
++
++
++def _form_body(
++    token: str, *, score: Any = "8.5", grade: Any = "B", comments: Any = "Good work"
++) -> dict[str, Any]:
++    return {
++        "score": score,
++        "grade": grade,
++        "comments": comments,
++        "antiforgery_token": token,
++    }
++
++
++def _review_requests(seen: list[httpx.Request]) -> list[httpx.Request]:
++    """The assignments-api grade POSTs the portal actually put on the wire."""
++    return [request for request in seen if request.method == "POST"]
++
++
++def _refusal(code: str) -> dict[str, str]:
++    return {"redirect_uri": f"{SUBMISSION_PATH}?error_code={code}"}
++
++
++def _set_cookie(response: httpx.Response) -> str:
++    return response.headers.get("set-cookie", "")
++
++
++# ── AC3: the happy path, asserted at the mock transport ───────────────────────────
++
++
++def test_grade_happy_path_presents_the_session_and_posts_the_camel_case_body(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC3: the fetch POST presents ``X-Portal-Session`` and answers the drill-down at 200."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH, json=_form_body(token), headers=_session_headers()
++        )
++
++    assert response.status_code == 200
++    assert response.headers["content-type"].startswith("application/json")
++    assert response.json() == {"redirect_uri": SUBMISSION_PATH}
++
++    review = _review_requests(assignments_seen)
++    assert len(review) == 1
++    assert str(review[0].url) == (
++        f"http://assignments-api.test/{ASSIGNMENT_ID}/students/{STUDENT_ID}/submission/review"
++    )
++    # The header the write path lives or dies on: the portal session, on the wire.
++    assert review[0].headers.get("X-Portal-Session") == SESSION_ID
++    assert "authorization" not in review[0].headers
++
++    # The body is exactly the API's camelCase binding spelling, and nothing else.
++    wire = json.loads(review[0].content)
++    assert wire == {
++        "teacherId": SESSION_TEACHER_ID,
++        "score": 8.5,
++        "grade": "B",
++        "comments": "Good work",
++    }
++    assert set(wire) == {"teacherId", "score", "grade", "comments"}
++
++    # The identity came from the session's claim read, not the dev bypass: once for the
++    # drill-down render, once for the grade POST.
++    assert [request.url.path for request in auth_seen] == [
++        f"/auth/session/{SESSION_ID}",
++        f"/auth/session/{SESSION_ID}",
++    ]
++
++
++def test_a_blank_outcome_still_grades_as_a_review(monkeypatch: pytest.MonkeyPatch) -> None:
++    """The API's own contract: a review with no score and no grade records ``Reviewed``."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport([]),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH,
++            json=_form_body(token, score="", grade="", comments=""),
++            headers=_session_headers(),
++        )
++
++    assert response.json() == {"redirect_uri": SUBMISSION_PATH}
++    assert json.loads(_review_requests(assignments_seen)[0].content) == {
++        "teacherId": SESSION_TEACHER_ID,
++        "score": None,
++        "grade": None,
++        "comments": None,
++    }
++
++
++# ── AC4: the transport guards, before anything else ───────────────────────────────
++
++
++def test_a_post_without_a_json_content_type_is_refused_and_no_upstream_is_called(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC4: the media type is the first guard — neither upstream is even reached."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.post(
++            REVIEW_PATH,
++            content=f"score=8.5&grade=B&antiforgery_token={SESSION_ID}",
++            headers={**_session_headers(), "content-type": "application/x-www-form-urlencoded"},
++        )
++
++    assert response.status_code == 200
++    assert response.headers["content-type"].startswith("application/json")
++    assert response.json() == _refusal(GRADE_FORM_REJECTED_CODE)
++    assert assignments_seen == []
++    assert auth_seen == []  # the gate's session read is never spent on a body we will not read
++
++
++def test_a_missing_token_is_refused_without_reading_the_session(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC4: the one-time token is required, and it is checked before the gate."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.post(
++            REVIEW_PATH, json=_form_body("not-a-token"), headers=_session_headers()
++        )
++
++    assert response.json() == _refusal(GRADE_ANTIFORGERY_REJECTED_CODE)
++    assert assignments_seen == []
++    assert auth_seen == []
++
++
++def test_a_spent_token_cannot_be_replayed(monkeypatch: pytest.MonkeyPatch) -> None:
++    """AC4: single use by construction — and the replay costs no upstream call either."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        body = _form_body(token)
++        first = client.post(REVIEW_PATH, json=body, headers=_session_headers())
++        reviews_after_first = len(_review_requests(assignments_seen))
++        reads_after_first = len(auth_seen)
++        replay = client.post(REVIEW_PATH, json=body, headers=_session_headers())
++
++    assert first.json() == {"redirect_uri": SUBMISSION_PATH}
++    assert replay.json() == _refusal(GRADE_ANTIFORGERY_REJECTED_CODE)
++    assert len(_review_requests(assignments_seen)) == reviews_after_first
++    assert len(auth_seen) == reads_after_first
++
++
++# ── AC5: the gate, on the POST, in the fetch's shape ──────────────────────────────
++
++
++@pytest.mark.parametrize("status", [410, 404], ids=["session-ended", "session-not-found"])
++def test_a_dead_session_is_answered_in_the_fetch_shape_and_the_api_never_fires(
++    monkeypatch: pytest.MonkeyPatch, status: int
++) -> None:
++    """AC5: the POST never clears the cookie — the drill-down GET re-gates and does."""
++    _no_sign_in_target(monkeypatch)
++    cardinality = "session_ended" if status == 410 else "session_not_found"
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(
++            auth_seen,
++            sessions=[
++                _session_ok,  # the drill-down render: a live session, so a token exists
++                lambda request: httpx.Response(status, json={"error": cardinality}),
++                # The GET the grade POST answered with re-gates — same dead state.
++                lambda request: httpx.Response(status, json={"error": cardinality}),
++            ],
++        ),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH, json=_form_body(token), headers=_session_headers()
++        )
++        # The one place the cookie lifecycle runs: the GET the fetch just navigated to.
++        drill_down = client.get(SUBMISSION_PATH, headers=_session_headers())
++
++    assert response.headers["content-type"].startswith("application/json")
++    assert response.json() == _refusal(GRADE_SESSION_REQUIRED_CODE)
++    assert _set_cookie(response) == ""  # the POST touches no cookie
++    assert _review_requests(assignments_seen) == []  # the grade POST never fired
++
++    assert drill_down.status_code == 200
++    assert cardinality in drill_down.text
++    cleared = _set_cookie(drill_down).lower()
++    assert f'{SESSION_COOKIE}=""' in cleared and "max-age=0" in cleared
++
++
++def test_a_degraded_session_read_is_answered_in_the_fetch_shape_and_keeps_the_cookie(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC5: the session's state is unknown, so nothing is graded and nothing is discarded."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport([], sessions=[_session_ok, _unreachable(), _unreachable()]),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH, json=_form_body(token), headers=_session_headers()
++        )
++        drill_down = client.get(SUBMISSION_PATH, headers=_session_headers())
++
++    assert response.json() == _refusal(GRADE_SESSION_REQUIRED_CODE)
++    assert _set_cookie(response) == ""
++    assert _review_requests(assignments_seen) == []
++    # The drill-down GET re-gates, so the degraded card is rendered there — cookie kept.
++    assert "unusable_response" in drill_down.text
++    assert _set_cookie(drill_down) == ""
++
++
++def test_a_session_less_post_navigates_to_the_configured_sign_in(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC5: rule 3's gate answer, translated into the shape the fetch can act on."""
++    monkeypatch.setenv(portal_app.LOGIN_URL_KEY, SIGN_IN_URL)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.post(REVIEW_PATH, json=_form_body(_minted_token(client)))
++
++    assert response.status_code == 200
++    assert response.headers["content-type"].startswith("application/json")
++    assert response.json() == {
++        "redirect_uri": f"{SIGN_IN_URL}?return_uri={quote(CALLBACK_URI, safe='')}"
++    }
++    assert assignments_seen == []
++    assert auth_seen == []
++
++
++def test_the_dev_path_grade_proceeds_with_the_configured_dev_teacher_id(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC5: no session, no login target — today's dev posture, header-less, as the queue read."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.DEV_TEACHER_ID_KEY, CONFIGURED_DEV_TEACHER_ID)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(assignments=_assignments_transport(assignments_seen)) as client:
++        token = _drill_down_token(client)
++        response = client.post(REVIEW_PATH, json=_form_body(token))
++
++    assert response.json() == {"redirect_uri": SUBMISSION_PATH}
++    review = _review_requests(assignments_seen)
++    assert len(review) == 1
++    assert review[0].headers.get("X-Portal-Session") is None
++    assert json.loads(review[0].content)["teacherId"] == CONFIGURED_DEV_TEACHER_ID
++
++
++def test_the_dev_path_grade_refuses_without_a_configured_dev_teacher_id(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC5: the dev id's refusal is intact — a grade is never attributed to a placeholder."""
++    _no_sign_in_target(monkeypatch)
++    _no_dev_teacher_id(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(assignments=_assignments_transport(assignments_seen)) as client:
++        token = _drill_down_token(client)
++        response = client.post(REVIEW_PATH, json=_form_body(token))
++
++    assert response.json() == _refusal(GRADE_TEACHER_UNCONFIGURED_CODE)
++    assert _review_requests(assignments_seen) == []
++
++
++def test_a_session_without_a_teacher_identity_refuses_the_grade_pre_flight(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC5: no usable ``teacherId`` in the claim read means nothing to attribute — no call."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    identity_less = {key: value for key, value in SESSION_PAYLOAD.items() if key != "teacherId"}
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(
++            [],
++            sessions=[
++                lambda request: httpx.Response(200, json=identity_less),
++                lambda request: httpx.Response(200, json=identity_less),
++            ],
++        ),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH, json=_form_body(token), headers=_session_headers()
++        )
++
++    assert response.json() == _refusal(GRADE_IDENTITY_MISSING_CODE)
++    assert _review_requests(assignments_seen) == []
++
++
++# ── AC6: bounded failure mapping, no upstream text in a page ──────────────────────
++
++
++def _problem(status: int, detail: str) -> Handler:
++    return lambda request: httpx.Response(
++        status,
++        json={"status": status, "detail": detail},
++        headers={"content-type": "application/problem+json"},
++    )
++
++
++@pytest.mark.parametrize(
++    ("review", "code"),
++    [
++        (_problem(404, "no submission for that student"), "grade_submission_missing"),
++        (_problem(403, "only the creating teacher can review"), "grade_refused"),
++        (_problem(500, "boom: internal path C:/secret"), "grade_unavailable"),
++        (_unreachable(), "grade_unavailable"),
++    ],
++    ids=["api-404", "api-403", "api-500", "transport"],
++)
++def test_an_upstream_failure_redirects_back_with_its_bounded_code(
++    monkeypatch: pytest.MonkeyPatch, review: Handler, code: str
++) -> None:
++    """AC6: the status is mapped; the Problem ``detail`` text goes nowhere."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen, review=review),
++        auth=_auth_transport([]),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH, json=_form_body(token), headers=_session_headers()
++        )
++
++    assert response.json() == _refusal(code)
++    assert "secret" not in response.text
++    assert "creating teacher" not in response.text
++
++
++def test_the_drill_down_renders_the_bounded_refusal_copy(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """AC6: the page the fetch lands on renders copy keyed by the code, nothing upstream."""
++    _no_sign_in_target(monkeypatch)
++
++    with _portal(assignments=_assignments_transport([]), auth=_auth_transport([])) as client:
++        response = client.get(
++            SUBMISSION_PATH,
++            params={"error_code": GRADE_REFUSED_CODE},
++            headers=_session_headers(),
++        )
++
++    assert response.status_code == 200
++    assert "Grade refused" in response.text
++    assert "Only the teacher who created the assignment" in response.text
++
++
++def test_an_unknown_error_code_degrades_to_the_generic_copy(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """A code this portal does not know is a generic bounded message — never the raw string."""
++    _no_sign_in_target(monkeypatch)
++
++    with _portal(assignments=_assignments_transport([]), auth=_auth_transport([])) as client:
++        response = client.get(
++            SUBMISSION_PATH,
++            params={"error_code": "<script>alert(1)</script>"},
++            headers=_session_headers(),
++        )
++
++    assert response.status_code == 200
++    assert "Nothing was changed" in response.text
++    assert "<script>alert(1)</script>" not in response.text
++
++
++def test_a_missing_assignments_endpoint_answers_the_grade_post_in_the_fetch_shape(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """A pre-route discovery failure is still a fetch answer, not an HTML page."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.delenv("services__assignments-api__http__0", raising=False)
++    monkeypatch.delenv("ASSIGNMENTS_API_HTTP", raising=False)
++
++    with TestClient(portal_app.app) as client:
++        response = client.post(
++            REVIEW_PATH, json=_form_body(_minted_token(client)), headers=_session_headers()
++        )
++
++    assert response.status_code == 200
++    assert response.headers["content-type"].startswith("application/json")
++    assert response.json() == _refusal(GRADE_UNAVAILABLE_CODE)
++
++
++# ── AC8: no credential ever reaches Python ────────────────────────────────────────
++
++
++def test_a_token_shaped_failure_body_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
++    """AC8: a decoded body carrying a token is refused, and its value never surfaces."""
++    _no_sign_in_target(monkeypatch)
++    leaked = {"error": "refused", "accessToken": "header.payload.signature"}
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(
++            assignments_seen,
++            review=lambda request: httpx.Response(200, json=leaked),
++        ),
++        auth=_auth_transport([]),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH, json=_form_body(token), headers=_session_headers()
++        )
++
++    assert response.json() == _refusal(GRADE_RESPONSE_REFUSED_CODE)
++    assert "header.payload.signature" not in response.text
++
++
++def test_the_grade_post_carries_no_credential(monkeypatch: pytest.MonkeyPatch) -> None:
++    """AC8/AC9: only the opaque session id travels — the body's ``teacherId`` is claim data."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        client.post(REVIEW_PATH, json=_form_body(token), headers=_session_headers())
++
++    review = _review_requests(assignments_seen)[0]
++    header_values = " ".join(value for _, value in review.headers.items())
++    assert SESSION_ID in review.headers.get("X-Portal-Session", "")
++    # No Authorization header, no token-shaped header, on the write path.
++    assert "authorization" not in review.headers
++    assert "token" not in header_values.lower().replace("x-portal-session", "")
++
++    # The identity read is the only other call per request, and it carried the opaque id.
++    assert [request.url.path for request in auth_seen] == [
++        f"/auth/session/{SESSION_ID}",
++        f"/auth/session/{SESSION_ID}",
++    ]
++
++
++def test_a_non_numeric_score_is_refused_and_nothing_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
++    """A hand-made body cannot smuggle a string the API's ``decimal?`` binding would reject."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport([]),
++    ) as client:
++        token = _drill_down_token(client, headers=_session_headers())
++        response = client.post(
++            REVIEW_PATH,
++            json=_form_body(token, score="eight and a half"),
++            headers=_session_headers(),
++        )
++
++    assert response.json() == _refusal(GRADE_SCORE_INVALID_CODE)
++    assert _review_requests(assignments_seen) == []
+diff --git a/src/SchoolCollab.Portals/tests/test_teacher_session.py b/src/SchoolCollab.Portals/tests/test_teacher_session.py
+index e48fd246..a8fb14e3 100644
+--- a/src/SchoolCollab.Portals/tests/test_teacher_session.py
++++ b/src/SchoolCollab.Portals/tests/test_teacher_session.py
+@@ -713,3 +713,36 @@ async def test_the_auth_client_raises_on_a_token_shaped_body() -> None:
+         client = AuthApiClient(http, AUTH_ENDPOINT)
+         with pytest.raises(TokenInResponseError):
+             await client.read_session(SESSION_ID)
++
++
++# ── AC7(b): the wire spelling, pinned from the parsing end ──────────────────────────
++
++#: The D18 read body's EXACT key set (AC7). The C# half of the pair
++#: (``tests/SchoolCollab.Auth.Tests.Unit/SessionWireSpellingTests.cs``) pins the same set from
++#: the serializing end, so a drift on either side reddens exactly one of the two pins.
++SESSION_WIRE_KEYS = frozenset(
++    {"sessionId", "tenantId", "tenantName", "tenantType", "teacherId", "roles", "expiresInSeconds"}
++)
++
++
++async def test_the_real_client_parses_the_pinned_camel_case_session_body() -> None:
++    """AC7(b): the wire spelling, driven through the REAL client over exactly those keys.
++
++    This is the Python half of the two one-way pins: the tolerance ``SessionData.from_payload``
++    carries is a pin here, not an accident — the auth service must serialize exactly these keys,
++    and this client must populate every ``SessionData`` field from them. The pin is a
++    **contract pin** (drift detection), not a pre-change failing test: the spelling is already
++    correct, and what it buys is that the two halves can no longer drift apart silently.
++    """
++    assert set(SESSION_PAYLOAD) == SESSION_WIRE_KEYS
++
++    handler: Handler = lambda request: httpx.Response(200, json=SESSION_PAYLOAD)  # noqa: E731
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
++        data = await AuthApiClient(http, AUTH_ENDPOINT).read_session(SESSION_ID)
++
++    assert data.session_id == SESSION_ID
++    assert data.tenant_id == SESSION_PAYLOAD["tenantId"]
++    assert data.tenant_name == "Dev School"
++    assert data.tenant_type == "School"
++    assert data.teacher_id == SESSION_TEACHER_ID
++    assert data.roles == ("teacher",)
+diff --git a/src/SchoolCollab.Portals/views/teacher.py b/src/SchoolCollab.Portals/views/teacher.py
+index 0c5db37f..fe9cf738 100644
+--- a/src/SchoolCollab.Portals/views/teacher.py
++++ b/src/SchoolCollab.Portals/views/teacher.py
+@@ -5,7 +5,7 @@ Four states, all pure functions of data — the split ``views/ward.py`` establis
+ * :func:`build_teacher_list_view` — the assignment list the drill-down starts from.
+ * :func:`build_review_queue_view` — one assignment's review queue.
+ * :func:`build_submission_view` — one submission: version history (where the ward's
+-  answers live) plus the teacher review.
++  answers live), the teacher review, and the grade form.
+ * :func:`build_teacher_error_view` — the degraded state shared by all three, rendered
+   from a typed portal error. The surface never shows a raw 500 or a traceback.
+ 
+@@ -15,6 +15,14 @@ and the session affordances every teacher page carries through :class:`TeacherSu
+ (signed-in identity from the D18 read, logout, or the sign-in links when the environment
+ supplied them, never an invented URL).
+ 
++Round ``portal-submission-grade`` (D4) adds the **write half**: the grade form inside
++:func:`build_submission_view` — the login form's chain mirrored (a model-driven ``Form``,
++a submit-driven reactive error state, and a ``Fetch.post`` to *this portal's own* route,
++never to the API and never to the auth service) — with every failure rendered from
++:data:`GRADE_COPY`, a bounded code table. The route the form posts to, and the drill-down
++that re-renders it, are defined here as :data:`REVIEW_PATH` / :data:`SUBMISSION_PATH` so the
++view and the app layer cannot drift.
++
+ This is a **flat module**, not a ``views/teacher/`` package (round-2 grill Q5, which
+ supersedes the plan's ``views/teacher/`` wording): one module per surface is the shape
+ ``views/ward.py`` proved, and a one-module package would add a folder node to the
+@@ -25,23 +33,39 @@ Component variants stay within the two the spike proved (``default`` / ``success
+ 
+ from __future__ import annotations
+ 
++import re
+ from dataclasses import dataclass
++from urllib.parse import quote
+ 
++from pydantic import BaseModel
++from pydantic import Field as ModelField
++from prefab_ui.actions import Action, CallHandler, Fetch, SetState, ShowToast
+ from prefab_ui.app import PrefabApp
+ from prefab_ui.components import (
++    Alert,
++    AlertDescription,
++    AlertTitle,
+     Badge,
++    Button,
+     Card,
+     CardContent,
+     Column,
+     DataTable,
+     DataTableColumn,
++    Field,
++    FieldError,
++    Form,
+     H3,
+     Link,
+     Muted,
+     Row,
++    defer,
++    insert,
+ )
++from prefab_ui.rx import Rx
+ 
+ from api import (
++    ApiResponseError,
+     AssignmentRow,
+     AuthServiceError,
+     PortalApiError,
+@@ -121,6 +145,150 @@ _GENERIC_SESSION_COPY: tuple[str, str] = (
+     "The auth service could not complete this step. Nothing was changed.",
+ )
+ 
++#: The drill-down page's own route template, and the grade form's POST target beneath it.
++#: ``REVIEW_PATH`` is ALSO what the app's outcome handler matches on the matched route's
++#: parameterized pattern — never a raw path, because the ids are request-specific.
++SUBMISSION_PATH = "/teacher/assignments/{assignment_id}/students/{student_id}"
++REVIEW_PATH = f"{SUBMISSION_PATH}/review"
++
++#: The drill-down's bounded failure query parameter: a refused grade answers the fetch with
++#: this page plus the code, and the page renders the code's copy (the auth portal's
++#: ``_login_failure`` shape).
++ERROR_CODE_PARAMETER = "error_code"
++
++#: The JSON body fields ``POST …/review`` parses (the app layer reads exactly these, and the
++#: form's submit body is built from the same names).
++ANTIFORGERY_FIELD = "antiforgery_token"
++GRADE_SCORE_FIELD = "score"
++GRADE_GRADE_FIELD = "grade"
++GRADE_COMMENTS_FIELD = "comments"
++
++#: The renderer JS action that navigates the current tab. THIS module's own spelling: the auth
++#: portal's handler is that app's, and prefab's ``Fetch`` follows redirects with no redirect
++#: option, so a mutation's ``{redirect_uri}`` answer has to move the tab explicitly.
++NAVIGATE_HANDLER = "navigate"
++NAVIGATE_HANDLER_JS = "(args) => { window.location.assign(args.arguments.url); }"
++NAVIGATE_URL_ARGUMENT = "url"
++
++#: The client-state key that makes the grade fields' error state **submit-driven** (the sign-in
++#: form's ``ATTEMPTED_STATE`` pattern). It is part of the page's initial state (``False``) and is
++#: set by the submit chain and by nothing else, so a page the teacher has not submitted renders
++#: with no error state at all. The initial value is load-bearing: prefab's renderer resolves a
++#: whole-attribute template to ``undefined`` and falls back to the raw (truthy) template string,
++#: so an ``invalid`` expression reading an undeclared key would paint every field invalid on
++#: first paint.
++GRADE_ATTEMPTED_STATE = "grade_attempted"
++
++#: The bounded codes the grade path renders. Named here, beside the copy table, so the app
++#: layer and the table cannot drift apart.
++GRADE_FORM_REJECTED_CODE = "grade_form_rejected"
++GRADE_ANTIFORGERY_REJECTED_CODE = "grade_antiforgery_rejected"
++GRADE_SESSION_REQUIRED_CODE = "grade_session_required"
++GRADE_IDENTITY_MISSING_CODE = "grade_identity_missing"
++GRADE_TEACHER_UNCONFIGURED_CODE = "grade_teacher_unconfigured"
++GRADE_SCORE_INVALID_CODE = "grade_score_invalid"
++GRADE_SUBMISSION_MISSING_CODE = "grade_submission_missing"
++GRADE_REFUSED_CODE = "grade_refused"
++GRADE_UNAVAILABLE_CODE = "grade_unavailable"
++GRADE_RESPONSE_REFUSED_CODE = "grade_response_refused"
++
++#: The bounded failure codes the grade path renders, one table (beside :data:`SESSION_COPY`) so a
++#: code and its wording cannot drift apart — and so an unrecognized failure can never echo an
++#: upstream body, a Problem ``detail``, a token or attacker-supplied text into a page.
++GRADE_COPY: dict[str, tuple[str, str]] = {
++    GRADE_FORM_REJECTED_CODE: (
++        "Grade not submitted",
++        "The grade form's own request was not a JSON form submission, so nothing was graded.",
++    ),
++    GRADE_ANTIFORGERY_REJECTED_CODE: (
++        "Grade form expired",
++        "The form's one-time token was missing or already used, so nothing was graded. Reload "
++        "this page and submit again.",
++    ),
++    GRADE_SESSION_REQUIRED_CODE: (
++        "Grade not recorded",
++        "This portal could not confirm your session, so nothing was graded.",
++    ),
++    GRADE_IDENTITY_MISSING_CODE: (
++        "Grade not recorded",
++        "The session carried no teacher identity, so the grade was not sent to the assignments "
++        "service.",
++    ),
++    GRADE_TEACHER_UNCONFIGURED_CODE: (
++        "Grade not recorded",
++        "This portal has no dev teacher id configured (PORTAL_DEV_TEACHER_ID), so it has no "
++        "teacher to attribute a grade to.",
++    ),
++    GRADE_SCORE_INVALID_CODE: (
++        "Score not a number",
++        "The score that was submitted is not a number, so nothing was graded.",
++    ),
++    GRADE_SUBMISSION_MISSING_CODE: (
++        "Submission not found",
++        "The assignments service has no submission for this student on this assignment, so "
++        "nothing was graded.",
++    ),
++    GRADE_REFUSED_CODE: (
++        "Grade refused",
++        "The assignments service refused this grade. Only the teacher who created the "
++        "assignment can grade its submissions, in their own tenant.",
++    ),
++    GRADE_UNAVAILABLE_CODE: (
++        "Grade not recorded",
++        "The assignments service could not be reached, so nothing was graded.",
++    ),
++    GRADE_RESPONSE_REFUSED_CODE: (
++        "Response refused",
++        "The assignments service answered with something this portal will not ingest, so "
++        "nothing was graded.",
++    ),
++}
++
++#: The alert every unrecognized grade failure degrades to.
++_GENERIC_GRADE_COPY: tuple[str, str] = (
++    "Grade not recorded",
++    "The grade could not be completed. Nothing was changed.",
++)
++
++#: The status a typed client refusal names in its own bounded ``detail`` (``HTTP 404 for …``).
++_UPSTREAM_STATUS = re.compile(r"HTTP (\d{3})")
++
++
++def grade_failure_code(error: PortalApiError) -> str:
++    """The bounded grade code for a typed client failure — never raw upstream text.
++
++    Mirrors :func:`session_card_code`: a token-shaped body is this portal's own refusal (AC11);
++    a client refusal that names an upstream status maps it (``404`` is the assignment/student
++    pair having no submission, ``403`` is the creating-teacher / tenant / claim refusal);
++    anything else — a transport failure, a non-JSON body, an unrecognized status — is
++    ``grade_unavailable``.
++    """
++    if isinstance(error, TokenInResponseError):
++        return GRADE_RESPONSE_REFUSED_CODE
++    if isinstance(error, ApiResponseError):
++        match = _UPSTREAM_STATUS.search(error.detail)
++        if match:
++            status = int(match.group(1))
++            if status == 404:
++                return GRADE_SUBMISSION_MISSING_CODE
++            if status == 403:
++                return GRADE_REFUSED_CODE
++    return GRADE_UNAVAILABLE_CODE
++
++
++def submission_path(assignment_id: str, student_id: str) -> str:
++    """The drill-down URL for one (assignment, student) — the page the grade form lives on."""
++    return SUBMISSION_PATH.format(
++        assignment_id=quote(assignment_id, safe=""), student_id=quote(student_id, safe="")
++    )
++
++
++def review_path(assignment_id: str, student_id: str) -> str:
++    """This (assignment, student) submission's grade route — this portal's own URL."""
++    return REVIEW_PATH.format(
++        assignment_id=quote(assignment_id, safe=""), student_id=quote(student_id, safe="")
++    )
++
+ 
+ @dataclass(frozen=True)
+ class TeacherSurfaceLinks:
+@@ -308,6 +476,151 @@ def build_review_queue_view(
+     return application
+ 
+ 
++class GradeSubmissionModel(BaseModel):
++    """The grade form's fields and their constraints.
++
++    All three are optional because the Assignments API's ``ReviewSubmissionRequest`` is: a
++    review with no score and no grade records ``Reviewed``, and one with either records
++    ``Graded``. ``score`` therefore binds a number input with its bounds, ``grade`` a bounded
++    text input, and ``comments`` a textarea — the API's own field names, one definition.
++    """
++
++    score: float | None = ModelField(
++        default=None,
++        title="Score",
++        description="Numeric score",
++        ge=0,
++        le=1000,
++    )
++    grade: str | None = ModelField(
++        default=None,
++        title="Grade",
++        description="Letter or short label",
++        max_length=32,
++    )
++    comments: str | None = ModelField(
++        default=None,
++        title="Comments",
++        description="Feedback for the ward",
++        max_length=2000,
++        json_schema_extra={"ui": {"type": "textarea", "rows": 3}},
++    )
++
++
++def _grade_blank_expression() -> str:
++    """The one client-side rule the optional grade fields have: a submit must carry *something*.
++
++    The API accepts a review with no outcome at all, so no single field is required — the
++    reactive ``invalid`` state is submit-driven (like the sign-in form's) and says only that a
++    blank submit is a submit the teacher did not mean. It is display-only: the route sends
++    whatever the API accepts, and the server is the authority.
++    """
++    return " && ".join(f"!{name}" for name in GradeSubmissionModel.model_fields)
++
++
++#: The `FieldError` message on an all-blank submit: the rule is about the FORM, not one field, so
++#: every optional field carries the same sentence (the sign-in form's per-field "Enter your …"
++#: wording would name a field that is not required).
++_GRADE_BLANK_MESSAGE = "Enter a score, a grade or some comments before submitting."
++
++
++def _grade_notice(error_code: str) -> None:
++    """The alert a refused or failed grade renders above the form (bounded code, HTTP 200)."""
++    title, message = GRADE_COPY.get(error_code, _GENERIC_GRADE_COPY)
++    with Alert(variant="destructive"):
++        AlertTitle(title)
++        AlertDescription(message)
++
++
++def _grade_section(
++    *, antiforgery_token: str, assignment_id: str, student_id: str, error_code: str | None
++) -> None:
++    """The grade Card: the login form's chain, mirrored.
++
++    A model-driven ``Form`` whose submit marks the form attempted and then ``Fetch.post``s to
++    *this portal's own* route (``REVIEW_PATH``) — never the Assignments API directly, never the
++    auth service. The route answers ``{"redirect_uri": …}`` at HTTP 200, and the success action
++    navigates the current tab there, so the page re-reads the submission through the drill-down
++    GET — which is where the cookie lifecycle and the re-gate run (the POST never touches the
++    cookie itself).
++    """
++    with Card():
++        with CardContent():
++            with Column(gap=2):
++                Muted(
++                    "Record a grade or review for this submission. A score or a grade marks it "
++                    "graded; feedback on its own records it as reviewed."
++                )
++                if error_code is not None:
++                    _grade_notice(error_code)
++                with Form(
++                    on_submit=_grade_submit_action(
++                        antiforgery_token, assignment_id, student_id
++                    )
++                ):
++                    _grade_fields()
++                    Button("Record grade")
++
++
++def _grade_submit_action(
++    antiforgery_token: str, assignment_id: str, student_id: str
++) -> list[Action]:
++    """The form's submit: mark the form attempted, then ``Fetch.post`` to this portal's route.
++
++    The renderer runs a list of actions in order and stops at the first failure, so the leading
++    ``SetState`` has already flipped :data:`GRADE_ATTEMPTED_STATE` by the time the request goes
++    out — the moment the fields' ``invalid`` expressions can first become true.
++    """
++    return [
++        SetState(GRADE_ATTEMPTED_STATE, True),
++        Fetch.post(
++            review_path(assignment_id, student_id),
++            body={
++                GRADE_SCORE_FIELD: _template(GRADE_SCORE_FIELD),
++                GRADE_GRADE_FIELD: _template(GRADE_GRADE_FIELD),
++                GRADE_COMMENTS_FIELD: _template(GRADE_COMMENTS_FIELD),
++                ANTIFORGERY_FIELD: antiforgery_token,
++            },
++            on_success=CallHandler(
++                NAVIGATE_HANDLER,
++                arguments={NAVIGATE_URL_ARGUMENT: _template("$result.redirect_uri")},
++            ),
++            on_error=ShowToast(_template("$error"), variant="error"),
++        ),
++    ]
++
++
++def _grade_fields() -> None:
++    """The model's fields, each in a reactive ``Field`` with its ``FieldError``.
++
++    ``Form.from_model(..., fields_only=True)`` generates the labeled inputs (label, placeholder,
++    number bounds, textarea) from :class:`GradeSubmissionModel`; they are generated detached so
++    each one can be adopted by a ``Field``, whose reactive ``invalid`` expression reads the
++    submit-driven :data:`GRADE_ATTEMPTED_STATE`.
++    """
++    with defer():
++        generated = Form.from_model(GradeSubmissionModel, fields_only=True)
++
++    blank = _grade_blank_expression()
++    # The zip's strict alignment is the point: ``fields_only=True`` returns one component per
++    # model field in order, so a prefab or pydantic change that broke that alignment fails here
++    # instead of silently mis-placing a field (the sign-in form's own guard).
++    for _name, component in zip(GradeSubmissionModel.model_fields, generated, strict=True):
++        with Field(invalid=Rx(f"{GRADE_ATTEMPTED_STATE} && {blank}")):
++            insert(component)
++            FieldError(_GRADE_BLANK_MESSAGE)
++
++
++def _template(expression: str) -> str:
++    """A prefab template for ``expression`` — ``{{ expression }}``.
++
++    The renderer resolves it against the page's component state and the action context
++    (``$result``/``$error``), which is how the submit body reads the inputs and how the success
++    action learns where to navigate.
++    """
++    return "{{ " + expression + " }}"
++
++
+ def build_submission_view(
+     *,
+     assignment_id: str,
+@@ -317,9 +630,23 @@ def build_submission_view(
+     status_code: int,
+     session: SessionData | None = None,
+     links: TeacherSurfaceLinks | None = None,
++    antiforgery_token: str | None = None,
++    error_code: str | None = None,
+ ) -> PrefabApp:
+-    """One submission: its version history (the answers) and its teacher review."""
+-    with PrefabApp(title="Teacher portal — submission", css_class="p-6") as application:
++    """One submission: its version history, its teacher review, and the grade form.
++
++    ``antiforgery_token`` is the one-time token the route just issued and stored server-side;
++    it travels into the submit body, so the server can require the exact page it handed out.
++    Without one (the view-level render) the grade form is omitted rather than rendered with a
++    body it could not submit. ``error_code`` is a bounded failure code a refused grade
++    redirected back with, rendered as an alert above the form — the page the fetch lands on.
++    """
++    with PrefabApp(
++        title="Teacher portal — submission",
++        css_class="p-6",
++        state={GRADE_ATTEMPTED_STATE: False},
++        js_actions={NAVIGATE_HANDLER: NAVIGATE_HANDLER_JS},
++    ) as application:
+         with Column(gap=4):
+             H3("Teacher portal — submission detail")
+             Muted(
+@@ -368,6 +695,13 @@ def build_submission_view(
+                                 f"Recorded by teacher {_shown(submission.review.teacher_id)} "
+                                 f"at {_shown(submission.review.created_at)}."
+                             )
++            if antiforgery_token is not None:
++                _grade_section(
++                    antiforgery_token=antiforgery_token,
++                    assignment_id=assignment_id,
++                    student_id=student_id,
++                    error_code=error_code,
++                )
+     return application
+ 
+ 
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs
+index 23185efd..57a650d1 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs
+@@ -13,7 +13,9 @@ namespace SchoolCollab.ArchitectureTests.Unit;
+ ///        gateway</b> scheme — and no longer Bearer. The gateway is registered in every flag state,
+ ///        so a listed scheme always has a handler (a policy-named scheme without one is a 500, not a
+ ///        401), and it routes each request to the portal session, to Bearer, or to the dev
+-///        TestAuth scheme;</item>
++///        TestAuth scheme. The round-<c>portal-submission-grade</c> writer policy
++///        (<c>RequireAssignmentWriter</c>) is guarded the same way, together with the route it
++///        holds and the general map it left;</item>
+ ///   <item>the AppHost's <b>both</b> app-callback allowlist copies carry the teacher portal's
+ ///        <c>/auth/callback</c> append — the auth service's (which enforces the list at code
+ ///        issuance) and the auth portal's own copy (which re-validates the value it redirects to).
+@@ -48,7 +50,6 @@ public class PortalSessionAdoptionArchitectureTests
+         "AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)";
+ 
+     private const string BearerSchemeOptIn = "AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)";
+-
+     private static readonly string RepoRoot = FindRepoRoot();
+ 
+     /// <summary>A resource-creation chain: <c>var portals = builder.AddUvicornApp("portals", …)</c>.
+@@ -95,6 +96,71 @@ public class PortalSessionAdoptionArchitectureTests
+             + "sub-groups) are untouched — only the reader policy moved to the gateway.");
+     }
+ 
++    [TestMethod]
++    public void WriterPolicy_NamesTheGateway_AndHoldsExactlyTheGradeRoute()
++    {
++        // The round-portal-submission-grade writer policy (D1) is the pair of facts no build and
++        // no unit test can see: which scheme it lists, and which route it decorates. Both are
++        // non-vacuous — removing the grade route from the writer sub-group, or dropping the
++        // gateway scheme from the policy, reddens this test.
++        //
++        // NOTE on the sub-group's inherited policy: the writer sub-group ALSO inherits the
++        // parent /assignments group's Bearer opt-in (as the reader sub-group does). That is
++        // correct and load-bearing — the authorization middleware COMBINES an endpoint's
++        // policies, so the union of {Bearer, gateway} authenticates a portal session through the
++        // gateway and an existing Bearer caller through the fallback. The route-level tests
++        // (AssignmentWriterPolicyRouteTests) prove that union over the real HTTP pipeline; this
++        // guard pins the SOURCE shape it depends on.
++        var endpoints = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "AssignmentEndpoints.cs");
++        var policy = ExtractMethod(endpoints, "void RequireAssignmentWriter(");
++
++        policy.Should().Contain(GatewaySchemeOptIn,
++            "the writer policy must list the portal-session gateway: it is the ONE scheme with a "
++            + "handler in every flag state, and it routes a portal session to the portal-session "
++            + "scheme while bearer and dev callers keep their own.");
++
++        policy.Should().NotContain("AuthTenancyExtensions.BearerScheme",
++            "the writer policy must list exactly one scheme (the reader's reason): authorization "
++            + "challenges every listed scheme, and Bearer has no handler under "
++            + "FEATURE:DisableOIDCAuth.");
++
++        policy.Should().Contain("RequireAuthenticatedUser()")
++            .And.Contain("RequireRole(",
++                "the writer policy stays self-sufficient for the route it decorates.");
++
++        // ONE role disjunction in the module: the writer's must be the reader's, exactly.
++        var readerPolicy = ExtractMethod(endpoints, "void RequireAssignmentReader(");
++        RoleNamesIn(policy).Should().Equal(RoleNamesIn(readerPolicy),
++            "the writer policy restates the reader's four-role disjunction verbatim — two "
++            + "disjunctions that can drift apart are exactly what the reader's P1-1 rework forbade.");
++
++        endpoints.Should().Contain("writerGroup.RequireAuthorization(RequireAssignmentWriter)",
++            "the writer sub-group is where the policy lands (never the whole /assignments group, "
++            + "whose widening would re-open every create/edit/publish write to the reader roles).");
++
++        endpoints.Should().Contain("writerGroup.MapAssignmentGradeRoutes()",
++            "the writer sub-group maps the grade route — the policy and the route it decorates "
++            + "must move together.");
++
++        Regex.Matches(endpoints, Regex.Escape(BearerSchemeOptIn)).Count.Should().Be(3,
++            "the writer sub-group must add NO group-level Bearer opt-in: the three the reader "
++            + "guard pins stay unchanged.");
++
++        // The route itself: mounted by the grade map, and gone from the general map.
++        var routes = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Endpoints", "AssignmentRoutes.cs");
++        ExtractMethod(routes, "RouteGroupBuilder MapAssignmentGradeRoutes(this RouteGroupBuilder")
++            .Should().Contain("/{id:guid}/students/{studentId:guid}/submission/review",
++                "the grade POST is the writer sub-group's one route.");
++        ExtractMethod(routes, "RouteGroupBuilder MapAssignmentRoutes(this RouteGroupBuilder")
++            .Should().NotContain("submission/review",
++                "the grade POST must no longer be mounted by MapAssignmentRoutes — that is the "
++                + "route move the writer policy depends on.");
++    }
++
++    /// <summary>The realm role names a policy body lists, in source order.</summary>
++    private static IReadOnlyList<string> RoleNamesIn(string policyBody)
++        => [.. Regex.Matches(policyBody, @"RealmRoleNames\.\w+").Select(match => match.Value)];
++
+     [TestMethod]
+     public void BothAppCallbackAllowlistCopies_CarryTheTeacherPortalCallback()
+     {
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+index 7a8817f4..faceed34 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+@@ -139,6 +139,7 @@ public class PortalsSolutionItemsArchitectureTests
+                 "src/SchoolCollab.Portals/tests/test_app_routes.py",
+                 "src/SchoolCollab.Portals/tests/test_assignments_api_client.py",
+                 "src/SchoolCollab.Portals/tests/test_service_discovery.py",
++                "src/SchoolCollab.Portals/tests/test_teacher_grade.py",
+                 "src/SchoolCollab.Portals/tests/test_teacher_session.py",
+                 "src/SchoolCollab.Portals/tests/test_teacher_views.py",
+                 "src/SchoolCollab.Portals/uv.lock",
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentWriterPolicyRouteTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentWriterPolicyRouteTests.cs
+new file mode 100644
+index 00000000..61e85ecd
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentWriterPolicyRouteTests.cs
+@@ -0,0 +1,493 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Net;
++using System.Net.Http;
++using System.Security.Claims;
++using System.Text;
++using System.Text.Encodings.Web;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Authorization.Infrastructure;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmission;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// Round <c>portal-submission-grade</c> D1 / AC1 / AC2 — the <b>writer policy</b> and the grade
++/// route it holds. Two layers, the <c>PortalSessionReaderPolicyTests</c> / 
++/// <c>AssignmentReaderPolicyRouteTests</c> shape:
++///
++/// <list type="number">
++/// <item>endpoint metadata: the grade POST carries the group's authenticated-user policy AND
++/// exactly one role-bearing writer policy, naming the portal-session GATEWAY and the reader's own
++/// four-role disjunction; every sibling write keeps the group policy alone, so no assignment-level
++/// write moved (the round's explicit non-goal);</item>
++/// <item>HTTP status over the container-free TestServer harness: a live portal session
++/// authorizes the grade POST <b>through the gateway</b> (the assertion that proves the write path
++/// works at all — the parent group's Bearer opt-in and the writer policy's gateway opt-in are
++/// COMBINED by the authorization middleware, and only the union authenticates a session caller);
++/// a role-less session is 403; an unknown session is a bare 401; a bearer caller with a role is
++/// unchanged; and the moved route's four catch arms plus its 404-before-dispatch are asserted
++/// (AC2's verbatim-parity tripwire).</item>
++/// </list>
++///
++/// <para>Discriminating: pre-fix the grade POST carried no writer policy at all — a portal session
++/// could not reach it (the group's Bearer pin 401s the header-less caller) — and the route's
++/// catch arms lived in <c>MapAssignmentRoutes</c>.</para>
++/// </summary>
++[TestClass]
++public class AssignmentWriterPolicyRouteTests
++{
++    private static readonly Guid AssignmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid StudentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid TeacherClaimId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++
++    private const string GradePattern = "assignments/{id:guid}/students/{studentId:guid}/submission/review";
++    private const string GradeUrl = "/assignments/11111111-1111-1111-1111-111111111111/students/22222222-2222-2222-2222-222222222222/submission/review";
++
++    private static readonly string[] WriterRoles =
++        [RealmRoleNames.Teacher, RealmRoleNames.Staff, RealmRoleNames.UserAdmin, RealmRoleNames.PlatformAdmin];
++
++    /// <summary>The sibling writes the round explicitly leaves alone: only the group policy.</summary>
++    private static readonly (string Method, string Pattern)[] UnmovedWrites =
++    [
++        ("POST", "assignments/{id:guid}/review"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/override-attempts"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/enable-submission"),
++        ("POST", "assignments/{id:guid}/students/{studentId:guid}/sign-off"),
++        ("POST", "assignments/{id:guid}/publish"),
++    ];
++
++    private static readonly string GradeBody =
++        $$"""{"teacherId":"{{TeacherClaimId}}","score":90,"grade":"A","comments":"Good work"}""";
++
++    private sealed class StubFeatureFlags(bool disableOidcAuth) : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey switch
++        {
++            FeatureFlagKeys.DisableOIDCAuth => disableOidcAuth,
++            _ => false,
++        };
++
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(IsEnabled(featureKey));
++        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
++            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
++    }
++
++    /// <summary>The canned claim set the stub claims port answers — the D9 contract the
++    /// portal-session handler materializes, with the roles the case under test needs.</summary>
++    private sealed class StubClaimsReader : IPortalSessionClaimsReader
++    {
++        public PortalClaims? NextClaims { get; set; } =
++            new("00000000-0000-0000-0000-000000000002", "Dev School", "School", TeacherClaimId.ToString(), [RealmRoleNames.Teacher]);
++
++        public string? LastSessionId { get; private set; }
++
++        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
++        {
++            LastSessionId = sessionId;
++            return ValueTask.FromResult(NextClaims);
++        }
++    }
++
++    private sealed class StubSubmissionRepository : ISubmissionRepository
++    {
++        public AssignmentSubmission? Submission { get; set; }
++
++        public Task<AssignmentSubmission?> GetSubmissionByAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
++            => Task.FromResult(Submission);
++
++        public Task<AssignmentSubmission?> GetSubmissionAsync(Guid submissionId, CancellationToken ct = default)
++            => Task.FromResult(Submission);
++
++        public void Add(AssignmentSubmission submission) { }
++        public void Update(AssignmentSubmission submission) { }
++        public void Add(AssignmentSubmissionVersion version) { }
++        public void Add(SubmissionReview review) { }
++        public void Add(SubmissionAnswer answer) { }
++        public void Add(AssignmentRecipient recipient) { }
++        public void Update(AssignmentRecipient recipient) { }
++        public void Add(GuardianSubmissionGate gate) { }
++        public void Update(GuardianSubmissionGate gate) { }
++        public void Add(SignatureEvent signatureEvent) { }
++
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(0);
++        public Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(0);
++        public Task<AssignmentRecipient?> GetRecipientAsync(Guid assignmentId, Guid contactId, CancellationToken ct = default) => Task.FromResult<AssignmentRecipient?>(null);
++        public Task<GuardianSubmissionGate?> GetGateAsync(Guid gateId, CancellationToken ct = default) => Task.FromResult<GuardianSubmissionGate?>(null);
++        public Task<GuardianSubmissionGate?> GetGateByAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default) => Task.FromResult<GuardianSubmissionGate?>(null);
++        public Task<List<GuardianSubmissionGate>> ListGatesForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(new List<GuardianSubmissionGate>());
++        public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default) => Task.FromResult<SignatureEvent?>(null);
++        public Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmission>());
++        public Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(new List<AssignmentRecipient>());
++        public Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(IReadOnlyList<Guid> submissionIds, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmissionVersion>());
++        public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
++        public Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
++        public Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) => Task.FromResult(Array.Empty<AssignmentRecipientDto>());
++        public Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default) => Task.FromResult<SubmissionDetailDto?>(null);
++        public Task<GuardianGateDto?> GetGuardianGateAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default) => Task.FromResult<GuardianGateDto?>(null);
++    }
++
++    /// <summary>Records the command it was handed and answers whatever the case under test wants.</summary>
++    private sealed class ScriptedReviewHandler(Func<ReviewSubmissionCommand, Exception?>? outcome = null)
++        : ICommandHandler<ReviewSubmissionCommand>
++    {
++        public ReviewSubmissionCommand? LastCommand { get; private set; }
++
++        public int Calls { get; private set; }
++
++        public Task HandleAsync(ReviewSubmissionCommand command, CancellationToken ct = default)
++        {
++            Calls++;
++            LastCommand = command;
++            var failure = outcome?.Invoke(command);
++            return failure is null ? Task.CompletedTask : Task.FromException(failure);
++        }
++    }
++
++    /// <summary>The bearer scheme, authenticating per request from headers: <c>x-test-roles</c>
++    /// comma-separated role names and <c>x-test-anonymous: 1</c> for an unauthenticated caller.</summary>
++    private sealed class HeaderPrincipalAuthHandler(
++        IOptionsMonitor<AuthenticationSchemeOptions> options,
++        ILoggerFactory logger,
++        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
++    {
++        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
++        {
++            if (Request.Headers["x-test-anonymous"] == "1")
++            {
++                return Task.FromResult(AuthenticateResult.NoResult());
++            }
++
++            var roles = Request.Headers["x-test-roles"].ToString();
++            if (string.IsNullOrWhiteSpace(roles))
++            {
++                // No roles header ⇒ no presented credential (the reader-host shape): the portal
++                // session case must authorize through the gateway, never through this handler.
++                return Task.FromResult(AuthenticateResult.NoResult());
++            }
++
++            var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, "test-user") };
++            foreach (var role in roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
++            {
++                claims.Add(new Claim(ClaimTypes.Role, role));
++            }
++
++            var identity = new ClaimsIdentity(claims, Scheme.Name);
++            return Task.FromResult(AuthenticateResult.Success(
++                new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
++        }
++    }
++
++    private static async Task<WebApplication> StartHostAsync(
++        bool disableOidcAuth,
++        StubClaimsReader? claimsReader = null,
++        ISubmissionRepository? repository = null,
++        ICommandHandler<ReviewSubmissionCommand>? reviewHandler = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags(disableOidcAuth));
++        builder.Services.AddAuthentication(AuthTenancyExtensions.BearerScheme)
++            .AddScheme<AuthenticationSchemeOptions, HeaderPrincipalAuthHandler>(
++                AuthTenancyExtensions.BearerScheme, _ => { })
++            // D19/D7: the writer policy names the GATEWAY scheme, and a policy-named scheme
++            // without a handler is a 500 — never a 401 — so this host registers the gateway
++            // exactly as Program.cs does, in BOTH flag states, over a stubbed claims port.
++            .AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
++        builder.Services.AddSingleton<IPortalSessionClaimsReader>(claimsReader ?? new StubClaimsReader());
++        builder.Services.AddAuthorization();
++        builder.Services.AddSingleton<ISubmissionRepository>(
++            repository ?? new StubSubmissionRepository());
++        builder.Services.AddSingleton<ICommandHandler<ReviewSubmissionCommand>>(
++            reviewHandler ?? new ScriptedReviewHandler());
++
++        var app = builder.Build();
++        app.UseAuthentication();
++        app.UseAuthorization();
++        app.MapAssignmentEndpoints(app.Services.GetRequiredService<IFeatureFlagService>());
++        await app.StartAsync();
++        return app;
++    }
++
++    private static HttpClient CreateClient(WebApplication app)
++        => ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++
++    private static HttpRequestMessage GradeRequest(string? sessionId, string? roles = null)
++    {
++        var request = new HttpRequestMessage(HttpMethod.Post, GradeUrl)
++        {
++            Content = new StringContent(GradeBody, Encoding.UTF8, "application/json"),
++        };
++        if (sessionId is not null)
++        {
++            request.Headers.Add(PortalSessionAuthenticationHandler.SessionHeaderName, sessionId);
++        }
++
++        if (roles is not null)
++        {
++            request.Headers.Add("x-test-roles", roles);
++        }
++
++        return request;
++    }
++
++    private static async Task<HttpResponseMessage> PostGradeAsync(
++        WebApplication app, string sessionId, string? roles = null)
++    {
++        using var client = CreateClient(app);
++        return await client.SendAsync(GradeRequest(sessionId, roles));
++    }
++
++    /// <summary>A host with a gradeable submission and a no-op review handler.</summary>
++    private static Task<WebApplication> StartGradeableHostAsync(
++        StubClaimsReader claimsReader,
++        Func<ReviewSubmissionCommand, Exception?>? outcome = null)
++    {
++        var repository = new StubSubmissionRepository
++        {
++            Submission = AssignmentSubmission.Create(Guid.NewGuid(), AssignmentId, StudentId, null),
++        };
++        return StartHostAsync(false, claimsReader, repository, new ScriptedReviewHandler(outcome));
++    }
++
++    // ── Layer 1: endpoint metadata ────────────────────────────────────────
++
++    private static RouteEndpoint Find(WebApplication app, string method, string pattern)
++    {
++        var wanted = Normalize(pattern);
++        var match = ((IEndpointRouteBuilder)app).DataSources
++            .SelectMany(d => d.Endpoints)
++            .OfType<RouteEndpoint>()
++            .Where(e => Normalize(e.RoutePattern.RawText) == wanted)
++            .Where(e => e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(method) == true)
++            .ToList();
++
++        match.Should().ContainSingle($"exactly one {method} route should match '{wanted}'");
++        return match[0];
++    }
++
++    private static string Normalize(string? rawText) => (rawText ?? string.Empty).Trim('/');
++
++    [TestMethod]
++    public async Task TheGradePost_CarriesTheWriterPolicy_OnTheGatewayScheme()
++    {
++        await using var app = await StartHostAsync(disableOidcAuth: false);
++
++        var endpoint = Find(app, "POST", GradePattern);
++        var policies = endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>();
++
++        policies.Should().HaveCount(2,
++            "the grade POST carries the group's authenticated-user policy AND the writer policy");
++        var writer = policies.Where(p => p.Requirements.OfType<RolesAuthorizationRequirement>().Any()).ToList();
++        writer.Should().ContainSingle("the grade POST carries exactly one role-bearing policy");
++        writer[0].AuthenticationSchemes.Should().Equal([PortalSessionAuthenticationHandler.GatewaySchemeName],
++            "the writer policy names the portal-session gateway (D19): the single scheme registered in " +
++            "every flag state — portal callers authenticate through it, bearer callers through the " +
++            "pinned Bearer fallback, and the two listed schemes are COMBINED into the endpoint's union");
++        writer[0].AuthenticationSchemes.Should().NotContain(AuthTenancyExtensions.BearerScheme);
++        writer[0].Requirements.OfType<RolesAuthorizationRequirement>().Single().AllowedRoles.Should()
++            .BeEquivalentTo(WriterRoles,
++                "the writer policy restates the reader's four-role disjunction — one disjunction per module");
++    }
++
++    [TestMethod]
++    public async Task TheSiblingWrites_KeepTheGroupPolicyAlone()
++    {
++        // The round's explicit non-goal: only the submission-grade route moves. A role-bearing
++        // policy on any of these would be a scope regression (the read policy's [P1-1] reason).
++        await using var app = await StartHostAsync(disableOidcAuth: false);
++
++        foreach (var (method, pattern) in UnmovedWrites)
++        {
++            var endpoint = Find(app, method, pattern);
++            var policies = endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>();
++
++            policies.Should().HaveCount(1, $"{method} /{pattern} keeps only the group's policy");
++            policies.SelectMany(p => p.Requirements).Should().NotContain(r => r is RolesAuthorizationRequirement,
++                $"{method} /{pattern} must NOT be covered by the writer policy");
++        }
++    }
++
++    // ── Layer 2: HTTP status (the union that makes the write path work) ────
++
++    [TestMethod]
++    public async Task APortalSession_AuthorizesTheGradePost_ThroughTheGateway()
++    {
++        // THE assertion the watch item asks for: asserted over the real HTTP pipeline (the
++        // middleware combines the group's Bearer opt-in with the writer policy's gateway opt-in
++        // and authenticates the session through the gateway), not per-policy in isolation.
++        var claimsReader = new StubClaimsReader();
++        await using var app = await StartGradeableHostAsync(claimsReader);
++
++        var response = await PostGradeAsync(app, "a-live-session-id");
++
++        response.StatusCode.Should().Be(HttpStatusCode.NoContent,
++            "a live portal session carrying the teacher role authorizes the grade POST");
++        claimsReader.LastSessionId.Should().Be("a-live-session-id",
++            "the handler resolved the request's session id through the claims port");
++    }
++
++    [TestMethod]
++    public async Task APortalSessionWithoutAWriterRole_IsForbidden()
++    {
++        var claimsReader = new StubClaimsReader
++        {
++            NextClaims = new("00000000-0000-0000-0000-000000000002", "Dev School", "School", TeacherClaimId.ToString(), ["guardian"]),
++        };
++        await using var app = await StartGradeableHostAsync(claimsReader);
++
++        var response = await PostGradeAsync(app, "a-live-session-id");
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
++            "T4: the API is the security boundary — a live session without a writer role is the " +
++            "policy's own 403, never a Python role list");
++    }
++
++    [TestMethod]
++    public async Task AnUnknownSession_IsABare401()
++    {
++        var claimsReader = new StubClaimsReader { NextClaims = null };
++        await using var app = await StartGradeableHostAsync(claimsReader);
++
++        var response = await PostGradeAsync(app, "not-a-live-session");
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
++            "an unknown or expired portal session fails closed with the gateway's bare 401");
++        response.Headers.Location.Should().BeNull("the challenge is never a redirect");
++    }
++
++    [TestMethod]
++    public async Task ABearerCaller_IsUnchanged()
++    {
++        var repository = new StubSubmissionRepository
++        {
++            Submission = AssignmentSubmission.Create(Guid.NewGuid(), AssignmentId, StudentId, null),
++        };
++        await using var app = await StartHostAsync(disableOidcAuth: false, repository: repository);
++        using var client = CreateClient(app);
++
++        var response = await client.SendAsync(GradeRequest(sessionId: null, roles: RealmRoleNames.Teacher));
++
++        response.StatusCode.Should().Be(HttpStatusCode.NoContent,
++            "an existing bearer caller authorizes exactly as before the writer policy landed");
++    }
++
++    [TestMethod]
++    public async Task AnAnonymousCaller_Is401()
++    {
++        await using var app = await StartHostAsync(disableOidcAuth: false);
++        using var client = CreateClient(app);
++
++        var response = await client.PostAsync(
++            GradeUrl, new StringContent(GradeBody, Encoding.UTF8, "application/json"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    /// <summary>[Regression guard] With FEATURE:DisableOIDCAuth ON the policy block is skipped, so
++    /// the grade route is reachable without any principal — today's dev posture, unchanged.</summary>
++    [TestMethod]
++    public async Task UnderDisableOidcAuth_NoWriterPolicyApplies_RegressionGuard()
++    {
++        var repository = new StubSubmissionRepository { Submission = null };
++        await using var app = await StartHostAsync(disableOidcAuth: true, repository: repository);
++        using var client = CreateClient(app);
++
++        var response = await client.PostAsync(
++            GradeUrl, new StringContent(GradeBody, Encoding.UTF8, "application/json"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
++            "with the flag ON there is no policy at all, so the request reaches the route — which " +
++            "answers 404 for the unknown submission, not 401");
++    }
++
++    // ── AC2: the moved route's verbatim behaviour ─────────────────────────
++
++    [TestMethod]
++    public async Task AnUnknownSubmission_Is404_BeforeTheHandlerIsDispatched()
++    {
++        var repository = new StubSubmissionRepository { Submission = null };
++        var handler = new ScriptedReviewHandler();
++        await using var app = await StartHostAsync(false, new StubClaimsReader(), repository, handler);
++        using var client = CreateClient(app);
++
++        var response = await client.SendAsync(GradeRequest("a-live-session-id"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
++            "the route resolves (assignment, student) -> submission and 404s before dispatching");
++        handler.Calls.Should().Be(0, "the command is never dispatched for an unknown submission");
++    }
++
++    [TestMethod]
++    public async Task TheFourCatchArms_AreUnchangedByTheMove()
++    {
++        var submission = AssignmentSubmission.Create(Guid.NewGuid(), AssignmentId, StudentId, null);
++
++        (HttpStatusCode, Exception)[] cases =
++        [
++            (HttpStatusCode.NotFound, new SubmissionNotFoundException(submission.Id)),
++            (HttpStatusCode.Forbidden, new UnauthorizedAccessException("only the creating teacher can review")),
++            (HttpStatusCode.Forbidden, new MissingTeacherPrincipalException(nameof(ReviewSubmissionCommand))),
++            (HttpStatusCode.Forbidden, new TeacherTenantMismatchException(
++                AssignmentId, "assignment", Guid.NewGuid(), Guid.NewGuid())),
++        ];
++
++        foreach (var (expected, failure) in cases)
++        {
++            var repository = new StubSubmissionRepository { Submission = submission };
++            var handler = new ScriptedReviewHandler(_ => failure);
++            await using var app = await StartHostAsync(false, new StubClaimsReader(), repository, handler);
++            using var client = CreateClient(app);
++
++            var response = await client.SendAsync(GradeRequest("a-live-session-id"));
++
++            response.StatusCode.Should().Be(expected,
++                $"{failure.GetType().Name} maps to {expected} exactly as it did inside MapAssignmentRoutes");
++        }
++    }
++
++    [TestMethod]
++    public async Task TheHappyPath_DispatchesTheSubmissionId_AndTheWireTeacherId()
++    {
++        var submission = AssignmentSubmission.Create(Guid.NewGuid(), AssignmentId, StudentId, null);
++        var repository = new StubSubmissionRepository { Submission = submission };
++        var handler = new ScriptedReviewHandler();
++        await using var app = await StartHostAsync(false, new StubClaimsReader(), repository, handler);
++        using var client = CreateClient(app);
++
++        var response = await client.SendAsync(GradeRequest("a-live-session-id"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
++        handler.Calls.Should().Be(1);
++        handler.LastCommand!.SubmissionId.Should().Be(submission.Id,
++            "the route hands the resolved submission's id to the command (not the path id)");
++        handler.LastCommand.TeacherId.Should().Be(TeacherClaimId,
++            "the body's teacherId is threaded through verbatim — the handler's claim-wins rule is untouched");
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/SessionWireSpellingTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/SessionWireSpellingTests.cs
+new file mode 100644
+index 00000000..915b9750
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/SessionWireSpellingTests.cs
+@@ -0,0 +1,117 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// The Q3 wire-spelling **contract pin** (round <c>portal-submission-grade</c> AC7(a)): the auth
++/// service's two portal-facing session bodies serialize with EXACTLY the camelCase key set the
++/// Python portal parses — nothing renamed, nothing added, nothing dropped.
++///
++/// <para>
++/// This is a <b>drift-detection pin, not a pre-change failing test</b>: the spelling it asserts
++/// is already correct (the previous round's portal tests drive the real client over a hand-written
++/// camelCase body, which is what proved it). Its value is that the two halves of the contract now
++/// have one automated pin each — a serialization-policy change here, or a parse change in the
++/// portal, reddens exactly one of them instead of silently blanking a page. The Python half lives
++/// in <c>src/SchoolCollab.Portals/tests/test_teacher_session.py</c>; neither side can be satisfied
++/// by the other's tolerance.
++/// </para>
++///
++/// <para>
++/// The bodies are read from the REAL pipeline (<see cref="AuthEndpointTestHost"/>, the composed
++/// Kestrel host) — the same host the session endpoint tests use — so the assertion observes
++/// ASP.NET's own serialization, never a re-implementation of it in the test.
++/// </para>
++/// </summary>
++[TestClass]
++public class SessionWireSpellingTests
++{
++    private const string AccessToken = "wire_spelling_access_token";
++    private const string RefreshToken = "wire_spelling_refresh_token";
++
++    /// <summary>The D18 read body's pinned key set — the portal's <c>SessionData</c> fields.</summary>
++    private static readonly string[] SessionReadKeys =
++    [
++        "sessionId",
++        "tenantId",
++        "tenantName",
++        "tenantType",
++        "teacherId",
++        "roles",
++        "expiresInSeconds",
++    ];
++
++    /// <summary>The D2 claims body's pinned key set — <c>SessionResponse</c> minus the session and
++    /// lifetime fields (the remote host's portal-session authentication reads exactly these).</summary>
++    private static readonly string[] SessionClaimsKeys =
++    [
++        "tenantId",
++        "tenantName",
++        "tenantType",
++        "teacherId",
++        "roles",
++    ];
++
++    private static string SeedSession(AuthEndpointTestHost host) =>
++        host.Services.GetRequiredService<PortalSessionStore>()
++            .Create(
++                AccessToken,
++                RefreshToken,
++                SessionEndpointTests.JwtWithClaims(tenantName: "Wire School", roles: ["teacher"]),
++                3600);
++
++    private static async Task<string> ReadBodyAsync(AuthEndpointTestHost host, string path)
++    {
++        var response = await host.Client.GetAsync(path);
++        response.StatusCode.Should().Be(HttpStatusCode.OK, $"{path} answers the claim set as data");
++        return await response.Content.ReadAsStringAsync();
++    }
++
++    private static string[] KeySet(string body)
++    {
++        using var document = JsonDocument.Parse(body);
++        return [.. document.RootElement.EnumerateObject().Select(property => property.Name).Order()];
++    }
++
++    [TestMethod]
++    public async Task SessionReadBody_CarriesExactlyThePinnedCamelCaseKeySet()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = SeedSession(host);
++
++        var body = await ReadBodyAsync(host, $"/auth/session/{sessionId}");
++
++        // Exact set equality, not "contains": a renamed or removed key is a drift the portal's
++        // tolerant parser would otherwise absorb as a blank field (and an ADDED key is a
++        // contract widening the portal knows nothing about).
++        KeySet(body).Should().Equal(SessionReadKeys.Order(),
++            "the D18 read body's spelling IS the portal's contract (round portal-session-adoption "
++            + "Q3): the previous round pinned it by hand in another context's test — this is the "
++            + "one-way pin on the serializing side.");
++
++        // The snake_case claim names are the D9 CLAIM contract, never the wire spelling.
++        body.Should().NotContain("tenant_id").And.NotContain("teacher_id")
++            .And.NotContain("session_id").And.NotContain("expires_in_seconds");
++    }
++
++    [TestMethod]
++    public async Task SessionClaimsBody_CarriesExactlyThePinnedCamelCaseKeySet()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = SeedSession(host);
++
++        var body = await ReadBodyAsync(host, $"/auth/session/{sessionId}/claims");
++
++        KeySet(body).Should().Equal(SessionClaimsKeys.Order(),
++            "the remote portal-session claims read is the OTHER half of the same wire contract: "
++            + "the Assignments API's PortalSessionClaimsReader parses exactly these keys (pinned "
++            + "in PortalSessionReaderPolicyTests), so this side must not drift either.");
++
++        body.Should().NotContain("tenant_id").And.NotContain("teacher_id");
++    }
++}
