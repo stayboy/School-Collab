@@ -1,7 +1,7 @@
 # Teachers & Ward Portal — Prefab UI (Python) integration plan
 
-Status: **Phase 0 LANDED; Phase 2's read-only half LANDED** — the teacher surface, its auth/scope wiring and its CI all merged to `main` at `b78dc2ae` (stack #297: #295 → #296 → #298 → #299, 2026-10-04). Phases 1 and 3–4 remain a proposal pending the owner's MVP go/no-go, and Phase 2's **write** half (submission review/grade, T5) is not started. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
-Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1; **2026-10-04:** the dev-teacher identity wiring landed (round `dev-teacher-identity-wiring`, PR #299) and the 4-layer train merged as stack #297 → `b78dc2ae`, closing the third prerequisite)
+Status: **Phase 0 LANDED; Phase 2 COMPLETE (read-only half + write half)** — the teacher surface, its auth/scope wiring and its CI all merged to `main` at `b78dc2ae` (stack #297: #295 → #296 → #298 → #299, 2026-10-04). Round `portal-submission-grade` (2026-10-06) landed Phase 2's **write** half: submission review/grade through the portal's own session-gated route, over the existing assignments-api grade endpoint (now reachable by a portal session). **T5's spike boundary — read-only review + submission review/grade — is therefore complete, and the Q5 MVP go/no-go is un-paused:** its named trigger was "after the teacher write half lands", and this round *is* that write half, so the owner re-decides Phases 1 and 3–4; nothing here pre-commits them. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
+Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1; **2026-10-04:** the dev-teacher identity wiring landed (round `dev-teacher-identity-wiring`, PR #299) and the 4-layer train merged as stack #297 → `b78dc2ae`, closing the third prerequisite; **2026-10-06:** the teacher write half landed (round `portal-submission-grade`) — submission review/grade through the portal's own session-gated route, completing T5's spike boundary and un-pausing the Q5 MVP go/no-go)
 Branch context: authored alongside the AR-13 round (branch `stack/13-ar-13-families-ward-surface`, since squash-merged to `main` as PR #236); the AR train (ar-13/ar-14/ar-15 — #236/#237/#239) has since fully merged to `main`. **Code for this plan HAS landed** — see the Status line above. The claim that stood here ("No code for this plan has landed") was true when written and had been false since #296; corrected 2026-10-04.
 
 ## 1. Goal
@@ -265,10 +265,29 @@ School-Collab/
 - Test story: Playwright per `.github/copilot/rules/testing.md`.
 
 ### Phase 2 — Teacher review portal spike (2026-10-01 decisions T1–T7)
-- **Read-only** teacher workspace in `views/teacher.py` (a **flat module** — round-2
-  grill Q5, superseding T1's `views/teacher/` wording): assignment list (scoped per
+- Teacher workspace in `views/teacher.py` (a **flat module** — round-2 grill Q5,
+  superseding T1's `views/teacher/` wording): assignment list (scoped per
   T3) → review queue (principal-first, ar-24) → submission detail → submission
-  review/grade. No create/edit/publish in the spike (T5).
+  review/grade. The **read** half landed 2026-10-03; the **write** half (the grade
+  form and its route) landed 2026-10-06 — see the bullet below. No
+  create/edit/publish in the spike (T5).
+- **Write half (round `portal-submission-grade`, 2026-10-06) — T5 complete:** the
+  submission detail page carries a model-driven Prefab grade form whose
+  `Fetch.post` calls **this portal's own** session-gated route
+  (`POST /teacher/assignments/{assignmentId}/students/{studentId}/review`). That
+  route mirrors the auth portal's mechanics (a JSON-only body plus a one-time
+  antiforgery token, consumed before anything else), resolves the D19 gate, and
+  then calls the **existing** assignments-api grade endpoint — which the round
+  opened to a portal session by mounting it under a new flag-conditional
+  `RequireAssignmentWriter` sub-group (the reader policy's pattern and its
+  four-role disjunction), instead of widening the `/assignments` group's Bearer
+  policy. The portal still holds no credential (AC11): the opaque session id
+  travels in `X-Portal-Session`, and the body's `teacherId` is the D18 claim set
+  **as data**. Every refusal is a bounded code rendered on the page the fetch
+  lands on; the assignments-api grade POST is never called without a live session
+  and an unspent form token. Because this is the write half T5 named, it fires
+  the Q5 deferral's trigger: the ward-portal MVP go/no-go is **un-paused**, and
+  the owner re-decides Phases 1 and 3–4.
 - **Auth/roles (T2, T4, T6)**: add `teacher` + `staff` realm roles, the
   assignment endpoint-group authorization policies (flag-conditional), and the
   teacher-scope filter fed by a new Assignments→Students `TeacherGradeLevel` port.

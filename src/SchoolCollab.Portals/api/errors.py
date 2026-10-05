@@ -8,6 +8,8 @@ lets a route catch ``PortalApiError`` and stay honest about the failure.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 
 class PortalApiError(RuntimeError):
     """Base class for every failure raised by the portal's API clients."""
@@ -113,3 +115,36 @@ class TokenInResponseError(PortalApiError):
             f"{service} at {base_url} returned a body carrying token-shaped fields {list(keys)} "
             "— the portal never holds a credential, so the response was refused"
         )
+
+
+#: Fields that must never appear in a portal-bound body (AC11). Every decoded response is scanned
+#: — nested objects and arrays included — and a body carrying one is refused, never ingested.
+#: Shared by every portal client: one spelling of the key set, owned by no single client, so a new
+#: client adopts the scan without importing another client's internals (round
+#: ``portal-submission-grade`` review P2-1).
+TOKEN_SHAPED_KEYS = frozenset(
+    {
+        "access_token",
+        "accessToken",
+        "refresh_token",
+        "refreshToken",
+        "id_token",
+        "idToken",
+    }
+)
+
+
+def token_shaped_keys(payload: object) -> tuple[str, ...]:
+    """Every token-shaped key in a decoded body, at any depth (AC11)."""
+    found: set[str] = set()
+    stack: list[object] = [payload]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, Mapping):
+            for key, value in item.items():
+                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
+                    found.add(key)
+                stack.append(value)
+        elif isinstance(item, (list, tuple)):
+            stack.extend(item)
+    return tuple(sorted(found))

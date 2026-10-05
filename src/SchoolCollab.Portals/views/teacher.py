@@ -5,7 +5,7 @@ Four states, all pure functions of data — the split ``views/ward.py`` establis
 * :func:`build_teacher_list_view` — the assignment list the drill-down starts from.
 * :func:`build_review_queue_view` — one assignment's review queue.
 * :func:`build_submission_view` — one submission: version history (where the ward's
-  answers live) plus the teacher review.
+  answers live), the teacher review, and the grade form.
 * :func:`build_teacher_error_view` — the degraded state shared by all three, rendered
   from a typed portal error. The surface never shows a raw 500 or a traceback.
 
@@ -14,6 +14,14 @@ Round ``portal-session-adoption`` (D19/D5) adds the session's own rendering:
 and the session affordances every teacher page carries through :class:`TeacherSurfaceLinks`
 (signed-in identity from the D18 read, logout, or the sign-in links when the environment
 supplied them, never an invented URL).
+
+Round ``portal-submission-grade`` (D4) adds the **write half**: the grade form inside
+:func:`build_submission_view` — the login form's chain mirrored (a model-driven ``Form``,
+a submit-driven reactive error state, and a ``Fetch.post`` to *this portal's own* route,
+never to the API and never to the auth service) — with every failure rendered from
+:data:`GRADE_COPY`, a bounded code table. The route the form posts to, and the drill-down
+that re-renders it, are defined here as :data:`REVIEW_PATH` / :data:`SUBMISSION_PATH` so the
+view and the app layer cannot drift.
 
 This is a **flat module**, not a ``views/teacher/`` package (round-2 grill Q5, which
 supersedes the plan's ``views/teacher/`` wording): one module per surface is the shape
@@ -25,23 +33,39 @@ Component variants stay within the two the spike proved (``default`` / ``success
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from urllib.parse import quote
 
+from pydantic import BaseModel
+from pydantic import Field as ModelField
+from prefab_ui.actions import Action, CallHandler, Fetch, SetState, ShowToast
 from prefab_ui.app import PrefabApp
 from prefab_ui.components import (
+    Alert,
+    AlertDescription,
+    AlertTitle,
     Badge,
+    Button,
     Card,
     CardContent,
     Column,
     DataTable,
     DataTableColumn,
+    Field,
+    FieldError,
+    Form,
     H3,
     Link,
     Muted,
     Row,
+    defer,
+    insert,
 )
+from prefab_ui.rx import Rx
 
 from api import (
+    ApiResponseError,
     AssignmentRow,
     AuthServiceError,
     PortalApiError,
@@ -120,6 +144,150 @@ _GENERIC_SESSION_COPY: tuple[str, str] = (
     "Session unavailable",
     "The auth service could not complete this step. Nothing was changed.",
 )
+
+#: The drill-down page's own route template, and the grade form's POST target beneath it.
+#: ``REVIEW_PATH`` is ALSO what the app's outcome handler matches on the matched route's
+#: parameterized pattern — never a raw path, because the ids are request-specific.
+SUBMISSION_PATH = "/teacher/assignments/{assignment_id}/students/{student_id}"
+REVIEW_PATH = f"{SUBMISSION_PATH}/review"
+
+#: The drill-down's bounded failure query parameter: a refused grade answers the fetch with
+#: this page plus the code, and the page renders the code's copy (the auth portal's
+#: ``_login_failure`` shape).
+ERROR_CODE_PARAMETER = "error_code"
+
+#: The JSON body fields ``POST …/review`` parses (the app layer reads exactly these, and the
+#: form's submit body is built from the same names).
+ANTIFORGERY_FIELD = "antiforgery_token"
+GRADE_SCORE_FIELD = "score"
+GRADE_GRADE_FIELD = "grade"
+GRADE_COMMENTS_FIELD = "comments"
+
+#: The renderer JS action that navigates the current tab. THIS module's own spelling: the auth
+#: portal's handler is that app's, and prefab's ``Fetch`` follows redirects with no redirect
+#: option, so a mutation's ``{redirect_uri}`` answer has to move the tab explicitly.
+NAVIGATE_HANDLER = "navigate"
+NAVIGATE_HANDLER_JS = "(args) => { window.location.assign(args.arguments.url); }"
+NAVIGATE_URL_ARGUMENT = "url"
+
+#: The client-state key that makes the grade fields' error state **submit-driven** (the sign-in
+#: form's ``ATTEMPTED_STATE`` pattern). It is part of the page's initial state (``False``) and is
+#: set by the submit chain and by nothing else, so a page the teacher has not submitted renders
+#: with no error state at all. The initial value is load-bearing: prefab's renderer resolves a
+#: whole-attribute template to ``undefined`` and falls back to the raw (truthy) template string,
+#: so an ``invalid`` expression reading an undeclared key would paint every field invalid on
+#: first paint.
+GRADE_ATTEMPTED_STATE = "grade_attempted"
+
+#: The bounded codes the grade path renders. Named here, beside the copy table, so the app
+#: layer and the table cannot drift apart.
+GRADE_FORM_REJECTED_CODE = "grade_form_rejected"
+GRADE_ANTIFORGERY_REJECTED_CODE = "grade_antiforgery_rejected"
+GRADE_SESSION_REQUIRED_CODE = "grade_session_required"
+GRADE_IDENTITY_MISSING_CODE = "grade_identity_missing"
+GRADE_TEACHER_UNCONFIGURED_CODE = "grade_teacher_unconfigured"
+GRADE_SCORE_INVALID_CODE = "grade_score_invalid"
+GRADE_SUBMISSION_MISSING_CODE = "grade_submission_missing"
+GRADE_REFUSED_CODE = "grade_refused"
+GRADE_UNAVAILABLE_CODE = "grade_unavailable"
+GRADE_RESPONSE_REFUSED_CODE = "grade_response_refused"
+
+#: The bounded failure codes the grade path renders, one table (beside :data:`SESSION_COPY`) so a
+#: code and its wording cannot drift apart — and so an unrecognized failure can never echo an
+#: upstream body, a Problem ``detail``, a token or attacker-supplied text into a page.
+GRADE_COPY: dict[str, tuple[str, str]] = {
+    GRADE_FORM_REJECTED_CODE: (
+        "Grade not submitted",
+        "The grade form's own request was not a JSON form submission, so nothing was graded.",
+    ),
+    GRADE_ANTIFORGERY_REJECTED_CODE: (
+        "Grade form expired",
+        "The form's one-time token was missing or already used, so nothing was graded. Reload "
+        "this page and submit again.",
+    ),
+    GRADE_SESSION_REQUIRED_CODE: (
+        "Grade not recorded",
+        "This portal could not confirm your session, so nothing was graded.",
+    ),
+    GRADE_IDENTITY_MISSING_CODE: (
+        "Grade not recorded",
+        "The session carried no teacher identity, so the grade was not sent to the assignments "
+        "service.",
+    ),
+    GRADE_TEACHER_UNCONFIGURED_CODE: (
+        "Grade not recorded",
+        "This portal has no dev teacher id configured (PORTAL_DEV_TEACHER_ID), so it has no "
+        "teacher to attribute a grade to.",
+    ),
+    GRADE_SCORE_INVALID_CODE: (
+        "Score not a number",
+        "The score that was submitted is not a number, so nothing was graded.",
+    ),
+    GRADE_SUBMISSION_MISSING_CODE: (
+        "Submission not found",
+        "The assignments service has no submission for this student on this assignment, so "
+        "nothing was graded.",
+    ),
+    GRADE_REFUSED_CODE: (
+        "Grade refused",
+        "The assignments service refused this grade. Only the teacher who created the "
+        "assignment can grade its submissions, in their own tenant.",
+    ),
+    GRADE_UNAVAILABLE_CODE: (
+        "Grade not recorded",
+        "The assignments service could not be reached, so nothing was graded.",
+    ),
+    GRADE_RESPONSE_REFUSED_CODE: (
+        "Response refused",
+        "The assignments service answered with something this portal will not ingest, so "
+        "nothing was graded.",
+    ),
+}
+
+#: The alert every unrecognized grade failure degrades to.
+_GENERIC_GRADE_COPY: tuple[str, str] = (
+    "Grade not recorded",
+    "The grade could not be completed. Nothing was changed.",
+)
+
+#: The status a typed client refusal names in its own bounded ``detail`` (``HTTP 404 for …``).
+_UPSTREAM_STATUS = re.compile(r"HTTP (\d{3})")
+
+
+def grade_failure_code(error: PortalApiError) -> str:
+    """The bounded grade code for a typed client failure — never raw upstream text.
+
+    Mirrors :func:`session_card_code`: a token-shaped body is this portal's own refusal (AC11);
+    a client refusal that names an upstream status maps it (``404`` is the assignment/student
+    pair having no submission, ``403`` is the creating-teacher / tenant / claim refusal);
+    anything else — a transport failure, a non-JSON body, an unrecognized status — is
+    ``grade_unavailable``.
+    """
+    if isinstance(error, TokenInResponseError):
+        return GRADE_RESPONSE_REFUSED_CODE
+    if isinstance(error, ApiResponseError):
+        match = _UPSTREAM_STATUS.search(error.detail)
+        if match:
+            status = int(match.group(1))
+            if status == 404:
+                return GRADE_SUBMISSION_MISSING_CODE
+            if status == 403:
+                return GRADE_REFUSED_CODE
+    return GRADE_UNAVAILABLE_CODE
+
+
+def submission_path(assignment_id: str, student_id: str) -> str:
+    """The drill-down URL for one (assignment, student) — the page the grade form lives on."""
+    return SUBMISSION_PATH.format(
+        assignment_id=quote(assignment_id, safe=""), student_id=quote(student_id, safe="")
+    )
+
+
+def review_path(assignment_id: str, student_id: str) -> str:
+    """This (assignment, student) submission's grade route — this portal's own URL."""
+    return REVIEW_PATH.format(
+        assignment_id=quote(assignment_id, safe=""), student_id=quote(student_id, safe="")
+    )
 
 
 @dataclass(frozen=True)
@@ -308,6 +476,151 @@ def build_review_queue_view(
     return application
 
 
+class GradeSubmissionModel(BaseModel):
+    """The grade form's fields and their constraints.
+
+    All three are optional because the Assignments API's ``ReviewSubmissionRequest`` is: a
+    review with no score and no grade records ``Reviewed``, and one with either records
+    ``Graded``. ``score`` therefore binds a number input with its bounds, ``grade`` a bounded
+    text input, and ``comments`` a textarea — the API's own field names, one definition.
+    """
+
+    score: float | None = ModelField(
+        default=None,
+        title="Score",
+        description="Numeric score",
+        ge=0,
+        le=1000,
+    )
+    grade: str | None = ModelField(
+        default=None,
+        title="Grade",
+        description="Letter or short label",
+        max_length=32,
+    )
+    comments: str | None = ModelField(
+        default=None,
+        title="Comments",
+        description="Feedback for the ward",
+        max_length=2000,
+        json_schema_extra={"ui": {"type": "textarea", "rows": 3}},
+    )
+
+
+def _grade_blank_expression() -> str:
+    """The one client-side rule the optional grade fields have: a submit must carry *something*.
+
+    The API accepts a review with no outcome at all, so no single field is required — the
+    reactive ``invalid`` state is submit-driven (like the sign-in form's) and says only that a
+    blank submit is a submit the teacher did not mean. It is display-only: the route sends
+    whatever the API accepts, and the server is the authority.
+    """
+    return " && ".join(f"!{name}" for name in GradeSubmissionModel.model_fields)
+
+
+#: The `FieldError` message on an all-blank submit: the rule is about the FORM, not one field, so
+#: every optional field carries the same sentence (the sign-in form's per-field "Enter your …"
+#: wording would name a field that is not required).
+_GRADE_BLANK_MESSAGE = "Enter a score, a grade or some comments before submitting."
+
+
+def _grade_notice(error_code: str) -> None:
+    """The alert a refused or failed grade renders above the form (bounded code, HTTP 200)."""
+    title, message = GRADE_COPY.get(error_code, _GENERIC_GRADE_COPY)
+    with Alert(variant="destructive"):
+        AlertTitle(title)
+        AlertDescription(message)
+
+
+def _grade_section(
+    *, antiforgery_token: str, assignment_id: str, student_id: str, error_code: str | None
+) -> None:
+    """The grade Card: the login form's chain, mirrored.
+
+    A model-driven ``Form`` whose submit marks the form attempted and then ``Fetch.post``s to
+    *this portal's own* route (``REVIEW_PATH``) — never the Assignments API directly, never the
+    auth service. The route answers ``{"redirect_uri": …}`` at HTTP 200, and the success action
+    navigates the current tab there, so the page re-reads the submission through the drill-down
+    GET — which is where the cookie lifecycle and the re-gate run (the POST never touches the
+    cookie itself).
+    """
+    with Card():
+        with CardContent():
+            with Column(gap=2):
+                Muted(
+                    "Record a grade or review for this submission. A score or a grade marks it "
+                    "graded; feedback on its own records it as reviewed."
+                )
+                if error_code is not None:
+                    _grade_notice(error_code)
+                with Form(
+                    on_submit=_grade_submit_action(
+                        antiforgery_token, assignment_id, student_id
+                    )
+                ):
+                    _grade_fields()
+                    Button("Record grade")
+
+
+def _grade_submit_action(
+    antiforgery_token: str, assignment_id: str, student_id: str
+) -> list[Action]:
+    """The form's submit: mark the form attempted, then ``Fetch.post`` to this portal's route.
+
+    The renderer runs a list of actions in order and stops at the first failure, so the leading
+    ``SetState`` has already flipped :data:`GRADE_ATTEMPTED_STATE` by the time the request goes
+    out — the moment the fields' ``invalid`` expressions can first become true.
+    """
+    return [
+        SetState(GRADE_ATTEMPTED_STATE, True),
+        Fetch.post(
+            review_path(assignment_id, student_id),
+            body={
+                GRADE_SCORE_FIELD: _template(GRADE_SCORE_FIELD),
+                GRADE_GRADE_FIELD: _template(GRADE_GRADE_FIELD),
+                GRADE_COMMENTS_FIELD: _template(GRADE_COMMENTS_FIELD),
+                ANTIFORGERY_FIELD: antiforgery_token,
+            },
+            on_success=CallHandler(
+                NAVIGATE_HANDLER,
+                arguments={NAVIGATE_URL_ARGUMENT: _template("$result.redirect_uri")},
+            ),
+            on_error=ShowToast(_template("$error"), variant="error"),
+        ),
+    ]
+
+
+def _grade_fields() -> None:
+    """The model's fields, each in a reactive ``Field`` with its ``FieldError``.
+
+    ``Form.from_model(..., fields_only=True)`` generates the labeled inputs (label, placeholder,
+    number bounds, textarea) from :class:`GradeSubmissionModel`; they are generated detached so
+    each one can be adopted by a ``Field``, whose reactive ``invalid`` expression reads the
+    submit-driven :data:`GRADE_ATTEMPTED_STATE`.
+    """
+    with defer():
+        generated = Form.from_model(GradeSubmissionModel, fields_only=True)
+
+    blank = _grade_blank_expression()
+    # The zip's strict alignment is the point: ``fields_only=True`` returns one component per
+    # model field in order, so a prefab or pydantic change that broke that alignment fails here
+    # instead of silently mis-placing a field (the sign-in form's own guard).
+    for _name, component in zip(GradeSubmissionModel.model_fields, generated, strict=True):
+        with Field(invalid=Rx(f"{GRADE_ATTEMPTED_STATE} && {blank}")):
+            insert(component)
+            FieldError(_GRADE_BLANK_MESSAGE)
+
+
+def _template(expression: str) -> str:
+    """A prefab template for ``expression`` — ``{{ expression }}``.
+
+    The renderer resolves it against the page's component state and the action context
+    (``$result``/``$error``), which is how the submit body reads the inputs and how the success
+    action learns where to navigate.
+    """
+    return "{{ " + expression + " }}"
+
+
 def build_submission_view(
     *,
     assignment_id: str,
@@ -317,9 +630,23 @@ def build_submission_view(
     status_code: int,
     session: SessionData | None = None,
     links: TeacherSurfaceLinks | None = None,
+    antiforgery_token: str | None = None,
+    error_code: str | None = None,
 ) -> PrefabApp:
-    """One submission: its version history (the answers) and its teacher review."""
-    with PrefabApp(title="Teacher portal — submission", css_class="p-6") as application:
+    """One submission: its version history, its teacher review, and the grade form.
+
+    ``antiforgery_token`` is the one-time token the route just issued and stored server-side;
+    it travels into the submit body, so the server can require the exact page it handed out.
+    Without one (the view-level render) the grade form is omitted rather than rendered with a
+    body it could not submit. ``error_code`` is a bounded failure code a refused grade
+    redirected back with, rendered as an alert above the form — the page the fetch lands on.
+    """
+    with PrefabApp(
+        title="Teacher portal — submission",
+        css_class="p-6",
+        state={GRADE_ATTEMPTED_STATE: False},
+        js_actions={NAVIGATE_HANDLER: NAVIGATE_HANDLER_JS},
+    ) as application:
         with Column(gap=4):
             H3("Teacher portal — submission detail")
             Muted(
@@ -368,6 +695,13 @@ def build_submission_view(
                                 f"Recorded by teacher {_shown(submission.review.teacher_id)} "
                                 f"at {_shown(submission.review.created_at)}."
                             )
+            if antiforgery_token is not None:
+                _grade_section(
+                    antiforgery_token=antiforgery_token,
+                    assignment_id=assignment_id,
+                    student_id=student_id,
+                    error_code=error_code,
+                )
     return application
 
 

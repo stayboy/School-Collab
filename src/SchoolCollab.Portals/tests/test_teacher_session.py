@@ -713,3 +713,36 @@ async def test_the_auth_client_raises_on_a_token_shaped_body() -> None:
         client = AuthApiClient(http, AUTH_ENDPOINT)
         with pytest.raises(TokenInResponseError):
             await client.read_session(SESSION_ID)
+
+
+# ── AC7(b): the wire spelling, pinned from the parsing end ──────────────────────────
+
+#: The D18 read body's EXACT key set (AC7). The C# half of the pair
+#: (``tests/SchoolCollab.Auth.Tests.Unit/SessionWireSpellingTests.cs``) pins the same set from
+#: the serializing end, so a drift on either side reddens exactly one of the two pins.
+SESSION_WIRE_KEYS = frozenset(
+    {"sessionId", "tenantId", "tenantName", "tenantType", "teacherId", "roles", "expiresInSeconds"}
+)
+
+
+async def test_the_real_client_parses_the_pinned_camel_case_session_body() -> None:
+    """AC7(b): the wire spelling, driven through the REAL client over exactly those keys.
+
+    This is the Python half of the two one-way pins: the tolerance ``SessionData.from_payload``
+    carries is a pin here, not an accident — the auth service must serialize exactly these keys,
+    and this client must populate every ``SessionData`` field from them. The pin is a
+    **contract pin** (drift detection), not a pre-change failing test: the spelling is already
+    correct, and what it buys is that the two halves can no longer drift apart silently.
+    """
+    assert set(SESSION_PAYLOAD) == SESSION_WIRE_KEYS
+
+    handler: Handler = lambda request: httpx.Response(200, json=SESSION_PAYLOAD)  # noqa: E731
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        data = await AuthApiClient(http, AUTH_ENDPOINT).read_session(SESSION_ID)
+
+    assert data.session_id == SESSION_ID
+    assert data.tenant_id == SESSION_PAYLOAD["tenantId"]
+    assert data.tenant_name == "Dev School"
+    assert data.tenant_type == "School"
+    assert data.teacher_id == SESSION_TEACHER_ID
+    assert data.roles == ("teacher",)
