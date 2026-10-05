@@ -388,6 +388,30 @@ public class PasskeyBootstrapTests
     }
 
     [TestMethod]
+    public async Task BootstrapRedeem_OmittedOrBlankCode_Is404_InvalidCode_Not500()
+    {
+        var clock = new FakeTimeProvider();
+        var store = BootstrapCodes(clock);
+
+        // The guard, not the store's lookup: with a VALID allowlisted redirect URI, an omitted/null
+        // or blank code must answer the taxonomy's unknown-code shape instead of surfacing as the
+        // 500 a null key throws on inside the store (the redemption taxonomy is 4xx everywhere).
+        var omitted = PasskeyEndpoints.BootstrapRedeem(
+            new PasskeyEndpoints.BootstrapRedeemRequest(null!, PortalBootstrapUrl), Allowlist(), store);
+        (await ExecuteStatusAsync(omitted)).Should().Be(StatusCodes.Status404NotFound,
+            "an omitted code is not a redeemable value at all — never a 500.");
+
+        var blank = PasskeyEndpoints.BootstrapRedeem(
+            new PasskeyEndpoints.BootstrapRedeemRequest("  ", PortalBootstrapUrl), Allowlist(), store);
+        (await ExecuteStatusAsync(blank)).Should().Be(StatusCodes.Status404NotFound);
+
+        // The BODY, not just the status: the rejection is the taxonomy's unknown-code shape (what
+        // B2's portal client maps), serialized through the shared endpoint runner — a 500 would
+        // never carry it.
+        (await EndpointTestSupport.ExecuteAsync(omitted)).Body.Should().Contain("invalid_code");
+    }
+
+    [TestMethod]
     public async Task BootstrapRedeem_UnknownCode_Is404_AndReplayOrMismatchIsRejected()
     {
         var clock = new FakeTimeProvider();

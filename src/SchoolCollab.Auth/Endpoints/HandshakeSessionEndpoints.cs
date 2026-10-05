@@ -67,8 +67,8 @@ public static class HandshakeSessionEndpoints
         {
             // An omitted/blank code is not a redeemable value at all: answer the taxonomy's
             // unknown-code shape rather than letting the store's null guard turn it into a 500.
-            // (PasskeyEndpoints.BootstrapRedeem carries the same pre-existing hole — deliberately
-            // NOT touched by this round; recorded in the round report.)
+            // (PasskeyEndpoints.BootstrapRedeem guards the same way: both redemption routes answer
+            // a missing/blank code with the taxonomy's invalid_code 404, never a 500.)
             return Results.Json(
                 new { error = "invalid_code" },
                 statusCode: StatusCodes.Status404NotFound);
