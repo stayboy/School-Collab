@@ -434,11 +434,40 @@ var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi);
 WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
 
+// portal-session-adoption D6: assignments-api reads the portal session's claims over the
+// cross-module HTTP client whose literal base address is `https+http://auth` — this matching
+// reference is what CrossModuleWiringTests demands for that literal. Second statement: `auth` is
+// declared later than the assignments-api chain in the file, so the reference re-assigns (the
+// established pattern).
+assignmentsApi = assignmentsApi.WithReference(auth);
+
+// ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):
+// the ward+teacher portal as a Python app (uv + FastAPI + Prefab UI), hosted solely by this
+// AppHost (plan Q5). Round `portal-session-adoption` (D19/D6): the TEACHER surface also becomes
+// a consumer of the auth service (the portal-session path) alongside assignments-api; the block
+// sits here so both allowlist copies below can append its endpoint-derived callback URI.
+var portals = builder.AddUvicornApp("portals", "..\\..\\SchoolCollab.Portals", "app:app")
+    .WithUv()
+    .WithReference(assignmentsApi)
+    // D6: the teacher portal's session plumbing resolves the auth service through the same
+    // Aspire-injected discovery variable the auth portal's client uses.
+    .WithReference(auth)
+    // The portal's dev-bypass teacher id (round `portal-teacher-surface` D5 seam): the SAME
+    // identity the assignments-api claim above carries, so the queue's `teacherId` wire
+    // fallback and the dev principal agree. Unset/empty makes the portal refuse loudly
+    // (MissingConfigurationError) instead of answering a fake empty queue.
+    .WithEnvironment("PORTAL_DEV_TEACHER_ID", devTeacherId)
+    .WaitFor(assignmentsApi);
+// The portal's own browser-facing base URL (the callback route's origin) comes from its Aspire
+// endpoint — the AuthPortal__PublicBaseUrl pattern — not a hardcoded port. Second statement
+// (owner-adjudicated pattern: WithEnvironment from the endpoint).
+portals = portals.WithEnvironment("PORTALS_PUBLIC_BASE_URL", portals.GetEndpoint("http"));
+
 // ── Auth portal (round B, spec §12 / D1) ──────────────────────────────────────────
 // The prefab login/logout/challenge UI + the user/role admin UI as a Python app (uv +
 // FastAPI + Prefab UI), hosted solely by this AppHost and a pure HTTP consumer of the auth
 // service — it holds no credential and makes no direct Keycloak or data-API call (D7/AC11).
-// Registered like `portals` below, NOT with WireKeycloakAuth: that helper takes a typed
+// Registered like `portals` above, NOT with WireKeycloakAuth: that helper takes a typed
 // IResourceBuilder<ProjectResource> and this resource is a Python app.
 var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
     .WithUv()
@@ -478,7 +507,8 @@ authPortal = authPortal.WithEnvironment("AuthPortal__PublicBaseUrl", authPortal.
 // B5b: the portal's copy of the app-callback allowlist. The portal validates `return_uri`
 // against it before rendering the form or redirecting (defense-in-depth + UX, B8); the
 // load-bearing enforcement stays in the auth service below.
-authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes", appCallbackPrefixes);
+authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes",
+    $"{appCallbackPrefixes};{portals.GetEndpoint("http")}/auth/callback");
 
 // D16: on the passkey path the AUTH SERVICE is the OIDC relying party, so it is what 302s the
 // browser back to the portal after the WebAuthn ceremony — hence the bootstrap redirect target
@@ -500,7 +530,17 @@ auth = auth.WithEnvironment("Auth__PostLogoutRedirectUri", $"{authPortal.GetEndp
 // portal's endpoint expression (never a hardcoded port) so the D16 bootstrap code — which is
 // URI-bound like every other one-time code — satisfies the same allowlist the apps' callbacks do.
 // `auth` receives it WITHOUT `Auth:Portal:LoginUrl`, so its flag-ON challenge still fails closed.
-auth = auth.WithEnvironment("Auth__AppCallbackPrefixes", $"{appCallbackPrefixes};{authPortal.GetEndpoint("http")}/bootstrap");
+// Round `portal-session-adoption` D6: the teacher portal's session callback joins the enforced
+// copy too — the D6 code the teacher portal redeems is minted bound to that callback.
+auth = auth.WithEnvironment("Auth__AppCallbackPrefixes",
+    $"{appCallbackPrefixes};{authPortal.GetEndpoint("http")}/bootstrap;{portals.GetEndpoint("http")}/auth/callback");
+
+// Round `portal-session-adoption` D6: the teacher portal's sign-in link points at the auth
+// portal's login page — reached via a DISTINCT key (`PORTALS_LOGIN_URL`, not
+// `Auth__Portal__LoginUrl`), because the existing guard pins that key to exactly two consumers as
+// the browser-facing CHALLENGE surface, and the portal's link is not that surface. Second
+// statement: the expression reads the auth portal's endpoint (the established pattern).
+portals = portals.WithEnvironment("PORTALS_LOGIN_URL", $"{authPortal.GetEndpoint("http")}/login");
 
 // Unified admin host — serves the unified Settings (CodedValues + Config
 // Flags), Assignments, and Students Blazor UIs.
@@ -552,20 +592,6 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi)
     .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
-    .WaitFor(assignmentsApi);
-
-// ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):
-// the ward portal as a Python app (uv + FastAPI + Prefab UI), hosted solely by this
-// AppHost (plan Q5) and a pure HTTP consumer of assignments-api — zero backend change
-// (plan Q3). Spike only: the owner re-decides the MVP go/no-go before further work.
-builder.AddUvicornApp("portals", "..\\..\\SchoolCollab.Portals", "app:app")
-    .WithUv()
-    .WithReference(assignmentsApi)
-    // The portal's dev-bypass teacher id (round `portal-teacher-surface` D5 seam): the SAME
-    // identity the assignments-api claim above carries, so the queue's `teacherId` wire
-    // fallback and the dev principal agree. Unset/empty makes the portal refuse loudly
-    // (MissingConfigurationError) instead of answering a fake empty queue.
-    .WithEnvironment("PORTAL_DEV_TEACHER_ID", devTeacherId)
     .WaitFor(assignmentsApi);
 
 builder.Build().Run();

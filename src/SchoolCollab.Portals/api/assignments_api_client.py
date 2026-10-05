@@ -13,6 +13,12 @@ The client is **async** (``httpx.AsyncClient``): it is created once in the
 FastAPI lifespan and awaited from async route handlers, so request handling
 never blocks the event loop on I/O.
 
+The public teacher-route reads take an optional per-call ``headers`` mapping.
+That is how the D19 portal session travels: the app layer presents the opaque
+session id (``X-Portal-Session``) on teacher-route calls only, while the ward
+route stays header-less — the header is passed per call, never defaulted onto
+the client, so no surface can acquire it by accident.
+
 Adding an endpoint is one method, e.g. the ward plan's next endpoints::
 
     async def list_ward_assignments(self, student_id: str) -> FetchResult:
@@ -79,9 +85,15 @@ class AssignmentsApiClient:
         """The resolved endpoint, for diagnostics (``/health``, error cards)."""
         return self._endpoint
 
-    async def list_assignments(self) -> FetchResult:
-        """``GET /assignments`` — the assignments the ward view tabulates."""
-        status_code, payload = await self._get_json("/assignments")
+    async def list_assignments(
+        self, headers: Mapping[str, str] | None = None
+    ) -> FetchResult:
+        """``GET /assignments`` — the assignments the ward view tabulates.
+
+        ``headers`` is the per-call portal-session header on the teacher routes; the ward
+        route omits it, so the API's own posture for it is unchanged.
+        """
+        status_code, payload = await self._get_json("/assignments", headers=headers)
 
         # The API answers with a bare array; tolerate an envelope just in case.
         if isinstance(payload, dict):
@@ -97,7 +109,10 @@ class AssignmentsApiClient:
         return FetchResult(status_code=status_code, rows=rows)
 
     async def list_review_queue(
-        self, assignment_id: str, teacher_id: str
+        self,
+        assignment_id: str,
+        teacher_id: str,
+        headers: Mapping[str, str] | None = None,
     ) -> ReviewQueueResult:
         """``GET /{id}/submissions/review-queue?teacherId=`` — one assignment's review queue.
 
@@ -105,10 +120,13 @@ class AssignmentsApiClient:
         (``currentUser.TeacherId ?? (isRealAuth ? throw : teacherId)``), so it is inert
         under real auth — where the claim wins — and the only teacher input under the
         dev bypass, which is why the route refuses to call this without a configured
-        value rather than sending a placeholder.
+        value rather than sending a placeholder. ``headers`` carries the portal session
+        on the session path (D19's rule 1).
         """
         status_code, payload = await self._get_json(
-            f"/{assignment_id}/submissions/review-queue", params={"teacherId": teacher_id}
+            f"/{assignment_id}/submissions/review-queue",
+            params={"teacherId": teacher_id},
+            headers=headers,
         )
 
         # The API answers with a bare array; tolerate an envelope just in case.
@@ -126,10 +144,15 @@ class AssignmentsApiClient:
         ]
         return ReviewQueueResult(status_code=status_code, rows=rows)
 
-    async def get_submission(self, assignment_id: str, student_id: str) -> SubmissionResult:
+    async def get_submission(
+        self,
+        assignment_id: str,
+        student_id: str,
+        headers: Mapping[str, str] | None = None,
+    ) -> SubmissionResult:
         """``GET /{id}/students/{studentId}/submission`` — one submission with its review."""
         status_code, payload = await self._get_json(
-            f"/{assignment_id}/students/{student_id}/submission"
+            f"/{assignment_id}/students/{student_id}/submission", headers=headers
         )
         if not isinstance(payload, Mapping):
             raise ApiResponseError(
@@ -143,11 +166,16 @@ class AssignmentsApiClient:
         )
 
     async def _get_json(
-        self, path: str, params: Mapping[str, str] | None = None
+        self,
+        path: str,
+        params: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> tuple[int, Any]:
         """GET ``path`` and return ``(status, parsed_json)`` or raise a typed error."""
         try:
-            response = await self._http.get(f"{self._endpoint.base_url}{path}", params=params)
+            response = await self._http.get(
+                f"{self._endpoint.base_url}{path}", params=params, headers=headers
+            )
             response.raise_for_status()
         except httpx.HTTPStatusError as error:
             raise ApiResponseError(

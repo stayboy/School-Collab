@@ -26,7 +26,7 @@ namespace SchoolCollab.Auth.Tests.Unit;
 /// <c>ClaimTypes.Role</c> (the long role URI), so <c>AuthTenancyExtensions</c> pins
 /// <c>RoleClaimType = ClaimTypes.Role</c> — the type <c>IsInRole</c> consults, which is what makes
 /// <c>RequireRole</c> / <c>[Authorize(Roles = "...")]</c> resolve on both the cookie and bearer
-/// paths. ClaimSetFactory.RolesClaim still reads <c>roles</c>, because that is the claim-set
+/// paths. PortalClaims.RolesClaim still reads <c>roles</c>, because that is the claim-set
 /// contract from the token PAYLOAD, which the inbound mapping does not touch.
 /// </para>
 /// <para>

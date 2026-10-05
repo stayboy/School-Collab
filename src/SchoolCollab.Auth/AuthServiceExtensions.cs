@@ -4,11 +4,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SchoolCollab.Auth.Auth;
 using SchoolCollab.Auth.Endpoints;
 using SchoolCollab.Auth.Options;
 using SchoolCollab.Auth.Providers;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Http;
 
 namespace SchoolCollab.Auth;
@@ -105,25 +105,21 @@ public static class AuthServiceExtensions
         // break refresh-token rotation.
         services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<KeycloakAuthProvider>());
 
-        // The portal-session scheme (D12): the portal presents its opaque session id instead of a
-        // token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
+        // The portal-session scheme (D12/D19): the portal presents its opaque session id instead of
+        // a token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
         // surface exists with OIDC either on or off — the portal's own login is the D16 form path, so
-        // it holds a session in both flag states. The scheme list of the portal-facing policy lives
-        // in AuthEndpointGroup.
-        services.AddAuthentication()
-            .AddScheme<PortalSessionAuthenticationOptions, PortalSessionAuthenticationHandler>(
-                PortalSessionAuthenticationHandler.SchemeName,
-                static _ => { })
-            .AddPolicyScheme(
-                PortalSessionAuthenticationHandler.GatewaySchemeName,
-                "Portal-session or host-scheme routing",
-                policy =>
-                {
-                    // Authentication follows the request (portal session vs the host's own scheme);
-                    // the challenge is ALWAYS this scheme's bare 401, never a redirect.
-                    policy.ForwardDefaultSelector = PortalSessionAuthenticationHandler.SelectAuthenticationScheme;
-                    policy.ForwardChallenge = PortalSessionAuthenticationHandler.SchemeName;
-                });
+        // it holds a session in both flag states. The registration itself lives in the shared kernel
+        // (round portal-session-adoption D1) so the Assignments API resolves the SAME scheme, and the
+        // fallback stays null — this host's own default is the correct target in both flag states
+        // (cookie/OIDC under real auth, TestAuth under the dev flag), exactly today's behaviour.
+        services.AddAuthentication().AddPortalSessionAuthentication();
+
+        // The in-process claims port (D19/D1): the moved handler's DI dependency, adapted over the
+        // D15 seam's own cheap custody read — no HTTP, no refresh, the SAME I/O-free read the
+        // handler performed before the move. A remote adopting host implements the same port over
+        // the HTTP route instead (D2), which is what custody being process-local forces.
+        services.AddSingleton<IPortalSessionClaimsReader>(
+            sp => new InProcessPortalSessionClaimsReader(sp.GetRequiredService<IAuthProvider>()));
 
         return services;
     }
@@ -167,5 +163,18 @@ public static class AuthServiceExtensions
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// The auth service's in-process <see cref="IPortalSessionClaimsReader"/> (D19/D1): the moved
+    /// handler's required dependency, adapted over the D15 seam's own <c>IAuthProvider.ReadClaims</c> —
+    /// the cheap, I/O-free custody projection, sync under the port's async signature. Custody is
+    /// process-local, so THIS host's adapter is genuinely local; a remote adopting host implements
+    /// the port over the HTTP claims route instead (D2).
+    /// </summary>
+    private sealed class InProcessPortalSessionClaimsReader(IAuthProvider provider) : IPortalSessionClaimsReader
+    {
+        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(provider.ReadClaims(sessionId));
     }
 }

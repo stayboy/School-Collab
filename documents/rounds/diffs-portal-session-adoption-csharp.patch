@@ -1,0 +1,2893 @@
+diff --git a/SchoolCollab.slnx b/SchoolCollab.slnx
+index 181c6ef7..f3371d01 100644
+--- a/SchoolCollab.slnx
++++ b/SchoolCollab.slnx
+@@ -63,6 +63,7 @@
+   <Folder Name="/src/SchoolCollab.Portals/api/">
+     <File Path="src/SchoolCollab.Portals/api/__init__.py" />
+     <File Path="src/SchoolCollab.Portals/api/assignments_api_client.py" />
++    <File Path="src/SchoolCollab.Portals/api/auth_api_client.py" />
+     <File Path="src/SchoolCollab.Portals/api/dto.py" />
+     <File Path="src/SchoolCollab.Portals/api/errors.py" />
+     <File Path="src/SchoolCollab.Portals/api/service_discovery.py" />
+@@ -71,6 +72,7 @@
+     <File Path="src/SchoolCollab.Portals/tests/test_app_routes.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_assignments_api_client.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_service_discovery.py" />
++    <File Path="src/SchoolCollab.Portals/tests/test_teacher_session.py" />
+     <File Path="src/SchoolCollab.Portals/tests/test_teacher_views.py" />
+   </Folder>
+   <Folder Name="/src/SchoolCollab.Portals/views/">
+diff --git a/src/AppHost/SchoolCollab.AppHost/Program.cs b/src/AppHost/SchoolCollab.AppHost/Program.cs
+index 9d363d48..febd4e3b 100644
+--- a/src/AppHost/SchoolCollab.AppHost/Program.cs
++++ b/src/AppHost/SchoolCollab.AppHost/Program.cs
+@@ -434,11 +434,40 @@ var auth = builder.AddProject<Projects.SchoolCollab_Auth>("auth")
+     .WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", disableKeycloakLoginUi);
+ WireKeycloakAuth(auth, keycloak, keycloakClientId, keycloakClientSecret);
+ 
++// portal-session-adoption D6: assignments-api reads the portal session's claims over the
++// cross-module HTTP client whose literal base address is `https+http://auth` — this matching
++// reference is what CrossModuleWiringTests demands for that literal. Second statement: `auth` is
++// declared later than the assignments-api chain in the file, so the reference re-assigns (the
++// established pattern).
++assignmentsApi = assignmentsApi.WithReference(auth);
++
++// ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):
++// the ward+teacher portal as a Python app (uv + FastAPI + Prefab UI), hosted solely by this
++// AppHost (plan Q5). Round `portal-session-adoption` (D19/D6): the TEACHER surface also becomes
++// a consumer of the auth service (the portal-session path) alongside assignments-api; the block
++// sits here so both allowlist copies below can append its endpoint-derived callback URI.
++var portals = builder.AddUvicornApp("portals", "..\\..\\SchoolCollab.Portals", "app:app")
++    .WithUv()
++    .WithReference(assignmentsApi)
++    // D6: the teacher portal's session plumbing resolves the auth service through the same
++    // Aspire-injected discovery variable the auth portal's client uses.
++    .WithReference(auth)
++    // The portal's dev-bypass teacher id (round `portal-teacher-surface` D5 seam): the SAME
++    // identity the assignments-api claim above carries, so the queue's `teacherId` wire
++    // fallback and the dev principal agree. Unset/empty makes the portal refuse loudly
++    // (MissingConfigurationError) instead of answering a fake empty queue.
++    .WithEnvironment("PORTAL_DEV_TEACHER_ID", devTeacherId)
++    .WaitFor(assignmentsApi);
++// The portal's own browser-facing base URL (the callback route's origin) comes from its Aspire
++// endpoint — the AuthPortal__PublicBaseUrl pattern — not a hardcoded port. Second statement
++// (owner-adjudicated pattern: WithEnvironment from the endpoint).
++portals = portals.WithEnvironment("PORTALS_PUBLIC_BASE_URL", portals.GetEndpoint("http"));
++
+ // ── Auth portal (round B, spec §12 / D1) ──────────────────────────────────────────
+ // The prefab login/logout/challenge UI + the user/role admin UI as a Python app (uv +
+ // FastAPI + Prefab UI), hosted solely by this AppHost and a pure HTTP consumer of the auth
+ // service — it holds no credential and makes no direct Keycloak or data-API call (D7/AC11).
+-// Registered like `portals` below, NOT with WireKeycloakAuth: that helper takes a typed
++// Registered like `portals` above, NOT with WireKeycloakAuth: that helper takes a typed
+ // IResourceBuilder<ProjectResource> and this resource is a Python app.
+ var authPortal = builder.AddUvicornApp("auth-portal", "..\\..\\SchoolCollab.AuthPortal", "app:app")
+     .WithUv()
+@@ -478,7 +507,8 @@ authPortal = authPortal.WithEnvironment("AuthPortal__PublicBaseUrl", authPortal.
+ // B5b: the portal's copy of the app-callback allowlist. The portal validates `return_uri`
+ // against it before rendering the form or redirecting (defense-in-depth + UX, B8); the
+ // load-bearing enforcement stays in the auth service below.
+-authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes", appCallbackPrefixes);
++authPortal = authPortal.WithEnvironment("AuthPortal__AppCallbackPrefixes",
++    $"{appCallbackPrefixes};{portals.GetEndpoint("http")}/auth/callback");
+ 
+ // D16: on the passkey path the AUTH SERVICE is the OIDC relying party, so it is what 302s the
+ // browser back to the portal after the WebAuthn ceremony — hence the bootstrap redirect target
+@@ -500,7 +530,17 @@ auth = auth.WithEnvironment("Auth__PostLogoutRedirectUri", $"{authPortal.GetEndp
+ // portal's endpoint expression (never a hardcoded port) so the D16 bootstrap code — which is
+ // URI-bound like every other one-time code — satisfies the same allowlist the apps' callbacks do.
+ // `auth` receives it WITHOUT `Auth:Portal:LoginUrl`, so its flag-ON challenge still fails closed.
+-auth = auth.WithEnvironment("Auth__AppCallbackPrefixes", $"{appCallbackPrefixes};{authPortal.GetEndpoint("http")}/bootstrap");
++// Round `portal-session-adoption` D6: the teacher portal's session callback joins the enforced
++// copy too — the D6 code the teacher portal redeems is minted bound to that callback.
++auth = auth.WithEnvironment("Auth__AppCallbackPrefixes",
++    $"{appCallbackPrefixes};{authPortal.GetEndpoint("http")}/bootstrap;{portals.GetEndpoint("http")}/auth/callback");
++
++// Round `portal-session-adoption` D6: the teacher portal's sign-in link points at the auth
++// portal's login page — reached via a DISTINCT key (`PORTALS_LOGIN_URL`, not
++// `Auth__Portal__LoginUrl`), because the existing guard pins that key to exactly two consumers as
++// the browser-facing CHALLENGE surface, and the portal's link is not that surface. Second
++// statement: the expression reads the auth portal's endpoint (the established pattern).
++portals = portals.WithEnvironment("PORTALS_LOGIN_URL", $"{authPortal.GetEndpoint("http")}/login");
+ 
+ // Unified admin host — serves the unified Settings (CodedValues + Config
+ // Flags), Assignments, and Students Blazor UIs.
+@@ -554,18 +594,4 @@ builder.AddProject<Projects.SchoolCollab_Families>("families")
+     .WithEnvironment("Auth__Portal__LoginUrl", $"{authPortal.GetEndpoint("http")}/login")
+     .WaitFor(assignmentsApi);
+ 
+-// ar-23 / prefab plan Phase-0 spike (documents/specs/teachers-ward-portal-prefab-plan.md):
+-// the ward portal as a Python app (uv + FastAPI + Prefab UI), hosted solely by this
+-// AppHost (plan Q5) and a pure HTTP consumer of assignments-api — zero backend change
+-// (plan Q3). Spike only: the owner re-decides the MVP go/no-go before further work.
+-builder.AddUvicornApp("portals", "..\\..\\SchoolCollab.Portals", "app:app")
+-    .WithUv()
+-    .WithReference(assignmentsApi)
+-    // The portal's dev-bypass teacher id (round `portal-teacher-surface` D5 seam): the SAME
+-    // identity the assignments-api claim above carries, so the queue's `teacherId` wire
+-    // fallback and the dev principal agree. Unset/empty makes the portal refuse loudly
+-    // (MissingConfigurationError) instead of answering a fake empty queue.
+-    .WithEnvironment("PORTAL_DEV_TEACHER_ID", devTeacherId)
+-    .WaitFor(assignmentsApi);
+-
+ builder.Build().Run();
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+index 71d99d18..62fe0d5e 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+@@ -77,20 +77,23 @@ public static class AssignmentEndpoints
+ 
+     /// <summary>
+     /// The one disjunctive teacher-portal reader policy: <c>teacher</c> ∨ <c>staff</c> ∨
+-    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the bearer scheme and authenticated. Built
+-    /// inline (the <c>AuthEndpointGroup.ConfigurePortalFacingAdminPolicy</c> precedent) rather
+-    /// than registered as a named policy: the hosts that compose this pipeline in tests call
+-    /// <c>AddAuthAndTenancy</c> without Assignments' <c>Program.cs</c>, and an unresolvable named
+-    /// policy throws out of <c>AuthorizationPolicy.Combine</c> on every request to a route that
+-    /// names it. The scheme and authenticated-user requirements are restated here so the policy
+-    /// is self-sufficient for the routes it decorates.
++    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the portal-session GATEWAY scheme and
++    /// authenticated (round <c>portal-session-adoption</c> D4/D19 — the policy's single scheme is
++    /// the gateway, which routes a portal session to the portal-session scheme, a bearer caller to
++    /// Bearer, and a dev caller to TestAuth; registered in every flag state, so the challenge can
++    /// never 500). Built inline (the <c>AuthEndpointGroup.ConfigurePortalFacingAdminPolicy</c>
++    /// precedent) rather than registered as a named policy: the hosts that compose this pipeline
++    /// in tests call <c>AddAuthAndTenancy</c> without Assignments' <c>Program.cs</c>, and an
++    /// unresolvable named policy throws out of <c>AuthorizationPolicy.Combine</c> on every request
++    /// to a route that names it. The scheme and authenticated-user requirements are restated here
++    /// so the policy is self-sufficient for the routes it decorates.
+     /// </summary>
+     internal static void RequireAssignmentReader(AuthorizationPolicyBuilder policy)
+     {
+         ArgumentNullException.ThrowIfNull(policy);
+ 
+         policy
+-            .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)
++            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
+             .RequireAuthenticatedUser()
+             .RequireRole(
+                 RealmRoleNames.Teacher,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 49ee0850..c259f437 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -5,6 +5,7 @@ using Serilog;
+ using SchoolCollab.Assignments.Api;
+ using SchoolCollab.Assignments.Api.Auth;
+ using SchoolCollab.Assignments.Api.Endpoints;
++using SchoolCollab.Assignments.Api.Services;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core;
+ using SchoolCollab.Settings.Core;
+@@ -227,6 +228,27 @@ builder.Services.AddNotificationDispatchSweep();
+ // Auth + tenancy (OIDC via Keycloak)
+ builder.Services.AddAuthAndTenancy(builder.Configuration);
+ 
++// portal-session-adoption (D4/D19): the Assignments API resolves the portal's opaque session id
++// through the SHARED portal-session scheme (the same handler, gateway and claim set the auth
++// service uses — one spelling, no duplicate handler). The gateway is registered in BOTH flag
++// states (a policy-named scheme without a handler is a 500, never a 401), and the fallback is
++// pinned to Bearer under real auth: existing bearer callers must keep authenticating exactly as
++// before, and the host default (the OIDC cookie) would substitute Cookie for them. The dev flag
++// resolves per request inside the selector (TestAuth under FEATURE:DisableOIDCAuth), so this call
++// carries no flag knowledge. The challenge is always the gateway's bare 401 — the fallback
++// governs authentication routing only.
++builder.Services.AddAuthentication().AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
++
++// The remote claims port the moved handler authenticates through: a cross-module HTTP read of the
++// auth service's GET /auth/session/{id}/claims (D2), fail-closed on transport failure, non-2xx and
++// a non-JSON body (the ar-24 posture) — an auth-service outage 401s portal callers, never fails
++// open. propagateTenant is off: the read's identity IS the session id in the URL, and a dev-tenant
++// header would be a second, weaker source of scope (the same posture the mediated readers use).
++// The literal base address is matched by the AppHost's .WithReference(auth) on assignments-api
++// (CrossModuleWiringTests).
++builder.Services.AddCrossModuleHttpClient<PortalSessionClaimsReader>("https+http://auth", propagateTenant: false)
++    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
++
+ // D5 (Q5, round teacher-scope-auth): bind the dev bypass's teacher_id claim. Inert unless
+ // FEATURE:DisableOIDCAuth registers TestAuthHandler; without a configured value the claim is
+ // not emitted, which is the CI default.
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/PortalSessionClaimsReader.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/PortalSessionClaimsReader.cs
+new file mode 100644
+index 00000000..b5c638f8
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/PortalSessionClaimsReader.cs
+@@ -0,0 +1,162 @@
++using System.Text.Json;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// The Assignments API's <see cref="IPortalSessionClaimsReader"/> (round
++/// <c>portal-session-adoption</c> D4 / D19): the moved portal-session scheme needs a claims read,
++/// and custody is process-local in the auth service — so this host implements the Core port as a
++/// remote HTTP read against <c>GET /auth/session/{id}/claims</c> (D2) through the cross-module
++/// client. The auth service answers from its D15 seam's cheap, I/O-free projection — no refresh,
++/// no Keycloak round trip — so the remote path keeps the handler's documented invariant.
++/// </summary>
++/// <remarks>
++/// <para>
++/// <b>Fail-closed everywhere (the ar-24 posture):</b> a transport failure, a non-2xx answer (the
++/// unknown-session <c>404</c> and an auth-service outage alike), a non-JSON body (a 2xx HTML login
++/// page is the exact fail-open class ar-24 closed with <c>AllowAutoRedirect=false</c>) and a body
++/// without the pinned claim contract all yield <c>null</c> — the portal-session handler turns that
++/// into <see cref="AuthenticateResult.NoResult"/> and a bare 401. An auth-service outage therefore
++/// 401s portal callers (the portal renders its session-ended card); it never fails open.
++/// </para>
++/// <para>
++/// Registered by the host's <c>Program.cs</c> via <c>AddCrossModuleHttpClient</c> (retry handler +
++/// long handler lifetime, the literal <c>https+http://auth</c> base address at the call site,
++/// tenant propagation off — the identity of the read IS the session id in the URL), matched by the
++/// AppHost's <c>.WithReference(auth)</c> on <c>assignments-api</c> per
++/// <c>CrossModuleWiringTests</c>.
++/// </para>
++/// </remarks>
++public sealed class PortalSessionClaimsReader(HttpClient httpClient, ILogger<PortalSessionClaimsReader> logger)
++    : IPortalSessionClaimsReader
++{
++    /// <summary>The auth service's cheap claims route (D2).</summary>
++    public const string ClaimsPath = "/auth/session/{sessionId}/claims";
++
++    /// <summary>
++    /// The required claims as (wire key, claim name) pairs — the D2 body carries them under its
++    /// <b>own</b> spelling, which is NOT the <see cref="PortalClaims"/> claim name: the auth route
++    /// serializes <c>SessionClaimsResponse</c> through minimal APIs' Web defaults, so every key is
++    /// camelCase. The claim names stay the realm-mapper spelling <c>BuildPrincipal</c>
++    /// materializes; this table is the one place the two spellings meet. A read that looked the
++    /// claim names up in the body would refuse every real session (fail-closed but feature-dead),
++    /// which is exactly what <c>PortalSessionReaderPolicyTests</c> pins now.
++    /// </summary>
++    private static readonly (string WireKey, string ClaimName)[] RequiredStringFields =
++    [
++        ("tenantId", PortalClaims.TenantIdClaim),
++        ("tenantName", PortalClaims.TenantNameClaim),
++        ("tenantType", PortalClaims.TenantTypeClaim),
++        ("teacherId", PortalClaims.TeacherIdClaim),
++    ];
++
++    /// <inheritdoc />
++    public async ValueTask<PortalClaims?> ReadClaimsAsync(
++        string sessionId,
++        CancellationToken cancellationToken = default)
++    {
++        var path = ClaimsPath.Replace("{sessionId}", Uri.EscapeDataString(sessionId), StringComparison.Ordinal);
++
++        HttpResponseMessage response;
++        try
++        {
++            response = await httpClient.GetAsync(path, cancellationToken);
++        }
++        catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
++        {
++            // Transport failure — including the request-aborted race a caller cancelling induces.
++            // An outage must 401 the caller, never fail open.
++            logger.LogWarning(error, "The auth service's claims read is unreachable; failing closed.");
++            return null;
++        }
++
++        var content = response.Content;
++        if (!response.IsSuccessStatusCode || !IsJson(content))
++        {
++            // Non-2xx (unknown session 404, outage 502) and a non-JSON 2xx (an OIDC challenge that
++            // answered with an HTML login page — never data) share the one fail-closed answer.
++            logger.LogWarning(
++                "The auth service's claims read answered HTTP {StatusCode} {ContentType}; failing closed.",
++                (int)response.StatusCode,
++                content.Headers.ContentType?.ToString() ?? "no content-type");
++            return null;
++        }
++
++        try
++        {
++            using var document = JsonDocument.Parse(await content.ReadAsStringAsync(cancellationToken));
++            return FromPayload(document.RootElement);
++        }
++        catch (JsonException error)
++        {
++            logger.LogWarning(error, "The auth service's claims read was not valid JSON; failing closed.");
++            return null;
++        }
++    }
++
++    /// <summary>Maps the D2 response body onto the D9 claim set, or <c>null</c> when the shape does
++    /// not carry the pinned contract (the same refusal the auth-service adapter's own custody read
++    /// applies for a token payload without the claim names).</summary>
++    private static PortalClaims? FromPayload(JsonElement payload)
++    {
++        if (payload.ValueKind != JsonValueKind.Object)
++        {
++            return null;
++        }
++
++        var strings = new Dictionary<string, string>(RequiredStringFields.Length, StringComparer.Ordinal);
++        foreach (var (wireKey, claimName) in RequiredStringFields)
++        {
++            if (!TryGetString(payload, wireKey, out var value))
++            {
++                return null;
++            }
++
++            strings[claimName] = value;
++        }
++
++        // roles is the one field whose wire key and D9 claim name coincide, so it needs no table
++        // entry — it is read under the same spelling either way.
++        var roles = new List<string>();
++        if (payload.TryGetProperty(PortalClaims.RolesClaim, out var rolesValue)
++            && rolesValue.ValueKind == JsonValueKind.Array)
++        {
++            foreach (var role in rolesValue.EnumerateArray())
++            {
++                if (role.ValueKind == JsonValueKind.String)
++                {
++                    roles.Add(role.GetString() ?? string.Empty);
++                }
++            }
++        }
++        else if (rolesValue.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
++        {
++            return null;
++        }
++
++        return new PortalClaims(
++            strings[PortalClaims.TenantIdClaim],
++            strings[PortalClaims.TenantNameClaim],
++            strings[PortalClaims.TenantTypeClaim],
++            strings[PortalClaims.TeacherIdClaim],
++            roles);
++    }
++
++    private static bool IsJson(HttpContent content) =>
++        (content.Headers.ContentType?.MediaType ?? string.Empty)
++            .StartsWith("application/json", StringComparison.OrdinalIgnoreCase);
++
++    private static bool TryGetString(JsonElement payload, string field, out string value)
++    {
++        value = string.Empty;
++        if (!payload.TryGetProperty(field, out var element) || element.ValueKind != JsonValueKind.String)
++        {
++            return false;
++        }
++
++        value = element.GetString() ?? string.Empty;
++        return value.Length > 0;
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Auth/PortalSessionAuthenticationHandler.cs b/src/SchoolCollab.Auth/Auth/PortalSessionAuthenticationHandler.cs
+deleted file mode 100644
+index aa10aaad..00000000
+--- a/src/SchoolCollab.Auth/Auth/PortalSessionAuthenticationHandler.cs
++++ /dev/null
+@@ -1,149 +0,0 @@
+-using System.Security.Claims;
+-using System.Text.Encodings.Web;
+-using Microsoft.AspNetCore.Authentication;
+-using Microsoft.AspNetCore.Authentication.Cookies;
+-using Microsoft.AspNetCore.Http;
+-using Microsoft.Extensions.Logging;
+-using Microsoft.Extensions.Options;
+-using SchoolCollab.Auth.Providers;
+-using SchoolCollab.Auth.Services;
+-
+-namespace SchoolCollab.Auth.Auth;
+-
+-/// <summary>
+-/// Options for <see cref="PortalSessionAuthenticationHandler"/>. The scheme carries no settings:
+-/// the session id travels in a request header and the session itself is validated against
+-/// custody (spec D12), so there is nothing to configure.
+-/// </summary>
+-public sealed class PortalSessionAuthenticationOptions : AuthenticationSchemeOptions;
+-
+-/// <summary>
+-/// The portal-session authentication scheme (spec D12 / D15): it turns the **opaque session id**
+-/// a portal presents into a principal, so portal-facing endpoints can authorize without the portal
+-/// holding a token of any kind (AC11).
+-/// </summary>
+-/// <remarks>
+-/// <para>
+-/// The portal never holds a Keycloak token: its cookie is a bare unguessable id (D12). It presents
+-/// that id in the <see cref="SessionHeaderName"/> request header on every identity- or
+-/// privilege-bearing call, and this handler asks the auth service's own custody — through the
+-/// D15 seam, never the store directly — whether the session is live. The claim set is the one
+-/// <see cref="ClaimSetFactory"/> produced for the OIDC paths (D9), including
+-/// <see cref="ClaimTypes.Role"/> entries for the realm roles, so <c>RequireRole</c> resolves
+-/// identically here and on the cookie/bearer paths.
+-/// </para>
+-/// <para>
+-/// <b>Fail-closed:</b> an absent header, an unknown session, an expired session and a token whose
+-/// payload does not carry the pinned claim contract all yield <see cref="AuthenticateResult.NoResult"/>
+-/// — never a partially-populated principal — and the challenge is a bare <c>401</c> (never a
+-/// redirect), which is what makes this scheme safe to list first in a portal-facing policy.
+-/// </para>
+-/// </remarks>
+-public sealed class PortalSessionAuthenticationHandler(
+-    IOptionsMonitor<PortalSessionAuthenticationOptions> options,
+-    ILoggerFactory logger,
+-    UrlEncoder encoder,
+-    IAuthProvider provider)
+-    : AuthenticationHandler<PortalSessionAuthenticationOptions>(options, logger, encoder)
+-{
+-    /// <summary>The scheme name this handler is registered under.</summary>
+-    public const string SchemeName = "PortalSession";
+-
+-    /// <summary>
+-    /// The policy-scheme name a portal-facing policy lists. Policies must name only schemes whose
+-    /// handler is registered in EVERY flag state (the authorization middleware challenges every
+-    /// listed scheme, and a missing handler there is a 500 — not a 401), so the portal-facing
+-    /// policy names this single gateway, which routes each request to either the portal-session
+-    /// scheme or the host's own default scheme (<see cref="SelectAuthenticationScheme"/>).
+-    /// </summary>
+-    public const string GatewaySchemeName = "PortalSessionGateway";
+-
+-    /// <summary>The request header carrying the portal's opaque session id (spec D12).</summary>
+-    public const string SessionHeaderName = "X-Portal-Session";
+-
+-    /// <summary>
+-    /// The gateway's per-request target: the portal-session scheme when the caller presents a
+-    /// session id, otherwise the scheme this app already authenticates with (the OIDC cookie, the
+-    /// bearer token, or dev TestAuth) — so a portal-facing policy behaves exactly as it did before
+-    /// the portal existed for every non-portal caller.
+-    /// </summary>
+-    public static string SelectAuthenticationScheme(HttpContext context)
+-    {
+-        ArgumentNullException.ThrowIfNull(context);
+-
+-        if (PresentedSessionId(context.Request) is not null)
+-        {
+-            return SchemeName;
+-        }
+-
+-        var options = context.RequestServices?.GetService<IOptions<AuthenticationOptions>>()?.Value;
+-        return options?.DefaultAuthenticateScheme
+-            ?? options?.DefaultScheme
+-            ?? CookieAuthenticationDefaults.AuthenticationScheme;
+-    }
+-
+-    /// <summary>Builds the principal from a claim set: the pinned tenant/teacher/role names —
+-    /// the same claims, the same spelling, as the OIDC cookie and the bearer token (D9).</summary>
+-    public static ClaimsPrincipal BuildPrincipal(PortalClaims claims, string schemeName)
+-    {
+-        var identity = new ClaimsIdentity(
+-            [
+-                new Claim(ClaimSetFactory.TenantIdClaim, claims.TenantId),
+-                new Claim(ClaimSetFactory.TenantNameClaim, claims.TenantName),
+-                new Claim(ClaimSetFactory.TenantTypeClaim, claims.TenantType),
+-                new Claim(ClaimSetFactory.TeacherIdClaim, claims.TeacherId),
+-                .. claims.Roles.Select(role => new Claim(ClaimTypes.Role, role)),
+-            ],
+-            schemeName);
+-
+-        return new ClaimsPrincipal(identity);
+-    }
+-
+-    /// <summary>The session id a request presents, or <c>null</c> when it presents none.</summary>
+-    public static string? PresentedSessionId(HttpRequest request)
+-    {
+-        foreach (var value in request.Headers[SessionHeaderName])
+-        {
+-            if (!string.IsNullOrWhiteSpace(value))
+-            {
+-                return value;
+-            }
+-        }
+-
+-        return null;
+-    }
+-
+-    /// <summary>
+-    /// Validates the presented session id against custody (D12) and materializes its claim set.
+-    /// The read is the seam's cheap, I/O-free <see cref="IAuthProvider.ReadClaims"/>: authenticating
+-    /// a portal call must not trigger a Keycloak refresh — the D18 lifecycle belongs to the
+-    /// session read itself.
+-    /// </summary>
+-    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+-    {
+-        var sessionId = PresentedSessionId(Request);
+-        if (sessionId is null)
+-        {
+-            return Task.FromResult(AuthenticateResult.NoResult());
+-        }
+-
+-        var claims = provider.ReadClaims(sessionId);
+-        if (claims is null)
+-        {
+-            Logger.LogDebug("The presented portal session is unknown, expired or unusable; failing closed.");
+-            return Task.FromResult(AuthenticateResult.NoResult());
+-        }
+-
+-        var principal = BuildPrincipal(claims, Scheme.Name);
+-        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name)));
+-    }
+-
+-    /// <summary>A bare <c>401</c>: a portal session cannot be "challenged" by redirecting (there is
+-    /// no interactive flow on this scheme) and a redirect would leak the caller onto an unrelated
+-    /// login UI.</summary>
+-    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
+-    {
+-        Response.StatusCode = StatusCodes.Status401Unauthorized;
+-        return Task.CompletedTask;
+-    }
+-}
+diff --git a/src/SchoolCollab.Auth/AuthServiceExtensions.cs b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+index ad652b92..3d322320 100644
+--- a/src/SchoolCollab.Auth/AuthServiceExtensions.cs
++++ b/src/SchoolCollab.Auth/AuthServiceExtensions.cs
+@@ -4,11 +4,11 @@ using Microsoft.AspNetCore.Http;
+ using Microsoft.AspNetCore.RateLimiting;
+ using Microsoft.Extensions.Configuration;
+ using Microsoft.Extensions.DependencyInjection;
+-using SchoolCollab.Auth.Auth;
+ using SchoolCollab.Auth.Endpoints;
+ using SchoolCollab.Auth.Options;
+ using SchoolCollab.Auth.Providers;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.Http;
+ 
+ namespace SchoolCollab.Auth;
+@@ -105,25 +105,21 @@ public static class AuthServiceExtensions
+         // break refresh-token rotation.
+         services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<KeycloakAuthProvider>());
+ 
+-        // The portal-session scheme (D12): the portal presents its opaque session id instead of a
+-        // token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
++        // The portal-session scheme (D12/D19): the portal presents its opaque session id instead of
++        // a token. Registered here rather than in AddAuthAndTenancy because the auth service's portal
+         // surface exists with OIDC either on or off — the portal's own login is the D16 form path, so
+-        // it holds a session in both flag states. The scheme list of the portal-facing policy lives
+-        // in AuthEndpointGroup.
+-        services.AddAuthentication()
+-            .AddScheme<PortalSessionAuthenticationOptions, PortalSessionAuthenticationHandler>(
+-                PortalSessionAuthenticationHandler.SchemeName,
+-                static _ => { })
+-            .AddPolicyScheme(
+-                PortalSessionAuthenticationHandler.GatewaySchemeName,
+-                "Portal-session or host-scheme routing",
+-                policy =>
+-                {
+-                    // Authentication follows the request (portal session vs the host's own scheme);
+-                    // the challenge is ALWAYS this scheme's bare 401, never a redirect.
+-                    policy.ForwardDefaultSelector = PortalSessionAuthenticationHandler.SelectAuthenticationScheme;
+-                    policy.ForwardChallenge = PortalSessionAuthenticationHandler.SchemeName;
+-                });
++        // it holds a session in both flag states. The registration itself lives in the shared kernel
++        // (round portal-session-adoption D1) so the Assignments API resolves the SAME scheme, and the
++        // fallback stays null — this host's own default is the correct target in both flag states
++        // (cookie/OIDC under real auth, TestAuth under the dev flag), exactly today's behaviour.
++        services.AddAuthentication().AddPortalSessionAuthentication();
++
++        // The in-process claims port (D19/D1): the moved handler's DI dependency, adapted over the
++        // D15 seam's own cheap custody read — no HTTP, no refresh, the SAME I/O-free read the
++        // handler performed before the move. A remote adopting host implements the same port over
++        // the HTTP route instead (D2), which is what custody being process-local forces.
++        services.AddSingleton<IPortalSessionClaimsReader>(
++            sp => new InProcessPortalSessionClaimsReader(sp.GetRequiredService<IAuthProvider>()));
+ 
+         return services;
+     }
+@@ -168,4 +164,17 @@ public static class AuthServiceExtensions
+ 
+         return services;
+     }
++
++    /// <summary>
++    /// The auth service's in-process <see cref="IPortalSessionClaimsReader"/> (D19/D1): the moved
++    /// handler's required dependency, adapted over the D15 seam's own <c>IAuthProvider.ReadClaims</c> —
++    /// the cheap, I/O-free custody projection, sync under the port's async signature. Custody is
++    /// process-local, so THIS host's adapter is genuinely local; a remote adopting host implements
++    /// the port over the HTTP claims route instead (D2).
++    /// </summary>
++    private sealed class InProcessPortalSessionClaimsReader(IAuthProvider provider) : IPortalSessionClaimsReader
++    {
++        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
++            => ValueTask.FromResult(provider.ReadClaims(sessionId));
++    }
+ }
+diff --git a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+index cc39525f..43ca8657 100644
+--- a/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
++++ b/src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs
+@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Http;
+ using Microsoft.AspNetCore.RateLimiting;
+ using Microsoft.AspNetCore.Routing;
+ using Microsoft.Extensions.DependencyInjection;
+-using SchoolCollab.Auth.Auth;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ using SchoolCollab.Core.Constants;
+ using SchoolCollab.Core.Features;
+ using System.Security.Claims;
+@@ -52,6 +52,15 @@ public static class AuthEndpointGroup
+         group.MapGet("/session/{sessionId}", SessionEndpoints.Get);
+         group.MapDelete("/session/{sessionId}", SessionEndpoints.Delete);
+ 
++        // Round portal-session-adoption (D2/D3). /session/{id}/claims is the cheap, I/O-free claims
++        // read a REMOTE host's portal-session authentication performs over the cross-module client
++        // (no refresh — the handler's documented invariant); /handshake/session redeems a D6
++        // handshake code for the opaque session id so a second portal can establish its own cookie
++        // without custody change. Its authorization is the code's single-use + TTL + URI binding;
++        // the allowlist was enforced at issuance (ExchangeEndpoints.Exchange).
++        group.MapGet("/session/{sessionId}/claims", SessionEndpoints.GetClaims);
++        group.MapPost("/handshake/session", HandshakeSessionEndpoints.Redeem);
++
+         // Round B pass B7 — D17's mediated picker reads (/auth/pickers/tenants, /auth/pickers/teachers).
+         // The portal holds no credential, so these are its only way to fill a tenant/teacher picker:
+         // each requires a portal session and runs as that session's user (see MediatedReadEndpoints).
+diff --git a/src/SchoolCollab.Auth/Endpoints/HandshakeSessionEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/HandshakeSessionEndpoints.cs
+new file mode 100644
+index 00000000..3684dee4
+--- /dev/null
++++ b/src/SchoolCollab.Auth/Endpoints/HandshakeSessionEndpoints.cs
+@@ -0,0 +1,92 @@
++using Microsoft.AspNetCore.Http;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Endpoints;
++
++/// <summary>
++/// <c>POST /auth/handshake/session</c> — the session-yielding redemption (round
++/// <c>portal-session-adoption</c> D3 / D19): a D6 handshake code plus its bound redirect URI in,
++/// the caller's opaque session id out. It mirrors <see cref="PasskeyEndpoints.BootstrapRedeem"/>
++/// but over the handshake <see cref="OneTimeCodeStore"/> instead of the bootstrap store, so the two
++/// code namespaces stay disjoint exactly as built: a bootstrap code can never be redeemed here and
++/// a handshake code can never be redeemed at <c>/auth/bootstrap/redeem</c>.
++/// </summary>
++/// <remarks>
++/// <para>
++/// <b>Why this route exists.</b> <c>/auth/redeem</c> returns claims only and is documented never to
++/// hand out a session id; <c>/auth/bootstrap/redeem</c> yields a session id but its codes are minted
++/// only on the passkey path, bound to the single auth-portal bootstrap URI — a second portal cannot
++/// land there. The D6 code, by contrast, is already minted bound to the caller's redirect URI and
++/// carrying the session reference (<c>ExchangeEndpoints.Exchange</c>), so a session-yielding
++/// redemption over the handshake store is the minimal generalization: no custody change, single-use
++/// + TTL + URI-binding semantics inherited from the store.
++/// </para>
++/// <para>
++/// <b>No allowlist check on this route — the allowlist is enforced at issuance time</b>
++/// (<c>ExchangeEndpoints.Exchange</c> validates <c>return_uri</c> before minting, exactly as
++/// <c>/auth/redeem</c> consumes already-allowlisted codes); the store's single-use + TTL +
++/// <see cref="StringComparison.Ordinal"/> URI binding is the replay guard. Accepted consequence
++/// (recorded): this route yields the session id to any holder of a valid code + its bound URI —
++/// inside the AppHost trust domain (codes are single-use, short-TTL, and delivered only to the
++/// bound callback), the same trust <c>/auth/bootstrap/redeem</c> already extends. The response
++/// carries only the opaque session id — no token of any kind (AC11).
++/// </para>
++/// </remarks>
++public static class HandshakeSessionEndpoints
++{
++    /// <summary>Request body — the <c>BootstrapRedeemRequest</c> spelling: <c>{code, redirectUri}</c>,
++    /// where <c>redirectUri</c> is the URI the code was bound to when the exchange minted it.</summary>
++    public sealed record HandshakeSessionRequest(string Code, string RedirectUri);
++
++    /// <summary>Success body: the opaque session id — the value the caller sets as its own cookie.
++    /// Token-free by design (AC11); the session's tokens stay in custody (D12).</summary>
++    public sealed record HandshakeSessionResponse(string SessionId);
++
++    /// <summary>
++    /// Redeems a D6 handshake code for the opaque session id. The failure taxonomy is the
++    /// <see cref="PasskeyEndpoints.BootstrapRedeem"/> one over the handshake store: a replay hits
++    /// <c>invalid_code</c> (the successful redemption already consumed the entry), an elapsed TTL is
++    /// <c>code_expired</c>, and a redirect-URI mismatch is consumed as misuse (<c>D6</c>) — every
++    /// rejection fail-closed, and a bootstrap code is simply unknown here (namespace disjointness).
++    /// A missing or blank <c>code</c> is not a redeemable value at all: it answers the same
++    /// <c>invalid_code</c> 404, never a 500.
++    /// </summary>
++    public static IResult Redeem(HandshakeSessionRequest request, OneTimeCodeStore codes)
++    {
++        ArgumentNullException.ThrowIfNull(request);
++        ArgumentNullException.ThrowIfNull(codes);
++
++        if (string.IsNullOrWhiteSpace(request.RedirectUri))
++        {
++            return Results.Json(
++                new { error = "redirect_uri_required" },
++                statusCode: StatusCodes.Status400BadRequest);
++        }
++
++        if (string.IsNullOrWhiteSpace(request.Code))
++        {
++            // An omitted/blank code is not a redeemable value at all: answer the taxonomy's
++            // unknown-code shape rather than letting the store's null guard turn it into a 500.
++            // (PasskeyEndpoints.BootstrapRedeem carries the same pre-existing hole — deliberately
++            // NOT touched by this round; recorded in the round report.)
++            return Results.Json(
++                new { error = "invalid_code" },
++                statusCode: StatusCodes.Status404NotFound);
++        }
++
++        var redemption = codes.Redeem(request.Code, request.RedirectUri);
++        return redemption.Status switch
++        {
++            RedeemStatus.Success => Results.Ok(new HandshakeSessionResponse(redemption.Entry!.SessionId)),
++            RedeemStatus.InvalidCode => Results.Json(
++                new { error = "invalid_code" },
++                statusCode: StatusCodes.Status404NotFound),
++            RedeemStatus.Expired => Results.Json(
++                new { error = "code_expired" },
++                statusCode: StatusCodes.Status400BadRequest),
++            _ => Results.Json(
++                new { error = "redirect_uri_mismatch" },
++                statusCode: StatusCodes.Status400BadRequest),
++        };
++    }
++}
+diff --git a/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs
+index 1f3e5ac4..7b25801d 100644
+--- a/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs
++++ b/src/SchoolCollab.Auth/Endpoints/MediatedReadEndpoints.cs
+@@ -2,9 +2,9 @@ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Builder;
+ using Microsoft.AspNetCore.Http;
+ using Microsoft.AspNetCore.Routing;
+-using SchoolCollab.Auth.Auth;
+ using SchoolCollab.Auth.Providers;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Endpoints;
+ 
+diff --git a/src/SchoolCollab.Auth/Endpoints/SessionEndpoints.cs b/src/SchoolCollab.Auth/Endpoints/SessionEndpoints.cs
+index cd8f8793..46e801af 100644
+--- a/src/SchoolCollab.Auth/Endpoints/SessionEndpoints.cs
++++ b/src/SchoolCollab.Auth/Endpoints/SessionEndpoints.cs
+@@ -1,3 +1,4 @@
++using Microsoft.AspNetCore.Authentication;
+ using Microsoft.AspNetCore.Http;
+ using SchoolCollab.Auth.Providers;
+ using SchoolCollab.Auth.Services;
+@@ -44,6 +45,18 @@ public static class SessionEndpoints
+     /// portal 302s the browser to it and never parses, logs or persists it.</summary>
+     public sealed record DeleteSessionResponse(string EndSessionUrl);
+ 
++    /// <summary>The cheap claims-read body (round <c>portal-session-adoption</c> D2 / D19): the D9
++    /// claim set as data, in the <see cref="SessionResponse"/> field spelling minus the session and
++    /// lifetime fields. Token-free by construction (AC11) — the same claim-set-as-data contract the
++    /// session read carries, without a refresh: the read exists so a remote host can authenticate a
++    /// portal call without triggering a Keycloak round trip.</summary>
++    public sealed record SessionClaimsResponse(
++        string TenantId,
++        string TenantName,
++        string TenantType,
++        string TeacherId,
++        IReadOnlyList<string> Roles);
++
+     /// <summary>
+     /// Reads a live session as data. <c>session_not_found</c> (404) and <c>session_ended</c> (410)
+     /// are distinct states on purpose: the first tells the portal its cookie is stale, the second
+@@ -101,4 +114,29 @@ public static class SessionEndpoints
+                 new { error = "session_not_found" },
+                 statusCode: StatusCodes.Status404NotFound);
+     }
++
++    /// <summary>
++    /// The cheap claims read (round <c>portal-session-adoption</c> D2 / D19): the D9 claim set for a
++    /// live session over the seam's own <see cref="IAuthProvider.ReadClaims"/> — <b>no refresh, no
++    /// I/O</b> — so a remote host's portal-session authentication never triggers a Keycloak round
++    /// trip (the handler's documented invariant). An unknown/expired session is the same
++    /// <c>session_not_found</c> 404 the session read answers, which the remote reader maps to
++    /// <c>null</c> → <see cref="AuthenticateResult.NoResult"/> → a bare 401. Token-free by
++    /// construction (AC11).
++    /// </summary>
++    public static IResult GetClaims(string sessionId, IAuthProvider provider)
++    {
++        var claims = provider.ReadClaims(sessionId);
++
++        return claims is null
++            ? Results.Json(
++                new { error = "session_not_found" },
++                statusCode: StatusCodes.Status404NotFound)
++            : Results.Ok(new SessionClaimsResponse(
++                claims.TenantId,
++                claims.TenantName,
++                claims.TenantType,
++                claims.TeacherId,
++                claims.Roles));
++    }
+ }
+diff --git a/src/SchoolCollab.Auth/Providers/IAuthProvider.cs b/src/SchoolCollab.Auth/Providers/IAuthProvider.cs
+index 90f5a42f..74f90a0e 100644
+--- a/src/SchoolCollab.Auth/Providers/IAuthProvider.cs
++++ b/src/SchoolCollab.Auth/Providers/IAuthProvider.cs
+@@ -1,4 +1,5 @@
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Providers;
+ 
+diff --git a/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs b/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs
+index 53aeea1f..c3c31c73 100644
+--- a/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs
++++ b/src/SchoolCollab.Auth/Providers/KeycloakAuthProvider.cs
+@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
+ using Microsoft.Extensions.Options;
+ using SchoolCollab.Auth.Options;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Providers;
+ 
+diff --git a/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs b/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
+index f198bfdf..6610faad 100644
+--- a/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
++++ b/src/SchoolCollab.Auth/Services/ClaimSetFactory.cs
+@@ -1,42 +1,30 @@
+ using System.IO;
+ using System.Text.Json;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Services;
+ 
+-/// <summary>The portal-facing claim set (spec §5.4 / D9). ONE shape, ONE factory: the Direct-Grant
+-/// handshake path and the realm-mapper-driven paths must not drift apart, so the claim names here
+-/// ARE the mapper contract pinned by the realm import (school-collab-realm.json).</summary>
+-public sealed record PortalClaims(
+-    string TenantId,
+-    string TenantName,
+-    string TenantType,
+-    string TeacherId,
+-    IReadOnlyList<string> Roles);
+-
+-/// <summary>
+-/// Builds the claim set from a decoded Keycloak token payload. The caller owns token validation
+-/// and JWT decoding; this class is purely about claim SHAPE, so a single fixture pins both paths
+-/// to the same names (D9). The tenant/teacher claims are REQUIRED — a session without them cannot
+-/// bind to a tenant, so a missing claim fails fast naming the claim rather than degrading.
+-/// <c>roles</c> is multivalued (the realm's <c>User Realm Role</c> mapper sets
+-/// <c>multivalued: true</c>); its absence means no roles.
+-/// </summary>
++/// <summary>Builds the portal-facing claim set (spec §5.4 / D9) from a decoded Keycloak token
++/// payload. ONE shape, ONE factory: the Direct-Grant handshake path and the realm-mapper-driven
++/// paths must not drift apart, so the claim names are <see cref="PortalClaims"/>' own constants —
++/// the shared-kernel spelling the portal-session handler and every adopting host read (D19/D1),
++/// and the mapper contract pinned by the realm import (school-collab-realm.json).</summary>
+ public sealed class ClaimSetFactory
+ {
+-    // These names are the realm mapper contract — changing the realm mappers or these constants
+-    // without the other is exactly the drift D9 forbids (school-collab-realm.json mappers:
+-    // tenant-id → tenant_id, tenant-name → tenant_name, tenant-type → tenant_type,
+-    // teacher-id → teacher_id, roles → roles).
+-    public const string TenantIdClaim = "tenant_id";
+-    public const string TenantNameClaim = "tenant_name";
+-    public const string TenantTypeClaim = "tenant_type";
+-    public const string TeacherIdClaim = "teacher_id";
+-    public const string RolesClaim = "roles";
++    // The names come from PortalClaims itself — the ONE spelling (D9/D19).
+ 
+     /// <summary>
++    /// Builds the claim set from a decoded Keycloak token payload. The caller owns token validation
++    /// and JWT decoding; this class is purely about claim SHAPE, so a single fixture pins both paths
++    /// to the same names (D9). The tenant/teacher claims are REQUIRED — a session without them cannot
++    /// bind to a tenant, so a missing claim fails fast naming the claim rather than degrading.
++    /// <c>roles</c> is multivalued (the realm's <c>User Realm Role</c> mapper sets
++    /// <c>multivalued: true</c>); its absence means no roles.
++    /// <para>
+     /// <paramref name="payload"/> must be a JSON object — a decoded token payload (the ID token
+     /// on the handshake path; the same shape the realm's attribute and role mappers emit on both
+     /// paths).
++    /// </para>
+     /// </summary>
+     /// <exception cref="InvalidDataException">The payload is not an object, a required
+     /// tenant/teacher claim is missing or not textual, or <c>roles</c> is malformed.</exception>
+@@ -47,10 +35,10 @@ public sealed class ClaimSetFactory
+             throw new InvalidDataException("the token payload must be a JSON object.");
+         }
+ 
+-        var tenantId = GetRequiredString(payload, TenantIdClaim);
+-        var tenantName = GetRequiredString(payload, TenantNameClaim);
+-        var tenantType = GetRequiredString(payload, TenantTypeClaim);
+-        var teacherId = GetRequiredString(payload, TeacherIdClaim);
++        var tenantId = GetRequiredString(payload, PortalClaims.TenantIdClaim);
++        var tenantName = GetRequiredString(payload, PortalClaims.TenantNameClaim);
++        var tenantType = GetRequiredString(payload, PortalClaims.TenantTypeClaim);
++        var teacherId = GetRequiredString(payload, PortalClaims.TeacherIdClaim);
+         var roles = GetRoles(payload);
+ 
+         return new PortalClaims(tenantId, tenantName, tenantType, teacherId, roles);
+@@ -85,7 +73,7 @@ public sealed class ClaimSetFactory
+ 
+     private static IReadOnlyList<string> GetRoles(JsonElement payload)
+     {
+-        if (!payload.TryGetProperty(RolesClaim, out var value))
++        if (!payload.TryGetProperty(PortalClaims.RolesClaim, out var value))
+         {
+             return Array.Empty<string>();
+         }
+@@ -93,7 +81,7 @@ public sealed class ClaimSetFactory
+         if (value.ValueKind != JsonValueKind.Array)
+         {
+             throw new InvalidDataException(
+-                $"the '{RolesClaim}' claim must be an array of strings (the realm mapper sets "
++                $"the '{PortalClaims.RolesClaim}' claim must be an array of strings (the realm mapper sets "
+                 + $"multivalued: true), was {value.ValueKind}.");
+         }
+ 
+@@ -102,7 +90,7 @@ public sealed class ClaimSetFactory
+         {
+             if (item.ValueKind != JsonValueKind.String)
+             {
+-                throw new InvalidDataException($"the '{RolesClaim}' claim contains a non-string entry.");
++                throw new InvalidDataException($"the '{PortalClaims.RolesClaim}' claim contains a non-string entry.");
+             }
+             roles.Add(item.GetString() ?? string.Empty);
+         }
+diff --git a/src/SchoolCollab.Core/Auth/PortalSessionAuthenticationHandler.cs b/src/SchoolCollab.Core/Auth/PortalSessionAuthenticationHandler.cs
+new file mode 100644
+index 00000000..719da98b
+--- /dev/null
++++ b/src/SchoolCollab.Core/Auth/PortalSessionAuthenticationHandler.cs
+@@ -0,0 +1,289 @@
++using System.Security.Claims;
++using System.Text.Encodings.Web;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authentication.Cookies;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using SchoolCollab.Core.Features;
++
++namespace SchoolCollab.Core.Auth;
++
++/// <summary>
++/// The portal-facing claim set (spec §5.4 / D9). ONE shape, ONE spelling: the auth service's
++/// <c>ClaimSetFactory</c> builds it, the portal-session handler materializes it, and the realm
++/// mappers emit it — the claim names here ARE the mapper contract pinned by the realm import
++/// (school-collab-realm.json).
++/// </summary>
++/// <remarks>
++/// Moved to the shared kernel with <see cref="PortalSessionAuthenticationHandler"/> (round
++/// <c>portal-session-adoption</c>, D19/D1): the Assignments API resolves the same session header
++/// into the SAME claim set the cookie/bearer paths carry, so the D9 contract keeps exactly one
++/// spelling across every host. The claim-name constants are the realm mapper contract — changing
++/// the realm mappers or these constants without the other is exactly the drift D9 forbids
++/// (school-collab-realm.json mappers: tenant-id → tenant_id, tenant-name → tenant_name,
++/// tenant-type → tenant_type, teacher-id → teacher_id, roles → roles).
++/// </remarks>
++public sealed record PortalClaims(
++    string TenantId,
++    string TenantName,
++    string TenantType,
++    string TeacherId,
++    IReadOnlyList<string> Roles)
++{
++    public const string TenantIdClaim = "tenant_id";
++    public const string TenantNameClaim = "tenant_name";
++    public const string TenantTypeClaim = "tenant_type";
++    public const string TeacherIdClaim = "teacher_id";
++    public const string RolesClaim = "roles";
++}
++
++/// <summary>
++/// The cheap, I/O-free claims read the portal-session scheme uses to turn the presented session id
++/// into a claim set. The auth service registers it as a trivial adapter over its own D15 custody
++/// seam (<c>IAuthProvider.ReadClaims</c>, genuinely I/O-free there); every OTHER host that adopts
++/// the scheme — today the Assignments API — implements it as a remote HTTP read against the auth
++/// service's <c>GET /auth/session/{id}/claims</c> route. Custody is process-local in the auth
++/// service, so no remote host can ever resolve the D15 seam in-process: the port is what makes the
++/// scheme shareable without sharing custody.
++/// </summary>
++/// <remarks>
++/// The contract is the D15 read's own: <c>null</c> when the session is unknown, expired, or its
++/// token payload does not carry the pinned claim contract — the caller fails closed. The read must
++/// stay cheap: authenticating a portal call must not trigger a Keycloak refresh (the D18 lifecycle
++/// belongs to the session read itself, <c>GET /auth/session/{id}</c>).
++/// </remarks>
++public interface IPortalSessionClaimsReader
++{
++    /// <summary>The claim set for a live session, or <c>null</c> to fail the authentication closed.</summary>
++    ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default);
++}
++
++/// <summary>
++/// Options for <see cref="PortalSessionAuthenticationHandler"/>. The scheme carries no settings:
++/// the session id travels in a request header and the session itself is validated against the
++/// claims port (<see cref="IPortalSessionClaimsReader"/>, custody per D12), so there is nothing to
++/// configure.
++/// </summary>
++public sealed class PortalSessionAuthenticationOptions : AuthenticationSchemeOptions;
++
++/// <summary>
++/// The portal-session authentication scheme (spec D12 / D15): it turns the **opaque session id**
++/// a portal presents into a principal, so portal-facing endpoints can authorize without the portal
++/// holding a token of any kind (AC11).
++/// </summary>
++/// <remarks>
++/// <para>
++/// The portal never holds a Keycloak token: its cookie is a bare unguessable id (D12). It presents
++/// that id in the <see cref="SessionHeaderName"/> request header on every identity- or
++/// privilege-bearing call, and this handler asks custody — through the
++/// <see cref="IPortalSessionClaimsReader"/> port, never the auth service's store directly — whether
++/// the session is live. The claim set is the one <see cref="PortalClaims"/> pins (D9), including
++/// <see cref="ClaimTypes.Role"/> entries for the realm roles, so <c>RequireRole</c> resolves
++/// identically here and on the cookie/bearer paths.
++/// </para>
++/// <para>
++/// <b>Fail-closed:</b> an absent header, an unknown session, an expired session and a token whose
++/// payload does not carry the pinned claim contract all yield <see cref="AuthenticateResult.NoResult"/>
++/// — never a partially-populated principal — and the challenge is a bare <c>401</c> (never a
++/// redirect), which is what makes this scheme safe to list first in a portal-facing policy.
++/// </para>
++/// <para>
++/// <b>Shared-kernel home (D19/D1).</b> The scheme lives in Core so more than one host can adopt it
++/// (the <see cref="TestAuthHandler"/> precedent): the auth service registers it over in-process
++/// custody, and every other adopting host registers it over the remote claims port — the
++/// <see cref="AddPortalSessionAuthentication"/> extension and its fallback-aware gateway selector
++/// are the shared registration both use.
++/// </para>
++/// </remarks>
++public sealed class PortalSessionAuthenticationHandler(
++    IOptionsMonitor<PortalSessionAuthenticationOptions> options,
++    ILoggerFactory logger,
++    UrlEncoder encoder,
++    IPortalSessionClaimsReader claimsReader)
++    : AuthenticationHandler<PortalSessionAuthenticationOptions>(options, logger, encoder)
++{
++    /// <summary>The scheme name this handler is registered under.</summary>
++    public const string SchemeName = "PortalSession";
++
++    /// <summary>
++    /// The policy-scheme name a portal-facing policy lists. Policies must name only schemes whose
++    /// handler is registered in EVERY flag state (the authorization middleware challenges every
++    /// listed scheme, and a missing handler there is a 500 — not a 401), so the portal-facing
++    /// policy names this single gateway, which routes each request to either the portal-session
++    /// scheme or the host's fallback scheme (<see cref="SelectAuthenticationScheme"/>).
++    /// </summary>
++    public const string GatewaySchemeName = "PortalSessionGateway";
++
++    /// <summary>The request header carrying the portal's opaque session id (spec D12).</summary>
++    public const string SessionHeaderName = "X-Portal-Session";
++
++    /// <summary>
++    /// The gateway's per-request target: the portal-session scheme when the caller presents a
++    /// session id, otherwise the caller's own scheme. With a pinned <paramref name="fallbackScheme"/>
++    /// (a host whose default scheme is semantically wrong for its API surface — e.g. an API host
++    /// whose default authenticates browsers via the OIDC cookie), the pinned scheme wins under real
++    /// auth; under <c>FEATURE:DisableOIDCAuth</c> the request-time flag resolution keeps the host's
++    /// own dev scheme, because the dev posture is today's (the flag resolves per request from
++    /// <see cref="IConfiguration"/> via <c>RequestServices</c>, and an absent or invalid value fails
++    /// closed to real auth). Without a pin, the host default resolves exactly as before.
++    /// </summary>
++    public static string SelectAuthenticationScheme(HttpContext context, string? fallbackScheme = null)
++    {
++        ArgumentNullException.ThrowIfNull(context);
++
++        if (PresentedSessionId(context.Request) is not null)
++        {
++            return SchemeName;
++        }
++
++        // The pin governs authentication ROUTING only under real auth — the challenge is always
++        // this scheme's bare 401, never the fallback. Under the dev flag the host default IS the
++        // dev scheme (TestAuth), which is the posture to keep.
++        if (!IsOidcDisabled(context) && !string.IsNullOrWhiteSpace(fallbackScheme))
++        {
++            return fallbackScheme;
++        }
++
++        var options = context.RequestServices?.GetService<IOptions<AuthenticationOptions>>()?.Value;
++        return options?.DefaultAuthenticateScheme
++            ?? options?.DefaultScheme
++            ?? CookieAuthenticationDefaults.AuthenticationScheme;
++    }
++
++    /// <summary>Builds the principal from a claim set: the pinned tenant/teacher/role names —
++    /// the same claims, the same spelling, as the OIDC cookie and the bearer token (D9).</summary>
++    public static ClaimsPrincipal BuildPrincipal(PortalClaims claims, string schemeName)
++    {
++        var identity = new ClaimsIdentity(
++            [
++                new Claim(PortalClaims.TenantIdClaim, claims.TenantId),
++                new Claim(PortalClaims.TenantNameClaim, claims.TenantName),
++                new Claim(PortalClaims.TenantTypeClaim, claims.TenantType),
++                new Claim(PortalClaims.TeacherIdClaim, claims.TeacherId),
++                .. claims.Roles.Select(role => new Claim(ClaimTypes.Role, role)),
++            ],
++            schemeName);
++
++        return new ClaimsPrincipal(identity);
++    }
++
++    /// <summary>The session id a request presents, or <c>null</c> when it presents none.</summary>
++    public static string? PresentedSessionId(HttpRequest request)
++    {
++        foreach (var value in request.Headers[SessionHeaderName])
++        {
++            if (!string.IsNullOrWhiteSpace(value))
++            {
++                return value;
++            }
++        }
++
++        return null;
++    }
++
++    /// <summary>
++    /// Validates the presented session id against the claims port (D12) and materializes its claim
++    /// set. The read is the port's cheap, I/O-free projection: authenticating a portal call must not
++    /// trigger a Keycloak refresh — the D18 lifecycle belongs to the session read itself.
++    /// </summary>
++    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
++    {
++        var sessionId = PresentedSessionId(Request);
++        if (sessionId is null)
++        {
++            return AuthenticateResult.NoResult();
++        }
++
++        var claims = await claimsReader.ReadClaimsAsync(sessionId, Context.RequestAborted);
++        if (claims is null)
++        {
++            Logger.LogDebug("The presented portal session is unknown, expired or unusable; failing closed.");
++            return AuthenticateResult.NoResult();
++        }
++
++        var principal = BuildPrincipal(claims, Scheme.Name);
++        return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name));
++    }
++
++    /// <summary>A bare <c>401</c>: a portal session cannot be "challenged" by redirecting (there is
++    /// no interactive flow on this scheme) and a redirect would leak the caller onto an unrelated
++    /// login UI.</summary>
++    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
++    {
++        Response.StatusCode = StatusCodes.Status401Unauthorized;
++        return Task.CompletedTask;
++    }
++
++    /// <summary>
++    /// Whether <c>FEATURE:DisableOIDCAuth</c> is enabled in the current request's configuration —
++    /// the same resolution <c>AuthTenancyExtensions.IsFlagEnabled</c> performs at registration, read
++    /// per request here so a pinned fallback never overrides the dev posture. Absent or invalid ⇒
++    /// <c>false</c> ⇒ real auth ⇒ the pinned fallback (fail-closed: an unparseable flag value can
++    /// never switch a principal onto a scheme the host did not register).
++    /// </summary>
++    private static bool IsOidcDisabled(HttpContext context)
++    {
++        var configuration = context.RequestServices?.GetService<IConfiguration>();
++        if (configuration is null)
++        {
++            return false;
++        }
++
++        var value = configuration[$"FeatureFlags:{FeatureFlagKeys.DisableOIDCAuth}"]
++                 ?? configuration[FeatureFlagKeys.DisableOIDCAuth];
++
++        return bool.TryParse(value, out var enabled) && enabled;
++    }
++}
++
++/// <summary>
++/// Registers the portal-session scheme (D12/D19) — the portal-session scheme plus the
++/// <see cref="PortalSessionAuthenticationHandler.GatewaySchemeName"/> policy scheme — in the
++/// shared-kernel shape every adopting host calls.
++/// </summary>
++/// <remarks>
++/// <para>
++/// <b>The gateway is registered in EVERY flag state, deliberately:</b> a policy that names a scheme
++/// without a handler in some flag state fails the challenge with a 500 instead of a 401, so the
++/// portal-facing policies list only the gateway. Authentication follows the request (portal session
++/// vs the host's fallback); the challenge is ALWAYS the portal-session scheme's bare 401, never a
++/// redirect and never the fallback's.
++/// </para>
++/// <para>
++/// <paramref name="fallbackScheme"/> pins the scheme non-portal callers authenticate with — a
++/// hardening for API hosts whose host default is semantically wrong (the OIDC cookie). When it is
++/// <c>null</c>, the host default resolves exactly as before the adoption. The reading host that
++/// wants a flag-aware pin passes its real-auth scheme; the dev flag resolves per request inside the
++/// selector, so the caller never adds flag knowledge.
++/// </para>
++/// </remarks>
++public static class PortalSessionAuthenticationExtensions
++{
++    /// <summary>Registers the portal-session scheme and its gateway (D12/D19).</summary>
++    public static AuthenticationBuilder AddPortalSessionAuthentication(
++        this AuthenticationBuilder authentication,
++        string? fallbackScheme = null)
++    {
++        ArgumentNullException.ThrowIfNull(authentication);
++
++        return authentication
++            .AddScheme<PortalSessionAuthenticationOptions, PortalSessionAuthenticationHandler>(
++                PortalSessionAuthenticationHandler.SchemeName,
++                static _ => { })
++            .AddPolicyScheme(
++                PortalSessionAuthenticationHandler.GatewaySchemeName,
++                "Portal-session or host-scheme routing",
++                policy =>
++                {
++                    // Authentication follows the request (portal session vs the pinned fallback or
++                    // the host's own scheme); the challenge is ALWAYS the portal-session scheme's
++                    // bare 401, never a redirect.
++                    policy.ForwardDefaultSelector = context =>
++                        PortalSessionAuthenticationHandler.SelectAuthenticationScheme(context, fallbackScheme);
++                    policy.ForwardChallenge = PortalSessionAuthenticationHandler.SchemeName;
++                });
++    }
++}
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs
+index 23d0b96d..0b76bd85 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/BearerForwardingWiringArchitectureTests.cs
+@@ -113,9 +113,11 @@ public class BearerForwardingWiringArchitectureTests
+         var assignmentsApi = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Program.cs");
+ 
+         assignmentsApi.Should().Contain("ConfigurePrimaryHttpMessageHandler",
+-            "row 7: both Assignments.Api clients must disable auto-redirect so a real-auth 302-challenge surfaces as non-2xx.");
+-        Count(assignmentsApi, "AllowAutoRedirect = false").Should().Be(2,
+-            "both Assignments.Api named clients (students-api, settings-api) must set AllowAutoRedirect = false.");
++            "row 7: every Assignments.Api cross-module client must disable auto-redirect so a real-auth 302-challenge surfaces as non-2xx.");
++        Count(assignmentsApi, "AllowAutoRedirect = false").Should().Be(3,
++            "every Assignments.Api named client (students-api, settings-api, and the portal-session "
++            + "claims reader's auth client — round portal-session-adoption D4, plan amendment "
++            + "2026-10-05) must set AllowAutoRedirect = false.");
+     }
+ 
+     private static int OptInCount(string source)
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs
+new file mode 100644
+index 00000000..23185efd
+--- /dev/null
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/PortalSessionAdoptionArchitectureTests.cs
+@@ -0,0 +1,329 @@
++using System.Text;
++using System.Text.RegularExpressions;
++using FluentAssertions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++
++namespace SchoolCollab.ArchitectureTests.Unit;
++
++/// <summary>
++/// Guards the round-<c>portal-session-adoption</c> wiring (D19/D9) that no build and no unit test
++/// can see, because it lives in source the compiler accepts in several wrong shapes:
++/// <list type="number">
++///   <item>the Assignments API's <c>RequireAssignmentReader</c> policy names the <b>portal-session
++///        gateway</b> scheme — and no longer Bearer. The gateway is registered in every flag state,
++///        so a listed scheme always has a handler (a policy-named scheme without one is a 500, not a
++///        401), and it routes each request to the portal session, to Bearer, or to the dev
++///        TestAuth scheme;</item>
++///   <item>the AppHost's <b>both</b> app-callback allowlist copies carry the teacher portal's
++///        <c>/auth/callback</c> append — the auth service's (which enforces the list at code
++///        issuance) and the auth portal's own copy (which re-validates the value it redirects to).
++///        Without either, the teacher portal's handoff code cannot be minted for its callback;</item>
++///   <item>the <c>portals</c> resource carries <c>WithReference(auth)</c> and both
++///        endpoint-derived env values — <c>PORTALS_PUBLIC_BASE_URL</c> (the callback URI's origin)
++///        and <c>PORTALS_LOGIN_URL</c> (the browser-facing sign-in link D19's rule 3 keys on);
++///        without the reference the portal cannot resolve <c>services__auth__http__0</c> at all;</item>
++///   <item>the <c>assignments-api</c> resource carries <c>WithReference(auth)</c> — without it the
++///        <c>https+http://auth</c> claims-read client dies at runtime with "No such host is
++///        known", which is exactly what <c>CrossModuleWiringTests</c> protects.</item>
++/// </list>
++/// <para>
++/// The resource blocks are parsed by line from the real <c>Program.cs</c>: a block opens at its
++/// <c>AddProject&lt;…&gt;("name")</c> / <c>AddUvicornApp("name", …)</c> call, absorbs the fluent
++/// continuation lines that follow, and also absorbs later <c>name = name.…</c> reassignments —
++/// the shape a cross-referencing pair of resources forces (the AppHostLoginUiFlagWiringArchitecture
++/// Tests precedent). Line comments are stripped first: these chains document themselves, and a
++/// comment naming a config key must neither satisfy nor break an assertion.
++/// </para>
++/// <para>
++/// The walk-up follows the <c>AppHostRealmImportArchitectureTests</c> /
++/// <c>PortalsSolutionItemsArchitectureTests</c> precedent and THROWS rather than passing vacuously
++/// when the repository root or a named resource block cannot be found.
++/// </para>
++/// </summary>
++[TestClass]
++public class PortalSessionAdoptionArchitectureTests
++{
++    /// <summary>The reader policy's one listed scheme (D4).</summary>
++    private const string GatewaySchemeOptIn =
++        "AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)";
++
++    private const string BearerSchemeOptIn = "AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)";
++
++    private static readonly string RepoRoot = FindRepoRoot();
++
++    /// <summary>A resource-creation chain: <c>var portals = builder.AddUvicornApp("portals", …)</c>.
++    /// Declared before <see cref="Blocks"/> — static initializers run in declaration order.</summary>
++    private static readonly Regex CreatedResource = new(
++        """^\s*(?:var\s+)?(?:(?<variable>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*)?builder\.(?:AddProject<Projects\.[A-Za-z0-9_]+>|AddUvicornApp)\("(?<resource>[^"]+)"[,)]""",
++        RegexOptions.Compiled);
++
++    /// <summary>A later <c>name = name.…</c> reassignment of an existing resource (the shape a
++    /// cross-referencing pair of resources forces).</summary>
++    private static readonly Regex ReassignedResource = new(
++        @"^\s*(?<alias>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<target>[A-Za-z_][A-Za-z0-9_]*)\.(\w)",
++        RegexOptions.Compiled);
++
++    private static readonly string Program = StripLineComments(
++        File.ReadAllText(Path.Combine(RepoRoot, "src", "AppHost", "SchoolCollab.AppHost", "Program.cs")));
++
++    private static readonly IReadOnlyList<ResourceBlock> Blocks = ParseResourceBlocks(Program);
++
++    [TestMethod]
++    public void ReaderPolicy_NamesTheGateway_AndNoLongerBearer()
++    {
++        var endpoints = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "AssignmentEndpoints.cs");
++        var policy = ExtractMethod(endpoints, "void RequireAssignmentReader(");
++
++        policy.Should().Contain(GatewaySchemeOptIn,
++            "the reader policy must list the portal-session gateway (D4): it is the ONE scheme with "
++            + "a handler in every flag state, and it routes a portal session to the portal-session "
++            + "scheme while bearer and dev callers keep their own.");
++
++        policy.Should().NotContain("AuthTenancyExtensions.BearerScheme",
++            "the policy must list exactly one scheme: authorization challenges every listed scheme, "
++            + "and Bearer has no handler registered under FEATURE:DisableOIDCAuth — a second listed "
++            + "scheme would 500 the dev posture instead of authenticating it.");
++
++        policy.Should().Contain("RequireAuthenticatedUser()")
++            .And.Contain("RequireRole(",
++                "the policy stays self-sufficient for the routes it decorates (the disjunctive "
++                + "teacher ∨ staff ∨ user-admin ∨ platform-admin role set is its own requirement).");
++
++        var groupOptIns = Regex.Matches(endpoints, Regex.Escape(BearerSchemeOptIn)).Count;
++        groupOptIns.Should().Be(3,
++            "the three group-level Bearer opt-ins (the /assignments group and its two nested "
++            + "sub-groups) are untouched — only the reader policy moved to the gateway.");
++    }
++
++    [TestMethod]
++    public void BothAppCallbackAllowlistCopies_CarryTheTeacherPortalCallback()
++    {
++        var authSource = Normalize(Block("auth").Source);
++        var allowlistAt = authSource.IndexOf("Auth__AppCallbackPrefixes", StringComparison.Ordinal);
++        allowlistAt.Should().BeGreaterThanOrEqualTo(0,
++            "the auth service must still receive Auth:AppCallbackPrefixes — it enforces the list at "
++            + "code issuance.");
++
++        var authFanOut = authSource[allowlistAt..];
++        authFanOut.Should().Contain("portals.GetEndpoint(\"http\")}/auth/callback",
++            "the teacher portal's callback must be appended to the ENFORCED copy: without it the "
++            + "one-time handshake code can never be minted for the portal's redemption, and every "
++            + "sign-in fails closed at issuance.");
++        authFanOut.Should().Contain("authPortal.GetEndpoint(\"http\")}/bootstrap",
++            "the auth portal's bootstrap URI must survive — this is an append, not a replacement.");
++
++        var authPortalSource = Normalize(Block("auth-portal").Source);
++        var portalAllowlistAt = authPortalSource.IndexOf("AuthPortal__AppCallbackPrefixes", StringComparison.Ordinal);
++        portalAllowlistAt.Should().BeGreaterThanOrEqualTo(0,
++            "the auth portal re-validates the value it redirects a browser to against its own copy "
++            + "(defense-in-depth, spec §14).");
++
++        authPortalSource[portalAllowlistAt..].Should().Contain("portals.GetEndpoint(\"http\")}/auth/callback",
++            "the second copy needs the same append: without it the passkey continuation and the "
++            + "login page's return_uri are refused for the teacher portal.");
++    }
++
++    [TestMethod]
++    public void PortalsResource_ReferencesAuth_AndCarriesBothSessionKeys()
++    {
++        var portals = Block("portals");
++
++        portals.Source.Should().Contain("WithReference(auth)",
++            "the teacher portal's session client resolves the auth service through the "
++            + "AppHost-injected services__auth__http__0 discovery variable.");
++
++        portals.Source.Should().Contain(
++            "WithEnvironment(\"PORTALS_PUBLIC_BASE_URL\", portals.GetEndpoint(\"http\"))",
++            "the callback URI's origin comes from the resource's own Aspire endpoint (the "
++            + "AuthPortal__PublicBaseUrl pattern) — never a hardcoded port.");
++
++        portals.Source.Should().Contain(
++            "WithEnvironment(\"PORTALS_LOGIN_URL\", $\"{authPortal.GetEndpoint(\"http\")}/login\")",
++            "the browser-facing sign-in link is derived from the auth portal's endpoint. It is a "
++            + "DISTINCT key from Auth__Portal__LoginUrl on purpose: that key's guard pins it to the "
++            + "two challenge surfaces, and this link is not one.");
++    }
++
++    [TestMethod]
++    public void AssignmentsApiResource_ReferencesAuth()
++    {
++        Block("assignments-api").Source.Should().Contain("WithReference(auth)",
++            "the portal-session claims reader is registered over the literal https+http://auth base "
++            + "address (D4), so the AppHost must carry the matching reference — CrossModuleWiring "
++            + "Tests demands it, and without it the hop dies at runtime.");
++    }
++
++    [TestMethod]
++    public void Scan_ActuallyFoundTheAppHostResources()
++    {
++        // Non-vacuity: every assertion above is per-resource or per-method, so a parser that
++        // silently matched nothing would pass while inspecting empty strings.
++        Blocks.Should().HaveCountGreaterThanOrEqualTo(10,
++            "the AppHost declares more than ten project/uvicorn resources; fewer means the parser "
++            + "found no real blocks.");
++
++        Blocks.Select(block => block.ResourceName)
++            .Should().Contain(["assignments-api", "auth", "auth-portal", "portals"]);
++
++        foreach (var name in new[] { "assignments-api", "auth", "auth-portal", "portals" })
++        {
++            Block(name).Source.Should().Contain("WithEnvironment(",
++                $"the '{name}' block must have absorbed its fluent continuation lines.");
++        }
++    }
++
++    // ── Helpers ─────────────────────────────────────────────────────────
++
++    private sealed record ResourceBlock(string ResourceName, string Source);
++
++    /// <summary>
++    /// Splits the AppHost source into per-resource blocks: the block opens on the resource's
++    /// creation call, absorbs the fluent lines that follow, and absorbs later
++    /// <c>name = name.…</c> reassignments of the same alias. A statement that spans several lines
++    /// (a <c>WithEnvironment(key,</c> whose argument continues on the next line) stays one
++    /// statement — tracked by the running parenthesis balance — so the whole fan-out expression is
++    /// inside the block it belongs to. Any other statement closes the block.
++    /// </summary>
++    private static IReadOnlyList<ResourceBlock> ParseResourceBlocks(string program)
++    {
++        var sources = new Dictionary<string, StringBuilder>(StringComparer.Ordinal);
++        var aliasToResource = new Dictionary<string, string>(StringComparer.Ordinal);
++        string? open = null;
++        var openParentheses = 0;
++
++        foreach (var rawLine in program.Split('\n'))
++        {
++            var line = rawLine.TrimEnd('\r');
++            if (string.IsNullOrWhiteSpace(line))
++            {
++                continue;
++            }
++
++            if (openParentheses > 0)
++            {
++                // Inside a multi-line statement: the line belongs to whatever opened it.
++                openParentheses += ParenthesisBalance(line);
++                if (open is not null)
++                {
++                    sources[open].Append('\n').Append(line);
++                }
++
++                continue;
++            }
++
++            var created = CreatedResource.Match(line);
++            if (created.Success)
++            {
++                var resource = created.Groups["resource"].Value;
++                if (created.Groups["variable"].Success)
++                {
++                    aliasToResource[created.Groups["variable"].Value] = resource;
++                }
++
++                sources[resource] = new StringBuilder(line);
++                open = resource;
++                openParentheses = ParenthesisBalance(line);
++                continue;
++            }
++
++            var reassigned = ReassignedResource.Match(line);
++            if (reassigned.Success)
++            {
++                var alias = reassigned.Groups["alias"].Value;
++                if (alias == reassigned.Groups["target"].Value
++                    && aliasToResource.TryGetValue(alias, out var resource))
++                {
++                    sources[resource].Append('\n').Append(line);
++                    open = resource;
++                    openParentheses = ParenthesisBalance(line);
++                }
++                else
++                {
++                    open = null;
++                }
++
++                continue;
++            }
++
++            // A continuation line is indented and starts with a fluent dot.
++            if (line.TrimStart().StartsWith('.'))
++            {
++                if (open is not null)
++                {
++                    sources[open].Append('\n').Append(line);
++                }
++
++                openParentheses = ParenthesisBalance(line);
++                continue;
++            }
++
++            open = null;
++        }
++
++        return [.. sources.Select(entry => new ResourceBlock(entry.Key, entry.Value.ToString()))];
++    }
++
++    /// <summary>Whether a line leaves a parenthesis open (a fluent statement continuing below).</summary>
++    private static int ParenthesisBalance(string line)
++        => line.Count(character => character == '(') - line.Count(character => character == ')');
++
++    private static ResourceBlock Block(string resourceName)
++        => Blocks.SingleOrDefault(block => block.ResourceName == resourceName)
++            ?? throw new InvalidOperationException(
++                $"The AppHost Program.cs has no resource block named '{resourceName}'. Known blocks: "
++                + string.Join(", ", Blocks.Select(block => block.ResourceName).OrderBy(name => name, StringComparer.Ordinal)));
++
++    /// <summary>One C# method body, from its signature line to its closing brace at member indent.</summary>
++    private static string ExtractMethod(string source, string signature)
++    {
++        var lines = source.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
++        var start = Array.FindIndex(lines, line => line.Contains(signature, StringComparison.Ordinal));
++
++        start.Should().BeGreaterThanOrEqualTo(0,
++            $"the method '{signature}' must exist — an absent policy would make this guard vacuous.");
++
++        // The method's closing brace is the first line that closes a member (four spaces + `}`):
++        // the body's own braces are indented further.
++        var end = Array.FindIndex(lines, start + 1, line => line == "    }");
++        end.Should().BeGreaterThan(start, $"the body of '{signature}' must terminate at member indent.");
++
++        return string.Join('\n', lines[start..(end + 1)]);
++    }
++
++    /// <summary>Whitespace-insensitive form — lets a multi-line fluent expression be pinned exactly.</summary>
++    private static string Normalize(string source) => Regex.Replace(source, @"\s+", string.Empty);
++
++    private static string Read(params string[] relative)
++    {
++        var path = Path.Combine([RepoRoot, .. relative]);
++        return File.Exists(path)
++            ? File.ReadAllText(path)
++            : throw new FileNotFoundException($"Expected source file not found under the repo: {string.Join('/', relative)}");
++    }
++
++    /// <summary>
++    /// Removes trailing <c>//</c> comments before parsing: these chains document themselves, and a
++    /// comment naming a config key would otherwise satisfy (or break) a substring assertion. No
++    /// string literal in the AppHost file contains <c>//</c> (URLs are built from endpoint
++    /// expressions).
++    /// </summary>
++    private static string StripLineComments(string source)
++        => string.Join('\n', source.Split('\n').Select(line =>
++        {
++            var commentAt = line.IndexOf("//", StringComparison.Ordinal);
++            return commentAt >= 0 ? line[..commentAt] : line;
++        }));
++
++    private static string FindRepoRoot()
++    {
++        var dir = new DirectoryInfo(AppContext.BaseDirectory);
++        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "AppHost", "SchoolCollab.AppHost")))
++        {
++            dir = dir.Parent;
++        }
++
++        return dir?.FullName
++            ?? throw new InvalidOperationException(
++                "Could not locate the repository root from " + AppContext.BaseDirectory);
++    }
++}
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+index bf8ccae2..7a8817f4 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/PortalsSolutionItemsArchitectureTests.cs
+@@ -121,11 +121,17 @@ public class PortalsSolutionItemsArchitectureTests
+         // A tripwire, not a tautology: the first test only proves disk ⊆ slnx, so this pins the
+         // slnx set itself. Adding or removing a portal file must update this list consciously —
+         // and with it the solution items.
++        //
++        // Round `portal-session-adoption` added two files here: the auth-service client and the
++        // session-path test module. Both land under existing `api/` and `tests/` package nodes, so
++        // PortalSolutionFolderNodes_MirrorThePackageLayout is deliberately unchanged — a new folder
++        // node would be a package-layout change, which this pair of files is not.
+         SolutionFileItems.Should().BeEquivalentTo(
+             [
+                 "src/SchoolCollab.Portals/app.py",
+                 "src/SchoolCollab.Portals/api/__init__.py",
+                 "src/SchoolCollab.Portals/api/assignments_api_client.py",
++                "src/SchoolCollab.Portals/api/auth_api_client.py",
+                 "src/SchoolCollab.Portals/api/dto.py",
+                 "src/SchoolCollab.Portals/api/errors.py",
+                 "src/SchoolCollab.Portals/api/service_discovery.py",
+@@ -133,6 +139,7 @@ public class PortalsSolutionItemsArchitectureTests
+                 "src/SchoolCollab.Portals/tests/test_app_routes.py",
+                 "src/SchoolCollab.Portals/tests/test_assignments_api_client.py",
+                 "src/SchoolCollab.Portals/tests/test_service_discovery.py",
++                "src/SchoolCollab.Portals/tests/test_teacher_session.py",
+                 "src/SchoolCollab.Portals/tests/test_teacher_views.py",
+                 "src/SchoolCollab.Portals/uv.lock",
+                 "src/SchoolCollab.Portals/views/__init__.py",
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs
+index b4f394ef..5d09ad01 100644
+--- a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentReaderPolicyRouteTests.cs
+@@ -132,6 +132,15 @@ public class AssignmentReaderPolicyRouteTests
+         public TenantContext CurrentTenant => new(Guid.Empty, "Test", TenantType.School);
+     }
+ 
++    /// <summary>D19/D7: the stub claims port the moved portal-session handler authenticates through
++    /// on this host — its canned answer is never consulted by the assertions here (bearer callers
++    /// only), but the registration itself is what the reader policy's gateway needs to exist.</summary>
++    private sealed class StubPortalSessionClaimsReader : IPortalSessionClaimsReader
++    {
++        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
++            => ValueTask.FromResult<PortalClaims?>(null);
++    }
++
+     private sealed class StubScopeProvider : ITeacherScopeProvider
+     {
+         public List<Guid> RequestedTeacherIds { get; } = [];
+@@ -201,7 +210,15 @@ public class AssignmentReaderPolicyRouteTests
+         builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags(disableOidcAuth));
+         builder.Services.AddAuthentication(AuthTenancyExtensions.BearerScheme)
+             .AddScheme<AuthenticationSchemeOptions, HeaderPrincipalAuthHandler>(
+-                AuthTenancyExtensions.BearerScheme, _ => { });
++                AuthTenancyExtensions.BearerScheme, _ => { })
++            // D19/D7 (portal-session-adoption): the reader policy names the GATEWAY scheme, and a
++            // policy-named scheme without a handler is a 500 — never a 401 — so this host registers
++            // the gateway exactly as Program.cs does, in BOTH flag states, over a stubbed claims
++            // port (the moved handler's required ctor dependency; an unregistered dependency is a
++            // DI failure, not a 401). Bearer callers keep authenticating through the pinned
++            // fallback, unchanged.
++            .AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
++        builder.Services.AddSingleton<IPortalSessionClaimsReader>(new StubPortalSessionClaimsReader());
+         builder.Services.AddAuthorization();
+         configure?.Invoke(builder.Services);
+ 
+@@ -278,8 +295,10 @@ public class AssignmentReaderPolicyRouteTests
+             reader[0].Requirements.OfType<RolesAuthorizationRequirement>().Single().AllowedRoles.Should()
+                 .BeEquivalentTo(AssignmentReaderRoles,
+                     $"{method} /{pattern} is the disjunctive teacher ∨ staff ∨ user-admin ∨ platform-admin policy");
+-            reader[0].AuthenticationSchemes.Should().Equal([AuthTenancyExtensions.BearerScheme],
+-                "the reader policy restates the bearer scheme so it is self-sufficient for its routes");
++            reader[0].AuthenticationSchemes.Should().Equal([PortalSessionAuthenticationHandler.GatewaySchemeName],
++                "the reader policy names the portal-session gateway (D19): the single scheme registered "
++                + "in every flag state — portal callers authenticate through it, bearer callers through "
++                + "the pinned Bearer fallback");
+         }
+     }
+ 
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/PortalSessionReaderPolicyTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/PortalSessionReaderPolicyTests.cs
+new file mode 100644
+index 00000000..fef4e784
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/PortalSessionReaderPolicyTests.cs
+@@ -0,0 +1,321 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Net;
++using System.Net.Http;
++using System.Security.Claims;
++using System.Text.Encodings.Web;
++using System.Text.Json;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Authorization.Infrastructure;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Routing;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Api.Services;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Auth;
++using SchoolCollab.Core.Constants;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// The reader policy's portal-session adoption (round <c>portal-session-adoption</c> D4/D19,
++/// AC1/AC2): <c>RequireAssignmentReader</c> names the portal-session GATEWAY — so a teacher
++/// presenting a live session id in <c>X-Portal-Session</c> authorizes with the SAME D9 claim set
++/// the cookie/bearer paths carry, an unknown session fails closed to a BARE 401 (never a 500, never
++/// a redirect), and existing bearer callers authorize exactly as before through the pinned
++/// fallback. Host: the container-free TestServer harness (the
++/// <c>AssignmentReaderPolicyRouteTests</c> shape), with the gateway registered and the claims port
++/// stubbed exactly as <c>Program.cs</c> wires them. The last two cases drop the host and drive the
++/// REAL <see cref="PortalSessionClaimsReader"/> over a scripted handler: they pin the D2 body's
++/// camelCase **wire spelling** against the reader's parse — the half of the contract that was
++/// pinned only by hand-written assertions in another context's test until here.
++/// </summary>
++[TestClass]
++public class PortalSessionReaderPolicyTests
++{
++    private static readonly Guid TeacherClaimId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid GradeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++
++    /// <summary>The canned claim set the stub claims port answers for its session id — the D9
++    /// contract the portal-session handler materializes, teacher role included.</summary>
++    private static readonly PortalClaims TeacherClaims =
++        new("00000000-0000-0000-0000-000000000002", "Dev School", "School", TeacherClaimId.ToString(), [RealmRoleNames.Teacher]);
++
++    private sealed class StubFeatureFlags : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => false;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(false);
++        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
++            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
++    }
++
++    private sealed class StubCurrentUser : ICurrentUser
++    {
++        public bool IsAuthenticated => true;
++        public Guid? TeacherId => TeacherClaimId;
++        public TenantContext CurrentTenant => new(Guid.Empty, "Test", TenantType.School);
++    }
++
++    private sealed class StubScopeProvider : ITeacherScopeProvider
++    {
++        public Task<TeacherScope> GetScopeAsync(Guid teacherId, CancellationToken cancellationToken = default)
++            => Task.FromResult(TeacherScope.ForTeacher(teacherId, [new TeacherSubjectGrade(GradeId, null, null)]));
++    }
++
++    private sealed class StubListHandler : IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>
++    {
++        public Task<AssignmentSummaryDto[]> HandleAsync(ListAssignmentsQuery query, CancellationToken ct = default)
++            => Task.FromResult(Array.Empty<AssignmentSummaryDto>());
++    }
++
++    /// <summary>The bearer scheme, authenticating per request from headers (the
++    /// <c>AssignmentReaderPolicyRouteTests.HeaderPrincipalAuthHandler</c> shape): a bearer-presenting
++    /// caller's roles ride <c>x-test-roles</c>.</summary>
++    private sealed class HeaderPrincipalAuthHandler(
++        IOptionsMonitor<AuthenticationSchemeOptions> options,
++        ILoggerFactory logger,
++        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
++    {
++        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
++        {
++            var roles = Request.Headers["x-test-roles"].ToString();
++            if (string.IsNullOrWhiteSpace(roles))
++            {
++                // No roles header ⇒ no presented credential: the anonymous case must fail
++                // authentication (401), never authenticate a role-less principal (403).
++                return Task.FromResult(AuthenticateResult.NoResult());
++            }
++
++            var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, "test-user") };
++            foreach (var role in roles.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
++            {
++                claims.Add(new Claim(ClaimTypes.Role, role));
++            }
++
++            var identity = new ClaimsIdentity(claims, Scheme.Name);
++            return Task.FromResult(AuthenticateResult.Success(
++                new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
++        }
++    }
++
++    /// <summary>The claims port the moved portal-session handler authenticates through on this
++    /// host — canned per test, so one host serves the live-session and dead-session cases.</summary>
++    private sealed class StubClaimsReader : IPortalSessionClaimsReader
++    {
++        public PortalClaims? NextClaims { get; set; } = TeacherClaims;
++
++        public string? LastSessionId { get; private set; }
++
++        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
++        {
++            LastSessionId = sessionId;
++            return ValueTask.FromResult(NextClaims);
++        }
++    }
++
++    private static async Task<WebApplication> StartHostAsync(StubClaimsReader? claimsReader = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
++        builder.Services.AddAuthentication(AuthTenancyExtensions.BearerScheme)
++            .AddScheme<AuthenticationSchemeOptions, HeaderPrincipalAuthHandler>(
++                AuthTenancyExtensions.BearerScheme, _ => { })
++            .AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
++        builder.Services.AddSingleton<IPortalSessionClaimsReader>(claimsReader ?? new StubClaimsReader());
++        builder.Services.AddAuthorization();
++        builder.Services.AddSingleton<IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>>(new StubListHandler());
++        builder.Services.AddSingleton<ITeacherScopeProvider>(new StubScopeProvider());
++        builder.Services.AddSingleton<ICurrentUser, StubCurrentUser>();
++
++        var app = builder.Build();
++        app.UseAuthentication();
++        app.UseAuthorization();
++        app.MapAssignmentEndpoints(app.Services.GetRequiredService<IFeatureFlagService>());
++        await app.StartAsync();
++        return app;
++    }
++
++    private static HttpClient CreateClient(WebApplication app)
++        => ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++
++    private static HttpRequestMessage SessionRequest(string sessionId)
++    {
++        var request = new HttpRequestMessage(HttpMethod.Get, "/assignments");
++        request.Headers.Add(PortalSessionAuthenticationHandler.SessionHeaderName, sessionId);
++        return request;
++    }
++
++    [TestMethod]
++    public async Task ReaderPolicy_NamesTheGatewayScheme_AndNoLongerBearer()
++    {
++        await using var app = await StartHostAsync();
++
++        var endpoint = ((IEndpointRouteBuilder)app).DataSources
++            .SelectMany(d => d.Endpoints)
++            .OfType<RouteEndpoint>()
++            .Single(e => (e.RoutePattern.RawText ?? string.Empty).Trim('/') == "assignments"
++                && e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("GET") == true);
++        var reader = endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>()
++            .Where(p => p.Requirements.OfType<RolesAuthorizationRequirement>().Any())
++            .ToList();
++
++        reader.Should().ContainSingle("the covered list route carries exactly one role-bearing policy");
++        reader[0].AuthenticationSchemes.Should().Equal([PortalSessionAuthenticationHandler.GatewaySchemeName],
++            "the reader policy's single scheme is the portal-session gateway (D19) — registered in " +
++            "every flag state, so the challenge can never 500");
++        reader[0].AuthenticationSchemes.Should().NotContain(AuthTenancyExtensions.BearerScheme);
++    }
++
++    [TestMethod]
++    public async Task ATeacherPresentingALiveSession_AuthorizesWithTheD9ClaimSet()
++    {
++        var claimsReader = new StubClaimsReader();
++        await using var app = await StartHostAsync(claimsReader);
++        using var client = CreateClient(app);
++
++        var response = await client.SendAsync(SessionRequest("a-live-session-id"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK,
++            "the portal-session principal carries the teacher role, so RequireRole succeeds");
++        claimsReader.LastSessionId.Should().Be("a-live-session-id",
++            "the handler resolved the request's session id through the claims port");
++    }
++
++    [TestMethod]
++    public async Task AnUnknownSession_IsABare401()
++    {
++        var claimsReader = new StubClaimsReader { NextClaims = null };
++        await using var app = await StartHostAsync(claimsReader);
++        using var client = CreateClient(app);
++
++        var response = await client.SendAsync(SessionRequest("not-a-live-session"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++        response.Headers.Location.Should().BeNull("the gateway's challenge is a bare 401, never a redirect");
++    }
++
++    [TestMethod]
++    public async Task ABearerCaller_StillAuthorizes_ThroughThePinnedFallback()
++    {
++        // AC2: the fallback pin restores today's exact authentication union for bearer callers —
++        // the gateway routes them to Bearer (never the host default's OIDC cookie).
++        await using var app = await StartHostAsync();
++        using var client = CreateClient(app);
++        client.DefaultRequestHeaders.Add("x-test-roles", RealmRoleNames.Teacher);
++
++        var response = await client.GetAsync("/assignments");
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK,
++            "an existing bearer caller authorizes exactly as before the adoption");
++    }
++
++    [TestMethod]
++    public async Task AnAnonymousCaller_WithNoSessionHeader_Is401()
++    {
++        await using var app = await StartHostAsync();
++        using var client = CreateClient(app);
++
++        var response = await client.GetAsync("/assignments");
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    // ── the D2 wire contract, over the REAL reader ──────────────────────────────────────────
++
++    private const string WireSessionId = "9f0c1a2b-4d3e-4f5a-8b9c-0d1e2f3a4b5c";
++    private const string WireTenantId = "11111111-1111-1111-1111-111111111111";
++    private const string WireTenantName = "Wire School";
++    private const string WireTenantType = "School";
++    private const string WireTeacherId = "22222222-2222-2222-2222-222222222222";
++
++    /// <summary>The D2 response body, field for field: minimal APIs serialize the auth service's
++    /// <c>SessionClaimsResponse</c> through the JSON Web defaults, so every key is camelCase. It is
++    /// rebuilt here with those same settings over the same field names — this test project cannot
++    /// reference the auth context (the shared kernel is the only cross-context allowance), so the
++    /// pin is the contract, not a copy of the record.</summary>
++    private sealed record SessionClaimsWireBody(
++        string TenantId,
++        string TenantName,
++        string TenantType,
++        string TeacherId,
++        IReadOnlyList<string> Roles);
++
++    /// <summary>The serialized D2 body, exactly as the auth route emits it.</summary>
++    private static string SerializeSessionClaimsBody() =>
++        JsonSerializer.Serialize(
++            new SessionClaimsWireBody(
++                WireTenantId, WireTenantName, WireTenantType, WireTeacherId, [RealmRoleNames.Teacher, "user-admin"]),
++            new JsonSerializerOptions(JsonSerializerDefaults.Web));
++
++    /// <summary>The REAL reader over a scripted handler. A request whose path is not
++    /// <c>/auth/session/{id}/claims</c> matches no scripted response and throws, so the route the
++    /// reader builds is covered by the same match.</summary>
++    private static PortalSessionClaimsReader CreateReader(string body)
++    {
++        var handler = new MockHttpMessageHandler();
++        handler.When("*/auth/session/*/claims").Respond("application/json", body);
++        return new PortalSessionClaimsReader(
++            new HttpClient(handler) { BaseAddress = new Uri("http://auth") },
++            NullLogger<PortalSessionClaimsReader>.Instance);
++    }
++
++    [TestMethod]
++    public async Task TheReader_ParsesTheSerializedClaimsBody_IntoTheD9ClaimSet()
++    {
++        var body = SerializeSessionClaimsBody();
++
++        // The body's spelling is asserted, never assumed: it is the half of the wire contract the
++        // reader must match, and a hand-written literal would let the two halves drift apart
++        // silently (exactly the fail-closed-but-feature-dead break this pins).
++        body.Should().Contain("\"tenantId\"").And.Contain("\"tenantName\"").And.Contain("\"tenantType\"")
++            .And.Contain("\"teacherId\"").And.Contain("\"roles\"");
++        body.Should().NotContain("tenant_id").And.NotContain("tenant_name").And.NotContain("tenant_type")
++            .And.NotContain("teacher_id");
++
++        var claims = await CreateReader(body).ReadClaimsAsync(WireSessionId);
++
++        claims.Should().NotBeNull("the D2 body carries the pinned claim contract");
++        claims!.TenantId.Should().Be(WireTenantId);
++        claims.TenantName.Should().Be(WireTenantName);
++        claims.TenantType.Should().Be(WireTenantType);
++        claims.TeacherId.Should().Be(WireTeacherId);
++        claims.Roles.Should().Equal(RealmRoleNames.Teacher, "user-admin");
++    }
++
++    [TestMethod]
++    public async Task TheReader_RefusesTheClaimNameSpelling_FailClosed()
++    {
++        // The discrimination's other direction: the D9 claim names are NOT the wire spelling, so a
++        // body spelled that way is not the D2 contract and must fail the authentication closed
++        // rather than resolve a half-read claim set.
++        var reader = CreateReader(
++            $$"""
++            {"tenant_id":"{{WireTenantId}}","tenant_name":"{{WireTenantName}}","tenant_type":"{{WireTenantType}}","teacher_id":"{{WireTeacherId}}","roles":["{{RealmRoleNames.Teacher}}"]}
++            """);
++
++        (await reader.ReadClaimsAsync(WireSessionId)).Should().BeNull();
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/RealAuthRouteTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/RealAuthRouteTests.cs
+index be16e104..4cb72ddb 100644
+--- a/tests/SchoolCollab.Assignments.Api.Tests.Unit/RealAuthRouteTests.cs
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/RealAuthRouteTests.cs
+@@ -50,6 +50,13 @@ public class RealAuthRouteTests
+ 
+         builder.Services.AddAuthAndTenancy(builder.Configuration);
+ 
++        // D19/D7 (portal-session-adoption): the reader policy names the GATEWAY scheme, and a
++        // policy-named scheme without a handler is a 500 — never a 401 — so this host registers
++        // the gateway exactly as Program.cs does, over a stubbed claims port (the moved handler's
++        // required ctor dependency; an unregistered dependency is a DI failure, not a 401).
++        builder.Services.AddAuthentication().AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
++        builder.Services.AddSingleton<IPortalSessionClaimsReader>(new StubPortalSessionClaimsReader());
++
+         var app = builder.Build();
+         app.UseAuthentication();
+         app.UseAuthorization();
+@@ -61,6 +68,15 @@ public class RealAuthRouteTests
+     private static HttpClient CreateClient(WebApplication app)
+         => ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
+ 
++    /// <summary>D19/D7: the stub claims port the moved portal-session handler authenticates through
++    /// on this host — a no-token request never presents a session id, so the gateway resolves the
++    /// pinned Bearer fallback and the 401 stays the bearer scheme's.</summary>
++    private sealed class StubPortalSessionClaimsReader : IPortalSessionClaimsReader
++    {
++        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
++            => ValueTask.FromResult<PortalClaims?>(null);
++    }
++
+     [TestMethod]
+     public async Task NoToken_AssignmentsGroup_Is401()
+     {
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/AdminEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/AdminEndpointTests.cs
+index a32a2d22..41a9b4ef 100644
+--- a/tests/SchoolCollab.Auth.Tests.Unit/AdminEndpointTests.cs
++++ b/tests/SchoolCollab.Auth.Tests.Unit/AdminEndpointTests.cs
+@@ -26,7 +26,7 @@ namespace SchoolCollab.Auth.Tests.Unit;
+ /// <c>ClaimTypes.Role</c> (the long role URI), so <c>AuthTenancyExtensions</c> pins
+ /// <c>RoleClaimType = ClaimTypes.Role</c> — the type <c>IsInRole</c> consults, which is what makes
+ /// <c>RequireRole</c> / <c>[Authorize(Roles = "...")]</c> resolve on both the cookie and bearer
+-/// paths. ClaimSetFactory.RolesClaim still reads <c>roles</c>, because that is the claim-set
++/// paths. PortalClaims.RolesClaim still reads <c>roles</c>, because that is the claim-set
+ /// contract from the token PAYLOAD, which the inbound mapping does not touch.
+ /// </para>
+ /// <para>
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/HandshakeSessionEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/HandshakeSessionEndpointTests.cs
+new file mode 100644
+index 00000000..2ca7acd8
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/HandshakeSessionEndpointTests.cs
+@@ -0,0 +1,170 @@
++using System.Net;
++using System.Net.Http.Json;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Options;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// <c>POST /auth/handshake/session</c> coverage (round <c>portal-session-adoption</c> D3): a D6
++/// handshake code plus its bound redirect URI redeems for the caller's opaque session id — the
++/// minimal generalization that lets a second portal establish its own cookie. The failure taxonomy
++/// is the <c>BootstrapRedeem</c> one over the handshake store (replay → <c>invalid_code</c> 404,
++/// TTL → <c>code_expired</c> 400, URI mismatch → <c>redirect_uri_mismatch</c> 400, blank URI →
++/// <c>redirect_uri_required</c> 400, omitted code → <c>invalid_code</c> 404, never a 500), there is
++/// deliberately NO allowlist re-check (the allowlist is enforced at issuance,
++/// <c>ExchangeEndpoints.Exchange</c>), and a bootstrap code is NOT redeemable
++/// here — the two code namespaces are disjoint exactly as built (AC4). The response carries only
++/// the opaque session id — no token (AC11).
++/// </summary>
++[TestClass]
++public class HandshakeSessionEndpointTests
++{
++    private const string AccessToken = "seeded_access_token";
++    private const string RefreshToken = "seeded_refresh_token";
++    private const string RedirectUri = "http://localhost:5310/auth/callback";
++
++    /// <summary>Mints a D6 code bound to <paramref name="redirectUri"/> for a live custody session,
++    /// exactly as the exchange does, and returns the code.</summary>
++    private static string MintCode(AuthEndpointTestHost host, string redirectUri = RedirectUri) =>
++        host.Services.GetRequiredService<OneTimeCodeStore>().Create(
++            redirectUri,
++            host.Services.GetRequiredService<PortalSessionStore>().Create(
++                AccessToken, RefreshToken, SessionEndpointTests.JwtWithClaims("Dev School", ["teacher"]), 3600));
++
++    private static async Task<HttpResponseMessage> RedeemAsync(AuthEndpointTestHost host, string code, string redirectUri) =>
++        await host.Client.PostAsJsonAsync("/auth/handshake/session",
++            new HandshakeSessionEndpoints.HandshakeSessionRequest(code, redirectUri));
++
++    [TestMethod]
++    public async Task AValidCode_YieldsTheBoundSessionId()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var code = MintCode(host);
++
++        var response = await RedeemAsync(host, code, RedirectUri);
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        var sessionId = JsonDocument.Parse(await response.Content.ReadAsStringAsync())
++            .RootElement.GetProperty("sessionId").GetString();
++        sessionId.Should().NotBeNullOrEmpty();
++
++        // The redeemed id is a LIVE custody session (the same one the exchange seeded) — the
++        // portal's cookie is not an orphan.
++        host.Services.GetRequiredService<PortalSessionStore>().Get(sessionId!).Should().NotBeNull();
++    }
++
++    [TestMethod]
++    public async Task AReplay_Is404_InvalidCode()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var code = MintCode(host);
++
++        (await RedeemAsync(host, code, RedirectUri)).StatusCode.Should().Be(HttpStatusCode.OK);
++
++        var replay = await RedeemAsync(host, code, RedirectUri);
++
++        replay.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await replay.Content.ReadAsStringAsync()).Should().Contain("invalid_code");
++    }
++
++    [TestMethod]
++    public async Task AnOmittedCode_Is404_InvalidCode_Not500()
++    {
++        // The guard, not the store's null check: an omitted/null code must answer the taxonomy's
++        // unknown-code shape instead of surfacing as a 500 (AC4's taxonomy is a 4xx everywhere).
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        var response = await host.Client.PostAsJsonAsync(
++            "/auth/handshake/session",
++            new { redirectUri = RedirectUri });
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("invalid_code");
++    }
++
++    [TestMethod]
++    public async Task AUriMismatch_Is400()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var code = MintCode(host);
++
++        var response = await RedeemAsync(host, code, "http://attacker.test/auth/callback");
++
++        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("redirect_uri_mismatch");
++    }
++
++    [TestMethod]
++    public async Task ABlankRedirectUri_Is400()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var code = MintCode(host);
++
++        var response = await RedeemAsync(host, code, string.Empty);
++
++        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("redirect_uri_required");
++    }
++
++    [TestMethod]
++    public async Task AnExpiredCode_Is400_CodeExpired()
++    {
++        // The TTL case the hosted path cannot reach without sleeping: the store and the endpoint
++        // run directly over a controllable clock (the SessionEndpointTests/RedeemEndpointTests
++        // direct-invocation pattern).
++        var clock = new FakeTimeProvider();
++        var options = EndpointTestSupport.OptionsFor(codeTtl: TimeSpan.FromSeconds(60));
++        var sessions = new PortalSessionStore(clock, options);
++        var codes = new OneTimeCodeStore(clock, options);
++        var sessionId = sessions.Create(AccessToken, RefreshToken, SessionEndpointTests.JwtWithClaims("Dev School", ["teacher"]), 3600);
++        var code = codes.Create(RedirectUri, sessionId);
++
++        clock.Now = clock.Now.AddSeconds(61);
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            HandshakeSessionEndpoints.Redeem(new HandshakeSessionEndpoints.HandshakeSessionRequest(code, RedirectUri), codes));
++
++        status.Should().Be(400);
++        body.Should().Contain("code_expired");
++    }
++
++    [TestMethod]
++    public async Task ABootstrapCode_IsNotRedeemableThere_NamespaceDisjoint()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = host.Services.GetRequiredService<PortalSessionStore>().Create(
++            AccessToken, RefreshToken, SessionEndpointTests.JwtWithClaims("Dev School", ["teacher"]), 3600);
++        var bootstrapCode = new BootstrapCodeStore(
++            host.Services.GetRequiredService<TimeProvider>(),
++            Microsoft.Extensions.Options.Options.Create(new AuthServiceOptions { OneTimeCodeTtl = TimeSpan.FromSeconds(60) }))
++            .Create("http://localhost:5700/bootstrap", sessionId);
++
++        var response = await RedeemAsync(host, bootstrapCode, "http://localhost:5700/bootstrap");
++
++        // A bootstrap code simply does not exist in the handshake store's namespace — the same
++        // 404 a replay or a forged code gets. The inverse holds too: /auth/bootstrap/redeem never
++        // sees a handshake code (the store instances are separate by construction).
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("invalid_code");
++    }
++
++    [TestMethod]
++    public async Task TheResponse_CarriesNoToken()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var code = MintCode(host);
++
++        var body = await (await RedeemAsync(host, code, RedirectUri)).Content.ReadAsStringAsync();
++
++        // AC11, VALUE-based: the fixture's token strings must never appear in the response.
++        body.Should().NotContain(AccessToken);
++        body.Should().NotContain(RefreshToken);
++    }
++}
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAuthProviderTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAuthProviderTests.cs
+index b32656ca..6c892560 100644
+--- a/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAuthProviderTests.cs
++++ b/tests/SchoolCollab.Auth.Tests.Unit/KeycloakAuthProviderTests.cs
+@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
+ using SchoolCollab.Auth.Options;
+ using SchoolCollab.Auth.Providers;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Tests.Unit;
+ 
+@@ -420,8 +421,10 @@ public class KeycloakAuthProviderTests
+     {
+         // The handler materializes the principal from these very names; a drift between the
+         // factory's constants and the realm mapper contract is what D9 forbids.
+-        ClaimSetFactory.TenantIdClaim.Should().Be("tenant_id");
+-        ClaimSetFactory.TeacherIdClaim.Should().Be("teacher_id");
+-        ClaimSetFactory.RolesClaim.Should().Be("roles");
++        // The claim names are the shared-kernel spelling (D19/D1): the realm mapper contract pins
++        // PortalClaims' constants, and the factory reads exactly them.
++        PortalClaims.TenantIdClaim.Should().Be("tenant_id");
++        PortalClaims.TeacherIdClaim.Should().Be("teacher_id");
++        PortalClaims.RolesClaim.Should().Be("roles");
+     }
+ }
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs
+index ac1bd8d4..016837bc 100644
+--- a/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs
++++ b/tests/SchoolCollab.Auth.Tests.Unit/MediatedReadEndpointTests.cs
+@@ -6,10 +6,10 @@ using Microsoft.AspNetCore.Http;
+ using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Logging.Abstractions;
+ using Microsoft.VisualStudio.TestTools.UnitTesting;
+-using SchoolCollab.Auth.Auth;
+ using SchoolCollab.Auth.Endpoints;
+ using SchoolCollab.Auth.Providers;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Tests.Unit;
+ 
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionAuthenticationHandlerTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionAuthenticationHandlerTests.cs
+index 16f53a9a..c59a62b6 100644
+--- a/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionAuthenticationHandlerTests.cs
++++ b/tests/SchoolCollab.Auth.Tests.Unit/PortalSessionAuthenticationHandlerTests.cs
+@@ -1,141 +1,25 @@
+ using System.Security.Claims;
+-using System.Text.Encodings.Web;
+ using FluentAssertions;
+-using Microsoft.AspNetCore.Authentication;
+-using Microsoft.AspNetCore.Http;
+ using Microsoft.Extensions.DependencyInjection;
+-using Microsoft.Extensions.Logging.Abstractions;
+-using Microsoft.Extensions.Options;
+ using Microsoft.VisualStudio.TestTools.UnitTesting;
+-using SchoolCollab.Auth.Auth;
+-using SchoolCollab.Auth.Providers;
+ using SchoolCollab.Auth.Services;
++using SchoolCollab.Core.Auth;
+ 
+ namespace SchoolCollab.Auth.Tests.Unit;
+ 
+ /// <summary>
+-/// The portal-session authentication scheme (pass B5 / spec D12): the opaque session id the portal
+-/// presents becomes a principal carrying the SAME claim set the OIDC paths produce (D9) — including
+-/// <see cref="ClaimTypes.Role"/> entries, so <c>RequireRole</c> resolves — and every failure mode
+-/// (no header, unknown session, expired session, a token payload without the claim contract) fails
+-/// closed with <c>NoResult</c> and a bare <c>401</c> challenge, never a redirect and never a
+-/// partially-populated principal.
++/// The portal-session authentication scheme's HOST-LEVEL tests (spec D12/D15): a live custody
++/// session authenticates the portal's own admin surface and the failure modes fail closed with a
++/// bare 401. The scheme itself lives in the shared kernel (round <c>portal-session-adoption</c>
++/// D19/D1); its in-process handler tests — the fail-closed contract, the claim materialization and
++/// the challenge — moved with it to <c>tests/SchoolCollab.Core.Tests.Unit/Auth/</c>, which is where
++/// they can be run against a stubbed claims port instead of real custody.
+ /// </summary>
+ [TestClass]
+ public class PortalSessionAuthenticationHandlerTests
+ {
+     private const string AccessToken = "seeded_access_token";
+     private const string RefreshToken = "seeded_refresh_token";
+-    private const string TeacherId = "00000000-0000-0000-0000-000000000003";
+-
+-    private static readonly string ClaimBearingIdToken =
+-        SessionEndpointTests.JwtWithClaims("Dev School", ["user-admin", "platform-admin"]);
+-
+-    [TestMethod]
+-    public async Task ValidSession_AuthenticatesWithTheFullClaimSet()
+-    {
+-        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
+-            new SessionEndpointTests.FakeTimeProvider(),
+-            new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)));
+-        var sessionId = sessions.Create(AccessToken, RefreshToken, ClaimBearingIdToken, 3600);
+-
+-        var (result, _) = await AuthenticateAsync(provider, sessionId);
+-
+-        result.Succeeded.Should().BeTrue();
+-        var principal = result.Principal!;
+-        principal.Identity!.AuthenticationType.Should().Be(PortalSessionAuthenticationHandler.SchemeName);
+-        principal.Identity.IsAuthenticated.Should().BeTrue();
+-        principal.FindFirst(ClaimSetFactory.TenantIdClaim)!.Value
+-            .Should().Be("00000000-0000-0000-0000-000000000002");
+-        principal.FindFirst(ClaimSetFactory.TenantNameClaim)!.Value.Should().Be("Dev School");
+-        principal.FindFirst(ClaimSetFactory.TenantTypeClaim)!.Value.Should().Be("School");
+-        principal.FindFirst(ClaimSetFactory.TeacherIdClaim)!.Value.Should().Be(TeacherId);
+-
+-        // D9 parity: RequireRole/IsInRole must resolve on this path exactly as on cookie/bearer.
+-        principal.IsInRole("user-admin").Should().BeTrue();
+-        principal.IsInRole("platform-admin").Should().BeTrue();
+-        principal.IsInRole("some-other-role").Should().BeFalse();
+-    }
+-
+-    [TestMethod]
+-    public async Task NoSessionHeader_IsNoResult_AndChallengesWith401()
+-    {
+-        var (provider, _, _) = SessionEndpointTests.BuildProvider(
+-            new SessionEndpointTests.FakeTimeProvider(),
+-            new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)));
+-
+-        var (result, context) = await AuthenticateAsync(provider, sessionId: null);
+-
+-        result.Succeeded.Should().BeFalse();
+-        result.None.Should().BeTrue();
+-        context.Response.StatusCode.Should().Be(401);
+-        context.Response.Headers.Location.Should().BeEmpty();
+-    }
+-
+-    [TestMethod]
+-    public async Task UnknownSession_IsNoResult()
+-    {
+-        var (provider, _, _) = SessionEndpointTests.BuildProvider(
+-            new SessionEndpointTests.FakeTimeProvider(),
+-            new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)));
+-
+-        var (result, _) = await AuthenticateAsync(provider, "0000000000000000000000000000000000000000000000000000000000000000");
+-
+-        result.Succeeded.Should().BeFalse();
+-        result.None.Should().BeTrue();
+-    }
+-
+-    [TestMethod]
+-    public async Task ExpiredSession_IsNoResult()
+-    {
+-        var clock = new SessionEndpointTests.FakeTimeProvider();
+-        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
+-            clock, new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)));
+-        var sessionId = sessions.Create(AccessToken, RefreshToken, ClaimBearingIdToken, 3600);
+-
+-        clock.Now = clock.Now.AddMinutes(31);
+-
+-        var (result, _) = await AuthenticateAsync(provider, sessionId);
+-
+-        result.Succeeded.Should().BeFalse();
+-        result.None.Should().BeTrue();
+-    }
+-
+-    [TestMethod]
+-    public async Task SessionWithoutTheClaimContract_IsNoResult()
+-    {
+-        // The session IS live, but its token payload lacks the tenant/teacher claims the realm
+-        // mappers contract (D9). Fail closed: a principal half-populated from an unreadable
+-        // claim set would authorize nothing useful and hide the drift.
+-        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(
+-            new SessionEndpointTests.FakeTimeProvider(),
+-            new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)));
+-        var sessionId = sessions.Create(
+-            AccessToken, RefreshToken, "header.eyJzdWIiOiJzZXNzaW9uLWZpeHR1cmUifQ.signature", 3600);
+-
+-        var (result, _) = await AuthenticateAsync(provider, sessionId);
+-
+-        result.Succeeded.Should().BeFalse();
+-        result.None.Should().BeTrue();
+-    }
+-
+-    [TestMethod]
+-    public async Task AuthenticatingAPortalCall_TouchesNoNetwork()
+-    {
+-        // The D18 lifecycle (and its Keycloak round-trips) belongs to the session READ: the scheme
+-        // authenticates on every portal call and must stay a pure custody lookup.
+-        var handler = new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway));
+-        var clock = new SessionEndpointTests.FakeTimeProvider();
+-        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(clock, handler);
+-        var sessionId = sessions.Create(AccessToken, RefreshToken, ClaimBearingIdToken, 300);
+-
+-        clock.Now = clock.Now.AddSeconds(301); // the access token is long elapsed
+-
+-        var (result, _) = await AuthenticateAsync(provider, sessionId);
+-
+-        result.Succeeded.Should().BeTrue();
+-        handler.Requests.Should().Be(0);
+-    }
+ 
+     [TestMethod]
+     public async Task PortalSession_WithUserAdminRole_AuthorizesTheAdminSurface()
+@@ -198,51 +82,4 @@ public class PortalSessionAuthenticationHandlerTests
+                 ? SessionEndpointTests.Json(
+                     System.Net.HttpStatusCode.OK, """[{"id":"u1","username":"alice","enabled":true}]""")
+                 : new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway));
+-
+-    /// <summary>Drives the handler through the framework's own <see cref="IAuthenticationHandler"/>
+-    /// surface (initialize → authenticate → challenge), so neither the principal nor the 401 is
+-    /// asserted through a private path the framework does not use.</summary>
+-    private static async Task<(AuthenticateResult Result, DefaultHttpContext Context)> AuthenticateAsync(
+-        IAuthProvider provider,
+-        string? sessionId)
+-    {
+-        var context = new DefaultHttpContext();
+-        if (sessionId is not null)
+-        {
+-            context.Request.Headers[PortalSessionAuthenticationHandler.SessionHeaderName] = sessionId;
+-        }
+-
+-        var handler = new PortalSessionAuthenticationHandler(
+-            OptionsMonitor(),
+-            NullLoggerFactory.Instance,
+-            UrlEncoder.Default,
+-            provider);
+-
+-        var scheme = new AuthenticationScheme(
+-            PortalSessionAuthenticationHandler.SchemeName,
+-            displayName: null,
+-            handlerType: typeof(PortalSessionAuthenticationHandler));
+-
+-        var authenticationHandler = (IAuthenticationHandler)handler;
+-        await authenticationHandler.InitializeAsync(scheme, context);
+-        var result = await authenticationHandler.AuthenticateAsync();
+-        await authenticationHandler.ChallengeAsync(properties: null);
+-
+-        return (result, context);
+-    }
+-
+-    /// <summary>An <see cref="IOptionsMonitor{T}"/> over a fresh options instance — the scheme
+-    /// carries no settings, so nothing here is under test.</summary>
+-    private static IOptionsMonitor<PortalSessionAuthenticationOptions> OptionsMonitor() => new Monitor();
+-
+-    private sealed class Monitor : IOptionsMonitor<PortalSessionAuthenticationOptions>
+-    {
+-        private readonly PortalSessionAuthenticationOptions _options = new();
+-
+-        public PortalSessionAuthenticationOptions CurrentValue => _options;
+-
+-        public PortalSessionAuthenticationOptions Get(string? name) => _options;
+-
+-        public IDisposable? OnChange(Action<PortalSessionAuthenticationOptions, string?> listener) => null;
+-    }
+ }
+diff --git a/tests/SchoolCollab.Auth.Tests.Unit/SessionClaimsEndpointTests.cs b/tests/SchoolCollab.Auth.Tests.Unit/SessionClaimsEndpointTests.cs
+new file mode 100644
+index 00000000..2a68f128
+--- /dev/null
++++ b/tests/SchoolCollab.Auth.Tests.Unit/SessionClaimsEndpointTests.cs
+@@ -0,0 +1,133 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Auth.Endpoints;
++using SchoolCollab.Auth.Services;
++
++namespace SchoolCollab.Auth.Tests.Unit;
++
++/// <summary>
++/// <c>GET /auth/session/{id}/claims</c> coverage (round <c>portal-session-adoption</c> D2): the
++/// cheap claims read a REMOTE host's portal-session authentication performs. It answers the D9
++/// claim set as data (the <see cref="SessionEndpoints.SessionResponse"/> field spelling minus the
++/// session and lifetime fields), 404 <c>session_not_found</c> for an unknown/expired/claim-less
++/// session, and — the invariant the remote path exists to preserve — it uses the seam's
++/// <see cref="IAuthProvider.ReadClaims"/> projection only: no refresh, no I/O, no Keycloak round
++/// trip. Token-free by construction (AC11).
++/// </summary>
++[TestClass]
++public class SessionClaimsEndpointTests
++{
++    private const string AccessToken = "seeded_access_token";
++    private const string RefreshToken = "seeded_refresh_token";
++    private const string TenantId = "00000000-0000-0000-0000-000000000002";
++    private const string TeacherId = "00000000-0000-0000-0000-000000000003";
++
++    private const string UnknownSessionId =
++        "0000000000000000000000000000000000000000000000000000000000000000";
++
++    private static string SeedSession(AuthEndpointTestHost host) =>
++        host.Services.GetRequiredService<PortalSessionStore>()
++            .Create(AccessToken, RefreshToken, SessionEndpointTests.JwtWithClaims("Dev School", ["user-admin"]), 3600);
++
++    // ── Hosted read path ────────────────────────────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task GetClaims_ReturnsTheClaimSetAsData_NoTokenInBody()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = SeedSession(host);
++
++        var response = await host.Client.GetAsync($"/auth/session/{sessionId}/claims");
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        var json = await response.Content.ReadAsStringAsync();
++        using var doc = JsonDocument.Parse(json);
++        var root = doc.RootElement;
++        root.GetProperty("tenantId").GetString().Should().Be(TenantId);
++        root.GetProperty("tenantName").GetString().Should().Be("Dev School");
++        root.GetProperty("tenantType").GetString().Should().Be("School");
++        root.GetProperty("teacherId").GetString().Should().Be(TeacherId);
++        root.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).Should().Contain("user-admin");
++
++        // The SessionResponse-only fields are deliberately absent: this read carries no session or
++        // lifetime state — the D18 lifecycle belongs to the session read itself.
++        root.TryGetProperty("sessionId", out _).Should().BeFalse();
++        root.TryGetProperty("expiresInSeconds", out _).Should().BeFalse();
++
++        // AC11, VALUE-based: the fixture's token strings never appear.
++        json.Should().NotContain(AccessToken);
++        json.Should().NotContain(RefreshToken);
++        json.Should().NotContain("id_token");
++    }
++
++    [TestMethod]
++    public async Task GetClaims_UnknownSession_Is404()
++    {
++        await using var host = await AuthEndpointTestHost.StartAsync();
++
++        var response = await host.Client.GetAsync($"/auth/session/{UnknownSessionId}/claims");
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++        (await response.Content.ReadAsStringAsync()).Should().Contain("session_not_found");
++    }
++
++    [TestMethod]
++    public async Task GetClaims_TokenWithoutTheClaimContract_Is404()
++    {
++        // The session is live, but ReadClaims refuses a payload without the pinned claim contract —
++        // the same fail-closed null the remote reader maps to NoResult (a bare 401), never a 500 or
++        // a partial principal.
++        await using var host = await AuthEndpointTestHost.StartAsync();
++        var sessionId = host.Services.GetRequiredService<PortalSessionStore>().Create(
++            AccessToken, RefreshToken, "header.eyJzdWIiOiJzZXNzaW9uLWZpeHR1cmUifQ.signature", 3600);
++
++        var response = await host.Client.GetAsync($"/auth/session/{sessionId}/claims");
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    // ── The cheap-read invariant (direct invocation: fake clock + scripted transport) ───────
++
++    [TestMethod]
++    public async Task GetClaims_ElapsedAccessToken_TouchesNoTransport()
++    {
++        // THE invariant D2 exists for: the claims read projects custody as-is. Even with the access
++        // token long elapsed (a read that refreshed would have hit Keycloak), zero requests leave.
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var handler = new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway));
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(clock, handler);
++        var sessionId = sessions.Create(AccessToken, RefreshToken, SessionEndpointTests.JwtWithClaims("Dev School", ["user-admin"]), 300);
++
++        clock.Now = clock.Now.AddSeconds(301); // the access token is long elapsed
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            SessionEndpoints.GetClaims(sessionId, provider));
++
++        status.Should().Be(200);
++        body.Should().Contain("Dev School");
++        handler.Requests.Should().Be(0, "authenticating a portal call must not trigger a Keycloak refresh");
++    }
++
++    [TestMethod]
++    public async Task GetClaims_DelegatesToReadClaims_AndNothingElse()
++    {
++        // A session whose custody entry exists (so ReadSessionAsync-style lifecycle work is
++        // reachable in principle) still answers from the pure projection: the read is the D15
++        // seam's ReadClaims member and nothing else.
++        var clock = new SessionEndpointTests.FakeTimeProvider();
++        var handler = new SessionEndpointTests.ScriptedHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway));
++        var (provider, sessions, _) = SessionEndpointTests.BuildProvider(clock, handler);
++        var sessionId = sessions.Create(AccessToken, RefreshToken, SessionEndpointTests.JwtWithClaims("Dev School", ["teacher"]), 3600);
++
++        var (status, body) = await EndpointTestSupport.ExecuteAsync(
++            SessionEndpoints.GetClaims(sessionId, provider));
++
++        status.Should().Be(200);
++        body.Should().Contain(TeacherId);
++        handler.Requests.Should().Be(0);
++    }
++}
+diff --git a/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalSessionAuthenticationHandlerTests.cs b/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalSessionAuthenticationHandlerTests.cs
+new file mode 100644
+index 00000000..d9580767
+--- /dev/null
++++ b/tests/SchoolCollab.Core.Tests.Unit/Auth/PortalSessionAuthenticationHandlerTests.cs
+@@ -0,0 +1,307 @@
++using System.Security.Claims;
++using System.Text.Encodings.Web;
++using FluentAssertions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.Extensions.Options;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Core.Auth;
++
++namespace SchoolCollab.Core.Tests.Unit.Auth;
++
++/// <summary>
++/// The portal-session authentication scheme's IN-PROCESS tests (spec D12/D15; round
++/// <c>portal-session-adoption</c> D19/D1 — moved here with the handler from
++/// <c>SchoolCollab.Auth</c>, where the real-custody host-level half stays): the opaque session id
++/// the portal presents becomes a principal carrying the SAME claim set the OIDC paths produce (D9)
++/// — including <see cref="ClaimTypes.Role"/> entries, so <c>RequireRole</c> resolves — and every
++/// failure mode (no header, an unknown/expired session, a claim set the port refuses) fails closed
++/// with <c>NoResult</c> and a bare <c>401</c> challenge, never a redirect and never a
++/// partially-populated principal. The handler consults ONLY the claims port, so the tests drive it
++/// through a stub port — the same contract the auth service's in-process adapter and the
++/// Assignments API's remote reader both implement.
++/// <para>
++/// These helpers are deliberately LOCAL to this assembly (no cross-assembly reuse of
++/// <c>Auth.Tests.Unit</c>'s <c>BuildProvider</c>/<c>JwtWithClaims</c>/<c>FakeTimeProvider</c>/
++/// <c>ScriptedHandler</c>): Core.Tests.Unit must not depend on the auth service's test fixtures.
++/// </para>
++/// </summary>
++[TestClass]
++public class PortalSessionAuthenticationHandlerTests
++{
++    private static readonly string TenantId = "00000000-0000-0000-0000-000000000002";
++    private static readonly string TeacherId = "00000000-0000-0000-0000-000000000003";
++
++    private static readonly PortalClaims FullClaims =
++        new(TenantId, "Dev School", "School", TeacherId, ["user-admin", "platform-admin"]);
++
++    // ── The handler against a stubbed claims port ─────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task ValidSession_AuthenticatesWithTheFullClaimSet()
++    {
++        var port = new FakeClaimsReader { NextClaims = FullClaims };
++
++        var (result, _) = await AuthenticateAsync(port, sessionId: "session-id-1");
++
++        result.Succeeded.Should().BeTrue();
++        port.Calls.Should().Be(1, "the handler consults the claims port exactly once per request");
++        port.LastSessionId.Should().Be("session-id-1");
++        var principal = result.Principal!;
++        principal.Identity!.AuthenticationType.Should().Be(PortalSessionAuthenticationHandler.SchemeName);
++        principal.Identity.IsAuthenticated.Should().BeTrue();
++        principal.FindFirst(PortalClaims.TenantIdClaim)!.Value.Should().Be(TenantId);
++        principal.FindFirst(PortalClaims.TenantNameClaim)!.Value.Should().Be("Dev School");
++        principal.FindFirst(PortalClaims.TenantTypeClaim)!.Value.Should().Be("School");
++        principal.FindFirst(PortalClaims.TeacherIdClaim)!.Value.Should().Be(TeacherId);
++
++        // D9 parity: RequireRole/IsInRole must resolve on this path exactly as on cookie/bearer.
++        principal.IsInRole("user-admin").Should().BeTrue();
++        principal.IsInRole("platform-admin").Should().BeTrue();
++        principal.IsInRole("some-other-role").Should().BeFalse();
++    }
++
++    [TestMethod]
++    public async Task NoSessionHeader_IsNoResult_AndChallengesWith401()
++    {
++        var port = new FakeClaimsReader();
++
++        var (result, context) = await AuthenticateAsync(port, sessionId: null);
++
++        result.Succeeded.Should().BeFalse();
++        result.None.Should().BeTrue();
++        port.Calls.Should().Be(0, "an absent header never reaches the claims port");
++        context.Response.StatusCode.Should().Be(401);
++        context.Response.Headers.Location.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task CustodyNull_IsNoResult()
++    {
++        // The port answers null for an unknown session, an expired one and a token payload without
++        // the pinned claim contract alike — the three custody-refusal states share one fail-closed
++        // answer (the auth-service adapter and the remote reader both produce null for them).
++        var (result, _) = await AuthenticateAsync(new FakeClaimsReader(), sessionId: "unknown-or-dead");
++
++        result.Succeeded.Should().BeFalse();
++        result.None.Should().BeTrue();
++    }
++
++    [TestMethod]
++    public async Task Challenge_IsABare401_EvenForASuccessfulScheme()
++    {
++        var port = new FakeClaimsReader { NextClaims = FullClaims };
++
++        var (result, context) = await AuthenticateAsync(port, sessionId: "session-id-1");
++
++        // The challenge pin is unconditional: a portal session cannot be redirected to a login UI,
++        // so the gateway's ForwardChallenge stays this scheme's bare 401 in every state.
++        result.Succeeded.Should().BeTrue();
++        context.Response.StatusCode.Should().Be(401);
++        context.Response.Headers.Location.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task AuthenticatingAPortalCall_TouchesNothingButThePort()
++    {
++        // The D18 lifecycle (and its Keycloak round-trips) belongs to the session READ: the scheme
++        // authenticates on every portal call and must stay a pure claims-port lookup. The stub port
++        // models the auth service's in-process adapter over IAuthProvider.ReadClaims — genuinely
++        // I/O-free — so a live session's principal comes back with zero transport work.
++        var port = new FakeClaimsReader { NextClaims = FullClaims };
++
++        var (result, _) = await AuthenticateAsync(port, sessionId: "session-id-1");
++
++        result.Succeeded.Should().BeTrue();
++        port.Calls.Should().Be(1);
++        port.TouchedTransport.Should().BeFalse();
++    }
++
++    [TestMethod]
++    public void TheClaimNameConstants_AreTheRealmMapperContract()
++    {
++        // The handler materializes the principal from these very names; a drift between the
++        // shared-kernel constants and the realm mapper contract is what D9 forbids. Asserted in the
++        // Core spelling, where the constants now live (D19/D1).
++        PortalClaims.TenantIdClaim.Should().Be("tenant_id");
++        PortalClaims.TenantNameClaim.Should().Be("tenant_name");
++        PortalClaims.TenantTypeClaim.Should().Be("tenant_type");
++        PortalClaims.TeacherIdClaim.Should().Be("teacher_id");
++        PortalClaims.RolesClaim.Should().Be("roles");
++    }
++
++    // ── The gateway selector ───────────────────────────────────────────────────────────────────
++
++    [TestMethod]
++    public void Selector_WithASessionHeader_PortalSessionWins_WhateverTheFallback()
++    {
++        var (context, _) = HttpContexts(sessionId: "session-id-1", disableOidcAuth: false);
++
++        PortalSessionAuthenticationHandler.SelectAuthenticationScheme(context, fallbackScheme: "Bearer")
++            .Should().Be(PortalSessionAuthenticationHandler.SchemeName);
++    }
++
++    [TestMethod]
++    public void Selector_RealAuth_WithAPinnedFallback_ResolvesToTheFallback()
++    {
++        // THE AC2 half: a bearer-presenting (or otherwise non-portal) caller keeps its own scheme —
++        // the pin restores today's authentication union for callers whose host default would
++        // otherwise substitute the OIDC cookie.
++        var (context, _) = HttpContexts(sessionId: null, disableOidcAuth: false);
++
++        PortalSessionAuthenticationHandler.SelectAuthenticationScheme(context, fallbackScheme: "Bearer")
++            .Should().Be("Bearer");
++    }
++
++    [TestMethod]
++    public void Selector_DevFlagOn_TheHostsOwnSchemeWins_OverThePin()
++    {
++        // FEATURE:DisableOIDCAuth ON keeps today's dev posture (TestAuth auto-authenticates) even
++        // where a fallback is pinned — the flag resolves per request from the request's config.
++        var (context, _) = HttpContexts(sessionId: null, disableOidcAuth: true, defaultScheme: "TestAuth");
++
++        PortalSessionAuthenticationHandler.SelectAuthenticationScheme(context, fallbackScheme: "Bearer")
++            .Should().Be("TestAuth");
++    }
++
++    [TestMethod]
++    public void Selector_WithoutAPin_TheHostDefaultResolves_AsBefore()
++    {
++        var (context, _) = HttpContexts(sessionId: null, disableOidcAuth: false, defaultAuthenticateScheme: "Cookies");
++
++        PortalSessionAuthenticationHandler.SelectAuthenticationScheme(context)
++            .Should().Be("Cookies", "a null fallback preserves the pre-adoption host-default resolution");
++    }
++
++    [TestMethod]
++    public void Selector_WithAnUnparseableDevFlag_FailsClosedToThePinnedFallback()
++    {
++        // Absent/invalid ⇒ fail-closed real auth ⇒ the pin — an unparseable flag value can never
++        // switch a principal onto a scheme the host did not register.
++        var (context, _) = HttpContexts(sessionId: null, disableOidcAuth: false, flagValue: "not-a-bool");
++
++        PortalSessionAuthenticationHandler.SelectAuthenticationScheme(context, fallbackScheme: "Bearer")
++            .Should().Be("Bearer");
++    }
++
++    // ── Fixtures ───────────────────────────────────────────────────────────────────────────────
++
++    /// <summary>A claims port whose answers are canned per test: <see cref="NextClaims"/> is
++    /// returned once and then the port reverts to <c>null</c> (so a replay-looking second call is
++    /// distinguishable), and every call is counted.</summary>
++    private sealed class FakeClaimsReader : IPortalSessionClaimsReader
++    {
++        public PortalClaims? NextClaims { get; set; }
++
++        public int Calls { get; private set; }
++
++        public string? LastSessionId { get; private set; }
++
++        public bool TouchedTransport { get; private set; }
++
++        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
++        {
++            Calls++;
++            LastSessionId = sessionId;
++            var claims = NextClaims;
++            NextClaims = null;
++            return ValueTask.FromResult(claims);
++        }
++    }
++
++    /// <summary>Drives the handler through the framework's own <see cref="IAuthenticationHandler"/>
++    /// surface (initialize → authenticate → challenge), so neither the principal nor the 401 is
++    /// asserted through a private path the framework does not use.</summary>
++    private static async Task<(AuthenticateResult Result, DefaultHttpContext Context)> AuthenticateAsync(
++        IPortalSessionClaimsReader claimsReader,
++        string? sessionId)
++    {
++        var context = new DefaultHttpContext();
++        context.RequestServices = ServicesWith(claimsReader);
++        if (sessionId is not null)
++        {
++            context.Request.Headers[PortalSessionAuthenticationHandler.SessionHeaderName] = sessionId;
++        }
++
++        var handler = new PortalSessionAuthenticationHandler(
++            OptionsMonitor(),
++            NullLoggerFactory.Instance,
++            UrlEncoder.Default,
++            claimsReader);
++
++        var scheme = new AuthenticationScheme(
++            PortalSessionAuthenticationHandler.SchemeName,
++            displayName: null,
++            handlerType: typeof(PortalSessionAuthenticationHandler));
++
++        var authenticationHandler = (IAuthenticationHandler)handler;
++        await authenticationHandler.InitializeAsync(scheme, context);
++        var result = await authenticationHandler.AuthenticateAsync();
++        await authenticationHandler.ChallengeAsync(properties: null);
++
++        return (result, context);
++    }
++
++    private static IServiceProvider ServicesWith(IPortalSessionClaimsReader claimsReader)
++    {
++        var services = new ServiceCollection();
++        services.AddLogging();
++        services.AddSingleton<IPortalSessionClaimsReader>(claimsReader);
++        services.AddOptions();
++        return services.BuildServiceProvider();
++    }
++
++    /// <summary>An <see cref="IOptionsMonitor{T}"/> over a fresh options instance — the scheme
++    /// carries no settings, so nothing here is under test.</summary>
++    private static IOptionsMonitor<PortalSessionAuthenticationOptions> OptionsMonitor() => new Monitor();
++
++    private sealed class Monitor : IOptionsMonitor<PortalSessionAuthenticationOptions>
++    {
++        private readonly PortalSessionAuthenticationOptions _options = new();
++
++        public PortalSessionAuthenticationOptions CurrentValue => _options;
++
++        public PortalSessionAuthenticationOptions Get(string? name) => _options;
++
++        public IDisposable? OnChange(Action<PortalSessionAuthenticationOptions, string?> listener) => null;
++    }
++
++    /// <summary>A request context whose config and authentication options are set per test: the
++    /// selector resolves the dev flag from the request's configuration and the host default from
++    /// <see cref="AuthenticationOptions"/>, exactly as a real pipeline would supply them.</summary>
++    private static (DefaultHttpContext Context, ServiceProvider Provider) HttpContexts(
++        string? sessionId,
++        bool disableOidcAuth,
++        string? flagValue = null,
++        string? defaultScheme = null,
++        string? defaultAuthenticateScheme = null)
++    {
++        var configuration = new ConfigurationBuilder()
++            .AddInMemoryCollection(new Dictionary<string, string?>
++            {
++                ["FeatureFlags:FEATURE:DisableOIDCAuth"] = flagValue ?? (disableOidcAuth ? "true" : "false"),
++            })
++            .Build();
++
++        var services = new ServiceCollection();
++        services.AddSingleton<IConfiguration>(configuration);
++        services.AddOptions();
++        services.Configure<AuthenticationOptions>(options =>
++        {
++            options.DefaultScheme = defaultScheme ?? "Bearer";
++            options.DefaultAuthenticateScheme = defaultAuthenticateScheme ?? (defaultScheme ?? "Bearer");
++        });
++        var provider = services.BuildServiceProvider();
++
++        var context = new DefaultHttpContext { RequestServices = provider };
++        if (sessionId is not null)
++        {
++            context.Request.Headers[PortalSessionAuthenticationHandler.SessionHeaderName] = sessionId;
++        }
++
++        return (context, provider);
++    }
++}

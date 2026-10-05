@@ -77,20 +77,23 @@ public static class AssignmentEndpoints
 
     /// <summary>
     /// The one disjunctive teacher-portal reader policy: <c>teacher</c> ∨ <c>staff</c> ∨
-    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the bearer scheme and authenticated. Built
-    /// inline (the <c>AuthEndpointGroup.ConfigurePortalFacingAdminPolicy</c> precedent) rather
-    /// than registered as a named policy: the hosts that compose this pipeline in tests call
-    /// <c>AddAuthAndTenancy</c> without Assignments' <c>Program.cs</c>, and an unresolvable named
-    /// policy throws out of <c>AuthorizationPolicy.Combine</c> on every request to a route that
-    /// names it. The scheme and authenticated-user requirements are restated here so the policy
-    /// is self-sufficient for the routes it decorates.
+    /// <c>user-admin</c> ∨ <c>platform-admin</c>, on the portal-session GATEWAY scheme and
+    /// authenticated (round <c>portal-session-adoption</c> D4/D19 — the policy's single scheme is
+    /// the gateway, which routes a portal session to the portal-session scheme, a bearer caller to
+    /// Bearer, and a dev caller to TestAuth; registered in every flag state, so the challenge can
+    /// never 500). Built inline (the <c>AuthEndpointGroup.ConfigurePortalFacingAdminPolicy</c>
+    /// precedent) rather than registered as a named policy: the hosts that compose this pipeline
+    /// in tests call <c>AddAuthAndTenancy</c> without Assignments' <c>Program.cs</c>, and an
+    /// unresolvable named policy throws out of <c>AuthorizationPolicy.Combine</c> on every request
+    /// to a route that names it. The scheme and authenticated-user requirements are restated here
+    /// so the policy is self-sufficient for the routes it decorates.
     /// </summary>
     internal static void RequireAssignmentReader(AuthorizationPolicyBuilder policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
 
         policy
-            .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)
+            .AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)
             .RequireAuthenticatedUser()
             .RequireRole(
                 RealmRoleNames.Teacher,

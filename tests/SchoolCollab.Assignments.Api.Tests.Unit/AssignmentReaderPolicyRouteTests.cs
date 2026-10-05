@@ -132,6 +132,15 @@ public class AssignmentReaderPolicyRouteTests
         public TenantContext CurrentTenant => new(Guid.Empty, "Test", TenantType.School);
     }
 
+    /// <summary>D19/D7: the stub claims port the moved portal-session handler authenticates through
+    /// on this host — its canned answer is never consulted by the assertions here (bearer callers
+    /// only), but the registration itself is what the reader policy's gateway needs to exist.</summary>
+    private sealed class StubPortalSessionClaimsReader : IPortalSessionClaimsReader
+    {
+        public ValueTask<PortalClaims?> ReadClaimsAsync(string sessionId, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<PortalClaims?>(null);
+    }
+
     private sealed class StubScopeProvider : ITeacherScopeProvider
     {
         public List<Guid> RequestedTeacherIds { get; } = [];
@@ -201,7 +210,15 @@ public class AssignmentReaderPolicyRouteTests
         builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags(disableOidcAuth));
         builder.Services.AddAuthentication(AuthTenancyExtensions.BearerScheme)
             .AddScheme<AuthenticationSchemeOptions, HeaderPrincipalAuthHandler>(
-                AuthTenancyExtensions.BearerScheme, _ => { });
+                AuthTenancyExtensions.BearerScheme, _ => { })
+            // D19/D7 (portal-session-adoption): the reader policy names the GATEWAY scheme, and a
+            // policy-named scheme without a handler is a 500 — never a 401 — so this host registers
+            // the gateway exactly as Program.cs does, in BOTH flag states, over a stubbed claims
+            // port (the moved handler's required ctor dependency; an unregistered dependency is a
+            // DI failure, not a 401). Bearer callers keep authenticating through the pinned
+            // fallback, unchanged.
+            .AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
+        builder.Services.AddSingleton<IPortalSessionClaimsReader>(new StubPortalSessionClaimsReader());
         builder.Services.AddAuthorization();
         configure?.Invoke(builder.Services);
 
@@ -278,8 +295,10 @@ public class AssignmentReaderPolicyRouteTests
             reader[0].Requirements.OfType<RolesAuthorizationRequirement>().Single().AllowedRoles.Should()
                 .BeEquivalentTo(AssignmentReaderRoles,
                     $"{method} /{pattern} is the disjunctive teacher ∨ staff ∨ user-admin ∨ platform-admin policy");
-            reader[0].AuthenticationSchemes.Should().Equal([AuthTenancyExtensions.BearerScheme],
-                "the reader policy restates the bearer scheme so it is self-sufficient for its routes");
+            reader[0].AuthenticationSchemes.Should().Equal([PortalSessionAuthenticationHandler.GatewaySchemeName],
+                "the reader policy names the portal-session gateway (D19): the single scheme registered "
+                + "in every flag state — portal callers authenticate through it, bearer callers through "
+                + "the pinned Bearer fallback");
         }
     }
 

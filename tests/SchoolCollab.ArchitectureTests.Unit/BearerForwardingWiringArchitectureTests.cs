@@ -113,9 +113,11 @@ public class BearerForwardingWiringArchitectureTests
         var assignmentsApi = Read("src", "Assignments", "SchoolCollab.Assignments.Api", "Program.cs");
 
         assignmentsApi.Should().Contain("ConfigurePrimaryHttpMessageHandler",
-            "row 7: both Assignments.Api clients must disable auto-redirect so a real-auth 302-challenge surfaces as non-2xx.");
-        Count(assignmentsApi, "AllowAutoRedirect = false").Should().Be(2,
-            "both Assignments.Api named clients (students-api, settings-api) must set AllowAutoRedirect = false.");
+            "row 7: every Assignments.Api cross-module client must disable auto-redirect so a real-auth 302-challenge surfaces as non-2xx.");
+        Count(assignmentsApi, "AllowAutoRedirect = false").Should().Be(3,
+            "every Assignments.Api named client (students-api, settings-api, and the portal-session "
+            + "claims reader's auth client — round portal-session-adoption D4, plan amendment "
+            + "2026-10-05) must set AllowAutoRedirect = false.");
     }
 
     private static int OptInCount(string source)

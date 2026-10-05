@@ -5,6 +5,7 @@ using Serilog;
 using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Api.Auth;
 using SchoolCollab.Assignments.Api.Endpoints;
+using SchoolCollab.Assignments.Api.Services;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
 using SchoolCollab.Settings.Core;
@@ -226,6 +227,27 @@ builder.Services.AddNotificationDispatchSweep();
 
 // Auth + tenancy (OIDC via Keycloak)
 builder.Services.AddAuthAndTenancy(builder.Configuration);
+
+// portal-session-adoption (D4/D19): the Assignments API resolves the portal's opaque session id
+// through the SHARED portal-session scheme (the same handler, gateway and claim set the auth
+// service uses — one spelling, no duplicate handler). The gateway is registered in BOTH flag
+// states (a policy-named scheme without a handler is a 500, never a 401), and the fallback is
+// pinned to Bearer under real auth: existing bearer callers must keep authenticating exactly as
+// before, and the host default (the OIDC cookie) would substitute Cookie for them. The dev flag
+// resolves per request inside the selector (TestAuth under FEATURE:DisableOIDCAuth), so this call
+// carries no flag knowledge. The challenge is always the gateway's bare 401 — the fallback
+// governs authentication routing only.
+builder.Services.AddAuthentication().AddPortalSessionAuthentication(AuthTenancyExtensions.BearerScheme);
+
+// The remote claims port the moved handler authenticates through: a cross-module HTTP read of the
+// auth service's GET /auth/session/{id}/claims (D2), fail-closed on transport failure, non-2xx and
+// a non-JSON body (the ar-24 posture) — an auth-service outage 401s portal callers, never fails
+// open. propagateTenant is off: the read's identity IS the session id in the URL, and a dev-tenant
+// header would be a second, weaker source of scope (the same posture the mediated readers use).
+// The literal base address is matched by the AppHost's .WithReference(auth) on assignments-api
+// (CrossModuleWiringTests).
+builder.Services.AddCrossModuleHttpClient<PortalSessionClaimsReader>("https+http://auth", propagateTenant: false)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
 // D5 (Q5, round teacher-scope-auth): bind the dev bypass's teacher_id claim. Inert unless
 // FEATURE:DisableOIDCAuth registers TestAuthHandler; without a configured value the claim is

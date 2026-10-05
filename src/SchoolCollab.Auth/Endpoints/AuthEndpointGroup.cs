@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using SchoolCollab.Auth.Auth;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Constants;
 using SchoolCollab.Core.Features;
 using System.Security.Claims;
@@ -51,6 +51,15 @@ public static class AuthEndpointGroup
         group.MapPost("/bootstrap/redeem", PasskeyEndpoints.BootstrapRedeem);
         group.MapGet("/session/{sessionId}", SessionEndpoints.Get);
         group.MapDelete("/session/{sessionId}", SessionEndpoints.Delete);
+
+        // Round portal-session-adoption (D2/D3). /session/{id}/claims is the cheap, I/O-free claims
+        // read a REMOTE host's portal-session authentication performs over the cross-module client
+        // (no refresh — the handler's documented invariant); /handshake/session redeems a D6
+        // handshake code for the opaque session id so a second portal can establish its own cookie
+        // without custody change. Its authorization is the code's single-use + TTL + URI binding;
+        // the allowlist was enforced at issuance (ExchangeEndpoints.Exchange).
+        group.MapGet("/session/{sessionId}/claims", SessionEndpoints.GetClaims);
+        group.MapPost("/handshake/session", HandshakeSessionEndpoints.Redeem);
 
         // Round B pass B7 — D17's mediated picker reads (/auth/pickers/tenants, /auth/pickers/teachers).
         // The portal holds no credential, so these are its only way to fill a tenant/teacher picker:

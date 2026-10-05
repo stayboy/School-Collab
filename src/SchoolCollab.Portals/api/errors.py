@@ -60,3 +60,56 @@ class MissingConfigurationError(PortalApiError):
         self.key = key
         self.detail = detail
         super().__init__(f"{key} cannot be used: {detail}")
+
+
+class AuthServiceError(PortalApiError):
+    """The auth service answered with one of its typed failure codes.
+
+    The teacher portal's session taxonomy (round ``portal-session-adoption``): the code and
+    optional detail travel as attributes so a route can key its D18 handling on the state
+    (``session_ended`` vs ``session_not_found``) rather than on an HTTP status.
+    """
+
+    def __init__(self, code: str, detail: str | None = None) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(f"the auth service refused ({code})" + (f": {detail}" if detail else ""))
+
+
+class AuthUpstreamError(AuthServiceError):
+    """The auth service's own identity provider could not be reached; session state is unknown."""
+
+
+class SessionEndedError(AuthServiceError):
+    """The session's refresh token was rejected — the session is over (D18 ``session_ended``).
+
+    A route that sees this must clear the session cookie: the session is gone for good.
+    """
+
+
+class SessionNotFoundError(AuthServiceError):
+    """No live session exists under the presented id (D18 ``session_not_found``).
+
+    Treated like :class:`SessionEndedError` for cookie handling (both are dead sessions), but
+    it means "stale cookie", not "revoked by the identity provider".
+    """
+
+
+class HandshakeCodeRejectedError(AuthServiceError):
+    """A one-time handshake code was refused (replay, TTL expiry, redirect-URI mismatch).
+
+    A callback route that sees this must NOT set its cookie: nothing was redeemed.
+    """
+
+
+class TokenInResponseError(PortalApiError):
+    """A service answered with a token-shaped field in its body (AC11) — refused, never ingested."""
+
+    def __init__(self, service: str, base_url: str, keys: tuple[str, ...]) -> None:
+        self.service = service
+        self.base_url = base_url
+        self.keys = keys
+        super().__init__(
+            f"{service} at {base_url} returned a body carrying token-shaped fields {list(keys)} "
+            "— the portal never holds a credential, so the response was refused"
+        )
