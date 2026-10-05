@@ -1,7 +1,7 @@
 # Teachers & Ward Portal — Prefab UI (Python) integration plan
 
-Status: **Phase 0 LANDED; Phase 2 COMPLETE (read-only half + write half); the ward MVP (Phase 1) RETIRED — DECIDED 2026-10-05** — the teacher surface, its auth/scope wiring and its CI all merged to `main` at `b78dc2ae` (stack #297: #295 → #296 → #298 → #299, 2026-10-04). Round `portal-submission-grade` (2026-10-05) landed Phase 2's **write** half: submission review/grade through the portal's own session-gated route, over the existing assignments-api grade endpoint (now reachable by a portal session). **T5's spike boundary — read-only review + submission review/grade — is therefore complete, and with it the go/no-go the plan's Q6 row deferred ("re-decide before any MVP work") came due** — the gate was spelled "Q5" earlier in this file, which was a mis-numbering: Q5 is *Serving*; Q6 carries the re-decide. **The owner's answer (2026-10-05) was NO-GO on the Prefab ward MVP:** the ward surface stays **Blazor** (`src/SchoolCollab.Families`), because the AR-13/14/15 train (#236/#237/#239) had already delivered Phase 1's entire scope — so this portal is the **teacher/staff surface only**, and Phase 4's "go/no-go vs extending the Blazor Families host" is **decided early in favour of Blazor**. Rationale: `documents/solution/ward-surface-decision.md`; the portal's own ward spike page retires with that decision. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
-Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1; **2026-10-04:** the dev-teacher identity wiring landed (round `dev-teacher-identity-wiring`, PR #299) and the 4-layer train merged as stack #297 → `b78dc2ae`, closing the third prerequisite; **2026-10-05:** the teacher write half landed (round `portal-submission-grade`) — submission review/grade through the portal's own session-gated route, completing T5's spike boundary and bringing the go/no-go due (spelled "Q5" in this line when written — the row carrying the re-decide is **Q6**, and Q5 is *Serving*); **2026-10-05 (same session):** the owner's go/no-go answered **no-go** — the ward surface stays Blazor because AR-13/14/15 had already delivered Phase 1's scope; Phase 1 retired, Phase 4 decided early for Blazor, and the portal's ward spike page to retire — see `documents/solution/ward-surface-decision.md`)
+Status: **Phase 0 LANDED; Phase 2 COMPLETE (read-only half + write half); the ward MVP (Phase 1) RETIRED — DECIDED 2026-10-05** — the teacher surface, its auth/scope wiring and its CI all merged to `main` at `b78dc2ae` (stack #297: #295 → #296 → #298 → #299, 2026-10-04). Round `portal-submission-grade` (2026-10-05) landed Phase 2's **write** half: submission review/grade through the portal's own session-gated route, over the existing assignments-api grade endpoint (now reachable by a portal session). **T5's spike boundary — read-only review + submission review/grade — is therefore complete, and with it the go/no-go the plan's Q6 row deferred ("re-decide before any MVP work") came due** — the gate was spelled "Q5" earlier in this file, which was a mis-numbering: Q5 is *Serving*; Q6 carries the re-decide. **The owner's answer (2026-10-05) was NO-GO on the Prefab ward MVP:** the ward surface stays **Blazor** (`src/SchoolCollab.Families`), because the AR-13/14/15 train (#236/#237/#239) had already delivered Phase 1's entire scope — so this portal is the **teacher/staff surface only**, and Phase 4's "go/no-go vs extending the Blazor Families host" is **decided early in favour of Blazor**. Rationale: `documents/solution/ward-surface-decision.md`; the portal's own ward spike page retires with that decision. **SCOPE CLOSED 2026-10-05:** the portal is the teacher's **read/review/grade** surface — T5's boundary is final, not a milestone toward migrating authoring, which stays on the Blazor **Admin** host; and Phase 3's OIDC item is **retired as unnecessary by construction** (the D19 session path means the portal holds no credential and needs none). Rationale and the priced alternative: `documents/solution/portal-scope-decision.md`. The portal's service-client structure (`api/` / `views/` / `tests/`, plus its `.slnx` solution items and their guard) landed on `main` in PR #250 (`a6933c40`); pattern and decisions: `documents/solution/portals-service-client-pattern.md`.
+Date: 2026-09-16 (updated after grill-me session — see `brainstorms/prefab-ui-portals.md`; **2026-09-21:** Phase 0 recorded as landed and **Q1 revised** to a module folder under `src/`; **2026-10-01:** teacher-portal spike + auth-role/policy decisions adopted — §1 T1–T7; **2026-10-03:** the read-only teacher surface landed (round `portal-teacher-surface`) — a flat `views/teacher.py`, the `portals-python` CI job, and the two pre-flip prerequisites recorded in §1; **2026-10-04:** the dev-teacher identity wiring landed (round `dev-teacher-identity-wiring`, PR #299) and the 4-layer train merged as stack #297 → `b78dc2ae`, closing the third prerequisite; **2026-10-05:** the teacher write half landed (round `portal-submission-grade`) — submission review/grade through the portal's own session-gated route, completing T5's spike boundary and bringing the go/no-go due (spelled "Q5" in this line when written — the row carrying the re-decide is **Q6**, and Q5 is *Serving*); **2026-10-05 (same session):** the owner's go/no-go answered **no-go** — the ward surface stays Blazor because AR-13/14/15 had already delivered Phase 1's scope; Phase 1 retired, Phase 4 decided early for Blazor, and the portal's ward spike page to retire — see `documents/solution/ward-surface-decision.md`; **2026-10-05 (same session, scope grill):** the portal's scope **closed** at read/review/grade — authoring stays on the Blazor **Admin** host, so T7's "eventual migration target for the rest" is superseded — and the Phase 3 OIDC item was **retired** as unnecessary by construction rather than deferred; the shared shell stays brand + titles — see `documents/solution/portal-scope-decision.md`)
 Branch context: authored alongside the AR-13 round (branch `stack/13-ar-13-families-ward-surface`, since squash-merged to `main` as PR #236); the AR train (ar-13/ar-14/ar-15 — #236/#237/#239) has since fully merged to `main`. **Code for this plan HAS landed** — see the Status line above. The claim that stood here ("No code for this plan has landed") was true when written and had been false since #296; corrected 2026-10-04.
 
 ## 1. Goal
@@ -48,7 +48,7 @@ assignment feature set.
 | T4 | Enforcement point | **API-side authorization policies** on the assignment endpoint groups (fail-closed), conditional on `FEATURE:DisableOIDCAuth` per `AGENTS.md`. Portal-side hiding is UX only, never the control. |
 | T5 | Spike boundary | **Read-only review**: assignment list + review queue + submission detail + submission review/grade. **No** create/edit/publish in the portal (those stay on the Blazor Admin surface until migrated). |
 | T6 | Auth mode | Dev bypass first (`FEATURE:DisableOIDCAuth=true`, TestAuth) keeps CI container-free; the role/policy wiring lands in the same change and activates when the flag flips. |
-| T7 | Relationship to the Blazor compartments | **Both tracks run** (owner Q5 = A). `documents/specs/assignment-authoring-compartments.md` (Blazor) remains the **authoring destination**; the Prefab teacher portal is a **read/review second surface** for the spike and the eventual migration target for the rest. |
+| T7 | Relationship to the Blazor compartments | **Both tracks run** (owner Q5 = A). `documents/specs/assignment-authoring-compartments.md` (Blazor) remains the **authoring destination**; the Prefab teacher portal is a **read/review second surface** for the spike and the eventual migration target for the rest. *(**Superseded 2026-10-05:** the scope closed at review/grade — authoring stays on the Blazor Admin host — so the portal is not a migration target for it. See §7 item 2 and `documents/solution/portal-scope-decision.md`.)* |
 
 **Consequence — Q3 (“zero backend changes”) is revised for the teacher portal
 only.** T2–T4 require backend work the ward portal does not:
@@ -303,6 +303,13 @@ Preserved for the record (the phase as it was written):
   and an unspent form token. Because this is the write half T5 named, it fires
   the Q5 deferral's trigger: the ward-portal MVP go/no-go is **un-paused**, and
   the owner re-decides Phases 1 and 3–4.
+- **Scope closed (owner decision, 2026-10-05) — T5's boundary is final:** the portal is the
+  teacher's **read/review/grade** surface. Create/edit/publish are **not** a roadmap tail waiting
+  to migrate: they stay on the Blazor **Admin** host, which owns the authoring RCL
+  (`src/Assignments/SchoolCollab.Assignments.Application`, referenced by `SchoolCollab.Admin`
+  alone — verified 2026-10-05). Migrating them would re-implement a dialog-and-section-heavy
+  FluentUI surface in a framework with no router, for a permanent dual-maintenance cost. Priced
+  alternative (a narrow slice) and rationale: `documents/solution/portal-scope-decision.md`.
 - **Auth/roles (T2, T4, T6)**: add `teacher` + `staff` realm roles, the
   assignment endpoint-group authorization policies (flag-conditional), and the
   teacher-scope filter fed by a new Assignments→Students `TeacherGradeLevel` port.
@@ -325,7 +332,11 @@ Preserved for the record (the phase as it was written):
   tenant scoping stays server-side as today. **Annotated 2026-10-05:** the portal is no longer
   credential-less — the D19 portal-session path (round `portal-session-adoption`) gave it an
   opaque session id issued by the auth service — so the older "no credential path" framing is
-  superseded; whether any OIDC work is still wanted is a §7.2 question.
+  superseded; whether any OIDC work is still wanted is a §7.2 question. **ANSWERED 2026-10-05 —
+  RETIRED, not deferred:** the portal holds only the opaque session-id cookie and reaches the APIs
+  *as data* (D12/AC9/AC11), so there is nothing for an OIDC flow to carry; D19 is the whole
+  credential path. A future need (e.g. a second portal) would reopen it explicitly — see
+  `documents/solution/portal-scope-decision.md`.
 
 ### Phase 4 — Decision review (**DECIDED EARLY 2026-10-05 — Blazor wins the ward surface**)
 - Go/no-go vs extending the Blazor Families host: **answered "extend the Blazor host"**.
@@ -337,7 +348,7 @@ Preserved for the record (the phase as it was written):
 | Risk | Mitigation |
 |---|---|
 | Prefab is 0.x with fast breaking releases | Pin exact version in `pyproject.toml`; isolate API client + view layers |
-| Python auth story (OIDC) is unproven here | Deferred to Phase 3; dev bypass flag keeps Phases 0–2 unblocked |
+| Python auth story (OIDC) is unproven here | *(**Historical, 2026-10-05:** the auth story was settled by the **D19 portal-session path**, not by OIDC — the portal holds no credential and needs none, and the Phase 3 OIDC item is retired. Kept for the record; see §5 Phase 3.)* Previously: deferred to Phase 3; dev bypass flag keeps Phases 0–2 unblocked |
 | No bUnit equivalent | **pytest + `httpx.MockTransport` + FastAPI's `TestClient`** over the view/client/route layer, gating the portal in CI (the `portals-python` job). Playwright is **deferred** — it needs the full AppHost, which this surface deliberately avoids. *Corrected 2026-10-04:* this row used to cite `.github/copilot/rules/testing.md` **for Playwright**; that rule covers the .NET stack only (MSTest on MTP, Moq, FluentAssertions, bUnit) and never mentions Playwright — the same correction §5 Phase 2 carries. |
 | `Aspire.Hosting.Python` API surface (verified 2026-09-16 against aspire.dev + Learn docs; exact patch version still to pin at spike time) | Phase 0 spike pins the version and settles the ASGI-vs-script entrypoint choice (`AddUvicornApp` vs `AddPythonApp`) |
 | Dual-stack surface drift (Blazor Families vs Prefab portal) | **RESOLVED 2026-10-05** — Phase 4 was decided early in favour of Blazor, so no ward surface is duplicated; the surviving Prefab surface is teacher-only and has no Blazor counterpart. Residual action: retire the portal's ward spike page. |
@@ -358,15 +369,21 @@ auth model, API contract fit, MVP order, serving stack, definition of done.
    scope), so defining Prefab-ergonomics criteria would have been work spent on a decision
    already made. The honest note for the record: this flag's premise — that the Prefab
    ergonomics question would decide the MVP — was overtaken before it was ever asked.
-2. **Teacher portal — remaining after the 2026-10-01 decisions (T1–T7):** the
-   spike-success criteria for the teacher workspace, the OIDC question (**annotated
-   2026-10-05:** the older "the portal has **no credential path**" framing is superseded —
-   the D19 portal-session path landed in round `portal-session-adoption`; what remains open
-   is whether any OIDC flow is wanted at all), and the
-   migration order for the remaining assignment create/edit/publish features once
-   the read-only review spike is accepted. **CI for `src/SchoolCollab.Portals/` is
-   no longer among them** — it landed 2026-10-03 as the `portals-python` job
-   (round `portal-teacher-surface`).
+2. **Teacher portal — remaining after the 2026-10-01 decisions (T1–T7):** all three flags
+   **closed 2026-10-05** by an owner grill — see `documents/solution/portal-scope-decision.md`.
+   - ~~The spike-success criteria for the teacher workspace~~ — **superseded, never needed:** the
+     owner decided the portal's shape directly, so a criteria exercise would have measured a
+     question already answered (the same fate as §7 item 1).
+   - ~~The OIDC question~~ (**annotated 2026-10-05:** the older "the portal has **no credential
+     path**" framing is superseded — the D19 portal-session path landed in round
+     `portal-session-adoption`) — **RETIRED as unnecessary by construction:** the portal holds no
+     credential and needs none (D12/AC9/AC11); D19 is the whole credential path. See §5 Phase 3.
+   - ~~The migration order for the remaining assignment create/edit/publish features once the
+     read-only review spike is accepted~~ — **the scope closed instead.** T5's boundary (read-only
+     review + submission review/grade) *is* the portal; authoring stays on the Blazor **Admin**
+     host, so T7's "eventual migration target for the rest" is superseded. See §5 Phase 2.
+   **CI for `src/SchoolCollab.Portals/` is no longer among them** — it landed 2026-10-03 as the
+   `portals-python` job (round `portal-teacher-surface`).
 3. ~~**The portal's shared page shell** (raised 2026-10-05) — the surviving Prefab surface has
    no chrome: every view builds its own `PrefabApp(title=…, css_class="p-6")` (seven call
    sites across `views/teacher.py` and `views/ward.py`). A `views/shell.py` composition
@@ -393,3 +410,10 @@ auth model, API contract fit, MVP order, serving stack, definition of done.
    client docstring example) and in `pyproject.toml`'s `description` ("Phase-0 prefab-UI spike:
    ward portal surface…"); `test_teacher_views.py`'s `assert "Ward portal" not in response.text`
    is **correct as-is** — a teacher page must not render a ward title — and stays.
+5. **The portal's shared shell — how far it should grow** (raised and answered 2026-10-05): the
+   shell stays **brand + titles**, as `views/shell.py`'s docstring already records. It earns its
+   place by making `PrefabApp` construct exactly once; a nav would not pay for itself on four
+   routes that already carry per-page breadcrumbs, and a `theme`/`mode` pass is a visual decision
+   that should follow a design review rather than ride in on a refactor. Revisit only if the scope
+   expands or a visual review flags the mismatch with FluentUI's look — no trigger is set (see
+   `documents/solution/portal-scope-decision.md`).
