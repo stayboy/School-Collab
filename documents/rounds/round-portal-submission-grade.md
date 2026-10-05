@@ -1,6 +1,6 @@
 # Round — portal-submission-grade
 
-Round `portal-submission-grade` · **Tier 3 LEAN (no-UI)** · 2026-10-06
+Round `portal-submission-grade` · **Tier 3 LEAN (no-UI)** · 2026-10-05
 Profile **ollama-cloud** · Models: orchestrator-plan `ollama-cloud/glm-5.3-flash` · plan-review + diff-review `ollama-cloud/kimi-k2.7-code` (Tier 3 lean: the plan gate runs the diff reviewer's model — never the worker's) · worker `ollama-cloud/deepseek-v4.1-flash`.
 Base: `main` @ `b99ae46d`. **Clean tree at round start** (skill step 0; `git status` is the authority) — the round diff is tree-wide `git diff` and no parent-owned files sit inside the expected-files table.
 

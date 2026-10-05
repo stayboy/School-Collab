@@ -1,6 +1,6 @@
 # Ward surface decision — Blazor (`SchoolCollab.Families`), not the Prefab portal
 
-- **Decided:** 2026-10-06, by the owner, in the `grill-me` round that answered the
+- **Decided:** 2026-10-05, by the owner, in the `grill-me` round that answered the
   `documents/specs/teachers-ward-portal-prefab-plan.md` Phase-1 / Phase-4 gate.
 - **Status:** DECIDED. Phase 1 (the Prefab "ward portal MVP") is **retired — already
   delivered in Blazor**. Phase 4 ("go/no-go vs extending the Blazor Families host") is
@@ -89,7 +89,7 @@ Phase 1 is retired as already delivered; Phase 4 is decided in favour of extendi
 
 ## Provenance
 
-- `documents/specs/teachers-ward-portal-prefab-plan.md` — the plan (annotated 2026-10-06: Status
+- `documents/specs/teachers-ward-portal-prefab-plan.md` — the plan (annotated 2026-10-05: Status
   line, Date line, Q4 row, §4 sketch + API contract, Phase 1, Phase 3, Phase 4, risk table, §7).
 - `documents/rounds/round-ar-23-ward-portal-prefab-spike.md` — the Phase-0 spike and its
   residuals (ephemeral round artifact; its durable findings are folded into the plan).
