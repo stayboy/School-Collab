@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SchoolCollab.Auth.Options;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Auth.Providers;
 

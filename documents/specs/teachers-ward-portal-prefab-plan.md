@@ -87,6 +87,14 @@ registered:
   pattern and needs its own design round (the Phase 3 OIDC item below); until then
   the portal is a **dev-bypass-only** surface.
 
+**The second prerequisite — the credential path — is now CLOSED for the TEACHER surface
+(2026-10-05).** Round `portal-session-adoption` (D19) gives the teacher portal its own opaque
+session cookie (`school_collab_teacher_session`, bootstrapped at its own `/auth/callback`) and
+presents `X-Portal-Session` on every teacher-route call, so those reads authorize as the session's
+user under real auth instead of 401-ing. The **ward** surface still sends no credential, so the gap
+remains open for it; the D11 role assignment above stays open for both, and the teacher-scope
+filter above is unaffected either way.
+
 **A third prerequisite — now CLOSED (2026-10-04).** The dev bypass had **no
 identity**: `TestAuth:TeacherId` was set nowhere and the portal's
 `PORTAL_DEV_TEACHER_ID` had no AppHost fan-out, so under `aspire run` the API ran

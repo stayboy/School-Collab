@@ -2,9 +2,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using SchoolCollab.Auth.Auth;
 using SchoolCollab.Auth.Providers;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Auth.Endpoints;
 

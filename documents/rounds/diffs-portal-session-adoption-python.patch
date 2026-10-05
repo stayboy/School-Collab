@@ -1,0 +1,2325 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index dfa23d34..22252f42 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -89,7 +89,7 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
+ | `assignments-api` | Project | admin |
+ | `students-api` | Project | admin |
+ | `students-worker` | Project | — |
+-| `portals` | Python app (uv / FastAPI + Prefab UI) in `src/SchoolCollab.Portals/` | — (no service-discovery consumer; receives `PORTAL_DEV_TEACHER_ID` from the `dev-teacher-id` parameter — see §2) |
++| `portals` | Python app (uv / FastAPI + Prefab UI) in `src/SchoolCollab.Portals/` | `auth` (the teacher surface's portal-session path resolves `services__auth__http__0` — round `portal-session-adoption` D19), `assignments-api`; receives `PORTAL_DEV_TEACHER_ID` from the `dev-teacher-id` parameter, plus `PORTALS_PUBLIC_BASE_URL` / `PORTALS_LOGIN_URL` from endpoint expressions — see §2/§4 |
+ 
+ > 📌 **Persistent volumes.** `postgres` and `rabbitmq` are wired with
+ > `WithDataVolume()` + `WithLifetime(ContainerLifetime.Persistent)`. The
+@@ -134,7 +134,7 @@ files only carry values that genuinely belong to that single service
+ | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
+ | `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). **Being retired (D3):** the approval requirement is now *also* an assignment-policy field — `RequiresApprovalBeforePublish`, settable per tenant (`PUT /api/settings/assignment-policy`) and per grade (`PUT /grade-levels/{id}/assignment-policy`) — and the two are OR'd for one release; see §5 and [`solution/assignment-policy-fields.md`](./solution/assignment-policy-fields.md) §5/§8. |
+ | `feature-flag-disable-keycloak-login-ui` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:DisableKeycloakLoginUi` (round B `keycloak-ui-auth`, spec §10 / D4/D5). Injected as `FeatureFlags__FEATURE__DisableKeycloakLoginUi` into all four consumers — `admin`, `families`, `auth` and `auth-portal`. It selects **which login UI renders**: OFF (default) = Keycloak's hosted page via the standard OIDC code flow; ON = the prefab auth portal's login form. A pure UI toggle — validation and authorization are identical in both states — and it is read **at startup** (auth pipelines are registered once, exactly like `FEATURE:DisableOIDCAuth`), so it is **not** a Settings/Config-service flag. See §5. |
+-| `app-callback-prefixes` | Aspire parameter (`AddParameter` inline default) | `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake` | Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist a one-time handshake code may be minted for. Fanned to the `auth` service as `Auth__AppCallbackPrefixes` (**plus** the portal's bootstrap redemption URI, appended from the portal's Aspire endpoint — no hardcoded port) and to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The auth service rejects a blank value at start (`ValidateOnStart`), so the list can never be empty in a running deployment. See §4. |
++| `app-callback-prefixes` | Aspire parameter (`AddParameter` inline default) | `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake` | Round B pass B5b (spec §14, plan-review P1-3): the per-app callback allowlist a one-time handshake code may be minted for. Fanned to the `auth` service as `Auth__AppCallbackPrefixes` (**plus** the portal's bootstrap redemption URI **and**, since round `portal-session-adoption` D6/D19, the teacher portal's `/auth/callback` — both appended from their Aspire endpoint expressions, no hardcoded port) and to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes` (**plus** the same teacher-portal callback, so the portal's own re-validation accepts the value it redirects to). The auth service rejects a blank value at start (`ValidateOnStart`), so the list can never be empty in a running deployment. See §4. |
+ | `smtp-host` | Aspire parameter | `localhost` | WS-E2 (ar-16) SMTP host for the MailKit email sender. Injected as `Smtp__Host` into `assignments-api`; read as `Smtp:Host`. **`Smtp:Host` blank/unset selects the log-and-skip `NullEmailSender`** (dev/standalone default — it reports success, so an unconfigured host never fills the ar-17 failure list). The AppHost also runs a MailPit dev container (`axllent/mailpit`; SMTP 1025, web inbox `http://localhost:8025`) on the same port. |
+ | `smtp-port` | Aspire parameter | `1025` | SMTP port. Injected as `Smtp__Port`; read as `Smtp:Port` (MailPit's default 1025). |
+ | `smtp-user` | Aspire parameter | `dev-user` (dev-only, `appsettings.Development.json`) | Optional SMTP user (blank ⇒ anonymous — MailPit accepts anonymous mail). Injected as `Smtp__User`; read as `Smtp:User`. A **dev-only** default is committed in `appsettings.Development.json` so a plain `aspire run` does not prompt; a real relay's value comes from user-secrets / env-var, which override it (production never loads the Development file). |
+@@ -396,7 +396,22 @@ D12 session cookie is always `HttpOnly` + `SameSite=Lax`, and its `Secure` flag
+ this key's scheme rather than hardcoded either way: an `https` base URL sets the flag, while an
+ unset key — and therefore the dev plain-`http` endpoints, where a `Secure` cookie would never be
+ sent — leaves it off. Nothing else configures it, so a production deployment reached over HTTPS
+-gets the flag from the base URL it already sets here.
++gets the flag from the base URL it already sets here. The teacher portal's own cookie
++(`school_collab_teacher_session`) applies the identical rule against `PORTALS_PUBLIC_BASE_URL`
++(below).
++
++### Round `portal-session-adoption` — the teacher portal's session keys (`PORTALS_PUBLIC_BASE_URL`, `PORTALS_LOGIN_URL`)
++
++Two keys let the **teacher** portal build its own URLs (round `portal-session-adoption`, D19/D5):
++the callback URI the one-time handshake code is bound to, and the sign-in page D19's rule 3
++redirects a session-less teacher to. Neither is an AppHost parameter — both are derived from
++Aspire endpoint expressions, so no port is hardcoded and every value derives from the same
++endpoint the browser reaches.
++
++| Key | Default | Description |
++| :--- | :--- | :--- |
++| `PORTALS_PUBLIC_BASE_URL` | _none_ | The teacher portal's own browser-facing base URL (its Aspire endpoint), fanned to the `portals` resource only. The portal appends `/auth/callback` to it for the D6 handshake code's bound redirect URI and for the passkey handoff's `app_redirect_uri` — both of which the AppHost also puts on the two callback allowlists (§2). It also decides the teacher session cookie's `Secure` flag, exactly as `AuthPortal:PublicBaseUrl` does for the auth portal. Unset: the portal falls back to the origin the browser actually reached it at, so the value is never invented — and the auth portal still validates every `return_uri` against its own allowlist. |
++| `PORTALS_LOGIN_URL` | _none_ | The auth portal's login page for the teacher portal's callback, fanned to the `portals` resource only. It is the **target of D19's gate rule 3**: a `/teacher*` read with no session cookie answers 302 to this URL with `return_uri={PORTALS_PUBLIC_BASE_URL}/auth/callback`; with the key **unset the gate does not act**, and the request renders the surface's honest session-less page instead. Deliberately a **distinct key** from `Auth:Portal:LoginUrl`: that key is the browser-facing *challenge* surface, pinned to exactly two consumers by `AppHostLoginUiFlagWiringArchitectureTests`, and a third fan-out would widen it. `PortalSessionAdoptionArchitectureTests` guards both fan-outs. |
+ 
+ ### Round B — the post-logout landing URI (`Auth:PostLogoutRedirectUri`)
+ 
+@@ -462,8 +477,8 @@ victim's claim set: URI binding is defenceless when the attacker chooses the URI
+ 
+ | Key | Default | Description |
+ | :--- | :--- | :--- |
+-| `Auth:AppCallbackPrefixes` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | Semicolon-separated allowlist of exact callback prefixes, read by the auth service as `Auth__AppCallbackPrefixes`. Enforced at **code issuance** — `/auth/exchange` rejects a non-allowlisted `RedirectUri` (`redirect_uri_not_allowed`, 400) before the credential exchange, so no code exists for an attacker URI (`AppCallbackAllowlist`, fail-closed/default-deny: a malformed entry matches nothing, an empty list matches nothing). Dev value (the AppHost parameter `app-callback-prefixes`, plus the portal's bootstrap URI appended from its Aspire endpoint): `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake;{auth-portal endpoint}/bootstrap`. The four handshake forms are the `admin` (5300/7300) and `families` (5400/7400) launch-profile origins; the bootstrap URI is the D16 redemption target the passkey path's one-time code is bound to. Production must list the real app origins. |
+-| `AuthPortal:AppCallbackPrefixes` | _none_ | The portal's own copy of the same list (the four Blazor handshake callbacks only — never its own bootstrap URI), fanned to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The portal validates `return_uri` against it before rendering the form or redirecting; that check is defense-in-depth + UX — the load-bearing enforcement is the auth service's, so a portal bug cannot mint an attacker-redeemable code. |
++| `Auth:AppCallbackPrefixes` | _none — **a blank value fails the start** (`ValidateOnStart`)_ | Semicolon-separated allowlist of exact callback prefixes, read by the auth service as `Auth__AppCallbackPrefixes`. Enforced at **code issuance** — `/auth/exchange` rejects a non-allowlisted `RedirectUri` (`redirect_uri_not_allowed`, 400) before the credential exchange, so no code exists for an attacker URI (`AppCallbackAllowlist`, fail-closed/default-deny: a malformed entry matches nothing, an empty list matches nothing). Dev value (the AppHost parameter `app-callback-prefixes`, plus the auth portal's bootstrap URI **and the teacher portal's `/auth/callback`** appended from their Aspire endpoint expressions): `http://localhost:5300/signin-handshake;https://localhost:7300/signin-handshake;http://localhost:5400/signin-handshake;https://localhost:7400/signin-handshake;{auth-portal endpoint}/bootstrap;{portals endpoint}/auth/callback`. The four handshake forms are the `admin` (5300/7300) and `families` (5400/7400) launch-profile origins; the bootstrap URI is the D16 redemption target the passkey path's one-time code is bound to; the teacher-portal callback is the D6 code's target on the D19 portal-session path. Production must list the real app origins. |
++| `AuthPortal:AppCallbackPrefixes` | _none_ | The portal's own copy of the same list (the four Blazor handshake callbacks **and, since round `portal-session-adoption`, the teacher portal's `/auth/callback`** — never its own bootstrap URI), fanned to the `auth-portal` resource as `AuthPortal__AppCallbackPrefixes`. The portal validates `return_uri` against it before rendering the form or redirecting, and re-validates the D6 continuation it hands onward on the passkey path (the teacher portal's callback is the continuation target there); that check is defense-in-depth + UX — the load-bearing enforcement is the auth service's, so a portal bug cannot mint an attacker-redeemable code. |
+ 
+ There is deliberately **no safe default** for `Auth:AppCallbackPrefixes`: a hardcoded non-empty
+ fallback would make production fail *open*, and an unvalidated empty list would look like a login
+diff --git a/documents/specs/teachers-ward-portal-prefab-plan.md b/documents/specs/teachers-ward-portal-prefab-plan.md
+index 07abab08..e3769f9a 100644
+--- a/documents/specs/teachers-ward-portal-prefab-plan.md
++++ b/documents/specs/teachers-ward-portal-prefab-plan.md
+@@ -87,6 +87,14 @@ registered:
+   pattern and needs its own design round (the Phase 3 OIDC item below); until then
+   the portal is a **dev-bypass-only** surface.
+ 
++**The second prerequisite — the credential path — is now CLOSED for the TEACHER surface
++(2026-10-05).** Round `portal-session-adoption` (D19) gives the teacher portal its own opaque
++session cookie (`school_collab_teacher_session`, bootstrapped at its own `/auth/callback`) and
++presents `X-Portal-Session` on every teacher-route call, so those reads authorize as the session's
++user under real auth instead of 401-ing. The **ward** surface still sends no credential, so the gap
++remains open for it; the D11 role assignment above stays open for both, and the teacher-scope
++filter above is unaffected either way.
++
+ **A third prerequisite — now CLOSED (2026-10-04).** The dev bypass had **no
+ identity**: `TestAuth:TeacherId` was set nowhere and the portal's
+ `PORTAL_DEV_TEACHER_ID` had no AppHost fan-out, so under `aspire run` the API ran
+diff --git a/src/SchoolCollab.Portals/api/__init__.py b/src/SchoolCollab.Portals/api/__init__.py
+index 75a7b4f8..89e1f539 100644
+--- a/src/SchoolCollab.Portals/api/__init__.py
++++ b/src/SchoolCollab.Portals/api/__init__.py
+@@ -5,6 +5,12 @@ The portal is a pure HTTP consumer: no backend change, no database access
+ (``views/``) never touches transport, and the transport layer never touches
+ Prefab components — the two layers churn for different reasons (prefab-ui is
+ 0.x, and the plan's risk table asks for exactly this isolation).
++
++Two upstreams now: the Assignments API (the ward list and the teacher
++drill-down) and the auth service (the teacher surface's D19 session path — the
++handshake redemption, the D18 session read and the D13 revocation). This module
++re-exports both clients' public surface, per the pattern's own rule: adding a
++client means growing the re-export list with it.
+ """
+ 
+ from api.assignments_api_client import (
+@@ -13,8 +19,15 @@ from api.assignments_api_client import (
+     ReviewQueueResult,
+     SubmissionResult,
+ )
++from api.auth_api_client import (
++    SESSION_HEADER_NAME,
++    AuthApiClient,
++    AuthServiceEndpoint,
++    resolve_auth_service_endpoint,
++)
+ from api.dto import (
+     AssignmentRow,
++    SessionData,
+     SubmissionDetailRow,
+     SubmissionForReviewRow,
+     SubmissionReviewRow,
+@@ -23,27 +36,44 @@ from api.dto import (
+ from api.errors import (
+     ApiResponseError,
+     ApiUnavailableError,
++    AuthServiceError,
++    AuthUpstreamError,
++    HandshakeCodeRejectedError,
+     MissingConfigurationError,
+     PortalApiError,
+     ServiceDiscoveryError,
++    SessionEndedError,
++    SessionNotFoundError,
++    TokenInResponseError,
+ )
+ from api.service_discovery import ServiceEndpoint, resolve_service_endpoint
+ 
+ __all__ = [
++    "SESSION_HEADER_NAME",
+     "ApiResponseError",
+     "ApiUnavailableError",
+     "AssignmentRow",
+     "AssignmentsApiClient",
++    "AuthApiClient",
++    "AuthServiceEndpoint",
++    "AuthServiceError",
++    "AuthUpstreamError",
+     "FetchResult",
++    "HandshakeCodeRejectedError",
+     "MissingConfigurationError",
+     "PortalApiError",
+     "ReviewQueueResult",
+     "ServiceDiscoveryError",
+     "ServiceEndpoint",
++    "SessionData",
++    "SessionEndedError",
++    "SessionNotFoundError",
+     "SubmissionDetailRow",
+     "SubmissionForReviewRow",
+     "SubmissionResult",
+     "SubmissionReviewRow",
+     "SubmissionVersionRow",
++    "TokenInResponseError",
++    "resolve_auth_service_endpoint",
+     "resolve_service_endpoint",
+ ]
+diff --git a/src/SchoolCollab.Portals/api/assignments_api_client.py b/src/SchoolCollab.Portals/api/assignments_api_client.py
+index fdc79d7b..daccef7f 100644
+--- a/src/SchoolCollab.Portals/api/assignments_api_client.py
++++ b/src/SchoolCollab.Portals/api/assignments_api_client.py
+@@ -13,6 +13,12 @@ The client is **async** (``httpx.AsyncClient``): it is created once in the
+ FastAPI lifespan and awaited from async route handlers, so request handling
+ never blocks the event loop on I/O.
+ 
++The public teacher-route reads take an optional per-call ``headers`` mapping.
++That is how the D19 portal session travels: the app layer presents the opaque
++session id (``X-Portal-Session``) on teacher-route calls only, while the ward
++route stays header-less — the header is passed per call, never defaulted onto
++the client, so no surface can acquire it by accident.
++
+ Adding an endpoint is one method, e.g. the ward plan's next endpoints::
+ 
+     async def list_ward_assignments(self, student_id: str) -> FetchResult:
+@@ -79,9 +85,15 @@ class AssignmentsApiClient:
+         """The resolved endpoint, for diagnostics (``/health``, error cards)."""
+         return self._endpoint
+ 
+-    async def list_assignments(self) -> FetchResult:
+-        """``GET /assignments`` — the assignments the ward view tabulates."""
+-        status_code, payload = await self._get_json("/assignments")
++    async def list_assignments(
++        self, headers: Mapping[str, str] | None = None
++    ) -> FetchResult:
++        """``GET /assignments`` — the assignments the ward view tabulates.
++
++        ``headers`` is the per-call portal-session header on the teacher routes; the ward
++        route omits it, so the API's own posture for it is unchanged.
++        """
++        status_code, payload = await self._get_json("/assignments", headers=headers)
+ 
+         # The API answers with a bare array; tolerate an envelope just in case.
+         if isinstance(payload, dict):
+@@ -97,7 +109,10 @@ class AssignmentsApiClient:
+         return FetchResult(status_code=status_code, rows=rows)
+ 
+     async def list_review_queue(
+-        self, assignment_id: str, teacher_id: str
++        self,
++        assignment_id: str,
++        teacher_id: str,
++        headers: Mapping[str, str] | None = None,
+     ) -> ReviewQueueResult:
+         """``GET /{id}/submissions/review-queue?teacherId=`` — one assignment's review queue.
+ 
+@@ -105,10 +120,13 @@ class AssignmentsApiClient:
+         (``currentUser.TeacherId ?? (isRealAuth ? throw : teacherId)``), so it is inert
+         under real auth — where the claim wins — and the only teacher input under the
+         dev bypass, which is why the route refuses to call this without a configured
+-        value rather than sending a placeholder.
++        value rather than sending a placeholder. ``headers`` carries the portal session
++        on the session path (D19's rule 1).
+         """
+         status_code, payload = await self._get_json(
+-            f"/{assignment_id}/submissions/review-queue", params={"teacherId": teacher_id}
++            f"/{assignment_id}/submissions/review-queue",
++            params={"teacherId": teacher_id},
++            headers=headers,
+         )
+ 
+         # The API answers with a bare array; tolerate an envelope just in case.
+@@ -126,10 +144,15 @@ class AssignmentsApiClient:
+         ]
+         return ReviewQueueResult(status_code=status_code, rows=rows)
+ 
+-    async def get_submission(self, assignment_id: str, student_id: str) -> SubmissionResult:
++    async def get_submission(
++        self,
++        assignment_id: str,
++        student_id: str,
++        headers: Mapping[str, str] | None = None,
++    ) -> SubmissionResult:
+         """``GET /{id}/students/{studentId}/submission`` — one submission with its review."""
+         status_code, payload = await self._get_json(
+-            f"/{assignment_id}/students/{student_id}/submission"
++            f"/{assignment_id}/students/{student_id}/submission", headers=headers
+         )
+         if not isinstance(payload, Mapping):
+             raise ApiResponseError(
+@@ -143,11 +166,16 @@ class AssignmentsApiClient:
+         )
+ 
+     async def _get_json(
+-        self, path: str, params: Mapping[str, str] | None = None
++        self,
++        path: str,
++        params: Mapping[str, str] | None = None,
++        headers: Mapping[str, str] | None = None,
+     ) -> tuple[int, Any]:
+         """GET ``path`` and return ``(status, parsed_json)`` or raise a typed error."""
+         try:
+-            response = await self._http.get(f"{self._endpoint.base_url}{path}", params=params)
++            response = await self._http.get(
++                f"{self._endpoint.base_url}{path}", params=params, headers=headers
++            )
+             response.raise_for_status()
+         except httpx.HTTPStatusError as error:
+             raise ApiResponseError(
+diff --git a/src/SchoolCollab.Portals/api/auth_api_client.py b/src/SchoolCollab.Portals/api/auth_api_client.py
+new file mode 100644
+index 00000000..5902545e
+--- /dev/null
++++ b/src/SchoolCollab.Portals/api/auth_api_client.py
+@@ -0,0 +1,314 @@
++"""Typed HTTP client for the auth service — the teacher portal's session half.
++
++The Python counterpart of the repo's one-client-per-surface rule (see
++``documents/solution/portals-service-client-pattern.md``): one class, one method per endpoint,
++DTOs in and out, transport failures translated into typed portal errors. The teacher portal
++holds **no credential of any kind** — its cookie is the opaque session id the auth service
++issued (D12) — so its calls present that id and nothing else.
++
++The client is deliberately **base-URL agnostic** — it is handed a resolved
++:class:`AuthServiceEndpoint` rather than reading the environment itself — so it can be driven by
++any transport, including ``httpx.MockTransport``: that is what keeps the portal's session tests
++container-free. It is **async** (``httpx.AsyncClient``): created once in the FastAPI lifespan and
++awaited from async route handlers.
++
++Endpoint paths this client pins (the auth service must serve exactly these):
++
++* ``POST /auth/handshake/session`` — a D6 handshake code plus its bound redirect URI in, this
++  portal's opaque session id out (round ``portal-session-adoption`` D3). Without it the D6 code
++  could only be redeemed for *claims* (``/auth/redeem``), never for a session id.
++* ``GET /auth/session/{session_id}`` — the claim set **as data** plus the remaining lifetime
++  (D18); ``410 session_ended`` and ``404 session_not_found`` are the two dead-session states the
++  portal must distinguish from a degraded read.
++* ``DELETE /auth/session/{session_id}`` — server-side revocation, the ``end_session`` URL out
++  (D13); the portal holds neither token and only redirects the browser to that opaque URL.
++
++Failure bodies carry a typed ``error`` code and an optional ``detail`` (the auth service's own
++taxonomy); the client maps the code to a typed exception and, for an unrecognized code, raises
++:class:`ApiResponseError` — never a half-working page.
++"""
++
++from __future__ import annotations
++
++import os
++from collections.abc import Mapping
++from dataclasses import dataclass
++from typing import Any
++from urllib.parse import quote
++
++import httpx
++
++from api.dto import SessionData
++from api.errors import (
++    ApiResponseError,
++    ApiUnavailableError,
++    AuthServiceError,
++    AuthUpstreamError,
++    HandshakeCodeRejectedError,
++    ServiceDiscoveryError,
++    SessionEndedError,
++    SessionNotFoundError,
++    TokenInResponseError,
++)
++
++#: The Aspire resource name of the auth service (the AppHost's ``WithReference(auth)`` on the
++#: ``portals`` resource injects its discovery variable).
++AUTH_SERVICE = "auth"
++
++JSON_CONTENT_TYPE = "application/json"
++
++REDEEM_HANDSHAKE_PATH = "/auth/handshake/session"
++SESSION_PATH = "/auth/session/{session_id}"
++
++#: The request header carrying the portal's opaque session id — ``PortalSessionAuthenticationHandler
++#: .SessionHeaderName`` (spec D12). Pinned here as a literal because the auth service and the
++#: Assignments API are the only other halves of the contract: the value is part of the wire
++#: contract, so a rename on either side must break loudly (the auth portal's ``admin_api_client``
++#: pins it for the same reason).
++SESSION_HEADER_NAME = "X-Portal-Session"
++
++#: Fields that must never appear in a portal-bound body (AC11). Every decoded response is scanned
++#: — nested objects and arrays included — and a body carrying one is refused, never ingested.
++TOKEN_SHAPED_KEYS = frozenset(
++    {
++        "access_token",
++        "accessToken",
++        "refresh_token",
++        "refreshToken",
++        "id_token",
++        "idToken",
++    }
++)
++
++#: The auth service's typed failure codes -> the portal's exception taxonomy (fail-closed: an
++#: unrecognized code degrades as an unusable response, never as "probably fine").
++_AUTH_ERROR_TYPES: dict[str, type[AuthServiceError]] = {
++    "session_ended": SessionEndedError,
++    "session_not_found": SessionNotFoundError,
++    "invalid_code": HandshakeCodeRejectedError,
++    "code_expired": HandshakeCodeRejectedError,
++    "redirect_uri_mismatch": HandshakeCodeRejectedError,
++    "redirect_uri_required": HandshakeCodeRejectedError,
++    "upstream_unreachable": AuthUpstreamError,
++    "keycloak_unreachable": AuthUpstreamError,
++    "claim_set_incomplete": AuthServiceError,
++}
++
++# Substrings that make an environment variable "discovery-shaped" — used only to build a helpful
++# diagnostic when resolution fails.
++_DISCOVERY_HINTS = ("AUTH", "SERVICE", "PORTAL", "KEYCLOAK")
++
++
++@dataclass(frozen=True)
++class AuthServiceEndpoint:
++    """Where the auth service lives, and which environment variable said so."""
++
++    service: str
++    base_url: str
++    env_var: str
++
++    @property
++    def label(self) -> str:
++        return f"{self.service} at {self.base_url} (via {self.env_var})"
++
++
++def candidate_env_vars(service: str) -> tuple[str, ...]:
++    """The environment-variable names Aspire may have used, in priority order.
++
++    ``WithReference(...)`` injects the .NET-style ``services__<name>__http__0`` (verified in the
++    ward-portal spike); the simplified ``<NAME>_HTTP`` form is still checked second.
++    """
++    return (f"services__{service}__http__0", f"{service.upper().replace('-', '_')}_HTTP")
++
++
++def resolve_auth_service_endpoint() -> AuthServiceEndpoint:
++    """Resolve the auth service's base URL from the AppHost-injected environment.
++
++    Lives beside the client rather than in ``service_discovery.py``: that module quarantines the
++    Assignments API's discovery for the ward surface, and this is the same Aspire ".NET-ism"
++    applied to the teacher surface's second upstream. Raising
++    :class:`ServiceDiscoveryError` is what lets a caller that *needs* the auth service render its
++    degraded state, and a caller that only *offers* a link (the passkey sign-in affordance)
++    simply omit it.
++    """
++    tried = candidate_env_vars(AUTH_SERVICE)
++    for name in tried:
++        value = os.environ.get(name)
++        if value:
++            return AuthServiceEndpoint(
++                service=AUTH_SERVICE, base_url=value.rstrip("/"), env_var=name
++            )
++
++    present = {
++        key: value
++        for key, value in os.environ.items()
++        if key.lower().startswith("services") or any(hint in key.upper() for hint in _DISCOVERY_HINTS)
++    }
++    raise ServiceDiscoveryError(AUTH_SERVICE, tried, present)
++
++
++def _token_shaped_keys(payload: Any) -> tuple[str, ...]:
++    """Every token-shaped key in a decoded body, at any depth (AC11)."""
++    found: set[str] = set()
++    stack: list[Any] = [payload]
++    while stack:
++        item = stack.pop()
++        if isinstance(item, Mapping):
++            for key, value in item.items():
++                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
++                    found.add(key)
++                stack.append(value)
++        elif isinstance(item, (list, tuple)):
++            stack.extend(item)
++    return tuple(sorted(found))
++
++
++def _string(value: Any) -> str | None:
++    """A non-empty string, or ``None`` — the shape every id and URL here must have."""
++    return value if isinstance(value, str) and value else None
++
++
++class AuthApiClient:
++    """The teacher portal's view of the auth service's session surface."""
++
++    def __init__(self, http: httpx.AsyncClient, endpoint: AuthServiceEndpoint) -> None:
++        self._http = http
++        self._endpoint = endpoint
++
++    @property
++    def endpoint(self) -> AuthServiceEndpoint:
++        """The resolved endpoint, for diagnostics (``/health``, error cards)."""
++        return self._endpoint
++
++    async def redeem_handshake_code(self, code: str, redirect_uri: str) -> str:
++        """``POST /auth/handshake/session`` — the D6 handshake code in, the session id out.
++
++        ``redirect_uri`` is this portal's own callback URI — the URI the code was bound to when
++        the exchange minted it, so the auth service compares it exactly. The response carries no
++        token: the session's tokens stay in custody (AC11).
++        """
++        payload = await self._request_json(
++            "POST",
++            REDEEM_HANDSHAKE_PATH,
++            body={"code": code, "redirectUri": redirect_uri},
++        )
++        session_id = _string(_field(payload, "sessionId", "session_id"))
++        if not session_id:
++            # A "success" without a session id cannot sign anyone in — and must not be turned
++            # into a cookie carrying nothing (the DTOs tolerate a shape drift, this refusal is
++            # what keeps that tolerance from becoming a silent blank session).
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                "the handshake redemption returned no session id",
++            )
++        return session_id
++
++    async def read_session(self, session_id: str) -> SessionData:
++        """``GET /auth/session/{id}`` — the claim set as data (D18).
++
++        Raises :class:`SessionEndedError` when the auth service reports the session ended and
++        :class:`SessionNotFoundError` when it does not know the id: the two dead-session states
++        the portal clears its cookie for, as opposed to a degraded read where the session's state
++        is simply unknown.
++        """
++        payload = await self._request_json(
++            "GET", SESSION_PATH.format(session_id=quote(session_id, safe=""))
++        )
++        return SessionData.from_payload(self._as_object(payload))
++
++    async def revoke_session(self, session_id: str) -> str:
++        """``DELETE /auth/session/{id}`` — revocation, the ``end_session`` URL back (D13).
++
++        The auth service revokes the refresh token itself and builds that URL because the portal
++        holds neither the id token nor the ability to sign one (D12/AC11). The URL is **opaque**:
++        the caller 302s the browser to it and never parses, logs or persists it.
++        """
++        payload = await self._request_json(
++            "DELETE", SESSION_PATH.format(session_id=quote(session_id, safe=""))
++        )
++        end_session_url = _string(_field(payload, "endSessionUrl", "end_session_url"))
++        if not end_session_url:
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                "the session revocation returned no end-session URL",
++            )
++        return end_session_url
++
++    async def _request_json(
++        self, method: str, path: str, *, body: dict[str, Any] | None = None
++    ) -> Any:
++        """Call ``path`` and return the decoded JSON, or raise a typed error.
++
++        Fail-closed at every step: transport failure -> ``ApiUnavailableError``; a non-JSON body
++        (a proxy or an OIDC challenge answering HTML at any status) -> ``ApiResponseError``; a
++        token-shaped field anywhere in the body -> ``TokenInResponseError`` (AC11); a 4xx/5xx ->
++        the typed error its ``error`` code names.
++        """
++        base_url = self._endpoint.base_url
++        try:
++            response = await self._http.request(method, f"{base_url}{path}", json=body)
++        except httpx.HTTPError as error:  # ConnectError, TimeoutException, ...
++            raise ApiUnavailableError(self._endpoint.service, base_url, error) from error
++
++        payload = self._decode(response, path)
++        leaked = _token_shaped_keys(payload)
++        if leaked:
++            raise TokenInResponseError(self._endpoint.service, base_url, leaked)
++
++        if response.status_code >= 400:
++            raise self._failure(response.status_code, payload)
++        return payload
++
++    def _decode(self, response: httpx.Response, path: str) -> Any:
++        content_type = response.headers.get("content-type", "")
++        if not content_type.lower().startswith(JSON_CONTENT_TYPE):
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                f"expected {JSON_CONTENT_TYPE} for {path}, "
++                f"got '{content_type or 'no content-type'}'",
++            )
++        try:
++            return response.json()
++        except ValueError as error:
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                f"body for {path} was not valid JSON: {error}",
++            ) from error
++
++    def _failure(self, status_code: int, payload: Any) -> AuthServiceError | ApiResponseError:
++        code = _string(payload.get("error")) if isinstance(payload, Mapping) else None
++        detail = _string(payload.get("detail")) if isinstance(payload, Mapping) else None
++
++        if code and code in _AUTH_ERROR_TYPES:
++            return _AUTH_ERROR_TYPES[code](code, detail)
++
++        described = f"HTTP {status_code}" + (f": {code}" if code else "")
++        return ApiResponseError(
++            self._endpoint.service,
++            self._endpoint.base_url,
++            described + (f" ({detail})" if detail else ""),
++        )
++
++    def _as_object(self, payload: Any) -> Mapping[str, Any]:
++        if not isinstance(payload, Mapping):
++            raise ApiResponseError(
++                self._endpoint.service,
++                self._endpoint.base_url,
++                f"expected a JSON object, got {type(payload).__name__}",
++            )
++        return payload
++
++
++def _field(payload: Any, *names: str) -> Any:
++    """The first present, non-empty field among ``names`` (the .NET spelling first)."""
++    if not isinstance(payload, Mapping):
++        return None
++    for name in names:
++        value = payload.get(name)
++        if value is not None and value != "":
++            return value
++    return None
+diff --git a/src/SchoolCollab.Portals/api/dto.py b/src/SchoolCollab.Portals/api/dto.py
+index 55b9a7a5..d791d8ea 100644
+--- a/src/SchoolCollab.Portals/api/dto.py
++++ b/src/SchoolCollab.Portals/api/dto.py
+@@ -6,7 +6,13 @@ the whole page (the dev database legitimately answers ``[]`` — see the ar-21/2
+ data-visibility note). Views consume attributes, never raw dictionaries.
+ 
+ The ward surface reads :class:`AssignmentRow`; the teacher surface adds the
+-review-queue row and the submission detail (with its version history and review).
++review-queue row and the submission detail (with its version history and review), plus
++:class:`SessionData` — the auth service's D18 claim set as data (round
++``portal-session-adoption`` D5/D19), which is what the teacher surface renders identity from.
++
++The auth service's session records serialize **camelCase** (``tenantId``) while the D9 claim
++names the realm mappers emit are **snake_case** (``tenant_id``); every field here accepts both
++spellings, so a serialization-policy change cannot silently blank a page.
+ """
+ 
+ from __future__ import annotations
+@@ -23,6 +29,22 @@ def _text(value: Any) -> str | None:
+     return value if isinstance(value, str) else str(value)
+ 
+ 
++def _text_list(value: Any) -> tuple[str, ...]:
++    """Coerce a multivalued value (the session's ``roles``) to a tuple of strings.
++
++    The auth service serializes roles as a JSON array, but a single string or a comma-separated
++    string is tolerated rather than dropping them — a page must never claim a signed-in teacher
++    carries no roles because the shape moved.
++    """
++    if value is None:
++        return ()
++    if isinstance(value, str):
++        return tuple(part.strip() for part in value.split(",") if part.strip())
++    if isinstance(value, (list, tuple, set)):
++        return tuple(text for item in value if (text := _text(item)) is not None and text)
++    return (_text(value) or "",)
++
++
+ # The teacher surface renders two enums the Assignments API serializes as **ints**:
+ # `Assignments.Api/Program.cs` registers a JsonStringEnumConverter for every DTO enum
+ # except these two, so the wire value is 0/1/2. The maps also pass a string through
+@@ -37,6 +59,35 @@ def _enum_name(value: Any, names: Mapping[str, str]) -> str | None:
+     return names.get(text, text) if text is not None else None
+ 
+ 
++@dataclass(frozen=True)
++class SessionData:
++    """A session read (D18): the claim set **as data** — tenant, teacher id, roles — never
++    tokens.
++
++    The portal holds no credential (AC11), so this is the only identity material it ever sees:
++    the opaque session id it presents, and the claim set the auth service derived from custody.
++    """
++
++    session_id: str | None = None
++    tenant_id: str | None = None
++    tenant_name: str | None = None
++    tenant_type: str | None = None
++    teacher_id: str | None = None
++    roles: tuple[str, ...] = ()
++
++    @classmethod
++    def from_payload(cls, payload: Mapping[str, Any]) -> SessionData:
++        """Build the session from the auth service's JSON object, tolerating both spellings."""
++        return cls(
++            session_id=_text(payload.get("sessionId") or payload.get("session_id")),
++            tenant_id=_text(payload.get("tenantId") or payload.get("tenant_id")),
++            tenant_name=_text(payload.get("tenantName") or payload.get("tenant_name")),
++            tenant_type=_text(payload.get("tenantType") or payload.get("tenant_type")),
++            teacher_id=_text(payload.get("teacherId") or payload.get("teacher_id")),
++            roles=_text_list(payload.get("roles")),
++        )
++
++
+ @dataclass(frozen=True)
+ class AssignmentRow:
+     """One row of ``GET /assignments`` — what the ward view tabulates."""
+diff --git a/src/SchoolCollab.Portals/api/errors.py b/src/SchoolCollab.Portals/api/errors.py
+index 5b2391d1..f2ae8cd6 100644
+--- a/src/SchoolCollab.Portals/api/errors.py
++++ b/src/SchoolCollab.Portals/api/errors.py
+@@ -60,3 +60,56 @@ class MissingConfigurationError(PortalApiError):
+         self.key = key
+         self.detail = detail
+         super().__init__(f"{key} cannot be used: {detail}")
++
++
++class AuthServiceError(PortalApiError):
++    """The auth service answered with one of its typed failure codes.
++
++    The teacher portal's session taxonomy (round ``portal-session-adoption``): the code and
++    optional detail travel as attributes so a route can key its D18 handling on the state
++    (``session_ended`` vs ``session_not_found``) rather than on an HTTP status.
++    """
++
++    def __init__(self, code: str, detail: str | None = None) -> None:
++        self.code = code
++        self.detail = detail
++        super().__init__(f"the auth service refused ({code})" + (f": {detail}" if detail else ""))
++
++
++class AuthUpstreamError(AuthServiceError):
++    """The auth service's own identity provider could not be reached; session state is unknown."""
++
++
++class SessionEndedError(AuthServiceError):
++    """The session's refresh token was rejected — the session is over (D18 ``session_ended``).
++
++    A route that sees this must clear the session cookie: the session is gone for good.
++    """
++
++
++class SessionNotFoundError(AuthServiceError):
++    """No live session exists under the presented id (D18 ``session_not_found``).
++
++    Treated like :class:`SessionEndedError` for cookie handling (both are dead sessions), but
++    it means "stale cookie", not "revoked by the identity provider".
++    """
++
++
++class HandshakeCodeRejectedError(AuthServiceError):
++    """A one-time handshake code was refused (replay, TTL expiry, redirect-URI mismatch).
++
++    A callback route that sees this must NOT set its cookie: nothing was redeemed.
++    """
++
++
++class TokenInResponseError(PortalApiError):
++    """A service answered with a token-shaped field in its body (AC11) — refused, never ingested."""
++
++    def __init__(self, service: str, base_url: str, keys: tuple[str, ...]) -> None:
++        self.service = service
++        self.base_url = base_url
++        self.keys = keys
++        super().__init__(
++            f"{service} at {base_url} returned a body carrying token-shaped fields {list(keys)} "
++            "— the portal never holds a credential, so the response was refused"
++        )
+diff --git a/src/SchoolCollab.Portals/app.py b/src/SchoolCollab.Portals/app.py
+index aa6aaf01..6511d459 100644
+--- a/src/SchoolCollab.Portals/app.py
++++ b/src/SchoolCollab.Portals/app.py
+@@ -25,11 +25,23 @@ Routes:
+                    environment (``PORTAL_DEV_TEACHER_ID``, D5) — never a default.
+     GET /teacher/assignments/{assignmentId}/students/{studentId} -> the
+                    submission detail (version history + review).
++    GET /auth/callback -> the teacher portal's OWN session bootstrap (round
++                   ``portal-session-adoption``, D19): it redeems the single-use
++                   D6 handshake code the auth portal handed the browser for
++                   ``{this portal}/auth/callback``, sets the opaque session-id
++                   cookie and 302s to ``/teacher``. No token reaches Python.
++    GET /teacher/logout -> revoke the session server-side, clear the cookie,
++                   and redirect the browser to the auth service's opaque
++                   ``end_session`` URL (D13).
+     GET /health -> spike diagnostics: the resolved API base URL, the env var
+                    that supplied it, and the last fetch result.
+ 
+-Every surface renders its degraded state as a typed error page — a page, never
+-a raw 500 or a traceback.
++Session posture (D19's rule ladder, one place — ``require_teacher_session``):
++``/teacher*`` reads carry the opaque session id in the ``X-Portal-Session``
++header on every assignments-api call; with no cookie at all the gate acts only
++when a sign-in target is configured (``PORTALS_LOGIN_URL``), and otherwise the
++routes behave exactly as before this round. Every surface renders its degraded
++state as a typed error page — a page, never a raw 500 or a traceback.
+ """
+ 
+ from __future__ import annotations
+@@ -41,24 +53,34 @@ from collections.abc import AsyncIterator
+ from contextlib import asynccontextmanager
+ from dataclasses import dataclass, field
+ from typing import Any
++from urllib.parse import quote
+ 
+ import httpx
+ from fastapi import Depends, FastAPI, Request
+-from fastapi.responses import HTMLResponse
++from fastapi.responses import HTMLResponse, RedirectResponse, Response
+ 
+ from api import (
++    SESSION_HEADER_NAME,
+     AssignmentsApiClient,
++    AuthApiClient,
+     MissingConfigurationError,
+     PortalApiError,
+     ServiceDiscoveryError,
+     ServiceEndpoint,
++    SessionData,
++    SessionEndedError,
++    SessionNotFoundError,
++    resolve_auth_service_endpoint,
+     resolve_service_endpoint,
+ )
+ from views.teacher import (
++    TeacherSurfaceLinks,
+     build_review_queue_view,
+     build_submission_view,
+     build_teacher_error_view,
+     build_teacher_list_view,
++    build_teacher_session_card,
++    session_card_code,
+ )
+ from views.ward import build_error_view, build_ward_view
+ 
+@@ -75,6 +97,41 @@ HTTP_TIMEOUT_SECONDS = 10.0
+ # sending a placeholder that would answer an empty queue looking like a real result.
+ DEV_TEACHER_ID_KEY = "PORTAL_DEV_TEACHER_ID"
+ 
++# The teacher portal's own opaque session cookie (D19/D12). It is named separately from the auth
++# portal's cookie on purpose: the two portals are separate browser-facing apps, and a name is the
++# only thing that keeps one portal's session out of the other's request handling. On ``localhost``
++# cookies ignore ports, so the auth portal's cookie IS also sent here in dev — this portal reads
++# only its own name and never relies on the sharing.
++SESSION_COOKIE_NAME = "school_collab_teacher_session"
++
++# This portal's session bootstrap (the D6 handshake code's bound redirect URI, appended to the
++# auth service's allowlist and the auth portal's own copy by the AppHost — D6).
++AUTH_CALLBACK_PATH = "/auth/callback"
++
++# D13 logout: revoke at the auth service, then send the browser to its end-session URL.
++LOGOUT_PATH = "/teacher/logout"
++
++# The auth portal's login page for THIS portal's callback (the AppHost fan-out), the value D19's
++# rule 3 keys its redirect on. Deliberately not ``Auth:Portal:LoginUrl``: that key's guard pins it
++# to exactly two consumers as the browser-facing CHALLENGE surface, which this link is not.
++LOGIN_URL_KEY = "PORTALS_LOGIN_URL"
++
++# This portal's own browser-facing base URL (the callback URI's origin), fanned out by the AppHost
++# from the resource's Aspire endpoint. Also decides the session cookie's ``Secure`` flag.
++PUBLIC_BASE_URL_KEY = "PORTALS_PUBLIC_BASE_URL"
++
++# The auth service's D16 passkey handoff. The ceremony itself happens in Keycloak with the auth
++# service as the relying party, so the portal only links the browser there — no code and no token
++# can land in Python (AC11/AC12).
++PASSKEY_LOGIN_PATH = "/auth/passkey/login"
++PASSKEY_APP_REDIRECT_PARAMETER = "app_redirect_uri"
++
++# The query parameter the auth portal hands the one-time handoff code back on.
++CODE_QUERY_PARAMETER = "code"
++
++# The auth portal's login form field carrying the callback it must return to.
++RETURN_URI_PARAMETER = "return_uri"
++
+ 
+ @dataclass
+ class PortalState:
+@@ -143,6 +200,285 @@ async def get_assignments_client(request: Request) -> AssignmentsApiClient:
+     return AssignmentsApiClient(state.http, state.endpoint)
+ 
+ 
++async def get_auth_client(request: Request) -> AuthApiClient | None:
++    """FastAPI dependency: the typed client for the auth service's session surface (D19).
++
++    Returns ``None`` — instead of raising — when the environment has not supplied an auth-service
++    endpoint, because that state means something different on each path and the caller is the one
++    that knows: the gate's rule 2 (no session cookie, the dev posture) must render today's views
++    with no auth service anywhere in sight, while the session path and the callback render their
++    degraded card and say so. Declared as a dependency (not called directly) so
++    ``app.dependency_overrides`` remains the single test seam, which is how the tests drive this
++    whole surface with ``httpx.MockTransport`` and no server.
++    """
++    state = _portal_state(request)
++    try:
++        endpoint = resolve_auth_service_endpoint()
++    except ServiceDiscoveryError:
++        return None
++
++    assert state.http is not None  # created in the lifespan (or lazily above)
++    return AuthApiClient(state.http, endpoint)
++
++
++def _session_cookie(request: Request) -> str | None:
++    """The opaque session id this request presents, or ``None`` — the gate's rule switch."""
++    session_id = request.cookies.get(SESSION_COOKIE_NAME)
++    return session_id.strip() if session_id and session_id.strip() else None
++
++
++def _set_session_cookie(response: Response, session_id: str) -> None:
++    """Set the opaque D12 session cookie: an id, ``HttpOnly``, ``SameSite=Lax`` and — over
++    HTTPS — ``Secure``.
++
++    ``Secure`` follows the scheme of this portal's configured browser-facing base URL
++    (``PORTALS_PUBLIC_BASE_URL``, the AppHost's fan-out) rather than being hardcoded either way:
++    the dev endpoints are plain ``http``, where a ``Secure`` cookie would never be sent, and a
++    production deployment reached over ``https`` must not ship without it. An unset base URL
++    leaves it off, like dev. Nothing else is in the cookie: no signature, no claim, no key
++    material in Python (D12).
++    """
++    response.set_cookie(
++        SESSION_COOKIE_NAME,
++        session_id,
++        path="/",
++        httponly=True,
++        samesite="lax",
++        secure=_public_base_url_is_https(),
++    )
++
++
++def _clear_session_cookie(response: Response) -> None:
++    """Drop the session cookie (logout, and every state where the session is already dead)."""
++    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
++
++
++def _signed_out_response(location: str) -> RedirectResponse:
++    """Send the browser onward with the session cookie cleared."""
++    response = RedirectResponse(location, status_code=302)
++    _clear_session_cookie(response)
++    return response
++
++
++def configured_public_base_url() -> str | None:
++    """This portal's configured browser-facing base URL, or ``None`` when it was not injected."""
++    return (os.environ.get(PUBLIC_BASE_URL_KEY) or "").strip() or None
++
++
++def _public_base_url_is_https() -> bool:
++    """Whether this portal is configured to be reached over HTTPS (the ``Secure`` flag's rule)."""
++    base_url = configured_public_base_url()
++    return bool(base_url) and base_url.lower().startswith("https://")
++
++
++def browser_base_url(request: Request) -> str:
++    """The origin the teacher portal's own URLs are built from.
++
++    The AppHost fan-out (``PORTALS_PUBLIC_BASE_URL``) first — it is the value the auth service's
++    allowlist carries. Its absence falls back to the origin **the browser actually reached this
++    portal at** (``request.base_url``): that is the same address the configured fan-out resolves
++    to in dev, so a callback URI is never invented — only observed. A value derived here is never
++    trusted by this portal: the auth portal validates every ``return_uri`` against its own
++    allowlist before it is honored, and the auth service validates the same URI again at issuance.
++    """
++    return (configured_public_base_url() or str(request.base_url)).rstrip("/")
++
++
++def callback_uri(request: Request) -> str:
++    """This portal's session callback URI — the D6 code's bound redirect target."""
++    return f"{browser_base_url(request)}{AUTH_CALLBACK_PATH}"
++
++
++def _login_url() -> str | None:
++    """The configured auth-portal login page (``PORTALS_LOGIN_URL``) — D19 rule 3's target."""
++    return (os.environ.get(LOGIN_URL_KEY) or "").strip() or None
++
++
++def resolve_teacher_links(request: Request) -> TeacherSurfaceLinks:
++    """The sign-in/passkey/logout affordances this environment can actually offer.
++
++    Each link is built from a value the AppHost fanned out; when one is absent the affordance is
++    simply left out (``None``), so a page never carries an invented URL. The passkey handoff needs
++    the auth service's own endpoint — a discovery failure means the link is omitted rather than a
++    page that cannot work.
++    """
++    login_url = _login_url()
++    callback = callback_uri(request)
++
++    try:
++        endpoint = resolve_auth_service_endpoint()
++        passkey_url: str | None = (
++            f"{endpoint.base_url}{PASSKEY_LOGIN_PATH}"
++            f"?{PASSKEY_APP_REDIRECT_PARAMETER}={quote(callback, safe='')}"
++        )
++    except ServiceDiscoveryError:
++        # Without a resolvable auth service there is nothing allowlistable to hand off to, so the
++        # affordance is omitted rather than pointed at a URL that cannot work.
++        passkey_url = None
++
++    return TeacherSurfaceLinks(
++        sign_in_url=(
++            f"{login_url}?{RETURN_URI_PARAMETER}={quote(callback, safe='')}" if login_url else None
++        ),
++        passkey_url=passkey_url,
++        logout_url=LOGOUT_PATH,
++    )
++
++
++@dataclass(frozen=True)
++class TeacherSession:
++    """One request's portal-session outcome (D19): the session id and the D18 identity as data.
++
++    ``session_id`` is the value the gate presents as ``X-Portal-Session`` on every
++    assignments-api call — so a view never sees a header, and the ward route can never acquire
++    one. ``data`` is the claim set the auth service returned, rendered as data and never as a
++    credential (AC11). On rule 2 (no cookie at all) both are absent and the routes behave exactly
++    as they did before this round.
++    """
++
++    session_id: str | None = None
++    data: SessionData | None = None
++
++    @property
++    def headers(self) -> dict[str, str]:
++        """The per-call headers the teacher routes pass to the assignments client."""
++        return {SESSION_HEADER_NAME: self.session_id} if self.session_id else {}
++
++
++class TeacherSessionOutcome(Exception):
++    """The gate's non-session answer: a page (or a redirect) instead of the route body.
++
++    Raised from :func:`require_teacher_session` so D19's rule ladder lives in exactly one place,
++    and re-rendered unchanged by the handler below. It is a page-level outcome — a card at HTTP
++    200, a 302 with the configured sign-in target — never a 500 and never a traceback.
++    """
++
++    def __init__(self, response: Response) -> None:
++        self.response = response
++        super().__init__("the teacher-session gate answered instead of the route")
++
++
++@app.exception_handler(TeacherSessionOutcome)
++async def on_teacher_session_outcome(
++    request: Request, outcome: TeacherSessionOutcome
++) -> Response:
++    """Answer with what the gate built — the response is already the whole page/redirect."""
++    return outcome.response
++
++
++def _session_card(
++    request: Request,
++    *,
++    code: str,
++    detail: str | None = None,
++    endpoint_label: str | None = None,
++    clear_cookie: bool,
++) -> HTMLResponse:
++    """The AC10 card for a dead or unusable session — cleared only when the session is dead.
++
++    ``clear_cookie`` is the D18 distinction this round turns on: ``session_ended`` /
++    ``session_not_found`` mean the cookie can only produce a broken page (clear it), while a
++    degraded read means the session's state is simply **unknown** (keep it — discarding a live
++    session because the auth service blipped would sign a teacher out for no reason).
++    """
++    if clear_cookie:
++        logger.warning("teacher session is dead; clearing the cookie (%s)", code)
++    else:
++        logger.warning("teacher session unavailable (state leaves the cookie in place) (%s)", code)
++
++    response = HTMLResponse(
++        build_teacher_session_card(
++            code=code,
++            detail=detail,
++            endpoint_label=endpoint_label,
++            links=resolve_teacher_links(request),
++            # The kept cookie means the state is unknown: the card must not claim the browser is
++            # signed out while the session may still be live (the badge would contradict the
++            # "state unknown" copy above it).
++            signed_out=clear_cookie,
++        ).html()
++    )
++    if clear_cookie:
++        _clear_session_cookie(response)
++    return response
++
++
++async def require_teacher_session(
++    request: Request,
++    client: AuthApiClient | None = Depends(get_auth_client),
++) -> TeacherSession:
++    """D19's rule ladder, in one place — the gate every ``/teacher*`` read route depends on.
++
++    **Rule 1 — a session cookie is present.** The session path: the auth service is asked for the
++    D18 claim set, and the route renders from it while presenting ``X-Portal-Session`` on every
++    assignments call. ``session_ended`` (410) and ``session_not_found`` (404) are dead sessions:
++    the cookie is cleared and this surface's AC10 card is rendered at HTTP 200 — never a redirect
++    loop, which is what a gate that redirects on a dead cookie would produce. A degraded read
++    (the auth service unreachable) renders the same card **without** clearing the cookie, because
++    the session's state is unknown. ``resolve_dev_teacher_id`` is never invoked on this path: the
++    session's own ``teacherId`` is the only identity, so a dev-env gap cannot degrade a valid
++    session.
++
++    **Rule 2 — no session cookie.** Today's route semantics, byte for byte: the dev id runs
++    exactly where it already ran, ``MissingConfigurationError`` still refuses, and no header is
++    sent (the property above is empty). The dev id is never this gate's trigger.
++
++    **Rule 3 — the redirect is target-keyed, not dev-id-keyed.** Scoped to the routes that depend
++    on this gate (the ward route is untouched), and acting only when there is no cookie **and**
++    ``PORTALS_LOGIN_URL`` is configured: 302 to the auth portal's login page with this portal's
++    callback as ``return_uri``. With no configured target (the dev posture) the gate does not act
++    and the request continues under rule 2 — today's honest render, never an invented URL.
++
++    A live-but-non-teacher session is deliberately not this portal's problem: the API is the
++    security boundary, so its refusal renders as the degraded card and no role list is duplicated
++    into Python.
++    """
++    session_id = _session_cookie(request)
++    links = resolve_teacher_links(request)
++
++    if session_id is None:
++        # Rule 3 first, then rule 2: the redirect fires only when a sign-in target was configured
++        # (``PORTALS_LOGIN_URL``), so an unconfigured dev posture renders today's views.
++        if links.sign_in_url:
++            raise TeacherSessionOutcome(_signed_out_response(links.sign_in_url))
++        return TeacherSession()
++
++    if client is None:
++        # The session path needs an auth service; the cookie is kept (its state is unknown, and
++        # only the auth service could say otherwise).
++        raise TeacherSessionOutcome(
++            _session_card(
++                request, code="auth_service_unconfigured", clear_cookie=False
++            )
++        )
++
++    try:
++        data = await client.read_session(session_id)
++    except (SessionEndedError, SessionNotFoundError) as error:
++        raise TeacherSessionOutcome(
++            _session_card(
++                request,
++                code=session_card_code(error),
++                detail=str(error),
++                endpoint_label=client.endpoint.label,
++                clear_cookie=True,
++            )
++        ) from error
++    except PortalApiError as error:
++        raise TeacherSessionOutcome(
++            _session_card(
++                request,
++                code=session_card_code(error),
++                detail=str(error),
++                endpoint_label=client.endpoint.label,
++                clear_cookie=False,
++            )
++        ) from error
++
++    logger.info("teacher session: identity read from the auth service")
++    return TeacherSession(session_id=session_id, data=data)
++
++
+ def resolve_dev_teacher_id() -> str:
+     """The configured dev-bypass teacher id, or raise when the portal cannot use one (D5).
+ 
+@@ -239,11 +575,12 @@ def _teacher_degraded(
+ async def teacher_assignment_list(
+     request: Request,
+     client: AssignmentsApiClient = Depends(get_assignments_client),
++    session: TeacherSession = Depends(require_teacher_session),
+ ) -> HTMLResponse:
+     """Render the teacher assignment list from a live assignments-api call."""
+     state = _portal_state(request)
+     try:
+-        result = await client.list_assignments()
++        result = await client.list_assignments(headers=session.headers)
+     except PortalApiError as error:
+         return _teacher_degraded(
+             request, client=client, error=error, surface="assignment list"
+@@ -263,7 +600,11 @@ async def teacher_assignment_list(
+     }
+     return HTMLResponse(
+         build_teacher_list_view(
+-            rows=result.rows, endpoint=client.endpoint, status_code=result.status_code
++            rows=result.rows,
++            endpoint=client.endpoint,
++            status_code=result.status_code,
++            session=session.data,
++            links=resolve_teacher_links(request),
+         ).html()
+     )
+ 
+@@ -273,12 +614,20 @@ async def teacher_review_queue(
+     request: Request,
+     assignment_id: str,
+     client: AssignmentsApiClient = Depends(get_assignments_client),
++    session: TeacherSession = Depends(require_teacher_session),
+ ) -> HTMLResponse:
+-    """Render one assignment's review queue from a live assignments-api call."""
++    """Render one assignment's review queue from a live assignments-api call.
++
++    Under rule 1 (a session) the queue read presents ``X-Portal-Session`` and the dev id is never
++    consulted; under rule 2 the ``teacherId`` parameter is today's dev fallback, with the refusal
++    intact.
++    """
+     state = _portal_state(request)
+     try:
+-        teacher_id = resolve_dev_teacher_id()
+-        result = await client.list_review_queue(assignment_id, teacher_id)
++        teacher_id = session.data.teacher_id if session.data else resolve_dev_teacher_id()
++        result = await client.list_review_queue(
++            assignment_id, teacher_id, headers=session.headers
++        )
+     except PortalApiError as error:
+         return _teacher_degraded(request, client=client, error=error, surface="review queue")
+ 
+@@ -301,6 +650,8 @@ async def teacher_review_queue(
+             rows=result.rows,
+             endpoint=client.endpoint,
+             status_code=result.status_code,
++            session=session.data,
++            links=resolve_teacher_links(request),
+         ).html()
+     )
+ 
+@@ -314,11 +665,14 @@ async def teacher_submission(
+     assignment_id: str,
+     student_id: str,
+     client: AssignmentsApiClient = Depends(get_assignments_client),
++    session: TeacherSession = Depends(require_teacher_session),
+ ) -> HTMLResponse:
+     """Render one submission (version history + review) from a live assignments-api call."""
+     state = _portal_state(request)
+     try:
+-        result = await client.get_submission(assignment_id, student_id)
++        result = await client.get_submission(
++            assignment_id, student_id, headers=session.headers
++        )
+     except PortalApiError as error:
+         return _teacher_degraded(
+             request, client=client, error=error, surface="submission detail"
+@@ -344,8 +698,126 @@ async def teacher_submission(
+             submission=result.submission,
+             endpoint=client.endpoint,
+             status_code=result.status_code,
++            session=session.data,
++            links=resolve_teacher_links(request),
++        ).html()
++    )
++
++
++@app.get(AUTH_CALLBACK_PATH, response_class=HTMLResponse)
++async def auth_callback(
++    request: Request,
++    code: str | None = None,
++    client: AuthApiClient | None = Depends(get_auth_client),
++) -> Response:
++    """This portal's own session bootstrap (D19): redeem the handoff code for its cookie.
++
++    Reachable by a **top-level browser navigation** from either sign-in path — the password path
++    (the auth portal's ``POST /login`` mints the D6 code bound to this callback and 302s the
++    browser here with it) and the passkey path (the auth service sees a non-portal-origin sign-in,
++    mints the D6 continuation for this callback, and the auth portal's ``/bootstrap`` re-validates
++    it against its own allowlist before 302ing here). Both land on this one redemption — the
++    passkey path needs no route of its own.
++
++    The ``redirectUri`` sent is this portal's callback URI in the auth service's own normalized
++    spelling — the URI the code was bound to. A refusal (replayed/expired code, mismatched URI)
++    or a degraded call renders a card at HTTP 200 and sets **no** cookie: nothing was redeemed, and
++    a half-signed-in browser must not look signed in. The success response carries no token
++    (AC11) and redirects to the teacher surface, where the session's identity is read back.
++    """
++    links = resolve_teacher_links(request)
++    if not code:
++        return HTMLResponse(
++            build_teacher_session_card(code="handshake_code_missing", links=links).html()
++        )
++
++    if client is None:
++        return HTMLResponse(
++            build_teacher_session_card(code="auth_service_unconfigured", links=links).html()
++        )
++
++    try:
++        session_id = await client.redeem_handshake_code(code, callback_uri(request))
++    except PortalApiError as error:
++        logger.warning("session bootstrap failed: %s", error)
++        return HTMLResponse(
++            build_teacher_session_card(
++                code=session_card_code(error),
++                detail=str(error),
++                endpoint_label=client.endpoint.label,
++                links=links,
++            ).html()
++        )
++
++    logger.info("session bootstrap: portal session established")
++    response = RedirectResponse("/teacher", status_code=302)
++    _set_session_cookie(response, session_id)
++    return response
++
++
++@app.get(LOGOUT_PATH)
++async def teacher_logout(
++    request: Request,
++    client: AuthApiClient | None = Depends(get_auth_client),
++) -> Response:
++    """D13: revoke the session server-side, clear the cookie, go to the opaque end-session URL.
++
++    The auth service revokes the refresh token itself and answers with the fully-built
++    ``end_session`` URL (``id_token_hint`` + ``post_logout_redirect_uri``), because this portal
++    holds neither the id token nor the ability to sign one (D12/AC11). That URL is **opaque**: it
++    is 302'd byte-for-byte into ``Location`` and is never parsed, re-encoded, logged or persisted
++    (re-encoding would break Keycloak's exact match and turn a working logout into an
++    unregistered-target rejection).
++
++    Every outcome clears this portal's cookie — a logout that leaves one behind is the one thing
++    this route must never do. A failed revocation still clears it and says so: the local sign-in
++    is over, and the session's fate must not be hidden.
++    """
++    session_id = _session_cookie(request)
++    if session_id is None:
++        # Nothing to revoke: the browser is signed out already.
++        return _signed_out_response("/")
++
++    if client is None:
++        return _logout_card(request, code="auth_service_unconfigured")
++
++    try:
++        end_session_url = await client.revoke_session(session_id)
++    except SessionNotFoundError as error:
++        # The auth service already forgot this session: locally signed out, nothing to redirect to.
++        logger.warning("teacher logout: the session was already gone: %s", error)
++        return _signed_out_response("/")
++    except PortalApiError as error:
++        logger.warning("teacher logout failed: %s", error)
++        return _logout_card(
++            request,
++            code=session_card_code(error),
++            detail=str(error),
++            endpoint_label=client.endpoint.label,
++        )
++
++    logger.info("teacher logout: session revoked; redirecting to the opaque end-session URL")
++    return _signed_out_response(end_session_url)
++
++
++def _logout_card(
++    request: Request,
++    *,
++    code: str,
++    detail: str | None = None,
++    endpoint_label: str | None = None,
++) -> HTMLResponse:
++    """The card a failed logout renders, with the cookie cleared: the local sign-out stands."""
++    response = HTMLResponse(
++        build_teacher_session_card(
++            code=code,
++            detail=detail,
++            endpoint_label=endpoint_label,
++            links=resolve_teacher_links(request),
+         ).html()
+     )
++    _clear_session_cookie(response)
++    return response
+ 
+ 
+ def _teacher_surface_for(path: str) -> str | None:
+diff --git a/src/SchoolCollab.Portals/tests/test_teacher_session.py b/src/SchoolCollab.Portals/tests/test_teacher_session.py
+new file mode 100644
+index 00000000..e48fd246
+--- /dev/null
++++ b/src/SchoolCollab.Portals/tests/test_teacher_session.py
+@@ -0,0 +1,715 @@
++"""Session-path tests for the teacher portal (round ``portal-session-adoption``, D8/D19).
++
++FastAPI's ``TestClient`` plus ``app.dependency_overrides`` — the container-free shape
++``test_teacher_views.py`` established, now with **two** stub transports: the assignments-api
++(which that file already drives) and the auth service's session surface. No server, no Docker, no
++Keycloak, no browser.
++
++The wire contract *is* the assertion: the ``X-Portal-Session`` header the portal presents on every
++teacher-route call, the ``redirectUri`` it redeems a handoff code with, the cookie it sets, clears
++or keeps per D18's two dead-session states, and the opaque ``end_session`` URL it hands the browser
++byte-for-byte. Every stubbed request is recorded — a header that is *claimed* to be threaded is not
++a header on the wire.
++
++The gate's own rule ladder gets its cases here too: rule 3 (the target-keyed redirect) both ways,
++and rule 2 (the dev posture, with no sign-in target configured) unchanged — including the
++``MissingConfigurationError`` refusal and the promise that the session path never consults the dev
++teacher id.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++from collections.abc import Callable, Iterator
++from contextlib import contextmanager
++from typing import Any
++from urllib.parse import quote
++
++import httpx
++import pytest
++from fastapi.testclient import TestClient
++
++import app as portal_app
++from api import (
++    AssignmentsApiClient,
++    AuthApiClient,
++    AuthServiceEndpoint,
++    ServiceEndpoint,
++    TokenInResponseError,
++)
++
++Handler = Callable[[httpx.Request], httpx.Response]
++
++ASSIGNMENTS_ENDPOINT = ServiceEndpoint(
++    service="assignments-api", base_url="http://assignments-api.test", env_var="test"
++)
++AUTH_ENDPOINT = AuthServiceEndpoint(service="auth", base_url="http://auth.test", env_var="test")
++
++SESSION_COOKIE = portal_app.SESSION_COOKIE_NAME
++SESSION_ID = "opaque-session-id-7"
++
++ASSIGNMENT_ID = "11111111-1111-1111-1111-111111111111"
++STUDENT_ID = "22222222-2222-2222-2222-222222222222"
++CONFIGURED_DEV_TEACHER_ID = "33333333-3333-3333-3333-333333333333"
++SESSION_TEACHER_ID = "55555555-5555-5555-5555-555555555555"
++
++QUEUE_PATH = f"/teacher/assignments/{ASSIGNMENT_ID}"
++SUBMISSION_PATH = f"{QUEUE_PATH}/students/{STUDENT_ID}"
++
++PORTAL_BASE_URL = "http://portals.test"
++CALLBACK_URI = f"{PORTAL_BASE_URL}/auth/callback"
++SIGN_IN_URL = "http://auth-portal.test/login"
++END_SESSION_URL = (
++    "http://keycloak.test/realms/school-collab/protocol/openid-connect/logout"
++    "?id_token_hint=opaque&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A5700%2F"
++)
++
++#: The D18 session read's body, camelCase as the auth service serializes its record.
++SESSION_PAYLOAD: dict[str, Any] = {
++    "sessionId": SESSION_ID,
++    "tenantId": "00000000-0000-0000-0000-000000000002",
++    "tenantName": "Dev School",
++    "tenantType": "School",
++    "teacherId": SESSION_TEACHER_ID,
++    "roles": ["teacher"],
++    "expiresInSeconds": 3600,
++}
++
++ASSIGNMENT_PAYLOAD: list[dict[str, Any]] = [
++    {
++        "id": ASSIGNMENT_ID,
++        "title": "Reading response",
++        "status": "Published",
++        "dueDate": "2026-10-01",
++        "createdAt": "2026-09-21T09:00:00Z",
++    }
++]
++
++
++# ── stub transports ────────────────────────────────────────────────────────────────
++
++
++def _assignments_override(handler: Handler):
++    """The assignments-api seam ``test_teacher_views.py`` drives, reused verbatim in shape."""
++
++    async def override() -> AssignmentsApiClient:
++        return AssignmentsApiClient(
++            httpx.AsyncClient(transport=httpx.MockTransport(handler)), ASSIGNMENTS_ENDPOINT
++        )
++
++    return override
++
++
++def _auth_override(handler: Handler):
++    """The auth-service seam: one dependency override covers all three session routes."""
++
++    async def override() -> AuthApiClient:
++        return AuthApiClient(
++            httpx.AsyncClient(transport=httpx.MockTransport(handler)), AUTH_ENDPOINT
++        )
++
++    return override
++
++
++def _redeem_ok(request: httpx.Request) -> httpx.Response:
++    return httpx.Response(200, json={"sessionId": SESSION_ID})
++
++
++def _session_ok(request: httpx.Request) -> httpx.Response:
++    return httpx.Response(200, json=SESSION_PAYLOAD)
++
++
++def _revoke_ok(request: httpx.Request) -> httpx.Response:
++    return httpx.Response(200, json={"endSessionUrl": END_SESSION_URL})
++
++
++def _auth_transport(
++    seen: list[httpx.Request],
++    *,
++    redeem: Handler = _redeem_ok,
++    session: Handler = _session_ok,
++    revoke: Handler = _revoke_ok,
++) -> Handler:
++    """A recording transport for the auth service's three session routes.
++
++    Each route defaults to its happy path, so a test overrides only the one it is about — and any
++    call the portal should not have made fails loudly instead of silently answering.
++    """
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        path = request.url.path
++        if path == "/auth/handshake/session":
++            assert request.method == "POST", f"unexpected method for {path}: {request.method}"
++            return redeem(request)
++        if path.startswith("/auth/session/"):
++            if request.method == "DELETE":
++                return revoke(request)
++            assert request.method == "GET", f"unexpected method for {path}: {request.method}"
++            return session(request)
++        raise AssertionError(f"the portal called an un-stubbed auth route: {request.method} {path}")
++
++    return handler
++
++
++def _assignments_transport(seen: list[httpx.Request], payload: Any = ASSIGNMENT_PAYLOAD) -> Handler:
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(request)
++        return httpx.Response(200, json=payload)
++
++    return handler
++
++
++def _unreachable() -> Handler:
++    def handler(request: httpx.Request) -> httpx.Response:
++        raise httpx.ConnectError("connection refused", request=request)
++
++    return handler
++
++
++@contextmanager
++def _portal(
++    *,
++    assignments: Handler | None = None,
++    auth: Handler | None = None,
++) -> Iterator[TestClient]:
++    """A ``TestClient`` with one or both upstreams stubbed by a ``MockTransport``."""
++    if assignments is not None:
++        portal_app.app.dependency_overrides[portal_app.get_assignments_client] = (
++            _assignments_override(assignments)
++        )
++    if auth is not None:
++        portal_app.app.dependency_overrides[portal_app.get_auth_client] = _auth_override(auth)
++    try:
++        with TestClient(portal_app.app) as client:
++            yield client
++    finally:
++        portal_app.app.dependency_overrides.clear()
++
++
++def _session_headers() -> dict[str, str]:
++    """Present the portal's session cookie as a request header.
++
++    Set explicitly rather than through the client's cookie jar (the auth portal's test
++    convention): what the portal *does* with the cookie — presents it, clears it, keeps it — is
++    the assertion here, and a jar deciding part of that for us would weaken it.
++    """
++    return {"cookie": f"{SESSION_COOKIE}={SESSION_ID}"}
++
++
++def _cookie_header(response: httpx.Response) -> str:
++    return response.headers.get("set-cookie", "")
++
++
++def _presented_session(request: httpx.Request) -> str | None:
++    return request.headers.get("X-Portal-Session")
++
++
++def _no_sign_in_target(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Rule 2's posture: no ``PORTALS_LOGIN_URL``, so the gate does not act.
++
++    Asserted rather than assumed (AC7): every pre-existing dev-path expectation in this module
++    depends on it, and the AppHost's real fan-out would silently make the gate redirect instead.
++    """
++    monkeypatch.delenv(portal_app.LOGIN_URL_KEY, raising=False)
++    assert os.environ.get(portal_app.LOGIN_URL_KEY) is None
++
++
++# ── the bootstrap: /auth/callback ──────────────────────────────────────────────────
++
++
++def test_handshake_redemption_sets_the_cookie_and_lands_on_the_teacher_list(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """The password path's landing: redeem the D6 code, set our OWN cookie, go to /teacher."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++    auth_seen: list[httpx.Request] = []
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.get(
++            "/auth/callback", params={"code": "one-time-code"}, follow_redirects=False
++        )
++        cookie = client.cookies.get(SESSION_COOKIE)
++        page = client.get("/teacher")
++
++    assert response.status_code == 302
++    assert response.headers["location"] == "/teacher"
++    assert f"{SESSION_COOKIE}={SESSION_ID}" in _cookie_header(response)
++    header = _cookie_header(response).lower()
++    assert "httponly" in header and "samesite=lax" in header
++
++    # The redemption carried the code and the URI it was bound to — this portal's own callback.
++    redemption = next(r for r in auth_seen if r.url.path == "/auth/handshake/session")
++    assert json.loads(redemption.read().decode()) == {
++        "code": "one-time-code",
++        "redirectUri": CALLBACK_URI,
++    }
++
++    assert cookie == SESSION_ID
++    assert page.status_code == 200
++    assert "Reading response" in page.text
++    assert f"Signed in as teacher {SESSION_TEACHER_ID}" in page.text
++    assert "Dev School" in page.text
++
++
++def test_passkey_continuation_lands_on_the_same_callback(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """The passkey path needs no route of its own: the auth portal 302s here with the same code.
++
++    ``PasskeyEndpoints.Complete`` mints the D6 continuation for a non-portal-origin sign-in, the
++    auth portal's ``/bootstrap`` re-validates it against its own allowlist and redirects the
++    browser to ``{this callback}?code=…`` — so this is the identical redemption.
++    """
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport([]),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.get(
++            "/auth/callback", params={"code": "passkey-continuation"}, follow_redirects=False
++        )
++
++    assert response.status_code == 302
++    assert response.headers["location"] == "/teacher"
++    assert client.cookies.get(SESSION_COOKIE) == SESSION_ID
++    assert [r.url.path for r in auth_seen] == ["/auth/handshake/session"]
++
++
++def test_a_replayed_or_expired_code_sets_no_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
++    """A refused handoff is a card at HTTP 200, never a half-signed-in browser."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++
++    with _portal(
++        assignments=_assignments_transport([]),
++        auth=_auth_transport(
++            [],
++            redeem=lambda request: httpx.Response(404, json={"error": "invalid_code"}),
++        ),
++    ) as client:
++        response = client.get("/auth/callback", params={"code": "replayed"})
++
++    assert response.status_code == 200
++    assert "Sign-in handoff rejected" in response.text
++    assert "invalid_code" in response.text
++    assert SESSION_COOKIE not in response.cookies
++
++
++def test_a_callback_without_a_code_is_refused_without_an_upstream_call(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _no_sign_in_target(monkeypatch)
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(auth=_auth_transport(auth_seen)) as client:
++        response = client.get("/auth/callback")
++
++    assert response.status_code == 200
++    assert "handshake_code_missing" in response.text
++    assert auth_seen == []
++
++
++# ── the header on every teacher-route call ─────────────────────────────────────────
++
++
++@pytest.mark.parametrize(
++    ("path", "payload"),
++    [
++        ("/teacher", ASSIGNMENT_PAYLOAD),
++        (QUEUE_PATH, []),
++        (SUBMISSION_PATH, {"submissionId": "sub-1", "versions": [], "review": None}),
++    ],
++    ids=["list", "queue", "submission"],
++)
++def test_every_teacher_route_presents_the_session_header(
++    monkeypatch: pytest.MonkeyPatch, path: str, payload: Any
++) -> None:
++    """AC6: asserted at the transport, per route — not at a header the route claims to set."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen, payload),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.get(path, headers=_session_headers())
++
++    assert response.status_code == 200
++    assert len(assignments_seen) == 1
++    assert _presented_session(assignments_seen[0]) == SESSION_ID
++    # The identity read is what makes the header trustworthy: one read, the session's own claims.
++    assert [r.url.path for r in auth_seen] == [f"/auth/session/{SESSION_ID}"]
++
++
++def test_the_ward_route_presents_no_session_header(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """Only the teacher surface threads the session — the ward route is untouched (D19's scope)."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport([]),
++    ) as client:
++        response = client.get("/", headers=_session_headers())
++
++    assert response.status_code == 200
++    assert assignments_seen
++    assert all(_presented_session(request) is None for request in assignments_seen)
++
++
++# ── the two dead-session states vs. a degraded read ────────────────────────────────
++
++
++@pytest.mark.parametrize("status", [410, 404], ids=["session-ended", "session-not-found"])
++def test_a_dead_session_clears_the_cookie_and_renders_the_card(
++    monkeypatch: pytest.MonkeyPatch, status: int
++) -> None:
++    """AC6: the card is a page at 200, the cookie is cleared, and the route body never runs."""
++    _no_sign_in_target(monkeypatch)
++    cardinality = "session_ended" if status == 410 else "session_not_found"
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport(
++            [],
++            session=lambda request: httpx.Response(status, json={"error": cardinality}),
++        ),
++    ) as client:
++        response = client.get("/teacher", headers=_session_headers())
++
++    assert response.status_code == 200
++    assert cardinality in response.text
++    cleared = _cookie_header(response).lower()
++    # ``path=/`` is asserted with the value: a cookie cleared on another path would survive on
++    # the routes that read it, so value + expiry alone cannot see the regression.
++    assert f'{SESSION_COOKIE}=""' in cleared and "max-age=0" in cleared and "path=/" in cleared
++    assert assignments_seen == []  # the route body never ran; a page, never a partial render
++
++
++def test_a_degraded_session_read_renders_the_card_and_keeps_the_cookie(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """D18: the session's state is UNKNOWN — discarding a live session would sign a teacher out."""
++    _no_sign_in_target(monkeypatch)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen),
++        auth=_auth_transport([], session=_unreachable()),
++    ) as client:
++        response = client.get("/teacher", headers=_session_headers())
++
++    assert response.status_code == 200
++    assert "unusable_response" in response.text
++    assert "unreachable" in response.text
++    # The kept cookie means the state is unknown, so the card may not claim the browser is
++    # signed out: that badge would contradict the "state unknown" copy right above it.
++    assert "No portal session" not in response.text
++    assert _cookie_header(response) == ""  # no Set-Cookie: the cookie's fate is unknown
++    assert assignments_seen == []  # the route body never ran
++
++
++def test_a_session_read_without_an_auth_endpoint_keeps_the_cookie(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """No auth-service endpoint: the session path says so; the cookie's fate is still unknown."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.delenv("services__auth__http__0", raising=False)
++    monkeypatch.delenv("AUTH_HTTP", raising=False)
++
++    with _portal(assignments=_assignments_transport([])) as client:
++        response = client.get("/teacher", headers=_session_headers())
++
++    assert response.status_code == 200
++    assert "auth_service_unconfigured" in response.text
++    assert _cookie_header(response) == ""
++
++
++# ── dev-bypass coexistence (D4) ────────────────────────────────────────────────────
++
++
++def test_the_session_path_never_consults_the_dev_teacher_id(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """Rule 1: the session's own ``teacherId`` is the identity — a dev-env gap cannot degrade it."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.delenv(portal_app.DEV_TEACHER_ID_KEY, raising=False)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen, []),
++        auth=_auth_transport([]),
++    ) as client:
++        response = client.get(QUEUE_PATH, headers=_session_headers())
++
++    assert response.status_code == 200
++    assert "MissingConfigurationError" not in response.text
++    assert assignments_seen[0].url.params["teacherId"] == SESSION_TEACHER_ID
++
++
++def test_the_session_less_queue_still_refuses_without_a_dev_teacher_id(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """Rule 2, byte for byte: the refusal is intact and it costs no wire call."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.delenv(portal_app.DEV_TEACHER_ID_KEY, raising=False)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(assignments=_assignments_transport(assignments_seen, [])) as client:
++        response = client.get(QUEUE_PATH)
++
++    assert response.status_code == 200
++    assert "review queue degraded" in response.text
++    assert "MissingConfigurationError" in response.text
++    assert assignments_seen == []
++
++
++def test_the_dev_bypass_path_presents_no_header(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """Rule 2: no session, no header — the dev bypass is the no-session dev path, nothing more."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.DEV_TEACHER_ID_KEY, CONFIGURED_DEV_TEACHER_ID)
++    assignments_seen: list[httpx.Request] = []
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport(assignments_seen, []),
++        auth=_auth_transport(auth_seen),
++    ) as client:
++        response = client.get(QUEUE_PATH)
++
++    assert response.status_code == 200
++    assert _presented_session(assignments_seen[0]) is None
++    assert assignments_seen[0].url.params["teacherId"] == CONFIGURED_DEV_TEACHER_ID
++    assert auth_seen == []
++    assert "No portal session" in response.text
++
++
++# ── the gate's rule 3, both ways ───────────────────────────────────────────────────
++
++
++def test_the_gate_redirects_to_the_configured_sign_in_target(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """No cookie + ``PORTALS_LOGIN_URL`` ⇒ 302 with this portal's callback as ``return_uri``."""
++    monkeypatch.setenv(portal_app.LOGIN_URL_KEY, SIGN_IN_URL)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++    assignments_seen: list[httpx.Request] = []
++
++    with _portal(assignments=_assignments_transport(assignments_seen)) as client:
++        response = client.get("/teacher", follow_redirects=False)
++
++    assert response.status_code == 302
++    assert response.headers["location"] == (
++        f"{SIGN_IN_URL}?return_uri={quote(CALLBACK_URI, safe='')}"
++    )
++    assert assignments_seen == []  # the route body never ran
++
++
++def test_the_gate_does_not_act_without_a_configured_sign_in_target(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """The dev posture: no target ⇒ today's render, and no URL is invented."""
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.delenv(portal_app.PUBLIC_BASE_URL_KEY, raising=False)
++
++    with _portal(assignments=_assignments_transport([])) as client:
++        response = client.get("/teacher", follow_redirects=False)
++
++    assert response.status_code == 200
++    assert "No portal session" in response.text
++    assert "No sign-in URL is configured" in response.text
++    assert "auth-portal" not in response.text
++
++
++def test_the_ward_route_is_never_gated(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Rule 3 is scoped to the teacher surface: the ward route keeps rendering."""
++    monkeypatch.setenv(portal_app.LOGIN_URL_KEY, SIGN_IN_URL)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++
++    with _portal(assignments=_assignments_transport([])) as client:
++        response = client.get("/", follow_redirects=False)
++
++    assert response.status_code == 200
++    assert "Ward" in response.text
++
++
++def test_the_sign_in_link_falls_back_to_the_origin_the_browser_reached(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """With no configured base URL the callback is the observed origin — never an invented host."""
++    monkeypatch.setenv(portal_app.LOGIN_URL_KEY, SIGN_IN_URL)
++    monkeypatch.delenv(portal_app.PUBLIC_BASE_URL_KEY, raising=False)
++
++    with _portal(assignments=_assignments_transport([])) as client:
++        response = client.get("/teacher", follow_redirects=False)
++
++    callback = f"{response.request.url.scheme}://{response.request.url.host}/auth/callback"
++    assert response.status_code == 302
++    assert response.headers["location"] == f"{SIGN_IN_URL}?return_uri={quote(callback, safe='')}"
++
++
++# ── the affordances come from the environment, or they do not exist ────────────────
++
++
++def test_the_passkey_link_is_built_from_the_auth_service_endpoint(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++    monkeypatch.setenv("services__auth__http__0", "http://auth.test")
++
++    with _portal(assignments=_assignments_transport([])) as client:
++        response = client.get("/teacher")
++
++    assert response.status_code == 200
++    assert (
++        "http://auth.test/auth/passkey/login?app_redirect_uri="
++        + quote(CALLBACK_URI, safe="") in response.text
++    )
++
++
++def test_no_link_is_invented_when_the_environment_supplies_nothing(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.delenv(portal_app.PUBLIC_BASE_URL_KEY, raising=False)
++    monkeypatch.delenv("services__auth__http__0", raising=False)
++    monkeypatch.delenv("AUTH_HTTP", raising=False)
++
++    with _portal(assignments=_assignments_transport([])) as client:
++        response = client.get("/teacher")
++
++    assert response.status_code == 200
++    assert "No portal session" in response.text
++    assert "passkey" not in response.text
++    assert "/login" not in response.text
++
++
++def test_a_signed_in_page_offers_the_logout_link(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _no_sign_in_target(monkeypatch)
++    monkeypatch.setenv(portal_app.PUBLIC_BASE_URL_KEY, PORTAL_BASE_URL)
++
++    with _portal(
++        assignments=_assignments_transport([]),
++        auth=_auth_transport([]),
++    ) as client:
++        response = client.get("/teacher", headers=_session_headers())
++
++    assert response.status_code == 200
++    assert f"Signed in as teacher {SESSION_TEACHER_ID}" in response.text
++    assert portal_app.LOGOUT_PATH in response.text
++
++
++# ── logout ─────────────────────────────────────────────────────────────────────────
++
++
++def test_logout_revokes_clears_and_redirects_to_the_opaque_url(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """The received URL is 302'd byte-for-byte: never parsed, re-encoded, logged or persisted."""
++    _no_sign_in_target(monkeypatch)
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(
++        assignments=_assignments_transport([]), auth=_auth_transport(auth_seen)
++    ) as client:
++        response = client.get(
++            portal_app.LOGOUT_PATH, headers=_session_headers(), follow_redirects=False
++        )
++        page = client.get("/teacher", follow_redirects=False)
++
++    assert response.status_code == 302
++    assert response.headers["location"] == END_SESSION_URL
++    cleared = _cookie_header(response).lower()
++    assert (
++        f'{SESSION_COOKIE}=""' in cleared
++        and "max-age=0" in cleared
++        and "path=/" in cleared
++    )
++    assert [(r.method, r.url.path) for r in auth_seen] == [
++        ("DELETE", f"/auth/session/{SESSION_ID}")
++    ]
++    # With the cookie cleared the surface is session-less, and (no sign-in target) it renders.
++    assert page.status_code == 200
++    assert "No portal session" in page.text
++
++
++def test_logout_without_a_cookie_is_already_signed_out(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _no_sign_in_target(monkeypatch)
++    auth_seen: list[httpx.Request] = []
++
++    with _portal(auth=_auth_transport(auth_seen)) as client:
++        response = client.get(portal_app.LOGOUT_PATH, follow_redirects=False)
++
++    assert response.status_code == 302
++    assert response.headers["location"] == "/"
++    assert auth_seen == []
++
++
++def test_a_failed_revocation_still_clears_the_cookie(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """A logout that leaves a cookie behind is the one thing this route must never do."""
++    _no_sign_in_target(monkeypatch)
++
++    with _portal(auth=_auth_transport([], revoke=_unreachable())) as client:
++        response = client.get(portal_app.LOGOUT_PATH, headers=_session_headers())
++
++    assert response.status_code == 200
++    assert "unusable_response" in response.text
++    cleared = _cookie_header(response).lower()
++    assert (
++        f'{SESSION_COOKIE}=""' in cleared
++        and "max-age=0" in cleared
++        and "path=/" in cleared
++    )
++
++
++# ── AC11: no token is ever ingested ────────────────────────────────────────────────
++
++
++def test_a_token_shaped_response_key_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
++    """The auth service answering with a token is refused, at the client and at the route."""
++    _no_sign_in_target(monkeypatch)
++    leaked = {**SESSION_PAYLOAD, "accessToken": "header.payload.signature"}
++
++    with _portal(
++        assignments=_assignments_transport([]),
++        auth=_auth_transport([], session=lambda request: httpx.Response(200, json=leaked)),
++    ) as client:
++        response = client.get("/teacher", headers=_session_headers())
++
++    assert response.status_code == 200
++    assert "token_in_response" in response.text
++    assert "header.payload.signature" not in response.text
++
++
++async def test_the_auth_client_raises_on_a_token_shaped_body() -> None:
++    """The client-level half: the scan runs on every response, nested keys included."""
++    handler: Handler = lambda request: httpx.Response(  # noqa: E731
++        200, json={"sessionId": SESSION_ID, "roles": [{"idToken": "x"}]}
++    )
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
++        client = AuthApiClient(http, AUTH_ENDPOINT)
++        with pytest.raises(TokenInResponseError):
++            await client.read_session(SESSION_ID)
+diff --git a/src/SchoolCollab.Portals/views/teacher.py b/src/SchoolCollab.Portals/views/teacher.py
+index a9e0c1c3..0c5db37f 100644
+--- a/src/SchoolCollab.Portals/views/teacher.py
++++ b/src/SchoolCollab.Portals/views/teacher.py
+@@ -9,6 +9,12 @@ Four states, all pure functions of data — the split ``views/ward.py`` establis
+ * :func:`build_teacher_error_view` — the degraded state shared by all three, rendered
+   from a typed portal error. The surface never shows a raw 500 or a traceback.
+ 
++Round ``portal-session-adoption`` (D19/D5) adds the session's own rendering:
++:func:`build_teacher_session_card` — the AC10 card a dead or unusable portal session gets —
++and the session affordances every teacher page carries through :class:`TeacherSurfaceLinks`
++(signed-in identity from the D18 read, logout, or the sign-in links when the environment
++supplied them, never an invented URL).
++
+ This is a **flat module**, not a ``views/teacher/`` package (round-2 grill Q5, which
+ supersedes the plan's ``views/teacher/`` wording): one module per surface is the shape
+ ``views/ward.py`` proved, and a one-module package would add a folder node to the
+@@ -19,6 +25,8 @@ Component variants stay within the two the spike proved (``default`` / ``success
+ 
+ from __future__ import annotations
+ 
++from dataclasses import dataclass
++
+ from prefab_ui.app import PrefabApp
+ from prefab_ui.components import (
+     Badge,
+@@ -35,14 +43,159 @@ from prefab_ui.components import (
+ 
+ from api import (
+     AssignmentRow,
++    AuthServiceError,
+     PortalApiError,
+     ServiceEndpoint,
++    SessionData,
+     SubmissionDetailRow,
+     SubmissionForReviewRow,
++    TokenInResponseError,
+ )
+ 
+ ColumnSpec = tuple[str, str, bool]
+ 
++#: The bounded failure codes the teacher session surface renders as an AC10 card. One table, so a
++#: code and its wording cannot drift apart — and so an unrecognized failure can never echo an
++#: upstream body, a token or attacker-supplied text into a page.
++SESSION_COPY: dict[str, tuple[str, str]] = {
++    "session_ended": (
++        "Session ended",
++        "Your sign-in expired or was revoked. Sign in again to continue.",
++    ),
++    "session_not_found": (
++        "Session no longer valid",
++        "This portal's session cookie was already stale - it has been cleared. Sign in again "
++        "to continue.",
++    ),
++    "invalid_code": (
++        "Sign-in handoff rejected",
++        "The one-time sign-in code was already used, or it has expired.",
++    ),
++    "code_expired": (
++        "Sign-in handoff rejected",
++        "The one-time sign-in code has expired.",
++    ),
++    "redirect_uri_mismatch": (
++        "Sign-in handoff rejected",
++        "The one-time sign-in code was issued for a different return address.",
++    ),
++    "redirect_uri_required": (
++        "Sign-in handoff rejected",
++        "The handoff carried no return address, so nothing could be redeemed.",
++    ),
++    "handshake_code_missing": (
++        "Sign-in handoff rejected",
++        "The browser arrived without a sign-in handoff code.",
++    ),
++    "auth_service_unconfigured": (
++        "Sign-in service unavailable",
++        "This portal has no auth-service endpoint configured, so it cannot read or establish a "
++        "session.",
++    ),
++    "upstream_unreachable": (
++        "Sign-in service unavailable",
++        "The identity provider could not be reached, so the session's state is unknown. Nothing "
++        "was changed.",
++    ),
++    "claim_set_incomplete": (
++        "Session unusable",
++        "The session's claim set was incomplete, so no identity could be rendered.",
++    ),
++    "token_in_response": (
++        "Response refused",
++        "The auth service answered with a token-shaped field. This portal holds no credential, "
++        "so the response was refused.",
++    ),
++    "unusable_response": (
++        "Session unavailable",
++        "The auth service answered with something this portal could not use. Nothing was "
++        "changed.",
++    ),
++}
++
++#: The card every unrecognized session failure degrades to.
++UNUSABLE_RESPONSE_CODE = "unusable_response"
++
++_GENERIC_SESSION_COPY: tuple[str, str] = (
++    "Session unavailable",
++    "The auth service could not complete this step. Nothing was changed.",
++)
++
++
++@dataclass(frozen=True)
++class TeacherSurfaceLinks:
++    """The session affordances' URLs, built from the environment by the app layer.
++
++    Every field is optional because the environment may not configure it: this module reads no
++    environment (the pattern's rule 3 — views are pure functions of their inputs), so the app
++    layer passes what it could resolve and a missing value means the affordance is rendered as
++    its honest absence. A link is never invented, so a page never points at a URL the portal
++    could not vouch for.
++    """
++
++    sign_in_url: str | None = None
++    passkey_url: str | None = None
++    logout_url: str | None = None
++
++
++def session_card_code(error: PortalApiError) -> str:
++    """The bounded card code for a typed session failure — never raw upstream text.
++
++    An auth-service failure carries its own ``error`` code when that code is one this surface
++    renders; anything else — a transport failure, a non-JSON or token-shaped body, an
++    unrecognized code — is the portal's own ``unusable_response``. A missing auth-service endpoint
++    is not an error object at all: the app layer names that state itself
++    (``auth_service_unconfigured``), because the portal knows it before any call.
++    """
++    if isinstance(error, TokenInResponseError):
++        return "token_in_response"
++    if isinstance(error, AuthServiceError) and error.code in SESSION_COPY:
++        return error.code
++    return UNUSABLE_RESPONSE_CODE
++
++
++def _session_affordances(
++    session: SessionData | None,
++    links: TeacherSurfaceLinks | None,
++    *,
++    signed_out: bool = True,
++) -> None:
++    """The signed-in identity, or the honest signed-out state — never an invented URL.
++
++    Signed in (D19's rule 1): the identity the D18 read returned, rendered **as data**, plus the
++    logout link. Signed out (rule 2 — the dev posture, no redirect target): an honest "no portal
++    session" badge, with the sign-in links only when the environment supplied them.
++
++    ``signed_out`` is False for the degraded states that deliberately **keep** the cookie: the
++    browser may still be signed in (only the auth service could say otherwise), so the "No portal
++    session" badge would contradict the card's own "state unknown" copy. The sign-in links stay —
++    they are the way forward either way — so only the false claim is dropped.
++    """
++    configured = links or TeacherSurfaceLinks()
++
++    with Row(gap=2):
++        if session is None:
++            if signed_out:
++                Badge("No portal session", variant="default")
++            if configured.sign_in_url:
++                Link("Sign in", href=configured.sign_in_url, target="_self")
++            if configured.passkey_url:
++                Link("Sign in with a passkey", href=configured.passkey_url, target="_self")
++            if not configured.sign_in_url and not configured.passkey_url:
++                Muted(
++                    "No sign-in URL is configured (PORTALS_LOGIN_URL), so this portal cannot "
++                    "send you to one."
++                )
++        else:
++            Badge(f"Signed in as teacher {_shown(session.teacher_id)}", variant="success")
++            Muted(
++                f"Tenant {_shown(session.tenant_name)} ({_shown(session.tenant_type)}) · "
++                f"roles: {', '.join(session.roles) if session.roles else 'none'}"
++            )
++            if configured.logout_url:
++                Link("Sign out", href=configured.logout_url, target="_self")
++
++
+ _ASSIGNMENT_COLUMNS: tuple[ColumnSpec, ...] = (
+     ("id", "Assignment id", False),
+     ("title", "Title", True),
+@@ -85,7 +238,12 @@ def _shown(value: str | None) -> str:
+ 
+ 
+ def build_teacher_list_view(
+-    *, rows: list[AssignmentRow], endpoint: ServiceEndpoint, status_code: int
++    *,
++    rows: list[AssignmentRow],
++    endpoint: ServiceEndpoint,
++    status_code: int,
++    session: SessionData | None = None,
++    links: TeacherSurfaceLinks | None = None,
+ ) -> PrefabApp:
+     """The teacher portal's entry page, from a live assignments-api response."""
+     with PrefabApp(title="Teacher portal — assignments", css_class="p-6") as application:
+@@ -95,6 +253,7 @@ def build_teacher_list_view(
+             with Row(gap=2):
+                 Badge(f"HTTP {status_code}", variant="success")
+                 Badge(f"{len(rows)} assignments", variant="default")
++            _session_affordances(session, links)
+             if not rows:
+                 Muted(
+                     "No assignments came back for this teacher. An empty result is a "
+@@ -117,6 +276,8 @@ def build_review_queue_view(
+     rows: list[SubmissionForReviewRow],
+     endpoint: ServiceEndpoint,
+     status_code: int,
++    session: SessionData | None = None,
++    links: TeacherSurfaceLinks | None = None,
+ ) -> PrefabApp:
+     """One assignment's review queue, from a live assignments-api response."""
+     with PrefabApp(title="Teacher portal — review queue", css_class="p-6") as application:
+@@ -127,6 +288,7 @@ def build_review_queue_view(
+                 Badge(f"HTTP {status_code}", variant="success")
+                 Badge(f"{len(rows)} submissions", variant="default")
+                 Link("← All assignments", href="/teacher", target="_self")
++            _session_affordances(session, links)
+             if not rows:
+                 Muted(
+                     "No submissions are waiting for review on this assignment. An empty "
+@@ -153,6 +315,8 @@ def build_submission_view(
+     submission: SubmissionDetailRow,
+     endpoint: ServiceEndpoint,
+     status_code: int,
++    session: SessionData | None = None,
++    links: TeacherSurfaceLinks | None = None,
+ ) -> PrefabApp:
+     """One submission: its version history (the answers) and its teacher review."""
+     with PrefabApp(title="Teacher portal — submission", css_class="p-6") as application:
+@@ -172,6 +336,7 @@ def build_submission_view(
+                     href=f"/teacher/assignments/{assignment_id}",
+                     target="_self",
+                 )
++            _session_affordances(session, links)
+             Muted(
+                 f"Submission {_shown(submission.submission_id)} · last submitted "
+                 f"{_shown(submission.last_submitted_at)}."
+@@ -206,6 +371,50 @@ def build_submission_view(
+     return application
+ 
+ 
++def build_teacher_session_card(
++    *,
++    code: str,
++    detail: str | None = None,
++    endpoint_label: str | None = None,
++    links: TeacherSurfaceLinks | None = None,
++    signed_out: bool = True,
++) -> PrefabApp:
++    """The AC10 card a dead or unusable portal session renders — a page at **HTTP 200**.
++
++    Mirrors the auth portal's ``require_admin_session`` card shape, and is used for the
++    dead-session states only (D18's ``session_ended`` / ``session_not_found``, and a handoff code
++    the auth service refused): the portal never makes it a hard entry gate, because a session's
++    state is either dead (card) or unknown (degraded card) — never "probably signed out".
++
++    ``detail`` is the typed error's own ``str()``: a class name plus the portal's bounded message
++    (no token, no upstream body), kept visible for the dev loop the way the ward portal's error
++    view keeps it. ``links`` offers the sign-in affordances when the environment configured them;
++    a route that clears the cookie alongside this card renders the same links.
++
++    ``signed_out`` is passed through to the affordances: a caller whose card means "the session is
++    gone" leaves it True, while the degraded states that keep the cookie pass False — asserting
++    "no portal session" there would contradict the card's own "state unknown" copy.
++    """
++    title, message = SESSION_COPY.get(code, _GENERIC_SESSION_COPY)
++
++    with PrefabApp(title=f"Teacher portal — {title}", css_class="p-6") as application:
++        with Column(gap=4):
++            H3("Teacher portal")
++            with Row(gap=2):
++                Badge(title, variant="default")
++                Badge(code, variant="default")
++            with Card():
++                with CardContent():
++                    with Column(gap=2):
++                        Muted(message)
++                        if detail:
++                            Muted(detail)
++                        if endpoint_label:
++                            Muted(f"Auth service: {endpoint_label}")
++            _session_affordances(None, links, signed_out=signed_out)
++    return application
++
++
+ def build_teacher_error_view(
+     *, error: PortalApiError, endpoint: ServiceEndpoint | None, surface: str
+ ) -> PrefabApp:

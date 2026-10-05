@@ -1,4 +1,5 @@
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Auth.Providers;
 

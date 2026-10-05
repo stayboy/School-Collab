@@ -6,10 +6,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Auth.Auth;
 using SchoolCollab.Auth.Endpoints;
 using SchoolCollab.Auth.Providers;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Auth.Tests.Unit;
 

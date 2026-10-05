@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Auth.Options;
 using SchoolCollab.Auth.Providers;
 using SchoolCollab.Auth.Services;
+using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Auth.Tests.Unit;
 
@@ -420,8 +421,10 @@ public class KeycloakAuthProviderTests
     {
         // The handler materializes the principal from these very names; a drift between the
         // factory's constants and the realm mapper contract is what D9 forbids.
-        ClaimSetFactory.TenantIdClaim.Should().Be("tenant_id");
-        ClaimSetFactory.TeacherIdClaim.Should().Be("teacher_id");
-        ClaimSetFactory.RolesClaim.Should().Be("roles");
+        // The claim names are the shared-kernel spelling (D19/D1): the realm mapper contract pins
+        // PortalClaims' constants, and the factory reads exactly them.
+        PortalClaims.TenantIdClaim.Should().Be("tenant_id");
+        PortalClaims.TeacherIdClaim.Should().Be("teacher_id");
+        PortalClaims.RolesClaim.Should().Be("roles");
     }
 }

@@ -6,7 +6,13 @@ the whole page (the dev database legitimately answers ``[]`` — see the ar-21/2
 data-visibility note). Views consume attributes, never raw dictionaries.
 
 The ward surface reads :class:`AssignmentRow`; the teacher surface adds the
-review-queue row and the submission detail (with its version history and review).
+review-queue row and the submission detail (with its version history and review), plus
+:class:`SessionData` — the auth service's D18 claim set as data (round
+``portal-session-adoption`` D5/D19), which is what the teacher surface renders identity from.
+
+The auth service's session records serialize **camelCase** (``tenantId``) while the D9 claim
+names the realm mappers emit are **snake_case** (``tenant_id``); every field here accepts both
+spellings, so a serialization-policy change cannot silently blank a page.
 """
 
 from __future__ import annotations
@@ -23,6 +29,22 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) else str(value)
 
 
+def _text_list(value: Any) -> tuple[str, ...]:
+    """Coerce a multivalued value (the session's ``roles``) to a tuple of strings.
+
+    The auth service serializes roles as a JSON array, but a single string or a comma-separated
+    string is tolerated rather than dropping them — a page must never claim a signed-in teacher
+    carries no roles because the shape moved.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split(",") if part.strip())
+    if isinstance(value, (list, tuple, set)):
+        return tuple(text for item in value if (text := _text(item)) is not None and text)
+    return (_text(value) or "",)
+
+
 # The teacher surface renders two enums the Assignments API serializes as **ints**:
 # `Assignments.Api/Program.cs` registers a JsonStringEnumConverter for every DTO enum
 # except these two, so the wire value is 0/1/2. The maps also pass a string through
@@ -35,6 +57,35 @@ def _enum_name(value: Any, names: Mapping[str, str]) -> str | None:
     """Map an int-serialized enum value to its display name, tolerating either form."""
     text = _text(value)
     return names.get(text, text) if text is not None else None
+
+
+@dataclass(frozen=True)
+class SessionData:
+    """A session read (D18): the claim set **as data** — tenant, teacher id, roles — never
+    tokens.
+
+    The portal holds no credential (AC11), so this is the only identity material it ever sees:
+    the opaque session id it presents, and the claim set the auth service derived from custody.
+    """
+
+    session_id: str | None = None
+    tenant_id: str | None = None
+    tenant_name: str | None = None
+    tenant_type: str | None = None
+    teacher_id: str | None = None
+    roles: tuple[str, ...] = ()
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, Any]) -> SessionData:
+        """Build the session from the auth service's JSON object, tolerating both spellings."""
+        return cls(
+            session_id=_text(payload.get("sessionId") or payload.get("session_id")),
+            tenant_id=_text(payload.get("tenantId") or payload.get("tenant_id")),
+            tenant_name=_text(payload.get("tenantName") or payload.get("tenant_name")),
+            tenant_type=_text(payload.get("tenantType") or payload.get("tenant_type")),
+            teacher_id=_text(payload.get("teacherId") or payload.get("teacher_id")),
+            roles=_text_list(payload.get("roles")),
+        )
 
 
 @dataclass(frozen=True)

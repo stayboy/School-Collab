@@ -121,11 +121,17 @@ public class PortalsSolutionItemsArchitectureTests
         // A tripwire, not a tautology: the first test only proves disk ⊆ slnx, so this pins the
         // slnx set itself. Adding or removing a portal file must update this list consciously —
         // and with it the solution items.
+        //
+        // Round `portal-session-adoption` added two files here: the auth-service client and the
+        // session-path test module. Both land under existing `api/` and `tests/` package nodes, so
+        // PortalSolutionFolderNodes_MirrorThePackageLayout is deliberately unchanged — a new folder
+        // node would be a package-layout change, which this pair of files is not.
         SolutionFileItems.Should().BeEquivalentTo(
             [
                 "src/SchoolCollab.Portals/app.py",
                 "src/SchoolCollab.Portals/api/__init__.py",
                 "src/SchoolCollab.Portals/api/assignments_api_client.py",
+                "src/SchoolCollab.Portals/api/auth_api_client.py",
                 "src/SchoolCollab.Portals/api/dto.py",
                 "src/SchoolCollab.Portals/api/errors.py",
                 "src/SchoolCollab.Portals/api/service_discovery.py",
@@ -133,6 +139,7 @@ public class PortalsSolutionItemsArchitectureTests
                 "src/SchoolCollab.Portals/tests/test_app_routes.py",
                 "src/SchoolCollab.Portals/tests/test_assignments_api_client.py",
                 "src/SchoolCollab.Portals/tests/test_service_discovery.py",
+                "src/SchoolCollab.Portals/tests/test_teacher_session.py",
                 "src/SchoolCollab.Portals/tests/test_teacher_views.py",
                 "src/SchoolCollab.Portals/uv.lock",
                 "src/SchoolCollab.Portals/views/__init__.py",

@@ -63,6 +63,7 @@
   <Folder Name="/src/SchoolCollab.Portals/api/">
     <File Path="src/SchoolCollab.Portals/api/__init__.py" />
     <File Path="src/SchoolCollab.Portals/api/assignments_api_client.py" />
+    <File Path="src/SchoolCollab.Portals/api/auth_api_client.py" />
     <File Path="src/SchoolCollab.Portals/api/dto.py" />
     <File Path="src/SchoolCollab.Portals/api/errors.py" />
     <File Path="src/SchoolCollab.Portals/api/service_discovery.py" />
@@ -71,6 +72,7 @@
     <File Path="src/SchoolCollab.Portals/tests/test_app_routes.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_assignments_api_client.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_service_discovery.py" />
+    <File Path="src/SchoolCollab.Portals/tests/test_teacher_session.py" />
     <File Path="src/SchoolCollab.Portals/tests/test_teacher_views.py" />
   </Folder>
   <Folder Name="/src/SchoolCollab.Portals/views/">

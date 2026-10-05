@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using SchoolCollab.Auth.Providers;
 using SchoolCollab.Auth.Services;
@@ -43,6 +44,18 @@ public static class SessionEndpoints
     /// holds neither the id token nor the registered landing URI. It is OPAQUE to the portal: the
     /// portal 302s the browser to it and never parses, logs or persists it.</summary>
     public sealed record DeleteSessionResponse(string EndSessionUrl);
+
+    /// <summary>The cheap claims-read body (round <c>portal-session-adoption</c> D2 / D19): the D9
+    /// claim set as data, in the <see cref="SessionResponse"/> field spelling minus the session and
+    /// lifetime fields. Token-free by construction (AC11) — the same claim-set-as-data contract the
+    /// session read carries, without a refresh: the read exists so a remote host can authenticate a
+    /// portal call without triggering a Keycloak round trip.</summary>
+    public sealed record SessionClaimsResponse(
+        string TenantId,
+        string TenantName,
+        string TenantType,
+        string TeacherId,
+        IReadOnlyList<string> Roles);
 
     /// <summary>
     /// Reads a live session as data. <c>session_not_found</c> (404) and <c>session_ended</c> (410)
@@ -100,5 +113,30 @@ public static class SessionEndpoints
             : Results.Json(
                 new { error = "session_not_found" },
                 statusCode: StatusCodes.Status404NotFound);
+    }
+
+    /// <summary>
+    /// The cheap claims read (round <c>portal-session-adoption</c> D2 / D19): the D9 claim set for a
+    /// live session over the seam's own <see cref="IAuthProvider.ReadClaims"/> — <b>no refresh, no
+    /// I/O</b> — so a remote host's portal-session authentication never triggers a Keycloak round
+    /// trip (the handler's documented invariant). An unknown/expired session is the same
+    /// <c>session_not_found</c> 404 the session read answers, which the remote reader maps to
+    /// <c>null</c> → <see cref="AuthenticateResult.NoResult"/> → a bare 401. Token-free by
+    /// construction (AC11).
+    /// </summary>
+    public static IResult GetClaims(string sessionId, IAuthProvider provider)
+    {
+        var claims = provider.ReadClaims(sessionId);
+
+        return claims is null
+            ? Results.Json(
+                new { error = "session_not_found" },
+                statusCode: StatusCodes.Status404NotFound)
+            : Results.Ok(new SessionClaimsResponse(
+                claims.TenantId,
+                claims.TenantName,
+                claims.TenantType,
+                claims.TeacherId,
+                claims.Roles));
     }
 }
