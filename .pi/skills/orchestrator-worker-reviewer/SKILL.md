@@ -350,10 +350,24 @@ the tester never derives or expands its own scope.
 
 ## Pitfalls
 
-- **Keep a Tier-1–2 diff reviewable; a large patch buys no review.** An unbounded
+- **Keep a diff reviewable; a large patch buys no review.** An unbounded
   patch times the static reviewer out into a missed-P1 verdict. Bound the diff for
   a light round, or **split the review by area** (one reviewer per patch slice)
-  instead of handing one reviewer an unbounded patch.
+  instead of handing one reviewer an unbounded patch. Split at freeze time when
+  the patch exceeds ~3k lines (provisional — one calibration point) via
+  `git diff <base> -- <area paths>` per area, dispatched in parallel; a timed-out
+  whole-patch review is split before re-dispatch, never re-sent as-is. Gate the
+  split mechanically: the slices' file lists must partition the full patch's file
+  list (none dropped, none in two slices) — verified by diffing the concatenated
+  slices against the full patch, not by narrated line totals, which drift. Brief
+  each slice with its own plan sections, patch path, and findings, and keep its
+  reading brief-scoped — but the parent lists the round's cross-slice seams (wire
+  contracts, registration pairings, call chains that cross the cut) and each
+  brief requires tracing them to the far end: "both slices passed" is not a
+  whole-system review; the parent's authoritative pass owns the composition.
+  Calibrated on round `portal-session-adoption` (5.2k-line whole-patch review:
+  timeout, no verdict; ~2.9k/2.3k-line slices: two verdicts, the C# slice finding
+  the round's only P1 — a dead wire contract that passed every named test).
 - **An empty reviewer verdict means "no review", never "clean".** A reviewer that
   times out, errors, or returns without a REVIEW block has verified nothing. Treat
   the round as unreviewed (resume or re-dispatch it) and never transcribe `CLOSED`
