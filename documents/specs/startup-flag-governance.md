@@ -209,6 +209,8 @@ non-vacuity check `:199-209`), in a sibling file
 
 ## 6. Rollout — two steps, each shippable alone
 
+> **Status: BOTH STEPS LANDED** (recorded 2026-10-04 — this section had described the rollout in the future tense long after it shipped). Verified from the tree: all **six** host `appsettings.json` files carry **no** `FEATURE:DisableOIDCAuth` base entry, the six `FeatureFlags__FEATURE__DisableOIDCAuth` fan-outs are present in the AppHost, and both flag-wiring guards exist (`AppHostStartupFlagWiringArchitectureTests`, `AppHostLoginUiFlagWiringArchitectureTests`). The steps below are retained as the record of how it was sequenced, not as pending work.
+
 **Step 1 (additive, behaviour-identical in dev).** Parameter + six fan-outs, with the two
 AppHost-side values. `aspire run` fans `true` (Development file) over per-host base `true` —
 resolved value unchanged everywhere in dev; standalone runs still read their old base
