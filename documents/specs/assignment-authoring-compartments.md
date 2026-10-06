@@ -1,7 +1,9 @@
 # Assignment Authoring — Compartmentalized Single-Page Experience
 
 > **Status:** adopted (grill session 2026-10-01; all frontier decisions ratified by the
-> owner). This is the durable, source-of-truth contract for **how an assignment is
+> owner) — **CLOSED 2026-10-06**: implemented in the main line and swept against the
+> code, with §17 kept as the recorded residual set (carried follow-ups, not open work
+> against this spec). This is the durable, source-of-truth contract for **how an assignment is
 > authored, edited and viewed** and for the **targeting model** that decides who
 > receives it. It **supersedes the create wizard** (`Assignments/Create.razor`'s
 > three-step `FluentWizard`) as the intended authoring flow.
@@ -21,6 +23,11 @@
 > model and the attachment-grounded AI surface specified below exist in code, with tests.
 > What those rounds deferred or found open (and the defects they closed by hand) is
 > recorded durably in §17.
+>
+> **Closed 2026-10-06 (spec staleness sweep).** Everything this spec specifies is shipped;
+> the four §17 entries are the only carried residuals and they have no owner — this spec
+> is no longer a work queue. Re-open it only if one of them is scheduled, or if the
+> authoring surface is redesigned again.
 >
 > **Parallel surface (2026-10-01):** the Prefab **teacher portal**
 > (`documents/specs/teachers-ward-portal-prefab-plan.md` §1 T1–T7) is a
@@ -434,7 +441,9 @@ new extraction dependency and a change to the AI generation contract.
 ## 17. Deferred / known gaps
 
 These residuals are **recorded, not silently dropped**: each was found by a review or UI-tester pass,
-judged non-blocking for the round that found it, and has no owner yet. `documents/rounds/` is
+judged non-blocking for the round that found it, and has no owner yet. **The spec itself was closed
+on 2026-10-06** — the entries below are carried follow-ups, not open work against this design; the
+spec is re-opened only if one of them is scheduled. `documents/rounds/` is
 declared ephemeral (`documents/rounds/README.md`), so this table is their durable home — extend it
 when a round defers something, and strike an entry (naming the round that closed it) when it is
 done rather than letting this list drift away from the code.

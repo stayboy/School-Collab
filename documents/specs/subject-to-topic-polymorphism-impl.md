@@ -12,6 +12,13 @@
 
 **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
+> **Swept 2026-10-06 (spec staleness audit).** Backend Phases 1–2, the bridge and the
+> API surface are shipped. Phase 5 is **partly** shipped: the `Topic*` dialogs,
+> `TopicRoutes` and the legacy `/subjects` API alias all exist, but the `Subjects.razor`
+> page and its `/students/subjects` nav route were **deliberately left un-renamed** (the
+> "keep UI labels as-is" instruction recorded in `grade-level-detail-view-plan.md`).
+> The unticked boxes below are the genuinely open ones; each names its own state.
+
 ---
 
 > **Spec is the source of truth.** This is the granular, per-spec phase tracker
@@ -116,9 +123,11 @@
   validation. — *FR-13, FR-14, FR-15, FR-16, FR-17*
 - [x] **2.3** Assignments CQRS/DTOs: rename `SubjectId` → `TopicId` across
   commands/queries/`AssignmentSummary`. — *§10*
-- [ ] **2.4** Assignments admin pages: update the topic picker (renamed); filter
+- [x] **2.4** Assignments admin pages: update the topic picker (renamed); filter
   by audience type (§12 Q4) — grade-bridged topics for `SelectedGrades`,
-  group-bridged topics for `SelectedGroups`. — *§10, §12 Q4*
+  group-bridged topics for `SelectedGroups`. — *§10, §12 Q4* (superseded 2026-10-06:
+  the old admin pages were replaced by `AssignmentAuthoring.razor`, which requires
+  `TopicId` and derives the audience from `TargetKindDto`.)
 - [x] **2.5** Cross-context: `Assignment.TopicId` is an operational ref to
   `topics.id` (no DB FK across contexts). — *§8.5*
 - [x] **2.6** Unit tests: `SelectedGrades`/`SelectedGroups` bridge validation
@@ -158,19 +167,26 @@
 - [ ] **5.1** Rename the Subjects admin page (`Subjects.razor` → `Topics.razor`,
   `SubjectCreateDialog` → `TopicCreateDialog`, `SubjectEditDialog` →
   `TopicEditDialog`); extend with an ActivityGroup filter via the bridge. —
-  *FR-1, OS-5, §10*
-- [ ] **5.2** Update `GradeLevelFormFields.razor`: subject picker → topic picker
-  (bridge-aware). — *§10*
-- [ ] **5.3** Confirm the backward-compatible API alias `/api/subjects` →
+  *FR-1, OS-5, §10* — *open 2026-10-06: the `Topic*` dialogs landed, the page rename
+  did not (`Subjects.razor` and `NavMenu.razor:154` still say `/students/subjects`), by
+  owner instruction.*
+- [x] **5.2** Update `GradeLevelFormFields.razor`: subject picker → topic picker
+  (bridge-aware). — *§10* (verified 2026-10-06 — the topics section landed with
+  `grade-level-detail-view-plan.md` Step 6.)
+- [x] **5.3** Confirm the backward-compatible API alias `/api/subjects` →
   `/api/topics` end-to-end (built in 1.15; verify in the UI/API integration). —
-  *NFR-6, AC-16*
-- [ ] **5.4** bUnit: Topics admin page; assignment create/edit topic picker. —
-  *§11*
+  *NFR-6, AC-16* (verified 2026-10-06: the legacy `/subjects` prefix is registered in
+  `src/Students/SchoolCollab.Students.Api/Endpoints/TopicRoutes.cs:30`.)
+- [x] **5.4** bUnit: Topics admin page; assignment create/edit topic picker. —
+  *§11* (verified 2026-10-06: `TopicDialogsBunitTests`, `TopicCreateDialogTests`,
+  `TopicEditDialogTests`, `TopicEditRouterTests`.)
 - [ ] **5.5** Playwright smoke (seeded, coordinated with
   `activity-group-enrollment-impl.md` Phase 6): create topic → bridge-assign to
-  group → `SelectedGroups` assignment → publish → recipients. — *§11*
+  group → `SelectedGroups` assignment → publish → recipients. — *§11* — *open
+  2026-10-06: the only Playwright project covers CodedValues; no seeded topic smoke exists.*
 - [ ] **5.6** `FEATURE:EnableActivityGroups` defaults ON for pilot tenant
-  (coordinated with `activity-group-enrollment-impl.md` Phase 6). — *NFR-8*
+  (coordinated with `activity-group-enrollment-impl.md` Phase 6). — *NFR-8* — *open
+  2026-10-06: the flag is OFF by default and no `appsettings.PilotTenant.json` exists.*
 
 ---
 
@@ -186,8 +202,9 @@
 - [x] **Orphaned subjects** (no `GradeSubjectAssignment`) → still renamed to
   `topics`; create bridge rows post-migration. — *EC-6*
 - [ ] **`TeacherSubject` → `TeacherTopic`** rename is a separate mechanical PR
-  (OS-4), not blocking. — *OS-4*
-- [ ] **Coded-value parent "Subjects"** rename is out of scope (OS-2). — *OS-2*
+  (OS-4), not blocking. — *OS-4* — *open 2026-10-06: the type is still `TeacherSubjectGrade`.*
+- **Coded-value parent "Subjects"** rename is **out of scope** (OS-2) — a decision, not
+  an open item. *(swept 2026-10-06)*
 - [x] **`NoUncommittedModelChanges`** passes for `StudentsDbContext` and
   `AssignmentsDbContext` after the migrations land. — *NFR-2*
 

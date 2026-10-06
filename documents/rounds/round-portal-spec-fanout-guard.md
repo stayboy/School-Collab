@@ -1,6 +1,6 @@
 # Round — `portal-spec-fanout-guard`
 
-**Status:** planned
+**Status:** CLOSED — **PR #300** (merged 2026-10-05), merge commit `0245a846`: the portal plan's stale claims were corrected and the corrected facts guarded. *(Status line corrected 2026-10-06 — it had still read "planned" after the round closed.)*
 **Tier:** Light (Tier 2) — worker + independent static diff reviewer
 **Branch:** to be created from `main` (`b78dc2ae`) — a standalone docs+guard change, not a layer of the (merged) stack #297.
 **Preceded by:** the Solo spec correction of 2026-10-04 (`documents/specs/teachers-ward-portal-prefab-plan.md`, `documents/specs/startup-flag-governance.md`) — uncommitted at the time this round starts; the two are one coherent change set.

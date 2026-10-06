@@ -1,6 +1,7 @@
 # Spec: Global Tenant Query Filter (Hybrid Reference + Strict Operational)
 
-> **Status:** Approved v3 (2026-07-08) — owner approved §3 (hybrid CodedValue +
+> **Status:** Approved v3 (2026-07-08); **implemented, and swept 2026-10-06** — §13
+> now records per-line verification. Original approval: owner approved §3 (hybrid CodedValue +
 > strict operational) and §11.2 defaults (Q-1 System tenant sink, Q-2 FeatureFlag
 > global, Q-3 override-not-duplicate). Corrects v2's over-generalization: the
 > owner's rule *"no creation with null/empty TenantId"* applies to the
@@ -762,22 +763,40 @@ override pattern is untouched).
 
 ## 13. Self-Review Checklist (run after each step)
 
-- [ ] `dotnet build` clean; `dotnet test` green for touched projects.
-- [ ] Every strict entity passes `() => CurrentTenantId`; no `OR IS NULL`.
-- [ ] `CodedValue` (the only hybrid entity) passes the hybrid predicate
-      `() => CurrentTenantId OR IS NULL`; no other entity is hybrid.
-- [ ] No strict create handler allows `CurrentTenantId == Guid.Empty`
-      (FR-4) — it throws `TenantContextRequiredException`.
-- [ ] `CodedValue.tenant_id` is never `Guid.Empty` (NULL or real Guid only).
+> **Swept 2026-10-06 (spec staleness audit).** This section is a **per-step review
+> aid, not a work list** — each line is an invariant assertion. A **ticked** line was
+> re-verified against the shipped code on that date and names its enforcement; an
+> **unticked** line has no independent guard (or is not re-verifiable) and is kept as
+> a review prompt for the next change in this area.
+
+- [x] `dotnet build` clean; `dotnet test` green for touched projects. — *CI green on `main`.*
+- [x] Every strict entity passes `() => CurrentTenantId`; no `OR IS NULL`. —
+      *enforced at model build by `ModuleDbContext.ValidateTenantFilters`
+      (`TenantFilterMissingException`), called from all three `ModuleDbContext`s.*
+- [x] `CodedValue` (the only hybrid entity) passes the hybrid predicate
+      `() => CurrentTenantId OR IS NULL`; no other entity is hybrid. —
+      *`EntityTypeConfigurationBase` + `.skills/tenancy-override-pattern/SKILL.md`.*
+- [x] No strict create handler allows `CurrentTenantId == Guid.Empty`
+      (FR-4) — it throws `TenantContextRequiredException`. — *thrown at
+      `src/SchoolCollab.Core/Data/ModuleDbContext.cs:88`.*
+- [ ] `CodedValue.tenant_id` is never `Guid.Empty` (NULL or real Guid only). — *not re-probed 2026-10-06.*
 - [ ] Duplicate-code guard rejects tenant-owned creation when a shared row
-      with that `(parent, code)` exists (FR-6, AC-9).
-- [ ] `CodedValueResolver` and override CQRS are unchanged (AC-8).
-- [ ] No unnamed `IgnoreQueryFilters()` on strict or hybrid DbSets (SC0001).
+      with that `(parent, code)` exists (FR-6, AC-9). — *not re-probed 2026-10-06.*
+- [ ] `CodedValueResolver` and override CQRS are unchanged (AC-8). — *"unchanged"
+      is not re-verifiable; neither was touched by this spec's steps.*
+- [x] No unnamed `IgnoreQueryFilters()` on strict or hybrid DbSets (SC0001). —
+      *the sanctioned opt-outs are named (`IgnoreQueryFilters(["Tenant"])`); the SC0001
+      analyzer stays deferred (§12 Step 6), covered by the runtime audit above.*
 - [ ] No `FindAsync`/`SingleOrDefaultAsync` on a strict/hybrid entity
-      without the filter.
+      without the filter. — *not re-probed 2026-10-06.*
 - [ ] Every strict tenant-scoped table has `tenant_id` NOT NULL + composite
-      indexes (NFR-3); `coded_values` has the two partial unique indexes.
-- [ ] No `Guid.Empty` in any strict table after backfill (EC-7).
-- [ ] New tests trace to an AC-*; every AC-* has a passing test.
-- [ ] `auth-tenancy-pattern.md` §4.6 + `grade-level-setup.md` + per-row
-      override spec notices updated; override-pattern skill extended.
+      indexes (NFR-3); `coded_values` has the two partial unique indexes. — *not re-probed 2026-10-06.*
+- [ ] No `Guid.Empty` in any strict table after backfill (EC-7). — *a data-state
+      assertion with no guard; not re-probed.*
+- [ ] New tests trace to an AC-*; every AC-* has a passing test. — *no
+      AC-traceability audit exists; not re-probed.*
+- [x] `auth-tenancy-pattern.md` §4.6 + `grade-level-setup.md` + per-row
+      override spec notices updated; override-pattern skill extended. —
+      *the skill carries the hybrid model; the doc is now
+      `documents/solution/auth-tenancy-pattern.md` and has no `§4.6` anchor
+      (its sections are unnumbered) — the citation, not the content, was stale.*

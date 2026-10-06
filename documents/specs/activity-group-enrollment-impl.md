@@ -20,6 +20,13 @@
 
 **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
+> **Swept 2026-10-06 (spec staleness audit).** Phases 1–5 shipped. **Phase 6 (flag
+> flip + pilot rollout) is not started** and is the only open work in this tracker —
+> `FEATURE:EnableActivityGroups` is still OFF and there is no `appsettings.PilotTenant.json`.
+> Two former boxes were not work at all (a decided cleanup policy, and a stale
+> "missing docs" list whose four docs all exist) and are now stated as such.
+
+
 ---
 
 ## Prerequisite dependency
@@ -90,9 +97,9 @@
 
 ## Phase 6 — Flag flip + pilot rollout (dark→lit)
 
-- [ ] **6.1** Default `FEATURE:EnableActivityGroups` ON in `appsettings.PilotTenant.json`; update `documents/configuration.md` §2. — *NFR-11*
-- [ ] **6.2** Playwright smoke: create "Chess Club" → add 3 students → create group-scoped polymorphic `Subject` (`OwnerType = ActivityGroup`) → create `SelectedGroups` assignment linked to club + that subject → publish → assert only club members' subscribed contacts received it. — *§11*
-- [ ] **6.3** Monitor pilot tenant 1 week before broader rollout.
+- [ ] **6.1** Default `FEATURE:EnableActivityGroups` ON in `appsettings.PilotTenant.json`; update `documents/configuration.md` §2. — *NFR-11* — *open 2026-10-06: no `appsettings.PilotTenant.json` exists yet.*
+- [ ] **6.2** Playwright smoke: create "Chess Club" → add 3 students → create group-scoped polymorphic `Subject` (`OwnerType = ActivityGroup`) → create `SelectedGroups` assignment linked to club + that subject → publish → assert only club members' subscribed contacts received it. — *§11* — *open 2026-10-06: no seeded smoke exists for this flow.*
+- [ ] **6.3** Monitor pilot tenant 1 week before broader rollout. — *open 2026-10-06: the pilot has not started.*
 
 ---
 
@@ -162,8 +169,8 @@
 
 ## Cross-cutting / don't-forget
 
-- [ ] **Closed-assignment link cleanup** — no automatic unlink needed (EC-12: benign dangling refs); `PUT /api/assignments/{id}/groups` (step 3.3) is the manual escape hatch.
-- [ ] **Missing referenced docs** (not implementation blockers, but cited by the spec): `centralized-feature-flags.md`, `ef-migrations.md`, `auth-tenancy-pattern.md`, `endpoint-organization-pattern.md` — either draft them or repoint the spec to the real mechanism.
+- **Closed-assignment link cleanup** — no automatic unlink needed (EC-12: benign dangling refs); `PUT /api/assignments/{id}/groups` (step 3.3) is the manual escape hatch. A **decided policy, not an open item**. *(swept 2026-10-06)*
+- [x] **Missing referenced docs** — *resolved 2026-10-06*: all four exist under other paths/names. `ef-migrations.md` is at `.github/copilot/rules/`; `auth-tenancy-pattern.md` and `endpoint-organization-pattern.md` are at `documents/solution/`; the centralised-flags doc is `documents/solution/centralized-feature-flags-implementation.superseded.md`. The stale part was the citations, not the docs.
 
 ---
 
