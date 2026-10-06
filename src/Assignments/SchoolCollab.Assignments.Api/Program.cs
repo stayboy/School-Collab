@@ -249,6 +249,12 @@ builder.Services.AddAuthentication().AddPortalSessionAuthentication(AuthTenancyE
 builder.Services.AddCrossModuleHttpClient<PortalSessionClaimsReader>("https+http://auth", propagateTenant: false)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
+// The scheme's handler resolves this port from DI, and the typed-client registration above binds only
+// the concrete reader — so the interface needs its own forward. An unregistered ctor dep is a DI
+// failure at request time (a 500), not a 401: forward instead of `AddTransient<IFace, Impl>()` so the
+// typed client's own pipeline (base address, retry handler, handler lifetime) is what gets used.
+builder.Services.AddTransient<IPortalSessionClaimsReader>(sp => sp.GetRequiredService<PortalSessionClaimsReader>());
+
 // D5 (Q5, round teacher-scope-auth): bind the dev bypass's teacher_id claim. Inert unless
 // FEATURE:DisableOIDCAuth registers TestAuthHandler; without a configured value the claim is
 // not emitted, which is the CI default.
