@@ -38,6 +38,13 @@ namespace SchoolCollab.Core.Tests.Unit.Architecture;
 /// <para>The test also fails on UNKNOWN service names (e.g. a typo like
 /// <c>https+http://studentsapi</c>) — every target must correspond to a
 /// resource declared anywhere in the AppHost.</para>
+///
+/// <para>SECOND RULE (<c>NamedClients_MatchingAnAppHostResource_HaveThatResourceAsBaseAddress</c>):
+/// a named <c>HttpClient</c> whose NAME is a declared AppHost resource (e.g.
+/// <c>AddHttpClient("settings-api")</c>) must be given a base address pointing at that
+/// resource. The literal scan above cannot see a client that has NO base address — an
+/// absent address produces no literal — so an omitted address passed the whole guard and
+/// surfaced only at runtime.</para>
 /// </summary>
 [TestClass]
 public class CrossModuleWiringTests
@@ -52,6 +59,19 @@ public class CrossModuleWiringTests
         string ResourceName,
         string CsprojNameDots,
         IReadOnlySet<string> ReferencedResources);
+
+    private sealed record NamedClientRegistration(
+        string File,
+        string Name,
+        string? BaseAddressHost);
+
+    // ── Scan pattern ────────────────────────────────────────────────────
+
+    /// <summary>A base-address literal targeting an Aspire service by name — the
+    /// <c>https+http://</c> discovery scheme or a plain <c>http://</c>. Host only; the
+    /// lowercase DNS-shaped capture is what keeps prose and placeholders out.</summary>
+    private static readonly Regex BaseAddressLiteralRegex =
+        new(@"""(?:(?:https?\+http)|http)://(?<host>[a-z][a-z0-9-]*)""", RegexOptions.Compiled);
 
     // ── Test ────────────────────────────────────────────────────────────
 
@@ -141,6 +161,42 @@ public class CrossModuleWiringTests
         violations.Should().BeEmpty(
             "every cross-module HTTP base address needs Aspire service discovery wiring; " +
             "a missing .WithReference surfaces only at runtime as \"No such host is known\"");
+    }
+
+    // ── Second rule: named clients named after an AppHost resource ──────
+
+    [TestMethod]
+    public void NamedClients_MatchingAnAppHostResource_HaveThatResourceAsBaseAddress()
+    {
+        var repoRoot = FindRepoRoot();
+        var appHostSource = ReadCommentStripped(Path.Combine(repoRoot.FullName, "src", "AppHost", "SchoolCollab.AppHost", "Program.cs"));
+
+        var declaredResources = ParseDeclaredResourceNames(appHostSource);
+        var resourceNamedClients = ScanNamedClientRegistrations(repoRoot)
+            .Where(r => declaredResources.Contains(r.Name))
+            .ToList();
+
+        // Non-vacuity: with no resource-named client at all the rule below checks
+        // nothing and would pass on an empty scan.
+        resourceNamedClients.Should().NotBeEmpty(
+            "the named-client scan must find at least one named HttpClient registered under a declared AppHost " +
+            "resource name (e.g. AddHttpClient(\"settings-api\")), otherwise this rule passes by finding nothing");
+
+        var violations = resourceNamedClients
+            .Where(r => r.BaseAddressHost != r.Name)
+            .Select(r => r.BaseAddressHost is null
+                ? $"{Relative(repoRoot, r.File)}: registers the named HttpClient \"{r.Name}\" — an AppHost resource — " +
+                  $"with NO base address. Use AddCrossModuleHttpClient(\"{r.Name}\", \"https+http://{r.Name}\", …)."
+                : $"{Relative(repoRoot, r.File)}: the named HttpClient \"{r.Name}\" is an AppHost resource but its " +
+                  $"base address points at '{r.BaseAddressHost}' instead — the call goes to the wrong host.")
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "a named HttpClient whose name IS an Aspire resource must carry that resource as its base address; " +
+            "a MISSING base address is invisible to the literal-scan rule above — it produces no literal — and " +
+            "surfaces only at runtime, where a relative request URI on a null BaseAddress throws " +
+            "InvalidOperationException(\"the request URI must be an absolute URI or BaseAddress must be set\"), " +
+            "which is NOT an HttpRequestException and so escapes every fail-open catch (HttpRequestException)");
     }
 
     // ── Parsing: AppHost ────────────────────────────────────────────────
@@ -241,34 +297,116 @@ public class CrossModuleWiringTests
 
     private static List<ClientRegistration> ScanClientRegistrations(DirectoryInfo repoRoot)
     {
-        var urlRegex = new Regex(@"""(?:(?:https?\+http)|http)://(?<host>[a-z][a-z0-9-]*)""", RegexOptions.Compiled);
         var excludedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "localhost", "host.docker.internal", "0.0.0.0", "example.com", "example.org"
         };
 
-        var srcDir = Path.Combine(repoRoot.FullName, "src");
-        var appHostDir = Path.Combine(srcDir, "AppHost");
-
         var results = new List<ClientRegistration>();
-        foreach (var file in Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var full in EnumerateScannedSourceFiles(repoRoot))
         {
-            var full = Path.GetFullPath(file);
-            if (full.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-                || full.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                || full.StartsWith(appHostDir, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             var cleaned = ReadCommentStripped(full);
-            foreach (Match m in urlRegex.Matches(cleaned))
+            foreach (Match m in BaseAddressLiteralRegex.Matches(cleaned))
             {
                 var host = m.Groups["host"].Value;
                 if (!excludedHosts.Contains(host))
                 {
                     results.Add(new ClientRegistration(full, host));
                 }
+            }
+        }
+        return results;
+    }
+
+    /// <summary>Every source file the guard reads: <c>src/**/*.cs</c> outside
+    /// <c>bin</c>/<c>obj</c> and outside the AppHost itself (the AppHost is the wiring
+    /// reference being checked against, not a caller).</summary>
+    private static IEnumerable<string> EnumerateScannedSourceFiles(DirectoryInfo repoRoot)
+    {
+        var srcDir = Path.Combine(repoRoot.FullName, "src");
+        var appHostDir = Path.Combine(srcDir, "AppHost");
+
+        return Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories)
+            .Select(Path.GetFullPath)
+            .Where(full => !full.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                && !full.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                && !full.StartsWith(appHostDir, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The index of the ';' that terminates the statement starting at
+    /// <paramref name="start"/> — the first one at parenthesis/brace depth zero and outside a
+    /// string literal — or the source length when the statement is unterminated.</summary>
+    /// <remarks>
+    /// A bare <c>IndexOf(';')</c> is not enough: <see cref="ReadCommentStripped"/> deliberately
+    /// preserves quoted content, and a lambda body or an interpolated string can carry a ';'
+    /// before the base-address literal. Slicing there would make a PRESENT base address read as
+    /// missing — a false positive against correct code. (Diff-review P2, applied verbatim pre-PR.
+    /// The reviewer's alternative — stop at the call's own ')' — was rejected deliberately: it
+    /// would miss the legitimate chained
+    /// <c>AddHttpClient(name).ConfigureHttpClient(c =&gt; c.BaseAddress = …)</c> spelling, which is
+    /// the opposite failure. Char literals are not modelled: a ';' char literal cannot occur in a
+    /// client registration.)
+    /// </remarks>
+    private static int StatementEnd(string source, int start)
+    {
+        var depth = 0;
+        var inString = false;
+        for (var i = start; i < source.Length; i++)
+        {
+            var c = source[i];
+            if (inString)
+            {
+                if (c == '\\') { i++; continue; }
+                if (c == '"') inString = false;
+                continue;
+            }
+
+            switch (c)
+            {
+                case '"': inString = true; break;
+                case '(' or '[' or '{': depth++; break;
+                case ')' or ']' or '}': depth--; break;
+                case ';' when depth <= 0: return i;
+            }
+        }
+
+        return source.Length;
+    }
+
+    // ── Scanning: named HttpClient registrations ────────────────────────
+
+    /// <summary>Finds every NAMED <c>HttpClient</c> registration whose name is written as a
+    /// string literal — the non-generic <c>AddHttpClient(name, …)</c> and
+    /// <c>AddCrossModuleHttpClient(name, baseAddress, …)</c> overloads. Typed registrations
+    /// (<c>AddHttpClient&lt;TClient&gt;()</c>) are out of rule by construction: their client
+    /// name is a TYPE name, never an Aspire resource.
+    ///
+    /// <para>The statement body (matched declaration up to the terminating ';') is searched
+    /// for a base-address literal, so all three sanctioned spellings are covered: a
+    /// configure lambda, a chained <c>ConfigureHttpClient</c>, and the helper's own second
+    /// argument. A registration with no such literal yields a null
+    /// <see cref="NamedClientRegistration.BaseAddressHost"/> — the exact defect this rule
+    /// exists to catch.</para>
+    /// </summary>
+    private static List<NamedClientRegistration> ScanNamedClientRegistrations(DirectoryInfo repoRoot)
+    {
+        var namedRegex = new Regex(
+            @"\.(?:AddHttpClient|AddCrossModuleHttpClient)\s*\(\s*""(?<name>[^""]+)""",
+            RegexOptions.Compiled);
+
+        var results = new List<NamedClientRegistration>();
+        foreach (var full in EnumerateScannedSourceFiles(repoRoot))
+        {
+            var cleaned = ReadCommentStripped(full);
+            foreach (Match m in namedRegex.Matches(cleaned))
+            {
+                var body = cleaned[m.Index..StatementEnd(cleaned, m.Index)];
+                var address = BaseAddressLiteralRegex.Match(body);
+
+                results.Add(new NamedClientRegistration(
+                    File: full,
+                    Name: m.Groups["name"].Value,
+                    BaseAddressHost: address.Success ? address.Groups["host"].Value : null));
             }
         }
         return results;

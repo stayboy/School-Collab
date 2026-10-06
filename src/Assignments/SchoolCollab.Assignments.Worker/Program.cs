@@ -7,6 +7,7 @@ using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Assignments.Core.Services.Delivery;
 using SchoolCollab.Assignments.Worker.Messaging;
 using SchoolCollab.Assignments.Worker.Services;
+using SchoolCollab.Core.Http;
 using SchoolCollab.Core.Messaging;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -31,10 +32,12 @@ builder.Services.AddAssignmentsCore(builder.Configuration);
 
 // E3 (ar-19): the relocated HTTP-backed effective-policy resolver + the Students-API
 // address resolver, so the sweeps render queue-time messages the same way the Api drain
-// does. Named clients resolve through Aspire service discovery (AppHost wires the
-// worker → settings-api + students-api).
-builder.Services.AddHttpClient("settings-api");
-builder.Services.AddHttpClient("students-api");
+// does. Both named clients are registered with the documented AddCrossModuleHttpClient
+// helper, whose base address is the literal Aspire service name — that literal is what
+// Aspire service discovery resolves (AppHost wires the worker → settings-api +
+// students-api, per CrossModuleWiringTests).
+builder.Services.AddCrossModuleHttpClient("settings-api", "https+http://settings-api", propagateTenant: false);
+builder.Services.AddCrossModuleHttpClient("students-api", "https+http://students-api", propagateTenant: false);
 builder.Services.AddScoped<INotificationPolicyResolver, NotificationPolicyResolver>();
 builder.Services.AddScoped<IContactAddressResolver, StudentsContactAddressResolver>();
 
