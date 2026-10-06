@@ -418,6 +418,12 @@ user instruction):
    SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
    ```
 5. Open a PR targeting `main` only after the user asks to open/create a PR.
+   **If a previous related PR is already open** (same area, arc, or feature
+   train), do **not** open an independent PR — deliver the new work as a
+   `gh stack` layer on top of it instead (see the `gh-stack-pr-train` skill: a
+   registered layer runs the stack root's CI checks, and the train reviews as
+   one ordered sequence). With no related PR open, a plain PR from `main`
+   is correct.
 6. Wait for the GitHub Actions `Build & Test` check to pass.
 7. Merge with squash merge by default only after the user asks to merge:
    ```bash

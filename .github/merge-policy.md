@@ -21,7 +21,12 @@ not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
    ```bash
    SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
    ```
-5. Open a PR targeting `main`.
+5. Open a PR targeting `main`. If a previous related PR is already open (same
+   area, arc, or feature train), deliver the new work as a `gh stack` layer on top
+   of it rather than an independent PR (see the `gh-stack-pr-train` skill: a
+   registered layer runs the stack root's CI checks, and the train reviews as
+   one ordered sequence). With no related PR open, a plain PR from `main` is
+   correct.
 6. Run the local pre-flight checks:
    - code review
    - `dotnet build`
