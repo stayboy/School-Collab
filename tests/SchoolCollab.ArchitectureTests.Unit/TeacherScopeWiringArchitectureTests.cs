@@ -20,8 +20,10 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 /// <c>IContactResolver</c>, <c>ITeacherDirectory</c>, <c>IStudentDirectory</c>,
 /// <c>IActivityGroupLookup</c>, <c>IAssignmentTargetResolver</c>, <c>ITopicAssignmentLookup</c> and
 /// <c>ITeacherScopeProvider</c>, so a second registration of the same name would silently drop the
-/// ar-24 handler chain. The <c>Assignments.Worker</c>'s own client is a separate host and is pinned
-/// as untouched.</item>
+/// ar-24 handler chain. The <c>Assignments.Worker</c>'s own client is a separate host: it is pinned
+/// as carrying the sanctioned base address but NO bearer-forwarding handler (round
+/// <c>assignments-cross-module-base-addresses</c> re-anchored that pin from the bare spelling, which
+/// the wiring guard's second rule now covers).</item>
 /// <item><b>[Q7] the port's file placement.</b> The interface lives in Assignments.Core, the HTTP
 /// implementation + the local DTO mirror in Assignments.Api — and none of the three names a
 /// <c>Students.Core</c>/<c>Students.Application</c> type.</item>
@@ -100,9 +102,13 @@ public class TeacherScopeWiringArchitectureTests
     {
         var worker = Read("src", "Assignments", "SchoolCollab.Assignments.Worker", "Program.cs");
 
-        worker.Should().Contain("AddHttpClient(\"students-api\")",
-            "the Worker's own named client is a separate host with no caller token to forward — the "
-            + "round deliberately leaves it alone");
+        worker.Should().Contain("AddCrossModuleHttpClient(\"students-api\", \"https+http://students-api\"",
+            "the Worker's own named client is a separate host with no caller token to forward — it carries no "
+            + "bearer handler, but it does need the sanctioned base address (round "
+            + "assignments-cross-module-base-addresses)");
+
+        worker.Should().NotContain("AddHttpMessageHandler<BearerForwardingDelegatingHandler>()",
+            "the pinned carve-out residual: the Worker has no caller token to forward.");
     }
 
     [TestMethod]

@@ -145,7 +145,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolv
 // E3 (ar-19): relocated into Assignments.Core (Services/NotificationPolicyResolver.cs)
 // so both the API and the Assignments.Worker sweeps resolve the same policy.
 // ar-24: same bearer-forwarding + AllowAutoRedirect=false posture as students-api.
-builder.Services.AddHttpClient("settings-api")
+// [P1-6] MIGRATED to the documented AddCrossModuleHttpClient pattern, like students-api
+// above — this registration carried no base address, so the two resolvers below issued
+// RELATIVE URIs and threw InvalidOperationException ("BaseAddress must be set"), which is
+// NOT an HttpRequestException and so escaped their fail-open catch.
+builder.Services.AddCrossModuleHttpClient("settings-api", "https+http://settings-api", propagateTenant: false)
     .AddHttpMessageHandler<BearerForwardingDelegatingHandler>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationPolicyResolver,

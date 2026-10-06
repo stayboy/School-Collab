@@ -35,6 +35,27 @@ for every HTTP client that crosses an Aspire service boundary. It configures:
    so it is never captured by a disposed DI scope or reused beyond its handler
    chain lifetime.
 
+## The base address is the part that is usually forgotten
+
+The helper does two different jobs, and only the first is obvious:
+
+1. **The resilience chain** (handler lifetime + retry) described above.
+2. **The base address**, which is what Aspire service discovery actually resolves. Handing the
+   client the Aspire name as its base address (`https+http://<resource>`) is what lets discovery
+   rewrite the host to the real endpoint.
+
+A named client registered **without** a base address — `services.AddHttpClient("settings-api")` —
+compiles, resolves from DI, and fails only when a caller issues a **relative** URI: the request
+throws `InvalidOperationException` ("the request URI must be an absolute URI or BaseAddress must be
+set"), which is **not** an `HttpRequestException` and therefore escapes every fail-open
+`catch (HttpRequestException)` in a caller. The registration looks fine, the AppHost
+`.WithReference` looks fine, and the unit tests that stub `IHttpClientFactory` supply their own base
+address — so nothing fails until runtime.
+
+`CrossModuleWiringTests` now fails the build for exactly this: every named client whose **name is a
+declared AppHost resource** must carry that resource as its base address. (It also keeps failing on
+a *wrong* base address, and on a target resource that no host references.)
+
 ## Usage
 
 ```csharp
