@@ -3,6 +3,13 @@
 Exact id tables, per-tier strategy, substitution rules, and the traceability
 header format. `SKILL.md` summarizes; this file is the catalog.
 
+**Policy lives elsewhere, on purpose:** the round-runner model policy — the metric
+(iterations per round), the citation-discipline gate criterion, seat-diversity requirements
+(the gate differs from the author in family or clearly-bigger tier), the author-escalation
+triggers, and the re-evaluation cadence — is
+`documents/specs/round-runner-model-policy.md` (adopted 2026-10-06). This file holds the
+operational ids and dispatch rules that policy governs; if they ever disagree, the spec wins.
+
 ## Selecting a provider — a per-round choice, never a fixed setting
 
 The provider is chosen **per round** and recorded on round-doc line 1. It is not
