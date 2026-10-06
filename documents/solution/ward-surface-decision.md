@@ -83,9 +83,12 @@ Phase 1 is retired as already delivered; Phase 4 is decided in favour of extendi
 - **Accepted dependency (unchanged by this decision):** the Prefab renderer loads from a
   CDN (jsDelivr, version-pinned) at page load. Accepted with a named trigger — any
   offline/air-gapped requirement or supply-chain policy — recorded in the plan's risk table.
-- **Open, carried to the next round:** whether any OIDC work remains for the portal now that the
+- ~~**Open, carried to the next round:** whether any OIDC work remains for the portal now that the
   D19 portal-session path gives it a credential path, and the migration order for the remaining
-  assignment create/edit/publish features (plan §7.2).
+  assignment create/edit/publish features (plan §7.2).~~ **CLOSED 2026-10-05 (same day, scope
+  grill):** the OIDC item was **retired as unnecessary by construction**, and the scope **closed at
+  read/review/grade** — authoring does not migrate to the portal. See
+  `documents/solution/portal-scope-decision.md`.
 
 ## Provenance
 

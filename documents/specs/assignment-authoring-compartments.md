@@ -25,8 +25,11 @@
 > **Parallel surface (2026-10-01):** the Prefab **teacher portal**
 > (`documents/specs/teachers-ward-portal-prefab-plan.md` §1 T1–T7) is a
 > **read/review second surface**; this Blazor compartment design remains the
-> **authoring destination**. Both tracks run (owner decision Q5 = A); the portal
-> is the eventual migration target for the working assignment feature set.
+> **authoring destination**. Both tracks run (owner decision Q5 = A); ~~the portal
+> is the eventual migration target for the working assignment feature set.~~
+> *(**Superseded 2026-10-05:** the portal's scope closed at read/review/grade — this Blazor
+> compartment design **is** the authoring surface, not a way-station toward a portal-side
+> authoring experience. `documents/solution/portal-scope-decision.md`.)*
 
 ---
 
