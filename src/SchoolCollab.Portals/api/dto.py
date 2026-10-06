@@ -5,7 +5,7 @@ renamed fields instead of exploding: a shape drift should degrade one cell, not
 the whole page (the dev database legitimately answers ``[]`` — see the ar-21/23
 data-visibility note). Views consume attributes, never raw dictionaries.
 
-The ward surface reads :class:`AssignmentRow`; the teacher surface adds the
+The assignment list reads :class:`AssignmentRow`; the teacher surface adds the
 review-queue row and the submission detail (with its version history and review), plus
 :class:`SessionData` — the auth service's D18 claim set as data (round
 ``portal-session-adoption`` D5/D19), which is what the teacher surface renders identity from.
@@ -90,7 +90,7 @@ class SessionData:
 
 @dataclass(frozen=True)
 class AssignmentRow:
-    """One row of ``GET /assignments`` — what the ward view tabulates."""
+    """One row of ``GET /assignments`` — what the teacher list tabulates."""
 
     id: str | None = None
     title: str | None = None
@@ -167,7 +167,7 @@ class SubmissionForReviewRow:
 class SubmissionVersionRow:
     """One entry of a submission's version history (``SubmissionVersionDto``).
 
-    The version's ``content`` is where the ward's answer lives — the detail response
+    The version's ``content`` is where the submission's answer lives — the detail response
     carries no separate answers array.
     """
 

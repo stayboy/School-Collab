@@ -339,7 +339,7 @@ def test_submission_renders_versions_and_review_through_the_injected_client() ->
     assert seen == [
         f"http://assignments-api.test/{ASSIGNMENT_ID}/students/{STUDENT_ID}/submission"
     ]
-    assert "My second answer" in response.text  # the ward's answer, per version
+    assert "My second answer" in response.text  # the submission's answer, per version
     assert "Guardian" in response.text  # SubmissionSourceDto 1, mapped from the API's int
     assert "Good work" in response.text
     assert "Reviewed" in response.text  # ReviewStateDto 1

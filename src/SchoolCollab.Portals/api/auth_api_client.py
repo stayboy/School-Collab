@@ -108,8 +108,8 @@ class AuthServiceEndpoint:
 def candidate_env_vars(service: str) -> tuple[str, ...]:
     """The environment-variable names Aspire may have used, in priority order.
 
-    ``WithReference(...)`` injects the .NET-style ``services__<name>__http__0`` (verified in the
-    ward-portal spike); the simplified ``<NAME>_HTTP`` form is still checked second.
+    ``WithReference(...)`` injects the .NET-style ``services__<name>__http__0`` (verified against
+    the AppHost's injection); the simplified ``<NAME>_HTTP`` form is still checked second.
     """
     return (f"services__{service}__http__0", f"{service.upper().replace('-', '_')}_HTTP")
 
@@ -118,8 +118,8 @@ def resolve_auth_service_endpoint() -> AuthServiceEndpoint:
     """Resolve the auth service's base URL from the AppHost-injected environment.
 
     Lives beside the client rather than in ``service_discovery.py``: that module quarantines the
-    Assignments API's discovery for the ward surface, and this is the same Aspire ".NET-ism"
-    applied to the teacher surface's second upstream. Raising
+    Assignments API's discovery, and this is the same Aspire ".NET-ism" applied to the
+    portal's second upstream. Raising
     :class:`ServiceDiscoveryError` is what lets a caller that *needs* the auth service render its
     degraded state, and a caller that only *offers* a link (the passkey sign-in affordance)
     simply omit it.

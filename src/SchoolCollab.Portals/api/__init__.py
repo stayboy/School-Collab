@@ -6,7 +6,7 @@ The portal is a pure HTTP consumer: no backend change, no database access
 Prefab components — the two layers churn for different reasons (prefab-ui is
 0.x, and the plan's risk table asks for exactly this isolation).
 
-Two upstreams now: the Assignments API (the ward list and the teacher
+Two upstreams: the Assignments API (the assignment list and the teacher
 drill-down) and the auth service (the teacher surface's D19 session path — the
 handshake redemption, the D18 session read and the D13 revocation). This module
 re-exports both clients' public surface, per the pattern's own rule: adding a

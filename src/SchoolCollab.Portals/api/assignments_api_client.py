@@ -15,9 +15,9 @@ never blocks the event loop on I/O.
 
 The public teacher-route reads take an optional per-call ``headers`` mapping.
 That is how the D19 portal session travels: the app layer presents the opaque
-session id (``X-Portal-Session``) on teacher-route calls only, while the ward
-route stays header-less — the header is passed per call, never defaulted onto
-the client, so no surface can acquire it by accident.
+session id (``X-Portal-Session``) on its identity-bearing calls — the header is
+passed per call, never defaulted onto the client, so no call can acquire it by
+accident.
 
 Adding an endpoint is one method. A read returns a parsed result::
 
@@ -92,7 +92,7 @@ class SubmissionResult:
 
 
 class AssignmentsApiClient:
-    """The portal's view of the Assignments API — the ward list and the teacher drill-down."""
+    """The portal's view of the Assignments API — the assignment list and the teacher drill-down."""
 
     def __init__(self, http: httpx.AsyncClient, endpoint: ServiceEndpoint) -> None:
         self._http = http
@@ -106,10 +106,10 @@ class AssignmentsApiClient:
     async def list_assignments(
         self, headers: Mapping[str, str] | None = None
     ) -> FetchResult:
-        """``GET /assignments`` — the assignments the ward view tabulates.
+        """``GET /assignments`` — the assignments the teacher list tabulates.
 
-        ``headers`` is the per-call portal-session header on the teacher routes; the ward
-        route omits it, so the API's own posture for it is unchanged.
+        ``headers`` is the per-call portal-session header the teacher routes send; omitting
+        it leaves the API's own posture for the call unchanged.
         """
         status_code, payload = await self._get_json("/assignments", headers=headers)
 
