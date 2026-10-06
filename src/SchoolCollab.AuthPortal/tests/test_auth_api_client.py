@@ -37,7 +37,7 @@ from api import (
     SessionNotFoundError,
     TokenInResponseError,
 )
-from api.auth_api_client import TOKEN_SHAPED_KEYS
+from api.errors import TOKEN_SHAPED_KEYS
 
 ENDPOINT = AuthServiceEndpoint(service="auth", base_url="http://auth.test", env_var="test")
 

@@ -42,10 +42,12 @@ from urllib.parse import quote
 
 import httpx
 
-# Package-internal reuse of the frozen sign-in client's pieces: the AC11 token-shape rule and the
-# tolerant DTO coercions must have exactly ONE definition in the portal. Both B2 modules are
-# outside this pass's file set, so nothing is copied rather than shared.
-from api.auth_api_client import AuthServiceEndpoint, _token_shaped_keys
+# Package-internal reuse of the frozen sign-in client's pieces: the tolerant DTO coercions must
+# have exactly ONE definition in the portal (both B2 modules were outside that pass's file
+# set, so nothing is copied rather than shared). The AC11 token-shape scanner is NOT a client
+# piece: it lives in ``api.errors``, so no client reaches into another client's private
+# symbols (the ``portal-submission-grade`` precedent).
+from api.auth_api_client import AuthServiceEndpoint
 from api.dto import _pick, _text, _text_list
 from api.errors import (
     ApiResponseError,
@@ -55,6 +57,7 @@ from api.errors import (
     SessionEndedError,
     SessionNotFoundError,
     TokenInResponseError,
+    token_shaped_keys,
 )
 
 #: The request header carrying the portal's opaque session id (B5's
@@ -387,7 +390,7 @@ class AdminApiClient:
             raise ApiUnavailableError(self._endpoint.service, self._endpoint.base_url, error) from error
 
         payload = self._decode(response, path)
-        leaked = _token_shaped_keys(payload)
+        leaked = token_shaped_keys(payload)
         if leaked:
             raise TokenInResponseError(self._endpoint.service, self._endpoint.base_url, leaked)
 
