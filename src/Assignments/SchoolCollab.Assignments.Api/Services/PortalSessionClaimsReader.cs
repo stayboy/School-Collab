@@ -22,11 +22,14 @@ namespace SchoolCollab.Assignments.Api.Services;
 /// 401s portal callers (the portal renders its session-ended card); it never fails open.
 /// </para>
 /// <para>
-/// Registered by the host's <c>Program.cs</c> via <c>AddCrossModuleHttpClient</c> (retry handler +
-/// long handler lifetime, the literal <c>https+http://auth</c> base address at the call site,
-/// tenant propagation off — the identity of the read IS the session id in the URL), matched by the
-/// AppHost's <c>.WithReference(auth)</c> on <c>assignments-api</c> per
-/// <c>CrossModuleWiringTests</c>.
+/// The host's <c>Program.cs</c> registers this typed client via
+/// <c>AddCrossModuleHttpClient&lt;PortalSessionClaimsReader&gt;</c> (retry handler + long handler
+/// lifetime, the literal <c>https+http://auth</c> base address at the call site, tenant propagation
+/// off — the identity of the read IS the session id in the URL) and then forwards
+/// <see cref="IPortalSessionClaimsReader"/> to it with its own registration line: the typed-client
+/// helper binds the concrete class alone, and the portal-session handler resolves the interface from
+/// DI. The literal base address is matched by the AppHost's <c>.WithReference(auth)</c> on
+/// <c>assignments-api</c> per <c>CrossModuleWiringTests</c>.
 /// </para>
 /// </remarks>
 public sealed class PortalSessionClaimsReader(HttpClient httpClient, ILogger<PortalSessionClaimsReader> logger)
