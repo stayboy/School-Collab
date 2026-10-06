@@ -81,6 +81,23 @@ public class AssignmentIndexBunitTests : BunitContext
             ApprovedAt: approvalStatus == ApprovalStatusDto.Approved ? (approvedAt ?? DateTimeOffset.UtcNow) : null,
             RequiresApproval: requiresApproval);
 
+    /// <summary>Opens a row's kebab menu and waits until its items are observably
+    /// rendered, then returns their trimmed labels. <c>FluentMenu</c> renders its
+    /// <c>fluent-menu-item</c> children on the pass raised after the kebab click's
+    /// state change cascades, so reading <c>FindAll</c> in the very next statement
+    /// has no ordering guarantee (the GradeLevelDetailPageTests / PeriodsLandingGridTests
+    /// kebab precedent). Call sites that only click an item need the open+wait and
+    /// discard the returned labels.</summary>
+    private static List<string> OpenRowActionsAndReadItems(IRenderedComponent<IndexPage> cut)
+    {
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        cut.WaitForAssertion(
+            () => cut.FindAll("fluent-menu-item").Count.Should().BeGreaterThan(
+                0, "the row-actions menu renders its items on the pass after the kebab click"),
+            TimeSpan.FromSeconds(15));
+        return cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+    }
+
     [TestMethod]
     public void Index_ShowsSpinner_WhileLoading()
     {
@@ -180,8 +197,7 @@ public class AssignmentIndexBunitTests : BunitContext
 
         // Open the row-actions kebab: FluentMenu renders its items only once
         // opened (the GradeLevelDetailPageTests kebab precedent).
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
-        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        var items = OpenRowActionsAndReadItems(cut);
         items.Should().Contain("Submit for Approval",
             "an approval-required Draft swaps Publish for Submit-for-approval");
         items.Should().NotContain("Publish",
@@ -217,8 +233,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
-        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        var items = OpenRowActionsAndReadItems(cut);
         items.Should().Contain("Publish",
             "an already-APPROVED Draft must keep the Publish action when approval is required — Submit-for-approval would silently revoke the approval");
         items.Should().NotContain("Submit for Approval",
@@ -301,7 +316,7 @@ public class AssignmentIndexBunitTests : BunitContext
         // before the API call resolves (we observe it after StateHasChanged
         // inside OnSubmitForApprovalAsync). With the POST backend stubbed
         // for success, the chip stays Pending after the call resolves.
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
 
         cut.WaitForAssertion(() =>
@@ -334,7 +349,7 @@ public class AssignmentIndexBunitTests : BunitContext
             cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim())
                 .Should().Contain("Not submitted"));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
 
         // After the 500 the optimistic flip rolls back: chip must end up
@@ -386,8 +401,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
-        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        var items = OpenRowActionsAndReadItems(cut);
         items.Should().Contain("Publish", "a row without the derived gate keeps the Publish action on Draft rows");
         items.Should().NotContain("Submit for Approval", "no derived gate means no approval action");
     }
@@ -409,8 +423,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.Markup.Should().Contain("Scheduled", "the Status badge maps Scheduled via the page badge ternary");
 
         // Decision (j): a Scheduled row offers Edit + Publish now + Unpublish.
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
-        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        var items = OpenRowActionsAndReadItems(cut);
         items.Should().Contain("Edit");
         items.Should().Contain("Publish now");
         items.Should().Contain("Unpublish");
@@ -467,7 +480,7 @@ public class AssignmentIndexBunitTests : BunitContext
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/publish")
             .Respond(HttpStatusCode.NoContent);
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Publish now").Click();
 
         cut.WaitForAssertion(() =>
@@ -491,7 +504,7 @@ public class AssignmentIndexBunitTests : BunitContext
         _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{id}/publish")
             .Respond(HttpStatusCode.InternalServerError);
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Publish now").Click();
 
         cut.WaitForAssertion(() =>
@@ -517,7 +530,7 @@ public class AssignmentIndexBunitTests : BunitContext
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/unpublish")
             .Respond(HttpStatusCode.NoContent);
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Unpublish").Click();
 
         cut.WaitForAssertion(() =>
@@ -547,8 +560,7 @@ public class AssignmentIndexBunitTests : BunitContext
 
         // WS-A4 / spec §3.1: archived rows now carry Review + Duplicate, so
         // they render via the kebab menu instead of a single labeled button.
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
-        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        var items = OpenRowActionsAndReadItems(cut);
         items.Should().Contain("Review");
         items.Should().Contain("Duplicate");
     }
@@ -684,7 +696,7 @@ public class AssignmentIndexBunitTests : BunitContext
             cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim()).Should().Contain("Not submitted");
         }, TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
 
         cut.WaitForAssertion(() =>
@@ -716,7 +728,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("fluent-button[title=\"Assignment actions\"]").Should().HaveCount(1),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Delete").Click();
 
         cut.WaitForAssertion(() =>
@@ -769,7 +781,7 @@ public class AssignmentIndexBunitTests : BunitContext
         await SearchAsync(cut, "Math");
         cut.WaitForAssertion(() => cut.Markup.Should().NotContain("(copy)"), TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
 
         cut.WaitForAssertion(() =>
@@ -793,8 +805,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
-        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        var items = OpenRowActionsAndReadItems(cut);
         items.Should().Contain("Duplicate",
             "a Published row must offer the Duplicate-as-template action");
     }
@@ -825,7 +836,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
 
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
             .Respond(HttpStatusCode.Created, "application/json",
@@ -880,7 +891,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
 
         cut.WaitForAssertion(() => dialogMock.Verify(
@@ -905,7 +916,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
             TimeSpan.FromSeconds(15));
 
-        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        OpenRowActionsAndReadItems(cut);
 
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
             .Respond(HttpStatusCode.InternalServerError);
