@@ -67,10 +67,18 @@ breadcrumbs, and a visual pass belongs to a design review, not to a refactor's t
 - `documents/solution/ward-surface-decision.md` — its "Open, carried to the next round" bullet
   (which pointed at plan §7.2) is closed with a pointer here.
 
-## Not done here
+## Pinned in the same change
 
-The portal's **route set is not yet pinned** by an architecture tripwire (its `.slnx` item set
-*is*, via `PortalsSolutionItemsArchitectureTests`). If this scope decision is to be enforced
-mechanically — so that adding an authoring route to the portal is a deliberate, reviewed act —
-that pin is the natural next guard, in the style of the reviewed-set tripwire already in that
-file. It is not required by this record and was not added with it.
+The portal's **route set is pinned** — by execution, not by a .NET architecture test: the
+portal is Python, so the pin lives where the app object is importable.
+`test_route_set_is_the_reviewed_set` (`src/SchoolCollab.Portals/tests/test_app_routes.py`)
+asserts the live route table equals the reviewed eight-route set, pins FastAPI's four own
+routes so a version bump is reported as a framework change, proves the write surface is
+exactly the one review POST, and verifies the three route constants (`REVIEW_PATH`,
+`AUTH_CALLBACK_PATH`, `LOGOUT_PATH`) still resolve to their pinned paths — `app.py`'s outcome
+handler matches on `route.path == REVIEW_PATH`, so a drifting constant would break that match
+silently otherwise. Probed red-then-green before commit: an injected
+`GET /teacher/assignments/new` failed the pin; the revert passed. CI-gated by the
+`portals-python` job, so a new route in the portal is a deliberate, reviewed act — add or
+remove it from `REVIEWED_ROUTES` in the same change. (The `.slnx` item set stays guarded
+separately, by `PortalsSolutionItemsArchitectureTests`.)
