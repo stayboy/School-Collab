@@ -22,6 +22,8 @@ regresses.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 
 class PortalApiError(RuntimeError):
     """Base class for every failure raised by the portal's API clients."""
@@ -131,3 +133,38 @@ class TokenInResponseError(PortalApiError):
             f"{service} at {base_url} returned a token-shaped field ({', '.join(keys)}); "
             "refusing to ingest it — credentials and tokens stay in the auth service (AC11)."
         )
+
+
+#: Fields that must never appear in a portal-bound body (AC11). Every decoded response is
+#: scanned — nested objects and arrays included — and a body carrying one is refused, never
+#: ingested: this scanner is the machinery behind :class:`TokenInResponseError` above. Shared
+#: by every portal client — one spelling of the key set, owned by no single client, so a new
+#: client adopts the scan without importing another client's internals (the
+#: ``portal-submission-grade`` precedent, ``src/SchoolCollab.Portals/api/errors.py``; adopted
+#: here 2026-10-06).
+TOKEN_SHAPED_KEYS = frozenset(
+    {
+        "access_token",
+        "accessToken",
+        "refresh_token",
+        "refreshToken",
+        "id_token",
+        "idToken",
+    }
+)
+
+
+def token_shaped_keys(payload: object) -> tuple[str, ...]:
+    """Every token-shaped key in a decoded body, at any depth (AC11)."""
+    found: set[str] = set()
+    stack: list[object] = [payload]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, Mapping):
+            for key, value in item.items():
+                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
+                    found.add(key)
+                stack.append(value)
+        elif isinstance(item, (list, tuple)):
+            stack.extend(item)
+    return tuple(sorted(found))

@@ -48,6 +48,8 @@ from api.errors import (
     SessionEndedError,
     SessionNotFoundError,
     TokenInResponseError,
+    TOKEN_SHAPED_KEYS,
+    token_shaped_keys,
 )
 
 #: The Aspire resource name of the auth service (``AddUvicornApp``/``WithReference`` in the
@@ -59,19 +61,6 @@ JSON_CONTENT_TYPE = "application/json"
 EXCHANGE_PATH = "/auth/exchange"
 BOOTSTRAP_REDEEM_PATH = "/auth/bootstrap/redeem"
 SESSION_PATH = "/auth/session/{session_id}"
-
-#: Fields that must never appear in a portal-bound body (AC11). The client scans every decoded
-#: response — nested objects included — and refuses to ingest a body carrying one.
-TOKEN_SHAPED_KEYS = frozenset(
-    {
-        "access_token",
-        "accessToken",
-        "refresh_token",
-        "refreshToken",
-        "id_token",
-        "idToken",
-    }
-)
 
 #: The auth service's typed failure codes -> the portal's exception taxonomy (fail-closed: an
 #: unrecognized code degrades as an unusable response, never as "probably fine").
@@ -135,22 +124,6 @@ def resolve_auth_service_endpoint() -> AuthServiceEndpoint:
         if key.lower().startswith("services") or any(hint in key.upper() for hint in _DISCOVERY_HINTS)
     }
     raise ServiceDiscoveryError(AUTH_SERVICE, tried, present)
-
-
-def _token_shaped_keys(payload: Any) -> tuple[str, ...]:
-    """Every token-shaped key in a decoded body, at any depth (AC11)."""
-    found: set[str] = set()
-    stack: list[Any] = [payload]
-    while stack:
-        item = stack.pop()
-        if isinstance(item, Mapping):
-            for key, value in item.items():
-                if isinstance(key, str) and key in TOKEN_SHAPED_KEYS:
-                    found.add(key)
-                stack.append(value)
-        elif isinstance(item, (list, tuple)):
-            stack.extend(item)
-    return tuple(sorted(found))
 
 
 def _string(value: Any) -> str | None:
@@ -237,7 +210,7 @@ class AuthApiClient:
             raise ApiUnavailableError(self._endpoint.service, base_url, error) from error
 
         payload = self._decode(response, path)
-        leaked = _token_shaped_keys(payload)
+        leaked = token_shaped_keys(payload)
         if leaked:
             raise TokenInResponseError(self._endpoint.service, base_url, leaked)
 
