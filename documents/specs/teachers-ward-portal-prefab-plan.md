@@ -405,11 +405,13 @@ auth model, API contract fit, MVP order, serving stack, definition of done.
    **DONE 2026-10-05 — same round:** `views/ward.py` deleted; `/` is a `302 → /teacher` that
    resolves no client; the ward import, route, comments and docstring are gone; the five ward
    tests are deleted or retargeted (the two D19-scope witnesses now prove the gate is scoped to
-   `/`); the `.slnx` row and the guard's pinned array are both updated. **Two out-of-scope prose
-   follow-ups the round surfaced**, both deliberate: stale ward text survives in `api/**` (a
-   client docstring example) and in `pyproject.toml`'s `description` ("Phase-0 prefab-UI spike:
-   ward portal surface…"); `test_teacher_views.py`'s `assert "Ward portal" not in response.text`
-   is **correct as-is** — a teacher page must not render a ward title — and stays.
+   `/`); the `.slnx` row and the guard's pinned array are both updated. **The two out-of-scope
+   prose follow-ups this paragraph originally recorded are both CLOSED (2026-10-06):** the
+   `api/**` ward prose was swept — all ten docstring lines now describe the teacher surface only,
+   and `git grep -in ward -- src/SchoolCollab.Portals/api` is clean — and `pyproject.toml`'s
+   `description` was already corrected, so what remains there is only the plan's own filename.
+   `test_teacher_views.py`'s `assert "Ward portal" not in response.text` is **correct as-is** — a
+   teacher page must not render a ward title — and stays.
 5. **The portal's shared shell — how far it should grow** (raised and answered 2026-10-05): the
    shell stays **brand + titles**, as `views/shell.py`'s docstring already records. It earns its
    place by making `PrefabApp` construct exactly once; a nav would not pay for itself on four
