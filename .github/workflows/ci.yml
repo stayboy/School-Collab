@@ -124,3 +124,31 @@ jobs:
       - name: Run the portal tests
         working-directory: src/SchoolCollab.Portals
         run: uv run pytest
+
+  authportal-python:
+    # The auth portal (src/SchoolCollab.AuthPortal/, the same Python stack as the teacher
+    # portal) is equally invisible to `dotnet test` — it contributes no project to the .NET
+    # solution. This job gates its suite the same way (pytest + httpx.MockTransport, no
+    # server, no Docker, no Keycloak), so a change to its clients can never land CI-blind
+    # again (added 2026-10-06, with the auth-portal symbol hoist).
+    name: Auth portal (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync the auth portal environment
+        working-directory: src/SchoolCollab.AuthPortal
+        run: uv sync
+
+      - name: Run the auth portal tests
+        working-directory: src/SchoolCollab.AuthPortal
+        run: uv run pytest
