@@ -1,6 +1,6 @@
 # Round — `authoring-subject-cascade-flake`
 
-**Status:** planned
+**Status:** CLOSED — the fix rode layer 3 (`stack/9-portal-teacher-surface`) of stack #297: **PR #298** merged 2026-10-04, and layer 4 (PR #299) restacked onto it and merged with it. The round's outcome is on `main` (the settled pick helper, `AssignmentCreateBunitTests.cs:228`). *(Status line corrected 2026-10-06 — it had still read "planned" after the round closed.)*
 **Tier:** Light (Tier 2) — worker + independent static diff reviewer
 **Branch:** `stack/9-portal-teacher-surface` (layer 3, tip `b29e02ba`) — the fix rides the **lowest red layer** so every layer above inherits a green head. Layer 4 (`stack/10`) is restacked onto the new tip afterwards.
 **Stack:** #297 — layer 3 carries the fix, layer 4 restacks onto it.

@@ -1,6 +1,6 @@
 ﻿# Spec: Grade-Level Detail/View Page + Teacher Role Tags + Subject->Topic Rename Finish
 
-> Status: **Complete - all phases implemented + tests green; submitted as a linked gh-stack (stack #118, PRs #113-#117) awaiting merge**
+> Status: **Complete** — all phases implemented + tests green; shipped as the linked gh-stack #118 (PRs #113–#117), **merged 2026-08-07**. Stale-claim sweep 2026-10-06 (the rollout table below said "open" long after merge; the Playwright note remains the one open item).
 > Owner: Students + Settings + Admin contexts
 > Depends on: `grade-level-landing-topics-strands-lessons.md`,
 > `grade-level-simplified-management.md`, `subject-to-topic-polymorphism.md`,
@@ -407,7 +407,9 @@ When built (Phase 2/3), per the "global tenant default + per-grade exceptions" d
 - [x] Integration suite: 27/28 pass; `TopicsByGradeEndpointErrorMappingTests.
   WithExplicitEffectiveDate_FiltersToThatDate` fails **on clean base HEAD too**
   (confirmed via isolated git worktree) — pre-existing, unrelated to this pass.
-- [ ] Playwright suite not run for this pass.
+- [ ] Playwright suite not run for this pass. — *still not run 2026-10-06: no
+  Playwright coverage exists for grade-level pages. Kept as the one open note in an
+  otherwise complete plan.*
 
 ### Stacked PR rollout (gh-stack) — 2026-08-05
 All rollout steps are complete and shipped as a single linked **gh-stack (stack #118)**, one
@@ -416,11 +418,11 @@ bottom-up with `gh stack merge <n> --yes` (all-or-nothing).
 
 | PR | Branch | Rollout steps | Status |
 |----|--------|---------------|--------|
-| #113 | `stack/1-tchroles-seed` | Step 1 (TCHROLES seed) | **open** |
-| #114 | `stack/2-backend-teacher-role-rename` | Steps 2-3 (role + rename) | **open** |
-| #115 | `stack/3-admin-client` | Step 4 (client methods) | **open** |
-| #116 | `stack/4-detail-landing` | Step 5 (Detail + landing) | **open** |
-| #117 | `stack/5-create-edit` | Step 6 (Create/Edit) | **open** |
+| #113 | `stack/1-tchroles-seed` | Step 1 (TCHROLES seed) | **merged** 2026-08-07 |
+| #114 | `stack/2-backend-teacher-role-rename` | Steps 2-3 (role + rename) | **merged** 2026-08-07 |
+| #115 | `stack/3-admin-client` | Step 4 (client methods) | **merged** 2026-08-07 |
+| #116 | `stack/4-detail-landing` | Step 5 (Detail + landing) | **merged** 2026-08-07 |
+| #117 | `stack/5-create-edit` | Step 6 (Create/Edit) | **merged** 2026-08-07 |
 
 - Setup: `gh extension install github/gh-stack`; `git config rerere.enabled true` +
   `remote.pushDefault origin`. Skill at `~/.agents/skills/gh-stack`.

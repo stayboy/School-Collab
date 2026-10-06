@@ -20,6 +20,11 @@ specs that remain the source of truth**.
   `acceptance-*` / `ui-tester-*` files. The orchestrator run (Tier 3) or the
   parent (Tiers 1–2) is the sole writer; reviewer and tester findings are
   persisted by the parent from their inline blocks.
+- **Flip the round doc's `**Status:**` line when the round closes** — set it to
+  `CLOSED` and name the PR/commit that carried it. Round docs left at `planned`
+  rot silently: three were found stale on 2026-10-06 (their rounds had merged days
+  earlier), and a reader cannot tell a finished round from an abandoned one. Same
+  rule as the status-line convention in `documents/README.md`.
 - Round docs and patches are **ephemeral residue**: once a round's durable
   outcomes are folded into the feature spec in `documents/specs/`, this whole
   folder is **safe to bulk-trash**.

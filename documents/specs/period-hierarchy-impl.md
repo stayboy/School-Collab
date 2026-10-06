@@ -13,6 +13,11 @@
 >
 > **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 >
+> **Swept 2026-10-06 (spec staleness audit).** Phases H1–H5 shipped. Of the two
+> remaining boxes, one was **not work** (the "open questions" line is resolved —
+> now ticked) and one is a **deferred** E2E needing the AppHost + seeded data
+> (Phase 6.2).
+>
 > **Hard dependency note:** This spec is the dependency referenced by
 > `activity-group-enrollment.md` Rev. 3 (decision 14 / FR-43). Only the activity-group
 > `WholeAcademicYear`/`Termly`/`Semester` spans need it; `OpenEnded` and `DateRange`
@@ -55,7 +60,7 @@
 
 - [x] **H5.1** After the activity-group Rev. 2/3 migration lands, enable `Termly`/`Semester`/`WholeAcademicYear` activity-group enrollment to attach memberships to the matching typed period of the active academic year. — *AC-H9, activity-group FR-43* (verified shipped in Phase 10; membership tests for all three spans)
 - [x] **H5.2** Integration test: create `Termly` group → add membership → attaches to an Active `Term` of the active AcademicYear; `WholeAcademicYear` → AcademicYear period. — *AC-H9* (extended with Semester + provided-PeriodId + no-active-term tests)
-- [ ] **H5.3** E2E/Playwright (seeded): open academic year → open term → create Termly activity group → enrol a student → verify membership `period_id` = the term. — *AC-H9* (deferred to Phase 6.2 — needs AppHost + seeded data)
+- [ ] **H5.3** E2E/Playwright (seeded): open academic year → open term → create Termly activity group → enrol a student → verify membership `period_id` = the term. — *AC-H9* (deferred to Phase 6.2 — needs AppHost + seeded data) — *still open 2026-10-06: no seeded E2E exists (the Playwright project covers CodedValues only).*
 
 ---
 
@@ -64,7 +69,7 @@
 - [x] **Back-compat** — `AcademicYearDivision = None` tenants (no sub-periods) must be byte-identical in behavior to the shipped flow (one active academic-year period, year-level grade enrollment, year-to-year promotion). Regression test. — *NFR-H4, EC-H5* (`AcademicYearDivisionNoneBackCompatTests`, 4 tests)
 - [x] **Tenancy** — Period + tenant-setting reads/writes strict-tenant; verify with `StudentsStrictTenancyTests`-style tests for sub-periods and the framework setting. — *NFR-H2* (3 sub-period tests in `StudentsStrictTenancyTests` + 2 Settings integration tests in `AcademicYearDivisionTenancyTests`)
 - [x] **Cache invalidation** — `IActivePeriodProvider`'s `HybridCache` ("students" tag) keys cover the new active-academic-year / active-sub-period lookups; Activate/Complete handlers already invalidate by tag — confirm no stale sub-period lookups. — *active-period-per-tenancy §4.6/§10* (5 new tests in `ActivePeriodProviderTests`)
-- [ ] **Open questions** — §12.1 RESOLVED (reuse feature-flag machinery — extend `FlagKind` + `Value` columns, no new table); §12.2 (cross-type auto-close) and §12.3 (sub-period `NextPeriodId`) are confirmed out of scope.
+- [x] **Open questions** — §12.1 RESOLVED (reuse feature-flag machinery — extend `FlagKind` + `Value` columns, no new table); §12.2 (cross-type auto-close) and §12.3 (sub-period `NextPeriodId`) are confirmed out of scope. — *resolved; ticked in the 2026-10-06 sweep.*
 
 ---
 

@@ -41,6 +41,14 @@ The core question: **does the doc define what the system must *be*, or record
 in `specs/`. Do **not** add new work-tracking docs to `specs/` — new ones go
 to `solution/`. (Reclassifying the two backlogs is a separate decision.)
 
+**Task lists are trackers, not completion claims.** A `- [ ]` means "not verified
+done", never "not done": it may be a plan, a per-step review aid that is unticked by
+convention, a decision that can never be executed, or genuinely open work — all four
+shapes have been found in this repo (spec staleness sweep, 2026-10-06). When a doc's
+task list changes — and after any such sweep — **refresh its `**Status:** <verdict>
+(<date>)` line in the same edit**, so a reader can tell a plan from a claim without
+re-reading the code.
+
 ## Naming conventions
 
 - `specs/`: `<feature-slug>.md`, optionally suffixed `-plan.md` / `-impl.md`.

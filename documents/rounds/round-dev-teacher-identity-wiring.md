@@ -1,6 +1,6 @@
 # Round — `dev-teacher-identity-wiring`
 
-**Status:** planned
+**Status:** CLOSED — committed as `ed4836d5` (wiring + guards + binding fix) and `356952c8` (docs); **PR #299** (merged 2026-10-04), layer 4 of stack #297. *(Status line recovered 2026-10-06 from an orphaned stash entry — the closure record existed only there.)*
 **Tier:** Light (Tier 2) — worker + independent static diff reviewer
 **Base:** `stack/9-portal-teacher-surface` (`b29e02ba`); this layer is `stack/10-dev-teacher-identity-wiring`
 **Stack:** #297 (layer 4)
