@@ -1,16 +1,17 @@
-# Round-runner model policy — the open questions (handoff stub)
+# Round-runner model policy
 
-Status: **DRAFT — handoff stub.** The nine decisions below are the frontier of the
-orchestrator/model-policy grill. They were posed — with recommended answers — during the
-2026-10-05/06 session (the portal-scope arc), and per the recommendation the *answers* are to
-be settled in a **fresh owner grill round**, not at the tail of the session that posed them.
-This file is what survives, so that round can start with full context. When the answers land,
-this stub becomes the spec: the Status line flips, each row carries its verdict, and the
-"what this stub is not" section is deleted.
+Status: **ADOPTED 2026-10-06.** The nine decisions below are settled. They were posed — with
+recommended answers — in the handoff stub of the same day (PR #310) and adopted in one round,
+under the owner's standing instruction ("for any decision to make, grill-me if necessary" —
+proceed on recommendations; grill only where a decision is genuinely the owner's). Two of the
+recommendations were **amended by evidence found while grounding the round**, noted in their
+rows. Nothing here delegates the git/gh gates: every policy change still lands through a
+reviewed PR on the owner's word.
 
-Date: 2026-10-06 · Provenance: owner grill (deferred 2026-10-05), evidence corpus below ·
+Date: 2026-10-06 (posed and adopted the same day) · Provenance: the 2026-10-05 corpus below ·
 Companion: `.pi/skills/orchestrator-worker-reviewer/SKILL.md` — the tiered skill this policy
-governs — and its `references/models.md`, which holds the **operational** model ids today.
+governs — and its `references/models.md`, the **operational id catalog** this policy
+deliberately does not duplicate.
 
 ## Why this policy exists (the corpus, mined 2026-10-05)
 
@@ -32,28 +33,56 @@ governs — and its `references/models.md`, which holds the **operational** mode
 2. A role already dispatched keeps the model it ran on.
 3. Mid-round overrides are logged, with the reason, in the round doc.
 
-## The nine questions
+The full operational precedence ladder — the five-item resolution order, the dispatch-time
+id-resolution rules, the substitution rule, and the never-omit-the-model-field dispatch rule —
+lives in `references/models.md` and is binding there by reference.
 
-| # | Decision | Recommended answer | Trade-offs / cost |
+## The nine decisions, settled
+
+| # | Decision | Settled as | Note |
 |---|---|---|---|
-| 1 | Vehicle | **This stub becomes the spec**; the answers settle in a fresh owner grill round (one round, the whole frontier). | One grill round in a clean session. The alternative — deciding at the tail of a compacted session — risks losing the corpus before it is written down. |
-| 2 | Metric | **Iterations per round is the primary metric; cost is a constraint, not a target.** | Measures the rework loop the owner actually pays for; refuses to let "more P1s caught" masquerade as quality. |
-| 3 | Seat coverage and order | **All seats, author/gate first** — the orchestrator-plan author, then the plan-review gate, then worker, diff-review, UI tester. | Author/gate is where the corpus shows the leverage; the remaining seats join the same policy table once the first two are settled. |
-| 4 | First move | **Citation discipline before any model change:** a plan that asserts a fact must cite `file:line`, and the gate reddens uncited claims. | Free — and it attacks the root cause the corpus actually shows (plans asserting stale state), which no model swap fixes. |
-| 5 | Author escalation | **Risk-based, from a named trigger list** (e.g. cross-context contracts, an auth/security surface, >2 prior rework iterations on the same area). Escalate the author seat on a trigger, never by default. | Keeps the cheap ladder as the default and reserves the strong model for rounds that can pay for it. Cost: writing the trigger list once. |
-| 6 | The gate tier | **Keep the gate tier; trial lean (Tier 2) rounds only after Q4 lands.** | The gate is the proven instrument (5/5); weakening it to save tokens trades the brake for the accelerator. |
-| 7 | Gate vs author diversity | **Require the gate model to differ from the author's in family** (never an effective self-review). | A second strong seat costs a little; a gate that shares the author's blind spots catches nothing — independence is what the corpus shows paying. |
-| 8 | Ledger | **A durable ledger** — `documents/solution/round-runner-model-ledger.md`, one row per round: seat→model, iterations, P1s by severity, rework cause. | The corpus becomes data instead of anecdote; re-evaluation stops being memory-work. Cost: one row per round, written in the round-doc flow. |
-| 9 | Spec vs operational ids, and review cadence | **This spec holds policy; `references/models.md` keeps operational ids.** Re-evaluate on a named trigger — two consecutive rounds with ≥2 rework iterations each — and in any case after **5 rounds**. | The spec stays stable while ids churn; the trigger prevents both "never re-look" and "re-litigate every round". |
+| 1 | Vehicle | **This file is the spec** | The stub flipped in the same change; Q8's ledger created with it |
+| 2 | Metric | **Iterations per round** is the primary metric; cost is a constraint, not a target | Feeds Q9's re-evaluation trigger |
+| 3 | Seat coverage and order | **All seats, author/gate first** — orchestrator-plan author, plan-review gate, then worker, diff-review, UI tester | Author/gate is where the corpus shows the leverage |
+| 4 | First move | **Citation discipline:** a plan that asserts a fact must cite `file:line`; the gate reddens uncited claims | A step-2b review criterion, not a model change — effective from the next orchestrator round |
+| 5 | Author escalation | **Risk-based from a named trigger list, never by default** | The trigger list is in §"The policy" item 4 |
+| 6 | The gate tier | **Keep the gate tier**; trial lean (Tier 2) rounds only after citation discipline is in effect | The gate is the proven instrument (5/5) — trading it for tokens trades the brake for the accelerator |
+| 7 | Gate vs author diversity | **The gate must differ from the author in family or clearly-bigger tier — never the same id at the same size** | **Amended while grounding this round:** the stub's letter said "family"; the standing Option-A pairing (author `glm-5.3-flash`, Tier-3-full gate `glm-5.3`) is *same family, bigger tier* — and produced the corpus's recorded author-side catch (the split-review P1). The rule encodes the intent — no effective self-review — not the letter |
+| 8 | Ledger | **`documents/solution/round-runner-model-ledger.md`**, one row per tiered round: seats→models, gate P1s by severity, iterations, rework cause | Seeded with the 2026-10-03→05 portal arc; earlier rounds stay authoritative on their round-doc line 1 |
+| 9 | Split and cadence | **This spec holds policy; `references/models.md` holds operational ids.** Re-evaluate on **two consecutive rounds with ≥2 rework iterations each**, or after **5 rounds** regardless | A re-evaluation is a grill round argued from the ledger — ids churn in `models.md`, policy changes here |
 
-## How to run the round
+## The policy, in operational order
 
-Fresh session, `grill-me`, one round: read this file and the skill, then answer the nine —
-"all as recommended" is a valid answer to the whole frontier. Then: flip the Status line,
-carry the verdicts into the rows, apply Q9's split, and start Q8's ledger with the rounds
-already on `main`.
+1. **Measure iterations per round.** A round's quality record is its iteration count, not its
+   P1 count. The ledger row is where the number lives.
+2. **Cite or fail (Q4).** From the next orchestrator round, a plan asserting a repo fact —
+   the state of code, a file's contents, a guard's reach — must cite `file:line`. The step-2b
+   plan gate treats an uncited factual claim as a finding. This is the cheapest lever the
+   corpus names: plans asserting stale state are exactly what the gate caught, and no model
+   swap fixes that.
+3. **Keep seats independent (Q7).** The reviewer/orchestrator must differ from the worker's
+   model (the standing owner rule, restated here as policy); the plan gate must differ from
+   the plan author in **family or clearly-bigger tier**. The Option-A pairing satisfies this;
+   a same-id-same-size gate never does.
+4. **Escalate the author on a trigger, never by default (Q5).** Triggers: (i) cross-context
+   contract changes; (ii) an auth/security surface; (iii) more than two prior rework
+   iterations in the same area; (iv) a round whose previous plan failed its gate. On a
+   trigger, escalate the author seat one step for that round and record the trigger in the
+   round doc.
+5. **Keep the gate (Q6).** The plan-review gate stays on full rounds. Trial lean (Tier 2)
+   rounds only once citation discipline is in effect, and count them in the ledger like any
+   other row.
+6. **One provider per round** — recorded on round-doc line 1, never mixed mid-round except the
+   per-role cross-provider override the user names (precedence item 1). Operational detail
+   stays in `references/models.md`.
+7. **Write the ledger row when the round closes (Q8).** The orchestrator adds it in the
+   round-doc flow; a round is not closed until its row exists.
+8. **Re-evaluate on the trigger, not on a whim (Q9).** Two consecutive rounds with ≥2 rework
+   iterations each, or five rounds since the last evaluation — then a grill round argued from
+   the ledger, never from memory.
 
-## What this stub is not
+## What this spec does not hold
 
-Not decided policy: nothing above is binding until the fresh grill round answers the nine.
-The skill's current `references/models.md` remains the operational source of truth until then.
+Operational model ids, provider catalogs, the substitution rule, and the dispatch-time
+resolution rules — all in `references/models.md`. This spec names model ids only as evidence,
+never as policy.
