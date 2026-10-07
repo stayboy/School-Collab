@@ -135,6 +135,37 @@ a light tier through. Record escalations in the round doc.
 - Round-doc format, line-1 provider/model traceability, and the ephemerality
   rules live in `documents/rounds/README.md` and `references/models.md`.
 
+## Unattended rounds (owner-opted)
+
+A round runs **unattended** only when the owner says so for that round - never by
+default, never inferred from silence, never on by absence. The option removes the human
+*wait*; it does not remove the discipline. Record it on round-doc line 1 as —
+`Mode: unattended (auto-accept recommendations)`.
+
+When the plan-stage grill (step 2b) or the acceptance residual grill (step 5) fires in an
+unattended round:
+
+- **Still hold the round.** Enumerate the whole residual frontier in grill format — every
+  open, prerequisite-settled decision, one round, each numbered with a recommendation -
+  exactly as an attended round would. The parent then accepts them as **"all as
+  recommended"**. Only the human wait disappears; the enumeration, the recommendations
+  and the round itself do not.
+- **Never auto-accept the plan author's own recommendations.** Recommendations may be
+  auto-accepted only from a seat OTHER than the plan author - in practice the plan gate
+  (a different, larger-tier model) or the reviewer. A plan author accepting its own
+  recommendations is self-review wearing a grill costume, and that case stays
+  human-gated even in an unattended round.
+- **Hard exclusions.** Migrations, contract/wire shape, security and auth, tenant
+  isolation, and deleting a public route always reach a human unless the owner has
+  pre-authorized that specific round by name. The blast radius decides, not the phrasing
+  of the question.
+- **Record provenance; never blur it.** Unattended decisions use a DISTINCT heading -
+  `## Pinned decisions (unattended - recommendations accepted)` - never the owner-pinned
+  heading, and the round's ledger row is flagged unattended. A reader must be able to tell
+  at a glance that no human confirmed those pins.
+- **Budget unchanged.** The grill still costs one round: it still counts against the
+  existing plan-review iteration at step 2b, and it is still the bound's terminal step at
+  step 5. Unattended mode adds no iterations.
 ## Models and per-tier strategy
 
 Exact id tables, substitution rules, and the traceability format live in
@@ -270,6 +301,13 @@ the tester never derives or expands its own scope.
    criteria). Tier 3: the orchestrator run reads the source specs/review
    docs, writes `## Plan`, and authors the worker/reviewer task specs and
    acceptance criteria. The plan must be implementable standalone.
+   **Open decisions (author side).** A plan that leaves a decision fork the specs
+   do not determine must DECLARE it in `## Plan` as an `Open decisions:` list in
+   grill format — numbered, each with a recommended answer — rather than silently
+   deciding it. Genuine forks only: a fact anyone could look up is never an open
+   decision. Declared forks are the plan-review gate's cleanest input and the
+   step-2b grill escalation's earliest trigger; a plan with an unresolved fork is
+   not implementable standalone.
 2b. **Plan review (Tier 3 — BEFORE the worker runs).** Dispatch the static
    reviewer against the **plan**, not a diff: the plan doc plus the code/spec
    seams it cites. It judges (i) **feasibility** — do the named files, routes,
@@ -285,6 +323,14 @@ the tester never derives or expands its own scope.
    re-reads only the revised sections. **≤1 plan-review iteration.** The worker
    is never dispatched on a plan with an open P1. The pass is static — any
    build/test numbers it volunteers are discarded like any other child's.
+   **Grill escalation (plan stage only).** If settling a plan P1 within the one revision
+   requires a choice the specs do not determine — a genuine trade-off the owner owns, not
+   a fact anyone could look up — do not loop the reviewer. The parent surfaces the whole
+   residual frontier to the user in grill format: every open, prerequisite-settled
+   decision in one round, each numbered, each with a recommended answer. One grill round
+   maximum, counted as the plan-review iteration. Fold the answers into `## Plan` as
+   pinned decisions before the reviewer re-reads the revised sections; the worker is
+   still never dispatched on a plan with an open P1.
    **Model:** Tier 3 **full** → `ollama/glm-5.3:cloud` (`cline-pass/glm-5.3`);
    Tier 3 **lean** → **`ollama-cloud/kimi-k2.7-code`** (the diff reviewer's model — see the plan-review sub-mode note). Read-only `reviewer` shell in
    both cases; a user-named model wins.
@@ -332,6 +378,17 @@ the tester never derives or expands its own scope.
    acceptance itself, on the reviewer's verdict plus its own authoritative pass.
    When the verdict is CLOSED and the UI trigger fires,
    the acceptance also appends the tester-scope handover.
+   **Residual grill (acceptance).** When the verdict would be anything other than a
+   clean CLOSED — an unaddressed P1 at the rework bound, an unmet or descoped criterion,
+   explicitly deferred scope, or residual P2s needing an accept/defer/backlog call —
+   surface the whole residual frontier to the user in grill format **before the verdict
+   is written**: every open, prerequisite-settled residual decision in one round, each
+   numbered, each with a recommended answer. One round maximum; a still-open frontier is
+   recorded as accepted residuals with the open items listed — never looped. Tiers 1–2
+   and Tier 3 lean: the parent transcribes the user's answers into `## Acceptance` as
+   the recorded owner decisions. Tier 3 full: the parent runs the grill and passes the
+   answers in the orchestrator-accept brief as pinned decisions, before that run writes
+   the verdict. A clean CLOSED needs no grill.
 6. **UI tester pass (Tier 3, UI rounds).** Task = tester contract + the
    handover verbatim + patch path. The tester bug-hunts only the handed-over
    surfaces and returns UI TEST; the parent persists it into `## UI Tester`.
@@ -350,6 +407,17 @@ the tester never derives or expands its own scope.
 
 ## Pitfalls
 
+- **One writer per working tree; isolate concurrent writers.** Two writing
+  subagents dispatched into the same checkout are NOT isolated by their paths
+  happening to be disjoint: their edits land in one shared diff that cannot be
+  attributed to either run, and a reviewer cannot diff it at all. Run writers
+  sequentially, or give each its own git worktree (`worktree: true`). The design
+  record - plan, spec, round doc - is the **orchestrator's** own artifact; delegating
+  it both breaks ownership and manufactures the concurrent-writer case. Verified
+  2026-10-07 (round `targets-dialog-picked-zone`): an implementation `worker` and a
+  spec `worker` ran in parallel against one checkout, and the reviewer could only
+  reconstruct the round's diff from a *sibling* round's patch - attribution was
+  never provable.
 - **Keep a diff reviewable; a large patch buys no review.** An unbounded
   patch times the static reviewer out into a missed-P1 verdict. Bound the diff for
   a light round, or **split the review by area** (one reviewer per patch slice)

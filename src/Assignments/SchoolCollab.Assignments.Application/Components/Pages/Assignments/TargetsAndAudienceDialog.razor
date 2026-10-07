@@ -1,0 +1,243 @@
+@* Assignment "Targets &amp; audience" entry dialog.
+   Per the grill decisions: the dialog shows a category selector and ONLY the typed picker that
+   applies to the selected category — never all fields at once. Every picker is SINGLE-value and
+   APPENDS its pick to the dismissible chip row above it (the GuardianPickerDialog precedent),
+   resetting to its own placeholder so the next pick appends another chip. The dialog returns one
+   TargetsAndAudienceEntry per chip, so a submission carries every chip the author left in the
+   picked-targets zone. Switching Category CLEARS the picked entries (a category change is a change
+   of KIND, so the old category's chips must not linger) before the new category is applied, and the
+   value-less "Everyone" checkpoint that the Everyone category picks is itself cleared by any
+   entity pick (TGT-2) — the two never mix. The dialog is UI-only (in-memory): it returns a
+   TargetsAndAudienceDialogResult. *@
+@inherits DialogShellBase<TargetsAndAudienceDialogModel, TargetsAndAudienceDialogResult>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="targets-audience-dialog">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Category" Required For="ta-category">
+            <FluentSelect TOption="CategoryOption" Id="ta-category"
+                          Items="CategoryOptions"
+                          SelectedOption="@SelectedCategory"
+                          SelectedOptionChanged="@OnCategoryChanged"
+                          OptionText="@(o => o.Label)"
+                          OptionValue="@(o => o.Value.ToString())"
+                          class="full-width" />
+        </FormRow>
+
+        @* The picked-targets zone: ALWAYS rendered, so the pills have a demarcated home before the
+           first pick and the author sees where a pick will land — an empty zone reads as "nothing
+           picked yet", never as a missing row. It sits ABOVE the value control so the pick the
+           author just made lands where they are looking, and every chip dismisses by IDENTITY — the
+           rendered chip closed over its own entry instance. *@
+        <div class="picked-targets">
+            <span class="picked-targets__caption">Picked targets</span>
+            @if (Model.PickedEntries.Count == 0)
+            {
+                <span class="picked-targets__hint">No targets picked yet.</span>
+            }
+            else
+            {
+                <div class="entity-grid-chips">
+                    @foreach (var entry in Model.PickedEntries)
+                    {
+                        <Chip Label="@entry.Label"
+                              Subtitle="@TargetCategoryLabel(entry.Category)"
+                              OnDismiss="@(() => Model.RemovePicked(entry))" />
+                    }
+                </div>
+            }
+        </div>
+
+        @* Exactly one value control renders — the one the selected category carries. Each category
+           gets its own branch (rather than one shared control over a swapped list) so switching
+           category cannot leave the previous category's selection behind in a reused control.
+           dropdown-ui/SKILL.md routes these pickers to the raw control; each is SINGLE-value and
+           binds its value so the dialog can reset it to the placeholder on every pick. *@
+        @if (Model.Category == TargetsAndAudienceCategory.Everyone)
+        {
+            <p class="dialog-hint">
+                The assignment applies to every active student in the organization.
+            </p>
+        }
+        else if (Model.Category == TargetsAndAudienceCategory.Students)
+        {
+            @* TGT-6: students are server-searched (never a full roster load), so the picker asks
+               Model.StudentSearch on every query of two characters or more. Single-pick: the pick
+               lands in the chip row and the control resets. *@
+            <FormRow Label="@CategoryLabel" Required For="ta-student">
+                <FluentAutocomplete TOption="TargetsAndAudienceOption" Id="ta-student"
+                                    Multiple="false"
+                                    MaximumOptionsSearch="20"
+                                    ImmediateDelay="300"
+                                    Placeholder="Search students by name or number…"
+                                    OptionText="@(o => o.Label)"
+                                    OptionValue="@(o => o.Value)"
+                                    SelectedOption="@_selectedValue"
+                                    SelectedOptionChanged="@OnValuePicked"
+                                    OnOptionsSearch="@OnStudentSearchAsync"
+                                    class="full-width" />
+            </FormRow>
+        }
+        else if (Model.Category == TargetsAndAudienceCategory.GradeLevels)
+        {
+            <FormRow Label="@CategoryLabel" Required For="ta-grade-level">
+                <FluentSelect TOption="TargetsAndAudienceOption" Id="ta-grade-level"
+                              Items="@Model.GradeLevelOptions"
+                              SelectedOption="@_selectedValue"
+                              SelectedOptionChanged="@OnValuePicked"
+                              OptionText="@(o => o?.Label ?? string.Empty)"
+                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                              Placeholder="Pick a grade level"
+                              class="form-select--dialog" />
+            </FormRow>
+        }
+        else if (Model.Category == TargetsAndAudienceCategory.Streams)
+        {
+            <FormRow Label="@CategoryLabel" Required For="ta-stream">
+                <FluentSelect TOption="TargetsAndAudienceOption" Id="ta-stream"
+                              Items="@Model.StreamOptions"
+                              SelectedOption="@_selectedValue"
+                              SelectedOptionChanged="@OnValuePicked"
+                              OptionText="@(o => o?.Label ?? string.Empty)"
+                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                              Placeholder="Pick a stream"
+                              class="form-select--dialog" />
+            </FormRow>
+        }
+        else
+        {
+            <FormRow Label="@CategoryLabel" Required For="ta-activity-group">
+                <FluentSelect TOption="TargetsAndAudienceOption" Id="ta-activity-group"
+                              Items="@Model.ActivityGroupOptions"
+                              SelectedOption="@_selectedValue"
+                              SelectedOptionChanged="@OnValuePicked"
+                              OptionText="@(o => o?.Label ?? string.Empty)"
+                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                              Placeholder="Pick an activity group"
+                              class="form-select--dialog" />
+            </FormRow>
+        }
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Add" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    /// <summary>One dropdown item for the category picker.</summary>
+    public sealed record CategoryOption(TargetsAndAudienceCategory Value, string Label);
+
+    private static readonly CategoryOption[] CategoryOptions =
+    [
+        new(TargetsAndAudienceCategory.GradeLevels, "Grade Levels"),
+        new(TargetsAndAudienceCategory.Streams, "Streams"),
+        new(TargetsAndAudienceCategory.Students, "Students"),
+        new(TargetsAndAudienceCategory.ActivityGroups, "Activity Groups"),
+        new(TargetsAndAudienceCategory.Everyone, "Applies to All in Org")
+    ];
+
+    /// <summary>The picker's displayed selection. Always null: the control shows its placeholder and a
+    /// pick APPENDS a chip through <see cref="OnValuePicked"/>, which resets this back to null — so the
+    /// next pick appends another chip instead of replacing a held selection.</summary>
+    private TargetsAndAudienceOption? _selectedValue;
+
+    /// <summary>The category picker's displayed selection — derived from <see cref="TargetsAndAudienceDialogModel.Category"/>,
+    /// which is the single source of truth for what the dialog renders.</summary>
+    private CategoryOption SelectedCategory =>
+        CategoryOptions.FirstOrDefault(o => o.Value == Model.Category) ?? CategoryOptions[0];
+
+    /// <summary>The current category's label: the value picker's field label and the missing-value
+    /// error both read it, so each category has one spelling in this dialog.</summary>
+    private string CategoryLabel => SelectedCategory.Label;
+
+    /// <summary>The chip subtitle: the category the entry carries, so a mixed-kind chip row still names
+    /// each chip's kind. The one map between the category set and its author-facing name.</summary>
+    private static string TargetCategoryLabel(TargetsAndAudienceCategory category) => category switch
+    {
+        TargetsAndAudienceCategory.GradeLevels => "Grade Levels",
+        TargetsAndAudienceCategory.Streams => "Streams",
+        TargetsAndAudienceCategory.Students => "Students",
+        TargetsAndAudienceCategory.ActivityGroups => "Activity Groups",
+        _ => "Applies to All in Org"
+    };
+
+    /// <summary>
+    /// Appends the picked value as a chip, then resets the control to its placeholder. A null report
+    /// (the control clearing itself) is ignored: it is not a pick. Switching to
+    /// <see cref="TargetsAndAudienceCategory.Everyone"/> is itself a pick of the checkpoint
+    /// (<see cref="TargetsAndAudienceDialogModel.PickEveryone"/>), because TGT-2 makes Everyone mutually
+    /// exclusive with every entity value; switching category first CLEARS every picked entry
+    /// (<see cref="TargetsAndAudienceDialogModel.ClearPicked"/>), because the new category is a
+    /// different kind of target and the old kind's chips would otherwise linger beside its picker.
+    /// </summary>
+    private void OnCategoryChanged(CategoryOption? option)
+    {
+        if (option is null || option.Value == Model.Category)
+        {
+            return;
+        }
+
+        Model.ClearPicked();
+        Model.Category = option.Value;
+        _selectedValue = null;
+
+        if (option.Value == TargetsAndAudienceCategory.Everyone)
+        {
+            Model.PickEveryone();
+        }
+    }
+
+    /// <summary>Appends one picked value as a chip through the model (which dedupes by
+    /// <c>(Category, RefId)</c> and clears the Everyone checkpoint) and empties the control's own
+    /// displayed selection so the picker is ready for the next value.</summary>
+    private void OnValuePicked(TargetsAndAudienceOption? option)
+    {
+        _selectedValue = null;
+
+        if (option is null)
+        {
+            return;
+        }
+
+        Model.AppendPicked(Model.Category, option);
+    }
+
+    /// <summary>
+    /// TGT-6: the student picker's server search. A query shorter than two characters clears the
+    /// list rather than scanning the roster, and a caller that supplied no
+    /// <see cref="TargetsAndAudienceDialogModel.StudentSearch"/> delegate offers nothing.
+    /// </summary>
+    private async Task OnStudentSearchAsync(OptionsSearchEventArgs<TargetsAndAudienceOption> e)
+    {
+        var query = (e.Text ?? string.Empty).Trim();
+        if (Model.StudentSearch is null || query.Length < 2)
+        {
+            e.Items = [];
+            return;
+        }
+
+        try
+        {
+            e.Items = await Model.StudentSearch(query, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            e.Items = [];
+        }
+    }
+
+    protected override Task<TargetsAndAudienceDialogResult?> SubmitAsync(TargetsAndAudienceDialogModel model)
+    {
+        if (model.PickedEntries.Count == 0)
+        {
+            Error = "Add at least one target.";
+            return Task.FromResult<TargetsAndAudienceDialogResult?>(null);
+        }
+
+        return Task.FromResult<TargetsAndAudienceDialogResult?>(
+            new TargetsAndAudienceDialogResult(model.PickedEntries.ToList()));
+    }
+}

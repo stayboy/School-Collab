@@ -33,7 +33,6 @@ public enum GeneratedQuestionType
 public sealed record QuestionGenerationRequest(
     Guid TopicId,
     string TopicName,
-    Guid? GradeLevelId = null,
     IReadOnlyList<string>? ContextStrands = null,
     int QuestionCount = 5,
     IReadOnlyList<GeneratedQuestionType>? Types = null,

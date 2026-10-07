@@ -45,7 +45,9 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
                 command.SignatureRequirement,
                 command.RequiresApprovalBeforePublish,
                 command.MaxPrimaryContacts,
-                command.MaxCopyContacts);
+                command.MaxCopyContacts,
+                command.MandatoryReview,
+                command.ArchiveGraceDays);
             policy = existing;
         }
         else
@@ -56,7 +58,9 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
                 command.SignatureRequirement,
                 command.RequiresApprovalBeforePublish,
                 command.MaxPrimaryContacts,
-                command.MaxCopyContacts);
+                command.MaxCopyContacts,
+                command.MandatoryReview,
+                command.ArchiveGraceDays);
             db.GradeAssignmentPolicies.Add(policy);
         }
 
@@ -68,6 +72,8 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
             policy.RequiresApprovalBeforePublish,
             policy.MaxPrimaryContacts,
             policy.MaxCopyContacts,
+            policy.MandatoryReview,
+            policy.ArchiveGraceDays,
             policy.UpdatedAt);
     }
 

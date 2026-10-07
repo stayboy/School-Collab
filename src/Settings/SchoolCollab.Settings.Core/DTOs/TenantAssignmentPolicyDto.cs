@@ -13,4 +13,6 @@ public sealed record TenantAssignmentPolicyDto(
     SignatureRequirementMode? SignatureRequirement,
     bool? RequiresApprovalBeforePublish,
     int? MaxPrimaryContacts,
-    int? MaxCopyContacts);
+    int? MaxCopyContacts,
+    bool? MandatoryReview = null,
+    int? ArchiveGraceDays = null);

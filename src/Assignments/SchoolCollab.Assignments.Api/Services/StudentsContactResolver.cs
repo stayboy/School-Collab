@@ -7,12 +7,16 @@ using SchoolCollab.Students.Core.DTOs;
 namespace SchoolCollab.Assignments.Api.Services;
 
 /// <summary>
-/// HTTP-backed <see cref="IContactResolver"/> (spec §9 G5 / Phase 6). Enumerates
-/// the publish cohort via the Students API — students by grade, their guardians,
-/// and each owner's subscribed contacts — and returns a flat subscriber list the
-/// publish handler can turn into <c>AssignmentRecipient</c> rows.
-/// The named HttpClient <c>students-api</c> is resolved through Aspire service
-/// discovery (AppHost wires <c>assignments-api</c> → <c>students-api</c>).
+/// HTTP-backed <see cref="IContactResolver"/> (spec §9 G5 / Phase 6). Turns the publish cohort —
+/// the student ids the target resolver already produced, plus each targeted grade's teachers —
+/// into guardians / owners and then each owner's subscribed contacts, returning a flat subscriber
+/// list the publish handler can turn into <c>AssignmentRecipient</c> rows.
+/// The named HttpClient <c>students-api</c> is resolved through Aspire service discovery (AppHost
+/// wires <c>assignments-api</c> → <c>students-api</c>).
+/// <para>Round <c>drop-primary-grade</c>: the <c>students/by-grade/{id}</c> whole-roster fallback is
+/// gone — publish resolves its students from the authored targets and refuses an empty set before
+/// reaching this resolver, so the by-grade path was dead. The teacher-cohort leg now runs once per
+/// distinct grade target (fail-open per grade).</para>
 /// </summary>
 public sealed class StudentsContactResolver(
     IHttpClientFactory httpClientFactory,
@@ -23,14 +27,6 @@ public sealed class StudentsContactResolver(
     {
         var client = httpClientFactory.CreateClient("students-api");
         var studentIds = (request.StudentIds ?? []).ToList();
-
-        if (studentIds.Count == 0 && request.GradeLevelId.HasValue)
-        {
-            var byGrade = await client.GetFromJsonAsync<SchoolCollab.Students.Core.DTOs.StudentDto[]>(
-                $"students/by-grade/{request.GradeLevelId.Value}", cancellationToken)
-                ?? [];
-            studentIds.AddRange(byGrade.Select(s => s.Id));
-        }
 
         var owners = new List<(ContactOwnerType OwnerType, Guid OwnerId, Guid? StudentId)>();
         foreach (var studentId in studentIds)
@@ -55,21 +51,23 @@ public sealed class StudentsContactResolver(
         }
 
         // Teachers are now notification recipients (dm/2 reverses the v1
-        // "teachers not notification recipients" carve-out). For a grade-level
-        // cohort, include the teachers linked to that grade; their contacts
-        // have no ward student, so StudentId is null.
-        if (request.GradeLevelId.HasValue)
+        // "teachers not notification recipients" carve-out). The cohort carries the teachers of
+        // EVERY targeted grade (round drop-primary-grade — the authored grade targets are the only
+        // grade source). Their contacts have no ward student, so StudentId is null. Each grade is
+        // fail-open (the ADR's graceful-degradation posture): a grade whose teachers cannot be read
+        // contributes none and never fails the publish.
+        foreach (var gradeId in (request.GradeLevelIds ?? []).Distinct())
         {
             TeacherWithRoleDto[] gradeTeachers = [];
             try
             {
                 gradeTeachers = await client.GetFromJsonAsync<TeacherWithRoleDto[]>(
-                    $"grade-levels/{request.GradeLevelId.Value}/teachers", cancellationToken)
+                    $"grade-levels/{gradeId}/teachers", cancellationToken)
                     ?? [];
             }
             catch (HttpRequestException ex)
             {
-                logger.LogWarning(ex, "Failed to resolve teachers for grade {GradeId}", request.GradeLevelId.Value);
+                logger.LogWarning(ex, "Failed to resolve teachers for grade {GradeId}", gradeId);
             }
 
             foreach (var t in gradeTeachers)

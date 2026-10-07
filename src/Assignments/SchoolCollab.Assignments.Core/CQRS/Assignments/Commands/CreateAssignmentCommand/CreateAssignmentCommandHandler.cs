@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Features;
@@ -27,6 +28,7 @@ public sealed class CreateAssignmentCommandHandler(
     ITeacherDirectory teacherDirectory,
     IFeatureFlagService featureFlags,
     IActivityGroupLookup groupLookup,
+    IAssignmentPolicyResolver assignmentPolicyResolver,
     ILogger<CreateAssignmentCommandHandler> logger) : ICommandHandler<CreateAssignmentCommand, Guid>
 {
     public async Task<Guid> HandleAsync(CreateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -76,6 +78,12 @@ public sealed class CreateAssignmentCommandHandler(
         AssignmentContentValidator.ValidateResources(command.Resources);
         AssignmentContentValidator.ValidateAttachments(command.Attachments, uploadOptions.Value);
 
+        // D6/D10: the three policy-derived assignment terms are snapshotted from the CURRENTLY
+        // RESOLVED effective policy for the assignment's policy-scope grade — never from the
+        // request. The request keeps only the AUTHOR half of guardian review (OD1).
+        var policy = await assignmentPolicyResolver.ResolveAsync(
+            DerivePolicyGrade(command.Targets), cancellationToken);
+
         var assignment = Assignment.Create(
             command.Title,
             command.Description,
@@ -83,20 +91,20 @@ public sealed class CreateAssignmentCommandHandler(
             command.GradingFormat,
             command.TargetAudienceType,
             command.TopicId,
-            command.GradeLevelId,
             command.DueDate,
             command.MaxScore,
             createdByTeacherId: createdByTeacherId,
-            mandatoryReview: command.MandatoryReview,
+            mandatoryReview: policy.MandatoryReview ?? command.MandatoryReview ?? true,
             assignmentNumber: assignmentNumber,
             aiPromptOverride: command.AiPromptOverride,
-            archiveGraceDays: command.ArchiveGraceDays,
+            // An unset policy leaves the built-in retention floor (30).
+            archiveGraceDays: policy.ArchiveGraceDays ?? 30,
             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
             // cap — named args preserve the existing call style.
             passScore: command.PassScore,
             maxAttempts: command.MaxAttempts,
-            // WS-C1 (spec §7 Q1): guardian-signature snapshot, thread-through.
-            requiresSignature: command.RequiresSignature,
+            // WS-C1/D10: the signature requirement is policy-decided; OD5 stores Optional as true.
+            requiresSignature: policy.SignatureRequirement != SignatureRequirementMode.Disabled,
             // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
             difficultyEasy: command.DifficultyEasyCount,
             difficultyMedium: command.DifficultyMediumCount,
@@ -205,6 +213,19 @@ public sealed class CreateAssignmentCommandHandler(
             assignment.Id, assignment.AssignmentNumber, tenantContext.TenantId);
         return assignment.Id;
     }
+
+    /// <summary>D6/D7: the policy-scope grade for an inbound target set — the one-distinct-grade
+    /// rule shared with the publish path (<see cref="AssignmentPolicyScope"/>), applied to the
+    /// authored grade-target rows because the assignment does not exist yet. Null (no single grade
+    /// target) resolves the tenant-global default.</summary>
+    private static Guid? DerivePolicyGrade(IReadOnlyList<AssignmentTargetDto>? targets) =>
+        targets is null
+            ? null
+            : AssignmentPolicyScope.DeriveGrade(
+                targets
+                    .Where(t => t.Kind == TargetKindDto.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList());
 
     /// <summary>D-8.1: resolves the activity-group ids in <paramref name="targets"/> that the
     /// FR-21 port does not report as active. A create has no persisted target rows, so every

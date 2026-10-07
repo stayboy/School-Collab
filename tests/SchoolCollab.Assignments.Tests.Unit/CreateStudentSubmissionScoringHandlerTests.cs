@@ -142,8 +142,9 @@ public class CreateStudentSubmissionScoringHandlerTests
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, maxScore, TeacherId,
-            mandatoryReview: false, passScore: passScore, maxAttempts: maxAttempts,
+            TopicId, null, maxScore, TeacherId,
+            // D4: a signature-requiring fixture must also require guardian review (the domain backstop).
+            mandatoryReview: requiresSignature, passScore: passScore, maxAttempts: maxAttempts,
             requiresSignature: requiresSignature)
             .WithTenant(new FakeTenantProvider(TenantId));
         var q1 = a.AddQuestion("Q1?", QuestionType.MultipleChoice, 0);
@@ -168,7 +169,7 @@ public class CreateStudentSubmissionScoringHandlerTests
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital,
             GradingFormat.InstantGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, 100m, TeacherId,
+            TopicId, null, 100m, TeacherId,
             mandatoryReview: false, passScore: 50m, maxAttempts: null)
             .WithTenant(new FakeTenantProvider(TenantId));
         var q = a.AddQuestion("Q1?", QuestionType.MultipleChoice, 0);
@@ -185,7 +186,7 @@ public class CreateStudentSubmissionScoringHandlerTests
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId,
+            TopicId, null, null, TeacherId,
             mandatoryReview: false)
             .WithTenant(new FakeTenantProvider(TenantId));
         a.AddQuestion("Q1?", QuestionType.MultipleChoice, 0);
@@ -210,7 +211,7 @@ public class CreateStudentSubmissionScoringHandlerTests
     {
         var a = Assignment.Create("Gated", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId, mandatoryReview: false)
+            TopicId, null, null, TeacherId, mandatoryReview: false)
             .WithTenant(new FakeTenantProvider(TenantId));
         var req = a.AddModule(ModuleType.Video, "https://video", title: "Req", minCompletionThresholdPercent: 80, isRequired: true);
         var opt = a.AddModule(ModuleType.Guide, "https://guide", title: "Opt", minCompletionThresholdPercent: 100, isRequired: false);
@@ -552,7 +553,7 @@ public class CreateStudentSubmissionScoringHandlerTests
     {
         var assignment = Assignment.Create("Math", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId)
+            TopicId, null, null, TeacherId)
             .WithTenant(new FakeTenantProvider(TenantId));
         // assignment has no questions, but the gate check fires first
         var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId); // not reviewed → disabled
@@ -568,12 +569,26 @@ public class CreateStudentSubmissionScoringHandlerTests
     // ── WS-C1 trigger (spec §3.2 line 51) ────────────────────────────────
     // The submit handler moves a new submission to AwaitingSignature when the
     // assignment RequiresSignature; idempotent across retries.
+    //
+    // D4 (round assignment-rules-policy-rework) makes the fixture's terms legal: a
+    // signature-requiring assignment must also require guardian review, so the student
+    // self-submit gate must have been passed for the submit to be reachable at all.
+
+    private static FakeSubmissionRepository ReviewedGateRepo() =>
+        new() { GateToReturn = ReviewedGate() };
+
+    private static GuardianSubmissionGate ReviewedGate()
+    {
+        var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId);
+        gate.EnableForStudent();
+        return gate;
+    }
 
     [TestMethod]
     public async Task SetsAwaitingSignature_WhenRequiresSignature()
     {
         var assignment = NewAutoGradedAssignment(requiresSignature: true);
-        var subRepo = new FakeSubmissionRepository();
+        var subRepo = ReviewedGateRepo();
         var scoring = new RecordingScoringEngine();
 
         var handler = NewHandler(assignment, subRepo, scoring);
@@ -606,7 +621,8 @@ public class CreateStudentSubmissionScoringHandlerTests
         var assignment = NewAutoGradedAssignment(requiresSignature: true);
         var existing = AssignmentSubmission.Create(TenantId, AssignmentId, StudentId, null);
         existing.MarkAwaitingSignature();
-        var subRepo = new FakeSubmissionRepository { SubmissionToReturn = existing };
+        var subRepo = ReviewedGateRepo();
+        subRepo.SubmissionToReturn = existing;
         var scoring = new RecordingScoringEngine();
 
         var handler = NewHandler(assignment, subRepo, scoring);

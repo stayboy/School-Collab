@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
@@ -9,6 +10,8 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
 using CreatePage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Create;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
+using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Helpers;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
@@ -38,6 +41,34 @@ public class AssignmentCreateBunitTests : BunitContext
     private readonly JsonSerializerOptions _apiJsonOptions;
     private readonly List<string> _createLogs = [];
     private readonly StubFlagService _flags = new();
+
+    /// <summary>D2/OD4: the resolved effective-policy body the page's
+    /// <c>/assignments/effective-policy</c> read returns for the tenant-default leg. Mutable so a
+    /// test can switch the resolved policy before rendering.</summary>
+    private string _effectivePolicyBody = EffectivePolicyBody();
+
+    /// <summary>The effective-policy body a GRADE-scoped read returns (the ctor's matcher dispatches
+    /// on the query string, which MockHttp's path matchers ignore).</summary>
+    private readonly Dictionary<Guid, string> _gradeEffectivePolicies = [];
+
+    /// <summary>Set before rendering: answers the effective-policy read with 500 so the page's
+    /// fail-open path is exercised (the pre-fix transport-failure case).</summary>
+    private bool _effectivePolicyUnreachable;
+
+    /// <summary>D2/OD4: the effective-policy body, produced by the REAL resolver so the stubbed body
+    /// can never disagree with the server's own derivation (the D4 implication included).</summary>
+    private static string EffectivePolicyBody(
+        SignatureRequirementMode signature = SignatureRequirementMode.Disabled,
+        bool? mandatoryReview = null,
+        int? archiveGraceDays = null) =>
+        JsonSerializer.Serialize(new EffectiveAssignmentPolicyResolver().Resolve(
+            tenantDefault: new AssignmentPolicyFields
+            {
+                SignatureRequirement = signature,
+                MandatoryReview = mandatoryReview,
+                ArchiveGraceDays = archiveGraceDays,
+            },
+            gradeOverride: null));
 
     private sealed class CaptureLogger<T> : ILogger<T>
     {
@@ -86,6 +117,33 @@ public class AssignmentCreateBunitTests : BunitContext
         // WS-B2 (step 6): the authoring page loads the org AI-prompt lock on init.
         _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
             .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
+        // D2/OD4: the page's ONE policy read — the whole effective policy (the Rules readouts and
+        // the guardian-review lock). Dispatches on the query string so a grade-scoped body can be
+        // substituted without fighting MockHttp's registration order.
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/effective-policy")
+            .Respond(request =>
+            {
+                if (_effectivePolicyUnreachable)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }
+
+                var query = request.RequestUri!.Query;
+                var body = _effectivePolicyBody;
+                foreach (var (gradeId, gradeBody) in _gradeEffectivePolicies)
+                {
+                    if (query.Contains(gradeId.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        body = gradeBody;
+                        break;
+                    }
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+            });
         // R2 (TGT-5): the stream picker sources its options from the grade-stream listing.
         _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels/*/streams")
             .Respond(HttpStatusCode.OK, "application/json", "[]");
@@ -144,29 +202,36 @@ public class AssignmentCreateBunitTests : BunitContext
     }
 
     /// <summary>
-    /// Stubs the tenant-level <c>/assignments/signature-default</c> body (Round B1 / D2
-    /// widening: <c>{ requiresSignature, signatureMode }</c>, where the boolean keeps its
-    /// pre-widening derivation <c>mode != Disabled</c>).
+    /// Stubs the tenant-default effective-policy body (round <c>assignment-rules-policy-rework</c>
+    /// D2/OD4; the <c>/signature-default</c> boolean body is retired with the route).
     /// </summary>
-    private void SetupSignatureDefault(SignatureRequirementMode mode)
-    {
-        var requiresSignature = mode != SignatureRequirementMode.Disabled ? "true" : "false";
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
-            .Respond(HttpStatusCode.OK, "application/json",
-                $"{{\"requiresSignature\":{requiresSignature},\"signatureMode\":\"{mode}\"}}");
-    }
+    private void SetupEffectivePolicy(SignatureRequirementMode signature = SignatureRequirementMode.Disabled,
+        bool? mandatoryReview = null, int? archiveGraceDays = null) =>
+        _effectivePolicyBody = EffectivePolicyBody(signature, mandatoryReview, archiveGraceDays);
 
-    /// <summary>Stubs the grade-scoped signature default. Registered BEFORE the tenant-level
-    /// matcher so the query-carrying call wins (MockHttp matches in registration order).
-    /// Request matching is on the query string because MockHttp's string matchers ignore it
-    /// when both calls share the same path.</summary>
-    private void SetupGradeSignatureDefault(Guid gradeLevelId, SignatureRequirementMode mode)
+    /// <summary>Stubs the grade-scoped effective-policy body — the grade's own resolved policy.</summary>
+    private void SetupGradeEffectivePolicy(Guid gradeLevelId,
+        SignatureRequirementMode signature = SignatureRequirementMode.Disabled,
+        bool? mandatoryReview = null, int? archiveGraceDays = null) =>
+        _gradeEffectivePolicies[gradeLevelId] = EffectivePolicyBody(signature, mandatoryReview, archiveGraceDays);
+
+    /// <summary>Round <c>drop-primary-grade</c>: the assignment has no primary-grade picker — its grade
+    /// scope IS its grade TARGET rows — so a create surface's subject list is fed by the grade target the
+    /// author adds through the builder. Mocks the Add dialog to return ONE grade target.</summary>
+    private void RegisterGradeTargetDialog(Guid gradeLevelId, string label)
     {
-        var requiresSignature = mode != SignatureRequirementMode.Disabled ? "true" : "false";
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
-            .With(req => req.RequestUri!.Query.Contains(gradeLevelId.ToString(), StringComparison.OrdinalIgnoreCase))
-            .Respond(HttpStatusCode.OK, "application/json",
-                $"{{\"requiresSignature\":{requiresSignature},\"signatureMode\":\"{mode}\"}}");
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
+            DialogResult.Ok<object?>(new DialogShellResult<TargetsAndAudienceDialogResult>(
+                new TargetsAndAudienceDialogResult(
+                    [new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, gradeLevelId, label)])))));
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<TargetsAndAudienceDialog, DialogShellData<TargetsAndAudienceDialogModel>>(
+                It.IsAny<DialogShellData<TargetsAndAudienceDialogModel>>(), It.IsAny<DialogParameters>()))
+            .ReturnsAsync(dialogRef.Object);
+
+        Services.AddSingleton(dialogMock.Object);
     }
 
     private static Guid TopicId { get; } = Guid.Parse("00000000-0000-0000-0000-0000000000cc");
@@ -176,27 +241,26 @@ public class AssignmentCreateBunitTests : BunitContext
     private static GradeLevelDto GradeFive =>
         new(GradeFiveId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
 
-    /// <summary>The guardian-signature checkbox, found by its stable id (the retired suite's
-    /// index-based <c>FindComponents&lt;FluentCheckbox&gt;()[1]</c> is deliberately gone).</summary>
-    private static FluentCheckbox SignatureCheckbox(IRenderedComponent<CreatePage> cut) =>
+    /// <summary>The author's guardian-review toggle (OD3: it lives in Basics and is editable only
+    /// while the effective policy leaves review unset), found by its stable id.</summary>
+    private static FluentCheckbox ReviewToggle(IRenderedComponent<CreatePage> cut) =>
         cut.FindComponents<FluentCheckbox>()
-            .Single(c => c.Instance.Id == "authoring-submission-requires-signature").Instance;
+            .Single(c => c.Instance.Id == "authoring-basics-mandatory-review").Instance;
 
     private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<CreatePage> cut, string id) =>
         cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
-    /// <summary>Renders the create page and waits until the initial picker load has populated
-    /// the grade options, mirroring the sibling suite's load-complete settle
-    /// (<c>AssignmentAuthoringBunitTests.cs:1392-1393</c>). Create-mode <c>_loading</c> is false
-    /// from the start, so a rendered form is not evidence the load finished; this closes the
-    /// residual window before the first grade pick.
+    /// <summary>Renders the create page and waits for the builder's Add action to be live — the create
+    /// surface's load marker now that there is no grade picker to wait on (round
+    /// <c>drop-primary-grade</c>: Create-mode <c>_loading</c> is false from the start, so a rendered form is
+    /// not evidence the load finished; the Add button is rendered only by the loaded surface).
     /// </summary>
     private IRenderedComponent<CreatePage> RenderCreatePage()
     {
         var cut = Render<CreatePage>();
         cut.WaitForAssertion(() =>
-            cut.FindAll("#authoring-basics-grade fluent-option").Should().NotBeEmpty(
-                "the initial grade-level load must finish before the first pick"),
+            cut.FindAll("#authoring-targets fluent-button[title='Add target']").Should().NotBeEmpty(
+                "the create surface must be loaded and live before the first authoring step"),
             TimeSpan.FromSeconds(5));
         return cut;
     }
@@ -220,39 +284,23 @@ public class AssignmentCreateBunitTests : BunitContext
         }, TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>Selects the primary grade. The picker binds <c>SelectedOptionChanged</c>
-    /// explicitly (it carries the FR-58 subject reload plus the signature re-resolve), so the
-    /// test drives that same callback — exactly what the select raises for a real user pick. After
-    /// the grade picker reflects the value we also wait for the subject list to finish loading,
-    /// confirming the grade-dependent cascade has settled.</summary>
-    private static async Task SelectGradeAsync(IRenderedComponent<CreatePage> cut, Guid value, string label)
+    /// <summary>Adds ONE grade-level target through the builder's Add dialog (the mocked dialog returns
+    /// it) and waits for the FR-58 subject union that target feeds to land — round
+    /// <c>drop-primary-grade</c>: the grade TARGET is the create surface's grade scope, and it is what the
+    /// subject picker's options (and the derived signature default) follow.</summary>
+    private static async Task AddGradeTargetAsync(IRenderedComponent<CreatePage> cut, string label)
     {
-        await SelectAsync(cut, "authoring-basics-grade", value, label);
+        await cut.InvokeAsync(() => cut.Find("fluent-button[title='Add target']").Click());
 
         cut.WaitForAssertion(() =>
         {
-            var subjectPicker = Picker(cut, "authoring-basics-subject");
-            subjectPicker.Items.Should().NotBeNullOrEmpty(
-                "the FR-58 subject reload for the selected grade should have landed");
+            cut.FindAll("#authoring-targets .targets-audience-item__value").Should()
+                .ContainSingle(e => e.TextContent.Trim() == label,
+                    "the grade target should be the authored set");
+            Picker(cut, "authoring-basics-subject").Items.Should().NotBeNullOrEmpty(
+                "the grade target's effective subject list should have landed");
         }, TimeSpan.FromSeconds(5));
     }
-
-    /// <summary>R2 (TGT-2/TGT-13): ticks the compartment's "Everyone" toggle — the shortest route
-    /// to a valid authored target set on the create surface. The wait confirms the audience
-    /// cascade has settled before the next step.</summary>
-    private static async Task SelectEveryoneAsync(IRenderedComponent<CreatePage> cut)
-    {
-        await cut.InvokeAsync(() => cut.FindComponents<FluentCheckbox>()
-            .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance.ValueChanged.InvokeAsync(true));
-
-        cut.WaitForAssertion(() =>
-        {
-            var everyone = cut.FindComponents<FluentCheckbox>()
-                .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance;
-            everyone.Value.Should().BeTrue("the Everyone audience toggle should be checked");
-        }, TimeSpan.FromSeconds(5));
-    }
-
     /// <summary>Fills the Basics title through the bound text field's own callback — the create
     /// guards require a non-empty title before anything is posted.</summary>
     private static async Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title)
@@ -270,14 +318,14 @@ public class AssignmentCreateBunitTests : BunitContext
 
     /// <summary>Sets the guardian-signature checkbox and waits until the bound value is reflected,
     /// closing the same late-cascade window as the other settled helpers.</summary>
-    private static async Task SetSignatureAsync(IRenderedComponent<CreatePage> cut, bool value)
+    private static async Task SetGuardianReviewAsync(IRenderedComponent<CreatePage> cut, bool value)
     {
-        await cut.InvokeAsync(() => SignatureCheckbox(cut).ValueChanged.InvokeAsync(value));
+        await cut.InvokeAsync(() => ReviewToggle(cut).ValueChanged.InvokeAsync(value));
 
         cut.WaitForAssertion(() =>
         {
-            SignatureCheckbox(cut).Value.Should().Be(value,
-                $"the signature checkbox should reflect the author override {value}");
+            ReviewToggle(cut).Value.Should().Be(value,
+                $"the guardian-review toggle should reflect the author choice {value}");
         }, TimeSpan.FromSeconds(5));
     }
 
@@ -307,10 +355,9 @@ public class AssignmentCreateBunitTests : BunitContext
         return field is null ? default : (T?)field.GetValue(instance);
     }
 
-    /// <summary>The D2 Mandatory-lock tooltip copy, bound once so the assertion and the
-    /// component cannot drift silently (the <c>QuestionGenerationGate.DisabledTooltip</c>
-    /// precedent).</summary>
-    private const string AssignmentSignatureMandatoryTooltip = Authoring.SignatureMandatoryReason;
+    /// <summary>The OD3 policy-set review lock copy, bound once so the assertion and the component
+    /// cannot drift silently (the <c>QuestionGenerationGate.DisabledTooltip</c> precedent).</summary>
+    private const string PolicyReviewLockedReason = Authoring.PolicyReviewLockedReason;
 
     // ── QuestionGenerationGate (pure, no render) ────────────────────────────
 
@@ -356,7 +403,7 @@ public class AssignmentCreateBunitTests : BunitContext
     {
         SetupGradeLevels();
         SetupActivityGroups();
-        SetupSignatureDefault(SignatureRequirementMode.Disabled);
+        SetupEffectivePolicy();
 
         var cut = Render<CreatePage>();
 
@@ -382,7 +429,7 @@ public class AssignmentCreateBunitTests : BunitContext
 
         SetupGradeLevels(GradeFive);
         SetupActivityGroups(); // mapped, but must never be requested
-        SetupSignatureDefault(SignatureRequirementMode.Disabled);
+        SetupEffectivePolicy(archiveGraceDays: 45);
 
         var cut = Render<CreatePage>();
 
@@ -401,103 +448,129 @@ public class AssignmentCreateBunitTests : BunitContext
 
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(SignatureRequirementMode.Disabled);
+        SetupEffectivePolicy();
 
         var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
-            cut.Markup.Should().Contain("Require guardian signature after completion"),
+            cut.Markup.Should().Contain("Require guardian review before student submits"),
             TimeSpan.FromSeconds(5));
 
         cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
             "the page must not be left spinning by the absent optional fetch");
     }
 
-    /// <summary>Assertion 1 (ported): a <c>Disabled</c> requirement leaves the signature
-    /// checkbox unchecked and free.</summary>
+    /// <summary>D10/AC10: the author-facing guardian-signature checkbox is retired — the signature
+    /// requirement is policy-decided and the Rules readout states the outcome.</summary>
     [TestMethod]
-    public void Create_DisabledSignatureDefault_LeavesCheckboxUncheckedAndFree()
+    public void Create_GuardianSignatureCheckbox_IsRetired_AndThePolicyRowStatesTheOutcome()
     {
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(SignatureRequirementMode.Disabled);
+        SetupEffectivePolicy(SignatureRequirementMode.Mandatory);
 
         var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("Require guardian signature after completion");
-            SignatureCheckbox(cut).Value.Should().BeFalse("a Disabled requirement leaves the signature checkbox unchecked");
-            SignatureCheckbox(cut).Disabled.Should().BeFalse("a Disabled requirement leaves the checkbox free");
+            cut.Markup.Should().NotContain("authoring-submission-requires-signature");
+            cut.Markup.Should().NotContain("Require guardian signature after completion");
+            cut.Find("#authoring-policy-signature").TextContent
+                .Should().Contain("A guardian signature is required after completion",
+                    "D10: the readonly policy row states the outcome the assignment will be saved with");
         }, TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>Assertion 2 (ported): an <c>Optional</c> tenant default pre-ticks the checkbox
-    /// while leaving the author in control.</summary>
+    /// <summary>OD3/AC10: the author's guardian-review toggle lives in Basics and is editable exactly
+    /// while the effective policy leaves review unset.</summary>
     [TestMethod]
-    public void Create_OptionalSignatureDefault_PreFillsTheCheckbox()
+    public void Create_UnsetReviewPolicy_LeavesTheGuardianReviewToggleFree()
     {
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(SignatureRequirementMode.Optional);
+        SetupEffectivePolicy(SignatureRequirementMode.Disabled, mandatoryReview: null);
 
         var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
         {
-            SignatureCheckbox(cut).Value.Should().BeTrue("the resolved default pre-fills the checkbox");
-            SignatureCheckbox(cut).Disabled.Should().BeFalse(
-                "an Optional requirement pre-fills but leaves the author in control");
+            ReviewToggle(cut).Disabled.Should().BeFalse(
+                "an unset policy leaves the guardian-review choice to the author");
+            cut.FindAll("#authoring-basics #authoring-basics-mandatory-review").Should().ContainSingle(
+                "OD3: the toggle lives in Basics, never inside the readouts-only Rules section");
+            cut.Find("#authoring-policy-review").TextContent
+                .Should().Contain("Not set by the policy");
         }, TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>Assertion 1 (ported, discriminating): the grade-scoped requirement wins over
-    /// the tenant default as soon as a grade is chosen.</summary>
+    /// <summary>OD3/OD5: an <c>Optional</c> signature requirement implies guardian review, so the
+    /// policy locks the toggle and the readout states both outcomes.</summary>
     [TestMethod]
-    public async Task Create_GradeSelected_ReResolvesTheSignatureDefault()
+    public void Create_OptionalSignaturePolicy_ImpliesAndLocksGuardianReview()
     {
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupGradeSignatureDefault(GradeFiveId, SignatureRequirementMode.Mandatory);
-        SetupSignatureDefault(SignatureRequirementMode.Disabled); // the init no-grade resolve
-        SetupSubjects(GradeFiveId);
+        SetupEffectivePolicy(SignatureRequirementMode.Optional);
 
-        var cut = RenderCreatePage();
-        cut.WaitForAssertion(() => SignatureCheckbox(cut).Value.Should().BeFalse());
-
-        await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
+        var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
         {
-            SignatureCheckbox(cut).Value.Should().BeTrue(
-                "the grade's Mandatory requirement replaces the tenant Disabled default");
-            SignatureCheckbox(cut).Disabled.Should().BeTrue("Mandatory locks the checkbox");
+            ReviewToggle(cut).Value.Should().BeTrue("OD5/D4: an Optional signature requirement requires review");
+            ReviewToggle(cut).Disabled.Should().BeTrue("a policy-set review value is not author-editable");
+            cut.Markup.Should().Contain(PolicyReviewLockedReason,
+                "the locked toggle explains why it cannot be changed");
+            cut.Find("#authoring-policy-signature").TextContent
+                .Should().Contain("A guardian signature is required after completion");
         }, TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>
-    /// Assertion 3 (ported, the discriminating case): a <c>Mandatory</c> requirement
-    /// pre-ticks, DISABLES and explains the checkbox, and the submitted create body still
-    /// carries <c>requiresSignature: true</c> (the snapshot the policy locked in).
-    /// </summary>
+    /// <summary>AC6/OD4 (round <c>drop-primary-grade</c>): the grade-scoped effective policy wins over
+    /// the tenant default as soon as a grade TARGET makes that grade the DERIVED policy-scope grade.</summary>
     [TestMethod]
-    public async Task Create_MandatoryPolicy_LocksCheckboxAndSubmitsTrue()
+    public async Task Create_GradeTargetAdded_ReResolvesTheEffectivePolicyForTheDerivedGrade()
     {
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(SignatureRequirementMode.Mandatory);
+        SetupGradeEffectivePolicy(GradeFiveId, archiveGraceDays: 45);
+        SetupEffectivePolicy(); // the init no-grade resolve: the built-in defaults
         SetupSubjects(GradeFiveId);
+        RegisterGradeTargetDialog(GradeFiveId, GradeFive.Name);
 
         var cut = RenderCreatePage();
+        cut.WaitForAssertion(() => cut.Find("#authoring-policy-archive").TextContent
+            .Should().Contain("Archived 30 days after the due date (built-in default)"));
 
-        await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
+        await AddGradeTargetAsync(cut, GradeFive.Name);
 
         cut.WaitForAssertion(() =>
         {
-            SignatureCheckbox(cut).Value.Should().BeTrue("Mandatory pre-ticks the checkbox");
-            SignatureCheckbox(cut).Disabled.Should().BeTrue("Mandatory locks the checkbox");
-            cut.Markup.Should().Contain(AssignmentSignatureMandatoryTooltip,
-                "the disabled checkbox explains why it cannot be unticked");
+            cut.Find("#authoring-policy-archive").TextContent
+                .Should().Contain("Archived 45 days after the due date",
+                    "the derived grade's policy replaces the tenant-leg readouts");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>AC5/D6/D10: the create request carries no <c>archiveGraceDays</c> and no
+    /// <c>requiresSignature</c> any more — both are snapshotted server-side from the resolved policy;
+    /// only the author half of guardian review still rides the wire (OD1).</summary>
+    [TestMethod]
+    public async Task Create_MandatoryPolicy_SubmitsWithoutTheRetiredAuthorInputs()
+    {
+        SetupGradeLevels(GradeFive);
+        SetupActivityGroups();
+        SetupEffectivePolicy(SignatureRequirementMode.Mandatory);
+        SetupSubjects(GradeFiveId);
+        RegisterGradeTargetDialog(GradeFiveId, GradeFive.Name);
+
+        var cut = RenderCreatePage();
+
+        await AddGradeTargetAsync(cut, GradeFive.Name);
+
+        cut.WaitForAssertion(() =>
+        {
+            ReviewToggle(cut).Value.Should().BeTrue("D4/OD5: the signature requirement implies review");
+            ReviewToggle(cut).Disabled.Should().BeTrue("the policy-set value is locked");
         }, TimeSpan.FromSeconds(5));
 
         string? capturedBody = null;
@@ -510,32 +583,36 @@ public class AssignmentCreateBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
         await SetTitleAsync(cut, "Algebra HW");
-        await SelectEveryoneAsync(cut);
         await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
         cut.Find("#authoring-primary-action").Click();
 
         cut.WaitForAssertion(() => AssertCapturedBodyNotNull(capturedBody, cut, _createLogs),
             TimeSpan.FromSeconds(5));
-        capturedBody.Should().Contain("\"requiresSignature\":true",
-            "the locked value is what the author submits — the persisted assignment keeps the policy snapshot");
+        capturedBody.Should().Contain("\"mandatoryReview\":true",
+            "the author half still rides the wire (OD1) and the policy wins server-side");
+        capturedBody.Should().NotContain("requiresSignature",
+            "D10: the retired author signature input left the request contract");
+        capturedBody.Should().NotContain("archiveGraceDays",
+            "D6: the archive grace window is no longer an author input");
     }
 
-    /// <summary>Assertion 4 (ported): an author override of an <c>Optional</c> default is what
-    /// gets submitted.</summary>
+    /// <summary>OD1: when the policy leaves review unset the author's toggle IS what the create
+    /// request carries — the policy still wins server-side whenever it sets a value.</summary>
     [TestMethod]
-    public async Task Create_AuthorOverrides_OverridesPrefillAndSubmitsValue()
+    public async Task Create_UnsetReviewPolicy_SubmitsTheAuthorsReviewChoice()
     {
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        SetupSignatureDefault(SignatureRequirementMode.Optional);
+        SetupEffectivePolicy(SignatureRequirementMode.Disabled, mandatoryReview: null);
         SetupSubjects(GradeFiveId);
+        RegisterGradeTargetDialog(GradeFiveId, GradeFive.Name);
 
         var cut = RenderCreatePage();
 
-        await SelectGradeAsync(cut, GradeFiveId, "Grade 5");
+        await AddGradeTargetAsync(cut, GradeFive.Name);
 
-        // The author overrides the pre-filled true back to false.
-        await SetSignatureAsync(cut, false);
+        // The author turns the default-true review off; the policy sets nothing, so this stands.
+        await SetGuardianReviewAsync(cut, false);
 
         string? capturedBody = null;
         _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
@@ -547,34 +624,34 @@ public class AssignmentCreateBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
         await SetTitleAsync(cut, "Algebra HW");
-        await SelectEveryoneAsync(cut);
         await SelectAsync(cut, "authoring-basics-subject", TopicId, "Mathematics");
         cut.Find("#authoring-primary-action").Click();
 
         cut.WaitForAssertion(() => AssertCapturedBodyNotNull(capturedBody, cut, _createLogs),
             TimeSpan.FromSeconds(5));
-        capturedBody.Should().Contain("\"requiresSignature\":false",
-            "the author's override is submitted in the create request");
+        capturedBody.Should().Contain("\"mandatoryReview\":false",
+            "the author's choice is submitted when the policy leaves review unset (OD1)");
     }
 
+    /// <summary>OD2/OD4 (fail-open): a failed effective-policy fetch leaves every readout unresolved,
+    /// keeps the author's review choice free, and renders no error bar.</summary>
     [TestMethod]
-    public void Create_PreFillFetchFails_CheckboxStaysDefault_NoError()
+    public void Create_EffectivePolicyFetchFails_ReadoutsUnresolvedAndToggleStaysFree()
     {
         SetupGradeLevels(GradeFive);
         SetupActivityGroups();
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
-            .Respond(HttpStatusCode.InternalServerError);
+        _effectivePolicyUnreachable = true;
 
         var cut = Render<CreatePage>();
 
         cut.WaitForAssertion(() =>
         {
-            SignatureCheckbox(cut).Value.Should().BeFalse("a failed resolve keeps the checkbox at its default");
-            SignatureCheckbox(cut).Disabled.Should().BeFalse(
+            cut.Find("#authoring-policy-signature").TextContent.Should().Contain("Not resolved yet");
+            ReviewToggle(cut).Disabled.Should().BeFalse(
                 "fail-open: a transport failure must never lock the author out of their own choice");
             cut.FindComponents<FluentMessageBar>()
                 .Should().NotContain(mb => mb.Instance.Intent == MessageIntent.Error,
-                    "the fail-open pre-fill does not render an error message bar");
+                    "the fail-open policy read does not render an error message bar");
         }, TimeSpan.FromSeconds(5));
     }
 }

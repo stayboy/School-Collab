@@ -94,5 +94,6 @@ Return ONLY:
     Verdict: ACCEPT | REWORK
     P1: <plan section or cited file:line — blocking plan defect>   (one per line; none if empty)
     P2: <plan section — should-fix>
+    Open decisions: <none | Q1: <decision fork the plan leaves open> — ➡️ <recommended answer>   (genuine forks only; never a substitute for a P1)
     Gates: <UI: none|risk · contract: none|risk · migrations: none|risk · secrets: none|risk>
     Acceptance honesty: <ok | tests that cannot fail, one per line>

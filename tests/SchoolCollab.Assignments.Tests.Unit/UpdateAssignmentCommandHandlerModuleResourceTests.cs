@@ -79,6 +79,7 @@ public class UpdateAssignmentCommandHandlerModuleResourceTests
             repo, publisher.Object, cache,
             uploadOptions ?? Options.Create(new AttachmentUploadOptions()),
             new AcceptAllActivityGroupLookup(),
+            new FakeAssignmentPolicyResolver(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
     }
 
@@ -87,7 +88,7 @@ public class UpdateAssignmentCommandHandlerModuleResourceTests
         var a = Assignment.Create(
             "Original", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null,
+            TopicId, null, null,
             createdByTeacherId: TeacherId,
             mandatoryReview: true,
             assignmentNumber: "ASGA01")
@@ -114,7 +115,6 @@ public class UpdateAssignmentCommandHandlerModuleResourceTests
             GradingFormat: GradingFormat.AutoGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: Guid.NewGuid(),
-            GradeLevelId: null,
             DueDate: null,
             MaxScore: 100m,
             MandatoryReview: true,

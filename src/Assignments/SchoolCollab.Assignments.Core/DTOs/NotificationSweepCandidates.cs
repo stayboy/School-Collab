@@ -19,7 +19,10 @@ public sealed record AssignmentReminderSweepCandidate(
     Guid AssignmentId,
     string Title,
     Guid TenantId,
-    Guid? GradeLevelId,
+    /// <summary>The DERIVED policy-scope grade (<see cref="Services.AssignmentPolicyScope.DeriveGrade"/>:
+    /// exactly one distinct grade target ⇒ that grade, otherwise the tenant default) — the input the
+    /// sweeper resolves the grade's notification policy with.</summary>
+    Guid? PolicyGradeId,
     Guid RecipientId,
     Guid ContactId,
     ContactOwnerType OwnerType,
@@ -44,7 +47,9 @@ public sealed record AssignmentCompletionSweepCandidate(
     Guid AssignmentId,
     string Title,
     Guid TenantId,
-    Guid? GradeLevelId,
+    /// <summary>The DERIVED policy-scope grade — see
+    /// <see cref="AssignmentReminderSweepCandidate.PolicyGradeId"/>.</summary>
+    Guid? PolicyGradeId,
     Guid RecipientId,
     Guid ContactId,
     ContactOwnerType OwnerType,
@@ -62,7 +67,9 @@ public sealed record AssignmentOverdueSweepCandidate(
     Guid AssignmentId,
     string Title,
     Guid TenantId,
-    Guid? GradeLevelId,
+    /// <summary>The DERIVED policy-scope grade — see
+    /// <see cref="AssignmentReminderSweepCandidate.PolicyGradeId"/>.</summary>
+    Guid? PolicyGradeId,
     Guid RecipientId,
     Guid ContactId,
     ContactOwnerType OwnerType,

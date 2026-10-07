@@ -6,9 +6,10 @@ namespace SchoolCollab.Assignments.Core.Domain;
 /// <summary>
 /// One authored targeting constraint on an assignment
 /// (documents/specs/assignment-authoring-compartments.md §7.1 TGT-1) — the multi-constraint
-/// replacement for the single-choice <see cref="TargetAudienceType"/> + <c>GradeLevelId</c> +
-/// <see cref="AssignmentActivityGroup"/> authored combination. Rows are tenant child records
-/// of the assignment (direct tenancy — operational data, the
+/// replacement for the single-choice <see cref="TargetAudienceType"/> authored audience. The
+/// assignment's grade(s) are the <see cref="Kind"/> = <c>GradeLevel</c> rows of this set (round
+/// <c>drop-primary-grade</c> — there is no separately-authored primary grade). Rows are tenant child
+/// records of the assignment (direct tenancy — operational data, the
 /// <see cref="AssignmentActivityGroup"/> precedent); <see cref="RefId"/> is an operational
 /// reference into the Students context (no cross-context DB FK), integrity enforced in code.
 /// </summary>

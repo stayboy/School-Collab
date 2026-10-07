@@ -22,7 +22,7 @@ public class AssignmentQuestionAttachmentTests
     private static Assignment NewAssignment() =>
         Assignment.Create("Title", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId);
+            TopicId, null, null, TeacherId);
 
     [TestMethod]
     public void AddAttachment_AddsToAttachmentsList_AndReturnsRow()

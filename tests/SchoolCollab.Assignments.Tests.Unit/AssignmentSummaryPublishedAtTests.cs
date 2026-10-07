@@ -50,7 +50,7 @@ public class AssignmentSummaryPublishedAtTests
 
     private static Assignment NewAssignment(Guid tenantId) =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(tenantId);
 
     [TestMethod]

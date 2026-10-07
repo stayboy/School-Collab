@@ -33,7 +33,7 @@ public class AssignmentLifecycleTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId);
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId);
 
     private static DateTimeOffset FutureUtc() => DateTimeOffset.UtcNow.AddDays(7);
 
@@ -435,7 +435,7 @@ public class AssignmentLifecycleTests
 
         assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, true, archiveGraceDays: 7);
+            TopicId, null, null, true, archiveGraceDays: 7);
 
         assignment.Title.Should().Be("New Title");
         assignment.ArchiveGraceDays.Should().Be(7);
@@ -450,7 +450,7 @@ public class AssignmentLifecycleTests
 
         Action act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, true);
+            TopicId, null, null, true);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("Only draft or scheduled assignments can be updated.*");
@@ -463,7 +463,7 @@ public class AssignmentLifecycleTests
 
         assignment.Update("T", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, true, archiveGraceDays: 14);
+            TopicId, null, null, true, archiveGraceDays: 14);
 
         assignment.ArchiveGraceDays.Should().Be(14);
     }
@@ -475,7 +475,7 @@ public class AssignmentLifecycleTests
     {
         var assignment = Assignment.Create("T", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId);
+            TopicId, null, null, TeacherId);
 
         assignment.ArchiveGraceDays.Should().Be(30);
     }
@@ -485,7 +485,7 @@ public class AssignmentLifecycleTests
     {
         var assignment = Assignment.Create("T", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId,
+            TopicId, null, null, TeacherId,
             archiveGraceDays: 7);
 
         assignment.ArchiveGraceDays.Should().Be(7);

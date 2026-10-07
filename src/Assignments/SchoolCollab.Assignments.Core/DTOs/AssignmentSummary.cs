@@ -10,7 +10,10 @@ public record AssignmentSummary(
     GradingFormat GradingFormat,
     TargetAudienceType TargetAudienceType,
     Guid TopicId,
-    Guid? GradeLevelId,
+    /// <summary>The row's authored grade-target ids (persisted order) — the read surfaces' grade
+    /// input now that the assignment carries no primary grade (round <c>drop-primary-grade</c>).
+    /// Always populated by the summary projections.</summary>
+    IReadOnlyList<Guid> TargetGradeIds,
     AssignmentStatus Status,
     DateTimeOffset? DueDate,
     decimal? MaxScore,

@@ -60,13 +60,14 @@ public sealed record StageQuestionsDraftBody(IReadOnlyList<NewQuestionDto> Quest
 public static class AssignmentRoutes
 {
     /// <summary>
-    /// The six teacher-portal GET reads (round <c>teacher-scope-auth</c> D3/D4) — exactly the
-    /// routes the reader policy decorates (see <see cref="AssignmentEndpoints"/>). Their caller's
-    /// <see cref="TeacherScope"/> is resolved HERE, at the endpoint, and threaded onto the query;
-    /// no Core handler fetches it. Everything else the <c>/assignments</c> group serves stays in
-    /// <see cref="MapAssignmentRoutes"/> and stays reachable by a role-less principal — except the
-    /// one submission-grade POST, which <see cref="MapAssignmentGradeRoutes"/> mounts under its own
-    /// writer sub-group (round <c>portal-submission-grade</c> D1).
+    /// The seven teacher-portal GET reads (round <c>teacher-scope-auth</c> D3/D4 and round
+    /// <c>assignment-rules-policy-rework</c> OD4) — exactly the routes the reader policy decorates
+    /// (see <see cref="AssignmentEndpoints"/>). Their caller's <see cref="TeacherScope"/> is resolved
+    /// HERE, at the endpoint, and threaded onto the query; no Core handler fetches it. Everything else
+    /// the <c>/assignments</c> group serves stays in <see cref="MapAssignmentRoutes"/> and stays
+    /// reachable by a role-less principal — except the one submission-grade POST, which
+    /// <see cref="MapAssignmentGradeRoutes"/> mounts under its own writer sub-group
+    /// (round <c>portal-submission-grade</c> D1).
     /// </summary>
     public static RouteGroupBuilder MapAssignmentReaderRoutes(this RouteGroupBuilder group)
     {
@@ -212,6 +213,23 @@ public static class AssignmentRoutes
             }
         });
 
+        // ── Effective assignment policy (WS-C1 / spec §7 Q1; round assignment-rules-policy-rework D2/OD4) ──
+        // The whole resolved policy for the authoring page's Rules readouts — approval, signature,
+        // guardian review and the archive window — with the D4 implication already applied by the
+        // resolver. Always 200: the resolution is fail-open (an unreachable policy source degrades
+        // to "nothing configured"), so the page's readouts can never be blocked. Null
+        // gradeLevelId resolves the tenant-global default; a grade id resolves the grade override
+        // falling back to the tenant default. The literal segment wins over the {id:guid} template
+        // (a non-GUID segment never matches a guid route).
+        group.MapGet("/effective-policy", async (
+            [FromQuery] Guid? gradeLevelId,
+            [FromServices] SchoolCollab.Assignments.Core.Services.IAssignmentPolicyResolver resolver,
+            CancellationToken ct) =>
+        {
+            var policy = await resolver.ResolveAsync(gradeLevelId, ct);
+            return Results.Ok(policy);
+        });
+
         return group;
     }
 
@@ -295,30 +313,10 @@ public static class AssignmentRoutes
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
-        // ── Effective guardian-signature default (WS-C1 / spec §7 Q1) ──
-        // The literal segment wins over the {id:guid} template above (a
-        // non-GUID segment never matches a guid route), so the always-200
-        // fail-open resolution is reachable by the create-wizard pre-fill.
-        // Round B1 (D2) widens the body ADDITIVELY with `signatureMode` (the enum
-        // name, via the type-level JsonStringEnumConverter) so the create wizard can
-        // distinguish Mandatory (lock the checkbox) from Optional (pre-fill only);
-        // `requiresSignature` keeps its Round A derivation
-        // (Mandatory/Optional ⇒ true, Disabled ⇒ false), so a consumer reading only
-        // the boolean still parses.
-        group.MapGet("/signature-default", async (
-            [FromQuery] Guid? gradeLevelId,
-            [FromServices] SchoolCollab.Assignments.Core.Services.IAssignmentPolicyResolver resolver,
-            CancellationToken ct) =>
-        {
-            var policy = await resolver.ResolveAsync(gradeLevelId, ct);
-            var requiresSignature = policy.SignatureRequirement != SignatureRequirementMode.Disabled;
-            return Results.Ok(new { requiresSignature, signatureMode = policy.SignatureRequirement });
-        });
-
         // ── Guardian sign-off consent language (WS-C1/C2 / spec §3.2 line 53) ──
         // Always 200 + the resolved consent text (tenant override or embedded
         // default via the fail-open resolver) so the sign page is never blocked.
-        // Literal segment wins over the {id:guid} template (the /signature-default
+        // Literal segment wins over the {id:guid} template (the /effective-policy
         // precedent).
         group.MapGet("/signature-consent-text", async (
             [FromServices] SchoolCollab.Assignments.Core.Services.ISignatureConsentTextResolver resolver,
@@ -419,7 +417,7 @@ public static class AssignmentRoutes
         // ── Org-level AI-prompt lock (WS-B2 / spec §3.4 line 70) ──
         // Always 200 + the resolved lock (fail-open false mirrors the resolver
         // posture) so the create wizard is never blocked. Literal segment wins
-        // over the {id:guid} template (the /signature-default precedent).
+        // over the {id:guid} template (the /effective-policy precedent).
         group.MapGet("/ai-prompt-policy", async (
             [FromServices] SchoolCollab.Assignments.Core.Services.IAiPromptPolicyResolver resolver,
             CancellationToken ct) =>
@@ -432,17 +430,17 @@ public static class AssignmentRoutes
         // Advisory, read-only, never blocks save: the same resolver + contact + policy chain the
         // publish handler runs (TGT-9), applied to the CURRENT constraint set so "contacts
         // reachable" means exactly what publish would send. Literal segment wins over the
-        // {id:guid} template (the /signature-default precedent).
+        // {id:guid} template (the /effective-policy precedent).
         //
         // Failure posture: any resolve/transport failure returns 200 with all-zero counts and
         // PreviewDegraded = true, which the compartment renders as an inline "Preview
         // unavailable" note — publish re-resolves fresh server-side.
         //
-        // `primaryGradeId` (plan-review P2-n2): the route has no assignment, so publish's two
-        // primary-grade legs — the ResolveSubscribersRequest grade cohort that carries the
-        // grade's teachers, and the grade's policy override — would otherwise be unreproducible
-        // and the preview would under-count against publish. Optional; omitted = the tenant leg
-        // only (the null-grade posture).
+        // `gradeLevelIds` (plan-review P2-n2, reworked by round drop-primary-grade): the route has
+        // no assignment, so publish's two derived legs — the ResolveSubscribersRequest grade cohort
+        // that carries each targeted grade's teachers, and the policy-scope grade — are reproduced
+        // from the POSTED grade-target set, exactly as publish derives them from the persisted one.
+        // The old authored `primaryGradeId` query param is gone with the primary grade itself.
         //
         // A missing current period is a resolve-level condition the Students `by-target` leg
         // answers with "no matches" rather than an error, so it surfaces as zero counts, not as
@@ -453,7 +451,6 @@ public static class AssignmentRoutes
             [FromQuery] Guid[] streamCodedValueIds,
             [FromQuery] Guid[] studentIds,
             [FromQuery] Guid[] activityGroupIds,
-            [FromQuery] Guid? primaryGradeId,
             [FromServices] IAssignmentTargetResolver targetResolver,
             [FromServices] IContactResolver contactResolver,
             [FromServices] INotificationPolicyResolver policyResolver,
@@ -481,12 +478,17 @@ public static class AssignmentRoutes
                 }
 
                 // Mirror publish's own chain: resolve subscribed contacts for the resolved cohort
-                // (plus the primary grade's teacher cohort), then apply the two effective
-                // policies. The recipient rows are transient projections — they exist only to
-                // feed the pure filter, so they carry no assignment id.
+                // (plus each targeted grade's teacher cohort), then apply the two effective
+                // policies — both derived from the posted grade-target set by the ONE rule
+                // (<see cref="AssignmentPolicyScope.DeriveGrade"/>). The recipient rows are transient
+                // projections — they exist only to feed the pure filter, so they carry no
+                // assignment id.
+                var derivedPolicyGradeId = AssignmentPolicyScope.DeriveGrade(
+                    (gradeLevelIds ?? []).Distinct().ToList());
+
                 var subscribers = await contactResolver.ResolveSubscribersAsync(
                     new ResolveSubscribersRequest(
-                        tenantId, SubscriptionScope.AllAssignments, primaryGradeId, matchedStudentIds),
+                        tenantId, SubscriptionScope.AllAssignments, gradeLevelIds, matchedStudentIds),
                     ct);
 
                 var projected = subscribers
@@ -503,8 +505,8 @@ public static class AssignmentRoutes
                         subscriptionActive: true))
                     .ToList();
 
-                var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, primaryGradeId, ct);
-                var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(primaryGradeId, ct);
+                var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, derivedPolicyGradeId, ct);
+                var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(derivedPolicyGradeId, ct);
                 var reachable = NotificationRecipientFilter.Apply(projected, effectivePolicy, assignmentPolicy);
 
                 var primaryContacts = reachable.Count(r => r.Role == GuardianRole.Primary);
@@ -536,7 +538,7 @@ public static class AssignmentRoutes
                 var cmd = new CreateAssignmentCommand(
                     req.Title, req.Description, (AssignmentType)req.AssignmentType,
                     (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
-                    req.TopicId, req.GradeLevelId,
+                    req.TopicId,
                     req.DueDate, req.MaxScore,
                     req.MandatoryReview,
                     req.AiPromptOverride,
@@ -544,13 +546,10 @@ public static class AssignmentRoutes
                     req.Attachments,
                     req.ContentModules,
                     req.Resources,
-                    req.ArchiveGraceDays,
                     // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
                     // attempt cap on the wire surface.
                     req.PassScore,
                     req.MaxAttempts,
-                    // WS-C1 (spec §7 Q1): guardian-signature snapshot.
-                    req.RequiresSignature,
                     // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
                     req.DifficultyEasyCount,
                     req.DifficultyMediumCount,
@@ -575,9 +574,9 @@ public static class AssignmentRoutes
                 return Results.NotFound();
             }
             // R2: the target validation (TGT-13 at-least-one, TGT-2 AllStudents exclusivity, the
-            // D-2 primary-grade rule, the D-8.1 archived-group rule) surfaces as
-            // ArgumentException — 400, never a 500. The pre-R2 domain argument guards
-            // (pass score / attempts / difficulty) land on the same mapping.
+            // D-8.1 archived-group rule) surfaces as ArgumentException — 400, never a 500. The
+            // pre-R2 domain argument guards (pass score / attempts / difficulty) land on the same
+            // mapping.
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { ex.Message });
@@ -609,20 +608,17 @@ public static class AssignmentRoutes
                 var cmd = new UpdateAssignmentCommand(
                     id, req.Title, req.Description, (AssignmentType)req.AssignmentType,
                     (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
-                    req.TopicId, req.GradeLevelId,
+                    req.TopicId,
                     req.DueDate, req.MaxScore, req.MandatoryReview,
                     req.AiPromptOverride,
                     req.Questions,
                     req.Attachments,
                     req.ContentModules,
                     req.Resources,
-                    req.ArchiveGraceDays,
                     // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
                     // attempt cap on the wire surface.
                     req.PassScore,
                     req.MaxAttempts,
-                    // WS-C1 (spec §7 Q1): guardian-signature round-trip.
-                    req.RequiresSignature,
                     // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
                     req.DifficultyEasyCount,
                     req.DifficultyMediumCount,

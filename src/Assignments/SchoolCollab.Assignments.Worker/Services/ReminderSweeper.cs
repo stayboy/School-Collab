@@ -92,7 +92,7 @@ public static class ReminderSweeper
                     {
                         logState.TryGetValue(candidate.RecipientId, out var state);
                         var policy = await policyResolver.ResolveEffectiveAsync(
-                            candidate.TenantId, candidate.GradeLevelId, ct);
+                            candidate.TenantId, candidate.PolicyGradeId, ct);
                         var now = timeProvider.GetUtcNow();
 
                         if (IsReminderDue(

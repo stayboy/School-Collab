@@ -47,7 +47,7 @@ public class StageQuestionsDraftCommandHandlerTests
     {
         var assignment = Assignment.Create(
                 "Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, null)
+                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null)
             .WithTenant(tenants);
         db.Assignments.Add(assignment);
         db.SaveChanges();

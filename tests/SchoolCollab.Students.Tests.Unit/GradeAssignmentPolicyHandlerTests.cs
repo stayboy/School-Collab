@@ -11,8 +11,9 @@ namespace SchoolCollab.Students.Tests.Unit;
 
 /// <summary>
 /// Round A (<c>documents/solution/assignment-policy-fields.md</c> §4) — the Students CQRS pair
-/// round-trips the whole four-field override shape, keeps the grade-exists guard, and keeps
-/// 204-when-no-row (all fields inherit) unchanged.
+/// round-trips the whole override shape, keeps the grade-exists guard, and keeps 204-when-no-row
+/// (all fields inherit) unchanged. Round <c>assignment-rules-policy-rework</c> (D3/D5, AC7) extends
+/// that shape with the guardian-review flag and the archive window.
 /// </summary>
 [TestClass]
 public class GradeAssignmentPolicyHandlerTests
@@ -49,7 +50,8 @@ public class GradeAssignmentPolicyHandlerTests
 
         await NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
             gradeId, SignatureRequirementMode.Optional, RequiresApprovalBeforePublish: true,
-            MaxPrimaryContacts: 2, MaxCopyContacts: 4));
+            MaxPrimaryContacts: 2, MaxCopyContacts: 4,
+            MandatoryReview: true, ArchiveGraceDays: 45));
 
         var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
 
@@ -59,6 +61,8 @@ public class GradeAssignmentPolicyHandlerTests
         result.RequiresApprovalBeforePublish.Should().BeTrue();
         result.MaxPrimaryContacts.Should().Be(2);
         result.MaxCopyContacts.Should().Be(4);
+        result.MandatoryReview.Should().BeTrue("the grade's guardian-review override round-trips (D3)");
+        result.ArchiveGraceDays.Should().Be(45, "the grade's archive-window override round-trips (D5)");
     }
 
     [TestMethod]
@@ -69,8 +73,9 @@ public class GradeAssignmentPolicyHandlerTests
         var upsert = NewUpsert(s);
 
         await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(
-            gradeId, SignatureRequirementMode.Mandatory, true, 1, 1));
-        await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(gradeId, null, null, null, null));
+            gradeId, SignatureRequirementMode.Mandatory, true, 1, 1,
+            MandatoryReview: true, ArchiveGraceDays: 45));
+        await upsert.HandleAsync(new UpsertGradeAssignmentPolicy(gradeId, null, null, null, null, null, null));
 
         var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
 
@@ -78,6 +83,8 @@ public class GradeAssignmentPolicyHandlerTests
         result.RequiresApprovalBeforePublish.Should().BeNull();
         result.MaxPrimaryContacts.Should().BeNull();
         result.MaxCopyContacts.Should().BeNull();
+        result.MandatoryReview.Should().BeNull("a null field restores 'inherit the tenant default' (D3)");
+        result.ArchiveGraceDays.Should().BeNull();
         (await s.Db.GradeAssignmentPolicies.CountAsync()).Should().Be(1, "one override row per grade");
     }
 

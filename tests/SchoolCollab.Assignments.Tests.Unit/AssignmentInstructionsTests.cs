@@ -60,7 +60,7 @@ public class AssignmentInstructionsTests
     private static Assignment NewAssignment(ITenantProvider tenants, string? instructions = null) =>
         Assignment.Create(
             "Algebra HW", "internal note", AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null,
+            TargetAudienceType.AllStudents, TopicId, null, null,
             createdByTeacherId: Guid.Empty,
             mandatoryReview: true,
             instructions: instructions)
@@ -73,13 +73,13 @@ public class AssignmentInstructionsTests
     {
         var assignment = Assignment.Create(
             "Algebra HW", "internal note", AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null);
+            TargetAudienceType.AllStudents, TopicId, null, null);
 
         assignment.Instructions.Should().BeNull("no instructions were supplied");
 
         var withInstructions = Assignment.Create(
             "Algebra HW", "internal note", AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null,
+            TargetAudienceType.AllStudents, TopicId, null, null,
             instructions: "  Read chapter 5, then answer the questions.  ");
 
         withInstructions.Instructions.Should().Be("Read chapter 5, then answer the questions.",
@@ -93,19 +93,19 @@ public class AssignmentInstructionsTests
     {
         var assignment = Assignment.Create(
             "Algebra HW", "internal note", AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null,
+            TargetAudienceType.AllStudents, TopicId, null, null,
             instructions: "original text");
 
         assignment.Update(
             "Algebra HW", "internal note", AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, mandatoryReview: true,
+            TargetAudienceType.AllStudents, TopicId, null, null, mandatoryReview: true,
             instructions: "  revised text  ");
 
         assignment.Instructions.Should().Be("revised text");
 
         assignment.Update(
             "Algebra HW", "internal note", AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, mandatoryReview: true);
+            TargetAudienceType.AllStudents, TopicId, null, null, mandatoryReview: true);
 
         assignment.Instructions.Should().BeNull("an update without instructions clears the field");
     }
@@ -133,6 +133,7 @@ public class AssignmentInstructionsTests
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = true },
             new AcceptAllActivityGroupLookup(),
+            new FakeAssignmentPolicyResolver(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
         var id = await handler.HandleAsync(new CreateAssignmentCommand(
@@ -142,7 +143,6 @@ public class AssignmentInstructionsTests
             GradingFormat: GradingFormat.TeacherGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: TopicId,
-            GradeLevelId: null,
             DueDate: null,
             MaxScore: null,
             MandatoryReview: true,
@@ -170,11 +170,12 @@ public class AssignmentInstructionsTests
             cache,
             Options.Create(new AttachmentUploadOptions()),
             new AcceptAllActivityGroupLookup(),
+            new FakeAssignmentPolicyResolver(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new UpdateAssignmentCommand(
             assignment.Id, "Algebra HW", "internal note", AssignmentType.Digital,
-            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents, TopicId, null, null, null,
+            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents, TopicId, null, null,
             MandatoryReview: true,
             Instructions: "Read chapter 6."));
 
@@ -311,8 +312,6 @@ public class AssignmentInstructionsTests
             TargetAudienceType: TargetAudienceTypeDto.AllStudents,
             TopicId: TopicId,
             TopicName: "Math",
-            GradeLevelId: null,
-            GradeName: null,
             Status: AssignmentStatusDto.Draft,
             DueDate: null,
             MaxScore: null,
@@ -327,13 +326,13 @@ public class AssignmentInstructionsTests
 
         var create = model.ToCreateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+            TargetAudienceTypeDto.AllStudents, TopicId, true);
         create.Instructions.Should().Be("Do the thing");
 
         model.Instructions = "Edited text";
         var update = model.ToUpdateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+            TargetAudienceTypeDto.AllStudents, TopicId, true);
         update.Instructions.Should().Be("Edited text", "ToUpdateRequest must carry Instructions");
     }
 }

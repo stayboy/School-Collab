@@ -57,8 +57,10 @@ public class NotificationRecipientFilterTests
     private static EffectiveAssignmentPolicy AssignmentPolicy(int? maxPrimary = null, int? maxCopy = null) =>
         new(SignatureRequirementMode.Disabled, RequiresApprovalBeforePublish: false,
             MaxPrimaryContacts: maxPrimary, MaxCopyContacts: maxCopy,
+            MandatoryReview: null, ArchiveGraceDays: null,
             SignatureRequirementFromOverride: false, RequiresApprovalBeforePublishFromOverride: false,
-            MaxPrimaryContactsFromOverride: false, MaxCopyContactsFromOverride: false);
+            MaxPrimaryContactsFromOverride: false, MaxCopyContactsFromOverride: false,
+            MandatoryReviewFromOverride: false, ArchiveGraceDaysFromOverride: false);
 
     private static IReadOnlyList<AssignmentRecipient> Apply(
         IReadOnlyList<AssignmentRecipient> recipients,

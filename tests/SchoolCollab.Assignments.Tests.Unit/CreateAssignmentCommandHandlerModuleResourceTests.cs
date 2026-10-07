@@ -67,6 +67,7 @@ public class CreateAssignmentCommandHandlerModuleResourceTests
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = true },
             new AcceptAllActivityGroupLookup(),
+            new FakeAssignmentPolicyResolver(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
     }
 
@@ -81,7 +82,6 @@ public class CreateAssignmentCommandHandlerModuleResourceTests
             GradingFormat: GradingFormat.AutoGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: Guid.NewGuid(),
-            GradeLevelId: null,
             DueDate: null,
             MaxScore: 100m,
             MandatoryReview: true,

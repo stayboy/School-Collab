@@ -57,11 +57,15 @@ public sealed class DuplicateAssignmentCommandHandler(
             source.GradingFormat,
             source.TargetAudienceType,
             source.TopicId,
-            source.GradeLevelId,
             source.DueDate,
             source.MaxScore,
             createdByTeacherId: source.CreatedByTeacherId,
-            mandatoryReview: source.MandatoryReview,
+            // D4 (this round): the clone COERCES rather than re-resolving. A duplicate copies the
+            // source's terms instead of re-authoring them, and a legacy row may legally hold
+            // RequiresSignature = true with MandatoryReview = false (the retired author checkboxes
+            // allowed exactly that pair) — without the coercion the new Assignment.Create guard
+            // would throw on duplicating such a row.
+            mandatoryReview: source.MandatoryReview || source.RequiresSignature,
             assignmentNumber: assignmentNumber,
             aiPromptOverride: source.AiPromptOverride,
             archiveGraceDays: source.ArchiveGraceDays,

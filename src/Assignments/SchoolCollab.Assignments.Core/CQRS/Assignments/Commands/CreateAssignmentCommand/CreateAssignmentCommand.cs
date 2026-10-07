@@ -18,28 +18,24 @@ public sealed record CreateAssignmentCommand(
     GradingFormat GradingFormat,
     TargetAudienceType TargetAudienceType,
     Guid TopicId,
-    Guid? GradeLevelId,
     DateTimeOffset? DueDate,
     decimal? MaxScore,
-    bool MandatoryReview = true,
+    /// <summary>D3/OD1 (round <c>assignment-rules-policy-rework</c>): the AUTHOR half of the
+    /// guardian-review value. Null = the author left it unset; the handler stores
+    /// <c>effective.MandatoryReview ?? MandatoryReview ?? true</c>, so a resolved policy always
+    /// wins an author payload.</summary>
+    bool? MandatoryReview = null,
     string? AiPromptOverride = null,
     IReadOnlyList<NewQuestionDto>? Questions = null,
     IReadOnlyList<NewAttachmentDto>? Attachments = null,
     IReadOnlyList<NewContentModuleDto>? ContentModules = null,
     IReadOnlyList<NewResourceDto>? Resources = null,
-    /// <summary>WS-A2 (spec §7 Q6): archive grace window in days.
-    /// Threaded to <c>Assignment.Create(...)</c>.</summary>
-    int ArchiveGraceDays = 30,
     /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
     /// Threaded to <c>Assignment.Create(...)</c>.</summary>
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Threaded to <c>Assignment.Create(...)</c>.</summary>
     int? MaxAttempts = null,
-    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
-    /// required after completion. Threaded to
-    /// <c>Assignment.Create(...)</c>.</summary>
-    bool RequiresSignature = false,
     /// <summary>WS-B2 (spec §3.4 line 70): requested per-difficulty counts.
     /// Threaded to <c>Assignment.Create(...)</c>.</summary>
     int? DifficultyEasyCount = null,

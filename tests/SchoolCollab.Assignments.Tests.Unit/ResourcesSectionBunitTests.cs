@@ -567,7 +567,6 @@ public class ResourcesSectionBunitTests : BunitContext
             SchoolCollab.Assignments.Contracts.GradingFormatDto.AutoGraded,
             SchoolCollab.Assignments.Contracts.TargetAudienceTypeDto.AllStudents,
             Guid.Parse("00000000-0000-0000-0000-000000000010"),
-            null,
             true);
 
         req.Resources.Should().NotBeNull();

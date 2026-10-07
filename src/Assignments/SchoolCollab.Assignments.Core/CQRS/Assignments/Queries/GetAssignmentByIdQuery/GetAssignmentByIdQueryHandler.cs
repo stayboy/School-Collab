@@ -69,9 +69,16 @@ public sealed class GetAssignmentByIdQueryHandler(
                     log.LogWarning(ex, "Feature flag resolution failed; defaulting approval to OFF");
                 }
 
+                // Round drop-primary-grade: the policy-scope grade is DERIVED from the assignment's
+                // grade targets (one distinct grade target ⇒ that grade, otherwise the tenant
+                // default). The aggregate is loaded with Targets auto-included, so this is no extra
+                // read, and it is the same rule every policy leg uses
+                // (<see cref="AssignmentPolicyScope.DeriveGrade"/>).
+                var policyGradeId = AssignmentPolicyScope.DeriveGrade(assignment);
+
                 var policy = await hybridCache.GetOrCreateAsync(
-                    EffectivePolicyCacheKey(dbContext.CurrentTenantId, assignment.GradeLevelId),
-                    (assignment.GradeLevelId, policyResolver),
+                    EffectivePolicyCacheKey(dbContext.CurrentTenantId, policyGradeId),
+                    (policyGradeId, policyResolver),
                     static async (policyState, token) =>
                     {
                         var (grade, resolver) = policyState;
@@ -89,8 +96,6 @@ public sealed class GetAssignmentByIdQueryHandler(
                     (GradingFormatDto)assignment.GradingFormat,
                     (TargetAudienceTypeDto)assignment.TargetAudienceType,
                     assignment.TopicId,
-                    null,
-                    assignment.GradeLevelId,
                     null,
                     (AssignmentStatusDto)assignment.Status,
                     assignment.DueDate,
@@ -123,7 +128,11 @@ public sealed class GetAssignmentByIdQueryHandler(
                     RequiresApproval: policy.RequiresApprovalBeforePublish || flagOn,
                     // INS-1/INS-2 (assignment-authoring-compartments §9): student-facing
                     // text — must be mapped or every detail read drops it.
-                    Instructions: assignment.Instructions);
+                    Instructions: assignment.Instructions,
+                    // Round drop-primary-grade: the scope input the by-id read filters on
+                    // (see AllowsAnyTargetGrade) — must be mapped or a scoped read silently
+                    // fails closed.
+                    TargetGradeIds: AssignmentPolicyScope.GradeTargetIds(assignment));
             },
             CacheOptions,
             tags: ["assignments"],
@@ -137,7 +146,7 @@ public sealed class GetAssignmentByIdQueryHandler(
         }
 
         if (query.Scope is { IsUnrestricted: false } scope
-            && !scope.Allows(summary.CreatedByTeacherId, summary.GradeLevelId, summary.TopicId))
+            && !scope.AllowsAnyTargetGrade(summary.CreatedByTeacherId, summary.TargetGradeIds, summary.TopicId))
         {
             return null;
         }

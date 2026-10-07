@@ -2,7 +2,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 
 @*
-    WS-A3 (spec §3.3 / §7 Q4): the Pass Score + Max Attempts inputs.
+    WS-A3 (spec §3.3 / §7 Q4): the Pass Score input.
 
     UX-17 / D12 (assignment-authoring-compartments §12): an inapplicable
     control renders **disabled with an inline reason, never hidden** — the
@@ -10,23 +10,27 @@
     fields were hidden for TeacherGraded before R1; they now render
     disabled so the compartment keeps its shape and the reason is visible.
 
+    Round `authoring-compact-fields` (OD1): the attempt cap LEFT this section
+    for the Basics `(Max score · Max attempts)` row — the authoring page pairs
+    the two short number fields, so the cap is rendered by the page. The cap
+    still carries this section's gate: the page calls
+    <see cref="IsScoringInapplicable"/> for its disabled state, and the one
+    <see cref="ScoringInapplicableReason"/> paragraph below still states why
+    BOTH fields are inapplicable (it names the pass score and the attempt cap).
+
     The gating rule itself is unchanged (`ScoringFieldsPassSubmitGate`
     still always passes for TeacherGraded, so a stale value can never
     block submit with an invisible error).
 *@
 
 @{
-    var inapplicable = IsInapplicable(GradingFormat);
+    var inapplicable = IsScoringInapplicable(GradingFormat);
 }
 
-<p class="muted">Set the pass threshold and attempt cap. Leave blank for no pass threshold / unlimited attempts.</p>
+<p class="muted">Set the pass threshold. Leave blank for no pass threshold.</p>
 
 <FormRow Label="Pass Score" For="scoringFieldsPassScore">
     <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3"
-                       Disabled="@inapplicable" />
-</FormRow>
-<FormRow Label="Max Attempts" For="scoringFieldsMaxAttempts">
-    <FluentNumberField Id="scoringFieldsMaxAttempts" @bind-Value="Model.MaxAttempts" Class="w-3"
                        Disabled="@inapplicable" />
 </FormRow>
 
@@ -43,9 +47,10 @@
     public const string ScoringInapplicableReason =
         "Not applicable for Teacher Marked grading — pass score and attempt caps apply to Auto Scored and Instant Feedback only.";
 
-    /// <summary>The shared form model (PassScore + MaxAttempts live
-    /// here so the authoring page's request projection and
-    /// <c>ScoringFieldsPassSubmitGate</c> pick them up automatically).</summary>
+    /// <summary>The shared form model (PassScore lives here — and MaxAttempts
+    /// still does, so the authoring page's request projection and
+    /// <c>ScoringFieldsPassSubmitGate</c> pick them up automatically — while
+    /// this section renders only the pass score, OD1).</summary>
     [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
 
     /// <summary>The currently selected grading format. For
@@ -56,7 +61,10 @@
     [Parameter, EditorRequired] public GradingFormatDto GradingFormat { get; set; }
 
     /// <summary>True when the grading format does not support the
-    /// pass-score / attempt-cap fields (UX-17 / D12).</summary>
-    private static bool IsInapplicable(GradingFormatDto gradingFormat) =>
+    /// pass-score / attempt-cap fields (UX-17 / D12). Public because the two
+    /// fields no longer share a component: this section renders the pass score
+    /// and the authoring page renders the attempt cap in its Basics row, so the
+    /// page asks here rather than restating the gate (one spelling, OD1).</summary>
+    public static bool IsScoringInapplicable(GradingFormatDto gradingFormat) =>
         gradingFormat is not (GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded);
 }

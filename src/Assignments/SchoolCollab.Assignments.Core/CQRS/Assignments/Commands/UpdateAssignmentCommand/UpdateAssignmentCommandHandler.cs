@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands;
@@ -19,6 +20,7 @@ public sealed class UpdateAssignmentCommandHandler(
     HybridCache cache,
     IOptions<AttachmentUploadOptions> uploadOptions,
     IActivityGroupLookup groupLookup,
+    IAssignmentPolicyResolver assignmentPolicyResolver,
     ILogger<UpdateAssignmentCommandHandler> logger) : ICommandHandler<UpdateAssignmentCommand>
 {
     public async Task HandleAsync(UpdateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -38,6 +40,20 @@ public sealed class UpdateAssignmentCommandHandler(
         AssignmentContentValidator.ValidateResources(command.Resources);
         AssignmentContentValidator.ValidateAttachments(command.Attachments, uploadOptions.Value);
 
+        // D6/D10: the three policy-derived assignment terms are RE-snapshotted from the CURRENTLY
+        // resolved effective policy for the assignment's policy-scope grade — never from the
+        // request. The inbound target set (non-null = full replacement) is the set this save
+        // persists, so the scope is derived from it; a null inbound set preserves the persisted
+        // rows and their scope (the null-means-preserve contract SetTargets honours below).
+        var policyGradeIds = command.Targets is { } inboundTargets
+            ? inboundTargets
+                .Where(t => t.Kind == TargetKindDto.GradeLevel && t.RefId.HasValue)
+                .Select(t => t.RefId!.Value)
+                .ToList()
+            : AssignmentPolicyScope.GradeTargetIds(assignment);
+        var policy = await assignmentPolicyResolver.ResolveAsync(
+            AssignmentPolicyScope.DeriveGrade(policyGradeIds), cancellationToken);
+
         assignment.Update(
             command.Title,
             command.Description,
@@ -45,18 +61,18 @@ public sealed class UpdateAssignmentCommandHandler(
             command.GradingFormat,
             command.TargetAudienceType,
             command.TopicId,
-            command.GradeLevelId,
             command.DueDate,
             command.MaxScore,
-            command.MandatoryReview,
+            mandatoryReview: policy.MandatoryReview ?? command.MandatoryReview ?? true,
             command.AiPromptOverride,
-            archiveGraceDays: command.ArchiveGraceDays,
+            // An unset policy leaves the built-in retention floor (30).
+            archiveGraceDays: policy.ArchiveGraceDays ?? 30,
             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
             // cap — named args preserve the existing call style.
             passScore: command.PassScore,
             maxAttempts: command.MaxAttempts,
-            // WS-C1 (spec §7 Q1): guardian-signature round-trip, thread-through.
-            requiresSignature: command.RequiresSignature,
+            // WS-C1/D10: the signature requirement is policy-decided; OD5 stores Optional as true.
+            requiresSignature: policy.SignatureRequirement != SignatureRequirementMode.Disabled,
             // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
             difficultyEasy: command.DifficultyEasyCount,
             difficultyMedium: command.DifficultyMediumCount,

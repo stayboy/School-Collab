@@ -76,7 +76,7 @@ public class AttachmentExtractionRoundTripTests
 
         var request = model.ToUpdateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded,
-            TargetAudienceTypeDto.AllStudents, Guid.NewGuid(), null, mandatoryReview: true);
+            TargetAudienceTypeDto.AllStudents, Guid.NewGuid(), mandatoryReview: true);
 
         var dto = request.Attachments!.Single();
         dto.ExtractionStatus.Should().Be(AttachmentExtractionStatusDto.Succeeded);
@@ -101,7 +101,7 @@ public class AttachmentExtractionRoundTripTests
 
         var request = model.ToCreateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded,
-            TargetAudienceTypeDto.AllStudents, Guid.NewGuid(), null, mandatoryReview: true);
+            TargetAudienceTypeDto.AllStudents, Guid.NewGuid(), mandatoryReview: true);
 
         var dto = request.Attachments!.Single();
         dto.ExtractionStatus.Should().Be(AttachmentExtractionStatusDto.Unsupported);
@@ -214,5 +214,5 @@ public class AttachmentExtractionRoundTripTests
     private static Core.Domain.Assignment NewAssignment() =>
         Core.Domain.Assignment.Create(
             "Title", null, Core.Domain.AssignmentType.Digital, Core.Domain.GradingFormat.AutoGraded,
-            Core.Domain.TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, null);
+            Core.Domain.TargetAudienceType.AllStudents, Guid.NewGuid(), null, null);
 }

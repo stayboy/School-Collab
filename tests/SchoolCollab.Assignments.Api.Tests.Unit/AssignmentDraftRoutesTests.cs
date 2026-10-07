@@ -170,8 +170,6 @@ public class AssignmentDraftRoutesTests
         TargetAudienceType: TargetAudienceTypeDto.AllStudents,
         TopicId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
         TopicName: "Photosynthesis",
-        GradeLevelId: null,
-        GradeName: null,
         Status: AssignmentStatusDto.Draft,
         DueDate: null,
         MaxScore: null,

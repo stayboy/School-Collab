@@ -53,7 +53,7 @@ public class ReminderOverdueSweepCandidateTests
     private static Assignment PublishedAssignment(string title = "Math", DateTimeOffset? dueDate = null)
     {
         var assignment = Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, dueDate, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, dueDate, null, TeacherId)
             .WithTenant(TenantA);
         assignment.Publish(approvalRequired: false);
         return assignment;

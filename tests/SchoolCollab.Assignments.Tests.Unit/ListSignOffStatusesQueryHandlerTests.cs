@@ -88,12 +88,13 @@ public class ListSignOffStatusesQueryHandlerTests
 
     private static Assignment NewRequiresSignatureAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId,
-            mandatoryReview: false, requiresSignature: true);
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId,
+            // D4: a signature-requiring fixture must also require guardian review (the domain backstop).
+            mandatoryReview: true, requiresSignature: true);
 
     private static Assignment NewNoSignatureAssignment() =>
         Assignment.Create("Quiet", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId,
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId,
             mandatoryReview: false);
 
     private static AssignmentSubmission NewSubmission(Guid student, SignOffState state)

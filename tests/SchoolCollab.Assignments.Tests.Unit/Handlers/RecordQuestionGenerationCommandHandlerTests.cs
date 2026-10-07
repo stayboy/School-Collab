@@ -45,7 +45,7 @@ public class RecordQuestionGenerationCommandHandlerTests
     private static Assignment NewAssignment(ITenantProvider tenants) =>
         Assignment.Create(
                 "Title", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, null)
+                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null)
             .WithTenant(tenants);
 
     private static RecordQuestionGenerationCommand Command(

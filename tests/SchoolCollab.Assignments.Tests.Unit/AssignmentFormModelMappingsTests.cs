@@ -38,8 +38,6 @@ public class AssignmentFormModelMappingsTests
         TargetAudienceType: TargetAudienceTypeDto.AllStudents,
         TopicId: TopicId,
         TopicName: "Mathematics",
-        GradeLevelId: null,
-        GradeName: null,
         Status: AssignmentStatusDto.Draft,
         DueDate: dueDate,
         MaxScore: maxScore,
@@ -111,33 +109,48 @@ public class AssignmentFormModelMappingsTests
         model.MaxScore.Should().Be(assignment.MaxScore);
     }
 
-    // ── WS-A2 / decision (j): LoadFrom carries ArchiveGraceDays ──
+    // ── D6/D10 (round assignment-rules-policy-rework): the retired author inputs ──
 
+    /// <summary>D6/AC5: the archive grace window and the signature requirement left the form model
+    /// (and therefore the create/update payloads) — the write seam snapshots both from the resolved
+    /// policy. Only the author half of guardian review still rides the wire (OD1).</summary>
     [TestMethod]
-    public void LoadFrom_CarriesArchiveGraceDays_NonDefaultValueRoundTrips()
+    public void ToCreateRequest_CarriesTheAuthorGuardianReviewHalf_AndNoRetiredPolicyInputs()
     {
-        var assignment = MakeAssignment();
-        var dtoWithNonDefaultGrace = assignment with { ArchiveGraceDays = 7 };
+        var model = new AssignmentEditFormModel { Title = "T" };
 
-        var model = new AssignmentEditFormModel();
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.TeacherGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            mandatoryReview: false);
 
-        model.LoadFrom(dtoWithNonDefaultGrace);
-
-        model.ArchiveGraceDays.Should().Be(7,
-            "LoadFrom must project the DTO's ArchiveGraceDays so the edit page never resets the grace window to the default (WS-A2 / decision (j))");
+        req.MandatoryReview.Should().BeFalse(
+            "the author half still rides the wire (OD1) — the resolved policy wins server-side");
+        typeof(CreateAssignmentRequest).GetProperty("RequiresSignature").Should().BeNull(
+            "D10: the retired author signature input left the request contract");
+        typeof(CreateAssignmentRequest).GetProperty("ArchiveGraceDays").Should().BeNull(
+            "D6: the archive grace window is not an author input any more");
     }
 
+    /// <summary>OD1: an unset author half travels as <c>null</c>, so the handler can tell "the author
+    /// left it to the policy" from "the author chose false".</summary>
     [TestMethod]
-    public void LoadFrom_CarriesArchiveGraceDays_DefaultValueAppliedWhenDtoOmits()
+    public void ToUpdateRequest_CarriesANullAuthorGuardianReviewHalf()
     {
-        var assignment = MakeAssignment(); // ArchiveGraceDays defaults to 30 on the record
+        var model = new AssignmentEditFormModel { Title = "T" };
 
-        var model = new AssignmentEditFormModel { ArchiveGraceDays = 999 };
+        var req = model.ToUpdateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.TeacherGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            mandatoryReview: null);
 
-        model.LoadFrom(assignment);
-
-        model.ArchiveGraceDays.Should().Be(30,
-            "a DTO with the default ArchiveGraceDays value still threads through LoadFrom (round-trip guarantee)");
+        req.MandatoryReview.Should().BeNull("null is the wire's 'author left it unset' value (OD1)");
+        typeof(UpdateAssignmentRequest).GetProperty("RequiresSignature").Should().BeNull();
+        typeof(UpdateAssignmentRequest).GetProperty("ArchiveGraceDays").Should().BeNull();
     }
 
     // ── QuestionEditorRow.FromGenerated / type converters (decision (b)) ──
@@ -350,7 +363,6 @@ public class AssignmentFormModelMappingsTests
             gradingFormat: GradingFormatDto.AutoGraded,
             targetAudienceType: TargetAudienceTypeDto.AllStudents,
             topicId: TopicId,
-            gradeLevelId: null,
             mandatoryReview: true);
 
         req.Title.Should().Be("T");
@@ -370,7 +382,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.TeacherGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.AiPromptOverride.Should().BeNull();
@@ -405,7 +416,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.Questions.Should().NotBeNull();
@@ -437,7 +447,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.Questions![0].Options.Should().BeNull("ShortAnswer questions have no options on the wire");
@@ -461,7 +470,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.Attachments.Should().NotBeNull();
@@ -904,7 +912,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.PassScore.Should().Be(75m);
@@ -968,36 +975,7 @@ public class AssignmentFormModelMappingsTests
         error.Should().Contain("Pass score cannot be negative");
     }
 
-    // ── WS-C1 (spec §7 Q1): guardian-signature round-trip + threading ──
-
-    [TestMethod]
-    public void LoadFrom_CarriesRequiresSignature()
-    {
-        var assignment = MakeAssignment() with { RequiresSignature = true };
-        var model = new AssignmentEditFormModel();
-
-        model.LoadFrom(assignment);
-
-        model.RequiresSignature.Should().BeTrue(
-            "LoadFrom must project RequiresSignature so the edit page never resets the flag (WS-C1)");
-    }
-
-    [TestMethod]
-    public void ToCreateRequest_ThreadsRequiresSignature()
-    {
-        var model = new AssignmentEditFormModel { Title = "T" };
-
-        var req = model.ToCreateRequest(
-            AssignmentTypeDto.Digital,
-            GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents,
-            TopicId,
-            null,
-            true,
-            requiresSignature: true);
-
-        req.RequiresSignature.Should().BeTrue("ToCreateRequest must thread the author-overridden signature flag (WS-C1)");
-    }
+    // ── D6/D10: the retired signature input ──
 
     // ── WS-B2 (spec §3.4 line 70): difficulty + resource-URL threading ──
 
@@ -1031,7 +1009,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.DifficultyEasyCount.Should().Be(2);
@@ -1051,7 +1028,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.Resources.Should().NotBeNull();
@@ -1073,7 +1049,6 @@ public class AssignmentFormModelMappingsTests
             GradingFormatDto.AutoGraded,
             TargetAudienceTypeDto.AllStudents,
             TopicId,
-            null,
             true);
 
         req.Resources.Should().BeNull("an empty URL list projects to the wire default (null)");
@@ -1206,7 +1181,7 @@ public class AssignmentFormModelMappingsTests
 
         var req = model.ToUpdateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+            TargetAudienceTypeDto.AllStudents, TopicId, true);
 
         req.Questions.Should().NotBeNull();
         // The outgoing request carries the loaded set plus the new question — never only the
@@ -1242,7 +1217,7 @@ public class AssignmentFormModelMappingsTests
 
         var req = model.ToCreateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+            TargetAudienceTypeDto.AllStudents, TopicId, true);
 
         req.Resources.Should().HaveCount(2);
         var file = req.Resources!.Single(r => r.ResourceKind == ResourceKindDto.File);
@@ -1267,7 +1242,7 @@ public class AssignmentFormModelMappingsTests
 
         var req = model.ToUpdateRequest(
             AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents, TopicId, null, true);
+            TargetAudienceTypeDto.AllStudents, TopicId, true);
 
         req.Questions.Should().BeNull();
         req.Attachments.Should().BeNull();

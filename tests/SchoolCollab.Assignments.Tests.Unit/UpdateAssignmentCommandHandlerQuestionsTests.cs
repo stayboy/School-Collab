@@ -12,6 +12,7 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
@@ -44,7 +45,8 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         return (db, sp.GetRequiredService<HybridCache>(), tenants);
     }
 
-    private static UpdateAssignmentCommandHandler NewHandler(IAssignmentRepository repo, HybridCache cache)
+    private static UpdateAssignmentCommandHandler NewHandler(
+        IAssignmentRepository repo, HybridCache cache, FakeAssignmentPolicyResolver? policyResolver = null)
     {
         var publisher = new Mock<IIntegrationEventPublisher>();
         return new UpdateAssignmentCommandHandler(
@@ -53,6 +55,7 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             cache,
             Options.Create(new AttachmentUploadOptions()),
             new AcceptAllActivityGroupLookup(),
+            policyResolver ?? new FakeAssignmentPolicyResolver(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
     }
 
@@ -61,7 +64,7 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         var assignment = Assignment.Create(
             "Original", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            Guid.NewGuid(), null, null, null,
+            Guid.NewGuid(), null, null,
             createdByTeacherId: Guid.Empty,
             mandatoryReview: true,
             assignmentNumber: "ASGA01",
@@ -86,7 +89,6 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewAttachmentDto>? attachments = null,
         IReadOnlyList<NewContentModuleDto>? contentModules = null,
         IReadOnlyList<NewResourceDto>? resources = null,
-        int archiveGraceDays = 30,
         // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap.
         decimal? passScore = null,
         int? maxAttempts = null) =>
@@ -98,7 +100,6 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             GradingFormat: GradingFormat.AutoGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: Guid.NewGuid(),
-            GradeLevelId: null,
             DueDate: null,
             MaxScore: 100m,
             MandatoryReview: true,
@@ -107,7 +108,6 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             Attachments: attachments,
             ContentModules: contentModules,
             Resources: resources,
-            ArchiveGraceDays: archiveGraceDays,
             PassScore: passScore,
             MaxAttempts: maxAttempts);
 
@@ -224,7 +224,7 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         var assignment = Assignment.Create(
             "Pub", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            Guid.NewGuid(), null, null, null,
+            Guid.NewGuid(), null, null,
             createdByTeacherId: Guid.Empty,
             mandatoryReview: true,
             assignmentNumber: "ASGA02")
@@ -243,10 +243,10 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             .WithMessage("*Only draft or scheduled assignments can be updated*");
     }
 
-    // ── WS-A2 / decision (k): ArchiveGraceDays threading + Scheduled update ──
+    // ── D6 (round assignment-rules-policy-rework): the archive window is policy-resolved ──
 
     [TestMethod]
-    public async Task HandleAsync_ArchiveGraceDays_ExplicitValueThreadedToUpdate()
+    public async Task HandleAsync_ResolvedPolicyArchiveWindow_IsWhatTheUpdateSnapshots()
     {
         var (db, _, tenants) = BuildScope("update-gracedays-seed");
         var seeded = SeedDraft(db, tenants);
@@ -257,14 +257,19 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
 
         var (_, cache, _) = BuildScope("update-gracedays-handler");
         var repo = new CapturingAssignmentRepository { Loaded = loaded };
-        var handler = NewHandler(repo, cache);
+        var resolver = new FakeAssignmentPolicyResolver
+        {
+            Policy = new EffectiveAssignmentPolicyResolver().Resolve(
+                new AssignmentPolicyFields { ArchiveGraceDays = 7 }, gradeOverride: null),
+        };
+        var handler = NewHandler(repo, cache, resolver);
 
-        await handler.HandleAsync(SampleUpdate(seededId, archiveGraceDays: 7));
+        await handler.HandleAsync(SampleUpdate(seededId));
 
         var mutated = repo.Updated;
         mutated.Should().NotBeNull();
         mutated!.ArchiveGraceDays.Should().Be(7,
-            "the explicit ArchiveGraceDays value must thread through to the updated aggregate (WS-A2 / decision (j))");
+            "an update RE-snapshots the archive window from the currently resolved policy (D6)");
     }
 
     [TestMethod]
@@ -274,7 +279,7 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         var assignment = Assignment.Create(
             "Sch", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            Guid.NewGuid(), null, null, null,
+            Guid.NewGuid(), null, null,
             createdByTeacherId: Guid.Empty,
             mandatoryReview: true,
             assignmentNumber: "ASGA03")

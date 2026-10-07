@@ -40,7 +40,7 @@ public class SubmissionReviewIdentityTests
 
     private static Assignment MakeAssignment(Guid tenantId) =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, Guid.NewGuid(), gradeLevelId: null, null, 100m, TeacherId)
+                TargetAudienceType.AllStudents, Guid.NewGuid(), null, 100m, TeacherId)
             .WithTenant(tenantId);
 
     private static AssignmentSubmission MakeSubmission(Guid tenantId) =>

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
@@ -15,6 +16,7 @@ using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Helpers;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Services;
 using Authoring = SchoolCollab.Assignments.Application.Components.Pages.Assignments.AssignmentAuthoring;
@@ -25,7 +27,7 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// R1 acceptance (documents/specs/assignment-authoring-compartments.md §16; round
 /// <c>round-assignment-authoring-r1</c> criteria 3–7) — the shared
 /// <see cref="AssignmentAuthoring"/> component is the ONE authoring surface (D5/UX-9):
-/// six compartments in Create / Edit / View, Edit parity with Create while Draft|Scheduled,
+/// five compartments in Create / Edit / View, Edit parity with Create while Draft|Scheduled,
 /// the §11 status-driven action bar, disabled-with-reason gating (UX-17/UX-19) and the
 /// read-only policy values with the inherited badge (UX-13).
 /// </summary>
@@ -36,10 +38,35 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private readonly JsonSerializerOptions _apiJsonOptions;
     private readonly StubFlagService _flags = new();
 
-    /// <summary>The resolved signature-requirement body the authoring page's
-    /// <c>/signature-default</c> read returns. Mutable so a test can switch the resolved
-    /// policy to Mandatory before rendering.</summary>
-    private string _signatureDefaultBody = "{\"requiresSignature\":false,\"signatureMode\":\"Disabled\"}";
+    /// <summary>The resolved effective-policy body the authoring page's
+    /// <c>/assignments/effective-policy</c> read returns. Mutable so a test can switch the resolved
+    /// policy (signature requirement, guardian review, archive window) before rendering.</summary>
+    private string _effectivePolicyBody = EffectivePolicyBody();
+
+    /// <summary>Every <c>/effective-policy</c> request's query string, in call order — the
+    /// observable for "which grade (if any) did the page resolve its effective policy for"
+    /// (round <c>drop-primary-grade</c>: the page DERIVES that grade from its grade targets).</summary>
+    private readonly List<string> _effectivePolicyQueries = [];
+
+    /// <summary>D2/OD4: the effective-policy body a GRADE-scoped read returns. The single matcher
+    /// below dispatches on the query string because MockHttp's path matchers ignore it, so a
+    /// grade-scoped stub cannot simply be registered first.</summary>
+    private readonly Dictionary<Guid, string> _gradeEffectivePolicies = [];
+
+    /// <summary>D2/OD4: the effective-policy body, produced by the REAL resolver so the stubbed body
+    /// can never disagree with the server's own derivation (the D4 implication included).</summary>
+    private static string EffectivePolicyBody(
+        SignatureRequirementMode signature = SignatureRequirementMode.Disabled,
+        bool? mandatoryReview = null,
+        int? archiveGraceDays = null) =>
+        JsonSerializer.Serialize(new EffectiveAssignmentPolicyResolver().Resolve(
+            tenantDefault: new AssignmentPolicyFields
+            {
+                SignatureRequirement = signature,
+                MandatoryReview = mandatoryReview,
+                ArchiveGraceDays = archiveGraceDays,
+            },
+            gradeOverride: null));
 
     public AssignmentAuthoringBunitTests()
     {
@@ -82,10 +109,25 @@ public class AssignmentAuthoringBunitTests : BunitContext
         // 200 (fail-open), and the pickers are empty.
         _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
             .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
-            .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/effective-policy")
+            .Respond(request =>
             {
-                Content = new StringContent(_signatureDefaultBody, Encoding.UTF8, "application/json")
+                var query = request.RequestUri!.Query;
+                _effectivePolicyQueries.Add(query);
+                var body = _effectivePolicyBody;
+                foreach (var (gradeId, gradeBody) in _gradeEffectivePolicies)
+                {
+                    if (query.Contains(gradeId.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        body = gradeBody;
+                        break;
+                    }
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
             });
         _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels")
             .Respond(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -141,8 +183,6 @@ public class AssignmentAuthoringBunitTests : BunitContext
             TargetAudienceType: audience,
             TopicId: Guid.NewGuid(),
             TopicName: "Math",
-            GradeLevelId: null,
-            GradeName: null,
             Status: status,
             DueDate: null,
             MaxScore: null,
@@ -219,15 +259,27 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
+    /// <summary>The five compartments' titles in canonical order, keyed by the ANCHOR each jump-nav
+    /// link resolves to. Round <c>authoring-compact-fields</c> moved Rules out of the spine into the
+    /// right-hand column as a SectionCard, so <c>section.authoring-compartment</c> is no longer the
+    /// compartment list — the anchor is the one contract all five keep (UX-4: the jump-nav mirrors the
+    /// compartment list). Four are the compartment's own <c>h3</c>; Targets &amp; audience and Rules
+    /// render NO <c>h3</c> — their single title is the SectionCard header (owner rework: one title, in
+    /// the card's header space). Reading the anchors through the jump-nav also asserts that every link
+    /// resolves: <c>Find</c> throws if an anchor has no element.</summary>
     private static IReadOnlyList<string> CompartmentTitles(IRenderedComponent<Authoring> cut) =>
-        cut.FindAll("h3.authoring-compartment-title").Select(h => h.TextContent.Trim()).ToList();
+        cut.FindAll("nav.authoring-jumpnav fluent-anchor")
+            .Select(link => link.GetAttribute("href")!.TrimStart('#'))
+            .Select(anchor => cut.Find($"#{anchor}"))
+            .Select(compartment => compartment.QuerySelector("h3.authoring-compartment-title")?.TextContent.Trim()
+                                   ?? compartment.QuerySelector(".section-card__title")!.TextContent.Trim())
+            .ToList();
 
     private static readonly string[] ExpectedCompartments =
     [
         "Basics",
-        "Audience & Targets",
-        "Delivery & Publishing",
-        "Submission & Sign-off",
+        "Targets & audience",
+        "Rules",
         "Content & Resources",
         "Questions & AI"
     ];
@@ -238,28 +290,140 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<Authoring> cut, string id) =>
         cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
-    /// <summary>The students picker is the one FluentAutocomplete on the page (TGT-6).</summary>
-    private static FluentAutocomplete<Authoring.PickerOption> StudentPicker(IRenderedComponent<Authoring> cut) =>
-        cut.FindComponents<FluentAutocomplete<Authoring.PickerOption>>().Single().Instance;
+    /// <summary>The five Rules readout ids, in card order (round <c>authoring-compact-fields</c>: the
+    /// readouts became card items, and their ids are the seam the surface has always exposed).</summary>
+    private static readonly string[] PolicyReadoutIds =
+    [
+        "authoring-policy-approval",
+        "authoring-policy-notification",
+        "authoring-policy-archive",
+        "authoring-policy-signature",
+        "authoring-policy-review"
+    ];
 
-    /// <summary>A student exactly as the students API answers it — both the picker's search and the
-    /// restored-id read deserialize this shape, so one helper keeps their labels identical.</summary>
-    private static StudentDto Student(Guid id, string firstName, string lastName, string studentNumber) =>
-        new(id, studentNumber, firstName, lastName, null, null, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+    /// <summary>The <c>FormRow</c> that owns the control with this id. A row's root element carries the
+    /// <c>form-row</c> class, so the walk goes up from the control's own cell — which is what makes
+    /// "the two controls share ONE row" assertable at all.</summary>
+    private static IElement OwningFormRow(IElement scope, string id)
+    {
+        var element = scope.QuerySelector($"#{id}");
+        while (element is not null && !element.ClassList.Contains("form-row"))
+        {
+            element = element.ParentElement;
+        }
+
+        return element ?? throw new InvalidOperationException($"#{id} renders outside any FormRow");
+    }
+
+    // ── The "Targets & audience" builder: add/remove helpers ────────────────
+
+    /// <summary>The add dialog's queued outcomes plus the models the page handed it, so a test can
+    /// assert the options the page offered as well as the entries it appended. One queued outcome is
+    /// one submission — and a submission carries EVERY option the multi-select picked.
+    /// </summary>
+    private sealed class TargetsDialogStub
+    {
+        private readonly Queue<TargetsAndAudienceDialogResult> _queued = new();
+
+        public List<TargetsAndAudienceDialogModel> Models { get; } = [];
+
+        /// <summary>Queues ONE dialog submission carrying these entries (the multi-select result).</summary>
+        public TargetsDialogStub Enqueue(params TargetsAndAudienceEntry[] entries)
+        {
+            _queued.Enqueue(new TargetsAndAudienceDialogResult(entries));
+            return this;
+        }
+
+        internal bool TryDequeue(out TargetsAndAudienceDialogResult result)
+        {
+            if (_queued.Count == 0)
+            {
+                result = null!;
+                return false;
+            }
+
+            result = _queued.Dequeue();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Mocks the "Add target &amp; audience" shell dialog: every open records the model the page
+    /// built (its option sources and student search) and resolves to the next queued submission — or to a
+    /// cancel when none remains. bUnit renders the page without a FluentUI dialog provider, so the
+    /// dialog component cannot be driven in-tree; the seam under test is what the page does with the
+    /// entries the dialog returns.
+    /// </summary>
+    private TargetsDialogStub RegisterTargetsDialog()
+    {
+        var stub = new TargetsDialogStub();
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<TargetsAndAudienceDialog, DialogShellData<TargetsAndAudienceDialogModel>>(
+                It.IsAny<DialogShellData<TargetsAndAudienceDialogModel>>(), It.IsAny<DialogParameters>()))
+            .Callback<DialogShellData<TargetsAndAudienceDialogModel>, DialogParameters>(
+                (data, _) => stub.Models.Add(data.Model))
+            .Returns(() =>
+            {
+                var dialogRef = new Mock<IDialogReference>();
+                dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(stub.TryDequeue(out var result)
+                    ? DialogResult.Ok<object?>(new DialogShellResult<TargetsAndAudienceDialogResult>(result))
+                    : DialogResult.Cancel()));
+                return Task.FromResult(dialogRef.Object);
+            });
+        Services.AddSingleton(dialogMock.Object);
+        return stub;
+    }
+
+    /// <summary>Clicks the builder's Add action — the card's native header Add (grill Q4), or its
+    /// disabled-with-reason replacement (P1-3), both named "Add target".</summary>
+    private static void OpenAddTargetDialog(IRenderedComponent<Authoring> cut) =>
+        cut.Find("fluent-button[title='Add target']").Click();
+
+    /// <summary>The builder's rendered entries — (category label, value label) in authored order.</summary>
+    private static IReadOnlyList<(string Category, string Value)> BuilderEntries(IRenderedComponent<Authoring> cut) =>
+        cut.FindAll("#authoring-targets .targets-audience-item")
+            .Select(item => (
+                item.QuerySelector(".targets-audience-item__label")!.TextContent.Trim(),
+                item.QuerySelector(".targets-audience-item__value")!.TextContent.Trim()))
+            .ToList();
+
+    /// <summary>Clicks the nth builder entry's remove action (P1-1: it lives INSIDE the ItemTemplate).</summary>
+    private static void RemoveBuilderEntry(IRenderedComponent<Authoring> cut, int index) =>
+        cut.FindAll("#authoring-targets fluent-button[title='Remove']")[index].Click();
 
     /// <summary>Drives a picker's real <c>SelectedOptionChanged</c> callback — never a raw DOM
     /// event (the AssignmentCreateBunitTests / AssignmentPolicyFieldEditDialogTests pattern).</summary>
-    private static Task SelectAsync(IRenderedComponent<Authoring> cut, string pickerId, string value, string label) =>
-        cut.InvokeAsync(() => Picker(cut, pickerId).SelectedOptionChanged.InvokeAsync(
-            new Authoring.PickerOption(value, label)));
+    /// <summary>Drives a FluentUI picker to a value and does not return until the pick is
+    /// OBSERVABLY applied — the shared seam every picker-driving test inherits (skill
+    /// <c>fix-flaky-bunit-fluentui-after-cascade</c>). Two races this closes: (1) the picker's
+    /// <c>Items</c> is rebuilt as a FRESH array when a prerequisite target/interaction settles, and
+    /// a pick made before that rebuild lands is dropped — FluentUI matches the selection by
+    /// INSTANCE — so we wait for the value to appear in <c>Items</c> and then pick that very
+    /// instance, never a synthetic one; (2) the pick's own <c>SelectedOptionChanged</c> cascade is
+    /// one render pass late, so a Submit in the next statement could read the pre-pick state — we
+    /// assert the landed selection before returning.</summary>
+    private static async Task SelectAsync(IRenderedComponent<Authoring> cut, string pickerId, string value)
+    {
+        cut.WaitForAssertion(() =>
+        {
+            var items = Picker(cut, pickerId).Items;
+            items.Should().NotBeNull("the picker's options are loaded before any pick");
+            items!.Should().Contain(o => o.Value == value,
+                "the prerequisite reload settles before the pick, so the value is present in the CURRENT Items array");
+        }, TimeSpan.FromSeconds(5));
 
-    /// <summary>Drives the multi-select activity-group picker's real callback with the option
-    /// objects its own item list holds (the picker matches a selection against its items).</summary>
-    /// <summary>R2 (TGT-2): flips the compartment's "Everyone" toggle — the Create-mode route to a
-    /// valid target set, since TGT-13 refuses a save with no targets.</summary>
-    private static Task SelectEveryoneAsync(IRenderedComponent<Authoring> cut, bool everyone = true) =>
-        cut.InvokeAsync(() => cut.FindComponents<FluentCheckbox>()
-            .Single(c => c.Instance.Id == "authoring-audience-everyone").Instance.ValueChanged.InvokeAsync(everyone));
+        await cut.InvokeAsync(() =>
+        {
+            var picker = Picker(cut, pickerId);
+            var option = picker.Items!.First(o => o.Value == value);
+            return picker.SelectedOptionChanged.InvokeAsync(option);
+        });
+
+        cut.WaitForAssertion(() => Picker(cut, pickerId).SelectedOption?.Value.Should().Be(value,
+            "the pick must be applied before the next interaction: the FluentUI cascade is one pass late"),
+            TimeSpan.FromSeconds(5));
+    }
 
     /// <summary>Drives the subject picker with the option INSTANCE its own Items hold (a foreign
     /// instance is not accepted as the selection by the FluentUI control).</summary>
@@ -271,25 +435,6 @@ public class AssignmentAuthoringBunitTests : BunitContext
             return picker.SelectedOptionChanged.InvokeAsync(option);
         });
 
-    /// <summary>Drives the grade-target multi-select's real callback with its own option objects.</summary>
-    private static Task SelectGradeTargetAsync(IRenderedComponent<Authoring> cut, Guid gradeId, string name) =>
-        SelectGradeTargetsAsync(cut, (gradeId, name));
-
-    /// <summary>Drives the grade-target multi-select's real callback with a whole option set — the
-    /// picker reports the complete selection of its own kind on every change.</summary>
-    private static Task SelectGradeTargetsAsync(
-        IRenderedComponent<Authoring> cut, params (Guid Id, string Name)[] grades) =>
-        cut.InvokeAsync(() => Picker(cut, "authoring-audience-grades").SelectedOptionsChanged.InvokeAsync(
-            grades.Select(g => new Authoring.PickerOption(g.Id.ToString(), g.Name)).ToArray()));
-
-    /// <summary>The chip list's labels, in DisplayOrder.</summary>
-    private static IReadOnlyList<string> ChipLabels(IRenderedComponent<Authoring> cut) =>
-        cut.FindAll(".authoring-target-chip fluent-badge").Select(b => b.TextContent.Trim()).ToList();
-
-    private static Task SelectGroupsAsync(IRenderedComponent<Authoring> cut, params ActivityGroupDto[] groups) =>
-        cut.InvokeAsync(() => Picker(cut, "authoring-audience-groups").SelectedOptionsChanged.InvokeAsync(
-            groups.Select(g => new Authoring.PickerOption(g.Id.ToString(), g.Name)).ToArray()));
-
     private static ActivityGroupDto Group(Guid id, string name, bool isActive = true) =>
         new(id, name, null, null, null, isActive, "span", null, null, false, [], 0,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
@@ -300,22 +445,22 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
             .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
 
-    // ── Criterion 3: six compartments in all three modes ────────────────────
+    // ── Criterion 3: five compartments in all three modes (D1) ──────────────
 
     [TestMethod]
-    public void Create_RendersAllSixCompartments()
+    public void Create_RendersAllFiveCompartments()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
 
         cut.WaitForAssertion(() =>
         {
             CompartmentTitles(cut).Should().Equal(ExpectedCompartments,
-                "UX-1/UX-3: the six compartments render stacked in one scroll, in canonical order");
+                "UX-1/UX-3 (D1): the five compartments render stacked in one scroll, in canonical order");
         });
     }
 
     [TestMethod]
-    public void Edit_Draft_RendersAllSixCompartments()
+    public void Edit_Draft_RendersAllFiveCompartments()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
 
@@ -324,7 +469,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void View_Published_RendersAllSixCompartments()
+    public void View_Published_RendersAllFiveCompartments()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.View, MakeDto(AssignmentStatusDto.Published));
 
@@ -333,7 +478,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void EveryMode_RendersTheJumpNavForAllSixCompartments()
+    public void EveryMode_RendersTheJumpNavForAllFiveCompartments()
     {
         foreach (var mode in Enum.GetValues<AssignmentAuthoringMode>())
         {
@@ -364,6 +509,39 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 .Should().Contain(t => t.Instance.Id == "authoring-basics-instructions",
                     "INS-1: Instructions is the student-facing field in compartment 1");
         });
+    }
+
+    /// <summary>The right-hand column's cards each carry their OWN header as their only title (the
+    /// column renders no <c>h3</c>). Round <c>authoring-compact-fields</c> added the Rules card to that
+    /// column, so the column now stacks exactly two cards in a fixed order — the assertion is re-pointed
+    /// from "exactly one title" to "exactly these two, in this order" rather than weakened: the
+    /// single-title intent is preserved per CARD, and the stacking order is now pinned too.
+    /// Round <c>drop-primary-grade</c>: the assignment carries no primary grade, so no grade control
+    /// exists anywhere on the surface — the grade half of the audience is the grade TARGET rows inside
+    /// the card (AC-9).</summary>
+    [TestMethod]
+    public void TargetsCompartment_CardHeaderIsTheOnlyTitle_AndNoPrimaryGradeFieldRenders()
+    {
+        foreach (var mode in Enum.GetValues<AssignmentAuthoringMode>())
+        {
+            var cut = mode == AssignmentAuthoringMode.Create
+                ? RenderAuthoring(mode)
+                : RenderAuthoring(mode, MakeDto(AssignmentStatusDto.Draft));
+
+            cut.WaitForAssertion(() =>
+            {
+                cut.FindAll("#authoring-targets h3.authoring-compartment-title").Should().BeEmpty(
+                    "the column renders no heading of its own — each card's header is its title");
+                cut.FindAll("#authoring-targets .section-card__title")
+                    .Select(title => title.TextContent.Trim())
+                    .Should().Equal(["Targets & audience", "Rules"],
+                        "the SectionCard headers hold both titles, Targets first");
+                cut.FindAll("#authoring-basics-grade").Should().BeEmpty(
+                    "round drop-primary-grade: the Primary grade control is gone from every mode (AC-9)");
+                cut.Markup.Should().NotContain("Primary grade",
+                    "no compartment offers a separately-authored primary grade any more");
+            });
+        }
     }
 
     // ── Criterion 4: Edit parity, View for later statuses ──────────────────
@@ -551,181 +729,6 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>R2 (D-2/TGT-11): a SINGLE grade target auto-derives the primary grade, so the grade
-    /// picker renders disabled WITH its reason (never hidden) and the value follows the target.</summary>
-    [TestMethod]
-    public async Task SingleGradeTarget_AutoDerivesThePrimaryGrade_AndDisablesThePicker()
-    {
-        var gradeId = Guid.Parse("22222222-2222-2222-2222-222222222222");
-        _gradeLevels = [new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)];
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-
-        await SelectGradeTargetAsync(cut, gradeId, "Grade 5");
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Set automatically from the single targeted grade level.");
-            cut.FindComponents<FluentSelect<Authoring.PickerOption>>()
-                .Single(s => s.Instance.Id == "authoring-basics-grade").Instance.Disabled
-                .Should().BeTrue("the primary grade is derived from the single target, not authored");
-        });
-    }
-
-    /// <summary>R2 (TGT-2/UX-17): with Everyone selected every constraint picker renders disabled
-    /// WITH the inline reason (disabled-with-reason, never hidden).</summary>
-    [TestMethod]
-    public async Task EveryoneTarget_DisablesTheConstraintPickersWithReason()
-    {
-        // The Create-mode load re-mirrors the (still empty) target set as it lands, which would
-        // wipe a toggle driven before it finished — so the load's own preview read (its last step)
-        // is what the test waits for first.
-        var previewRequests = 0;
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
-            .Respond(_ =>
-            {
-                previewRequests++;
-                return PreviewResponse(
-                    "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":false}");
-            });
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
-
-        cut.WaitForAssertion(() => previewRequests.Should().Be(1), TimeSpan.FromSeconds(5));
-
-        await SelectEveryoneAsync(cut);
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle(
-                "UX-17: inapplicable controls explain themselves inline");
-            Picker(cut, "authoring-audience-groups").Disabled.Should().BeTrue(
-                "TGT-2: AllStudents is mutually exclusive with every other kind");
-        }, TimeSpan.FromSeconds(5));
-    }
-
-    /// <summary>R2 (TGT-16/EC-7): the chips are a pure projection of the loaded target rows —
-    /// <c>TargetChips =&gt; _model.Targets…</c> — so Edit mode pins the persisted DisplayOrder (and
-    /// each chip's label) with no picker interaction at all.</summary>
-    [TestMethod]
-    public void Edit_TargetChips_RenderInDisplayOrder()
-    {
-        var gradeId = Guid.Parse("22222222-2222-2222-2222-222222222222");
-        _gradeLevels =
-        [
-            new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
-        ];
-        _activityGroups = [Group(GroupAId, "Alpha")];
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            MakeChildren(targets:
-            [
-                new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0),
-                new AssignmentTargetDto(TargetKindDto.GradeLevel, gradeId, 1)
-            ]));
-
-        cut.WaitForAssertion(() =>
-        {
-            var chips = cut.FindAll(".authoring-target-chip");
-            chips.Should().HaveCount(2, "each persisted target row renders exactly one chip");
-            chips.Select(c => c.GetAttribute("data-order")).Should().Equal(new[] { "0", "1" },
-                "the chips carry the persisted DisplayOrder");
-            chips.Select(c => c.QuerySelector("fluent-badge")!.TextContent.Trim())
-                .Should().Equal(new[] { "Alpha", "Grade 5" },
-                    "each chip labels its target through the loaded picker options");
-        });
-    }
-
-    /// <summary>R2 (TGT-16/D-4): the preview renders the server-resolved counts once the trailing
-    /// debounce fires — driven by the injected fake clock, so the assertion never races real time.
-    /// </summary>
-    [TestMethod]
-    public async Task RecipientPreview_RendersTheCountsAfterTheDebounce()
-    {
-        // The load-time read answers "nobody matched"; only the read the settled change issues
-        // carries the counts, so the assertion below cannot pass on the load's own read.
-        var previewRequests = 0;
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
-            .Respond(_ => PreviewResponse(++previewRequests == 1
-                ? "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":false}"
-                : "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}"));
-
-        var clock = new FakeTimeProvider();
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Create, timeProvider: clock);
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Everyone"));
-
-        // Settle the load's own debounce first, so the change below is the only pending schedule.
-        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
-
-        // Awaited only under a bound (below): the callback's task completes once the debounce it
-        // arms has fired.
-        var changing = SelectEveryoneAsync(cut);
-
-        // The event dispatch is queued through the renderer, so this no-op rides behind it — when
-        // it runs the change has armed its trailing debounce, which is still unfired.
-        await cut.InvokeAsync(() => { });
-        previewRequests.Should().Be(1, "the trailing debounce is armed, not elapsed");
-
-        clock.Advance(FakeTimeProvider.PreviewDebounce);
-        await changing.WaitAsync(TimeSpan.FromSeconds(5));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Students matched: 7");
-            cut.Markup.Should().Contain("Contacts reachable: 7");
-        }, TimeSpan.FromSeconds(2));
-
-        previewRequests.Should().Be(2, "one preview read per settled debounce");
-    }
-
-    /// <summary>R2 (D-4) coalescing: a burst of constraint changes leaves exactly ONE trailing
-    /// debounce alive, so the audience is read once per settle rather than once per change. The
-    /// fake clock holds every timer, so a read can only happen when the test advances it — the
-    /// cancellation is what the count measures.</summary>
-    [TestMethod]
-    public async Task RecipientPreview_RapidConstraintChanges_CoalesceIntoASingleRead()
-    {
-        var previewRequests = 0;
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
-            .Respond(_ =>
-            {
-                previewRequests++;
-                return PreviewResponse(
-                    "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}");
-            });
-
-        var clock = new FakeTimeProvider();
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Create, timeProvider: clock);
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Everyone"));
-
-        // The load's own read settles first, so the burst below is the only debounce left.
-        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
-        previewRequests.Should().Be(1);
-
-        // Three constraint changes in quick succession (Everyone on → off → on). Each one
-        // re-schedules the trailing debounce and cancels its predecessor.
-        var burst = new[]
-        {
-            SelectEveryoneAsync(cut),
-            SelectEveryoneAsync(cut, everyone: false),
-            SelectEveryoneAsync(cut)
-        };
-
-        // A no-op queued behind all three dispatches: when it runs, every change has cancelled the
-        // debounce before it and nothing has fired.
-        await cut.InvokeAsync(() => { });
-        previewRequests.Should().Be(1, "a held debounce reads nothing before the clock is advanced");
-        clock.PendingTimers.Should().Be(1, "the burst left exactly ONE trailing debounce armed");
-
-        clock.Advance(FakeTimeProvider.PreviewDebounce);
-        await Task.WhenAll(burst).WaitAsync(TimeSpan.FromSeconds(5));
-
-        cut.WaitForAssertion(() => previewRequests.Should().Be(2), TimeSpan.FromSeconds(2));
-        previewRequests.Should().Be(2,
-            "D-4 coalescing: three rapid constraint changes produce ONE preview read, not one per change");
-        clock.PendingTimers.Should().Be(0, "nothing is left armed to fire a second read");
-    }
-
     [TestMethod]
     public void OfflineType_RendersQuestionsCompartmentDisabledWithReason()
     {
@@ -740,226 +743,6 @@ public class AssignmentAuthoringBunitTests : BunitContext
             cut.Markup.Should().Contain(QuestionGenerationGate.DisabledHint,
                 "the compartment explains why generation is unavailable");
         });
-    }
-
-    [TestMethod]
-    public void ActivityGroupsFlagOff_DoesNotOfferTheGroupTarget()
-    {
-        _flags.ActivityGroupsEnabled = false;
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().NotContain("By Group",
-                "the group target must not be offered when FEATURE:EnableActivityGroups is off");
-            cut.FindAll("#authoring-groups-reason").Should().ContainSingle(
-                "the picker renders disabled-with-reason instead of disappearing");
-        });
-    }
-
-    /// <summary>R2-7 (P2-b): when the preview read degrades, the compartment renders the
-    /// advisory reason inline — save is never blocked.</summary>
-    [TestMethod]
-    public async Task RecipientPreview_Degraded_RendersTheUnavailableReason()
-    {
-        var previewRequests = 0;
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
-            .Respond(_ =>
-            {
-                previewRequests++;
-                return PreviewResponse(
-                    "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":true}");
-            });
-
-        var clock = new FakeTimeProvider();
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Create, timeProvider: clock);
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Everyone"));
-
-        // The load's own read settles first (its debounce is armed from a posted continuation),
-        // so the change below issues the only remaining read.
-        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
-
-        var changing = SelectEveryoneAsync(cut);
-        await cut.InvokeAsync(() => { });
-        clock.Advance(FakeTimeProvider.PreviewDebounce);
-        await changing.WaitAsync(TimeSpan.FromSeconds(5));
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain(Authoring.PreviewUnavailableReason,
-                "D-4: a degraded preview shows the inline advisory note");
-            cut.Markup.Should().NotContain("Students matched",
-                "F10: a degraded read answers all-zero counts — they are never rendered as if trustworthy");
-            cut.FindAll("#authoring-audience-preview").Should().BeEmpty(
-                "F10: the reason replaces the counts line, it is never shown beside it");
-        }, TimeSpan.FromSeconds(2));
-
-        previewRequests.Should().Be(2, "the change's own settled debounce issued the degraded read");
-    }
-
-    /// <summary>R2-7 (P2-b / UX-21): an editable Edit surface whose persisted targets could
-    /// not be loaded renders the audience pickers disabled-with-reason rather than live-empty.</summary>
-    [TestMethod]
-    public void Edit_TargetsLoadFails_DisablesAudiencePickersWithReason()
-    {
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            childrenReadFails: true);
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain(Authoring.ChildrenUnavailableReason,
-                "the audience editor shares the fail-closed reason with the children editors");
-            cut.Find("#authoring-audience-everyone").HasAttribute("disabled").Should().BeTrue(
-                "the Everyone toggle is disabled until the persisted targets are known");
-            Picker(cut, "authoring-audience-grades").Disabled.Should().BeTrue(
-                "the grade target picker is disabled until the persisted targets are known");
-            Picker(cut, "authoring-audience-streams").Disabled.Should().BeTrue(
-                "the stream target picker is disabled until the persisted targets are known");
-        });
-    }
-
-    /// <summary>R2-9 (F1, P1 data-loss path): the persisted-targets read and the group-links read are
-    /// SEPARATE calls, so the first can fail while the second succeeds. The group picker used to gate
-    /// on <c>GroupPickerReason</c> alone — which does not carry the UX-21 "targets did not load"
-    /// reason — so it stayed LIVE over an empty in-memory target set and a group selection then
-    /// full-replaced the persisted rows on save. It now gates on the same reason the other three
-    /// constraint pickers do.</summary>
-    [TestMethod]
-    public void Edit_TargetsLoadFails_GroupLinksLoadSucceeds_DisablesTheGroupPicker()
-    {
-        _activityGroups = [Group(GroupAId, "Alpha")];
-
-        // Targets read 500; group-links read 200 WITH a link — the exact asymmetry of the defect.
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            childrenReadFails: true, linkedGroupIds: [GroupAId]);
-
-        cut.WaitForAssertion(() =>
-        {
-            // Vacuity guard: the options DID load, so the disabled state below is the gate and not
-            // an empty picker.
-            cut.FindAll("#authoring-audience-groups fluent-option").Should().ContainSingle(
-                "the group options loaded — the links read succeeded");
-
-            Picker(cut, "authoring-audience-groups").Disabled.Should().BeTrue(
-                "F1: the group picker is disabled whenever the other three constraint pickers are — " +
-                "a group selection here would full-replace the unread persisted target rows on save");
-
-            cut.FindAll("#authoring-audience-groups[disabled]").Should().ContainSingle(
-                "the rendered control is inert, so no group target can be set at all");
-
-            cut.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle(
-                "F1: the UX-21 case is explained by the AUDIENCE reason")
-                .Which.TextContent.Should().Contain(Authoring.ChildrenUnavailableReason);
-
-            cut.FindAll("#authoring-groups-reason").Should().BeEmpty(
-                "F1: no misleading group-specific reason is invented for the UX-21 case");
-        }, TimeSpan.FromSeconds(5));
-    }
-
-    /// <summary>R2-10 (P1, NFR-1): the group picker's <c>aria-describedby</c> names the reason
-    /// paragraph that actually RENDERS. The attribute used to be the hard-coded
-    /// <c>authoring-groups-reason</c>, which is absent in the UX-21 case (the picker is disabled by
-    /// the constraint gate while <c>GroupPickerReason</c> is null), so the idref dangled and the
-    /// disabled picker exposed no reason at all.</summary>
-    [TestMethod]
-    public void Edit_TargetsLoadFails_GroupLinksLoadSucceeds_GroupPickerNamesTheRenderedReason()
-    {
-        _activityGroups = [Group(GroupAId, "Alpha")];
-
-        // Targets read 500; group-links read 200 — the exact UX-21 asymmetry.
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            childrenReadFails: true, linkedGroupIds: [GroupAId]);
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.FindAll("#authoring-groups-reason").Should().BeEmpty(
-                "vacuity guard: the idref the attribute must not use is genuinely absent from the DOM");
-
-            cut.FindAll("#authoring-audience-groups[disabled]").Should().ContainSingle(
-                "the picker really is disabled — NFR-1 binds exactly on the disabled control");
-
-            cut.Find("#authoring-audience-groups").GetAttribute("aria-describedby")
-                .Should().Be("authoring-audience-constraint-reason",
-                    "NFR-1/P1: the disabled picker names the reason paragraph that renders");
-        }, TimeSpan.FromSeconds(5));
-    }
-
-    /// <summary>R2-9 (F4): Everyone is mutually exclusive with the constraints, so switching it ON
-    /// necessarily replaces them — switching it back OFF must restore what it replaced instead of
-    /// leaving an empty set (the prior constraints were discarded without a word).</summary>
-    [TestMethod]
-    public async Task EveryoneOff_RestoresTheConstraintsEveryoneReplaced()
-    {
-        var gradeA = Guid.Parse("22222222-2222-2222-2222-222222222222");
-        var gradeB = Guid.Parse("99999999-9999-9999-9999-999999999999");
-        _gradeLevels =
-        [
-            new GradeLevelDto(gradeA, Guid.NewGuid(), 5, "Grade 5", 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
-            new GradeLevelDto(gradeB, Guid.NewGuid(), 6, "Grade 6", 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
-        ];
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-
-        await SelectGradeTargetsAsync(cut, (gradeA, "Grade 5"), (gradeB, "Grade 6"));
-        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal("Grade 5", "Grade 6"),
-            TimeSpan.FromSeconds(5));
-
-        await SelectEveryoneAsync(cut);
-        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal("Everyone"),
-            TimeSpan.FromSeconds(5));
-
-        await SelectEveryoneAsync(cut, everyone: false);
-
-        cut.WaitForAssertion(() =>
-        {
-            ChipLabels(cut).Should().Equal(new[] { "Grade 5", "Grade 6" },
-                "F4: Everyone OFF restores the constraints it replaced — the authored work is kept");
-            Picker(cut, "authoring-audience-grades").SelectedOptions!.Select(o => o.Value)
-                .Should().BeEquivalentTo([gradeA.ToString(), gradeB.ToString()],
-                    "the restored set is mirrored back onto the grade picker, not just onto the chips");
-        }, TimeSpan.FromSeconds(5));
-    }
-
-    /// <summary>R2-9 (F6/F8 + F9/F14, NFR-1): each control the Audience compartment disables names
-    /// the reason paragraph that explains it, and the constraint rows are top-aligned (the students
-    /// typeahead is a tall composite beside single-line siblings).</summary>
-    [TestMethod]
-    public async Task AudienceCompartment_DisabledControlsNameTheirReason_AndConstraintRowsAlignTop()
-    {
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-
-        cut.FindAll(".form-row--align-top").Should().HaveCount(4,
-            "F9/F14: the four constraint rows (grades, streams, students, activity groups) are top-aligned");
-
-        await SelectEveryoneAsync(cut);
-
-        cut.WaitForAssertion(() =>
-        {
-            foreach (var id in new[]
-                     {
-                         "authoring-audience-grades",
-                         "authoring-audience-streams",
-                         "authoring-audience-groups"
-                     })
-            {
-                cut.Find($"#{id}").GetAttribute("aria-describedby").Should().NotBeNull(
-                    $"NFR-1: the disabled {id} names the reason paragraph that explains it");
-            }
-
-            cut.Find("#authoring-audience-groups").GetAttribute("aria-describedby")
-                .Should().Be("authoring-groups-reason",
-                    "NFR-1: the group picker points at its own reason paragraph");
-            cut.Find("#authoring-audience-everyone").GetAttribute("aria-describedby")
-                .Should().Be("authoring-audience-constraint-reason");
-        }, TimeSpan.FromSeconds(5));
-
-        // NFR-1 (F6): the chip Remove button carries the chip it removes in its accessible name.
-        cut.FindAll(".authoring-target-chip fluent-button")
-            .Select(b => b.GetAttribute("aria-label"))
-            .Should().Contain("Remove Everyone",
-                "the visible \"Remove\" text alone is ambiguous across the chip list");
     }
 
     /// <summary>R2-9 (F11): the preview resolves on an editable surface only, so a read-only View
@@ -978,43 +761,355 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    // ── Criterion 7: policy values are read-only with the inherited badge ───
+    // ── Criterion 7 (D2/OD3/OD4): the Rules readouts ────────────────────────
 
     [TestMethod]
-    public void PolicyDerivedFields_RenderReadOnlyWithTheInheritedBadge()
+    public void Rules_HoldsTheFivePolicyReadoutsAndNoAuthorEditableInput()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
 
         cut.WaitForAssertion(() =>
         {
-            var rows = cut.FindAll(".authoring-policy-row");
-            rows.Should().HaveCount(3, "approval, notification and signature policy rows (UX-13/UX-15/UX-16)");
+            var rules = cut.Find("#authoring-rules");
+            var rows = rules.QuerySelectorAll(".authoring-policy-row");
+            rows.Should().HaveCount(5,
+                "D2: approval, notification, archive window, signature requirement and guardian review");
             cut.Markup.Should().Contain(Authoring.InheritedPolicyBadgeText);
 
             foreach (var row in rows)
             {
                 row.QuerySelectorAll("input, fluent-text-field, fluent-number-field, fluent-select, fluent-checkbox, fluent-date-picker, fluent-listbox, fluent-text-area")
-                    .Should().BeEmpty("UX-13: a policy-derived value is never an editable control");
+                    .Should().BeEmpty("UX-13/D2: a policy-derived value is never an editable control");
             }
+
+            rules.QuerySelectorAll("fluent-number-field, fluent-date-picker, fluent-checkbox, fluent-text-field")
+                .Should().BeEmpty("D2/AC8: no author-editable input remains inside Rules");
         });
     }
 
+    /// <summary>D2/OD4: the archive-window and guardian-review readouts render the RESOLVED policy the
+    /// page fetched — the page does not recompute the D4 implication, and an unset window states the
+    /// built-in retention floor the write seam falls back to.</summary>
     [TestMethod]
-    public void PolicySignatureRow_ReflectsTheResolvedRequirement()
+    public void Rules_SignatureArchiveAndReviewReadouts_ReflectTheResolvedPolicy()
     {
-        _signatureDefaultBody = "{\"requiresSignature\":true,\"signatureMode\":\"Mandatory\"}";
+        // Signature Mandatory, policy review TRUE (so the implication is observable both ways),
+        // archive window 45.
+        _effectivePolicyBody = EffectivePolicyBody(
+            SignatureRequirementMode.Mandatory, mandatoryReview: true, archiveGraceDays: 45);
 
         var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("A guardian signature is required after completion");
-            cut.FindComponents<FluentCheckbox>()
-                .Single(c => c.Instance.Id == "authoring-submission-requires-signature").Instance.Disabled
-                .Should().BeTrue("a Mandatory policy locks the per-assignment override");
-            cut.Markup.Should().Contain(Authoring.SignatureMandatoryReason,
-                "the disabled checkbox explains why it cannot be unticked");
+            cut.Find("#authoring-policy-signature").TextContent
+                .Should().Contain("A guardian signature is required after completion");
+            cut.Find("#authoring-policy-archive").TextContent
+                .Should().Contain("Archived 45 days after the due date");
+            cut.Find("#authoring-policy-review").TextContent
+                .Should().Contain("Guardian review is required before a student can submit");
         });
+    }
+
+    /// <summary>OD2: an unset archive window reads as the built-in retention floor rather than as a
+    /// blank readout — the write seam stores exactly that value.</summary>
+    [TestMethod]
+    public void Rules_UnsetArchiveWindow_StatesTheBuiltInRetentionFloor()
+    {
+        _effectivePolicyBody = EffectivePolicyBody();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() => cut.Find("#authoring-policy-archive").TextContent
+            .Should().Contain("Archived 30 days after the due date (built-in default)"));
+    }
+
+    // ── Round authoring-compact-fields (AC1–AC5): the Rules card + the paired short fields ──
+
+    /// <summary>AC1: Rules renders through the shared <c>SectionCard</c>, inside the right-hand column
+    /// and beneath the Targets &amp; audience card — it is no longer a full-width spine section, and the
+    /// spine is left with the other four compartments.</summary>
+    [TestMethod]
+    public void Rules_RendersThroughSectionCard_InTheRightColumnBeneathTheTargetsCard()
+    {
+        foreach (var mode in Enum.GetValues<AssignmentAuthoringMode>())
+        {
+            var cut = mode == AssignmentAuthoringMode.Create
+                ? RenderAuthoring(mode)
+                : RenderAuthoring(mode, MakeDto(AssignmentStatusDto.Draft));
+
+            cut.WaitForAssertion(() =>
+            {
+                cut.Find("#authoring-targets").ClassList.Should().Contain("authoring-compartment--right",
+                    "the right-hand column is the element the Rules card stacks in");
+                cut.Find("#authoring-targets > #authoring-rules").Should().NotBeNull(
+                    "the Rules container is a child of that column, so it stacks beneath the Targets card");
+
+                var rules = cut.Find("#authoring-rules");
+                rules.QuerySelectorAll("h3").Should().BeEmpty(
+                    "the card header IS the compartment's single title — no hand-rolled h3");
+                rules.QuerySelector(".section-card__body .authoring-policy-row").Should().NotBeNull(
+                    "the readouts render as card ITEMS, not as bare children of a section");
+                rules.NextElementSibling.Should().BeNull(
+                    "the Rules card closes the column: Targets card → its audience readouts → Rules card");
+
+                cut.FindAll("section.authoring-compartment").Select(section => section.Id)
+                    .Should().Equal(
+                        ["authoring-basics", "authoring-targets", "authoring-content", "authoring-questions"],
+                        "only the four spine compartments are sections any more — Rules is a card");
+            });
+        }
+    }
+
+    /// <summary>AC2: the Rules card renders NO Add button and all five readouts, whose long-standing ids
+    /// survive the move from hand-written rows to card items.</summary>
+    [TestMethod]
+    public void Rules_Card_RendersTheFiveReadoutsAsItems_AndNoAddButton()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            var rules = cut.Find("#authoring-rules");
+
+            rules.QuerySelectorAll("fluent-button").Should().BeEmpty(
+                "ShowAddButton=\"false\": a readouts-only card offers no Add");
+            rules.QuerySelectorAll(".section-card__title").Should().ContainSingle()
+                .Which.TextContent.Trim().Should().Be("Rules", "the card header carries the title");
+
+            foreach (var id in PolicyReadoutIds)
+            {
+                rules.QuerySelectorAll($".section-card__body .authoring-policy-row#{id}").Should().ContainSingle(
+                    $"{id} still renders — now as a card item");
+            }
+
+            rules.QuerySelectorAll(".authoring-policy-row").Should().HaveCount(5,
+                "the five readouts and nothing else are the card's items");
+        });
+    }
+
+    /// <summary>AC5: the jump-nav still enumerates the five compartments, every link names an anchor
+    /// that resolves, and the Rules link lands on the card.</summary>
+    [TestMethod]
+    public void JumpNav_StillResolvesAllFiveAnchors_IncludingTheRulesCard()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        cut.WaitForAssertion(() =>
+        {
+            var links = cut.FindAll("nav.authoring-jumpnav fluent-anchor");
+            links.Select(link => link.TextContent.Trim()).Should().Equal(ExpectedCompartments,
+                "UX-4: the jump-nav mirrors the five-compartment list");
+            links.Select(link => link.GetAttribute("href")).Should().Equal(
+                ["#authoring-basics", "#authoring-targets", "#authoring-rules",
+                 "#authoring-content", "#authoring-questions"],
+                "each link names the anchor of its compartment");
+
+            cut.Find("#authoring-rules .section-card__title").TextContent.Trim().Should().Be("Rules",
+                "the Rules link still resolves — its anchor sits on the card container now");
+        });
+    }
+
+    /// <summary>AC3: each short pair renders as exactly ONE multi-input <c>FormRow</c>. The two controls
+    /// share one input cell and that cell is top-aligned (<c>AlignTop</c> — the repo's multi-input row
+    /// pattern, which KEEPS the 180px label gutter so the pair lines up with every single-field row),
+    /// instead of each field owning
+    /// its own full-width row.</summary>
+    [TestMethod]
+    public void Basics_PairsTheShortFields_OneRowEach()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, grading: GradingFormatDto.AutoGraded));
+
+        cut.WaitForAssertion(() =>
+        {
+            var basics = cut.Find("#authoring-basics");
+
+            var pairs = new (string Name, string[] Ids)[]
+            {
+                ("type & grading format", ["authoring-basics-type", "authoring-basics-grading"]),
+                ("max score & max attempts", ["authoring-basics-max-score", "scoringFieldsMaxAttempts"]),
+                ("status & available from", ["authoring-basics-status", "authoring-basics-available-from"])
+            };
+
+            foreach (var (name, ids) in pairs)
+            {
+                var rows = ids.Select(id => OwningFormRow(basics, id)).Distinct().ToList();
+                rows.Should().ContainSingle($"the {name} pair shares ONE FormRow");
+
+                var row = rows[0];
+                row.ClassList.Should().Contain("form-row--horizontal",
+                    $"the {name} pair KEEPS the 180px label gutter, so its controls line up with every single-field row");
+                row.ClassList.Should().NotContain("form-row--label-below",
+                    $"LabelPosition=Below drops the gutter and renders the pair single label under its FIRST control — the regression this pair must never reintroduce");
+                row.ClassList.Should().Contain("form-row--align-top",
+                    $"AlignTop top-aligns the {name} pair's cell (the flex-row-input-alignment pattern)");
+
+                // The pair shares ONE input cell, and that cell holds exactly the two controls —
+                // which is what makes them render side by side instead of stacked. (The cell's
+                // element children also carry FluentUI's own <style> elements, so the assertion
+                // counts the CONTROLS, never the cell's children.)
+                var cell = row.QuerySelector(".form-row-input")!;
+                cell.QuerySelectorAll("fluent-select, fluent-number-field, span.authoring-readonly-value")
+                    .Should().HaveCount(2, $"both {name} controls sit in the ONE input cell, so they sit inline");
+                ids.Should().OnlyContain(id => cell.QuerySelector($"#{id}") != null,
+                    $"both {name} controls belong to that one row");
+
+                foreach (var id in ids)
+                {
+                    cut.FindAll($"#{id}").Should().ContainSingle($"{id} renders exactly once");
+                }
+            }
+        });
+    }
+
+    /// <summary>AC4 (regression guard): the pairing changed LAYOUT only. Every paired control still
+    /// writes the same model member, the six ids are the ones the surface always exposed, and OD1's
+    /// move is asserted where it is observable — the attempt cap renders in Basics and is no longer in
+    /// <c>ScoringFieldsSection</c>'s own markup.</summary>
+    [TestMethod]
+    public void PairedFields_KeepTheirBindingsAndIds()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, grading: GradingFormatDto.AutoGraded));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW",
+            "Edit loads the assignment before the form is compared — a write before that load "
+            + "would be overwritten by it"));
+
+        cut.Find("#authoring-basics-max-score").Change("100");
+        cut.Find("#scoringFieldsMaxAttempts").Change("3");
+        cut.Find("#scoringFieldsPassScore").Change("70");
+
+        var model = cut.FindComponents<ScoringFieldsSection>().Single().Instance.Model;
+        model.MaxScore.Should().Be(100m, "the paired max score still binds _model.MaxScore");
+        model.MaxAttempts.Should().Be(3, "the paired attempt cap still binds _model.MaxAttempts");
+        model.PassScore.Should().Be(70m, "the pass score still binds _model.PassScore");
+
+        cut.FindComponents<ScoringFieldsSection>().Single().Markup
+            .Should().NotContain("scoringFieldsMaxAttempts",
+                "OD1: the attempt cap left that section for the Basics pair");
+
+        foreach (var id in new[]
+                 {
+                     "authoring-basics-type", "authoring-basics-grading", "authoring-basics-max-score",
+                     "scoringFieldsMaxAttempts", "authoring-basics-status", "authoring-basics-available-from"
+                 })
+        {
+            cut.FindAll($"#{id}").Should().ContainSingle($"{id} is unchanged by the pairing");
+        }
+    }
+
+    // ── OD3/AC10: the guardian-review toggle lives in Basics ────────────────
+
+    /// <summary>OD3: the author toggle is free (unlocked, author-controlled) exactly while the
+    /// effective policy leaves review unset.</summary>
+    [TestMethod]
+    public void GuardianReviewToggle_UnsetPolicy_IsAuthorEditableInBasics()
+    {
+        _effectivePolicyBody = EffectivePolicyBody(SignatureRequirementMode.Disabled, mandatoryReview: null);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            var toggle = cut.FindComponents<FluentCheckbox>()
+                .Single(c => c.Instance.Id == "authoring-basics-mandatory-review").Instance;
+            toggle.Disabled.Should().BeFalse("an unset policy leaves the review choice to the author");
+            cut.FindAll("#authoring-basics #authoring-basics-mandatory-review").Should().ContainSingle(
+                "OD3: the toggle lives in Basics, not in the readouts-only Rules section");
+        });
+    }
+
+    /// <summary>OD3/AC10: a policy-set review value locks the toggle and explains why; Rules still
+    /// carries the policy readout row.</summary>
+    [TestMethod]
+    public void GuardianReviewToggle_PolicySetReview_IsLockedWithAReason()
+    {
+        _effectivePolicyBody = EffectivePolicyBody(mandatoryReview: false);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            var toggle = cut.FindComponents<FluentCheckbox>()
+                .Single(c => c.Instance.Id == "authoring-basics-mandatory-review").Instance;
+            toggle.Disabled.Should().BeTrue("D3: a policy-set value is not author-editable");
+            toggle.Value.Should().BeFalse("the locked toggle mirrors the policy's value");
+            cut.Markup.Should().Contain(Authoring.PolicyReviewLockedReason);
+            cut.Find("#authoring-policy-review").TextContent
+                .Should().Contain("Guardian review is not required");
+        });
+    }
+
+    /// <summary>AC10 (D10): the author-facing guardian-signature checkbox is retired — nothing on the
+    /// page binds a <c>RequiresSignature</c> control any more; the policy readout states the outcome.</summary>
+    [TestMethod]
+    public void GuardianSignatureCheckbox_IsRetired_AndThePolicyRowStatesTheOutcome()
+    {
+        _effectivePolicyBody = EffectivePolicyBody(SignatureRequirementMode.Mandatory);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().NotContain("authoring-submission-requires-signature");
+            cut.Markup.Should().NotContain("Require guardian signature after completion");
+            cut.Find("#authoring-policy-signature").TextContent
+                .Should().Contain("A guardian signature is required after completion");
+        });
+    }
+
+    /// <summary>AC9 (D9): the author-fed scoring fields moved into Basics, directly under the Grading
+    /// format control that drives them.</summary>
+    [TestMethod]
+    public void ScoringFields_RenderInsideBasics_UnderTheGradingFormat()
+    {
+        _effectivePolicyBody = EffectivePolicyBody();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, grading: GradingFormatDto.AutoGraded));
+
+        cut.WaitForAssertion(() =>
+        {
+            var basics = cut.Find("#authoring-basics");
+            basics.QuerySelector("#authoring-basics-max-score").Should().NotBeNull();
+            basics.QuerySelector("#authoring-feedback-mode").Should().NotBeNull();
+            basics.QuerySelector("#scoringFieldsPassScore").Should().NotBeNull();
+            cut.FindAll("#authoring-submission").Should().BeEmpty(
+                "D1: the Submission & Sign-off compartment is retired");
+
+            // "Directly after" the Grading format field: the scoring controls precede the
+            // AI-availability hint and the Subject picker that follow them in Basics.
+            var order = basics.QuerySelectorAll(
+                "#authoring-basics-grading, #authoring-basics-max-score, #scoringFieldsPassScore, #authoring-basics-subject")
+                .Select(e => e.Id).ToList();
+            order.Should().ContainInOrder(
+                "authoring-basics-grading", "authoring-basics-max-score", "scoringFieldsPassScore",
+                "authoring-basics-subject");
+        });
+    }
+
+    /// <summary>AC11 (OD4): the page reads the whole effective policy from the new route and never the
+    /// retired <c>/signature-default</c> one. The legacy matcher is registered (and counted) so the
+    /// assertion is about the PAGE's traffic, not about the route's absence from the API.</summary>
+    [TestMethod]
+    public void EffectivePolicy_IsFetchedFromTheNewRoute_AndTheLegacyRouteIsNeverCalled()
+    {
+        var legacyRoute = _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
+            .Respond(HttpStatusCode.OK, "application/json", "{}");
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        cut.WaitForAssertion(() =>
+        {
+            _effectivePolicyQueries.Should().NotBeEmpty(
+                "the Rules readouts and the review lock are resolved from /assignments/effective-policy");
+            _effectivePolicyQueries.Should().OnlyContain(q => !q.Contains("gradeLevelId=", StringComparison.Ordinal),
+                "a create with no grade target resolves the tenant-global default");
+        });
+        _mockHttp.GetMatchCount(legacyRoute).Should().Be(0,
+            "OD4: the page's only policy read is the effective-policy route");
     }
 
     // ── P1 rework: Edit loads the persisted children (the load half of parity) ─────
@@ -1132,13 +1227,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.FindAll("#authoring-content-reason").Should().BeEmpty();
     }
 
-    // ── P1 rework (supervisor decision (a)): the group picker's binding is real again ──
+    // ── Shared fixtures for the builder's group/FR-58 coverage ──────────────
 
     private static Guid GroupAId { get; } = Guid.Parse("aaaaaaaa-1111-1111-1111-111111111111");
 
     private static Guid GroupBId { get; } = Guid.Parse("bbbbbbbb-2222-2222-2222-222222222222");
 
-    /// <summary>Stubs the FR-58 subject union the group picker's selection resolves against.</summary>
+    /// <summary>Stubs the FR-58 subject union an activity-group target resolves against.</summary>
     private void SetupGroupSubjects(params Guid[] topicIds)
     {
         _mockHttp.When(HttpMethod.Get, "http://localhost/students/subjects/by-group/*")
@@ -1146,180 +1241,41 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 topicIds.Select(id => new { id, name = "Mathematics", displayOrder = 0 }), _apiJsonOptions));
     }
 
+    /// <summary>
+    /// Stubs the advisory recipient-preview read and returns the number of reads issued so far. The
+    /// authoring page's load ends by SCHEDULING that read, so a non-zero count is the deterministic
+    /// "the load has settled" signal the builder tests need before they author entries — the load's own
+    /// <c>RebuildTargetsAndAudienceFromModel</c> would otherwise clear entries added mid-load.
+    /// </summary>
+    private Func<int> SetupRecipientPreviewRead(
+        string body = "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":false}")
+    {
+        var reads = 0;
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
+            .Respond(_ =>
+            {
+                reads++;
+                return PreviewResponse(body);
+            });
+
+        return () => reads;
+    }
+
+    /// <summary>Waits for the page's load to settle behind its own preview debounce.</summary>
+    private static void WaitForLoadSettled(IRenderedComponent<Authoring> cut, Func<int> previewReads) =>
+        cut.WaitForAssertion(() => previewReads().Should().BeGreaterThan(0,
+            "the load settles behind its own preview debounce"), TimeSpan.FromSeconds(5));
+
     /// <summary>Clicks the Edit action bar's "Save draft" kebab item (the update path).</summary>
     private static void SaveDraft(IRenderedComponent<Authoring> cut)
     {
         cut.Find("fluent-button[title=\"More assignment actions\"]").Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Should().Contain(i => i.TextContent.Trim() == "Save draft",
+                "the Draft's kebab hosts the save action; rendered items were: ["
+                + string.Join(", ", cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())) + "]"),
+            TimeSpan.FromSeconds(5));
         cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Save draft").Click();
-    }
-
-    /// <summary>
-    /// Regression (supervisor decision (a)): the group picker bound
-    /// <c>@bind-SelectedValues</c>, which does not exist on the FluentUI list components —
-    /// Blazor dropped it into the catch-all <c>AdditionalAttributes</c> and the element
-    /// rendered a stray <c>selectedvalues</c> attribute while never reporting a selection.
-    /// </summary>
-    [TestMethod]
-    public void GroupPicker_BindsTheSupportedApi_AndRendersNoStrayAttribute()
-    {
-        // Both modes the picker renders in: Create (empty selection) and Edit (a loaded link).
-        foreach (var mode in new[] { AssignmentAuthoringMode.Create, AssignmentAuthoringMode.Edit })
-        {
-            _activityGroups = [Group(GroupAId, "Alpha")];
-            var cut = mode == AssignmentAuthoringMode.Create
-                ? RenderAuthoring(mode)
-                : RenderAuthoring(mode,
-                    MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups),
-                    MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0)]),
-                    linkedGroupIds: [GroupAId]);
-
-            cut.WaitForAssertion(() =>
-            {
-                cut.Markup.Should().NotContain("selectedvalues",
-                    "the dead @bind-SelectedValues attribute must not leak into the DOM");
-                cut.Markup.Should().NotContain("fluent-listbox",
-                    "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
-                cut.Find("#authoring-audience-groups").HasAttribute("multiple").Should().BeTrue();
-                cut.FindAll("#authoring-audience-groups fluent-option").Should().ContainSingle(
-                    "the groups are offered by the multi-select picker");
-            });
-        }
-    }
-
-    /// <summary>Requirement 4(i): Create must ACCEPT a group selection and submit it — with the
-    /// dead binding the author could never satisfy the By-Group audience.</summary>
-    [TestMethod]
-    public async Task Create_SelectingGroups_SubmitsTheAudienceAndLinksTheGroups()
-    {
-        var groupA = Group(GroupAId, "Alpha");
-        _activityGroups = [groupA];
-        var newAssignmentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
-        var topicId = Guid.Parse("44444444-4444-4444-4444-444444444444");
-        SetupGroupSubjects(topicId);
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
-        cut.WaitForAssertion(() => cut.FindAll("#authoring-audience-groups fluent-option").Should().ContainSingle());
-
-        await SetTitleAsync(cut, "Group-targeted HW");
-        await SelectGroupsAsync(cut, groupA);
-        await SelectAsync(cut, "authoring-basics-subject", topicId.ToString(), "Mathematics");
-
-        string? createBody = null;
-        _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
-            .With(req =>
-            {
-                createBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-                return true;
-            })
-            .Respond(HttpStatusCode.OK, "application/json", $"\"{newAssignmentId}\"");
-
-        string? linkBody = null;
-        _mockHttp.Expect(HttpMethod.Put, $"http://localhost/assignments/{newAssignmentId}/groups")
-            .With(req =>
-            {
-                linkBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-                return true;
-            })
-            .Respond(HttpStatusCode.NoContent);
-
-        cut.Find("#authoring-primary-action").Click();
-
-        cut.WaitForAssertion(() =>
-        {
-            createBody.Should().NotBeNull("ValidateForSave must accept the group selection and create the assignment");
-            linkBody.Should().NotBeNull("the selected groups are linked after the create");
-        }, TimeSpan.FromSeconds(5));
-
-        createBody.Should().Contain("\"targetAudienceType\":\"SelectedGroups\"",
-            "R2 (D-1): the compat audience is DERIVED from the authored group target");
-        createBody.Should().Contain(GroupAId.ToString(),
-            "the authored target rows ride the create payload (TGT-1)");
-        linkBody.Should().Contain(GroupAId.ToString(), "the picker's selection reaches the link route");
-        cut.Markup.Should().NotContain("Select at least one activity group.",
-            "ValidateForSave accepts the selection the repaired picker reports");
-    }
-
-    /// <summary>Requirement 4(ii): the loaded links render as SELECTED (the load half of P2-1).</summary>
-    [TestMethod]
-    public void Edit_LoadedLinks_RenderAsSelectedInThePicker()
-    {
-        _activityGroups = [Group(GroupAId, "Alpha"), Group(GroupBId, "Beta")];
-        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
-            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0)]),
-            linkedGroupIds: [GroupAId]);
-
-        cut.WaitForAssertion(() =>
-        {
-            Picker(cut, "authoring-audience-groups").SelectedOptions
-                .Should().ContainSingle(o => o.Value == GroupAId.ToString(),
-                    "the persisted TARGET row is loaded into the picker instead of an empty selection");
-            cut.FindAll("#authoring-audience-groups fluent-option[aria-selected=\"true\"]")
-                .Should().ContainSingle(o => o.TextContent.Contains("Alpha"),
-                    "the loaded link is marked selected in the rendered picker");
-        });
-    }
-
-    /// <summary>Requirement 4(iii), the fail-safe half: an untouched picker never issues the
-    /// replace-set call (which deletes every link missing from its payload).</summary>
-    [TestMethod]
-    public async Task Edit_ReassertingTheSameGroups_DoesNotRewriteTheLinks()
-    {
-        var groupA = Group(GroupAId, "Alpha");
-        _activityGroups = [groupA];
-        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
-        SetupGroupSubjects(dto.TopicId);
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
-            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0)]),
-            linkedGroupIds: [GroupAId]);
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-
-        // The picker reports the SAME set it loaded (a click that changes nothing): the
-        // subject union reloads but the link set is unchanged.
-
-        await SelectSubjectAsync(cut, dto.TopicId);
-
-        string? updateBody = null;
-        string? linkBody = null;
-        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}/groups", body => linkBody = body);
-        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", body => updateBody = body);
-
-        SaveDraft(cut);
-
-        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
-        linkBody.Should().BeNull(
-            "an unchanged picker never issues the replace-set call — the route deletes every link missing from its payload");
-    }
-
-    /// <summary>Requirement 4(iii), the write half: an ACTUAL edit of the picker is persisted.</summary>
-    [TestMethod]
-    public async Task Edit_ChangingTheGroups_PersistsTheReplaceSet()
-    {
-        var groupA = Group(GroupAId, "Alpha");
-        var groupB = Group(GroupBId, "Beta");
-        _activityGroups = [groupA, groupB];
-        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
-        SetupGroupSubjects(dto.TopicId);
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
-            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0)]),
-            linkedGroupIds: [GroupAId]);
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-
-        await SelectGroupsAsync(cut, groupA, groupB);
-        await SelectSubjectAsync(cut, dto.TopicId);
-
-        string? linkBody = null;
-        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}/groups", body => linkBody = body);
-        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", _ => { });
-
-        SaveDraft(cut);
-
-        cut.WaitForAssertion(() => linkBody.Should().NotBeNull(
-            "an edited picker is what makes the links non-stale (the reviewer's P2-1)"), TimeSpan.FromSeconds(5));
-        linkBody.Should().Contain(GroupAId.ToString()).And.Contain(GroupBId.ToString());
     }
 
     /// <summary>A fresh recipient-preview response per read (the mock re-sends it on every
@@ -1342,67 +1298,6 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 return true;
             })
             .Respond(HttpStatusCode.NoContent);
-    }
-
-    /// <summary>Requirement 4(iii), the fail-closed half: an unknown link set is never written
-    /// over (the picker disables with a reason and the save path skips the replace-set).</summary>
-    [TestMethod]
-    public void Edit_LinkedGroupsReadFails_DisablesThePickerWithReason()
-    {
-        // The link read is stubbed to 500 for this dto only; every other route the Edit surface
-        // touches is registered here (this test registers its own routes instead of calling
-        // SetupAssignment, whose /groups route returns 200).
-        _activityGroups = [Group(GroupAId, "Alpha")];
-        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/authoring")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(MakeChildren(), _apiJsonOptions));
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/groups")
-            .Respond(HttpStatusCode.InternalServerError);
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/questions-draft")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/students/subjects/by-grade/*")
-            .Respond(HttpStatusCode.OK, "application/json", "[]");
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(dto, _apiJsonOptions));
-
-        var cut = Render<Authoring>(parameters =>
-        {
-            parameters.Add(p => p.Mode, AssignmentAuthoringMode.Edit);
-            parameters.Add(p => p.Id, dto.Id);
-        });
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain(Authoring.GroupLinksUnavailableReason);
-            Picker(cut, "authoring-audience-groups").Disabled.Should().BeTrue(
-                "an unknown link set must not be collectable — saving would replace the persisted links");
-        });
-    }
-
-    /// <summary>Requirement 4(i)-adjacent: the empty-string Title path is unchanged; this asserts
-    /// the group audience still needs a selection once the picker reports one — i.e. the
-    /// validation gate is satisfied by the picker rather than bypassed.</summary>
-    [TestMethod]
-    public async Task Create_GroupAudienceWithoutGroupSubjects_BlocksTheSave()
-    {
-        var groupA = Group(GroupAId, "Alpha");
-        _activityGroups = [groupA];
-        SetupGroupSubjects(); // the group resolves NO subject
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
-        cut.WaitForAssertion(() => cut.FindAll("#authoring-audience-groups fluent-option").Should().ContainSingle());
-
-        await SetTitleAsync(cut, "Group-targeted HW");
-        await SelectGroupsAsync(cut, groupA);
-
-        string? createBody = null;
-        CaptureRequest(HttpMethod.Post, "http://localhost/assignments", body => createBody = body);
-
-        cut.Find("#authoring-primary-action").Click();
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Select a subject."),
-            TimeSpan.FromSeconds(5));
-        createBody.Should().BeNull("the FR-58 union gate blocks the save before any request is sent");
     }
 
     // ── UX-7 (D2/D3): the unsaved-changes guard ──────────────────────────────
@@ -1716,7 +1611,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
             questions[0].QuestionText.Should().Be("Loaded question?",
                 "... and they carry what the server holds");
 
-            ChipLabels(cut).Should().Equal(new[] { "Grade 5" },
+            BuilderEntries(cut).Should().Equal(new[] { ("Grade Levels", "Grade 5") },
                 "§17 item 1: the target rows came back with them");
         }, TimeSpan.FromSeconds(15));
     }
@@ -1787,10 +1682,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
             Instructions = "Do the odd numbers",
             DueDate = new DateTime(2026, 5, 1, 9, 0, 0),
             MaxScore = 10m,
-            ArchiveGraceDays = 30,
             PassScore = 5m,
             MaxAttempts = 2,
-            RequiresSignature = true,
             AiPromptOverride = "be gentle",
             DifficultyEasyCount = 1,
             DifficultyMediumCount = 2,
@@ -1825,13 +1718,14 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
     /// <summary>§17 (item 5): both spellings of the save payload for one model state — the round's
     /// fingerprint, and the payload itself serialized exactly as the pre-fix snapshot serialized it.</summary>
-    private static (string Snapshot, string Payload) CaptureProbe(AssignmentEditFormModel model) =>
+    private static (string Snapshot, string Payload) CaptureProbe(
+        AssignmentEditFormModel model, bool? mandatoryReview = true) =>
         (model.CaptureSaveSnapshot(
              AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.SelectedGrades,
-             SnapshotProbeTopicId, SnapshotProbeGradeId, mandatoryReview: true, requiresSignature: true),
+             SnapshotProbeTopicId, mandatoryReview),
          JsonSerializer.Serialize(model.ToUpdateRequest(
              AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.SelectedGrades,
-             SnapshotProbeTopicId, SnapshotProbeGradeId, mandatoryReview: true, requiresSignature: true,
+             SnapshotProbeTopicId, mandatoryReview,
              targets: model.ToTargetDtos())));
 
     /// <summary>§17 (item 5): asserts the snapshot's equality relation matches the payload's, in whichever
@@ -1890,11 +1784,19 @@ public class AssignmentAuthoringBunitTests : BunitContext
             SnapshotProbeModel(m => m.DueDate = DateTime.SpecifyKind(m.DueDate!.Value, DateTimeKind.Unspecified)));
         AssertSnapshotTracksPayload("MaxScore", SnapshotProbeModel(), SnapshotProbeModel(m => m.MaxScore = 20m));
         AssertSnapshotTracksPayload("MaxScore null→zero", SnapshotProbeModel(m => m.MaxScore = null), SnapshotProbeModel(m => m.MaxScore = 0m));
-        AssertSnapshotTracksPayload("ArchiveGraceDays", SnapshotProbeModel(), SnapshotProbeModel(m => m.ArchiveGraceDays = 31));
         AssertSnapshotTracksPayload("PassScore", SnapshotProbeModel(), SnapshotProbeModel(m => m.PassScore = 6m));
         AssertSnapshotTracksPayload("MaxAttempts", SnapshotProbeModel(), SnapshotProbeModel(m => m.MaxAttempts = 3));
         AssertSnapshotTracksPayload("difficulty mix", SnapshotProbeModel(), SnapshotProbeModel(m => m.DifficultyHardCount = 4));
         AssertSnapshotTracksPayload("AiPromptOverride", SnapshotProbeModel(), SnapshotProbeModel(m => m.AiPromptOverride = null));
+
+        // OD1/D3: guardian review is nullable on the wire now — "unset" (the author left it to the
+        // policy) is a different payload from an explicit value, so the fingerprint must tell them apart.
+        CaptureProbe(SnapshotProbeModel(), mandatoryReview: true).Snapshot.Should().NotBe(
+            CaptureProbe(SnapshotProbeModel(), mandatoryReview: null).Snapshot,
+            "a payload field the snapshot cannot distinguish makes a real edit read as clean");
+        CaptureProbe(SnapshotProbeModel(), mandatoryReview: null).Snapshot.Should().NotBe(
+            CaptureProbe(SnapshotProbeModel(), mandatoryReview: false).Snapshot,
+            "null and false are two different payloads (OD1)");
 
         // ── Questions
         AssertSnapshotTracksPayload("question text", SnapshotProbeModel(), SnapshotProbeModel(m => m.Questions[0].QuestionText = "Other"));
@@ -2326,223 +2228,602 @@ public class AssignmentAuthoringBunitTests : BunitContext
             .Should().Contain("Students matched: 7", "the scheduled read still settles once the debounce elapses"));
     }
 
-    // ── F15: the constraint reason sits with the pickers it explains ───────
+    // ── R2 rework: the "Targets & audience" typed builder ─────────────────────
 
-    /// <summary>F15: the paragraph that explains WHY the four constraint pickers are unavailable must be
-    /// reachable from the group it governs — positioned with the picker rows rather than after the last
-    /// one — and every control it disables must name a paragraph that actually renders in that state
-    /// (NFR-1; the R2-10 derived-idref fix, re-checked through the new placement).
-    /// <para>Discriminating: against `66c2676a` the paragraph rendered AFTER the group row, so the
-    /// placement assertions fail.</para></summary>
+    private static readonly Guid BuilderGradeAId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid BuilderGradeBId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+    private static readonly Guid BuilderStreamId = Guid.Parse("bbbbbbbb-3333-3333-3333-333333333333");
+    private static readonly Guid BuilderStudentId = Guid.Parse("cccccccc-4444-4444-4444-444444444444");
+
+    /// <summary>One grade level the builder's grade picker offers.</summary>
+    private static GradeLevelDto BuilderGrade(Guid id, int level, string name) =>
+        new(id, Guid.NewGuid(), level, name, 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+    /// <summary>Adds one entry by clicking the builder's Add action (the mocked dialog returns the next
+    /// queued entry).</summary>
+    private static Task AddTargetEntryAsync(IRenderedComponent<Authoring> cut) =>
+        cut.InvokeAsync(() => OpenAddTargetDialog(cut));
+
+    /// <summary>R2 (Q1): the Add dialog hands back a TYPED entry per category, and the builder renders
+    /// each with its category label over the picked value's label.</summary>
     [TestMethod]
-    public async Task ConstraintReason_SitsWithThePickerRows_AndEveryDisabledControlNamesARenderedReason()
+    public async Task Create_AddDialog_AddsATypedEntryOfEachCategoryToTheBuilder()
     {
-        var everyoneState = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-        everyoneState.WaitForAssertion(() => everyoneState.Markup.Should().Contain("Math HW"));
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5")];
+        _activityGroups = [Group(GroupAId, "Alpha")];
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.Streams, BuilderStreamId, "Grade 5 · Blue"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.Students, BuilderStudentId, "Ada Lovelace (S1001)"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.ActivityGroups, GroupAId, "Alpha"));
+        var previewReads = SetupRecipientPreviewRead();
 
-        await SelectEveryoneAsync(everyoneState);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
 
-        everyoneState.WaitForAssertion(() =>
+        foreach (var expected in new[]
+                 {
+                     ("Grade Levels", "Grade 5"),
+                     ("Streams", "Grade 5 · Blue"),
+                     ("Students", "Ada Lovelace (S1001)"),
+                     ("Activity Groups", "Alpha")
+                 })
         {
-            var markup = everyoneState.Markup;
-            var toggle = markup.IndexOf("id=\"authoring-audience-everyone\"", StringComparison.Ordinal);
-            var reason = markup.IndexOf("id=\"authoring-audience-constraint-reason\"", StringComparison.Ordinal);
-            var firstPicker = markup.IndexOf("id=\"authoring-audience-grades\"", StringComparison.Ordinal);
-            var lastPicker = markup.IndexOf("id=\"authoring-audience-groups\"", StringComparison.Ordinal);
-
-            toggle.Should().BeGreaterThanOrEqualTo(0).And.BeLessThan(reason,
-                "F15: the reason follows the toggle that explains the constraint gate");
-            reason.Should().BeLessThan(firstPicker,
-                "F15: and stands with the picker rows it governs, above the first of them");
-            reason.Should().BeLessThan(lastPicker, "F15: never after the last picker in the group");
-
-            AssertEveryDisabledConstraintControlNamesARenderedReason(everyoneState);
-        }, TimeSpan.FromSeconds(5));
-
-        // The same contract in the UX-21 case (persisted targets did not load): the placement moved, so
-        // the R2-10 derived-idref guarantee is re-checked against the new position.
-        var ux21 = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            childrenReadFails: true);
-
-        ux21.WaitForAssertion(() =>
-        {
-            ux21.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle();
-            AssertEveryDisabledConstraintControlNamesARenderedReason(ux21);
-        }, TimeSpan.FromSeconds(5));
-    }
-
-    /// <summary>NFR-1: every control the Audience compartment disables names a reason paragraph that
-    /// really renders in the state under test — a dangling idref is worse than none, because it
-    /// silently tells assistive tech nothing.</summary>
-    private static void AssertEveryDisabledConstraintControlNamesARenderedReason(IRenderedComponent<Authoring> cut)
-    {
-        var describedBy = new[]
-        {
-            "authoring-audience-everyone",
-            "authoring-audience-grades",
-            "authoring-audience-streams",
-            "authoring-audience-groups"
-        };
-
-        foreach (var id in describedBy)
-        {
-            var control = cut.Find($"#{id}");
-            var idref = control.GetAttribute("aria-describedby");
-            idref.Should().NotBeNullOrEmpty($"NFR-1: the disabled {id} explains itself");
-            cut.FindAll($"#{idref}").Should().ContainSingle(
-                $"NFR-1: {id}'s idref must resolve to a paragraph that actually renders in this state");
+            await AddTargetEntryAsync(cut);
+            cut.WaitForAssertion(() => BuilderEntries(cut).Should().Contain(expected,
+                "each typed category renders its category label over the picked value's label"));
         }
 
-        // §17 (item 3, this round): the students picker is the one constraint control FluentAutocomplete
-        // owns the aria surface of — it routes a declared attribute to its own root <div> rather than to
-        // the inner <fluent-text-field> that carries the combobox role and the idref's target, so the page
-        // declares the reason on the row's GROUP instead (see the Students FormRow). Either carrier is
-        // accepted here: a FluentUI version that starts forwarding the declared attribute to the inner
-        // field satisfies the first half, and this round's group satisfies it meanwhile — the assertion
-        // states the contract (the reason reaches an element of the students row that renders) without
-        // pinning the mechanism, so it does not have to be rewritten on a package upgrade.
-        var students = cut.Find("#authoring-audience-students");
-        var studentsIdref = students.GetAttribute("aria-describedby")
-            ?? cut.Find("#authoring-audience-students-group").GetAttribute("aria-describedby");
-        studentsIdref.Should().Be("authoring-audience-constraint-reason",
-            "NFR-1/§17: the disabled students picker names the reason paragraph the constraint gate renders");
-        cut.FindAll($"#{studentsIdref}").Should().ContainSingle(
-            "NFR-1: the students picker's idref must resolve to a paragraph that actually renders here");
+        BuilderEntries(cut).Should().HaveCount(4, "each Add appends exactly one entry");
     }
 
-    /// <summary>§17 (item 3, this round): with the constraint gate engaged the students picker names its
-    /// reason like its four siblings. FluentAutocomplete routes the page's declared attributes to its own
-    /// root <c>&lt;div&gt;</c> while the element it takes the component Id on is the INNER
-    /// <c>&lt;fluent-text-field&gt;</c> that carries the combobox role — so a declared aria-describedby
-    /// reached nothing a screen reader reads, and this was the one disabled constraint control with no
-    /// reason. The reason is declared on the row's own labelled group, which the control cannot rewrite.
-    /// <para>Discriminating: against the pre-fix page there is no <c>#authoring-audience-students-group</c>
-    /// at all, so the row-group assertion cannot hold.</para></summary>
+    /// <summary>Owner rework: the entity pickers are MULTI-select, so ONE dialog submission appends
+    /// one entry per picked option — the whole selection rides the page's Add action.</summary>
     [TestMethod]
-    public async Task StudentsPicker_NamesItsReasonFromItsOwnRow_WhenTheConstraintGateDisablesIt()
+    public async Task Create_AddDialog_MultiSelect_AppendsOneEntryPerPickedOption()
     {
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5"), BuilderGrade(BuilderGradeBId, 6, "Grade 6")];
+        RegisterTargetsDialog().Enqueue(
+            new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"),
+            new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeBId, "Grade 6"));
+        var previewReads = SetupRecipientPreviewRead();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
+
+        await AddTargetEntryAsync(cut);
+
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(
+            new[] { ("Grade Levels", "Grade 5"), ("Grade Levels", "Grade 6") },
+            "one multi-select submission appends an entry for every picked option"));
+    }
+
+    /// <summary>R2 (TGT-2/Q6): an Everyone entry is mutually exclusive with every typed entry — adding
+    /// it clears the entity entries, and adding an entity entry clears it.</summary>
+    [TestMethod]
+    public async Task Builder_EveryoneEntry_IsMutuallyExclusiveWithEntityEntries()
+    {
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5"), BuilderGrade(BuilderGradeBId, 6, "Grade 6")];
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"))
+            .Enqueue(new TargetsAndAudienceEntry(
+                TargetsAndAudienceCategory.Everyone, null, TargetsAndAudienceEntry.EveryoneLabel))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeBId, "Grade 6"));
+        var previewReads = SetupRecipientPreviewRead();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
+
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(new[] { ("Grade Levels", "Grade 5") }));
+
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(
+            new[] { ("Applies to All in Org", TargetsAndAudienceEntry.EveryoneLabel) },
+            "adding Everyone clears the entity entries (TGT-2)"));
+
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(
+            new[] { ("Grade Levels", "Grade 6") },
+            "adding an entity entry clears the Everyone entry"));
+    }
+
+    /// <summary>P1-1: the entry's remove action renders INSIDE the ItemTemplate (SectionCard ignores
+    /// ItemActions for a templated card) and removes the entry that names it.</summary>
+    [TestMethod]
+    public async Task Builder_EntryRemoveAction_RemovesTheEntryItNames()
+    {
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5"), BuilderGrade(BuilderGradeBId, 6, "Grade 6")];
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeBId, "Grade 6"));
+        var previewReads = SetupRecipientPreviewRead();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
+        await AddTargetEntryAsync(cut);
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(2));
+
+        cut.FindAll("#authoring-targets fluent-button[title='Remove']").Should().HaveCount(2,
+            "P1-1: every entry exposes its own remove action");
+
+        RemoveBuilderEntry(cut, 0);
+
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(
+            new[] { ("Grade Levels", "Grade 6") }, "the remove action removes the entry it names"));
+    }
+
+    /// <summary>AC-5: an edit surface rebuilds the builder from the persisted target rows, in the
+    /// persisted DisplayOrder, labelled from the loaded option sources.</summary>
+    [TestMethod]
+    public void Edit_LoadsThePersistedTargetsIntoTheBuilder()
+    {
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5")];
+        _activityGroups = [Group(GroupAId, "Alpha")];
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            MakeChildren(targets:
+            [
+                new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0),
+                new AssignmentTargetDto(TargetKindDto.GradeLevel, BuilderGradeAId, 1)
+            ]));
+
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(
+            new[] { ("Activity Groups", "Alpha"), ("Grade Levels", "Grade 5") },
+            "the persisted rows load in DisplayOrder with their resolved labels"));
+    }
+
+    /// <summary>Round <c>drop-primary-grade</c> (AC-6), re-pointed at the effective-policy seam by
+    /// OD4: the page's policy resolution follows the DERIVED policy-scope grade — exactly one grade
+    /// target ⇒ that grade's override; a SECOND grade target moves the derived grade to null and the
+    /// tenant default is resolved. There is no picker to change.</summary>
+    [TestMethod]
+    public async Task GradeTargets_DriveTheEffectivePolicyResolution()
+    {
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5"), BuilderGrade(BuilderGradeBId, 6, "Grade 6")];
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeBId, "Grade 6"));
+        var previewReads = SetupRecipientPreviewRead();
+        // The grade's own policy: a signature requirement, a locked review and a 45-day window —
+        // every one of them distinguishable from the built-in tenant-leg defaults below.
+        SetupGradeEffectivePolicy(BuilderGradeAId, EffectivePolicyBody(
+            SignatureRequirementMode.Optional, mandatoryReview: false, archiveGraceDays: 45));
+
         var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+        WaitForLoadSettled(cut, previewReads);
 
-        await SelectEveryoneAsync(cut);
+        // The load resolves the policy for the LOADED row's derived grade (create/edit ⇒ none here:
+        // the fixture carries no target), then each builder edit re-resolves when that grade moves.
+        _effectivePolicyQueries.Should().ContainSingle();
+        _effectivePolicyQueries[0].Should().NotContain("gradeLevelId=",
+            "a row with no grade target derives the tenant-default leg");
+        cut.Find("#authoring-policy-archive").TextContent
+            .Should().Contain("Archived 30 days after the due date (built-in default)");
+
+        await AddTargetEntryAsync(cut);
 
         cut.WaitForAssertion(() =>
         {
-            // The gate really is engaged and the picker really is disabled — NFR-1 binds on that state.
-            cut.Find("#authoring-audience-students").HasAttribute("disabled").Should().BeTrue(
-                "vacuity guard: the reason is only owed to a picker the gate actually disables");
-
-            var rowGroup = cut.Find("#authoring-audience-students-group");
-            rowGroup.GetAttribute("aria-describedby").Should().Be("authoring-audience-constraint-reason",
-                "§17: the students row carries the reason on the group that keeps it");
-            rowGroup.GetAttribute("aria-label").Should().NotBeNullOrEmpty(
-                "a description on an UNNAMED group is inert for assistive tech — the reason is only exposed " +
-                "because the group is announced");
-            rowGroup.QuerySelector("#authoring-audience-students").Should().NotBeNull(
-                "the group is the students control's own row, not a page-wide carrier");
-
-            cut.FindAll("#authoring-audience-constraint-reason").Should().ContainSingle()
-                .Which.TextContent.Should().NotBeNullOrWhiteSpace(
-                    "NFR-1: the idref names a paragraph that renders the reason in this state");
-
-            // ... and all five disabled controls, not just this one.
-            AssertEveryDisabledConstraintControlNamesARenderedReason(cut);
+            _effectivePolicyQueries.Should().HaveCount(2);
+            _effectivePolicyQueries[1].Should().Contain($"gradeLevelId={BuilderGradeAId}",
+                "a single grade target derives that grade, so its policy override is what gets resolved");
+            cut.FindAll(".authoring-policy-link").Should().NotBeEmpty(
+                "the resolved policy links to the single derived grade's card");
+            cut.Find("#authoring-policy-archive").TextContent
+                .Should().Contain("Archived 45 days after the due date",
+                    "the grade's policy replaced the tenant-leg readouts");
+            cut.FindComponents<FluentCheckbox>()
+                .Single(c => c.Instance.Id == "authoring-basics-mandatory-review").Instance.Disabled
+                .Should().BeTrue("the grade's policy sets review, so the author's toggle locks (OD3)");
         }, TimeSpan.FromSeconds(5));
-    }
 
-    // ── §17 item 2: a restored student target keeps its resolved label ─────
-
-    /// <summary>F4/§17 (item 2, this round): switching Everyone OFF restores the target rows it replaced,
-    /// which puts the student IDS back — but a chip renders from its OPTION object and Everyone ON clears
-    /// the ones the picker reported. The restored student therefore rendered the <c>Student &lt;id8&gt;</c>
-    /// fallback until the author touched the picker. The page re-resolves the restored ids.
-    /// <para>Discriminating: pre-fix the restore path re-added nothing to
-    /// <c>_selectedStudentOptions</c>, so the chip assertion fails on the id-labelled fallback.</para></summary>
-    [TestMethod]
-    public async Task EveryoneOff_RestoresAResolvedStudentChip_NotTheIdFallback()
-    {
-        var studentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
-        // The restored-id re-resolve reads the student by id; the picker's own search answers the pick.
-        _mockHttp.When(HttpMethod.Get, $"http://localhost/students/{studentId}")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
-                Student(studentId, "Ada", "Lovelace", "S1001"), _apiJsonOptions));
-        _mockHttp.When(HttpMethod.Get, "http://localhost/students?search=Ada")
-            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
-                new[] { Student(studentId, "Ada", "Lovelace", "S1001") }, _apiJsonOptions));
-
-        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
-
-        var search = new OptionsSearchEventArgs<Authoring.PickerOption> { Text = "Ada" };
-        await cut.InvokeAsync(() => StudentPicker(cut).OnOptionsSearch.InvokeAsync(search));
-        search.Items.Should().ContainSingle("the stubbed search answered the picker");
-        await cut.InvokeAsync(() => StudentPicker(cut).SelectedOptionsChanged.InvokeAsync(search.Items));
-
-        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal(new[] { "Ada Lovelace (S1001)" }),
-            TimeSpan.FromSeconds(5));
-
-        await SelectEveryoneAsync(cut);
-        cut.WaitForAssertion(() => ChipLabels(cut).Should().Equal(new[] { "Everyone" }), TimeSpan.FromSeconds(5));
-
-        await SelectEveryoneAsync(cut, everyone: false);
+        await AddTargetEntryAsync(cut);
 
         cut.WaitForAssertion(() =>
         {
-            ChipLabels(cut).Should().Equal(new[] { "Ada Lovelace (S1001)" },
-                "§17 item 2: the restored student target renders the name it was re-resolved to, not the id fallback");
-            cut.Markup.Should().NotContain($"Student {studentId.ToString()[..8]}",
-                "the id-labelled fallback chip is what the author used to be shown here");
-            StudentPicker(cut).SelectedOptions!.Select(o => o.Value)
-                .Should().BeEquivalentTo(new[] { studentId.ToString() },
-                    "the restored option is kept, so the picker's own selection projection shows it too");
+            _effectivePolicyQueries.Should().HaveCount(3);
+            _effectivePolicyQueries[2].Should().NotContain("gradeLevelId=",
+                "two grade targets derive NULL — the tenant-default policy (AC-5b/AC-6)");
+            cut.FindAll(".authoring-policy-link").Should().BeEmpty(
+                "no single grade owns the policy any more, so the link falls back to the grade-level list");
+            cut.Find("#authoring-policy-archive").TextContent
+                .Should().Contain("Archived 30 days after the due date (built-in default)");
         }, TimeSpan.FromSeconds(5));
     }
 
-    // ── §17 item 4: an unrepresentable persisted link is named ─────────────
+    /// <summary>D2/OD4: registers the effective-policy body a grade-scoped read returns.</summary>
+    private void SetupGradeEffectivePolicy(Guid gradeLevelId, string body) =>
+        _gradeEffectivePolicies[gradeLevelId] = body;
 
-    /// <summary>§17 (item 4, this round): a persisted link to an activity group the picker cannot
-    /// represent (an archived one — the replace-set route would refuse it) used to be dropped from the
-    /// selection without a word, so the author saw a shorter list and nothing explained it. The note names
-    /// the dropped link and states what is true of it: the link survives while the selection is left alone.
-    /// <para>Discriminating: pre-fix no note is rendered at all, so the first half cannot pass.</para></summary>
+    /// <summary>AC-4: the save payload carries exactly the authored entries — one target row each — and
+    /// the legacy compat audience is derived from them.</summary>
     [TestMethod]
-    public void ArchivedLinkedGroup_IsNamedOnThePage_AndTheNoteIsAbsentWhenNothingIsDropped()
+    public async Task Create_Save_CarriesTheAuthoredTargetRows()
     {
-        var activeId = Guid.Parse("44444444-4444-4444-4444-444444444444");
-        var archivedId = Guid.Parse("55555555-5555-5555-5555-555555555555");
-        _activityGroups = [Group(activeId, "Robotics"), Group(archivedId, "Retired Choir", isActive: false)];
+        var newAssignmentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var topicId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5")];
+        _activityGroups = [Group(GroupAId, "Alpha")];
+        SetupGroupSubjects(topicId);
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.ActivityGroups, GroupAId, "Alpha"));
+        var previewReads = SetupRecipientPreviewRead();
 
-        var dropped = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            linkedGroupIds: [archivedId]);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
+        await SetTitleAsync(cut, "Targeted HW");
+        await AddTargetEntryAsync(cut);
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(2));
+        await SelectAsync(cut, "authoring-basics-subject", topicId.ToString());
 
-        dropped.WaitForAssertion(() =>
+        string? createBody = null;
+        _mockHttp.When(HttpMethod.Post, "http://localhost/assignments")
+            .With(req =>
+            {
+                createBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.OK, "application/json", $"\"{newAssignmentId}\"");
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{newAssignmentId}/groups", _ => { });
+
+        cut.Find("#authoring-primary-action").Click();
+
+        cut.WaitForAssertion(() => createBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        createBody.Should().Contain(BuilderGradeAId.ToString()).And.Contain(GroupAId.ToString(),
+            "each authored entry rides the create payload as a target row (TGT-1)");
+        createBody.Should().Contain("\"targetAudienceType\":\"SelectedGrades\"",
+            "the compat audience is DERIVED from the authored target rows (D-1)");
+    }
+
+    /// <summary>AC-5: a no-op save leaves the persisted targets alone — the untouched builder sends no
+    /// target replacement (the update handler reads null as "preserve").</summary>
+    [TestMethod]
+    public async Task Edit_NoOpSave_DoesNotRewriteThePersistedTargets()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.Stream, BuilderStreamId, 0)]));
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(1));
+
+        string? updateBody = null;
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", body => updateBody = body);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        updateBody.Should().NotContain(BuilderStreamId.ToString(),
+            "an untouched builder sends no target replacement — the persisted rows survive");
+    }
+
+    /// <summary>AC-4/P2-1: removing a builder entry reduces the target rows the update carries, and the
+    /// legacy link table follows the changed group set.</summary>
+    [TestMethod]
+    public async Task Edit_RemovingAnActivityGroupEntry_SendsTheReducedTargetSetAndLinks()
+    {
+        _activityGroups = [Group(GroupAId, "Alpha"), Group(GroupBId, "Beta")];
+        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
+        SetupGroupSubjects(dto.TopicId);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            MakeChildren(targets:
+            [
+                new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0),
+                new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupBId, 1)
+            ]),
+            linkedGroupIds: [GroupAId, GroupBId]);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(2));
+
+        RemoveBuilderEntry(cut, 1);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(1));
+
+        // Removing a group target resets the FR-58 subject sources, so the author re-picks the topic.
+        await SelectSubjectAsync(cut, dto.TopicId);
+
+        string? updateBody = null;
+        string? linkBody = null;
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}/groups", body => linkBody = body);
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", body => updateBody = body);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        updateBody.Should().Contain(GroupAId.ToString()).And.NotContain(GroupBId.ToString(),
+            "the update carries exactly the reduced target set");
+        linkBody.Should().NotBeNull("the changed group set re-issues the replace-set link route");
+        linkBody.Should().NotContain(GroupBId.ToString());
+    }
+
+    /// <summary>The fail-safe half of the group-link sync: a builder that still holds exactly the
+    /// group target set it loaded never issues the replace-set route, whose payload deletes every
+    /// link missing from it.</summary>
+    [TestMethod]
+    public async Task Edit_ReassertingTheSameGroups_DoesNotRewriteTheLinks()
+    {
+        _activityGroups = [Group(GroupAId, "Alpha")];
+        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
+        SetupGroupSubjects(dto.TopicId);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0)]),
+            linkedGroupIds: [GroupAId]);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(new[] { ("Activity Groups", "Alpha") },
+            "the persisted group target loads into the builder as the same target set"));
+
+        string? updateBody = null;
+        string? linkBody = null;
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}/groups", body => linkBody = body);
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", body => updateBody = body);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        linkBody.Should().BeNull(
+            "an unchanged group target set never issues the replace-set call — the route deletes every " +
+            "link missing from its payload");
+    }
+
+    /// <summary>P1-3 (UX-21): an editable Edit surface whose persisted targets could not be read
+    /// renders the builder DISABLED WITH REASON — the add action is inert and a save writes no target
+    /// set at all.</summary>
+    [TestMethod]
+    public void Edit_TargetsLoadFails_RendersTheBuilderDisabledWithReason_AndBlocksTheSave()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, childrenReadFails: true);
+
+        cut.WaitForAssertion(() =>
         {
-            var note = dropped.Find("#authoring-groups-dropped-links");
-            note.TextContent.Should().Contain("Retired Choir",
-                "§17 item 4: the note names the archived group the name-bearing read carried");
-            note.TextContent.Should().Contain(Authoring.DroppedGroupLinksNoteLead);
-            note.TextContent.Should().NotContain("lost",
-                "the link is not re-writable, which is not the same as lost");
+            cut.FindAll("#authoring-targets-reason").Should().ContainSingle(
+                "UX-21: the builder names the reason it is disabled")
+                .Which.TextContent.Should().Contain(Authoring.ChildrenUnavailableReason);
+            cut.Find("fluent-button[title='Add target']").HasAttribute("disabled").Should().BeTrue(
+                "P1-3: no entry may be authored over an unknown persisted set");
         }, TimeSpan.FromSeconds(5));
 
-        // The picker still cannot represent it — the note is the only thing that says so.
-        Picker(dropped, "authoring-audience-groups").SelectedOptions.Should().BeEmpty(
-            "vacuity guard: an archived group is genuinely not selectable, which is why it needs naming");
+        string? updateBody = null;
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", body => updateBody = body);
 
-        // Nothing dropped → no note: the paragraph can never become permanent furniture. The link and the
-        // target row are in step here — the state the save path keeps them in — so the picker really does
-        // represent the link.
-        var intact = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
-            children: MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, activeId, 0)]),
-            linkedGroupIds: [activeId]);
+        SaveDraft(cut);
 
-        intact.WaitForAssertion(() =>
+        updateBody.Should().BeNull("P1-3: the save path refuses to write targets it could not read");
+
+        // The refusal lands on the page's error surface. A kebab-invoked action's state change renders
+        // on the NEXT pass (the event is declared by RowActionsMenu, not by this page), so the test
+        // re-sets the same parameters — which renders without re-entering the load — before reading it.
+        cut.Render(p => p
+            .Add(x => x.Mode, AssignmentAuthoringMode.Edit)
+            .Add(x => x.Id, dto.Id));
+
+        cut.WaitForAssertion(() => cut.Find("#authoring-error").TextContent
+            .Should().Contain(Authoring.ChildrenUnavailableReason,
+                "P1-3: the refused save explains itself with the UX-21 reason"), TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>P2-1 rework, fail-closed: an unknown persisted link set blocks the save with the reason
+    /// rather than writing a replace-set the author never saw.</summary>
+    [TestMethod]
+    public void Edit_LinkedGroupsReadFails_BlocksTheSaveWithReason()
+    {
+        _activityGroups = [Group(GroupAId, "Alpha")];
+        var dto = MakeDto(AssignmentStatusDto.Draft, audience: TargetAudienceTypeDto.SelectedGroups);
+
+        // The link read is stubbed to 500 for this dto only; every other route the Edit surface touches
+        // is registered here (this test registers its own routes instead of calling SetupAssignment,
+        // whose /groups route returns 200).
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/authoring")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(
+                MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.ActivityGroup, GroupAId, 0)]),
+                _apiJsonOptions));
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/groups")
+            .Respond(HttpStatusCode.InternalServerError);
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/questions-draft")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/students/subjects/by-grade/*")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(dto, _apiJsonOptions));
+
+        var cut = Render<Authoring>(parameters =>
         {
-            Picker(intact, "authoring-audience-groups").SelectedOptions.Should().NotBeEmpty(
-                "vacuity guard: the representable link really was selected");
-            intact.FindAll("#authoring-groups-dropped-links").Should().BeEmpty(
-                "§17 item 4: no dropped link, no note");
+            parameters.Add(p => p.Mode, AssignmentAuthoringMode.Edit);
+            parameters.Add(p => p.Id, dto.Id);
+        });
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+
+        string? updateBody = null;
+        CaptureRequest(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}", body => updateBody = body);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#authoring-error").TextContent.Should().Contain(Authoring.GroupLinksUnavailableReason,
+                "the unknown link set explains why the save is refused");
+            updateBody.Should().BeNull("a replace-set over an unread link set would delete the stored links");
         }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>TGT-13/FR-58: a group target with no subject selected cannot be saved — the gate
+    /// refuses before any request is sent.</summary>
+    [TestMethod]
+    public async Task Create_GroupTargetWithoutASubject_BlocksTheSave()
+    {
+        _activityGroups = [Group(GroupAId, "Alpha")];
+        SetupGroupSubjects(); // the group resolves NO subject
+        RegisterTargetsDialog().Enqueue(
+            new TargetsAndAudienceEntry(TargetsAndAudienceCategory.ActivityGroups, GroupAId, "Alpha"));
+        var previewReads = SetupRecipientPreviewRead();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
+
+        await SetTitleAsync(cut, "Group-targeted HW");
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(1));
+
+        string? createBody = null;
+        CaptureRequest(HttpMethod.Post, "http://localhost/assignments", body => createBody = body);
+
+        cut.Find("#authoring-primary-action").Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Select a subject."), TimeSpan.FromSeconds(5));
+        createBody.Should().BeNull("the gate blocks the save before any request is sent");
+    }
+
+    /// <summary>R2: with FEATURE:EnableActivityGroups off the builder offers no activity-group values
+    /// (the category stays in the dialog; its picker is simply empty).</summary>
+    [TestMethod]
+    public async Task ActivityGroupsFlagOff_DoesNotOfferAGroupTargetValue()
+    {
+        _flags.ActivityGroupsEnabled = false;
+        _activityGroups = [Group(GroupAId, "Alpha")];
+        var stub = RegisterTargetsDialog();
+        var previewReads = SetupRecipientPreviewRead();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+        WaitForLoadSettled(cut, previewReads);
+
+        await AddTargetEntryAsync(cut);
+
+        cut.WaitForAssertion(() =>
+        {
+            stub.Models.Should().ContainSingle("the add dialog was opened");
+            stub.Models[0].ActivityGroupOptions.Should().BeEmpty(
+                "the group target must not be offered when FEATURE:EnableActivityGroups is off");
+            cut.Markup.Should().NotContain("By Group", "the retired group picker stays gone");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>TGT-16 (restored): the preview renders under the builder card and re-resolves from the
+    /// CURRENT set, because the model's targets are synced on every add — not only at save.</summary>
+    [TestMethod]
+    public async Task Builder_Add_ReResolvesTheRecipientPreviewFromTheCurrentSet()
+    {
+        var previewRequests = 0;
+        var previewQueries = new List<string>();
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
+            .With(req =>
+            {
+                previewQueries.Add(req.RequestUri!.Query);
+                return true;
+            })
+            .Respond(_ => PreviewResponse(++previewRequests == 1
+                ? "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":false}"
+                : "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}"));
+
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5")];
+        RegisterTargetsDialog().Enqueue(
+            new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"));
+
+        var clock = new FakeTimeProvider();
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create, timeProvider: clock);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
+
+        await AddTargetEntryAsync(cut);
+        cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(1));
+        previewRequests.Should().Be(1, "the trailing debounce is armed, not elapsed");
+
+        clock.Advance(FakeTimeProvider.PreviewDebounce);
+
+        cut.WaitForAssertion(() => cut.Find("#authoring-audience-preview").TextContent.Trim()
+            .Should().Contain("Students matched: 7"), TimeSpan.FromSeconds(2));
+        previewRequests.Should().Be(2, "one preview read per settled debounce");
+        previewQueries[1].Should().Contain($"gradeLevelIds={BuilderGradeAId}",
+            "P1-4: the model's targets are synced on the ADD, so the preview resolves the current set");
+    }
+
+    /// <summary>TGT-16/F10 (restored): a degraded read renders the unavailable reason under the builder
+    /// and never the all-zero counts.</summary>
+    [TestMethod]
+    public async Task Builder_DegradedPreview_RendersTheUnavailableReason()
+    {
+        var previewRequests = 0;
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
+            .Respond(_ =>
+            {
+                previewRequests++;
+                return PreviewResponse(
+                    "{\"studentsMatched\":0,\"primaryContacts\":0,\"otherContacts\":0,\"previewDegraded\":true}");
+            });
+
+        var clock = new FakeTimeProvider();
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            MakeChildren(targets: [new AssignmentTargetDto(TargetKindDto.Stream, BuilderStreamId, 0)]),
+            timeProvider: clock);
+
+        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain(Authoring.PreviewUnavailableReason,
+                "TGT-16: a degraded preview shows the inline advisory note");
+            cut.Markup.Should().NotContain("Students matched",
+                "F10: a degraded read answers all-zero counts — they are never rendered as trustworthy");
+            cut.FindAll("#authoring-audience-preview").Should().BeEmpty(
+                "F10: the reason replaces the counts line, it is never shown beside it");
+            cut.FindAll("#authoring-audience-preview-note").Should().ContainSingle();
+        }, TimeSpan.FromSeconds(2));
+    }
+
+    /// <summary>TGT-16/D-4: a burst of builder changes leaves exactly ONE trailing debounce alive, so
+    /// the audience is read once per settle rather than once per change.</summary>
+    [TestMethod]
+    public async Task Builder_RapidChanges_CoalesceIntoASinglePreviewRead()
+    {
+        var previewRequests = 0;
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/recipient-preview*")
+            .Respond(_ =>
+            {
+                previewRequests++;
+                return PreviewResponse(
+                    "{\"studentsMatched\":7,\"primaryContacts\":5,\"otherContacts\":2,\"previewDegraded\":false}");
+            });
+
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.Students, BuilderStudentId, "Ada Lovelace (S1001)"))
+            .Enqueue(new TargetsAndAudienceEntry(
+                TargetsAndAudienceCategory.Students, Guid.Parse("dddddddd-5555-5555-5555-555555555555"), "Bob Stone (S1002)"))
+            .Enqueue(new TargetsAndAudienceEntry(
+                TargetsAndAudienceCategory.Everyone, null, TargetsAndAudienceEntry.EveryoneLabel));
+
+        var clock = new FakeTimeProvider();
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create, timeProvider: clock);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        await AdvanceUntilAsync(clock, () => previewRequests >= 1);
+        previewRequests.Should().Be(1);
+
+        // Three builder changes in quick succession. Each one re-schedules the trailing debounce and
+        // cancels its predecessor.
+        var burst = new[]
+        {
+            AddTargetEntryAsync(cut),
+            AddTargetEntryAsync(cut),
+            AddTargetEntryAsync(cut)
+        };
+        await Task.WhenAll(burst).WaitAsync(TimeSpan.FromSeconds(5));
+
+        cut.WaitForAssertion(() => clock.PendingTimers.Should().Be(1,
+            "the burst left exactly ONE trailing debounce armed"), TimeSpan.FromSeconds(5));
+        previewRequests.Should().Be(1, "a held debounce reads nothing before the clock is advanced");
+
+        clock.Advance(FakeTimeProvider.PreviewDebounce);
+
+        cut.WaitForAssertion(() => previewRequests.Should().Be(2), TimeSpan.FromSeconds(2));
+        clock.PendingTimers.Should().Be(0, "nothing is left armed to fire a second read");
     }
 
     // ── F7: a disabled action explains itself (the authoring call site) ────

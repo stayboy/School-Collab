@@ -67,7 +67,6 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         bool promptLocked = false,
         Guid? topicId = null,
         string? topicName = null,
-        Guid? gradeLevelId = null,
         EventCallback? onQuestionsChanged = null,
         IUrlTextExtractor? urlExtractor = null,
         Guid? assignmentId = null)
@@ -94,7 +93,6 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             parameters.Add(p => p.PromptLocked, promptLocked);
             parameters.Add(p => p.TopicId, topicId);
             parameters.Add(p => p.TopicName, topicName);
-            parameters.Add(p => p.GradeLevelId, gradeLevelId);
             parameters.Add(p => p.AssignmentId, assignmentId);
             parameters.Add(p => p.OnQuestionsChanged,
                 onQuestionsChanged ?? EventCallback.Empty);
@@ -124,7 +122,6 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             gateEnabled: true,
             topicId: topicId,
             topicName: "Photosynthesis",
-            gradeLevelId: null,
             onQuestionsChanged: cb);
 
         // Find and click the Generate button. The button text is "Generate"

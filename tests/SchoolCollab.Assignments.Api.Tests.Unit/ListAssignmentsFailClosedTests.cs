@@ -121,7 +121,7 @@ public class ListAssignmentsFailClosedTests
     private static AssignmentSummary Row(string title, Guid creator) =>
         new(
             Guid.NewGuid(), title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, SubjectId, GradeId, AssignmentStatus.Draft,
+            TargetAudienceType.AllStudents, SubjectId, [GradeId], AssignmentStatus.Draft,
             DueDate: null, MaxScore: null, MandatoryReview: false,
             CreatedByTeacherId: creator, CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow);
 

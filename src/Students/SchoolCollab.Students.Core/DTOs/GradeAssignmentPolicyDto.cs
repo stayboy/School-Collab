@@ -16,6 +16,8 @@ public sealed record GradeAssignmentPolicyDto(
     bool? RequiresApprovalBeforePublish,
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
+    bool? MandatoryReview,
+    int? ArchiveGraceDays,
     DateTimeOffset UpdatedAt)
 {
     /// <summary>

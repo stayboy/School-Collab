@@ -77,10 +77,22 @@ public class AssignmentRequiresApprovalProjectionTests
         };
     }
 
-    private static Assignment NewAssignment(Guid? gradeLevelId) =>
-        Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, gradeLevelId, null, null, TeacherId)
+    /// <summary>Round <c>drop-primary-grade</c>: a row's grade scope is its authored grade TARGETS,
+    /// so the policy-scope grade the list read resolves is DERIVED from them — a null grade here
+    /// means "no grade target" and derives the tenant-default policy.</summary>
+    private static Assignment NewAssignment(Guid? gradeLevelId)
+    {
+        var assignment = Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(TenantA);
+
+        if (gradeLevelId is Guid grade)
+        {
+            assignment.WithGradeTarget(grade);
+        }
+
+        return assignment;
+    }
 
     private static EffectiveAssignmentPolicy PolicyWith(bool requiresApproval) =>
         FakeAssignmentPolicyResolver.BuiltInDefault with { RequiresApprovalBeforePublish = requiresApproval };
@@ -314,7 +326,7 @@ public class AssignmentRequiresApprovalProjectionTests
     public async Task List_AssignmentsWithoutAGrade_ResolveThroughTheNoneSentinelKey()
     {
         using var s = Build(nameof(List_AssignmentsWithoutAGrade_ResolveThroughTheNoneSentinelKey));
-        s.Db.Assignments.Add(NewAssignment(gradeLevelId: null));
+        s.Db.Assignments.Add(NewAssignment(null));
         await s.Db.SaveChangesAsync();
 
         var resolver = new RecordingAssignmentPolicyResolver(PolicyWith(false));

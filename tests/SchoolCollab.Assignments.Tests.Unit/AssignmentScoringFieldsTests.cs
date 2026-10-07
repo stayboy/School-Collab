@@ -21,7 +21,7 @@ public class AssignmentScoringFieldsTests
         decimal? maxScore = null,
         GradingFormat grading = GradingFormat.AutoGraded) =>
         Assignment.Create("Title", null, AssignmentType.Digital, grading,
-            TargetAudienceType.AllStudents, TopicId, null, null, maxScore, TeacherId,
+            TargetAudienceType.AllStudents, TopicId, null, maxScore, TeacherId,
             passScore: passScore, maxAttempts: maxAttempts);
 
     // ── PassScore / MaxAttempts round-trip on Create ────────────────────
@@ -96,7 +96,7 @@ public class AssignmentScoringFieldsTests
     {
         var a = CreateAssignment();
         a.Update("T", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, 100m, true,
+            TargetAudienceType.AllStudents, TopicId, null, 100m, true,
             passScore: 75m, maxAttempts: 4);
 
         a.PassScore.Should().Be(75m);
@@ -108,7 +108,7 @@ public class AssignmentScoringFieldsTests
     {
         var a = CreateAssignment(maxScore: 100m);
         var act = () => a.Update("T", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, 100m, true,
+            TargetAudienceType.AllStudents, TopicId, null, 100m, true,
             passScore: 101m, maxAttempts: 3);
 
         act.Should().Throw<ArgumentException>()
@@ -120,7 +120,7 @@ public class AssignmentScoringFieldsTests
     {
         var a = CreateAssignment();
         var act = () => a.Update("T", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, true,
+            TargetAudienceType.AllStudents, TopicId, null, null, true,
             passScore: null, maxAttempts: 0);
 
         act.Should().Throw<ArgumentException>()
@@ -132,7 +132,7 @@ public class AssignmentScoringFieldsTests
     {
         var a = CreateAssignment(passScore: 80m, maxAttempts: 3);
         a.Update("T", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, true,
+            TargetAudienceType.AllStudents, TopicId, null, null, true,
             passScore: null, maxAttempts: null);
 
         a.PassScore.Should().BeNull();

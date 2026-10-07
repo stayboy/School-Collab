@@ -65,10 +65,11 @@ public class SubmissionEngineTests
     private static Assignment NewAssignment(bool mandatoryReview = true)
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, GradeLevelId, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(TenantProvider())
             // R2 (TGT-13/D-1): the publish path reads the authored target rows, so this fixture
-            // needs a grade target (matching its GradeLevelId) to stay publishable.
+            // needs a grade target (round drop-primary-grade: the grade target IS the row's grade
+            // scope) to stay publishable.
             .WithGradeTarget(GradeLevelId);
         if (!mandatoryReview)
             typeof(Assignment).GetProperty(nameof(Assignment.MandatoryReview))!.SetValue(a, false);

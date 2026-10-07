@@ -95,10 +95,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_date");
 
-                    b.Property<Guid?>("GradeLevelId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("grade_level_id");
-
                     b.Property<int>("GradingFormat")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -183,9 +179,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
 
                     b.HasIndex("CreatedByTeacherId")
                         .HasDatabaseName("ix_assignments_teacher_id");
-
-                    b.HasIndex("GradeLevelId")
-                        .HasDatabaseName("ix_assignments_grade_level_id");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_assignments_status");

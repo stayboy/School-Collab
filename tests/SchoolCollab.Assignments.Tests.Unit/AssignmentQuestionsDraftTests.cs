@@ -17,7 +17,7 @@ public class AssignmentQuestionsDraftTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null);
+            TargetAudienceType.AllStudents, TopicId, null, null);
 
     private static Assignment NewScheduled()
     {

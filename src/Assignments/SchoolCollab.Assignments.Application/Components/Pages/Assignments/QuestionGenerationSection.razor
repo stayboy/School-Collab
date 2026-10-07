@@ -106,10 +106,6 @@
     /// <see cref="QuestionGenerationRequest.TopicName"/>.</summary>
     [Parameter] public string? TopicName { get; set; }
 
-    /// <summary>The selected grade level's id, passed into the
-    /// generation request when known.</summary>
-    [Parameter] public Guid? GradeLevelId { get; set; }
-
     /// <summary>R3 (D4/P1-2): the assignment being authored, or null in Create mode (where no row
     /// exists yet to hang a generation header off). When set, every successful generate records one
     /// <c>AssignmentQuestionGeneration</c> header and stamps its id onto the appended rows.</summary>
@@ -207,7 +203,6 @@
         var request = new QuestionGenerationRequest(
             TopicId: TopicId.Value,
             TopicName: TopicName ?? string.Empty,
-            GradeLevelId: GradeLevelId,
             ContextStrands: null,
             QuestionCount: _questionCount,
             Types: types,

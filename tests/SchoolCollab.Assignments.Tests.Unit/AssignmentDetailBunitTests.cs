@@ -126,8 +126,14 @@ public class AssignmentDetailBunitTests : BunitContext
         // the generic detail read (MockHttp v6 first-match ordering).
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/questions-draft")
             .Respond(HttpStatusCode.OK, "application/json", "[]");
-        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
-            .Respond(HttpStatusCode.OK, "application/json", "{\"requiresSignature\":false,\"signatureMode\":\"Disabled\"}");
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/effective-policy")
+            .Respond(HttpStatusCode.OK, "application/json",
+                "{\"signatureRequirement\":\"Disabled\",\"requiresApprovalBeforePublish\":false," +
+                "\"maxPrimaryContacts\":null,\"maxCopyContacts\":null,\"mandatoryReview\":null," +
+                "\"archiveGraceDays\":null,\"signatureRequirementFromOverride\":false," +
+                "\"requiresApprovalBeforePublishFromOverride\":false,\"maxPrimaryContactsFromOverride\":false," +
+                "\"maxCopyContactsFromOverride\":false,\"mandatoryReviewFromOverride\":false," +
+                "\"archiveGraceDaysFromOverride\":false}");
         _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
             .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
         _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels")
@@ -178,8 +184,6 @@ public class AssignmentDetailBunitTests : BunitContext
             TargetAudienceType: TargetAudienceTypeDto.AllStudents,
             TopicId: Guid.NewGuid(),
             TopicName: "Math",
-            GradeLevelId: null,
-            GradeName: null,
             Status: status,
             DueDate: dueDate,
             MaxScore: null,
@@ -217,8 +221,12 @@ public class AssignmentDetailBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Scheduled");
-            cut.Markup.Should().Contain("Available from",
-                "the Delivery & Publishing compartment surfaces the Scheduled window (UX-15)");
+            // Round authoring-compact-fields paired Status with Available from, so the label no longer
+            // reads "Available from" alone — the scheduled window is asserted through the Basics
+            // lifecycle readout itself (UX-15), which is what the old text proxy stood in for.
+            cut.Find("#authoring-basics-available-from").TextContent.Trim()
+                .Should().Be(dto.AvailableFromUtc!.Value.ToLocalTime().ToString("g"),
+                    "the Basics lifecycle readout surfaces the Scheduled window (UX-15)");
             // §11: Scheduled's primary action is Unpublish; the secondary actions are in the
             // kebab (Reschedule replaces the retired "Cancel schedule" button).
             cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Unpublish");

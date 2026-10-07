@@ -22,15 +22,17 @@ namespace SchoolCollab.Assignments.Api.Tests.Unit;
 
 /// <summary>
 /// R2-7 (TGT-16 / D-4): wire tests for <code>GET /assignments/recipient-preview</code>.
-/// Covers the full query binding (including the optional <code>primaryGradeId</code>),
-/// the happy-path count shape, and the degraded shape — HTTP 200 with all-zero counts
-/// and <code>PreviewDegraded = true</code>, never an exception.
+/// Covers the full query binding (the posted grade/stream/student/group target arrays), the
+/// happy-path count shape, and the degraded shape — HTTP 200 with all-zero counts and
+/// <code>PreviewDegraded = true</code>, never an exception.
+/// Round <c>drop-primary-grade</c>: the optional <code>primaryGradeId</code> is gone — publish's
+/// teacher cohort and both policy legs are derived from the posted grade targets, and the preview
+/// reproduces that derivation.
 /// </summary>
 [TestClass]
 public class AssignmentRecipientPreviewRouteTests
 {
     private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid GradeA = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid Student1 = Guid.Parse("33333333-3333-3333-3333-333333333331");
     private static readonly Guid Student2 = Guid.Parse("33333333-3333-3333-3333-333333333332");
     private static readonly Guid Contact1 = Guid.Parse("66666666-6666-6666-6666-666666666661");
@@ -142,7 +144,7 @@ public class AssignmentRecipientPreviewRouteTests
     }
 
     [TestMethod]
-    public async Task RecipientPreview_BindsAllQueryArrays_AndPrimaryGradeId()
+    public async Task RecipientPreview_BindsAllQueryArrays_AndFeedsThePostedGradesToTheTeacherCohortLeg()
     {
         var (app, client, resolver, contacts) = await StartHostAsync();
         await using (app)
@@ -153,7 +155,7 @@ public class AssignmentRecipientPreviewRouteTests
             var group = Guid.NewGuid();
 
             _ = await GetPreviewAsync(client,
-                $"?allStudents=false&gradeLevelIds={grade}&streamCodedValueIds={stream}&studentIds={student}&activityGroupIds={group}&primaryGradeId={GradeA}");
+                $"?allStudents=false&gradeLevelIds={grade}&streamCodedValueIds={stream}&studentIds={student}&activityGroupIds={group}");
 
             resolver.LastIncludeAllStudents.Should().BeFalse();
             resolver.LastConstraints.Should().Contain(c => c.Kind == TargetKind.GradeLevel && c.RefId == grade);
@@ -161,7 +163,10 @@ public class AssignmentRecipientPreviewRouteTests
             resolver.LastConstraints.Should().Contain(c => c.Kind == TargetKind.Student && c.RefId == student);
             resolver.LastConstraints.Should().Contain(c => c.Kind == TargetKind.ActivityGroup && c.RefId == group);
             contacts.LastRequest.Should().NotBeNull();
-            contacts.LastRequest!.GradeLevelId.Should().Be(GradeA);
+            contacts.LastRequest!.GradeLevelIds.Should().BeEquivalentTo(
+                new[] { grade },
+                "the preview's teacher-cohort input is the POSTED grade-target set (round "
+                + "drop-primary-grade: there is no separately-authored primary grade to carry)");
         }
     }
 

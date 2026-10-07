@@ -12,6 +12,7 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -47,7 +48,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         return (db, sp.GetRequiredService<HybridCache>(), tenants);
     }
 
-    private static CreateAssignmentCommandHandler NewHandler(AssignmentsDbContext db, HybridCache cache, ITenantProvider tenants)
+    private static CreateAssignmentCommandHandler NewHandler(
+        AssignmentsDbContext db, HybridCache cache, ITenantProvider tenants,
+        FakeAssignmentPolicyResolver? policyResolver = null)
     {
         var generator = new Mock<IEntityCodeGenerator>();
         generator.Setup(g => g.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -64,6 +67,7 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = true },
             new AcceptAllActivityGroupLookup(),
+            policyResolver ?? new FakeAssignmentPolicyResolver(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
     }
 
@@ -73,7 +77,6 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewAttachmentDto>? attachments = null,
         IReadOnlyList<NewContentModuleDto>? contentModules = null,
         IReadOnlyList<NewResourceDto>? resources = null,
-        int archiveGraceDays = 30,
         // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap.
         decimal? passScore = null,
         int? maxAttempts = null,
@@ -88,7 +91,6 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             GradingFormat: GradingFormat.AutoGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: Guid.NewGuid(),
-            GradeLevelId: null,
             DueDate: null,
             MaxScore: 100m,
             MandatoryReview: true,
@@ -97,7 +99,6 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             Attachments: attachments,
             ContentModules: contentModules,
             Resources: resources,
-            ArchiveGraceDays: archiveGraceDays,
             PassScore: passScore,
             MaxAttempts: maxAttempts,
             // WS-B2 (spec §3.4 line 70): threaded to Assignment.Create.
@@ -355,10 +356,10 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         stored.Attachments.Should().BeEmpty();
     }
 
-    // ── WS-A2 / decision (k): ArchiveGraceDays threading on create ──
+    // ── D6/D10 (round assignment-rules-policy-rework): the archive window is policy-resolved ──
 
     [TestMethod]
-    public async Task HandleAsync_ArchiveGraceDays_DefaultsTo30_WhenOmitted()
+    public async Task HandleAsync_UnsetPolicyArchiveWindow_KeepsTheBuiltInRetentionFloor()
     {
         var (db, cache, tenants) = BuildScope("create-gracedays-default");
         using var _db = db;
@@ -368,21 +369,28 @@ public class CreateAssignmentCommandHandlerQuestionsTests
 
         var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
         stored.ArchiveGraceDays.Should().Be(30,
-            "the command defaults to 30 when ArchiveGraceDays is omitted (WS-A2 / spec §7 Q6 default)");
+            "an unset policy leaves the built-in 30-day retention floor (D6/OD2) — the request has no say");
     }
 
     [TestMethod]
-    public async Task HandleAsync_ArchiveGraceDays_ExplicitValuePersisted()
+    public async Task HandleAsync_ResolvedPolicyArchiveWindow_IsWhatGetsPersisted()
     {
-        var (db, cache, tenants) = BuildScope("create-gracedays-explicit");
+        var (db, cache, tenants) = BuildScope("create-gracedays-policy");
         using var _db = db;
-        var handler = NewHandler(db, cache, tenants);
+        var resolver = new FakeAssignmentPolicyResolver
+        {
+            Policy = new EffectiveAssignmentPolicyResolver().Resolve(
+                new AssignmentPolicyFields { ArchiveGraceDays = 7 }, gradeOverride: null),
+        };
+        var handler = NewHandler(db, cache, tenants, resolver);
 
-        var id = await handler.HandleAsync(SampleCommand(archiveGraceDays: 7));
+        var id = await handler.HandleAsync(SampleCommand());
 
         var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
         stored.ArchiveGraceDays.Should().Be(7,
-            "the explicit ArchiveGraceDays value must thread through to the created aggregate (WS-A2 / decision (j))");
+            "the resolved policy — not the author — decides the archive window (D6)");
+        resolver.RequestedGradeLevelIds.Should().ContainSingle(
+            "the create path resolves the policy for its derived policy-scope grade (no grade target ⇒ null)");
     }
 
     // ── WS-A3 / spec §3.3 + §7 Q4: PassScore / MaxAttempts threading ──

@@ -191,6 +191,18 @@ the user wants to choose explicitly:
    lean"): the parent transcribes acceptance and no UI tester is dispatched — the
    orchestrator plan pass and its review are never skipped.
 
+**Unattended (a modifier on (2) and (3), never a mode of its own).** The owner may
+run a round unattended **for that round only** — never a default, never inferred from
+silence, never on by absence. Asking for it is part of this menu's question, not a
+separate flag. In an unattended round the parent **still holds** the grill round and
+auto-accepts its recommendations as "all as recommended"; it may **never** auto-accept the
+plan author's own recommendations (that stays human-gated), and migrations, contract/wire
+shape, security and auth, tenant isolation, and deleting a public route **always reach a
+human** unless the owner pre-authorises that specific round by name. Record it on round-doc
+line 1 as `Mode: unattended (auto-accept recommendations)` and flag the ledger row — an
+unattended pin and an owner pin must never look alike. Full rules: skill § "Unattended
+rounds".
+
 Each round produces a single `round-<slug>.md` (+ `diffs-<slug>.patch`) in
 `documents/rounds/` — see "Repository docs layout" below.
 
@@ -447,6 +459,12 @@ in this policy (explicit authorization for each action, the change-set
 review, `SCHOOLCOLLAB_ALLOW_PUSH=1` for pushes, no merge without
 instruction) applies unchanged to the agent's steps; the agent reports the
 staged paths, commit SHA, and PR links back.
+
+**One writer per working tree.** Never run two writing subagents concurrently in
+the same checkout: their edits land in one shared diff that cannot be attributed
+to either run, and a reviewer cannot diff it. Run writers sequentially, or isolate
+each in its own git worktree. Writing the plan, spec, or round doc is the parent
+orchestrator's own work, never a delegate's.
 
 **Keep delegate briefs short and bounded.** Multi-minute waits (CI polling,
 sleeps) belong in the **parent**, which survives an interrupted call or a

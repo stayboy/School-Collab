@@ -27,12 +27,13 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public AssignmentType AssignmentType { get; private set; }
     public GradingFormat GradingFormat { get; private set; }
     public TargetAudienceType TargetAudienceType { get; private set; }
-    // Operational references into the Students bounded context (global GradeLevel/
-    // Topic entities). These replace the former coded-value ids so the assignment
-    // reports against the real operational entities; display names are still
-    // resolved client-side from tenant-resolved coded values (spec §5.7).
+    // Operational reference into the Students bounded context (the global Topic
+    // entity). This replaces the former coded-value id so the assignment reports
+    // against the real operational entity; the display name is still resolved
+    // client-side from tenant-resolved coded values (spec §5.7). The assignment's
+    // grades live in its <see cref="Targets"/> rows (TargetKind.GradeLevel) — there is
+    // no separately-authored primary grade.
     public Guid TopicId { get; private set; }
-    public Guid? GradeLevelId { get; private set; }
     /// <summary>Auto-generated assignment code (e.g. ASGA01) — spec §3.6.</summary>
     public string? AssignmentNumber { get; private set; }
 
@@ -55,8 +56,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// would deadlock the literal cap check).</summary>
     public int? MaxAttempts { get; private set; }
     /// <summary>WS-C1 / spec §7 Q1 — whether a guardian signature is required
-    /// after completion. Snapshotted at create from the resolved grade/tenant
-    /// default via the wizard pre-fill; the author may override. Defaults to
+    /// after completion. Snapshotted at create/update from the resolved grade/tenant
+    /// policy; never an author input (D6/D10). Defaults to
     /// <see langword="false"/> when not supplied.</summary>
     public bool RequiresSignature { get; private set; }
     /// <summary>WS-B2 (spec §3.4 line 70) — the requested easy-question count,
@@ -77,7 +78,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// <summary>
     /// When true (default), student self-submit is blocked until a Primary
     /// guardian reviews + enables (or submits on behalf). When false, the
-    /// gate is optional (spec §4.7).
+    /// gate is optional (spec §4.7). Snapshotted at create/update from the resolved
+    /// effective policy (the author supplies only the fallback the policy leaves
+    /// unset — D3/OD1) and constrained by the D4 implication:
+    /// <see cref="RequiresSignature"/> implies this flag.
     /// </summary>
     public bool MandatoryReview { get; private set; }
     /// <summary>Set when the assignment is published (spec §4.8). Null while Draft.</summary>
@@ -137,7 +141,6 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         GradingFormat gradingFormat,
         TargetAudienceType targetAudienceType,
         Guid topicId,
-        Guid? gradeLevelId,
         DateTimeOffset? dueDate,
         decimal? maxScore,
         Guid createdByTeacherId = default,
@@ -155,7 +158,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         int? maxAttempts = null,
         /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
         /// required after completion. Snapshotted from the resolved
-        /// grade/tenant default; the author may override.</summary>
+        /// grade/tenant policy; never an author override (D10).</summary>
         bool requiresSignature = false,
         /// <summary>WS-B2 (spec §3.4 line 70): requested optional per-difficulty
         /// counts. Null = let the model decide; no cross-field sum validation.</summary>
@@ -168,14 +171,18 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
-        if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
-            throw new ArgumentException("SelectedGrades assignments require a grade level.", nameof(gradeLevelId));
         if (maxScore.HasValue && passScore.HasValue && passScore.Value > maxScore.Value)
             throw new ArgumentException("Pass score must not exceed the max score.", nameof(passScore));
         if (maxAttempts.HasValue && maxAttempts.Value < 1)
             throw new ArgumentException("Max attempts must be at least 1.", nameof(maxAttempts));
         if (difficultyEasy < 0 || difficultyMedium < 0 || difficultyHard < 0)
             throw new ArgumentException("Difficulty counts must be zero or greater.", nameof(difficultyEasy));
+        // D4 backstop: a signed assignment must also require guardian review, exactly as
+        // passScore <= maxScore is asserted here rather than only at the resolution seam. A
+        // caller that bypasses the effective-policy resolver cannot persist the contradiction.
+        if (requiresSignature && !mandatoryReview)
+            throw new ArgumentException(
+                "A signature-required assignment must also require guardian review.", nameof(mandatoryReview));
 
         var now = DateTimeOffset.UtcNow;
         var assignment = new Assignment
@@ -188,7 +195,6 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             GradingFormat = gradingFormat,
             TargetAudienceType = targetAudienceType,
             TopicId = topicId,
-            GradeLevelId = gradeLevelId,
             DueDate = dueDate,
             MaxScore = maxScore,
             PassScore = passScore,
@@ -222,7 +228,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
-        Guid topicId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
+        Guid topicId, DateTimeOffset? dueDate, decimal? maxScore,
         bool mandatoryReview, string? aiPromptOverride = null, int archiveGraceDays = 30,
         /// <summary>WS-A3 (spec §3.3): pass/fail score threshold. Null
         /// means no pass/fail signal. When both are set must be &lt;=
@@ -232,7 +238,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         /// means unlimited. When set must be &gt;= 1.</summary>
         int? maxAttempts = null,
         /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
-        /// required after completion. Round-trips the create-time snapshot.</summary>
+        /// required after completion. Re-snapshotted from the currently resolved
+        /// grade/tenant policy; never an author override (D6/D10).</summary>
         bool requiresSignature = false,
         /// <summary>WS-B2 (spec §3.4 line 70): requested optional per-difficulty
         /// counts. Null = let the model decide; no cross-field sum validation.</summary>
@@ -247,14 +254,16 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             throw new InvalidOperationException("Only draft or scheduled assignments can be updated.");
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
-        if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
-            throw new ArgumentException("SelectedGrades assignments require a grade level.", nameof(gradeLevelId));
         if (maxScore.HasValue && passScore.HasValue && passScore.Value > maxScore.Value)
             throw new ArgumentException("Pass score must not exceed the max score.", nameof(passScore));
         if (maxAttempts.HasValue && maxAttempts.Value < 1)
             throw new ArgumentException("Max attempts must be at least 1.", nameof(maxAttempts));
         if (difficultyEasy < 0 || difficultyMedium < 0 || difficultyHard < 0)
             throw new ArgumentException("Difficulty counts must be zero or greater.", nameof(difficultyEasy));
+        // D4 backstop — the Update half of the Create guard above.
+        if (requiresSignature && !mandatoryReview)
+            throw new ArgumentException(
+                "A signature-required assignment must also require guardian review.", nameof(mandatoryReview));
 
         Title = title.Trim();
         Description = description?.Trim();
@@ -263,7 +272,6 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         GradingFormat = gradingFormat;
         TargetAudienceType = targetAudienceType;
         TopicId = topicId;
-        GradeLevelId = gradeLevelId;
         DueDate = dueDate;
         MaxScore = maxScore;
         PassScore = passScore;
@@ -286,8 +294,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// <c>DisplayOrder</c> 0..n-1; <see langword="null"/> preserves the current rows (the
     /// questions/attachments/modules null-means-preserve contract). Validation, in the order
     /// the spec states it: TGT-13 at-least-one, TGT-2 <c>AllStudents</c> exclusivity and
-    /// uniqueness, per-kind duplicate <c>(Kind, RefId)</c> rejection, the D-8.1 archived-group
-    /// rejection for NEWLY-ADDED group targets, and the D-2 primary-grade rule.
+    /// uniqueness, per-kind duplicate <c>(Kind, RefId)</c> rejection, and the D-8.1 archived-group
+    /// rejection for NEWLY-ADDED group targets.
     /// <para>D-8.1: an already-persisted group target whose group was archived after linking
     /// is NOT re-validated, so a re-save never silently drops the historical row; archived
     /// state still filters recipients at resolution (EC-4) and at the topic gate.</para>
@@ -341,20 +349,6 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                     $"Cannot link archived activity group(s): {string.Join(", ", archivedNewIds)}");
         }
 
-        // D-2 (TGT-11): with two or more distinct grade targets the primary grade is required
-        // and must be one of them.
-        var targetedGradeIds = targets
-            .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
-            .Select(t => t.RefId!.Value)
-            .Distinct()
-            .ToArray();
-        if (targetedGradeIds.Length >= 2
-            && (GradeLevelId is null || !targetedGradeIds.Contains(GradeLevelId.Value)))
-        {
-            throw new ArgumentException(
-                "The primary grade must be one of the targeted grade levels.", nameof(targets));
-        }
-
         _targets.Clear();
         for (var i = 0; i < targets.Count; i++)
         {
@@ -370,9 +364,6 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// at the end of <see cref="Create"/>, <see cref="Update"/> and <see cref="SetTargets"/> —
     /// the three write points — so the list DTO, the Admin list surface and the ward
     /// projection keep reading a correct value without any change of their own.
-    /// <para><see cref="GradeLevelId"/> is deliberately NOT derived: D-2 re-purposes it as the
-    /// authored primary grade, which is a policy/authoring field rather than a delivery
-    /// constraint.</para>
     /// </summary>
     private void SyncDerivedTargeting()
     {

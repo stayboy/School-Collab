@@ -37,6 +37,8 @@ internal sealed class GradeAssignmentPolicyConfiguration
         builder.Property(x => x.RequiresApprovalBeforePublish);
         builder.Property(x => x.MaxPrimaryContacts);
         builder.Property(x => x.MaxCopyContacts);
+        builder.Property(x => x.MandatoryReview);
+        builder.Property(x => x.ArchiveGraceDays);
 
         // One policy row per (tenant, grade); cascade-delete with the grade.
         builder.HasOne<GradeLevel>()

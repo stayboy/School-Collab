@@ -71,7 +71,7 @@ public sealed class LinkAssignmentGroupsRollbackPostgresTests
         {
             var assignment = Assignment.Create(
                 "Math — rollback fixture", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
+                TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
                 .WithTenant(TenantId);
             assignment.SetTargets([(TargetKind.Stream, (Guid?)StreamCodedValueId)], TenantId);
             assignmentId = assignment.Id;

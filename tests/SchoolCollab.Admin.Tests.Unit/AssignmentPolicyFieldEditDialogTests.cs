@@ -87,16 +87,21 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
         SignatureRequirementMode? signature = null,
         bool? requiresApproval = null,
         int? maxPrimary = null,
-        int? maxCopy = null) =>
-        new(signature, requiresApproval, maxPrimary, maxCopy);
+        int? maxCopy = null,
+        bool? mandatoryReview = null,
+        int? archiveGraceDays = null) =>
+        new(signature, requiresApproval, maxPrimary, maxCopy, mandatoryReview, archiveGraceDays);
 
     private static GradeAssignmentPolicyDto Grade(
         Guid gradeId,
         SignatureRequirementMode? signature = null,
         bool? requiresApproval = null,
         int? maxPrimary = null,
-        int? maxCopy = null) =>
-        new(gradeId, signature, requiresApproval, maxPrimary, maxCopy, DateTimeOffset.UnixEpoch);
+        int? maxCopy = null,
+        bool? mandatoryReview = null,
+        int? archiveGraceDays = null) =>
+        new(gradeId, signature, requiresApproval, maxPrimary, maxCopy, mandatoryReview, archiveGraceDays,
+            DateTimeOffset.UnixEpoch);
 
     private sealed record OpenDialog(
         IRenderedComponent<FluentDialogProvider> Cut,
@@ -176,6 +181,65 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
         result.Should().BeNull("cancelling closes the dialog after inspecting the panels");
     }
 
+    // ── D8/AC7 (round assignment-rules-policy-rework): the two new policy fields ──
+
+    /// <summary>
+    /// AC7: the dialog sets the guardian-review flag (Bool kind) in BOTH scopes, and both scopes'
+    /// wires carry it — a field the editor cannot write would be dead configuration.
+    /// </summary>
+    [TestMethod]
+    public async Task Dialog_SetsGuardianReview_BoolKind_InBothScopes()
+    {
+        var gradeId = Guid.NewGuid();
+        var handler = Register(gradeId);
+        var model = new AssignmentPolicyFieldEditDialog.EditModel(
+            "MandatoryReview", "Guardian review before submit", AssignmentPolicyFieldEditDialog.FieldKind.Bool,
+            gradeId,
+            Tenant(SignatureRequirementMode.Disabled, mandatoryReview: null),
+            Grade(gradeId, mandatoryReview: null));
+
+        var dialog = Open(model);
+        Select(dialog.Cut, "apd-global", "true");
+        Select(dialog.Cut, "apd-grade", "false");
+        dialog.Cut.Find("form").Submit();
+
+        var result = await dialog.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().NotBeNull();
+
+        handler.Calls.Should().HaveCount(2);
+        handler.Calls.Single(c => c.Url == "/api/settings/assignment-policy").Body
+            .Should().Contain("\"mandatoryReview\":true", "the tenant default carries the new field");
+        handler.Calls.Single(c => c.Url.Contains("grade-levels")).Body
+            .Should().Contain("\"mandatoryReview\":false", "the grade override carries it too");
+    }
+
+    /// <summary>AC7: the archive window (Int kind) round-trips through the same dialog and both wires.</summary>
+    [TestMethod]
+    public async Task Dialog_SetsArchiveGraceDays_IntKind_InBothScopes()
+    {
+        var gradeId = Guid.NewGuid();
+        var handler = Register(gradeId);
+        var model = new AssignmentPolicyFieldEditDialog.EditModel(
+            "ArchiveGraceDays", "Archive grace window (days)", AssignmentPolicyFieldEditDialog.FieldKind.Int,
+            gradeId,
+            Tenant(archiveGraceDays: 30),
+            Grade(gradeId, archiveGraceDays: null));
+
+        var dialog = Open(model);
+        SetNumber(dialog.Cut, "apd-global", 45);
+        SetNumber(dialog.Cut, "apd-grade", 14);
+        dialog.Cut.Find("form").Submit();
+
+        var result = await dialog.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().NotBeNull();
+
+        handler.Calls.Should().HaveCount(2);
+        handler.Calls.Single(c => c.Url == "/api/settings/assignment-policy").Body
+            .Should().Contain("\"archiveGraceDays\":45", "the tenant default carries the new field");
+        handler.Calls.Single(c => c.Url.Contains("grade-levels")).Body
+            .Should().Contain("\"archiveGraceDays\":14", "the grade override carries it too");
+    }
+
     [TestMethod]
     public async Task Dialog_ChangesOnlyGlobalScope_WritesSettingsEndpoint_Only()
     {
@@ -202,6 +266,9 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
         put.Body.Should().Contain("\"requiresApprovalBeforePublish\":true", "the other fields are preserved");
         put.Body.Should().Contain("\"maxPrimaryContacts\":2");
         put.Body.Should().Contain("\"maxCopyContacts\":4");
+        put.Body.Should().Contain("\"mandatoryReview\":null",
+            "the untouched new field rides the payload as unset");
+        put.Body.Should().Contain("\"archiveGraceDays\":null");
     }
 
     [TestMethod]

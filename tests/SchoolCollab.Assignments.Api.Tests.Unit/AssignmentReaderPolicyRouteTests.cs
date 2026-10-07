@@ -69,7 +69,7 @@ public class AssignmentReaderPolicyRouteTests
     private static readonly string[] AssignmentReaderRoles =
         [RealmRoleNames.Teacher, RealmRoleNames.Staff, RealmRoleNames.UserAdmin, RealmRoleNames.PlatformAdmin];
 
-    /// <summary>The Covered table: exactly these six routes get the reader policy.</summary>
+    /// <summary>The Covered table: exactly these seven routes get the reader policy.</summary>
     private static readonly (string Method, string Pattern)[] CoveredRoutes =
     [
         ("GET", "assignments/"),
@@ -78,6 +78,7 @@ public class AssignmentReaderPolicyRouteTests
         ("GET", "assignments/{id:guid}/submissions/review-queue"),
         ("GET", "assignments/{id:guid}/students/{studentId:guid}/submission"),
         ("GET", "assignments/{id:guid}/sign-off-statuses"),
+        ("GET", "assignments/effective-policy"),
     ];
 
     /// <summary>
@@ -93,7 +94,6 @@ public class AssignmentReaderPolicyRouteTests
         ("GET", "assignments/{id:guid}/authoring"),
         ("GET", "assignments/{id:guid}/questions-draft"),
         ("GET", "assignments/{id:guid}/recipients"),
-        ("GET", "assignments/signature-default"),
         ("GET", "assignments/signature-consent-text"),
         ("GET", "assignments/ai-prompt-policy"),
         ("GET", "assignments/recipient-preview"),
@@ -457,8 +457,8 @@ public class AssignmentReaderPolicyRouteTests
         var foreignId = Guid.NewGuid();
         var detailGate = new ScopeAwareDetailHandler(
         [
-            new AssignmentRow(AssignmentId, TeacherClaimId, GradeId, null),
-            new AssignmentRow(foreignId, Guid.NewGuid(), Guid.NewGuid(), null),
+            new AssignmentRow(AssignmentId, TeacherClaimId, [GradeId], null),
+            new AssignmentRow(foreignId, Guid.NewGuid(), [Guid.NewGuid()], null),
         ]);
         await using var app = await StartHostAsync(
             disableOidcAuth: false,
@@ -514,12 +514,12 @@ public class AssignmentReaderPolicyRouteTests
         var detailGate = new ScopeAwareDetailHandler(
         [
             // The caller's own creation, in a grade they do not teach.
-            new AssignmentRow(ownId, TeacherClaimId, foreignGradeId, null),
+            new AssignmentRow(ownId, TeacherClaimId, [foreignGradeId], null),
             // A colleague's grade-wide creation in a grade the caller teaches (TopicId null ⇒
             // the whole grade — the [P1-5] leg).
-            new AssignmentRow(taughtGradeWideId, foreignTeacherId, GradeId, null),
+            new AssignmentRow(taughtGradeWideId, foreignTeacherId, [GradeId], null),
             // A colleague's creation in a grade the caller does not teach.
-            new AssignmentRow(foreignId, foreignTeacherId, foreignGradeId, null),
+            new AssignmentRow(foreignId, foreignTeacherId, [foreignGradeId], null),
         ]);
         var signOffHandler = new StubSignOffStatusesHandler([SignOffRow()]);
 
@@ -581,9 +581,10 @@ public class AssignmentReaderPolicyRouteTests
 
     /// <summary>
     /// A faithful stand-in for the [P2-2] gate. <c>GetAssignmentByIdQueryHandler</c> applies the
-    /// real D3 rule (<see cref="TeacherScope.Allows"/>) to the row the tenant-wide cache returned
-    /// and answers <c>null</c> for an out-of-scope id; this stub applies the same call to a fixed
-    /// row set, so a route test observes the production rule without Postgres.
+    /// real D3 rule (<see cref="TeacherScope.AllowsAnyTargetGrade"/>) to the row the tenant-wide
+    /// cache returned and answers <c>null</c> for an out-of-scope id; this stub applies the same
+    /// call to a fixed row set, so a route test observes the production rule without Postgres.
+    /// The row's grade scope is its authored grade TARGETS (round <c>drop-primary-grade</c>).
     /// </summary>
     private sealed class ScopeAwareDetailHandler(IReadOnlyList<AssignmentRow> rows)
         : IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>
@@ -602,19 +603,21 @@ public class AssignmentReaderPolicyRouteTests
             }
 
             var visible = query.Scope is not { IsUnrestricted: false } scope
-                || scope.Allows(row.CreatedByTeacherId, row.GradeLevelId, row.TopicId);
+                || scope.AllowsAnyTargetGrade(row.CreatedByTeacherId, row.TargetGradeIds, row.TopicId);
 
             return Task.FromResult(visible ? Summary(row) : null);
         }
 
         private static AssignmentSummaryDto Summary(AssignmentRow row) => new(
             row.Id, "Scoped assignment", null, AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-            TargetAudienceTypeDto.AllStudents, row.TopicId ?? Guid.Empty, null, row.GradeLevelId, null,
+            TargetAudienceTypeDto.AllStudents, row.TopicId ?? Guid.Empty, null,
             AssignmentStatusDto.Draft, null, null, false, row.CreatedByTeacherId,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            TargetGradeIds: row.TargetGradeIds);
     }
 
-    private sealed record AssignmentRow(Guid Id, Guid CreatedByTeacherId, Guid? GradeLevelId, Guid? TopicId);
+    private sealed record AssignmentRow(
+        Guid Id, Guid CreatedByTeacherId, IReadOnlyList<Guid> TargetGradeIds, Guid? TopicId);
 
     private sealed class StubSubmissionsHandler : IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]>
     {

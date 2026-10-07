@@ -42,7 +42,7 @@ public sealed class AssignmentEditFormModel
     /// <summary>WS-A1 (spec §4.10 / FR-210–212): the content modules this save would send. Carried,
     /// not authored — no editor loads or mutates the collection yet, so a real form state always
     /// leaves it null and the projection hands the wire its null-means-preserve value (the
-    /// <see cref="ArchiveGraceDays"/> posture). It is part of the update payload all the same, so
+    /// <c>the archive grace window</c> posture). It is part of the update payload all the same, so
     /// <see cref="CaptureSaveSnapshot"/> mixes it: the snapshot covers every payload field, not only
     /// the ones some editor happens to own today.</summary>
     public IReadOnlyList<NewContentModuleDto>? ContentModules { get; set; }
@@ -67,13 +67,6 @@ public sealed class AssignmentEditFormModel
     /// set, the override is sent as a user-role framing message.</summary>
     public string? AiPromptOverride { get; set; }
 
-    /// <summary>WS-A2 (spec §7 Q6): archive grace window in days.
-    /// Persisted on the row so the archive sweep honours per-row
-    /// overrides; the default of 30 mirrors the spec's retention floor.
-    /// Pass-through only — no visible wizard/edit field this round
-    /// (decision (j) recorded adjustment).</summary>
-    public int ArchiveGraceDays { get; set; }
-
     /// <summary>WS-A3 (spec §3.3): pass/fail score threshold on the
     /// assignment (decimal?, null = no pass/fail signal). Hidden in the
     /// UI for TeacherGraded assignments (the
@@ -86,11 +79,6 @@ public sealed class AssignmentEditFormModel
     /// = unlimited). When set must be &gt;= 1. Same conditional rule
     /// as <see cref="PassScore"/> — hidden for TeacherGraded.</summary>
     public int? MaxAttempts { get; set; }
-
-    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
-    /// required after completion. Round-trips through create/update so
-    /// the edit page never silently resets the flag.</summary>
-    public bool RequiresSignature { get; set; }
 
     /// <summary>WS-B2 (spec §3.4 line 70): requested per-difficulty counts.
     /// Round-trip through create/update so the edit page never silently resets
@@ -261,13 +249,10 @@ public sealed class AssignmentEditFormModel
         Instructions = assignment.Instructions;
         DueDate = assignment.DueDate?.DateTime;
         MaxScore = assignment.MaxScore;
-        ArchiveGraceDays = assignment.ArchiveGraceDays;
         // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap
         // — round-trip so the edit page never resets them to defaults.
         PassScore = assignment.PassScore;
         MaxAttempts = assignment.MaxAttempts;
-        // WS-C1 (spec §7 Q1): guardian-signature snapshot round-trip.
-        RequiresSignature = assignment.RequiresSignature;
         // WS-B2 (spec §3.4 line 70): difficulty mix round-trip.
         DifficultyEasyCount = assignment.DifficultyEasyCount;
         DifficultyMediumCount = assignment.DifficultyMediumCount;
@@ -369,8 +354,8 @@ public sealed class AssignmentEditFormModel
     /// <summary>
     /// Projects this form model into a <see cref="CreateAssignmentRequest"/>
     /// that the API client submits. Page-level values that live outside the
-    /// model (type, grading, audience, subject, grade level, mandatory
-    /// review) are passed in as arguments — the student-model precedent
+    /// model (type, grading, audience, subject, mandatory review) are passed in
+    /// as arguments — the student-model precedent
     /// (documents/solution/dto-form-model-mapping.md). Re-indexes
     /// <c>DisplayOrder</c> to 0..n over the whole question list (EC-7).
     /// Returns <c>Questions</c>/<c>Attachments</c> as <c>null</c> when the
@@ -381,9 +366,9 @@ public sealed class AssignmentEditFormModel
         GradingFormatDto gradingFormat,
         TargetAudienceTypeDto targetAudienceType,
         Guid topicId,
-        Guid? gradeLevelId,
-        bool mandatoryReview,
-        bool requiresSignature = false,
+        /// <summary>D3/OD1 (round <c>assignment-rules-policy-rework</c>): the AUTHOR half of the
+        /// guardian-review value — null leaves the decision to the resolved policy.</summary>
+        bool? mandatoryReview,
         /// <summary>R2 (TGT-1): the authored targeting constraints. Null on a create means "no
         /// targets supplied" (publish is then refused until they are authored); on an update null
         /// preserves the persisted set (the caller's change gate).</summary>
@@ -466,7 +451,6 @@ public sealed class AssignmentEditFormModel
             GradingFormat: gradingFormat,
             TargetAudienceType: targetAudienceType,
             TopicId: topicId,
-            GradeLevelId: gradeLevelId,
             DueDate: DueDate.HasValue ? new DateTimeOffset(DueDate.Value, TimeSpan.Zero) : null,
             MaxScore: MaxScore,
             MandatoryReview: mandatoryReview,
@@ -479,8 +463,6 @@ public sealed class AssignmentEditFormModel
             // cap threaded to the wire surface.
             PassScore: PassScore,
             MaxAttempts: MaxAttempts,
-            // WS-C1 (spec §7 Q1): guardian-signature snapshot.
-            RequiresSignature: requiresSignature,
             // WS-B2 (spec §3.4 line 70): difficulty mix threaded to create.
             DifficultyEasyCount: DifficultyEasyCount,
             DifficultyMediumCount: DifficultyMediumCount,
@@ -494,7 +476,7 @@ public sealed class AssignmentEditFormModel
     /// <summary>
     /// Projects this form model into an <see cref="UpdateAssignmentRequest"/> for the
     /// assignment identified by the route. Page-level values that live outside the model
-    /// (type, grading, audience, subject, grade level, review/signature flags) are passed in
+    /// (type, grading, audience, subject, review/signature flags) are passed in
     /// as arguments — the <see cref="ToCreateRequest"/> precedent.
     /// <para>Child collections follow the wire contract's null-means-preserve rule: an empty
     /// editor projects <c>null</c> (not an empty list) so an edit that touches only scalar
@@ -506,14 +488,12 @@ public sealed class AssignmentEditFormModel
         GradingFormatDto gradingFormat,
         TargetAudienceTypeDto targetAudienceType,
         Guid topicId,
-        Guid? gradeLevelId,
-        bool mandatoryReview,
-        bool requiresSignature = false,
+        bool? mandatoryReview,
         IReadOnlyList<AssignmentTargetDto>? targets = null)
     {
         var create = ToCreateRequest(
-            assignmentType, gradingFormat, targetAudienceType, topicId, gradeLevelId,
-            mandatoryReview, requiresSignature, targets);
+            assignmentType, gradingFormat, targetAudienceType, topicId,
+            mandatoryReview, targets);
 
         return new UpdateAssignmentRequest(
             Title: create.Title,
@@ -522,7 +502,6 @@ public sealed class AssignmentEditFormModel
             GradingFormat: create.GradingFormat,
             TargetAudienceType: create.TargetAudienceType,
             TopicId: create.TopicId,
-            GradeLevelId: create.GradeLevelId,
             DueDate: create.DueDate,
             MaxScore: create.MaxScore,
             MandatoryReview: create.MandatoryReview,
@@ -531,10 +510,8 @@ public sealed class AssignmentEditFormModel
             Attachments: create.Attachments,
             ContentModules: create.ContentModules,
             Resources: create.Resources,
-            ArchiveGraceDays: ArchiveGraceDays,
             PassScore: create.PassScore,
             MaxAttempts: create.MaxAttempts,
-            RequiresSignature: create.RequiresSignature,
             DifficultyEasyCount: create.DifficultyEasyCount,
             DifficultyMediumCount: create.DifficultyMediumCount,
             DifficultyHardCount: create.DifficultyHardCount,
@@ -803,9 +780,7 @@ public sealed class AssignmentEditFormModel
         GradingFormatDto gradingFormat,
         TargetAudienceTypeDto targetAudienceType,
         Guid topicId,
-        Guid? gradeLevelId,
-        bool mandatoryReview,
-        bool requiresSignature)
+        bool? mandatoryReview)
     {
         var hash = new SaveSnapshotHash();
 
@@ -819,7 +794,6 @@ public sealed class AssignmentEditFormModel
         hash.Add((int)gradingFormat);
         hash.Add((int)targetAudienceType);
         hash.Add(topicId);
-        hash.Add(gradeLevelId);
         // DueDate rides the wire as a DateTimeOffset pinned to +00:00, so only its ticks are payload:
         // two DateTime values with the same ticks but a different Kind save the same instant.
         hash.Add(DueDate.HasValue);
@@ -827,10 +801,8 @@ public sealed class AssignmentEditFormModel
         hash.Add(MaxScore);
         hash.Add(mandatoryReview);
         hash.Add(AiPromptOverride);
-        hash.Add(ArchiveGraceDays);
         hash.Add(PassScore);
         hash.Add(MaxAttempts);
-        hash.Add(requiresSignature);
         hash.Add(DifficultyEasyCount);
         hash.Add(DifficultyMediumCount);
         hash.Add(DifficultyHardCount);
@@ -1013,6 +985,17 @@ public sealed class AssignmentEditFormModel
         public void AddMissing() => Mix(0);
 
         public void Add(bool value) => Mix(value ? (byte)1 : (byte)0);
+
+        /// <summary>A nullable bool as presence + value — the wire distinguishes an UNSET author
+        /// guardian-review value (null) from an explicit <c>false</c>, so the snapshot must too.</summary>
+        public void Add(bool? value)
+        {
+            Mix(value.HasValue ? (byte)1 : (byte)0);
+            if (value is bool present)
+            {
+                Add(present);
+            }
+        }
 
         public void Add(int value) => AddWide((ulong)(uint)value, 4);
 

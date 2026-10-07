@@ -103,7 +103,6 @@ public class QuestionsDraftSectionBunitTests : BunitContext
             parameters.Add(p => p.PromptLocked, promptLocked);
             parameters.Add(p => p.TopicId, TopicId);
             parameters.Add(p => p.TopicName, "Photosynthesis");
-            parameters.Add(p => p.GradeLevelId, (Guid?)null);
             parameters.Add(p => p.OnConfirmed, onConfirmed ?? EventCallback.Empty);
         });
     }
@@ -359,8 +358,6 @@ public class QuestionsDraftSectionBunitTests : BunitContext
         TargetAudienceType: TargetAudienceTypeDto.AllStudents,
         TopicId: TopicId,
         TopicName: "Photosynthesis",
-        GradeLevelId: null,
-        GradeName: null,
         Status: AssignmentStatusDto.Draft,
         DueDate: null,
         MaxScore: null,

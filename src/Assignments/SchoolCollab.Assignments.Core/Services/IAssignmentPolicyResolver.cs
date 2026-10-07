@@ -19,7 +19,10 @@ namespace SchoolCollab.Assignments.Core.Services;
 /// "nothing configured", so the built-in defaults apply
 /// (<see cref="SignatureRequirementMode.Disabled"/>, approval not required, uncapped). The
 /// approval gate therefore never turns ON because a policy fetch failed — it is OR'd with
-/// <c>FEATURE:RequireAssignmentApproval</c> at the call site, and the flag alone still gates.</para>
+/// <c>FEATURE:RequireAssignmentApproval</c> at the call site, and the flag alone still gates. The
+/// create/update snapshot seam reads the same degraded shape: <c>MandatoryReview</c> stays
+/// <see langword="null"/> (the caller keeps its own default) and <c>ArchiveGraceDays</c> stays
+/// <see langword="null"/> (the caller keeps the built-in 30-day retention floor).</para>
 /// </summary>
 public interface IAssignmentPolicyResolver
 {

@@ -38,7 +38,7 @@ public class PublishAssignmentApprovalGateTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(TenantId)
             // R2 (TGT-13): a publishable assignment needs at least one authored target row.
             .WithAllStudentsTarget();

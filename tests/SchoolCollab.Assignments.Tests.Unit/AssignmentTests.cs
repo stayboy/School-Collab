@@ -9,6 +9,7 @@ public class AssignmentTests
 {
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid GradeId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     private static Assignment CreateTestAssignment(
         string title = "Title",
@@ -16,7 +17,7 @@ public class AssignmentTests
         AssignmentType type = AssignmentType.Digital,
         GradingFormat grading = GradingFormat.TeacherGraded,
         TargetAudienceType audience = TargetAudienceType.AllStudents) =>
-        Assignment.Create(title, description, type, grading, audience, TopicId, null, null, null, TeacherId);
+        Assignment.Create(title, description, type, grading, audience, TopicId, null, null, TeacherId);
 
     [TestMethod]
     public void Create_WithEmptyTopicId_Throws()
@@ -27,8 +28,7 @@ public class AssignmentTests
             AssignmentType.Digital,
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
-            Guid.Empty, // empty topic
-            null, null, null,
+            Guid.Empty, null, null,
             TeacherId);
 
         act.Should().Throw<ArgumentException>()
@@ -36,35 +36,42 @@ public class AssignmentTests
             .WithMessage("Topic is required.*");
     }
 
+    /// <summary>Round <c>drop-primary-grade</c>: <c>SelectedGrades</c> no longer implies a grade
+    /// argument — the retired D-2 guard required one and threw here. The audience compat is DERIVED
+    /// from the target rows, so a SelectedGrades create is legal before any target is attached (the
+    /// TGT-13 at-least-one rule is enforced by <c>SetTargets</c>, not here).</summary>
     [TestMethod]
-    public void Create_SelectedGrades_NullGrade_Throws()
+    public void Create_SelectedGrades_NeedsNoGradeArgument()
     {
-        var act = () => Assignment.Create(
+        var assignment = Assignment.Create(
             "Test",
             null,
             AssignmentType.Digital,
             GradingFormat.TeacherGraded,
             TargetAudienceType.SelectedGrades,
-            TopicId, null, null, null,
+            TopicId, null, null,
             TeacherId);
 
-        act.Should().Throw<ArgumentException>()
-            .WithParameterName("gradeLevelId")
-            .WithMessage("SelectedGrades assignments require a grade level.*");
+        assignment.TargetAudienceType.Should().Be(TargetAudienceType.Mixed,
+            "the compat audience is DERIVED from the (still empty) target rows at Create — the caller's "
+            + "SelectedGrades argument is only the pre-derivation value");
+        assignment.WithGradeTarget(GradeId);
+        assignment.TargetAudienceType.Should().Be(TargetAudienceType.SelectedGrades,
+            "a grade target re-derives the SelectedGrades compat audience");
     }
 
     [TestMethod]
-    public void Update_SelectedGrades_NullGrade_Throws()
+    public void Update_SelectedGrades_NeedsNoGradeArgument()
     {
         var assignment = CreateTestAssignment();
-        var act = () => assignment.Update(
+
+        assignment.Update(
             "New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.SelectedGrades,
-            TopicId, null, null, null, true);
+            TopicId, null, null, true);
 
-        act.Should().Throw<ArgumentException>()
-            .WithParameterName("gradeLevelId")
-            .WithMessage("SelectedGrades assignments require a grade level.*");
+        assignment.Title.Should().Be("New Title",
+            "the retired D-2 guard refused exactly this update for want of a grade argument");
     }
 
     [TestMethod]
@@ -78,8 +85,7 @@ public class AssignmentTests
             AssignmentType.Digital,
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
-            Guid.Empty, // empty topic
-            null, null, null, true);
+            Guid.Empty, null, null, true);
 
         act.Should().Throw<ArgumentException>()
             .WithParameterName("topicId")
@@ -98,7 +104,6 @@ public class AssignmentTests
             GradingFormat.AutoGraded,
             TargetAudienceType.AllStudents,
             TopicId,
-            null,
             dueDate,
             100m,
             TeacherId);
@@ -114,7 +119,6 @@ public class AssignmentTests
         assignment.WithAllStudentsTarget();
         Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
         Assert.AreEqual(TopicId, assignment.TopicId);
-        Assert.IsNull(assignment.GradeLevelId);
         Assert.AreEqual(dueDate, assignment.DueDate);
         Assert.AreEqual(100m, assignment.MaxScore);
         Assert.AreEqual(AssignmentStatus.Draft, assignment.Status);
@@ -131,8 +135,7 @@ public class AssignmentTests
             AssignmentType.Manual,
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
-            TopicId,
-            null, null, null,
+            TopicId, null, null,
             TeacherId);
 
         Assert.AreEqual("Test Title", assignment.Title);
@@ -183,7 +186,7 @@ public class AssignmentTests
         var gradeLevelId = Guid.NewGuid();
         assignment.Update("New Title", "New Desc", AssignmentType.SemiManual,
             GradingFormat.InstantGraded, TargetAudienceType.SelectedGrades,
-            newTopicId, gradeLevelId, null, 50m, true);
+            newTopicId, null, 50m, true);
         // R2 (D-1): the derived compat column follows the authored targets.
         assignment.WithGradeTarget(gradeLevelId);
 
@@ -203,7 +206,7 @@ public class AssignmentTests
         assignment.Publish();
         var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, true);
+            TopicId, null, null, true);
         act.Should().Throw<InvalidOperationException>();
     }
 
@@ -215,7 +218,7 @@ public class AssignmentTests
         assignment.Close();
         var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, true);
+            TopicId, null, null, true);
         act.Should().Throw<InvalidOperationException>();
     }
 

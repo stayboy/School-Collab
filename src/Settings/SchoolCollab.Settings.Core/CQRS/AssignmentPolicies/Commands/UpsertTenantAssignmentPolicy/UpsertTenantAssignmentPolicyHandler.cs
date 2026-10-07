@@ -35,7 +35,9 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
                 command.SignatureRequirement,
                 command.RequiresApprovalBeforePublish,
                 command.MaxPrimaryContacts,
-                command.MaxCopyContacts);
+                command.MaxCopyContacts,
+                command.MandatoryReview,
+                command.ArchiveGraceDays);
             policy = existing;
         }
         else
@@ -45,7 +47,9 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
                 command.SignatureRequirement,
                 command.RequiresApprovalBeforePublish,
                 command.MaxPrimaryContacts,
-                command.MaxCopyContacts);
+                command.MaxCopyContacts,
+                command.MandatoryReview,
+                command.ArchiveGraceDays);
             db.TenantAssignmentPolicies.Add(policy);
         }
 
@@ -55,7 +59,9 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
             policy.SignatureRequirement,
             policy.RequiresApprovalBeforePublish,
             policy.MaxPrimaryContacts,
-            policy.MaxCopyContacts);
+            policy.MaxCopyContacts,
+            policy.MandatoryReview,
+            policy.ArchiveGraceDays);
     }
 
     /// <summary>

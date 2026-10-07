@@ -129,9 +129,6 @@
     /// <summary>The subject's display name for the generation request.</summary>
     [Parameter] public string? TopicName { get; set; }
 
-    /// <summary>The grade level id for the generation request, when known.</summary>
-    [Parameter] public Guid? GradeLevelId { get; set; }
-
     /// <summary>Raised after Confirm replaces the questions so the Edit page can
     /// reload the summary (question count / review area changes).</summary>
     [Parameter] public EventCallback OnConfirmed { get; set; }
@@ -229,9 +226,8 @@
         _attachmentWarning = BuildAttachmentWarning(composition.DroppedAttachmentCount);
 
         var request = new QuestionGenerationRequest(
-            TopicId: TopicId.Value,
+            TopicId: TopicId!.Value,
             TopicName: TopicName ?? string.Empty,
-            GradeLevelId: GradeLevelId,
             ContextStrands: null,
             QuestionCount: _questionCount,
             Types: types,
