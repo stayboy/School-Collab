@@ -46,11 +46,13 @@ jobs:
           --report-trx
           --report-trx-filename integration-results.trx
           --results-directory ./test-results
-        # The OpenRouter live integration tests resolve the API key from the
-        # OpenRouter__ApiKey environment variable (and user secrets locally).
-        # Inject the GitHub Actions secret here so CI exercises the real
-        # provider. When the secret is absent (e.g. forked PRs), the key is
-        # empty and the live tests self-skip as Inconclusive rather than fail.
+        # NOTE (corrected 2026-10-07): this variable feeds the AI HOST's `OpenRouter:ApiKey`
+        # (AI.Server/Program.cs reads it; the AppHost sets it). It is NOT read by the live tests in
+        # this project, which resolve `Parameters:openrouter-api-key` from user secrets / the
+        # Parameters__openrouter_api_key env var — so those tests always see an empty key here and
+        # self-skip as Inconclusive, regardless of this secret. Injecting the secret under the
+        # test-facing name instead would make CI call OpenRouter for real; that is deliberately NOT
+        # done because the live calls currently return HTTP 400 for the pinned model.
         env:
           OpenRouter__ApiKey: ${{ secrets.OPENROUTER_API_KEY }}
         continue-on-error: false

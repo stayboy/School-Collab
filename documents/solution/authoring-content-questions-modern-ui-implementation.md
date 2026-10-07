@@ -105,7 +105,7 @@ Six open decisions closed with the owner (recorded as **G44–G49** in the spec)
 | Decision | Outcome |
 |---|---|
 | G44 commit granularity | **one commit** for R1–R3 (the default squash-merge makes a multi-commit PR history moot) |
-| G45 keyless live tests | **out of this PR** — the self-skip guard is fixed in its own PR; this PR ships with a documented pre-flight exception |
+| G45 keyless live tests | **out of this PR** — and, after diagnosis, **no fix was needed**: the self-skip guard already works. See §10 (corrected) |
 | G46 `Chip` coverage | **`ChipBunitTests` added** + CH-1 and the §10 claim corrected |
 | G47 the load-flaky draft-preload test | `WaitForAssertion` budgets raised from bUnit's 1s default to an explicit 5s |
 | G48 D8/VM read-only chrome | **withdrawn** — a recorded non-goal of this spec |
@@ -122,11 +122,26 @@ Six open decisions closed with the owner (recorded as **G44–G49** in the spec)
   `Renders_Preload_ExistingDraft`'s) now carry an explicit 5s budget instead of bUnit's 1s default,
   removing the load-sensitive timeout that failed once under a full-solution run.
 
-## 10. Known local-only failure (documented exception, G45)
+## 10. The live OpenRouter tests — corrected diagnosis (G45)
 
-`CodedValueAIServiceLiveTests` (`ChatAsync_WithOpenRouter_*`, 3 tests in
-`SchoolCollab.Settings.Tests.Integration`) **fail on a keyless local machine** while CI is green
-(`ci.yml:55` injects `secrets.OPENROUTER_API_KEY`). CI's own comment promises the opposite of what
-happens locally: *"When the secret is absent the key is empty and the live tests self-skip as
-Inconclusive rather than fail."* They fail in isolation on untouched code, so this is pre-existing and
-unrelated to R1–R3; fixing that guard is tracked as a separate PR.
+**The original entry here was wrong; corrected 2026-10-07.** It claimed the missing-secret self-skip
+was broken and needed fixing. The verified facts:
+
+- **The self-skip already works.** `CodedValueAIServiceLiveTests.LoadOpenRouterSettings` calls
+  `Assert.Inconclusive` when the key is empty (`CodedValueAIServiceLiveTests.cs:85-91`) — exactly what
+  the workflow comment describes.
+- **CI therefore never exercises the live provider**, despite `ci.yml`'s comment claiming it does.
+  `ci.yml:55` injects `OpenRouter__ApiKey`, the name the **AI host** reads
+  (`AI.Server/Program.cs:32`, fed by `AppHost/Program.cs:308`), while the **tests** resolve
+  `Parameters:openrouter-api-key` (user secrets / `Parameters__openrouter_api_key`). Different key
+  path ⇒ empty key in CI ⇒ every live test self-skips as Inconclusive. That is why CI is green.
+- **Locally the failures are a live provider rejection, not a missing secret.** With a real key
+  configured the test calls OpenRouter and receives **HTTP 400 Bad Request**, which the skip
+  classification (timeout / transient / rate-limit / connection, lines 492-497) does not cover. The
+  pinned model is hard-asserted at line 104 (`google/gemma-4-31b-it`, from the AppHost's
+  `openrouter-default-model`), so a stale model entitlement is the likely cause.
+
+All three tests fail in isolation on untouched code, so none of this is related to R1–R3. Left as-is by
+owner decision: the area is environmental, and wiring the CI secret to the test-facing name would turn
+CI red on the same 400. `ci.yml`'s misleading comment is corrected in place so the misconception cannot
+spread.
