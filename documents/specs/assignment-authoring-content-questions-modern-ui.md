@@ -524,7 +524,7 @@ and is delivered as a stack layer on top of R1 if R1's PR is still open.
 | # | Question | Answer | Cost accepted |
 |---|---|---|---|
 | **G44** | Commit granularity (Q1) | **One commit** for R1–R3 — the default squash-merge makes a multi-commit history moot | a bisect-hostile single commit |
-| **G45** | The keyless live-test failures (Q2) | **Out of this PR** — fix the self-skip guard in its own PR; this PR ships with a documented pre-flight exception | local `dotnet test` stays red for those 3 until the follow-up |
+| **G45** | The keyless live-test failures (Q2) | **Out of this PR** — and after diagnosis, **no fix was needed**: the self-skip guard already exists and works (`CodedValueAIServiceLiveTests.cs:85-91`). *(Corrected 2026-10-07 — the original rationale, "fix the self-skip guard", was wrong.)* The real findings were a **dead CI secret** (`ci.yml` injects `OpenRouter__ApiKey`, the name the AI host reads, while the tests read `Parameters:openrouter-api-key` ⇒ CI always self-skips) and a live **HTTP 400** for the pinned model once a real key is present. | no code change; the live tests keep self-skipping in CI and failing locally when a stale key is configured |
 | **G46** | `Chip` coverage (Q3) | Add **`ChipBunitTests`**, and correct both CH-1 (which *prescribed* the defect) and §10's claim | a new test file in an already-large PR |
 | **G47** | The load-flaky draft-preload test (Q4) | Raise its `WaitForAssertion` budget to an explicit 5s | a longer timeout could mask a genuinely slow path (bounded, still fails loudly) |
 | **G48** | D8/VM read-only chrome (Q5) | **Withdrawn — a recorded non-goal** of this spec | View mode stays visually thinner than Edit |
