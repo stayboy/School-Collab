@@ -259,6 +259,68 @@ public class QuestionGenerationSectionBunitTests : BunitContext
     }
 
     [TestMethod]
+    public void ConfigSummary_ReflectsTheKnobs()
+    {
+        var model = new AssignmentEditFormModel
+        {
+            DifficultyEasyCount = 4,
+            DifficultyMediumCount = 4,
+            DifficultyHardCount = 2,
+        };
+
+        var cut = RenderSection(model, new FakeQuestionGenerator(), topicName: "Photosynthesis");
+
+        var summary = cut.Find("#cq-config-summary").TextContent;
+        summary.Should().Contain("5 questions", "QA-3: the summary leads with the count knob");
+        summary.Should().Contain("4 easy / 4 medium / 2 hard", "QA-3: the difficulty mix is shown");
+        summary.Should().Contain("Multiple choice", "PB-4: the summary reuses the canonical type names");
+    }
+
+    [TestMethod]
+    public void Generate_RefreshesATemplateMatchedNarrative_NamingTheCurrentSubject()
+    {
+        // A previously composed narrative (PB-4 shape) naming a subject the page no longer has.
+        var model = new AssignmentEditFormModel
+        {
+            AiPromptOverride =
+                "Generate 5 questions for the subject \"Old Subject\".\n" +
+                "Grade level: —.\n" +
+                "Difficulty mix: 0 easy / 0 medium / 0 hard.\n" +
+                "Include: Multiple choice, True / false, Short answer.",
+        };
+        var cut = RenderSection(
+            model, new FakeQuestionGenerator(), topicId: Guid.NewGuid(), topicName: "Photosynthesis");
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            model.AiPromptOverride.Should().Contain("\"Photosynthesis\"",
+                "QA-23: a template-matched narrative is refreshed for the current context at Generate time");
+            model.AiPromptOverride.Should().NotContain("Old Subject");
+        });
+    }
+
+    [TestMethod]
+    public void Generate_LeavesAHandWrittenPromptAlone()
+    {
+        var model = new AssignmentEditFormModel { AiPromptOverride = "Keep it gentle and short." };
+        var cut = RenderSection(
+            model, new FakeQuestionGenerator(), topicId: Guid.NewGuid(), topicName: "Photosynthesis");
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => model.Questions.Should().NotBeEmpty());
+
+        model.AiPromptOverride.Should().Be("Keep it gentle and short.",
+            "QA-23/PB-5: hand-written prose is never overwritten by the refresh");
+    }
+
+    [TestMethod]
     public void TopicIdNull_ClickShowsSelectASubject_NoGeneratorCall()
     {
         var model = new AssignmentEditFormModel();
@@ -285,9 +347,13 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             "TopicId null must short-circuit BEFORE the generator is called (no-call guarantee)");
         model.Questions.Should().BeEmpty();
 
-        // The count field renders with min=\"1\" (EC-10 unreachable-zero).
-        cut.Markup.Should().Contain("min=\"1\"",
-            "EC-10: the count field's HTML attribute is min=1 so zero is unreachable via the input");
+        // R3 (QA-22/D14): the count field moved into the prompt dialog, so its EC-10 min="1"
+        // guard now lives in QuestionPromptDialogBunitTests; the composer proves its NEW surface
+        // instead — the read-only summary line and the Configure trigger.
+        cut.Markup.Should().Contain("id=\"cq-config-summary\"",
+            "QA-3: the composer shows the read-only config summary");
+        cut.Markup.Should().Contain("id=\"cq-configure\"",
+            "QA-4: the composer shows the Configure trigger");
     }
 
     [TestMethod]

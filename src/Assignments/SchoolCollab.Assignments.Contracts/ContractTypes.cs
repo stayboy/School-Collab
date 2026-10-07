@@ -78,8 +78,11 @@ public enum TargetKindDto
 /// options — the discriminator is retained for client-side handling.</summary>
 public enum QuestionTypeDto
 {
+    [Description("Multiple choice")]
     MultipleChoice = 0,
+    [Description("True / false")]
     TrueFalse = 1,
+    [Description("Short answer")]
     ShortAnswer = 2
 }
 

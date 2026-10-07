@@ -1,13 +1,35 @@
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Assignments.Application.Helpers
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Assignments.Application.Services
 @using SchoolCollab.Assignments.Contracts
 @using SchoolCollab.AI.Abstractions
 @implements IDisposable
+@inject IDialogService DialogService
 @inject IAssignmentQuestionGenerator QuestionGenerator
 @inject AssignmentsApiClient Api
 @inject ILogger<QuestionsDraftSection> Logger
 
 <section class="questions-draft-section">
+    @* QA-18 (spec §6.3, D12): the staged-draft surface is a collapsed disclosure, auto-expanded
+       whenever a draft is staged — its duplicate generation controls are not deduplicated this
+       round, so collapsing keeps them off the default page while the draft route stays one click
+       away inside the same compartment. *@
+    <button type="button" class="cq-draft-toggle"
+            id="cq-draft-panel"
+            aria-expanded="@(_expanded ? "true" : "false")"
+            aria-controls="cq-draft-body"
+            @onclick="ToggleExpanded">
+        <FluentIcon Icon="@(Icons.Regular.Size20.ChevronRight)"
+                    Class="@(_expanded ? "cq-draft-chevron is-open" : "cq-draft-chevron")"
+                    aria-hidden="true" />
+        <span>Draft preview</span>
+    </button>
+
+    @if (_expanded)
+    {
+        <div class="cq-draft-body" id="cq-draft-body" role="region" aria-label="Draft preview">
     <FluentMessageBar Intent="MessageIntent.Info">
         Regenerate questions as a draft. Confirming replaces every current question.
     </FluentMessageBar>
@@ -20,6 +42,21 @@
                         Disabled="@PromptLocked"
                         Placeholder="@PromptPlaceholder"
                         class="full-width" />
+    </div>
+
+    @* PB-11: the draft surface keeps its own inline controls (QA-20) and ALSO gets the shared
+       prompt-builder dialog plus the same read-only summary line. Composing here writes this
+       surface's transient _prompt and never dirties the form. *@
+    <div class="cq-composer-config">
+        <span class="cq-config-summary" id="cq-draft-config-summary">@ConfigSummary</span>
+        <FluentButton Id="cq-draft-configure"
+                      Appearance="Appearance.Outline"
+                      IconStart="@FluentIcons.Settings"
+                      Disabled="@(!GateEnabled || TopicId is null || _busy)"
+                      OnClick="OpenPromptDialogAsync"
+                      Tooltip="@(TopicId is null ? ConfigureDisabledReason : null)">
+            Configure
+        </FluentButton>
     </div>
 
     <div class="questions-draft-row">
@@ -102,6 +139,8 @@
             }
         </ul>
     }
+        </div>
+    }
 </section>
 
 @code {
@@ -136,14 +175,136 @@
     private int _questionCount = 5;
     private bool _includeMultipleChoice = true;
     private bool _includeTrueFalse = true;
-    private bool _includeShortAnswer = true;
-    private int? _difficultyEasy;
+    private bool _includeShortAnswer = true;    private int? _difficultyEasy;
     private int? _difficultyMedium;
     private int? _difficultyHard;
     private string? _prompt;
+
+    /// <summary>QA-4/PB-11: the disabled reason, spelled as the composer spells it.</summary>
+    private const string ConfigureDisabledReason = "Select a subject before generating questions.";
+
+    /// <summary>The targeted grades' canonical levels (D18/PB-3), supplied by the page.</summary>
+    [Parameter] public IReadOnlyList<int> TargetGradeLevels { get; set; } = [];
+
+    /// <summary>PB-11: the same read-only summary line the composer shows, over THIS surface's knobs.</summary>
+    private string ConfigSummary => QuestionPromptComposer.ComposeSummary(NarrativeInputs());
+
+    private IReadOnlyList<QuestionTypeDto> SelectedTypes()
+    {
+        var picked = new List<QuestionTypeDto>(3);
+        if (_includeMultipleChoice) picked.Add(QuestionTypeDto.MultipleChoice);
+        if (_includeTrueFalse) picked.Add(QuestionTypeDto.TrueFalse);
+        if (_includeShortAnswer) picked.Add(QuestionTypeDto.ShortAnswer);
+        return picked;
+    }
+
+    private IReadOnlyList<string> ResourceNames() =>
+        Model.Attachments.Select(a => a.FileName).OfType<string>()
+            .Concat(Model.ResourceUrls.Select(r => r.Url))
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .ToList();
+
+    private QuestionPromptNarrativeInputs NarrativeInputs() => new(
+        TopicName: TopicName,
+        GradeLevels: TargetGradeLevels,
+        QuestionCount: _questionCount,
+        DifficultyEasy: _difficultyEasy,
+        DifficultyMedium: _difficultyMedium,
+        DifficultyHard: _difficultyHard,
+        Types: SelectedTypes(),
+        ResourceNames: ResourceNames());
+
+    /// <summary>PB-11 + PB-6: the draft surface's dialog opens from THIS surface's own transient
+    /// knobs — the composer's persisted-count source (PB-6(i)) deliberately does not apply here.</summary>
+    private async Task OpenPromptDialogAsync()
+    {
+        if (TopicId is null || _busy)
+        {
+            return;
+        }
+
+        var count = _questionCount;
+        var multiple = _includeMultipleChoice;
+        var trueFalse = _includeTrueFalse;
+        var shortAnswer = _includeShortAnswer;
+
+        if (QuestionPromptComposer.TryParse(_prompt, out var parsed))
+        {
+            count = parsed.QuestionCount;
+            multiple = parsed.Types.Contains(QuestionTypeDto.MultipleChoice);
+            trueFalse = parsed.Types.Contains(QuestionTypeDto.TrueFalse);
+            shortAnswer = parsed.Types.Contains(QuestionTypeDto.ShortAnswer);
+        }
+
+        var model = new QuestionPromptModel
+        {
+            TopicName = TopicName,
+            GradeLevels = TargetGradeLevels,
+            ResourceNames = ResourceNames(),
+            PromptLocked = PromptLocked,
+            QuestionCount = count,
+            DifficultyEasyCount = _difficultyEasy,
+            DifficultyMediumCount = _difficultyMedium,
+            DifficultyHardCount = _difficultyHard,
+            IncludeMultipleChoice = multiple,
+            IncludeTrueFalse = trueFalse,
+            IncludeShortAnswer = shortAnswer,
+        };
+
+        var result = await DialogService
+            .ShowShellDialogAsync<QuestionPromptDialog, QuestionPromptModel, QuestionPromptResult>(
+                model, "Configure questions", DialogSize.Medium);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        _questionCount = result.QuestionCount;
+        _difficultyEasy = result.DifficultyEasyCount;
+        _difficultyMedium = result.DifficultyMediumCount;
+        _difficultyHard = result.DifficultyHardCount;
+        _includeMultipleChoice = result.IncludeMultipleChoice;
+        _includeTrueFalse = result.IncludeTrueFalse;
+        _includeShortAnswer = result.IncludeShortAnswer;
+
+        await WriteComposedPromptAsync();
+    }
+
+    /// <summary>PB-5 on the draft surface: replace when empty or template-matched, otherwise confirm
+    /// (caller-side — <c>dialog-ui</c> forbids nested dialogs). Never touches the form model, so
+    /// composing here cannot dirty the form (PB-11).</summary>
+    private async Task WriteComposedPromptAsync()
+    {
+        if (PromptLocked)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_prompt) && !QuestionPromptComposer.IsTemplateMatch(_prompt))
+        {
+            var replace = await DialogService.ShowConfirmDialogAsync(
+                "Replace the prompt guidance you wrote with the generated one? Your text will be overwritten.",
+                primaryText: "Replace",
+                title: "Replace prompt");
+
+            if (!replace)
+            {
+                return;
+            }
+        }
+
+        _prompt = QuestionPromptComposer.Compose(NarrativeInputs());
+    }
     private IReadOnlyList<NewQuestionDto>? _draft;
     private bool _busy;
     private string? _error;
+
+    /// <summary>QA-18 (spec §6.3, D12): whether the "Draft preview" disclosure is open. Auto-expanded
+    /// whenever a draft is staged — on load, and right after a successful generate.</summary>
+    private bool _expanded;
+
+    private void ToggleExpanded() => _expanded = !_expanded;
     private string? _attachmentWarning;
     private CancellationTokenSource? _cts;
 
@@ -165,6 +326,12 @@
         try
         {
             _draft = await Api.GetQuestionsDraftAsync(AssignmentId);
+            // QA-18/D12: a staged draft opens the panel; the load must never CLOSE a panel the
+            // author already opened themselves.
+            if (_draft is not null)
+            {
+                _expanded = true;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -268,6 +435,7 @@
             }
             await Api.StageQuestionsDraftAsync(AssignmentId, draft, ct);
             _draft = draft;
+            _expanded = true;
         }
         catch (QuestionGenerationFailed ex)
         {

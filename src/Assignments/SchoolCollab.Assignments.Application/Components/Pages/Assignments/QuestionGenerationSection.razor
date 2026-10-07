@@ -1,69 +1,70 @@
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Assignments.Application.Services
 @using SchoolCollab.AI.Abstractions
 @implements IDisposable
+@inject IDialogService DialogService
 @inject IAssignmentQuestionGenerator QuestionGenerator
 @inject ILogger<QuestionGenerationSection> Logger
 @inject IUrlTextExtractor UrlTextExtractor
 @inject AssignmentsApiClient Api
 
 <section class="question-generation-section">
-    <div class="question-generation-controls">
+    <div class="cq-composer" id="cq-composer">
+        @* QA-1/QA-2 (spec §6.1): the prompt is the composer's hero field. No visible
+           label — the reference has none — so the accessible name comes from the
+           visually-hidden label element instead. *@
+        <label class="cq-visually-hidden" for="cq-composer-prompt">Additional guidance for the AI (optional)</label>
         <FluentTextArea @bind-Value="Model.AiPromptOverride"
-                        Label="Additional guidance for the AI (optional)"
+                        Id="cq-composer-prompt"
                         MaxLength="4000"
                         Rows="3"
                         Disabled="@PromptLocked"
+                        Placeholder="Describe the questions you want — e.g. '10 mixed questions on fractions, 40% hard'"
                         Tooltip="@(PromptLocked ? "Your organization has locked the AI prompt." : null)"
                         class="full-width" />
 
-        <div class="question-generation-row">
-            <FluentNumberField @bind-Value="_questionCount"
-                               Label="Number of questions"
-                               Min="1"
-                               Max="30"
-                               Class="w-3" />
-
-            <FluentNumberField @bind-Value="Model.DifficultyEasyCount"
-                               Label="Easy questions"
-                               Min="0"
-                               Max="30"
-                               Class="w-2" />
-            <FluentNumberField @bind-Value="Model.DifficultyMediumCount"
-                               Label="Medium questions"
-                               Min="0"
-                               Max="30"
-                               Class="w-2" />
-            <FluentNumberField @bind-Value="Model.DifficultyHardCount"
-                               Label="Hard questions"
-                               Min="0"
-                               Max="30"
-                               Class="w-2" />
-
-            <div class="question-generation-types" role="group" aria-label="Question types">
-                <FluentCheckbox @bind-Value="_includeMultipleChoice" Label="@EnumHelper.GetDescription(QuestionTypeDto.MultipleChoice)" />
-                <FluentCheckbox @bind-Value="_includeTrueFalse" Label="@EnumHelper.GetDescription(QuestionTypeDto.TrueFalse)" />
-                <FluentCheckbox @bind-Value="_includeShortAnswer" Label="@EnumHelper.GetDescription(QuestionTypeDto.ShortAnswer)" />
-            </div>
+        @* QA-3/QA-4/QA-22 (spec §6.1, D14): the knobs moved into the dialog, so the composer shows
+           only the read-only summary and the Configure trigger. The Generate row keeps the
+           trailing-edge primary action (QA-5). *@
+        <div class="cq-composer-config">
+            <span class="cq-config-summary" id="cq-config-summary">@ConfigSummary</span>
+            <FluentButton Id="cq-configure"
+                          Appearance="Appearance.Outline"
+                          IconStart="@FluentIcons.Settings"
+                          Disabled="@(!GateEnabled || TopicId is null || _generating)"
+                          OnClick="OpenPromptDialogAsync"
+                          Tooltip="@(TopicId is null ? ConfigureDisabledReason : null)">
+                Configure
+            </FluentButton>
         </div>
 
-        <div class="question-generation-actions">
-            <FluentButton Appearance="Appearance.Accent"
-                          Disabled="@(!GateEnabled || _generating)"
-                          OnClick="OnGenerateAsync"
-                          Tooltip="@(GateEnabled ? null : QuestionGenerationGate.DisabledTooltip)">
-                @(_generating ? "Generating…" : "Generate")
-            </FluentButton>
+        @* QA-4: the disabled reason, mirroring Generate's own "select a subject" message. *@
+        @if (TopicId is null)
+        {
+            <p class="cq-configure-reason" id="cq-configure-reason">@ConfigureDisabledReason</p>
+        }
 
-            @if (_generating)
-            {
-                <FluentProgressRing class="question-generation-progress" />
-                <FluentButton Appearance="Appearance.Neutral"
-                              OnClick="OnCancelAsync">
-                    Cancel
+        <div class="cq-composer-footer">
+            <div class="cq-composer-actions">
+                <FluentButton Appearance="Appearance.Accent"
+                              Disabled="@(!GateEnabled || _generating)"
+                              OnClick="OnGenerateAsync"
+                              Tooltip="@(GateEnabled ? null : QuestionGenerationGate.DisabledTooltip)">
+                    @(_generating ? "Generating…" : "Generate")
                 </FluentButton>
-            }
+
+                @if (_generating)
+                {
+                    <FluentProgressRing class="question-generation-progress" />
+                    <FluentButton Appearance="Appearance.Neutral"
+                                  OnClick="OnCancelAsync">
+                        Cancel
+                    </FluentButton>
+                }
+            </div>
         </div>
 
         @if (!string.IsNullOrEmpty(_generationError))
@@ -120,6 +121,163 @@
     private bool _includeMultipleChoice = true;
     private bool _includeTrueFalse = true;
     private bool _includeShortAnswer = true;
+
+    /// <summary>QA-4: the Configure trigger's disabled reason — the composer's own "select a subject"
+    /// message, so both actions explain themselves identically.</summary>
+    private const string ConfigureDisabledReason = "Select a subject before generating questions.";
+
+    /// <summary>The targeted grades' canonical levels (D18/PB-3). Supplied by the page from
+    /// <c>KnownGradeTargetIds</c> + the loaded grade levels — no new API call.</summary>
+    [Parameter] public IReadOnlyList<int> TargetGradeLevels { get; set; } = [];
+
+    /// <summary>QA-3: the read-only summary line — the same parts the narrative is built from.</summary>
+    private string ConfigSummary => QuestionPromptComposer.ComposeSummary(NarrativeInputs());
+
+    private IReadOnlyList<QuestionTypeDto> SelectedTypes()
+    {
+        var picked = new List<QuestionTypeDto>(3);
+        if (_includeMultipleChoice) picked.Add(QuestionTypeDto.MultipleChoice);
+        if (_includeTrueFalse) picked.Add(QuestionTypeDto.TrueFalse);
+        if (_includeShortAnswer) picked.Add(QuestionTypeDto.ShortAnswer);
+        return picked;
+    }
+
+    /// <summary>The attached file/link names the narrative names (PB-4's <c>Grounded on:</c> line).</summary>
+    private IReadOnlyList<string> ResourceNames() =>
+        Model.Attachments.Select(a => a.FileName).OfType<string>()
+            .Concat(Model.ResourceUrls.Select(r => r.Url))
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .ToList();
+
+    private QuestionPromptNarrativeInputs NarrativeInputs() => new(
+        TopicName: TopicName,
+        GradeLevels: TargetGradeLevels,
+        QuestionCount: _questionCount,
+        DifficultyEasy: Model.DifficultyEasyCount,
+        DifficultyMedium: Model.DifficultyMediumCount,
+        DifficultyHard: Model.DifficultyHardCount,
+        Types: SelectedTypes(),
+        ResourceNames: ResourceNames());
+
+    /// <summary>PB-6: open the knobs dialog. Difficulty always opens from the PERSISTED assignment
+    /// counts (PB-6(i)); the count and type mix come from the template parse only when the prompt
+    /// still matches PB-4's skeleton, otherwise from this surface's current values (PB-6(ii)).</summary>
+    private async Task OpenPromptDialogAsync()
+    {
+        if (TopicId is null || _generating)
+        {
+            return;
+        }
+
+        var count = _questionCount;
+        var multiple = _includeMultipleChoice;
+        var trueFalse = _includeTrueFalse;
+        var shortAnswer = _includeShortAnswer;
+
+        if (QuestionPromptComposer.TryParse(Model.AiPromptOverride, out var parsed))
+        {
+            count = parsed.QuestionCount;
+            multiple = parsed.Types.Contains(QuestionTypeDto.MultipleChoice);
+            trueFalse = parsed.Types.Contains(QuestionTypeDto.TrueFalse);
+            shortAnswer = parsed.Types.Contains(QuestionTypeDto.ShortAnswer);
+        }
+
+        var model = new QuestionPromptModel
+        {
+            TopicName = TopicName,
+            GradeLevels = TargetGradeLevels,
+            ResourceNames = ResourceNames(),
+            PromptLocked = PromptLocked,
+            QuestionCount = count,
+            DifficultyEasyCount = Model.DifficultyEasyCount,
+            DifficultyMediumCount = Model.DifficultyMediumCount,
+            DifficultyHardCount = Model.DifficultyHardCount,
+            IncludeMultipleChoice = multiple,
+            IncludeTrueFalse = trueFalse,
+            IncludeShortAnswer = shortAnswer,
+        };
+
+        var result = await DialogService
+            .ShowShellDialogAsync<QuestionPromptDialog, QuestionPromptModel, QuestionPromptResult>(
+                model, "Configure questions", DialogSize.Medium);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        ApplyPromptResult(result);
+        await WriteComposedPromptAsync(confirmBeforeReplace: true);
+    }
+
+    /// <summary>The dialog's knobs always apply; whether they are WRITTEN into the prompt is PB-5's
+    /// separate decision, so declining the confirm never costs the author their knob edits.</summary>
+    private void ApplyPromptResult(QuestionPromptResult result)
+    {
+        _questionCount = result.QuestionCount;
+        Model.DifficultyEasyCount = result.DifficultyEasyCount;
+        Model.DifficultyMediumCount = result.DifficultyMediumCount;
+        Model.DifficultyHardCount = result.DifficultyHardCount;
+        _includeMultipleChoice = result.IncludeMultipleChoice;
+        _includeTrueFalse = result.IncludeTrueFalse;
+        _includeShortAnswer = result.IncludeShortAnswer;
+    }
+
+    /// <summary>PB-5's write point. The confirm runs CALLER-side because <c>dialog-ui</c> forbids
+    /// nested dialogs — a <c>ConfirmDialog</c> inside a shell dialog is exactly that.</summary>
+    private async Task WriteComposedPromptAsync(bool confirmBeforeReplace)
+    {
+        if (PromptLocked)
+        {
+            // PB-8: a locked org has its PromptOverride discarded by the server.
+            return;
+        }
+
+        var current = Model.AiPromptOverride;
+        if (string.IsNullOrWhiteSpace(current) || QuestionPromptComposer.IsTemplateMatch(current))
+        {
+            Model.AiPromptOverride = QuestionPromptComposer.Compose(NarrativeInputs());
+            return;
+        }
+
+        if (!confirmBeforeReplace)
+        {
+            return;
+        }
+
+        var replace = await DialogService.ShowConfirmDialogAsync(
+            "Replace the prompt guidance you wrote with the generated one? Your text will be overwritten.",
+            primaryText: "Replace",
+            title: "Replace prompt");
+
+        if (replace)
+        {
+            Model.AiPromptOverride = QuestionPromptComposer.Compose(NarrativeInputs());
+        }
+    }
+
+    /// <summary>QA-23: refresh before Generate when the context changed and the text is still the
+    /// machine-composed one. "Template-matched" is the unedited predicate, so the rule behaves
+    /// identically after a reload where no transient state exists.</summary>
+    private void RefreshComposedPromptIfStale()
+    {
+        if (PromptLocked)
+        {
+            return;
+        }
+
+        var current = Model.AiPromptOverride;
+        if (!QuestionPromptComposer.IsTemplateMatch(current))
+        {
+            return;
+        }
+
+        var narrative = QuestionPromptComposer.Compose(NarrativeInputs());
+        if (!string.Equals(current, narrative, StringComparison.Ordinal))
+        {
+            Model.AiPromptOverride = narrative;
+        }
+    }
     private bool _generating;
     private string? _generationError;
     private string? _urlWarning;
@@ -151,6 +309,9 @@
         _generateCts?.Dispose();
         _generateCts = new CancellationTokenSource();
         var ct = _generateCts.Token;
+
+        // QA-23: keep the composed narrative honest for the knobs this request is about to send.
+        RefreshComposedPromptIfStale();
 
         // Build the type set; null = "all" (server-side balanced default per FR-221).
         IReadOnlyList<GeneratedQuestionType>? types = null;

@@ -1,0 +1,63 @@
+/*
+    Scoped styles for the R3 prompt-builder dialog (spec §6.1a).
+
+    NOTE: a FluentDialog renders outside the authoring composition row, so the
+    `--cq-*` custom properties declared on `.authoring-layout--cq` do NOT inherit
+    here. Every `--cq-*` use therefore carries a fallback, and the rest are plain
+    FluentUI design tokens (DL-1: tokens only, no literals).
+*/
+
+.cq-prompt-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* PB-3: the read-only context preview. */
+.cq-prompt-context {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: var(--cq-radius-card, 14px);
+    background: var(--neutral-layer-2);
+}
+
+.cq-prompt-context-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.cq-prompt-context-row dt {
+    flex: 0 0 96px;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.8125rem;
+}
+
+.cq-prompt-context-row dd {
+    margin: 0;
+    font-size: 0.875rem;
+}
+
+.cq-prompt-nums {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.cq-prompt-types {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.cq-prompt-note {
+    margin: 0;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.8125rem;
+}

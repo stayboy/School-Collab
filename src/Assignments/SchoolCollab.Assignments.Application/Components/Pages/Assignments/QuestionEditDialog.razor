@@ -1,0 +1,126 @@
+@* Question Add/Edit dialog (spec §6.2 QA-11, round content-questions-modern-ui).
+   The per-type fields are the ones the inline editor used to render — moved verbatim into the
+   repo's shared dialog shell so the question LIST can stay a single-line, kebab-driven row list
+   (the reference project page's shape). Edits apply to a working copy; Cancel discards. *@
+@using SchoolCollab.Assignments.Application.Helpers
+@inherits DialogShellBase<QuestionEditModel, QuestionEditResult>
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <FluentTextField @bind-Value="Model.Row.QuestionText"
+                         Id="cq-qedit-text"
+                         Label="Question *"
+                         class="full-width mb-3" />
+
+        <DropdownForEnum TEnum="QuestionTypeDto"
+                         @bind-SelectedValue="Model.Row.Type"
+                         @bind-SelectedValue:after="OnTypeChanged"
+                         Label="Type"
+                         Class="w-3" />
+
+        @switch (Model.Row.Type)
+        {
+            case QuestionTypeDto.MultipleChoice:
+            {
+                <div class="cq-qedit-options">
+                    <span class="cq-qedit-sublabel">Options (pick the correct one)</span>
+                    <FluentRadioGroup TValue="int" Name="@RadioGroupKey">
+                        @for (var i = 0; i < Model.Row.Options.Count; i++)
+                        {
+                            var optIndex = i;
+                            var opt = Model.Row.Options[i];
+                            <div class="cq-qedit-option" @key="opt">
+                                <FluentRadio Value="@optIndex"
+                                             Group="@RadioGroupKey"
+                                             Checked="@(Model.Row.CorrectOptionIndex == optIndex)"
+                                             CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(optIndex, v)))"
+                                             aria-label="Mark as correct option" />
+                                <FluentTextField @bind-Value="opt.OptionText"
+                                                 Placeholder="@($"Option {optIndex + 1}")"
+                                                 class="full-width" />
+                                @if (Model.Row.Options.Count > QuestionEditorRow.MinOptions)
+                                {
+                                    <FluentButton Appearance="Appearance.Stealth"
+                                                  OnClick="@(() => OnRemoveOption(optIndex))"
+                                                  aria-label="Remove option">
+                                        ×
+                                    </FluentButton>
+                                }
+                            </div>
+                        }
+                    </FluentRadioGroup>
+                    <FluentButton Appearance="Appearance.Outline"
+                                  Disabled="@(Model.Row.Options.Count >= QuestionEditorRow.MaxOptions)"
+                                  OnClick="OnAddOption">
+                        Add option
+                    </FluentButton>
+                </div>
+                break;
+            }
+            case QuestionTypeDto.TrueFalse:
+            {
+                <div class="cq-qedit-options">
+                    <span class="cq-qedit-sublabel">Correct answer</span>
+                    <FluentRadioGroup TValue="int" Name="@RadioGroupKey">
+                        <FluentRadio Value="0"
+                                     Label="True"
+                                     Checked="@(Model.Row.CorrectOptionIndex == 0)"
+                                     CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(0, v)))" />
+                        <FluentRadio Value="1"
+                                     Label="False"
+                                     Checked="@(Model.Row.CorrectOptionIndex == 1)"
+                                     CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(1, v)))" />
+                    </FluentRadioGroup>
+                </div>
+                break;
+            }
+            case QuestionTypeDto.ShortAnswer:
+            {
+                <FluentTextArea @bind-Value="Model.Row.ModelAnswer"
+                                Label="Model answer (teacher reference)"
+                                Rows="2"
+                                class="full-width" />
+                break;
+            }
+        }
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@SubmitText"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    /// <summary>A per-dialog radio-group name so each question's radios stay independent.</summary>
+    private readonly string _groupName = $"qedit-{Guid.NewGuid():N}";
+
+    private string RadioGroupKey => $"{_groupName}-{Model.Position}";
+
+    protected override string SubmitText => Model.IsNew ? "Add question" : "Save";
+
+    /// <summary>Applies the type change's canonical option/correct-answer reset (spec §7).</summary>
+    private void OnTypeChanged() => Model.Row.ApplyTypeChange(Model.Row.Type);
+
+    private void OnAddOption() => Model.Row.AddOption();
+
+    private void OnRemoveOption(int index) => Model.Row.RemoveOptionAt(index);
+
+    private void OnCorrectOptionChanged(int index, bool isChecked)
+    {
+        if (isChecked)
+        {
+            Model.Row.CorrectOptionIndex = index;
+        }
+        else if (Model.Row.CorrectOptionIndex == index)
+        {
+            // Radio-uncheck is allowed; the submit gate rejects a row with no correct pick.
+            Model.Row.CorrectOptionIndex = null;
+        }
+    }
+
+    /// <summary>No per-question validation exists today (the apply-time submit gate owns it), so
+    /// a confirmed dialog always returns its working copy.</summary>
+    protected override Task<QuestionEditResult?> SubmitAsync(QuestionEditModel model) =>
+        Task.FromResult<QuestionEditResult?>(new QuestionEditResult(model.Row));
+}

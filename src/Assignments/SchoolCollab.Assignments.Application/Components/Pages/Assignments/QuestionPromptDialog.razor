@@ -1,0 +1,108 @@
+@* R3 (spec §6.1a PB-1…PB-11): the generation-knobs dialog. The composer keeps only the prompt
+   textarea, the read-only summary line and the Configure button (QA-22); every knob lives here so
+   one surface owns "what the AI is asked for". The context block is a PREVIEW of what the
+   composition will use — it is read-only by design (PB-3). *@
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Assignments.Contracts
+@inherits DialogShellBase<QuestionPromptModel, QuestionPromptResult>
+
+<div class="dialog-container cq-prompt-dialog">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <div class="cq-prompt-stack">
+            @* PB-3: the read-only context preview. *@
+            <dl class="cq-prompt-context" id="cq-prompt-context">
+                <div class="cq-prompt-context-row">
+                    <dt>Subject</dt>
+                    <dd>@(string.IsNullOrWhiteSpace(Model.TopicName) ? "No subject selected" : Model.TopicName)</dd>
+                </div>
+                <div class="cq-prompt-context-row">
+                    <dt>Grade level</dt>
+                    <dd>@QuestionPromptComposer.FormatGrades(Model.GradeLevels)</dd>
+                </div>
+                @if (Model.ResourceNames.Count > 0)
+                {
+                    <div class="cq-prompt-context-row">
+                        <dt>Grounding</dt>
+                        <dd>@string.Join(", ", Model.ResourceNames) (@Model.ResourceNames.Count)</dd>
+                    </div>
+                }
+            </dl>
+
+            @* PB-2: the editable knobs. *@
+            <div class="cq-prompt-nums">
+                <FluentNumberField @bind-Value="Model.QuestionCount"
+                                   Id="cq-prompt-count"
+                                   Label="Number of questions"
+                                   Min="1"
+                                   Max="30"
+                                   Class="w-2" />
+                <FluentNumberField @bind-Value="Model.DifficultyEasyCount"
+                                   Id="cq-prompt-easy"
+                                   Label="Easy"
+                                   Min="0"
+                                   Max="30"
+                                   Class="w-2" />
+                <FluentNumberField @bind-Value="Model.DifficultyMediumCount"
+                                   Id="cq-prompt-medium"
+                                   Label="Medium"
+                                   Min="0"
+                                   Max="30"
+                                   Class="w-2" />
+                <FluentNumberField @bind-Value="Model.DifficultyHardCount"
+                                   Id="cq-prompt-hard"
+                                   Label="Hard"
+                                   Min="0"
+                                   Max="30"
+                                   Class="w-2" />
+            </div>
+
+            <div class="cq-prompt-types" role="group" aria-label="Question types">
+                <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.MultipleChoice)"
+                      Selected="@Model.IncludeMultipleChoice"
+                      OnToggle="@(v => { Model.IncludeMultipleChoice = v; })" />
+                <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.TrueFalse)"
+                      Selected="@Model.IncludeTrueFalse"
+                      OnToggle="@(v => { Model.IncludeTrueFalse = v; })" />
+                <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.ShortAnswer)"
+                      Selected="@Model.IncludeShortAnswer"
+                      OnToggle="@(v => { Model.IncludeShortAnswer = v; })" />
+            </div>
+
+            @* PB-2: "all off" keeps today's meaning (the server's balanced default). *@
+            @if (!Model.IncludeMultipleChoice && !Model.IncludeTrueFalse && !Model.IncludeShortAnswer)
+            {
+                <p class="cq-prompt-note" id="cq-prompt-all-off">No type selected — the AI will choose a mix.</p>
+            }
+
+            @* PB-8: the knobs stay enabled under a lock; only the composition/replace is skipped. *@
+            @if (Model.PromptLocked)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning" id="cq-prompt-locked">
+                    Your organization has locked the AI prompt. These settings still shape the request,
+                    but the written prompt will not be composed or replaced.
+                </FluentMessageBar>
+            }
+
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
+                               SubmitText="@SubmitText"
+                               OnCancel="HandleCancelAsync" />
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    protected override string SubmitText => "Apply";
+
+    /// <summary>No per-field validation exists — every knob is bounded by the number fields' Min/Max,
+    /// so a valid submit always returns the working copy for the caller to apply.</summary>
+    protected override Task<QuestionPromptResult?> SubmitAsync(QuestionPromptModel model) =>
+        Task.FromResult<QuestionPromptResult?>(new QuestionPromptResult(
+            model.QuestionCount,
+            model.DifficultyEasyCount,
+            model.DifficultyMediumCount,
+            model.DifficultyHardCount,
+            model.IncludeMultipleChoice,
+            model.IncludeTrueFalse,
+            model.IncludeShortAnswer));
+}

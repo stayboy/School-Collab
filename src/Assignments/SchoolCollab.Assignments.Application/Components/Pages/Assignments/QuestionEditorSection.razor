@@ -1,13 +1,19 @@
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Application.Helpers
 @implements IDisposable
 @inject IDialogService DialogService
 @inject ILogger<QuestionEditorSection> Logger
 
+@* Spec §6.2 (round content-questions-modern-ui): the question list is a single-line,
+   hairline-separated row list — the reference project page's shape. The question text is the
+   "open" target and the trailing kebab holds Edit / Remove; editing happens in the shared
+   QuestionEditDialog, NOT inline (decision D4, invariant X-9). The per-type fields moved to the
+   dialog verbatim. *@
 <section class="question-editor-section">
-    <div class="question-editor-toolbar">
-        <span class="question-editor-count">@Model.Questions.Count question(s)</span>
-        <FluentButton Appearance="Appearance.Accent"
+    <div class="cq-list-head">
+        <span class="cq-list-count">@Model.Questions.Count question(s)</span>
+        <FluentButton Id="cq-add-question"
+                      Appearance="Appearance.Outline"
                       IconStart="@FluentIcons.Add"
                       OnClick="OnAddQuestionAsync">
             Add question
@@ -16,103 +22,38 @@
 
     @if (Model.Questions.Count == 0)
     {
-        <FluentMessageBar Intent="MessageIntent.Info">No questions yet. Add a question to get started.</FluentMessageBar>
+        @* QA-15/X-6: the long-standing empty-state string is retained. *@
+        <p class="cq-empty">No questions yet. Add a question to get started.</p>
     }
     else
     {
-        <div class="question-editor-pages">
+        <ul class="cq-qrows" id="cq-question-list">
             @foreach (var (row, index) in _currentPage.Select((r, i) => (r, i)))
             {
                 var absoluteIndex = _paginationState.CurrentPageIndex * AssignmentEditFormModel.QuestionPageSize + index;
-                <div class="question-editor-card" @key="row">
-                    <div class="question-editor-card-header">
-                        <span class="question-editor-position">#@(absoluteIndex + 1)</span>
-                        <span class="question-editor-card-spacer" aria-hidden="true"></span>
-                        <FluentButton Appearance="Appearance.Stealth"
-                                      OnClick="@(() => OnRemoveQuestionAsync(absoluteIndex))"
-                                      aria-label="Remove question">
-                            Remove
-                        </FluentButton>
-                    </div>
-
-                    <FluentTextField @bind-Value="row.QuestionText"
-                                     Label="Question *"
-                                     class="full-width" />
-
-                    <DropdownForEnum TEnum="QuestionTypeDto"
-                                     @bind-SelectedValue="row.Type"
-                                     @bind-SelectedValue:after="() => OnTypeChanged(row)"
-                                     Label="Type"
-                                     Class="w-3" />
-
-                    @switch (row.Type)
-                    {
-                        case QuestionTypeDto.MultipleChoice:
-                        {
-                            <div class="question-editor-options">
-                                <span class="question-editor-sublabel">Options (pick the correct one)</span>
-                                <FluentRadioGroup TValue="int" Name="@RadioGroupKey(row)">
-                                    @for (var i = 0; i < row.Options.Count; i++)
-                                    {
-                                        var opt = row.Options[i];
-                                        var optIndex = i;
-                                        <div class="question-editor-option-row" @key="opt">
-                                            <FluentRadio Value="@optIndex"
-                                                         Group="@RadioGroupKey(row)"
-                                                         Checked="@(row.CorrectOptionIndex == optIndex)"
-                                                         CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, optIndex, v)))"
-                                                         aria-label="Mark as correct option" />
-                                            <FluentTextField @bind-Value="opt.OptionText"
-                                                             Placeholder="@($"Option {optIndex + 1}")"
-                                                             class="full-width" />
-                                            @if (row.Options.Count > QuestionEditorRow.MinOptions)
-                                            {
-                                                <FluentButton Appearance="Appearance.Stealth"
-                                                              OnClick="@(() => row.RemoveOptionAt(optIndex))"
-                                                              aria-label="Remove option">
-                                                    ×
-                                                </FluentButton>
-                                            }
-                                        </div>
-                                    }
-                                </FluentRadioGroup>
-                                <FluentButton Appearance="Appearance.Outline"
-                                              Disabled="@(row.Options.Count >= QuestionEditorRow.MaxOptions)"
-                                              OnClick="@(() => row.AddOption())">
-                                    Add option
-                                </FluentButton>
-                            </div>
-                            break;
-                        }
-                        case QuestionTypeDto.TrueFalse:
-                        {
-                            <div class="question-editor-options">
-                                <span class="question-editor-sublabel">Correct answer</span>
-                                <FluentRadioGroup TValue="int" Name="@RadioGroupKey(row)">
-                                    <FluentRadio Value="0"
-                                                 Label="True"
-                                                 Checked="@(row.CorrectOptionIndex == 0)"
-                                                 CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, 0, v)))" />
-                                    <FluentRadio Value="1"
-                                                 Label="False"
-                                                 Checked="@(row.CorrectOptionIndex == 1)"
-                                                 CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, 1, v)))" />
-                                </FluentRadioGroup>
-                            </div>
-                            break;
-                        }
-                        case QuestionTypeDto.ShortAnswer:
-                        {
-                            <FluentTextArea @bind-Value="row.ModelAnswer"
-                                            Label="Model answer (teacher reference)"
-                                            Rows="2"
-                                            class="full-width" />
-                            break;
-                        }
-                    }
-                </div>
+                <li class="cq-qrow" id="@($"cq-qrow-{absoluteIndex}")" @key="row">
+                    <span class="cq-qrow-position">#@(absoluteIndex + 1)</span>
+                    @* QA-9/QA-12: a real anchor so the open target is keyboard reachable; the row
+                       itself is NOT a button (a button nested in a clickable row is invalid). *@
+                    <FluentAnchor Appearance="Appearance.Hypertext"
+                                  Href="#"
+                                  Id="@($"cq-qrow-{absoluteIndex}-open")"
+                                  Class="cq-qrow-open"
+                                  Title="@(string.IsNullOrWhiteSpace(row.QuestionText) ? "Untitled question" : row.QuestionText)"
+                                  OnClick="@(() => OpenEditAsync(absoluteIndex, row))">
+                        @(string.IsNullOrWhiteSpace(row.QuestionText) ? "Untitled question" : row.QuestionText)
+                    </FluentAnchor>
+                    <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(row.Type)</FluentBadge>
+                    @* QA-16/D13: always in the DOM, revealed on hover / focus-within by CSS. *@
+                    <span class="cq-qrow-actions" id="@($"cq-qrow-{absoluteIndex}-actions")">
+                        <RowActionsMenu UseMenuService="false"
+                                        ForceKebab="true"
+                                        AriaLabel="@($"Question {absoluteIndex + 1} actions")"
+                                        Actions="ActionsFor(absoluteIndex, row)" />
+                    </span>
+                </li>
             }
-        </div>
+        </ul>
 
         <FluentPaginator State="@_paginationState" />
     }
@@ -122,12 +63,8 @@
     /// <summary>The form model that owns the question list being edited.</summary>
     [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
 
-    /// <summary>Raised when the model was mutated (add / remove / type
-    /// change / option edit) so the page can re-render review counts and
-    /// the submit gate. Child-write re-render trap (blazor-components.md
-    /// "Share form fields…" §6): the EventCallback invoke re-renders the
-    /// receiver, which a raw binding into the parent's model object
-    /// would not do.</summary>
+    /// <summary>Raised when the model was mutated (add / remove / dialog-confirmed edit) so the page
+    /// can re-render review counts and the submit gate.</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
     private readonly PaginationState _paginationState = new()
@@ -138,11 +75,7 @@
 
     protected override void OnParametersSet()
     {
-        // Track the paginator's total so it follows appends/removals
-        // (FR-240). PaginationState's setters are async in this
-        // FluentUI version, so fire-and-forget is acceptable here —
-        // OnParametersSet already runs on the renderer thread; the
-        // paginator UI catches up after.
+        // Track the paginator's total so it follows appends/removals (FR-240).
         _ = _paginationState.SetTotalItemCountAsync(Model.Questions.Count);
         if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
         {
@@ -151,57 +84,59 @@
         _currentPage = Model.GetQuestionPage(_paginationState.CurrentPageIndex);
     }
 
-    private async Task OnAddQuestionAsync()
+    /// <summary>Appends a blank MultipleChoice row and moves to it. Unchanged from the inline
+    /// editor: Add produces a row whose fields are then edited through the row's own Edit action.</summary>
+    public async Task OnAddQuestionAsync()
     {
         Model.AddQuestion(QuestionEditorRow.NewMultipleChoice());
         await _paginationState.SetCurrentPageIndexAsync(Model.QuestionPageCount() - 1);
         await Changed.InvokeAsync();
     }
 
-    private async Task OnRemoveQuestionAsync(int index)
+    /// <summary>QA-10: Edit opens the dialog; Remove is destructive so RowActionsMenu owns the
+    /// confirmation prompt (this method must NOT prompt again — a second gate would double-confirm).</summary>
+    private IReadOnlyList<RowAction> ActionsFor(int index, QuestionEditorRow row) =>
+    [
+        RowAction.Callback("Edit", () => OpenEditAsync(index, row), FluentIcons.Edit),
+        RowAction.Callback("Remove", () => OnRemoveQuestionAsync(index), FluentIcons.Delete, destructive: true),
+    ];
+
+    /// <summary>QA-11/QA-12: opens the question in the shared dialog shell and adopts the confirmed
+    /// working copy. A cancelled dialog leaves the row untouched (the model held a copy).
+    /// The testable seam the bUnit suite drives directly.</summary>
+    public async Task OpenEditAsync(int index, QuestionEditorRow row)
     {
-        var confirmed = await DialogService.ShowConfirmDialogAsync(
-            "Remove this question?",
-            "Remove",
-            "Cancel",
-            "Remove question");
-        if (!confirmed)
+        var result = await DialogService.ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>(
+            QuestionEditModel.ForEdit(index, row),
+            title: "Edit question",
+            size: DialogSize.Medium);
+
+        if (result is null || index < 0 || index >= Model.Questions.Count)
         {
             return;
         }
-        Model.RemoveQuestionAt(index);
+
+        // Keep the row's slot identity/order: the dialog edited a copy, not the position.
+        result.Row.DisplayOrder = Model.Questions[index].DisplayOrder;
+        Model.Questions[index] = result.Row;
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>Removes the question at <paramref name="absoluteIndex"/> (destructive-gated upstream
+    /// by <see cref="RowActionsMenu"/>).</summary>
+    public async Task OnRemoveQuestionAsync(int absoluteIndex)
+    {
+        if (absoluteIndex < 0 || absoluteIndex >= Model.Questions.Count)
+        {
+            return;
+        }
+        Model.RemoveQuestionAt(absoluteIndex);
         if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
         {
             await _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
         }
         await Changed.InvokeAsync();
     }
-
-    private async Task OnTypeChanged(QuestionEditorRow row)
-    {
-        // ApplyTypeChange resets options and the correct pick per spec §7.
-        row.ApplyTypeChange(row.Type);
-        await Changed.InvokeAsync();
-    }
-
-    private async Task OnCorrectOptionChanged(QuestionEditorRow row, int index, bool isChecked)
-    {
-        if (isChecked)
-        {
-            row.CorrectOptionIndex = index;
-        }
-        else if (row.CorrectOptionIndex == index)
-        {
-            // Allow clearing the correct pick (radio-uncheck). The
-            // submit gate will then reject the row.
-            row.CorrectOptionIndex = null;
-        }
-        await Changed.InvokeAsync();
-    }
-
-    /// <summary>Stable radio group key per question row, so each row's
-    /// <c>FluentRadio</c> group is independent.</summary>
-    private static string RadioGroupKey(QuestionEditorRow row) => $"q-{row.DisplayOrder}";
 
     public void Dispose()
     {

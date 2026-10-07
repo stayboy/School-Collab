@@ -44,3 +44,37 @@
 .chip-sub {
     color: var(--neutral-foreground-hint, #6b6b6b);
 }
+
+/* ── Selectable mode (round content-questions-modern-ui, spec §5 CH) ──────
+   A toggle chip is a real <button aria-pressed>; the wrapper keeps the pill's
+   geometry while the button carries the interaction. Two states per DL-10:
+   unselected = hairline + transparent, selected = filled and borderless. */
+.chip.chip--toggle {
+    padding: 0;
+    background: transparent;
+    border-color: var(--neutral-stroke-divider-rest);
+    cursor: pointer;
+}
+
+.chip.chip--toggle.is-selected {
+    background: var(--neutral-layer-2);
+    border-color: transparent;
+}
+
+.chip-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.chip-toggle:focus-visible {
+    outline: 2px solid var(--focus-stroke-outer, var(--accent-fill-rest));
+    outline-offset: 2px;
+}

@@ -17,6 +17,12 @@
 > - `documents/specs/assignment-creation-with-ai.md` — AI question generation,
 >   incorporated here as an **action**, not re-specified.
 > - `documents/specs/notification-delivery-plan.md` — notification policy contract.
+> - `documents/specs/assignment-authoring-content-questions-modern-ui.md` — **presentation-only
+>   refinement** of compartment 5 (Content & Resources) and compartment 6 (Questions & AI): a
+>   Claude-project-style two-column composition, the Context-style resource card, a composer hero,
+>   and a single-line question list whose kebab opens the editor in a dialog. It changes no
+>   behaviour, gating, save semantics or contract defined below (this spec stays CLOSED and
+>   authoritative for those).
 >
 > **Implementation status:** **implemented in the main line.** R1 (#288), R2 (#291) and
 > R3 (#293) are merged on `main` — the compartmentalized authoring page, the targeting

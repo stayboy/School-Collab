@@ -54,6 +54,19 @@ public class QuestionEditorSectionBunitTests : BunitContext
         });
     }
 
+    /// <summary>QA-10/D4: opens the row's kebab and clicks the named RowActionsMenu item.</summary>
+    private static void ClickRowAction(IRenderedComponent<QuestionEditorSection> cut, int rowIndex, string label)
+    {
+        var actions = cut.Find($"#cq-qrow-{rowIndex}-actions");
+        actions.QuerySelector("fluent-button[aria-haspopup='true']")!.Click();
+        cut.WaitForAssertion(() => cut.Find($"#cq-qrow-{rowIndex}-actions")
+            .QuerySelectorAll("fluent-menu-item").Length.Should().BeGreaterThan(0));
+        cut.Find($"#cq-qrow-{rowIndex}-actions")
+            .QuerySelectorAll("fluent-menu-item")
+            .First(item => item.TextContent.Trim() == label)
+            .Click();
+    }
+
     private static AssignmentEditFormModel SeedModel(int questionCount)
     {
         var model = new AssignmentEditFormModel();
@@ -92,67 +105,33 @@ public class QuestionEditorSectionBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void MultipleChoiceRow_ShowsOptionInputsAndCorrectRadioControls()
+    public void RowList_RendersIndexTextTypeBadgeAndKebab()
     {
-        var model = new AssignmentEditFormModel();
-        var mc = new QuestionEditorRow
-        {
-            QuestionText = "MC?",
-            Type = QuestionTypeDto.MultipleChoice,
-        };
-        mc.Options.Add(new OptionEditorRow { OptionText = "First" });
-        mc.Options.Add(new OptionEditorRow { OptionText = "Second" });
-        model.Questions.Add(mc);
+        // Round content-questions-modern-ui (spec §6.2 QA-9/QA-10, decisions D4/G9): the question
+        // list is a single-line row list whose text opens the edit dialog and whose kebab carries
+        // Edit / Remove. The per-type fields these three tests used to assert moved into
+        // QuestionEditDialogBunitTests with the fields themselves.
+        var model = SeedModel(1);
+        model.Questions[0].QuestionText = "MC?";
 
         var cut = RenderEditor(model);
 
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("First");
-            cut.Markup.Should().Contain("Second");
-            cut.Markup.Should().Contain("Add option",
-                "an Add-option button is rendered for MultipleChoice rows");
-            cut.Markup.Should().Contain("Mark as correct option",
-                "a radio control lets the teacher pick the correct option (EC-5)");
-        });
-    }
+        cut.WaitForAssertion(() => cut.Find("#cq-qrow-0"));
+        cut.Find("#cq-qrow-0").TextContent.Should().Contain("#1", "the row carries its position");
+        cut.Find("#cq-qrow-0").TextContent.Should().Contain("MC?", "the row's open target carries the question text");
+        cut.Find("#cq-qrow-0-open").Should().NotBeNull(
+            "the question text is the row's keyboard-reachable open target");
 
-    [TestMethod]
-    public void TrueFalseRow_ShowsTrueFalseRadios_NoOptionTextInputs()
-    {
-        var model = new AssignmentEditFormModel();
-        var tf = new QuestionEditorRow { QuestionText = "TF?" };
-        tf.ApplyTypeChange(QuestionTypeDto.TrueFalse);
-        model.Questions.Add(tf);
-
-        var cut = RenderEditor(model);
+        var actions = cut.Find("#cq-qrow-0-actions");
+        actions.QuerySelector("fluent-button[aria-haspopup='true']")!.Click();
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("True");
-            cut.Markup.Should().Contain("False");
-            cut.Markup.Should().NotContain("Add option",
-                "TrueFalse is fixed at two canonical options — no Add-option affordance");
-        });
-    }
-
-    [TestMethod]
-    public void ShortAnswerRow_ShowsModelAnswerTextArea()
-    {
-        var model = new AssignmentEditFormModel();
-        model.Questions.Add(new QuestionEditorRow
-        {
-            QuestionText = "Name it.",
-            Type = QuestionTypeDto.ShortAnswer,
-            ModelAnswer = "Reference answer",
-        });
-
-        var cut = RenderEditor(model);
-
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Model answer (teacher reference)",
-                "FR-241 / decision (c): the ShortAnswer model answer is editable in the wizard");
+            cut.Find("#cq-qrow-0-actions")
+                .QuerySelectorAll("fluent-menu-item")
+                .Select(item => item.TextContent.Trim())
+                .Should().Equal(["Edit", "Remove"],
+                    "the kebab carries Edit and the destructive Remove (D4)");
         });
     }
 
@@ -298,9 +277,9 @@ public class QuestionEditorSectionBunitTests : BunitContext
 
         var cut = RenderEditor(model);
 
-        var removeButton = cut.FindAll("fluent-button")
-            .First(b => b.TextContent.Trim().StartsWith("Remove", StringComparison.Ordinal) && b.TextContent.Trim() != "Remove option");
-        removeButton.Click();
+        // QA-10/D4: Remove now lives in the row's kebab, and the shared RowActionsMenu owns the
+        // destructive confirmation (the section must not prompt a second time).
+        ClickRowAction(cut, 0, "Remove");
 
         cut.WaitForAssertion(() =>
         {
@@ -332,9 +311,7 @@ public class QuestionEditorSectionBunitTests : BunitContext
 
         var cut = RenderEditor(model);
 
-        var removeButton = cut.FindAll("fluent-button")
-            .First(b => b.TextContent.Trim().StartsWith("Remove", StringComparison.Ordinal) && b.TextContent.Trim() != "Remove option");
-        removeButton.Click();
+        ClickRowAction(cut, 0, "Remove");
 
         cut.WaitForAssertion(() =>
         {

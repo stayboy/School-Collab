@@ -498,6 +498,13 @@ public class ResourcesSectionBunitTests : BunitContext
         var model = new AssignmentEditFormModel();
         var cut = RenderSection(model);
 
+        // CR-1/CR-8 (round content-questions-modern-ui): the link input is hidden until the
+        // card header's + reveals it, so the narrow rail carries only the tile + item rows.
+        cut.FindAll("fluent-button")
+            .First(b => b.GetAttribute("aria-label") == "Add resource")
+            .Click();
+        cut.WaitForAssertion(() => cut.FindComponent<FluentTextField>());
+
         // Type a URL into the bound text field, then click the Add link button.
         var field = cut.FindComponent<FluentTextField>();
         await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/notes"));
@@ -553,6 +560,12 @@ public class ResourcesSectionBunitTests : BunitContext
     {
         var model = new AssignmentEditFormModel { Title = "T" };
         var cut = RenderSection(model);
+
+        // CR-1/CR-8: reveal the link input through the card header's + first.
+        cut.FindAll("fluent-button")
+            .First(b => b.GetAttribute("aria-label") == "Add resource")
+            .Click();
+        cut.WaitForAssertion(() => cut.FindComponent<FluentTextField>());
 
         var field = cut.FindComponent<FluentTextField>();
         await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/source"));
