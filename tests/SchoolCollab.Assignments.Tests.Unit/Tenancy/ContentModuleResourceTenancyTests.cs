@@ -48,7 +48,7 @@ public class ContentModuleResourceTenancyTests
     private static Assignment NewDraft() =>
         Assignment.Create("HW", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId);
+            TopicId, null, null, TeacherId);
 
     [TestMethod]
     public async Task Modules_And_Resources_AreTenantIsolated_NoCrossTenantLeak()

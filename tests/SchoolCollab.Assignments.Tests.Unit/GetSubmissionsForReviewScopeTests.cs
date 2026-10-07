@@ -55,10 +55,22 @@ public class GetSubmissionsForReviewScopeTests
         return new Harness { Db = db, Repository = new SubmissionRepository(db) };
     }
 
-    private static Assignment NewAssignment(string title, Guid creator, Guid? grade) =>
-        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, SubjectArt, grade, null, null, creator)
+    /// <summary>Round <c>drop-primary-grade</c>: a row's grade scope is its authored grade TARGETS, so
+    /// the grade half of every scope fixture is attached as a <c>GradeLevel</c> target row (a null
+    /// grade means "no grade target", which is visible through the creator leg only).</summary>
+    private static Assignment NewAssignment(string title, Guid creator, Guid? grade)
+    {
+        var assignment = Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents, SubjectArt, null, null, creator)
             .WithTenant(TenantId);
+
+        if (grade is Guid gradeId)
+        {
+            assignment.WithGradeTarget(gradeId);
+        }
+
+        return assignment;
+    }
 
     private static AssignmentSubmission SubmissionFor(Guid assignmentId) =>
         AssignmentSubmission.Create(TenantId, assignmentId, Ward, null);

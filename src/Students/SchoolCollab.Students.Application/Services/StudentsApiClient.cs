@@ -2259,7 +2259,9 @@ public sealed record UpsertGradeAssignmentPolicyRequest(
     SignatureRequirementMode? SignatureRequirement,
     bool? RequiresApprovalBeforePublish,
     int? MaxPrimaryContacts,
-    int? MaxCopyContacts);
+    int? MaxCopyContacts,
+    bool? MandatoryReview = null,
+    int? ArchiveGraceDays = null);
 
 /// <summary>
 /// <b>Legacy request shape (Round A only).</b> The pre-widening PUT body was the single

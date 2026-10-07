@@ -131,7 +131,8 @@ public class AssignmentPolicyRoutesTests
 
         var response = await PutAsync(upsert, """
             {"signatureRequirement":"Mandatory","requiresApprovalBeforePublish":true,
-             "maxPrimaryContacts":2,"maxCopyContacts":4}
+             "maxPrimaryContacts":2,"maxCopyContacts":4,
+             "mandatoryReview":true,"archiveGraceDays":45}
             """);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -141,6 +142,22 @@ public class AssignmentPolicyRoutesTests
         upsert.Last.RequiresApprovalBeforePublish.Should().BeTrue();
         upsert.Last.MaxPrimaryContacts.Should().Be(2);
         upsert.Last.MaxCopyContacts.Should().Be(4);
+        upsert.Last.MandatoryReview.Should().BeTrue("the PUT body binds the guardian-review field (D3, AC7)");
+        upsert.Last.ArchiveGraceDays.Should().Be(45, "and the archive window (D5, AC7)");
+    }
+
+    /// <summary>D3/D5/AC7: the two new fields are optional — a body that omits them leaves them unset
+    /// rather than failing to bind.</summary>
+    [TestMethod]
+    public async Task Put_WithoutTheNewFields_LeavesThemUnset()
+    {
+        var upsert = new CapturingUpsertHandler();
+
+        var response = await PutAsync(upsert, """{"signatureRequirement":"Optional"}""");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        upsert.Last!.MandatoryReview.Should().BeNull("a body without the field binds null = unset");
+        upsert.Last.ArchiveGraceDays.Should().BeNull();
     }
 
     [TestMethod]
@@ -173,7 +190,8 @@ public class AssignmentPolicyRoutesTests
     {
         var stored = new TenantAssignmentPolicyDto(
             SignatureRequirementMode.Optional, RequiresApprovalBeforePublish: true,
-            MaxPrimaryContacts: 2, MaxCopyContacts: null);
+            MaxPrimaryContacts: 2, MaxCopyContacts: null,
+            MandatoryReview: false, ArchiveGraceDays: 45);
         var (app, client) = await StartAsync(new CapturingUpsertHandler(), stored);
 
         await using (app)
@@ -188,6 +206,8 @@ public class AssignmentPolicyRoutesTests
             dto!.SignatureRequirement.Should().Be(SignatureRequirementMode.Optional);
             dto.MaxPrimaryContacts.Should().Be(2);
             dto.MaxCopyContacts.Should().BeNull();
+            dto.MandatoryReview.Should().BeFalse("the GET body carries the new field set too");
+            dto.ArchiveGraceDays.Should().Be(45);
         }
     }
 }

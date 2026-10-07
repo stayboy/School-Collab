@@ -9,12 +9,18 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 
 /// <summary>
 /// WS-A3 (spec §3.3 + §7 Q4) — <see cref="ScoringFieldsSection"/>
-/// renders the Pass Score + Max Attempts inputs for AutoGraded / InstantGraded; for
-/// TeacherGraded they render <b>disabled with an inline reason</b>
+/// renders the Pass Score input for AutoGraded / InstantGraded; for
+/// TeacherGraded it renders <b>disabled with an inline reason</b>
 /// (assignment-authoring-compartments UX-17/D12 — never hidden, so the authoring page does
 /// not reflow when the grading format changes). The <c>ScoringFieldsPassSubmitGate</c>
 /// safety rule is unchanged: a TeacherGraded submit never blocks on the hidden-then,
 /// disabled-now values.
+///
+/// Round <c>authoring-compact-fields</c> (OD1): the attempt cap moved out of this section into the
+/// authoring page's Basics <c>(Max score · Max attempts)</c> pair, so these tests pin the section's
+/// new shape — ONE number field — and the shared gate the page still asks for the moved control.
+/// The cap's disabled-with-reason behaviour is pinned at page level
+/// (<c>AssignmentAuthoringBunitTests.TeacherGraded_ScoringFields_RenderDisabledWithReason</c>).
 /// </summary>
 [TestClass]
 public class ScoringFieldsSectionBunitTests : BunitContext
@@ -35,7 +41,7 @@ public class ScoringFieldsSectionBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void AutoGraded_RendersPassScoreAndMaxAttempts()
+    public void AutoGraded_RendersThePassScore()
     {
         var cut = Render(new AssignmentEditFormModel(), GradingFormatDto.AutoGraded);
 
@@ -43,25 +49,25 @@ public class ScoringFieldsSectionBunitTests : BunitContext
         {
             cut.Markup.Should().Contain("Pass Score",
                 "AutoGraded must show the Pass Score field");
-            cut.Markup.Should().Contain("Max Attempts",
-                "AutoGraded must show the Max Attempts field");
+            cut.Markup.Should().NotContain("Max Attempts",
+                "OD1: the attempt cap is the authoring page's Basics pair, not this section's");
         });
     }
 
     [TestMethod]
-    public void InstantGraded_RendersPassScoreAndMaxAttempts()
+    public void InstantGraded_RendersThePassScore()
     {
         var cut = Render(new AssignmentEditFormModel(), GradingFormatDto.InstantGraded);
 
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Pass Score");
-            cut.Markup.Should().Contain("Max Attempts");
+            cut.Markup.Should().NotContain("Max Attempts");
         });
     }
 
     [TestMethod]
-    public void TeacherGraded_RendersBothInputsDisabledWithReason()
+    public void TeacherGraded_RendersThePassScoreDisabledWithReason()
     {
         var cut = Render(new AssignmentEditFormModel(), GradingFormatDto.TeacherGraded);
 
@@ -71,14 +77,24 @@ public class ScoringFieldsSectionBunitTests : BunitContext
             // disabled with an inline reason, never hidden — the compartment must not reflow
             // when the grading format changes.
             var fields = cut.FindAll("fluent-number-field");
-            fields.Should().HaveCount(2, "both fields stay rendered for TeacherGraded");
+            fields.Should().ContainSingle("only the Pass Score field is this section's (OD1)");
             fields.Should().OnlyContain(f => f.HasAttribute("disabled"),
-                "TeacherGraded disables the Pass Score and Max Attempts fields");
+                "TeacherGraded disables the Pass Score field");
             cut.Markup.Should().Contain("Pass Score");
-            cut.Markup.Should().Contain("Max Attempts");
             cut.Markup.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the inline reason explains why the fields cannot be edited");
+                "the inline reason explains why the field cannot be edited");
         });
+    }
+
+    /// <summary>OD1: the moved attempt cap's gate is the section's own — the page must not restate
+    /// the rule, so the shared predicate is public and answers for exactly the two scoring formats.</summary>
+    [TestMethod]
+    public void IsScoringInapplicable_GatesTheScoringFormats()
+    {
+        ScoringFieldsSection.IsScoringInapplicable(GradingFormatDto.AutoGraded).Should().BeFalse();
+        ScoringFieldsSection.IsScoringInapplicable(GradingFormatDto.InstantGraded).Should().BeFalse();
+        ScoringFieldsSection.IsScoringInapplicable(GradingFormatDto.TeacherGraded).Should().BeTrue(
+            "TeacherGraded carries no pass threshold and no attempt cap");
     }
 
     [TestMethod]
@@ -91,21 +107,15 @@ public class ScoringFieldsSectionBunitTests : BunitContext
         // the RENDERED inputs (not just left intact on the model), and a
         // user edit writes back into the form model.
         var fields = cut.FindAll("fluent-number-field");
-        fields.Should().HaveCount(2, "AutoGraded must render the Pass Score and Max Attempts number fields");
+        fields.Should().ContainSingle("AutoGraded renders the Pass Score number field");
 
-        cut.WaitForAssertion(() =>
-        {
-            fields[0].GetAttribute("value").Should().Be("75",
-                "the Pass Score input must render the model's value (decimal)");
-            fields[1].GetAttribute("value").Should().Be("4",
-                "the Max Attempts input must render the model's value (int)");
-        });
+        cut.WaitForAssertion(() => fields[0].GetAttribute("value").Should().Be("75",
+            "the Pass Score input must render the model's value (decimal)"));
 
         // Interaction write-back: edit the Pass Score and assert the model follows.
         fields[0].Change("88");
         model.PassScore.Should().Be(88m, "editing the Pass Score input must write back into the model");
-
-        fields[1].Change("6");
-        model.MaxAttempts.Should().Be(6, "editing the Max Attempts input must write back into the model");
+        model.MaxAttempts.Should().Be(4,
+            "the cap keeps its loaded value — this section no longer renders it, and must not reset it");
     }
 }

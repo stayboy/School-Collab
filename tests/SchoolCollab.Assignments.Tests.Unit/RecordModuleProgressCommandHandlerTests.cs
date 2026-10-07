@@ -62,7 +62,7 @@ public class RecordModuleProgressCommandHandlerTests
     {
         var a = Assignment.Create("Gated", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, TeacherId, mandatoryReview: false)
+            TopicId, null, null, TeacherId, mandatoryReview: false)
             .WithTenant(new FakeTenantProvider(TenantId));
         SetId(a, AssignmentId);
         var module = a.AddModule(ModuleType.Video, "https://video", title: "Req", minCompletionThresholdPercent: threshold, isRequired: true);

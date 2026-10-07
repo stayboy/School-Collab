@@ -43,7 +43,7 @@ public class GetAssignmentAuthoringChildrenQueryHandlerTests
     private static Assignment NewAssignment(ITenantProvider tenants) =>
         Assignment.Create(
                 "Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, null)
+                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null)
             .WithTenant(tenants);
 
     [TestMethod]

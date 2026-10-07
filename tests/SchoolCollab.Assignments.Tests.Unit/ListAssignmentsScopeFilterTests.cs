@@ -126,10 +126,21 @@ public class ListAssignmentsScopeFilterTests
         return new Scope { Db = db, Repository = new AssignmentRepository(db), Tenants = tenants };
     }
 
-    private static Assignment NewAssignment(string title, Guid creator, Guid? grade, Guid subject) =>
-        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, subject, grade, null, null, creator)
+    /// <summary>Round <c>drop-primary-grade</c>: the grade half of the row is its authored grade
+    /// TARGETS (a null grade = no grade target ⇒ visible through the creator leg only).</summary>
+    private static Assignment NewAssignment(string title, Guid creator, Guid? grade, Guid subject)
+    {
+        var assignment = Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents, subject, null, null, creator)
             .WithTenant(TenantId);
+
+        if (grade is Guid gradeId)
+        {
+            assignment.WithGradeTarget(gradeId);
+        }
+
+        return assignment;
+    }
 
     // ── D6.2 — both directions: own creation OR taught grade/subject ──────
 

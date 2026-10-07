@@ -296,7 +296,7 @@ public class SignOffRoutesTests
         public Task<AssignmentSummaryDto?> HandleAsync(GetAssignmentByIdQuery query, CancellationToken ct = default) =>
             Task.FromResult<AssignmentSummaryDto?>(new AssignmentSummaryDto(
                 query.Id, "Assignment", null, AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded,
-                TargetAudienceTypeDto.AllStudents, Guid.Empty, null, null, null, AssignmentStatusDto.Draft,
+                TargetAudienceTypeDto.AllStudents, Guid.Empty, null, AssignmentStatusDto.Draft,
                 null, null, false, Guid.Empty, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
     }
 }

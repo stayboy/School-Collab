@@ -59,7 +59,7 @@ public class AssignmentIndexBunitTests : BunitContext
         new(
             id, title, null, AssignmentTypeDto.Digital,
             GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-            Guid.NewGuid(), "Math", null, null, status,
+            Guid.NewGuid(), "Math", status,
             null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <summary>UI-tester rework overload — pin the ApprovalStatus (and
@@ -73,7 +73,7 @@ public class AssignmentIndexBunitTests : BunitContext
         new(
             id, title, null, AssignmentTypeDto.Digital,
             GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-            Guid.NewGuid(), "Math", null, null, status,
+            Guid.NewGuid(), "Math", status,
             null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             AvailableFromUtc: null, ArchiveGraceDays: 30,
             ApprovalStatus: approvalStatus,
@@ -145,7 +145,7 @@ public class AssignmentIndexBunitTests : BunitContext
         var dto = new AssignmentSummaryDto(
             Guid.NewGuid(), "Test", null, AssignmentTypeDto.SemiManual,
             GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-            Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Published,
+            Guid.NewGuid(), "Math", AssignmentStatusDto.Published,
             null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         var json = JsonSerializer.Serialize(dto, _apiJsonOptions);
@@ -414,7 +414,7 @@ public class AssignmentIndexBunitTests : BunitContext
             new AssignmentSummaryDto(
                 Guid.NewGuid(), "Math HW", null, AssignmentTypeDto.Digital,
                 GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-                Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Scheduled,
+                Guid.NewGuid(), "Math", AssignmentStatusDto.Scheduled,
                 null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
         });
         var cut = Render<IndexPage>();
@@ -550,7 +550,7 @@ public class AssignmentIndexBunitTests : BunitContext
             new AssignmentSummaryDto(
                 id, "Math HW", null, AssignmentTypeDto.Digital,
                 GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
-                Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Archived,
+                Guid.NewGuid(), "Math", AssignmentStatusDto.Archived,
                 null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
         });
         var cut = Render<IndexPage>();

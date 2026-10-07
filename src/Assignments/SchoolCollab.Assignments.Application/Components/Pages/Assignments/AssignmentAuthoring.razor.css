@@ -123,17 +123,62 @@
     margin: 0;
 }
 
-/* R2 (TGT-16): the authored constraint chips, rendered in DisplayOrder. */
-.authoring-target-chips {
+/* Targets & audience builder: label on top, bold value underneath, remove action at the right. */
+.targets-audience-item {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: row;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
-    padding: 4px 0;
 }
 
-.authoring-target-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+.targets-audience-item__text {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Audience take-away: two-column top (Basics left, scoped audience cards right) ── */
+.authoring-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
+    gap: 16px;
+    align-items: start;
+}
+
+/* Right-hand column: the compact card stack right of Basics — the audience builder card and, since
+   round authoring-compact-fields, the Rules readouts card beneath it. The column draws NO frame of
+   its own — the base .authoring-compartment chrome is reset here because the SectionCards it hosts
+   are FluentCards with their own border/background, so a second frame would double-frame them: each
+   card's own frame is the single visible border. */
+.authoring-compartment--right {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+/* OD2 (round authoring-compact-fields): the Rules readouts render as a card inside that column, so
+   #authoring-rules is the card's container and a column block: the card plus the hint explaining
+   the readouts. The readout rows themselves keep .authoring-policy-row's own wrapping chrome — the
+   column is narrow (320–460px) and the row wraps rather than truncating or shrinking. */
+.authoring-rules-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Targets & audience builder: label on top, bold value underneath. */
+.targets-audience-item__label {
+    font-size: var(--font-size-100, 0.75rem);
+    color: var(--neutral-foreground-hint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.targets-audience-item__value {
+    font-weight: 600;
+    word-break: break-word;
 }

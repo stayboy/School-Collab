@@ -30,13 +30,17 @@ public sealed record SubscriberInfo(
     GuardianRole? Role);
 
 /// <summary>
-/// Request to resolve publish recipients. Provide an explicit <see cref="StudentIds"/>
-/// roster, or a <see cref="GradeLevelId"/> to resolve the whole cohort (the
-/// resolver enumerates students by grade, their guardians, and each owner's
-/// subscribed contacts). When neither is supplied the result is empty.
+/// Request to resolve publish recipients. Provide an explicit <see cref="StudentIds"/> roster
+/// (already resolved from the assignment's authored targets) and/or the assignment's distinct
+/// grade-target ids (<see cref="GradeLevelIds"/>, which add each grade's teachers to the cohort).
+/// The by-grade whole-roster fallback is gone (round <c>drop-primary-grade</c>): the target
+/// resolver is the sole student source and publish refuses an empty resolved set before this
+/// resolver is reached. When neither is supplied the result is empty.
 /// </summary>
 public sealed record ResolveSubscribersRequest(
     Guid TenantId,
     SubscriptionScope Scope,
-    Guid? GradeLevelId = null,
+    /// <summary>The assignment's distinct grade-target ids — each grade's teachers are added to the
+    /// cohort (fail-open per grade). Null/empty adds none.</summary>
+    IReadOnlyList<Guid>? GradeLevelIds = null,
     IReadOnlyList<Guid>? StudentIds = null);

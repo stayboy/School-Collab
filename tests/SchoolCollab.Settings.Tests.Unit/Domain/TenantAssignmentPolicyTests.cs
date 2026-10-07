@@ -7,8 +7,10 @@ namespace SchoolCollab.Settings.Tests.Unit.Domain;
 
 /// <summary>
 /// Round A (<c>documents/solution/assignment-policy-fields.md</c> §4) — the tenant-global
-/// assignment policy widened from one boolean to the shared four-field shape. Every field is
-/// nullable and null means "unset" (the built-in default applies at resolution time).
+/// assignment policy widened from one boolean to the shared field shape; round
+/// <c>assignment-rules-policy-rework</c> (D3/D5/D7) adds the guardian-review and archive-window
+/// fields to the same set. Every field is nullable and null means "unset" (the built-in default
+/// applies at resolution time).
 /// </summary>
 [TestClass]
 public class TenantAssignmentPolicyTests
@@ -25,6 +27,8 @@ public class TenantAssignmentPolicyTests
         p.RequiresApprovalBeforePublish.Should().BeNull();
         p.MaxPrimaryContacts.Should().BeNull();
         p.MaxCopyContacts.Should().BeNull();
+        p.MandatoryReview.Should().BeNull();
+        p.ArchiveGraceDays.Should().BeNull();
     }
 
     [TestMethod]
@@ -35,12 +39,16 @@ public class TenantAssignmentPolicyTests
             signatureRequirement: SignatureRequirementMode.Mandatory,
             requiresApprovalBeforePublish: true,
             maxPrimaryContacts: 2,
-            maxCopyContacts: 4);
+            maxCopyContacts: 4,
+            mandatoryReview: true,
+            archiveGraceDays: 45);
 
         p.SignatureRequirement.Should().Be(SignatureRequirementMode.Mandatory);
         p.RequiresApprovalBeforePublish.Should().BeTrue();
         p.MaxPrimaryContacts.Should().Be(2);
         p.MaxCopyContacts.Should().Be(4);
+        p.MandatoryReview.Should().BeTrue();
+        p.ArchiveGraceDays.Should().Be(45);
     }
 
     [TestMethod]
@@ -62,12 +70,16 @@ public class TenantAssignmentPolicyTests
             signatureRequirement: SignatureRequirementMode.Optional,
             requiresApprovalBeforePublish: true,
             maxPrimaryContacts: 1,
-            maxCopyContacts: 3);
+            maxCopyContacts: 3,
+            mandatoryReview: false,
+            archiveGraceDays: 14);
 
         p.SignatureRequirement.Should().Be(SignatureRequirementMode.Optional);
         p.RequiresApprovalBeforePublish.Should().BeTrue();
         p.MaxPrimaryContacts.Should().Be(1);
         p.MaxCopyContacts.Should().Be(3);
+        p.MandatoryReview.Should().BeFalse();
+        p.ArchiveGraceDays.Should().Be(14);
         p.UpdatedAt.Should().BeOnOrAfter(before);
     }
 
@@ -75,14 +87,17 @@ public class TenantAssignmentPolicyTests
     public void SetPolicy_WithAllNulls_ClearsEveryFieldBackToUnset()
     {
         var p = TenantAssignmentPolicy.Create(
-            TenantId, SignatureRequirementMode.Mandatory, true, 2, 4);
+            TenantId, SignatureRequirementMode.Mandatory, true, 2, 4,
+            mandatoryReview: true, archiveGraceDays: 45);
 
-        p.SetPolicy(null, null, null, null);
+        p.SetPolicy(null, null, null, null, null, null);
 
         p.SignatureRequirement.Should().BeNull();
         p.RequiresApprovalBeforePublish.Should().BeNull();
         p.MaxPrimaryContacts.Should().BeNull();
         p.MaxCopyContacts.Should().BeNull();
+        p.MandatoryReview.Should().BeNull();
+        p.ArchiveGraceDays.Should().BeNull();
     }
 
     [TestMethod]
@@ -90,8 +105,9 @@ public class TenantAssignmentPolicyTests
     {
         var p = TenantAssignmentPolicy.Create(TenantId, requiresApprovalBeforePublish: true);
 
-        p.SetPolicy(null, requiresApprovalBeforePublish: false, null, null);
+        p.SetPolicy(null, requiresApprovalBeforePublish: false, null, null, mandatoryReview: false, null);
 
         p.RequiresApprovalBeforePublish.Should().BeFalse("false is a configured value, not 'unset'");
+        p.MandatoryReview.Should().BeFalse("false is a configured value, not 'unset'");
     }
 }

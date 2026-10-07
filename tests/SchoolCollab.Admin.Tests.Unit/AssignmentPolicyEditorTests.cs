@@ -78,17 +78,21 @@ public class AssignmentPolicyEditorTests : BunitContext
     }
 
     private static string TenantJson(
-        string? signature = null, bool? requiresApproval = null, int? maxPrimary = null, int? maxCopy = null) =>
+        string? signature = null, bool? requiresApproval = null, int? maxPrimary = null, int? maxCopy = null,
+        bool? mandatoryReview = null, int? archiveGraceDays = null) =>
         Json(new Dictionary<string, object?>
         {
             ["signatureRequirement"] = signature,
             ["requiresApprovalBeforePublish"] = requiresApproval,
             ["maxPrimaryContacts"] = maxPrimary,
             ["maxCopyContacts"] = maxCopy,
+            ["mandatoryReview"] = mandatoryReview,
+            ["archiveGraceDays"] = archiveGraceDays,
         });
 
     private static string GradeJson(
-        string? signature = null, bool? requiresApproval = null, int? maxPrimary = null, int? maxCopy = null) =>
+        string? signature = null, bool? requiresApproval = null, int? maxPrimary = null, int? maxCopy = null,
+        bool? mandatoryReview = null, int? archiveGraceDays = null) =>
         Json(new Dictionary<string, object?>
         {
             ["gradeLevelId"] = Guid.NewGuid(),
@@ -96,6 +100,8 @@ public class AssignmentPolicyEditorTests : BunitContext
             ["requiresApprovalBeforePublish"] = requiresApproval,
             ["maxPrimaryContacts"] = maxPrimary,
             ["maxCopyContacts"] = maxCopy,
+            ["mandatoryReview"] = mandatoryReview,
+            ["archiveGraceDays"] = archiveGraceDays,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         });
 
@@ -115,11 +121,13 @@ public class AssignmentPolicyEditorTests : BunitContext
         cut.Markup.Should().Contain("Grade override");
         cut.Markup.Should().Contain("Actions");
 
-        // Every one of the four policy fields is a row.
+        // Every one of the six policy fields is a row.
         cut.Markup.Should().Contain("Guardian signature");
         cut.Markup.Should().Contain("Approval before publish");
         cut.Markup.Should().Contain("Max primary guardian contacts per sendout");
         cut.Markup.Should().Contain("Max copy guardian contacts per sendout");
+        cut.Markup.Should().Contain("Guardian review before submit");
+        cut.Markup.Should().Contain("Archive grace window (days)");
 
         // Global column = the tenant default; grade column = the override where one exists.
         cut.Markup.Should().Contain("Optional", "the tenant signature requirement is rendered");
@@ -129,7 +137,7 @@ public class AssignmentPolicyEditorTests : BunitContext
 
         // Each row exposes the kebab with Edit + Reset.
         var triggers = cut.FindAll("fluent-button[title^='Actions for']");
-        triggers.Count.Should().Be(4, "one kebab per policy field");
+        triggers.Count.Should().Be(6, "one kebab per policy field");
         triggers.First().Click();
         cut.FindAll("fluent-menu-item").Should().Contain(i => i.TextContent.Trim() == "Edit");
         cut.FindAll("fluent-menu-item").Should().Contain(i => i.TextContent.Trim() == "Reset");
@@ -147,8 +155,8 @@ public class AssignmentPolicyEditorTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Inherit global"));
 
-        // Three of the four fields inherit (only MaxPrimaryContacts is overridden) ⇒ three badges.
-        cut.FindAll(".inherit-badge").Count.Should().Be(3,
+        // Five of the six fields inherit (only MaxPrimaryContacts is overridden) ⇒ five badges.
+        cut.FindAll(".inherit-badge").Count.Should().Be(5,
             "every field without a grade override shows the Inherit global badge");
     }
 
@@ -163,7 +171,35 @@ public class AssignmentPolicyEditorTests : BunitContext
         var cut = Render<AssignmentPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mandatory (locked)"));
-        cut.FindAll(".inherit-badge").Count.Should().Be(4, "a 204 grade read means every field inherits");
+        cut.FindAll(".inherit-badge").Count.Should().Be(6, "a 204 grade read means every field inherits");
+    }
+
+    /// <summary>
+    /// D8/AC7 (round <c>assignment-rules-policy-rework</c>): the two fields added to the shared set are
+    /// exposed by the SAME editor grid — a field the resolver can read but no editor can write would be
+    /// dead configuration.
+    /// </summary>
+    [TestMethod]
+    public void Grid_shows_the_guardian_review_and_archive_window_fields() 
+    {
+        var (_, gradeId) = Register(
+            tenantBody: TenantJson(mandatoryReview: true, archiveGraceDays: 30),
+            gradeBody: GradeJson(mandatoryReview: false, archiveGraceDays: 45));
+
+        var cut = Render<AssignmentPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
+
+        cut.WaitForAssertion(() =>
+        {
+            var reviewRow = cut.FindAll("tr.fluent-data-grid-row")
+                .Single(r => r.TextContent.Contains("Guardian review before submit"));
+            reviewRow.TextContent.Should().Contain("Required", "the tenant default renders in the global column");
+            reviewRow.TextContent.Should().Contain("Not required", "the grade override renders in its column");
+
+            var archiveRow = cut.FindAll("tr.fluent-data-grid-row")
+                .Single(r => r.TextContent.Contains("Archive grace window (days)"));
+            archiveRow.TextContent.Should().Contain("30");
+            archiveRow.TextContent.Should().Contain("45");
+        });
     }
 
     [TestMethod]

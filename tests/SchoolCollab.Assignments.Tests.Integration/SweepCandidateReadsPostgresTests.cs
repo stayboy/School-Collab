@@ -45,7 +45,7 @@ public sealed class SweepCandidateReadsPostgresTests
         {
             var assignment = Assignment.Create(
                 "Math — Postgres translation", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, TopicId, null, DateTimeOffset.UtcNow.AddHours(-5), null, TeacherId)
+                TargetAudienceType.AllStudents, TopicId, DateTimeOffset.UtcNow.AddHours(-5), null, TeacherId)
                 .WithTenant(TenantId);
             assignment.Publish(approvalRequired: false);
             seed.Assignments.Add(assignment);

@@ -13,4 +13,6 @@ public sealed record UpsertTenantAssignmentPolicy(
     SignatureRequirementMode? SignatureRequirement,
     bool? RequiresApprovalBeforePublish,
     int? MaxPrimaryContacts,
-    int? MaxCopyContacts) : ICommand;
+    int? MaxCopyContacts,
+    bool? MandatoryReview = null,
+    int? ArchiveGraceDays = null) : ICommand;

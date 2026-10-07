@@ -104,7 +104,8 @@ public class AssignmentPolicyResolverTests
         var students = new MockHttpMessageHandler();
         students.When(GradeUrl).Respond("application/json", GradeJson(new GradeAssignmentPolicyDto(
             GradeId, SignatureRequirementMode.Mandatory, RequiresApprovalBeforePublish: true,
-            MaxPrimaryContacts: 1, MaxCopyContacts: null, DateTimeOffset.UtcNow)));
+            MaxPrimaryContacts: 1, MaxCopyContacts: null, MandatoryReview: null, ArchiveGraceDays: null,
+            DateTimeOffset.UtcNow)));
         var resolver = NewResolver(settings, students);
 
         // Act
@@ -174,6 +175,77 @@ public class AssignmentPolicyResolverTests
         policy.SignatureRequirement.Should().Be(SignatureRequirementMode.Mandatory);
         policy.RequiresApprovalBeforePublish.Should().BeTrue();
         policy.SignatureRequirementFromOverride.Should().BeFalse();
+    }
+
+    /// <summary>D3/D5 (round <c>assignment-rules-policy-rework</c> AC1/AC7 at the HTTP seam): both new
+    /// policy fields cross BOTH wire DTOs and merge per field exactly like the pre-existing four — the
+    /// grade's explicit review wins while the grade's unset archive window inherits the tenant's.</summary>
+    [TestMethod]
+    public async Task Resolve_ReviewAndArchiveFields_FlowThroughBothPolicyLevels()
+    {
+        // Arrange
+        var settings = new MockHttpMessageHandler();
+        settings.When(TenantUrl).Respond("application/json", TenantJson(new TenantAssignmentPolicyDto(
+            SignatureRequirementMode.Disabled, null, null, null,
+            MandatoryReview: null, ArchiveGraceDays: 45)));
+        var students = new MockHttpMessageHandler();
+        students.When(GradeUrl).Respond("application/json", GradeJson(new GradeAssignmentPolicyDto(
+            GradeId, SignatureRequirementMode.Disabled, null, null, null,
+            MandatoryReview: true, ArchiveGraceDays: null, DateTimeOffset.UtcNow)));
+        var resolver = NewResolver(settings, students);
+
+        // Act
+        var policy = await resolver.ResolveAsync(GradeId);
+
+        // Assert
+        policy.MandatoryReview.Should().BeTrue("the grade's explicit review override wins");
+        policy.MandatoryReviewFromOverride.Should().BeTrue();
+        policy.ArchiveGraceDays.Should().Be(45,
+            "the grade leaves the window unset, so the tenant default is inherited");
+        policy.ArchiveGraceDaysFromOverride.Should().BeFalse();
+    }
+
+    /// <summary>D4 through the wire: the resolver — not the page, not the write seam — derives the
+    /// implication, so the Rules readout states the outcome the assignment will actually be saved with.</summary>
+    [TestMethod]
+    public async Task Resolve_SignatureRequirement_ImpliesMandatoryReview_ThroughTheWire()
+    {
+        // Arrange — the tenant requires a signature and leaves both new fields unset.
+        var settings = new MockHttpMessageHandler();
+        settings.When(TenantUrl).Respond("application/json", TenantJson(new TenantAssignmentPolicyDto(
+            SignatureRequirementMode.Mandatory, null, null, null)));
+        var students = new MockHttpMessageHandler();
+        var resolver = NewResolver(settings, students);
+
+        // Act
+        var policy = await resolver.ResolveAsync(null);
+
+        // Assert
+        policy.MandatoryReview.Should().BeTrue("a signature requirement implies guardian review (D4)");
+        policy.MandatoryReviewFromOverride.Should().BeFalse("no grade set the review field itself");
+        policy.ArchiveGraceDays.Should().BeNull(
+            "an unset window stays null — the write seam keeps the built-in 30-day retention floor");
+    }
+
+    /// <summary>OD2's degradation posture, pinned: a failed fetch must never turn review ON and must
+    /// never silently zero the archive window — the write seam then keeps today's defaults.</summary>
+    [TestMethod]
+    public async Task Resolve_BothFetchesUnreachable_LeavesReviewAndWindowUnset()
+    {
+        // Arrange
+        var settings = new MockHttpMessageHandler();
+        settings.When(TenantUrl).Throw(new HttpRequestException("settings-api unreachable"));
+        var students = new MockHttpMessageHandler();
+        students.When(GradeUrl).Throw(new HttpRequestException("students-api unreachable"));
+        var resolver = NewResolver(settings, students);
+
+        // Act
+        var policy = await resolver.ResolveAsync(GradeId);
+
+        // Assert
+        policy.SignatureRequirement.Should().Be(SignatureRequirementMode.Disabled);
+        policy.MandatoryReview.Should().BeNull("degradation must not turn the review gate ON");
+        policy.ArchiveGraceDays.Should().BeNull("degradation must not zero the archive window");
     }
 
     /// <summary>The built-in defaults the resolver must produce when a fetch fails.</summary>

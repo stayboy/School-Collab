@@ -41,7 +41,11 @@ public sealed class PublishAssignmentCommandHandler(
         // maps to 400. The policy resolver is fail-open: a failed fetch resolves
         // RequiresApprovalBeforePublish = false, so a policy outage can never turn the gate
         // ON silently — only the flag still can.
-        var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(assignment.GradeLevelId, cancellationToken);
+        // Round drop-primary-grade: the policy-scope grade is DERIVED from the assignment's grade
+        // targets (one distinct grade target ⇒ that grade, otherwise the tenant default) — the same
+        // single rule the read handlers, the sweep reads and the preview use.
+        var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(
+            AssignmentPolicyScope.DeriveGrade(assignment), cancellationToken);
         var approvalRequired = assignmentPolicy.RequiresApprovalBeforePublish
             || await featureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, cancellationToken);
 
@@ -53,7 +57,8 @@ public sealed class PublishAssignmentCommandHandler(
         // recipients so each minted deep-link token can carry the resolved
         // LinkValidityDays (expiry = mint + LinkValidityDays ?? 7). The policy is
         // still applied to the broadcast audience after recipient resolution below.
-        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
+        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(
+            tenantId, AssignmentPolicyScope.DeriveGrade(assignment), cancellationToken);
         var recipients = await ResolveRecipientsAndGatesAsync(
             assignment, tenantId, effectivePolicy.LinkValidityDays, command.ContactIds, cancellationToken);
 
@@ -156,11 +161,13 @@ public sealed class PublishAssignmentCommandHandler(
             }
         }
 
-        // TGT-9: the resolved target cohort rides the existing StudentIds seam. The primary
-        // grade rides GradeLevelId so the grade's teacher-recipient leg survives (D-6's
-        // documented widening for a group-only assignment carrying a primary grade).
+        // TGT-9: the resolved target cohort rides the existing StudentIds seam. The assignment's
+        // distinct grade-target ids ride GradeLevelIds so each targeted grade's teacher-recipient
+        // leg survives (round drop-primary-grade: the authored grade targets are the only grade
+        // source — D-6's documented widening, now per target rather than per authored primary grade).
         var request = new ResolveSubscribersRequest(
-            tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId, resolvedStudentIds);
+            tenantId, SubscriptionScope.AllAssignments,
+            AssignmentPolicyScope.GradeTargetIds(assignment), resolvedStudentIds);
 
         var subscribers = await contactResolver.ResolveSubscribersAsync(request, cancellationToken);
 

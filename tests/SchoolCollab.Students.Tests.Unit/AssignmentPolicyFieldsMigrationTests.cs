@@ -48,6 +48,28 @@ public class AssignmentPolicyFieldsMigrationTests
         return file!;
     }
 
+    /// <summary>The <c>Up()</c>/<c>Down()</c> bodies of one named migration.</summary>
+    private static (string Up, string Down) ReadBodies(string suffix)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SchoolCollab.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        var migrationsDir = Path.Combine(
+            directory!.FullName, "src", "Students", "SchoolCollab.Students.Core", "Migrations");
+        var file = Directory.GetFiles(migrationsDir, $"*{suffix}").SingleOrDefault();
+        file.Should().NotBeNull($"the migration '*{suffix}' must exist — this test asserts the file that ships");
+
+        var source = File.ReadAllText(file!);
+        var upIndex = source.IndexOf("protected override void Up", StringComparison.Ordinal);
+        var downIndex = source.IndexOf("protected override void Down", StringComparison.Ordinal);
+        upIndex.Should().BeGreaterThan(-1, "the migration must implement Up()");
+        downIndex.Should().BeGreaterThan(upIndex, "the migration must implement Down() after Up()");
+        return (source[upIndex..downIndex], source[downIndex..]);
+    }
+
     /// <summary>
     /// The two method <b>bodies</b> — not the whole file: the class-level XML doc names the very
     /// members these tests assert the absence of ("the EF-scaffolded DropColumn has to be deleted
@@ -114,5 +136,34 @@ public class AssignmentPolicyFieldsMigrationTests
         up.IndexOf("AddColumn", StringComparison.Ordinal)
             .Should().BeLessThan(up.IndexOf("SET signature_requirement", StringComparison.Ordinal),
                 "the new column must exist before the backfill writes to it");
+    }
+
+    // ── Round assignment-rules-policy-rework (D7/AC6): the guardian-review + archive-window pair ──
+
+    private const string ReviewAndArchiveMigrationSuffix = "_AddAssignmentPolicyReviewAndArchiveFields.cs";
+
+    /// <summary>
+    /// AC6: the Students half of the migration pair — the same two additive nullable columns as the
+    /// Settings migration, shipped in the same change (D7), with a <c>Down()</c> that is the exact
+    /// inverse and nothing to backfill.
+    /// </summary>
+    [TestMethod]
+    public void ReviewAndArchiveMigration_AddsTwoNullableColumns_AndHasNoBackfill()
+    {
+        var (up, down) = ReadBodies(ReviewAndArchiveMigrationSuffix);
+
+        up.Should().Contain("name: \"mandatory_review\"",
+            "the grade override gets the guardian-review flag as a real column (no JSON/owned type)");
+        up.Should().Contain("name: \"archive_grace_days\"");
+        up.Should().NotContain("DropColumn", "additive-only (ef-migrations rule 8)");
+        up.Should().NotContain("RenameColumn");
+        SqlBlockPattern.Matches(up).Should().BeEmpty(
+            "there is nothing to backfill: an existing override simply stays 'inherit' on both fields");
+
+        down.Should().Contain("name: \"mandatory_review\"", "Down() drops what Up() added");
+        down.Should().Contain("name: \"archive_grace_days\"");
+        down.IndexOf("name: \"archive_grace_days\"", StringComparison.Ordinal)
+            .Should().BeLessThan(down.IndexOf("name: \"mandatory_review\"", StringComparison.Ordinal),
+                "ef-migrations rule 4: Down() runs last-added first");
     }
 }

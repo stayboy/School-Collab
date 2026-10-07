@@ -46,7 +46,7 @@ public class AssignmentLifecycleSweepQueryTests
     private static Assignment NewAssignment(Guid tenantId,
         DateTimeOffset? dueDate = null, int archiveGraceDays = 30) =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, dueDate, null, TeacherId,
+            TargetAudienceType.AllStudents, TopicId, dueDate, null, TeacherId,
             archiveGraceDays: archiveGraceDays)
             .WithTenant(tenantId);
 

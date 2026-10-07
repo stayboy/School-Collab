@@ -12,7 +12,7 @@
 @inject ILogger<AssignmentPolicyEditor> Logger
 
 @* Per-grade Assignment Policy editor (documents/solution/assignment-policy-fields.md D6, §4).
-   A single grid lists each of the four policy fields with its tenant-global value and its
+   A single grid lists each of the six policy fields with its tenant-global value and its
    per-grade override. Row actions: Edit (opens a dialog with Global / This-grade scope) and Reset
    (clears the per-grade override back to "inherit global"). This card absorbs the retired
    Guardian Signature card (GradeSignaturePolicyEditor). *@
@@ -68,6 +68,8 @@ else
         new("RequiresApprovalBeforePublish", "Approval before publish", AssignmentPolicyFieldEditDialog.FieldKind.Bool),
         new("MaxPrimaryContacts", "Max primary guardian contacts per sendout", AssignmentPolicyFieldEditDialog.FieldKind.Int),
         new("MaxCopyContacts", "Max copy guardian contacts per sendout", AssignmentPolicyFieldEditDialog.FieldKind.Int),
+        new("MandatoryReview", "Guardian review before submit", AssignmentPolicyFieldEditDialog.FieldKind.Bool),
+        new("ArchiveGraceDays", "Archive grace window (days)", AssignmentPolicyFieldEditDialog.FieldKind.Int),
     ];
 
     [Parameter] public Guid GradeLevelId { get; set; }
@@ -176,7 +178,9 @@ else
             key == "SignatureRequirement" ? null : _gradeOverride?.SignatureRequirement,
             key == "RequiresApprovalBeforePublish" ? null : _gradeOverride?.RequiresApprovalBeforePublish,
             key == "MaxPrimaryContacts" ? null : _gradeOverride?.MaxPrimaryContacts,
-            key == "MaxCopyContacts" ? null : _gradeOverride?.MaxCopyContacts);
+            key == "MaxCopyContacts" ? null : _gradeOverride?.MaxCopyContacts,
+            key == "MandatoryReview" ? null : _gradeOverride?.MandatoryReview,
+            key == "ArchiveGraceDays" ? null : _gradeOverride?.ArchiveGraceDays);
 
     private static string FormatValue(object? value) => value switch
     {
@@ -198,6 +202,8 @@ else
         "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
         "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
         "MaxCopyContacts" => policy?.MaxCopyContacts,
+        "MandatoryReview" => policy?.MandatoryReview,
+        "ArchiveGraceDays" => policy?.ArchiveGraceDays,
         _ => null,
     };
 
@@ -207,6 +213,8 @@ else
         "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
         "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
         "MaxCopyContacts" => policy?.MaxCopyContacts,
+        "MandatoryReview" => policy?.MandatoryReview,
+        "ArchiveGraceDays" => policy?.ArchiveGraceDays,
         _ => null,
     };
 }

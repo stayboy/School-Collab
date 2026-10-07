@@ -10,17 +10,18 @@ namespace SchoolCollab.Assignments.Application.Services;
 
 /// <summary>
 /// The Audience &amp; Targets live-preview request (assignment-authoring-compartments §7.5
-/// TGT-16 / D-4): the current constraint set, exactly as the create/update payload would carry
-/// it, plus the authored primary grade (plan-review P2-n2 — publish's teacher cohort and both
-/// policy legs resolve from it, so the preview must too).
+/// TGT-16 / D-4): the current constraint set, exactly as the create/update payload would carry it.
+/// Publish derives both its teacher cohort and its policy-scope grade from the grade-target ids in
+/// <see cref="GradeLevelIds"/>; the preview reproduces that derivation from the same posted set
+/// (round <c>drop-primary-grade</c> removed the separately-authored primary grade the preview used
+/// to carry).
 /// </summary>
 public sealed record RecipientPreviewRequest(
     bool AllStudents,
     IReadOnlyList<Guid> GradeLevelIds,
     IReadOnlyList<Guid> StreamCodedValueIds,
     IReadOnlyList<Guid> StudentIds,
-    IReadOnlyList<Guid> ActivityGroupIds,
-    Guid? PrimaryGradeId);
+    IReadOnlyList<Guid> ActivityGroupIds);
 
 public sealed class AssignmentsApiClient
 {
@@ -104,33 +105,29 @@ public sealed class AssignmentsApiClient
     }
 
     /// <summary>
-    /// Resolves the effective guardian-signature requirement for the create wizard
-    /// (WS-C1 / spec §7 Q1; D2 / Q6 in Round B1). <paramref name="gradeLevelId"/> null
-    /// resolves the tenant-global default; a grade id resolves the grade override falling
-    /// back to the tenant default. Always succeeds (the API resolves fail-open to
-    /// <see cref="SignatureRequirementMode.Disabled"/>); an unreachable endpoint surfaces as
-    /// <see cref="HttpRequestException"/> for the caller to log + ignore. The returned mode
-    /// lets the wizard distinguish <c>Mandatory</c> (lock the checkbox) from
-    /// <c>Optional</c> (pre-fill only); the route's legacy boolean is honoured as
-    /// <c>Optional</c>/<c>Disabled</c> when the mode is absent (an older API).
+    /// Resolves the <b>effective assignment policy</b> for the authoring page's Rules readouts
+    /// (round <c>assignment-rules-policy-rework</c> D2/OD4). <paramref name="gradeLevelId"/> null
+    /// resolves the tenant-global default; a grade id resolves the grade override falling back to
+    /// the tenant default. The response is the whole resolved policy with the D4 implication
+    /// (<c>RequiresSignature ⇒ MandatoryReview</c>) already applied server-side, so no caller
+    /// recomputes it. Always succeeds against a reachable API (the route is fail-open); an
+    /// unreachable endpoint surfaces as <see cref="HttpRequestException"/> for the caller to log
+    /// and ignore.
     /// </summary>
-    public async Task<SignatureRequirementMode> GetSignatureDefaultAsync(
+    public async Task<EffectiveAssignmentPolicy?> GetEffectivePolicyAsync(
         Guid? gradeLevelId, CancellationToken ct = default)
     {
-        _logger.LogDebug("Resolving signature default for grade {GradeLevelId}", gradeLevelId);
+        _logger.LogDebug("Resolving the effective assignment policy for grade {GradeLevelId}", gradeLevelId);
         var url = gradeLevelId.HasValue
-            ? $"/assignments/signature-default?gradeLevelId={gradeLevelId}"
-            : "/assignments/signature-default";
+            ? $"/assignments/effective-policy?gradeLevelId={gradeLevelId}"
+            : "/assignments/effective-policy";
         var response = await _http.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<SignatureDefaultResponse>(_jsonOptions, ct);
-        var mode = result?.SignatureMode
-            ?? (result?.RequiresSignature == true
-                ? SignatureRequirementMode.Optional
-                : SignatureRequirementMode.Disabled);
+        var policy = await response.Content.ReadFromJsonAsync<EffectiveAssignmentPolicy>(_jsonOptions, ct);
         _logger.LogInformation(
-            "Resolved signature requirement {Mode} for grade {GradeLevelId}", mode, gradeLevelId);
-        return mode;
+            "Resolved the effective assignment policy for grade {GradeLevelId}: signature {Signature}, review {Review}, archive grace {ArchiveGraceDays}",
+            gradeLevelId, policy?.SignatureRequirement, policy?.MandatoryReview, policy?.ArchiveGraceDays);
+        return policy;
     }
 
     /// <summary>
@@ -156,11 +153,12 @@ public sealed class AssignmentsApiClient
     /// Resolves the live recipient preview for a constraint set (assignment-authoring-compartments
     /// §7.5 TGT-16 / D-4). The counts are advisory — a failed read returns null and the caller
     /// renders the degraded note; save is never blocked.
+    /// <para>Publish derives its teacher-recipient cohort and its notification/assignment policy
+    /// from the assignment's grade TARGETS, so the preview carries the posted grade-target ids in
+    /// <see cref="RecipientPreviewRequest.GradeLevelIds"/> and the server reproduces that same
+    /// derivation — otherwise the "contacts reachable" count under-reports against what publish
+    /// actually sends.</para>
     /// </summary>
-    /// <param name="primaryGradeId">Plan-review P2-n2: publish resolves BOTH its teacher-recipient
-    /// cohort and its notification/assignment policy from the assignment's primary grade, so the
-    /// preview must carry it too — otherwise the "contacts reachable" count under-reports against
-    /// what publish actually sends. Null = the tenant-global leg only.</param>
     public async Task<RecipientPreviewDto?> GetRecipientPreviewAsync(
         RecipientPreviewRequest request, CancellationToken ct = default)
     {
@@ -171,10 +169,6 @@ public sealed class AssignmentsApiClient
         query.AddRange(request.StreamCodedValueIds.Select(id => $"streamCodedValueIds={id}"));
         query.AddRange(request.StudentIds.Select(id => $"studentIds={id}"));
         query.AddRange(request.ActivityGroupIds.Select(id => $"activityGroupIds={id}"));
-        if (request.PrimaryGradeId is Guid primaryGradeId)
-        {
-            query.Add($"primaryGradeId={primaryGradeId}");
-        }
 
         _logger.LogDebug("Resolving recipient preview for {Constraints} target(s)",
             request.GradeLevelIds.Count + request.StreamCodedValueIds.Count
@@ -670,10 +664,4 @@ public sealed class AssignmentsApiClient
     /// <see cref="System.Text.Json.JsonException"/> on this object body; the
     /// duplicate uses this working record instead.</summary>
     private sealed record IdResponse(Guid Id);
-
-    /// <summary>Private envelope for the <c>/assignments/signature-default</c> route's always-200
-    /// body. Round B1 widened it additively: <c>signatureMode</c> is authoritative when present;
-    /// the legacy <c>requiresSignature</c> boolean is the pre-widening derivation
-    /// (<c>mode != Disabled</c>) and is honoured when the mode is absent.</summary>
-    private sealed record SignatureDefaultResponse(bool RequiresSignature, SignatureRequirementMode? SignatureMode = null);
 }

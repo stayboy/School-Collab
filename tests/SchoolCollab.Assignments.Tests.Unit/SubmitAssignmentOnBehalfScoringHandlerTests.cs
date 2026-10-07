@@ -112,7 +112,7 @@ public class SubmitAssignmentOnBehalfScoringHandlerTests
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, 100m, TeacherId,
+            TopicId, null, 100m, TeacherId,
             passScore: 50m, maxAttempts: maxAttempts)
             .WithTenant(new FakeTenantProvider(TenantId));
         var q = a.AddQuestion("Q1?", QuestionType.MultipleChoice, 0);

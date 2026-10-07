@@ -37,7 +37,7 @@ public class LinkAssignmentGroupsHandlerTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, GradeA, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(TenantId);
 
     private static Scope BuildScope(string name)

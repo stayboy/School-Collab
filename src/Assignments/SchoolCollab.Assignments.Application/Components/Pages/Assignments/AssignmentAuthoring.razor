@@ -1,9 +1,11 @@
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Core.AssignmentPolicies
 @using SchoolCollab.Core.Features
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Application.Components.Students
 @using Microsoft.JSInterop
 @inject AssignmentsApiClient Api
 @inject StudentsApiClient StudentsApi
@@ -22,7 +24,7 @@
     Draft|Scheduled) · View (read-only; Published|Closed|Archived). Edit degrades to View
     internally for a later status so hosts never test the status themselves.
 
-    Layout (UX-3/UX-4/UX-8): all six compartments stacked in one scroll as
+    Layout (UX-3/UX-4/UX-8): all five compartments stacked in one scroll as
     section-card-style blocks, a sticky compartment jump-nav, and a sticky action bar whose
     primary action follows the §11 status matrix with the secondary actions in a kebab.
 
@@ -112,371 +114,238 @@
                 }
 
                 @* ── 1 · Basics (the always-on spine, §3/UX-12) ───────────────── *@
-                <section id="authoring-basics" class="authoring-compartment">
-                    <h3 class="authoring-compartment-title">Basics</h3>
+                <div class="authoring-layout">
+                    <section id="authoring-basics" class="authoring-compartment">
+                        <h3 class="authoring-compartment-title">Basics</h3>
 
-                    <FormRow Label="Title" Required For="authoring-basics-title">
-                        <FluentTextField Id="authoring-basics-title" @bind-Value="_model.Title" Required
-                                         ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
-                    </FormRow>
+                        <FormRow Label="Title" Required For="authoring-basics-title">
+                            <FluentTextField Id="authoring-basics-title" @bind-Value="_model.Title" Required
+                                             ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
+                        </FormRow>
 
-                    <FormRow Label="Description" For="authoring-basics-description">
-                        <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
-                                        ReadOnly="@IsReadOnly" Rows="3"
-                                        Placeholder="Internal note for other teachers…" class="full-width" />
-                    </FormRow>
+                        <FormRow Label="Description" For="authoring-basics-description">
+                            <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
+                                            ReadOnly="@IsReadOnly" Rows="3"
+                                            Placeholder="Internal note for other teachers…" class="full-width" />
+                        </FormRow>
 
-                    @* INS-1/INS-2: student-facing task text, distinct from Description. *@
-                    <FormRow Label="Instructions" For="authoring-basics-instructions">
-                        <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
-                                        ReadOnly="@IsReadOnly" Rows="4"
-                                        Placeholder="What the student must do — shown to students…" class="full-width" />
-                    </FormRow>
+                        @* INS-1/INS-2: student-facing task text, distinct from Description. *@
+                        <FormRow Label="Instructions" For="authoring-basics-instructions">
+                            <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
+                                            ReadOnly="@IsReadOnly" Rows="4"
+                                            Placeholder="What the student must do — shown to students…" class="full-width" />
+                        </FormRow>
 
-                    <FormRow Label="Assignment type" Required For="authoring-basics-type">
-                        <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
-                                      Items="@TypeOptions" @bind-SelectedOption="_selectedType"
-                                      OptionText="@(o => o?.Label ?? string.Empty)"
-                                      OptionValue="@(o => o?.Value ?? string.Empty)"
-                                      Disabled="@IsReadOnly" class="full-width" />
-                    </FormRow>
+                        @* Round authoring-compact-fields: type + grading are two short pickers, so they
+                           render as ONE row of the shared FormRow primitive. AlignTop is the
+                           repo's multi-input row pattern (flex-row-input-alignment): the row's own input
+                           cell already lays its children inline (8px gap) and top-aligned, and the row keeps the shared 180px label
+                           gutter, so the pair lines up with every single-field row. Do NOT add
+                           LabelPosition="Below" here: it drops that gutter and renders the pair's one
+                           label under its FIRST control — no bespoke CSS, no new component. *@
+                        <FormRow Label="Assignment type &amp; grading format" Required AlignTop
+                                 For="authoring-basics-type">
+                            <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
+                                          Items="@TypeOptions" @bind-SelectedOption="_selectedType"
+                                          OptionText="@(o => o?.Label ?? string.Empty)"
+                                          OptionValue="@(o => o?.Value ?? string.Empty)"
+                                          Disabled="@IsReadOnly" Class="w-6" />
+                            <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
+                                          Items="@GradingFormatOptions" @bind-SelectedOption="_selectedGradingFormat"
+                                          OptionText="@(o => o?.Label ?? string.Empty)"
+                                          OptionValue="@(o => o?.Value ?? string.Empty)"
+                                          Disabled="@IsReadOnly" Class="w-6" />
+                        </FormRow>
 
-                    <FormRow Label="Grading format" Required For="authoring-basics-grading">
-                        <FluentSelect TOption="PickerOption" Id="authoring-basics-grading"
-                                      Items="@GradingFormatOptions" @bind-SelectedOption="_selectedGradingFormat"
-                                      OptionText="@(o => o?.Label ?? string.Empty)"
-                                      OptionValue="@(o => o?.Value ?? string.Empty)"
-                                      Disabled="@IsReadOnly" class="full-width" />
-                    </FormRow>
+                        @* D9 + OD1 (round authoring-compact-fields): the author-fed scoring fields sit
+                           directly under the Grading format control that already drives them. The attempt
+                           cap joins the max score here — the two short number fields are paired — and it
+                           keeps the UX-17/D12 gate: for TeacherGraded it renders DISABLED with the one
+                           reason ScoringFieldsSection still prints below the pass score, so the page
+                           never reflows when the grading format changes. *@
+                        <FormRow Label="Max score &amp; max attempts" AlignTop
+                                 For="authoring-basics-max-score">
+                            <FluentNumberField Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
+                                               ReadOnly="@IsReadOnly" Class="w-3" />
+                            <FluentNumberField Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
+                                               Class="w-3"
+                                               Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
+                        </FormRow>
 
-                    @* FR-220 / UX-19: the AI-availability hint lives with the type/grading choice. *@
-                    <p class="authoring-hint" id="authoring-generation-hint">
-                        @QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat)
-                    </p>
+                        <p class="authoring-hint" id="authoring-feedback-mode">
+                            Feedback mode: @EnumHelper.GetDescription(SelectedGradingFormat)
+                        </p>
 
-                    <FormRow Label="Subject" Required For="authoring-basics-subject">
-                        <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
-                                      Items="@SubjectOptions" @bind-SelectedOption="_selectedSubject"
-                                      OptionText="@(o => o?.Label ?? string.Empty)"
-                                      OptionValue="@(o => o?.Value ?? string.Empty)"
-                                      Placeholder="@SubjectPickerPlaceholder"
-                                      Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
-                    </FormRow>
+                        @* UX-17/UX-18: the pass-score / attempt-cap pair renders disabled with an
+                           inline reason for TeacherGraded instead of disappearing — the disable logic
+                           moved with the fields. *@
+                        <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
 
-                    <FormRow Label="Primary grade" For="authoring-basics-grade">
-                        @* The grade picker owns an extra side effect (FR-58 subject reload + the
-                           WS-C1 signature re-resolve), so it binds the selected option and the
-                           changed callback explicitly rather than through @bind. *@
-                        <FluentSelect TOption="PickerOption" Id="authoring-basics-grade"
-                                      Items="@_gradeLevelOptions"
-                                      SelectedOption="@_selectedGradeLevel"
-                                      SelectedOptionChanged="@OnGradeLevelChangedAsync"
-                                      OptionText="@(o => o?.Label ?? string.Empty)"
-                                      OptionValue="@(o => o?.Value ?? string.Empty)"
-                                      Placeholder="Select a grade level"
-                                      Disabled="@(IsReadOnly || GradePickerDisabled)"
-                                      class="full-width" />
-                    </FormRow>
-                    @if (GradePickerReason is not null)
-                    {
-                        <p class="authoring-reason" id="authoring-grade-reason">@GradePickerReason</p>
-                    }
-
-                    @if (_gradeLevels is { Length: 0 })
-                    {
-                        <FluentMessageBar Intent="MessageIntent.Warning">
-                            No grade levels available. Please create grade levels in the Students module first.
-                        </FluentMessageBar>
-                    }
-                </section>
-
-                @* ── 2 · Audience & Targets (§7 TGT-1…TGT-16, UX-21) ──────────── *@
-                <section id="authoring-audience" class="authoring-compartment">
-                    <h3 class="authoring-compartment-title">Audience &amp; Targets</h3>
-
-                    @if (AudienceEditorDisabledReason is not null)
-                    {
-                        @* UX-21 load-half, fail-closed: the persisted constraints are unknown, so
-                           the editor renders disabled-with-reason rather than live-empty. *@
-                        <p class="authoring-reason" id="authoring-audience-reason">@AudienceEditorDisabledReason</p>
-                    }
-
-                    @* TGT-2/UX-17: Everyone is mutually exclusive with every constraint — when it
-                       is on the pickers render DISABLED WITH REASON, never hidden. *@
-                    @* NFR-1 (F6/F8): every control this compartment disables-with-reason also names
-                       that reason paragraph in aria-describedby, so a screen reader announces WHY the
-                       control is unavailable instead of only that it is. AlignTop (F9/F14) keeps the
-                       labels of these rows at the top of their (mixed-height) controls. *@
-                    <FormRow Label="Everyone" For="authoring-audience-everyone">
-                        <FluentCheckbox Id="authoring-audience-everyone"
-                                        @bind-Value="_everyone"
-                                        @bind-Value:after="OnEveryoneChangedAsync"
-                                        Label="All active students in the organization"
-                                        aria-describedby="authoring-audience-constraint-reason"
-                                        Disabled="@(IsReadOnly || AudienceEditorDisabledReason is not null)" />
-                    </FormRow>
-
-                    @* F15: the reason the four constraint pickers below are unavailable renders
-                       WITH the group it explains — immediately after the Everyone toggle and above
-                       the first picker row — instead of after the last one, so the paragraph a
-                       reader (or an assistive tech idref) reaches is beside the controls it
-                       describes. *@
-                    @if (ConstraintPickersDisabledReason is not null)
-                    {
-                        <p class="authoring-reason" id="authoring-audience-constraint-reason">@ConstraintPickersDisabledReason</p>
-                    }
-
-                    <FormRow Label="Grade levels" For="authoring-audience-grades" AlignTop>
-                        <FluentSelect TOption="PickerOption" Id="authoring-audience-grades"
-                                      Items="@_gradeLevelOptions"
-                                      Multiple="true"
-                                      OptionText="@(o => o.Label)"
-                                      OptionValue="@(o => o.Value)"
-                                      SelectedOptions="@SelectedGradeTargetOptions"
-                                      SelectedOptionsChanged="@OnSelectedGradeTargetsChangedAsync"
-                                      aria-describedby="authoring-audience-constraint-reason"
-                                      Disabled="@ConstraintPickersDisabled" class="full-width" />
-                    </FormRow>
-
-                    <FormRow Label="Streams" For="authoring-audience-streams" AlignTop>
-                        @* TGT-5/D-5: streams are grade-agnostic constraints; the picker groups them
-                           under their offering grade for legibility only (display), and stores the
-                           bare StreamCodedValueId. *@
-                        <FluentSelect TOption="PickerOption" Id="authoring-audience-streams"
-                                      Items="@_streamOptions"
-                                      Multiple="true"
-                                      OptionText="@(o => o.Label)"
-                                      OptionValue="@(o => o.Value)"
-                                      SelectedOptions="@SelectedStreamTargetOptions"
-                                      SelectedOptionsChanged="@OnSelectedStreamTargetsChangedAsync"
-                                      aria-describedby="authoring-audience-constraint-reason"
-                                      Disabled="@ConstraintPickersDisabled" class="full-width" />
-                    </FormRow>
-
-                    <FormRow Label="Students" For="authoring-audience-students" AlignTop>
-                        @* TGT-6: individual students via server search (never a full roster load). *@
-                        @* NFR-1 / §17 (F15): FluentAutocomplete routes the page's declared attributes to its
-                           OWN root element — a bare <div> — while the element it takes the component Id on is
-                           the inner <fluent-text-field>, which is the one carrying the combobox role,
-                           aria-expanded/controls and the label association. A declared aria-describedby
-                           therefore never reaches an element assistive tech reads, and this was the one
-                           constraint picker whose disabled state named no reason. The reason is declared on a
-                           labelled group the control cannot rewrite; the four sibling pickers need no such
-                           wrapper because their own host element is the one their Id lands on. The
-                           declaration stays on the control as well, so a FluentUI version that starts
-                           forwarding it to the inner field keeps working. *@
-                        <div id="authoring-audience-students-group"
-                             class="full-width"
-                             role="group"
-                             aria-label="Students"
-                             aria-describedby="authoring-audience-constraint-reason">
-                            <FluentAutocomplete TOption="PickerOption" Id="authoring-audience-students"
-                                                Multiple="true"
-                                                MaximumOptionsSearch="20"
-                                                ImmediateDelay="300"
-                                                Placeholder="Search students by name or number…"
-                                                Items="@_studentOptions"
-                                                OptionText="@(o => o.Label)"
-                                                OptionValue="@(o => o.Value)"
-                                                SelectedOptions="@SelectedStudentTargetOptions"
-                                                SelectedOptionsChanged="@OnSelectedStudentTargetsChangedAsync"
-                                                OnOptionsSearch="@OnStudentSearchAsync"
-                                                aria-describedby="authoring-audience-constraint-reason"
-                                                Disabled="@ConstraintPickersDisabled" class="full-width" />
-                        </div>
-                    </FormRow>
-
-                    <FormRow Label="Activity groups" For="authoring-audience-groups" AlignTop>
-                        @* Raw FluentSelect with Multiple (not a wrapper): dropdown-ui/SKILL.md routes
-                           multi-select pickers to the raw control and asks for the reason to be
-                           documented here — the five shared wrappers are all single-value. The
-                           selection binds the supported SelectedOptions/SelectedOptionsChanged
-                           pair over the option objects; the page keeps the ids as its source of
-                           truth. (R1 regression: this element bound @bind-SelectedValues, which
-                           does not exist on FluentListbox in FluentUI 4.14.2, so the binding was
-                           silently dropped into AdditionalAttributes and the picker never
-                           reported or showed a selection.) *@
-                        @* R2-10 (P1/NFR-1): the idref is DERIVED from the reason that renders — a
-                           hard-coded authoring-groups-reason dangled whenever this picker was disabled
-                           by the UX-21 constraint gate (GroupPickerReason is null there), leaving the
-                           disabled control with no reason at all. *@
-                        <FluentSelect TOption="PickerOption" Id="authoring-audience-groups"
-                                      Items="@_activityGroupOptions"
-                                      Multiple="true"
-                                      OptionText="@(g => g.Label)"
-                                      OptionValue="@(g => g.Value)"
-                                      SelectedOptions="@SelectedGroupOptions"
-                                      SelectedOptionsChanged="@OnSelectedGroupsChangedAsync"
-                                      aria-describedby="@GroupPickerAriaDescribedBy"
-                                      Disabled="@GroupPickerDisabled"
-                                      class="full-width" />
-                    </FormRow>
-                    @if (GroupPickerReason is not null)
-                    {
-                        <p class="authoring-reason" id="authoring-groups-reason">@GroupPickerReason</p>
-                    }
-
-                    @* §17 (item 4, this round): a persisted link the picker cannot represent (an archived
-                       group) used to be discarded from the selection without a word, so the author saw a
-                       shorter list and nothing explained it. The note names the dropped link(s) and states
-                       what is actually true — the link is kept while the selection is left alone — rather
-                       than claiming anything was lost. *@
-                    @if (DroppedGroupLinksNote is not null)
-                    {
-                        <p class="authoring-reason" id="authoring-groups-dropped-links">@DroppedGroupLinksNote</p>
-                    }
-
-                    @* The selected constraints as chips in DisplayOrder; removal re-indexes 0..n-1. *@
-                    <div class="authoring-target-chips" id="authoring-audience-targets">
-                        @if (TargetChips.Count == 0)
+                        @* OD3: the author guardian-review toggle lives beside the grading format. It is
+                           editable ONLY while the effective policy leaves review unset; a policy-set value
+                           locks it (disabled with an inline reason), and Rules carries the policy readout. *@
+                        <FormRow Label="Guardian review" For="authoring-basics-mandatory-review">
+                            <FluentCheckbox Id="authoring-basics-mandatory-review"
+                                            @bind-Value="_mandatoryReview"
+                                            Label="Require guardian review before student submits"
+                                            Disabled="@(IsReadOnly || PolicyReviewLocked)"
+                                            Tooltip="@(PolicyReviewLocked ? PolicyReviewLockedReason : null)" />
+                        </FormRow>
+                        @if (PolicyReviewLocked)
                         {
-                            <span class="authoring-hint" id="authoring-audience-no-targets">
-                                No targets yet — add at least one before publishing.
+                            <p class="authoring-reason" id="authoring-review-policy-reason">@PolicyReviewLockedReason</p>
+                        }
+
+                        @* FR-220 / UX-19: the AI-availability hint lives with the type/grading choice. *@
+                        <p class="authoring-hint" id="authoring-generation-hint">
+                            @QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat)
+                        </p>
+
+                        <FormRow Label="Subject" Required For="authoring-basics-subject">
+                            <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
+                                          Items="@SubjectOptions" @bind-SelectedOption="_selectedSubject"
+                                          OptionText="@(o => o?.Label ?? string.Empty)"
+                                          OptionValue="@(o => o?.Value ?? string.Empty)"
+                                          Placeholder="@SubjectPickerPlaceholder"
+                                          Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
+                        </FormRow>
+
+                        @* D1/D2: the retired Delivery & Publishing compartment's lifecycle facts and its one
+                           author field. Rules is readouts-only, so the author's due date and the two
+                           always-derived delivery readouts sit on the always-on Basics spine instead.
+                           Round authoring-compact-fields: Status + Available from are the compact pair. *@
+                        <FormRow Label="Status &amp; available from" AlignTop
+                                 For="authoring-basics-status">
+                            <span class="authoring-readonly-value" id="authoring-basics-status">
+                                @(_item?.Status.ToString() ?? "New draft")
                             </span>
+                            <span class="authoring-readonly-value" id="authoring-basics-available-from">
+                                @(_item?.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")
+                            </span>
+                        </FormRow>
+
+                        <FormRow Label="Due date" For="authoring-basics-due">
+                            <FluentDatePicker Id="authoring-basics-due" @bind-Value="_model.DueDate"
+                                              @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
+                                              Class="w-4" />
+                        </FormRow>
+                    </section>
+
+                    <section id="authoring-targets" class="authoring-compartment authoring-compartment--right">
+                        @* Round drop-primary-grade: the assignment carries no primary grade. The
+                           grade half of the audience is authored as grade TARGET rows in the builder
+                           below; the policy-scope grade is derived from them (one distinct grade ⇒
+                           that grade, otherwise the tenant default). *@
+                        @if (_gradeLevels is { Length: 0 })
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Warning">
+                                No grade levels available. Please create grade levels in the Students module first.
+                            </FluentMessageBar>
+                        }
+
+                        @* UX-21 load-half, fail-closed: when an editable Edit surface could not read the
+                           persisted targets, the builder renders DISABLED WITH REASON (never live-empty) —
+                           a first add over an unknown set is what the save path would write as a full
+                           replacement. *@
+                        @if (AudienceEditorDisabledReason is not null)
+                        {
+                            <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
+                        }
+
+                        @* The card keeps SectionCard's native header Add (grill Q4) and its header IS the
+                           compartment's single title — the section renders no <h3> of its own. The Add is
+                           wired through SectionCard's own ShowAddButton (the card header shows no Add while
+                           the audience editor is disabled) and the disabled state renders the
+                           disabled-with-reason replacement below the card. *@
+                        <SectionCard TItem="TargetsAndAudienceEntry"
+                                     Title="Targets & audience"
+                                     Count="@_targetsAndAudience.Count"
+                                     ShowAddButton="@BuilderAddEnabled"
+                                     AddTitle="Add target"
+                                     AddAriaLabel="Add target"
+                                     OnAddClick="@OpenTargetsAndAudienceDialogAsync"
+                                     Items="@_targetsAndAudience.ToArray()"
+                                     EmptyMessage="No targets yet. Click + to add.">
+                            <ItemTemplate Context="entry">
+                                <div class="targets-audience-item">
+                                    <div class="targets-audience-item__text">
+                                        <span class="targets-audience-item__label">@TargetCategoryLabel(entry.Category)</span>
+                                        <span class="targets-audience-item__value">@entry.Label</span>
+                                    </div>
+                                    @* P1-1: the remove action lives INSIDE the ItemTemplate — SectionCard
+                                       ignores ItemActions whenever a template is supplied. *@
+                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                  IconStart="@FluentIcons.Delete" Title="Remove"
+                                                  AriaLabel="@($"Remove {entry.Label}")"
+                                                  Disabled="@BuilderDisabled"
+                                                  OnClick="() => RemoveTargetEntryAsync(entry)" />
+                                </div>
+                            </ItemTemplate>
+                        </SectionCard>
+
+                        @if (AudienceEditorDisabledReason is not null)
+                        {
+                            <FluentButton Appearance="Appearance.Outline"
+                                          IconStart="@FluentIcons.Add"
+                                          Title="Add target"
+                                          AriaLabel="Add target"
+                                          Disabled="true">Add target</FluentButton>
+                        }
+
+                        @* TGT-16 / D-4: live, server-resolved, advisory preview (debounced; never blocks
+                           save). F10: a degraded read answers all-zero counts, so only the unavailable
+                           reason renders then — counts that merely LOOK trustworthy are never shown beside
+                           it. F11: the preview resolves on an editable surface only, so a read-only View
+                           renders PreviewAuthorOnlyNote (via PreviewText) rather than a "Preview pending…"
+                           that can never settle. *@
+                        @if (!IsReadOnly && _previewDegraded)
+                        {
+                            <p class="authoring-reason" id="authoring-audience-preview-note">@PreviewUnavailableReason</p>
                         }
                         else
                         {
-                            @foreach (var chip in TargetChips)
-                            {
-                                <span class="authoring-target-chip" data-order="@chip.Index">
-                                    <FluentBadge Appearance="Appearance.Lightweight"
-                                                 Title="@chip.KindLabel">@chip.Label</FluentBadge>
-                                    @if (!IsReadOnly)
-                                    {
-                                        @* NFR-1 (F6): the visible "Remove" text alone is ambiguous
-                                           to a screen reader across the chip list, so the accessible
-                                           name carries the chip it removes. *@
-                                        <FluentButton Appearance="Appearance.Stealth"
-                                                      aria-label="@($"Remove {chip.Label}")"
-                                                      OnClick="@(() => RemoveTargetAsync(chip.Index))">Remove</FluentButton>
-                                    }
-                                </span>
-                            }
+                            <p class="authoring-hint" id="authoring-audience-preview">@PreviewText</p>
                         }
-                    </div>
 
-                    @if (IsReadOnly)
-                    {
-                        @* D-1: the derived compat audience is read-only in View mode — it is no
-                           longer an authored field. *@
-                        <FormRow Label="Target audience" For="authoring-audience-derived">
-                            <span class="authoring-readonly-value" id="authoring-audience-derived">@DerivedAudienceText</span>
-                        </FormRow>
-                    }
+                        @* ── 3 · Rules (D1/D2: policy-derived readouts only) ────────────
+                           Round authoring-compact-fields (OD1/OD2): the five policy readouts render as a
+                           SectionCard stacked directly beneath the Targets & audience card, inside this same
+                           right-hand column (the element carrying authoring-compartment--right).
+                           OD2: all five stay card items and the card's own row chrome wraps — no compact row
+                           component, no truncation. The card header IS the compartment's single title (no
+                           <h3>), ShowAddButton="false" hides the header Add (a readout list authors
+                           nothing), and #authoring-rules stays on the card's container so the jump-nav
+                           anchor still resolves. *@
+                        <div id="authoring-rules" class="authoring-rules-card">
+                            <SectionCard TItem="PolicyReadout"
+                                         Title="Rules"
+                                         Count="@PolicyReadouts.Length"
+                                         ShowAddButton="false"
+                                         OnAddClick="@NoAddActionAsync"
+                                         Items="@PolicyReadouts">
+                                <ItemTemplate Context="readout">
+                                    @* UX-13: a policy-derived value is the resolved read-only text plus the
+                                       inherited badge and — when one grade owns the policy — the link to it.
+                                       The row keeps the .authoring-policy-row chrome it had in the spine. *@
+                                    <div class="authoring-policy-row" id="@readout.Id">
+                                        <span class="authoring-policy-label">@readout.Label</span>
+                                        <span class="authoring-policy-value">@readout.Value</span>
+                                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
+                                        @if (PolicyLinkHref is not null)
+                                        {
+                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
+                                                          class="authoring-policy-link">Grade policy</FluentAnchor>
+                                        }
+                                    </div>
+                                </ItemTemplate>
+                            </SectionCard>
 
-                    @* TGT-16 / D-4: live, server-resolved, advisory preview (debounced; never blocks
-                       save). F10: a degraded read answers all-zero counts, so only the unavailable
-                       reason renders then — counts that merely LOOK trustworthy are never shown beside
-                       it. F11: the preview resolves on an editable surface only, so a read-only View
-                       renders PreviewAuthorOnlyNote (via PreviewText) rather than a "Preview pending…"
-                       that can never settle. *@
-                    @if (!IsReadOnly && _previewDegraded)
-                    {
-                        <p class="authoring-reason" id="authoring-audience-preview-note">@PreviewUnavailableReason</p>
-                    }
-                    else
-                    {
-                        <p class="authoring-hint" id="authoring-audience-preview">@PreviewText</p>
-                    }
-                </section>
-
-                @* ── 3 · Delivery & Publishing (UX-15) ────────────────────────── *@
-                <section id="authoring-delivery" class="authoring-compartment">
-                    <h3 class="authoring-compartment-title">Delivery &amp; Publishing</h3>
-
-                    <FormRow Label="Status" For="authoring-delivery-status">
-                        <span class="authoring-readonly-value" id="authoring-delivery-status">
-                            @(_item?.Status.ToString() ?? "New draft")
-                        </span>
-                    </FormRow>
-
-                    <FormRow Label="Available from" For="authoring-delivery-available-from">
-                        <span class="authoring-readonly-value" id="authoring-delivery-available-from">
-                            @(_item?.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")
-                        </span>
-                    </FormRow>
-
-                    <FormRow Label="Due date" For="authoring-delivery-due">
-                        <FluentDatePicker Id="authoring-delivery-due" @bind-Value="_model.DueDate"
-                                          @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
-                                          Class="w-4" />
-                    </FormRow>
-
-                    <FormRow Label="Archive grace (days)" For="authoring-delivery-grace">
-                        <FluentNumberField Id="authoring-delivery-grace" @bind-Value="_model.ArchiveGraceDays"
-                                           ReadOnly="@IsReadOnly" Class="w-3" />
-                    </FormRow>
-
-                    <div class="authoring-policy-row" id="authoring-policy-approval">
-                        <span class="authoring-policy-label">Approval before publish</span>
-                        <span class="authoring-policy-value">@ApprovalPolicyValueText</span>
-                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
-                        @if (PolicyLinkHref is not null)
-                        {
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
-                                          class="authoring-policy-link">Grade policy</FluentAnchor>
-                        }
-                    </div>
-
-                    <div class="authoring-policy-row" id="authoring-policy-notification">
-                        <span class="authoring-policy-label">Notification policy</span>
-                        <span class="authoring-policy-value">Resolved per recipient grade at publish</span>
-                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
-                        @if (PolicyLinkHref is not null)
-                        {
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
-                                          class="authoring-policy-link">Grade policy</FluentAnchor>
-                        }
-                    </div>
-                </section>
-
-                @* ── 4 · Submission & Sign-off (UX-16, UX-17) ─────────────────── *@
-                <section id="authoring-submission" class="authoring-compartment">
-                    <h3 class="authoring-compartment-title">Submission &amp; Sign-off</h3>
-
-                    <FormRow Label="Max score" For="authoring-submission-max-score">
-                        <FluentNumberField Id="authoring-submission-max-score" @bind-Value="_model.MaxScore"
-                                           ReadOnly="@IsReadOnly" Class="w-3" />
-                    </FormRow>
-
-                    <p class="authoring-hint" id="authoring-feedback-mode">
-                        Feedback mode: @EnumHelper.GetDescription(SelectedGradingFormat)
-                    </p>
-
-                    @* UX-17/UX-18: the pass-score / attempt-cap pair renders disabled with an
-                       inline reason for TeacherGraded instead of disappearing. *@
-                    <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
-
-                    <FormRow Label="Guardian review" For="authoring-submission-mandatory-review">
-                        <FluentCheckbox Id="authoring-submission-mandatory-review"
-                                        @bind-Value="_mandatoryReview"
-                                        Label="Require guardian review before student submits"
-                                        Disabled="@IsReadOnly" />
-                    </FormRow>
-
-                    <FormRow Label="Guardian signature" For="authoring-submission-requires-signature">
-                        <FluentCheckbox Id="authoring-submission-requires-signature"
-                                        @bind-Value="_requiresSignature"
-                                        Label="Require guardian signature after completion"
-                                        Disabled="@(IsReadOnly || _signatureMandatory)"
-                                        Tooltip="@(_signatureMandatory ? SignatureMandatoryReason : null)" />
-                    </FormRow>
-                    @if (_signatureMandatory)
-                    {
-                        <p class="authoring-reason" id="authoring-signature-reason">@SignatureMandatoryReason</p>
-                    }
-
-                    <div class="authoring-policy-row" id="authoring-policy-signature">
-                        <span class="authoring-policy-label">Signature requirement</span>
-                        <span class="authoring-policy-value">@SignaturePolicyValueText</span>
-                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
-                        @if (PolicyLinkHref is not null)
-                        {
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
-                                          class="authoring-policy-link">Grade policy</FluentAnchor>
-                        }
-                    </div>
-                </section>
+                            <p class="authoring-hint" id="authoring-rules-hint">
+                                These values are resolved from your grade and organization policy — they are not authored per assignment.
+                            </p>
+                        </div>
+                    </section>
+                </div>
 
                 @* ── 5 · Content & Resources (always active, UX-19) ───────────── *@
                 <section id="authoring-content" class="authoring-compartment">
@@ -519,7 +388,6 @@
                                                    GateEnabled="false"
                                                    TopicId="@TopicId"
                                                    TopicName="@_selectedSubject?.Label"
-                                                   GradeLevelId="@GradeLevelId"
                                                    PromptLocked="_aiPromptLocked"
                                                    AssignmentId="_item?.Id"
                                                    OnQuestionsChanged="OnModelChanged" />
@@ -531,7 +399,6 @@
                                                    GateEnabled="true"
                                                    TopicId="@TopicId"
                                                    TopicName="@_selectedSubject?.Label"
-                                                   GradeLevelId="@GradeLevelId"
                                                    PromptLocked="_aiPromptLocked"
                                                    AssignmentId="_item?.Id"
                                                    OnQuestionsChanged="OnModelChanged" />
@@ -544,7 +411,6 @@
                                                    PromptLocked="_aiPromptLocked"
                                                    TopicId="@TopicId"
                                                    TopicName="@_selectedSubject?.Label"
-                                                   GradeLevelId="@GradeLevelId"
                                                    OnConfirmed="ReloadAsync" />
                         }
                     }
@@ -562,11 +428,16 @@
     /// Declared once so the markup, the spec wording and the bUnit suite cannot drift.</summary>
     public const string InheritedPolicyBadgeText = "Inherited from Grade/Tenant policy";
 
-    /// <summary>D2 / Round B1: the inline reason (also the checkbox tooltip) shown when the
-    /// resolved grade/tenant signature requirement is <c>Mandatory</c> and therefore locks the
-    /// <c>RequiresSignature</c> checkbox.</summary>
-    public const string SignatureMandatoryReason =
-        "Your organization requires a guardian signature for new assignments in this grade.";
+    /// <summary>D3/OD3 (round <c>assignment-rules-policy-rework</c>): the inline reason (also the
+    /// toggle's tooltip) shown when the resolved effective policy SETS guardian review — a
+    /// policy-set value is not author-editable, so the Basics toggle renders disabled with this
+    /// explanation. Mirrors the retired signature checkbox's lock precedent.</summary>
+    public const string PolicyReviewLockedReason =
+        "Your organization's policy sets guardian review for assignments in this grade, so it cannot be changed here.";
+
+    /// <summary>D6/OD2: the built-in archive retention floor the write seam falls back to when the
+    /// resolved policy leaves the archive window unset — mirrors <c>Assignment.Create</c>'s default.</summary>
+    private const int DefaultArchiveGraceDays = 30;
 
     /// <summary>P1 rework, fail-closed: the reason the Content &amp; Resources and
     /// Questions &amp; AI editors render disabled with when an editable Edit surface could
@@ -583,18 +454,6 @@
     public const string GroupLinksUnavailableReason =
         "The activity groups already linked to this assignment could not be loaded, so this picker is " +
         "disabled — saving would replace the existing links. Reload the page to try again.";
-
-    /// <summary>§17 (item 4, this round): the note the Audience compartment renders when the persisted
-    /// link set carries an activity group the picker cannot represent — an archived one, which the
-    /// replace-set link route would refuse. It leads with the group(s) and states what is actually true
-    /// of the link (it is kept while the selection is left alone) rather than claiming it was lost. See
-    /// <see cref="DroppedGroupLinksNote"/> for the tail.</summary>
-    public const string DroppedGroupLinksNoteLead = "Not shown here — archived activity group: ";
-
-    /// <summary>§17 (item 4, this round): the half of the note that says what the author can rely on.</summary>
-    public const string DroppedGroupLinksNoteTail =
-        ". The link is kept while the group selection is left unchanged; changing the selection and " +
-        "saving replaces the whole link set, and an archived group cannot be re-linked from this page.";
 
     // ── UX-7: the unsaved-changes guard (D2/D3) ─────────────────────────────
 
@@ -702,24 +561,26 @@
     private RecipientPreviewDto? _preview;
     private bool _previewDegraded;
 
-    /// <summary>TGT-2: the "Everyone" toggle. Mirrors the model's single <c>AllStudents</c> row.</summary>
-    private bool _everyone;
-
-    // Type / grading / review / signature selection state.
+    // Type / grading / review selection state.
     private PickerOption? _selectedType;
     private PickerOption? _selectedGradingFormat;
     private bool _mandatoryReview = true;
-    private bool _requiresSignature;
-    private bool _signatureMandatory;
-    private SignatureRequirementMode? _resolvedSignatureMode;
+
+    /// <summary>D2/OD4: the single resolved effective policy the Rules readouts and the
+    /// guardian-review lock read from — fetched whole from <c>/assignments/effective-policy</c>, so
+    /// the page never recomputes the D4 implication the resolver already applied. Null before the
+    /// first resolution settles (or after one failed): every readout then renders "Not resolved yet"
+    /// and the author keeps their own review choice (fail-open).</summary>
+    private EffectiveAssignmentPolicy? _policy;
 
     /// <summary>WS-B2 (spec §3.4 line 70) — org-level AI-prompt lock.</summary>
     private bool _aiPromptLocked;
 
-    // Primary grade + subject + activity-group picker state.
+    // Subject + activity-group picker state. The grade half of the audience now lives entirely in
+    // the authored target rows (round drop-primary-grade) — there is no primary-grade picker and no
+    // separate grade selection to mirror.
     private GradeLevelDto[]? _gradeLevels;
     private PickerOption[] _gradeLevelOptions = [];
-    private PickerOption? _selectedGradeLevel;
     private bool _loadingSubjects;
     private SubjectDto[]? _subjects;
     private PickerOption[] _subjectOptions = [];
@@ -727,6 +588,215 @@
     private bool _activityGroupsEnabled;
     private PickerOption[] _activityGroupOptions = [];
     private HashSet<Guid> _selectedGroupIds = [];
+
+    /// <summary>R2/grill: the single "Targets &amp; audience" builder's entries.
+    /// UI-only, in-memory (no new table/migration); each entry is a category plus the TYPED value
+    /// collected through <see cref="TargetsAndAudienceDialog"/>. The entries ARE the assignment's
+    /// target rows — <see cref="SyncTargetsFromBuilder"/> projects them onto the form model before a
+    /// save, and <see cref="RebuildTargetsAndAudienceFromModel"/> reads the loaded rows back.</summary>
+    private readonly List<TargetsAndAudienceEntry> _targetsAndAudience = [];
+
+    /// <summary>Label shown above an entry's value in the card body.</summary>
+    private static string TargetCategoryLabel(TargetsAndAudienceCategory category) => category switch
+    {
+        TargetsAndAudienceCategory.GradeLevels => "Grade Levels",
+        TargetsAndAudienceCategory.Streams => "Streams",
+        TargetsAndAudienceCategory.Students => "Students",
+        TargetsAndAudienceCategory.ActivityGroups => "Activity Groups",
+        _ => "Applies to All in Org"
+    };
+
+    /// <summary>
+    /// The builder category a persisted target kind belongs to — the one map between the closed
+    /// category set and <see cref="TargetKindDto"/>, read by both the load rebuild and the save sync
+    /// so the two can never disagree. <see cref="TargetKindDto.AllStudents"/> is the single Everyone
+    /// row (no ref id), not an entity kind.
+    /// </summary>
+    private static TargetsAndAudienceCategory BuilderCategoryOf(TargetKindDto kind) => kind switch
+    {
+        TargetKindDto.GradeLevel => TargetsAndAudienceCategory.GradeLevels,
+        TargetKindDto.Stream => TargetsAndAudienceCategory.Streams,
+        TargetKindDto.Student => TargetsAndAudienceCategory.Students,
+        TargetKindDto.ActivityGroup => TargetsAndAudienceCategory.ActivityGroups,
+        _ => TargetsAndAudienceCategory.Everyone
+    };
+
+    /// <summary>The page's option list for a builder entity category — the label source for a loaded
+    /// target row. Empty for Everyone, which references no entity (and for Students, which the page
+    /// never preloads: that row's label falls back to its id).</summary>
+    private PickerOption[] TargetOptionsFor(TargetsAndAudienceCategory category) => category switch
+    {
+        TargetsAndAudienceCategory.GradeLevels => _gradeLevelOptions,
+        TargetsAndAudienceCategory.Streams => _streamOptions,
+        TargetsAndAudienceCategory.ActivityGroups => _activityGroupOptions,
+        _ => []
+    };
+
+    /// <summary>
+    /// AC-5: rebuilds the builder's entries from the form model's target rows — one entry per row, in
+    /// the model's DisplayOrder (the persisted order), so an edit surface shows the targets the server
+    /// actually holds. The label comes from the loaded option list and falls back to the bare id, so a
+    /// reference the page has no option for still renders (and stays removable).
+    /// </summary>
+    private void RebuildTargetsAndAudienceFromModel()
+    {
+        _targetsAndAudience.Clear();
+
+        foreach (var target in _model.Targets)
+        {
+            if (target.Kind == TargetKindDto.AllStudents)
+            {
+                _targetsAndAudience.Add(new TargetsAndAudienceEntry(
+                    TargetsAndAudienceCategory.Everyone, null, TargetsAndAudienceEntry.EveryoneLabel));
+                continue;
+            }
+
+            // A ref-id target row without a ref id cannot be represented as a typed entry, and must
+            // never be collapsed onto Guid.Empty: the server rejects such a row, so this is a guard
+            // against inventing a reference, not a path a real load takes.
+            if (target.RefId is not Guid refId)
+            {
+                continue;
+            }
+
+            var category = BuilderCategoryOf(target.Kind);
+            _targetsAndAudience.Add(new TargetsAndAudienceEntry(category, refId, TargetLabelOf(category, refId)));
+        }
+    }
+
+    /// <summary>The label of the option a persisted target row references, falling back to the bare id
+    /// so a row the page has no option for (a student, a deleted grade level) still names something.</summary>
+    private string TargetLabelOf(TargetsAndAudienceCategory category, Guid refId) =>
+        TargetOptionsFor(category).FirstOrDefault(o => o.Value == refId.ToString())?.Label
+        ?? refId.ToString();
+
+    /// <summary>
+    /// AC-4: projects the builder's authored entries onto the form model's target rows, so the save
+    /// payload carries exactly what the card shows. Only the model's existing API is used —
+    /// <c>SetTargetsOfKind</c> per entity kind (an empty list clears that kind) — and
+    /// <c>SetEveryoneTarget(true)</c> for Everyone, which REPLACES the whole set and therefore runs
+    /// INSTEAD of the per-kind calls, never alongside them.
+    /// <para>Each kind is written only when its ids actually differ from the model's: the model's
+    /// setter removes-then-appends, so a blanket rebuild would re-order the rows of an untouched set
+    /// — and the update path reads a re-ordered set as a changed one, which would make a no-op save
+    /// replace the persisted rows and their DisplayOrder.</para>
+    /// </summary>
+    private void SyncTargetsFromBuilder()
+    {
+        if (_targetsAndAudience.Any(e => e.Category == TargetsAndAudienceCategory.Everyone))
+        {
+            // Grill Q6 keeps Everyone mutually exclusive with every entity entry, so this is the
+            // whole authored set: one AllStudents row and nothing else.
+            _model.SetEveryoneTarget(true);
+            return;
+        }
+
+        if (_model.HasAllStudents)
+        {
+            // Mutual exclusivity, the other direction: the authored set holds no Everyone entry, so a
+            // model that still carries the loaded AllStudents row (an edit-loaded Everyone assignment
+            // whose entry was removed) is stale — the save would persist a target the card no longer
+            // shows. Cleared through SetTargetsOfKind, which removes only the AllStudents rows, so the
+            // per-kind diff below still preserves an untouched entity set.
+            _model.SetTargetsOfKind(TargetKindDto.AllStudents, []);
+        }
+
+        foreach (var kind in Enum.GetValues<TargetKindDto>())
+        {
+            if (kind == TargetKindDto.AllStudents)
+            {
+                // AC-4: an AllStudents row carries no ref id, so it is set by SetEveryoneTarget
+                // alone — SetTargetsOfKind would store Guid.Empty.
+                continue;
+            }
+
+            var authoredIds = _targetsAndAudience
+                .Where(e => e.Category == BuilderCategoryOf(kind) && e.RefId.HasValue)
+                .Select(e => e.RefId!.Value)
+                .Distinct()
+                .ToList();
+
+            if (!authoredIds.SequenceEqual(TargetIds(kind)))
+            {
+                _model.SetTargetsOfKind(kind, authoredIds);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes a previously added entry from the builder. Record VALUE equality is not enough here:
+    /// two entries may legitimately be equal (the same category and ref id added twice), so removing
+    /// by value would drop the FIRST match when the second one was clicked. The entry instance the
+    /// rendered row closed over is the one identity that names the clicked row.
+    /// </summary>
+    private async Task RemoveTargetEntryAsync(TargetsAndAudienceEntry entry)
+    {
+        _targetsAndAudience.RemoveAll(e => ReferenceEquals(e, entry));
+        await OnTargetsChangedAsync();
+    }
+
+    /// <summary>Opens the single add dialog (category + a single-value picker that APPENDS every pick
+    /// as a chip), then appends every entry it returned. Inert while the builder is disabled, so the
+    /// unknown persisted set can never be extended (P1-3).</summary>
+    private async Task OpenTargetsAndAudienceDialogAsync()
+    {
+        if (!BuilderAddEnabled)
+        {
+            return;
+        }
+
+        // DialogSize.Large (720px), not the Small (420px) default: the dialog's entity pickers are
+        // multi-select listboxes, and the dialog's `full-width` fields floor at 400px — beside the
+        // fixed 180px label column, only the 720px body leaves the option rows that room.
+        var result = await DialogService.ShowShellDialogAsync<
+            TargetsAndAudienceDialog, TargetsAndAudienceDialogModel, TargetsAndAudienceDialogResult>(
+            BuildTargetsAndAudienceDialogModel(),
+            "Add target & audience",
+            DialogSize.Large);
+
+        if (result is null || result.Entries.Count == 0)
+        {
+            return;
+        }
+
+        // Grill Q6: "everyone" is mutually exclusive with any other category. The dialog clears the
+        // opposite side on either pick (an Everyone checkpoint clears the entity chips, an entity
+        // pick clears the Everyone entry), and the page ACCUMULATES across dialog opens, so a batch may
+        // be MIXED-KIND — several categories merged into one target set — and the merge below is the
+        // page-side enforcement: an Everyone entry in the batch still clears every entity entry, and a
+        // batch without one still clears the Everyone entry.
+        if (result.Entries.Any(e => e.Category == TargetsAndAudienceCategory.Everyone))
+        {
+            _targetsAndAudience.RemoveAll(e => e.Category != TargetsAndAudienceCategory.Everyone);
+        }
+        else
+        {
+            _targetsAndAudience.RemoveAll(e => e.Category == TargetsAndAudienceCategory.Everyone);
+        }
+
+        _targetsAndAudience.AddRange(result.Entries);
+        await OnTargetsChangedAsync();
+    }
+
+    /// <summary>
+    /// The dialog's form model: the page owns the option sources (grade levels, streams, activity
+    /// groups) and the student search, so the dialog itself stays data-free. The student search runs on
+    /// the page's load token — the dialog has no cancellation source of its own, and a reload that
+    /// swaps this instance must take an in-flight search with it.
+    /// </summary>
+    private TargetsAndAudienceDialogModel BuildTargetsAndAudienceDialogModel() => new()
+    {
+        GradeLevelOptions = ToDialogOptions(_gradeLevelOptions),
+        StreamOptions = ToDialogOptions(_streamOptions),
+        ActivityGroupOptions = ToDialogOptions(_activityGroupOptions),
+        StudentSearch = (query, _) => SearchStudentsAsync(query, _loadCts?.Token ?? CancellationToken.None)
+    };
+
+    /// <summary>The page's picker options as the dialog's own option record — <c>PickerOption</c> is
+    /// nested in this component, so the dialog cannot share it.</summary>
+    private static TargetsAndAudienceOption[] ToDialogOptions(IEnumerable<PickerOption> options) =>
+        options.Select(o => new TargetsAndAudienceOption(o.Value, o.Label)).ToArray();
+
     private SubjectDto[]? _groupSubjects;
     private PickerOption[] _groupSubjectOptions = [];
     private bool _loadingGroupSubjects;
@@ -734,11 +804,6 @@
     /// <summary>TGT-5: the stream options, labelled "Grade · Stream" (display grouping only —
     /// the stored constraint is the bare <c>StreamCodedValueId</c>).</summary>
     private PickerOption[] _streamOptions = [];
-
-    /// <summary>TGT-6: the server-search result page backing the student picker, plus every
-    /// student the author has selected (kept so a chip keeps its label after the next search).</summary>
-    private PickerOption[] _studentOptions = [];
-    private readonly List<PickerOption> _selectedStudentOptions = [];
 
     /// <summary>P1 rework — whether the persisted children were loaded into
     /// <see cref="AssignmentEditFormModel"/> before the editors rendered.</summary>
@@ -750,30 +815,51 @@
     private readonly HashSet<Guid> _loadedGroupIds = [];
     private string? _groupLinksUnavailableReason;
 
-    /// <summary>§17 (item 4, this round): every activity group the last list read returned — including the
-    /// inactive (archived) ones the picker does not offer — so a persisted link the picker cannot
-    /// represent can still be named to the author instead of silently disappearing from the selection.</summary>
-    private ActivityGroupDto[] _fetchedActivityGroups = [];
-
-    /// <summary>§17 (item 4, this round): the persisted link ids <see cref="LoadLinkedGroupIdsAsync"/>
-    /// could not select — the ones <see cref="DroppedGroupLinksNote"/> names.</summary>
-    private readonly List<Guid> _droppedGroupLinkIds = [];
-
     /// <summary>One dropdown item for every picker on this page (grade, subject, group,
     /// assignment type, grading format, target audience). Kept public so the pickers can be
     /// driven by tests through their real <c>SelectedOptionChanged</c> callback.</summary>
     public sealed record PickerOption(string Value, string Label);
 
+    /// <summary>The Rules card renders NO Add button — it is a readout list, so there is nothing to
+    /// author. The callback is therefore unreachable: <see cref="SectionCard"/> renders its header
+    /// Add only when <c>ShowAddButton</c> is true, and this card passes <c>false</c>. It is supplied
+    /// because <c>SectionCard.OnAddClick</c> is marked <c>[EditorRequired]</c> and the RZ2012 analyzer
+    /// cannot see the runtime <c>ShowAddButton</c> value — omitting it would add a build warning for a
+    /// parameter this card can never invoke.</summary>
+    private static Task NoAddActionAsync() => Task.CompletedTask;
+
     private sealed record Compartment(string Anchor, string Title);
 
-    /// <summary>The six compartments in canonical order (UX-1). The jump-nav and the stacked
-    /// sections both render from this list, so the two can never disagree.</summary>
+    /// <summary>OD2 (round authoring-compact-fields): one resolved policy readout — a Rules card item.
+    /// <see cref="Id"/> is the readout's long-standing element id (the bUnit suite's seam), so the
+    /// five readouts keep their ids now that <see cref="PolicyReadouts"/> renders them from data
+    /// instead of five hand-written rows.</summary>
+    private sealed record PolicyReadout(string Id, string Label, string Value);
+
+    /// <summary>The five resolved policy readouts in canonical order — the Rules card's items.
+    /// Rebuilt per render from the resolved policy, so the card and its readout text cannot drift.
+    /// OD3: the guardian-review entry stays a READOUT like every other (D2's "readouts only" holds
+    /// literally) — the author's toggle lives in Basics.</summary>
+    private PolicyReadout[] PolicyReadouts =>
+    [
+        new("authoring-policy-approval", "Approval before publish", ApprovalPolicyValueText),
+        new("authoring-policy-notification", "Notification policy", "Resolved per recipient grade at publish"),
+        new("authoring-policy-archive", "Archive window", ArchiveWindowPolicyValueText),
+        new("authoring-policy-signature", "Signature requirement", SignaturePolicyValueText),
+        new("authoring-policy-review", "Guardian review", GuardianReviewPolicyValueText)
+    ];
+
+    /// <summary>The five compartments in canonical order (UX-1). The jump-nav renders from this list,
+    /// and each entry's anchor is the element id the link targets (<c>#authoring-{anchor}</c>).
+    /// Round <c>authoring-compact-fields</c> moved the Rules compartment out of the spine, so its
+    /// anchor now sits on the Rules card's container in the right-hand column rather than on a
+    /// full-width section — the jump-nav is unchanged. D1: the retired Delivery &amp; Publishing and
+    /// Submission &amp; Sign-off compartments are replaced by the single policy-readout Rules surface.</summary>
     private static readonly Compartment[] Compartments =
     [
         new("basics", "Basics"),
-        new("audience", "Audience & Targets"),
-        new("delivery", "Delivery & Publishing"),
-        new("submission", "Submission & Sign-off"),
+        new("targets", "Targets & audience"),
+        new("rules", "Rules"),
         new("content", "Content & Resources"),
         new("questions", "Questions & AI")
     ];
@@ -855,21 +941,22 @@
     private string DerivedAudienceText => EnumHelper.GetDescription(DerivedTargetAudience);
 
     /// <summary>UX-21 load-half, fail-closed: non-null exactly when an editable Edit surface did
-    /// not get its persisted targeting rows, so the Audience &amp; Targets editor renders
-    /// disabled-with-reason instead of live-empty.</summary>
+    /// not get its persisted targeting rows, so nothing may be authored over an unknown set. The
+    /// builder's Add/remove actions read it, the save path refuses to write while it is non-null,
+    /// and the advisory recipient preview resolves no count while the targets are unknown.</summary>
     private string? AudienceEditorDisabledReason =>
         EffectiveMode == AssignmentAuthoringMode.Edit && !_model.TargetsLoaded
             ? ChildrenUnavailableReason
             : null;
 
-    /// <summary>TGT-2/UX-17: the constraint pickers are disabled while Everyone is on (the set is
-    /// a single AllStudents row) and while the persisted constraints are unknown.</summary>
-    private bool ConstraintPickersDisabled =>
-        IsReadOnly || _everyone || AudienceEditorDisabledReason is not null;
+    /// <summary>P1-3 (UX-21): every entry action the builder owns renders disabled exactly when the
+    /// surface is read-only or the persisted targets could not be loaded — disabled with the reason
+    /// above, never hidden (UX-17/UX-19).</summary>
+    private bool BuilderDisabled => IsReadOnly || AudienceEditorDisabledReason is not null;
 
-    private string? ConstraintPickersDisabledReason =>
-        AudienceEditorDisabledReason
-        ?? (_everyone ? "Not applicable while the audience is Everyone." : null);
+    /// <summary>P1-3: whether the builder's Add action is offered at all. Never in View mode (there is
+    /// nothing to author) and never while the persisted targets are unknown.</summary>
+    private bool BuilderAddEnabled => !IsReadOnly && AudienceEditorDisabledReason is null;
 
     /// <summary>FR-220 / EC-3 — whether this type + grading combination offers AI generation.
     /// Drives the disabled-with-reason treatment of compartment 6 and the kebab's
@@ -879,42 +966,41 @@
     private Guid? TopicId =>
         _selectedSubject is not null && Guid.TryParse(_selectedSubject.Value, out var id) ? id : null;
 
-    private Guid? GradeLevelId =>
-        _selectedGradeLevel is not null && Guid.TryParse(_selectedGradeLevel.Value, out var id) ? id : null;
-
-    /// <summary>The picker's selection projection: the option instances matching the ids the
-    /// page holds. FluentSelect highlights the options it is handed, so a loaded link must be
-    /// projected back onto its own option (the TeacherEditDialog multi-select precedent).
-    /// <para>R1 regression fix: the picker previously bound <c>@bind-SelectedValues</c>, a
-    /// parameter that does not exist on the FluentUI 4.14.2 list components — Blazor routed it
-    /// into the catch-all <c>AdditionalAttributes</c> (rendering a stray
-    /// <c>selectedvalues</c> HTML attribute) and the picker neither showed nor reported a
-    /// selection, so Create-with-By-Group could never pass <see cref="ValidateForSave"/>.</para></summary>
-    private IEnumerable<PickerOption> SelectedGroupOptions =>
-        _activityGroupOptions.Where(o => _selectedGroupIds.Contains(Guid.Parse(o.Value)));
-
-    /// <summary>TGT-4: the grade target picker's selection projection — the option instances the
-    /// model's GradeLevel targets match (FluentSelect highlights the options it is handed).</summary>
-    private IEnumerable<PickerOption> SelectedGradeTargetOptions =>
-        _gradeLevelOptions.Where(o => ModelHasTarget(TargetKindDto.GradeLevel, o.Value));
-
-    /// <summary>TGT-5: the stream target picker's selection projection.</summary>
-    private IEnumerable<PickerOption> SelectedStreamTargetOptions =>
-        _streamOptions.Where(o => ModelHasTarget(TargetKindDto.Stream, o.Value));
-
-    /// <summary>TGT-6: the student target picker's selection projection — every selected student
-    /// (kept across searches so the chip and the picker agree).</summary>
-    private IEnumerable<PickerOption> SelectedStudentTargetOptions =>
-        _selectedStudentOptions.Where(o => ModelHasTarget(TargetKindDto.Student, o.Value));
-
-    private bool ModelHasTarget(TargetKindDto kind, string value) =>
-        Guid.TryParse(value, out var id)
-        && _model.Targets.Any(t => t.Kind == kind && t.RefId == id);
+    /// <summary>
+    /// Round <c>drop-primary-grade</c>: the grade-target ids this surface KNOWS. The form model's
+    /// authored rows are the live set on Create/Edit (they change as the author adds or removes a
+    /// target); a read-only View never reads the children, so it falls back to the loaded summary's
+    /// projected <see cref="AssignmentSummaryDto.TargetGradeIds"/>.
+    /// </summary>
+    private IReadOnlyList<Guid> KnownGradeTargetIds =>
+        _model.TargetsLoaded ? TargetIds(TargetKindDto.GradeLevel) : _item?.TargetGradeIds ?? [];
 
     /// <summary>
-    /// FR-58: the offered subjects are the union of the primary grade's effective list and the
+    /// Round <c>drop-primary-grade</c>: the policy-scope grade the effective-policy resolution asks
+    /// for, DERIVED from the grade targets by the one shared rule — exactly one distinct grade
+    /// target ⇒ that grade, otherwise <see langword="null"/> (the tenant-default leg).
+    /// <para>Mirrors <c>SchoolCollab.Assignments.Core.Services.AssignmentPolicyScope.DeriveGrade</c>,
+    /// which this project cannot reference (Assignments.Application does not reference
+    /// Assignments.Core); the page's input is the form model's DTO-kind target rows rather than the
+    /// entity's, so the one-line derivation is the whole rule.</para>
+    /// </summary>
+    private Guid? DerivedPolicyGrade => DerivePolicyGrade(KnownGradeTargetIds);
+
+    /// <summary>The one-distinct-grade rule over a grade-target id set — the page's one spelling of
+    /// <c>AssignmentPolicyScope.DeriveGrade</c>. Kept byte-for-byte equivalent to the Core rule on
+    /// purpose (it is the same function): drop <see cref="Guid.Empty"/>, de-duplicate, then exactly
+    /// one distinct grade ⇒ that grade, else <see langword="null"/>. A future edit here must mirror
+    /// any change to <c>src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentPolicyScope.cs</c>.</summary>
+    private static Guid? DerivePolicyGrade(IReadOnlyList<Guid> gradeTargetIds) =>
+        gradeTargetIds.Where(id => id != Guid.Empty).Distinct().ToArray() is [var onlyGrade]
+            ? onlyGrade
+            : null;
+
+    /// <summary>
+    /// FR-58: the offered subjects are the union of the targeted grade levels' effective lists and the
     /// union across the targeted activity groups — the pre-R2 grade-or-group paths, now both driven
-    /// by the authored target rows.
+    /// by the authored target rows (round <c>drop-primary-grade</c>: the grade leg is the union over
+    /// the distinct grade targets, not over one authored primary grade).
     /// <para>The union is CACHED and only rebuilt when one of its two source arrays is replaced: a
     /// fresh array on every render makes the picker see its <c>Items</c> change on each pass, and
     /// the control then drops a selection it cannot match by instance (the subject was silently
@@ -945,77 +1031,16 @@
     private PickerOption[]? _groupSubjectOptionsUnionSource;
 
     private bool SubjectPickerDisabled =>
-        (_selectedGradeLevel is null && _selectedGroupIds.Count == 0)
+        (KnownGradeTargetIds.Count == 0 && _selectedGroupIds.Count == 0)
         || SubjectOptions.Length == 0
         || _loadingSubjects
         || _loadingGroupSubjects;
 
     private string SubjectPickerPlaceholder =>
-        _selectedGradeLevel is null && _selectedGroupIds.Count == 0
+        KnownGradeTargetIds.Count == 0 && _selectedGroupIds.Count == 0
             ? "Select a grade level or activity group first"
             : "Select a subject";
 
-    /// <summary>D-2 (TGT-11): the primary grade is the authored policy/authoring field. With
-    /// exactly ONE grade target it auto-derives from that target and the picker is disabled with
-    /// this reason; with none it is free (nullable) and with two or more it must be one of them
-    /// (enforced by <see cref="ValidateForSave"/> and by the server).</summary>
-    private string? GradePickerReason =>
-        _model.CountOf(TargetKindDto.GradeLevel) == 1
-            ? "Set automatically from the single targeted grade level."
-            : null;
-
-    private bool GradePickerDisabled => GradePickerReason is not null;
-
-    /// <summary>UX-17/UX-19: the activity-group picker is unavailable entirely when the tenant
-    /// flag is off (no group targets exist then), disabled while Everyone is selected, and
-    /// disabled when the persisted links could not be read (P2-1 fail-closed: an unknown set must
-    /// never be saved over the stored one).</summary>
-    private string? GroupPickerReason =>
-        !_activityGroupsEnabled
-            ? "Not available — activity groups are disabled for this organization."
-            : _groupLinksUnavailableReason
-              ?? (_everyone ? "Not applicable while the audience is Everyone." : null);
-
-    /// <summary>F1: the activity-group picker is gated by everything that gates the other three
-    /// constraint pickers — <see cref="ConstraintPickersDisabled"/> carries the UX-21 "persisted
-    /// targets did not load" reason, which <see cref="GroupPickerReason"/> does not — plus its own
-    /// reasons. The targets read (<c>GET /assignments/{id}/authoring</c>) and the group-links read
-    /// are separate calls, so a failed targets read with a successful links read used to leave this
-    /// picker LIVE over an empty in-memory target set: a group selection then marked the model's
-    /// <c>TargetsChanged</c> and Save full-replaced the persisted rows. The two group-only reasons
-    /// stay in the gate — neither the flag-off state nor an unreadable link set is expressible
-    /// through <see cref="ConstraintPickersDisabled"/>.</summary>
-    private bool GroupPickerDisabled => ConstraintPickersDisabled || GroupPickerReason is not null;
-
-    /// <summary>R2-10 (P1, NFR-1): the group picker's <c>aria-describedby</c>, derived from the
-    /// reason paragraph that actually RENDERS. The attribute used to be the hard-coded
-    /// <c>authoring-groups-reason</c>, which dangles in the UX-21 case — <see cref="ConstraintPickersDisabled"/>
-    /// disables the picker while <see cref="GroupPickerReason"/> is still null, so that paragraph is
-    /// absent and the disabled control exposed no reason to assistive tech. Null when no reason
-    /// paragraph renders at all, so the attribute is omitted rather than left pointing at nothing.</summary>
-    private string? GroupPickerAriaDescribedBy =>
-        GroupPickerReason is not null ? "authoring-groups-reason"
-        : ConstraintPickersDisabledReason is not null ? "authoring-audience-constraint-reason"
-        : null;
-
-    /// <summary>
-    /// §17 (item 4, this round): the persisted activity-group links this page cannot show, named for
-    /// the author. Null — and therefore absent from the DOM — whenever the picker could represent every
-    /// link it found, so the note can never become permanent furniture.
-    /// </summary>
-    private string? DroppedGroupLinksNote => _droppedGroupLinkIds.Count == 0
-        ? null
-        : DroppedGroupLinksNoteLead
-          + string.Join(", ", _droppedGroupLinkIds.Select(GroupLinkDisplayName))
-          + DroppedGroupLinksNoteTail;
-
-    /// <summary>The dropped link's group name, taken from the same list read that produced the picker's
-    /// options (an archived group is still IN that read — it is only filtered out of the option list).
-    /// Falls back to the id when the group is not in the read at all, so the note always names something
-    /// the author can act on.</summary>
-    private string GroupLinkDisplayName(Guid groupId) =>
-        _fetchedActivityGroups.FirstOrDefault(g => g.Id == groupId)?.Name
-        ?? $"group {groupId.ToString()[..8]}";
 
     // ── Policy-derived read-only values (UX-13) ───────────────────────────────
 
@@ -1025,18 +1050,43 @@
             ? "Approval is required before this assignment can be published"
             : "No approval required before publishing";
 
-    private string SignaturePolicyValueText => _resolvedSignatureMode switch
+    /// <summary>D2/OD4 (D10): the signature readout states the OUTCOME of the resolved policy —
+    /// the author has no signature control any more, and <c>Optional</c> and <c>Mandatory</c> both
+    /// snapshot <c>RequiresSignature = true</c> (OD5), so the two read identically.</summary>
+    private string SignaturePolicyValueText => _policy?.SignatureRequirement switch
     {
-        SignatureRequirementMode.Mandatory => "A guardian signature is required after completion",
-        SignatureRequirementMode.Optional => "A guardian signature is optional and pre-ticked",
         SignatureRequirementMode.Disabled => "No guardian signature is required",
+        SignatureRequirementMode.Optional or SignatureRequirementMode.Mandatory =>
+            "A guardian signature is required after completion",
         _ => "Not resolved yet"
     };
 
-    /// <summary>UX-13: the resolved values link to the policy card that owns them — the grade's
-    /// policy page when the assignment carries a primary grade, otherwise the grade-level list
-    /// that hosts the tenant-global default.</summary>
-    private string? PolicyLinkHref => _item?.GradeLevelId is Guid gradeId
+    /// <summary>D2/OD4: the archive-window readout — the resolved policy's value, or the built-in
+    /// retention floor the write seam falls back to when the policy leaves it unset.</summary>
+    private string ArchiveWindowPolicyValueText => _policy is null
+        ? "Not resolved yet"
+        : _policy.ArchiveGraceDays is int days
+            ? $"Archived {days} days after the due date"
+            : $"Archived {DefaultArchiveGraceDays} days after the due date (built-in default)";
+
+    /// <summary>D2/OD3/OD4: the guardian-review readout — the policy's locked value, or the
+    /// statement that the choice is the author's (the Basics toggle).</summary>
+    private string GuardianReviewPolicyValueText => _policy?.MandatoryReview switch
+    {
+        true => "Guardian review is required before a student can submit",
+        false => "Guardian review is not required",
+        _ => "Not set by the policy — the author chooses in Basics"
+    };
+
+    /// <summary>OD3: the author's guardian-review toggle is editable only while the effective
+    /// policy leaves review unset — a policy-set value locks it.</summary>
+    private bool PolicyReviewLocked => _policy?.MandatoryReview is not null;
+
+    /// <summary>UX-13: the resolved values link to the policy card that owns them — the single
+    /// targeted grade's policy page when the assignment targets exactly one grade, otherwise the
+    /// grade-level list that hosts the tenant-global default (the same one-distinct-grade rule
+    /// <see cref="DerivedPolicyGrade"/> applies to the policy resolution itself).</summary>
+    private string? PolicyLinkHref => DerivedPolicyGrade is Guid gradeId
         ? $"/students/grade-levels/{gradeId}"
         : null;
 
@@ -1053,51 +1103,6 @@
         new(((int)GradingFormatDto.AutoGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.AutoGraded)),
         new(((int)GradingFormatDto.InstantGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.InstantGraded))
     ];
-
-    // ── Target chips (TGT-16 chip list, DisplayOrder) ─────────────────────────
-
-    /// <summary>One rendered target chip: its position in the DisplayOrder and the labels the
-    /// author reads.</summary>
-    public sealed record TargetChip(int Index, TargetKindDto Kind, Guid? RefId, string KindLabel, string Label);
-
-    /// <summary>The authored constraints as chips, in DisplayOrder (the model's list order).</summary>
-    private IReadOnlyList<TargetChip> TargetChips => _model.Targets
-        .Select((t, i) => new TargetChip(i, t.Kind, t.RefId, KindLabel(t.Kind), TargetLabel(t)))
-        .ToList();
-
-    private static string KindLabel(TargetKindDto kind) => kind switch
-    {
-        TargetKindDto.AllStudents => "Everyone",
-        TargetKindDto.GradeLevel => "Grade level",
-        TargetKindDto.Stream => "Stream",
-        TargetKindDto.Student => "Student",
-        _ => "Activity group"
-    };
-
-    /// <summary>The chip's display name, resolved from the loaded picker option for that kind and
-    /// id — with an explicit fallback so a stale or foreign id is still removable.</summary>
-    private string TargetLabel(AssignmentEditFormModel.AssignmentTargetSpec target)
-    {
-        if (target.Kind == TargetKindDto.AllStudents)
-        {
-            return "Everyone";
-        }
-
-        var options = target.Kind switch
-        {
-            TargetKindDto.GradeLevel => _gradeLevelOptions,
-            TargetKindDto.Stream => _streamOptions,
-            TargetKindDto.ActivityGroup => _activityGroupOptions,
-            TargetKindDto.Student => _selectedStudentOptions.ToArray(),
-            _ => []
-        };
-
-        // F16: one explicit shape for the fallback — the null-conditional chain
-        // `RefId?.ToString()[..8] ?? "—"` leans on the ?. propagating through the range operator,
-        // which reads as a slice taken before the null check. Branch on the Guid instead.
-        return options.FirstOrDefault(o => o.Value == target.RefId?.ToString())?.Label
-            ?? $"{KindLabel(target.Kind)} {(target.RefId is Guid refId ? refId.ToString()[..8] : "—")}";
-    }
 
     // ── Live recipient preview (TGT-16 / D-4) ─────────────────────────────────
 
@@ -1176,8 +1181,7 @@
                     TargetIds(TargetKindDto.GradeLevel),
                     TargetIds(TargetKindDto.Stream),
                     TargetIds(TargetKindDto.Student),
-                    TargetIds(TargetKindDto.ActivityGroup),
-                    GradeLevelId),
+                    TargetIds(TargetKindDto.ActivityGroup)),
                 ct);
 
             if (ct.IsCancellationRequested)
@@ -1228,9 +1232,7 @@
         SelectedGradingFormat,
         DerivedTargetAudience,
         TopicId ?? Guid.Empty,
-        GradeLevelId,
-        _mandatoryReview,
-        _requiresSignature);
+        _mandatoryReview);
 
     /// <summary>UX-7 (D3): moves the baseline onto the form's current content — the two moments the
     /// form IS the persisted state: the end of a load, and the component's own exit after a save
@@ -1414,7 +1416,6 @@
                 {
                     _model.LoadFrom(_item);
                     _mandatoryReview = _item.MandatoryReview;
-                    _requiresSignature = _item.RequiresSignature;
                     _selectedType = TypeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
                     _selectedGradingFormat = GradingFormatOptions
                         .FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
@@ -1451,12 +1452,15 @@
                 // mirrors run here — they carry whatever the surface already holds.
                 SyncTargetPickerState();
                 SyncGroupsFromTargets();
-                _everyone = _model.HasAllStudents;
+                RebuildTargetsAndAudienceFromModel();
             }
 
-            // WS-C1 (spec §7 Q1) / D2: resolve the effective signature requirement — the
-            // Create-mode pre-fill and the Edit/View read-only policy row share this call.
-            await ResolveSignatureDefaultAsync(_item?.GradeLevelId);
+            // WS-C1 (spec §7 Q1) / D2/OD4: resolve the effective assignment policy — the five
+            // Rules readouts, the guardian-review lock, and (for the author) the review toggle's
+            // editable state all read this ONE object. Round drop-primary-grade: the grade is
+            // DERIVED from the loaded grade-target rows (create → null ⇒ the tenant default),
+            // never read off an authored field.
+            await ResolveEffectivePolicyAsync(DerivedPolicyGrade);
 
             // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock (best-effort, fail-open).
             await LoadAiPromptPolicyAsync(ct);
@@ -1499,21 +1503,16 @@
         _selectedType = null;
         _selectedGradingFormat = null;
         _mandatoryReview = true;
-        _requiresSignature = false;
-        _signatureMandatory = false;
-        _resolvedSignatureMode = null;
+        _policy = null;
         _aiPromptLocked = false;
 
         _childrenLoaded = false;
         _groupLinksLoaded = false;
         _loadedGroupIds.Clear();
         _groupLinksUnavailableReason = null;
-        _fetchedActivityGroups = [];
-        _droppedGroupLinkIds.Clear();
 
         _gradeLevels = null;
         _gradeLevelOptions = [];
-        _selectedGradeLevel = null;
         _subjects = null;
         _subjectOptions = [];
         _selectedSubject = null;
@@ -1522,10 +1521,8 @@
         _groupSubjects = null;
         _groupSubjectOptions = [];
         _streamOptions = [];
-        _studentOptions = [];
-        _selectedStudentOptions.Clear();
 
-        _everyone = false;
+        _targetsAndAudience.Clear();
         _preview = null;
         _previewDegraded = false;
     }
@@ -1546,10 +1543,11 @@
         await LoadChildrenAsync(assignmentId, ct);
         await LoadLinkedGroupIdsAsync(assignmentId, ct);
 
-        // D-2 / TGT-7: mirror the loaded target set onto the pickers.
+        // D-2 / TGT-7: mirror the loaded target set onto the pickers, and rebuild the builder's
+        // entries from the same set so the surface shows the targets the server actually holds (AC-5).
         SyncTargetPickerState();
         SyncGroupsFromTargets();
-        _everyone = _model.HasAllStudents;
+        RebuildTargetsAndAudienceFromModel();
 
         // FR-58: a persisted group target needs its group-subject union loaded up front — the submit
         // gate and the subject picker both read it, and the union otherwise only loads when the author
@@ -1588,14 +1586,6 @@
             Logger.LogError(ex, "Failed to load grade levels");
         }
 
-        // Seed the primary grade from the loaded assignment even when the grade is not in the
-        // fetched list (a deleted/foreign grade must not silently blank the assignment).
-        if (item?.GradeLevelId is Guid gradeId)
-        {
-            _selectedGradeLevel = _gradeLevelOptions.FirstOrDefault(o => o.Value == gradeId.ToString())
-                ?? new PickerOption(gradeId.ToString(), item.GradeName ?? "Current grade");
-        }
-
         await LoadActivityGroupsAsync(ct);
 
         // TGT-5 (D-5): the stream picker's options come from the existing grade-stream listing,
@@ -1611,9 +1601,13 @@
             _subjectOptions = [topic];
         }
 
-        if (_selectedGradeLevel is not null)
+        // FR-58 (round drop-primary-grade): the grade side of the subject union is the union over the
+        // loaded assignment's grade TARGETS — the summary projects them, so no target row has to be
+        // read yet. A create has no grade targets, and an assignment without one simply offers the
+        // group-subject union.
+        if (item?.TargetGradeIds is { Count: > 0 } gradeTargetIds)
         {
-            await LoadSubjectsForGradeAsync(_selectedGradeLevel, ct);
+            await LoadSubjectsForGradeTargetsAsync(gradeTargetIds, ct);
         }
     }
 
@@ -1622,7 +1616,6 @@
     private async Task LoadActivityGroupsAsync(CancellationToken ct)
     {
         _activityGroupOptions = [];
-        _fetchedActivityGroups = [];
         _selectedGroupIds.Clear();
         _loadedGroupIds.Clear();
         _groupLinksLoaded = false;
@@ -1639,9 +1632,8 @@
             var groups = await StudentsApi.ListActivityGroupsAsync(ct);
             if (groups is null) return;
 
-            // §17 (item 4): the WHOLE read is kept — the archived rows are what a dropped link has to
-            // be named from — while only the active ones become picker options.
-            _fetchedActivityGroups = groups;
+            // §17 (item 4): every group the listing returned is offered only while it is active;
+            // an archived row is not selectable (the replace-set link route refuses it).
             _activityGroupOptions = groups
                 .Where(g => g.IsActive)
                 .OrderBy(g => g.Name)
@@ -1699,7 +1691,6 @@
     {
         _groupLinksLoaded = false;
         _loadedGroupIds.Clear();
-        _droppedGroupLinkIds.Clear();
         _groupLinksUnavailableReason = null;
 
         if (!_activityGroupsEnabled)
@@ -1725,14 +1716,11 @@
                 // residual — an archived link is not re-writable through this route).
                 if (_activityGroupOptions.Any(o => o.Value == groupId.ToString()))
                 {
+                    // Only ids the picker can represent are selected: the link route rejects ANY
+                    // archived id in a replace set, so offering one would fail every save (bounded
+                    // residual — an archived link is not re-writable through this route).
                     _loadedGroupIds.Add(groupId);
                     _selectedGroupIds.Add(groupId);
-                }
-                else
-                {
-                    // §17 (item 4, this round): the drop is reported instead of silent — the author
-                    // sees a shorter list below, and this is what tells them why.
-                    _droppedGroupLinkIds.Add(groupId);
                 }
             }
 
@@ -1765,51 +1753,53 @@
 
     private void OnModelChanged() { }
 
-    private async Task OnGradeLevelChangedAsync(PickerOption? option)
-    {
-        _selectedGradeLevel = option;
-        _selectedSubject = null;
-        _subjectOptions = [];
-        _groupSubjects = null;
-        _groupSubjectOptions = [];
-        _subjects = null;
-
-        if (option is null)
-        {
-            return;
-        }
-
-        await LoadSubjectsForGradeAsync(option, _loadCts?.Token ?? CancellationToken.None);
-
-        // WS-C1 (spec §7 Q1) / D2: switching grade re-resolves the signature default (the
-        // author's prior override is intentionally replaced — mirrors the subject-list reset).
-        if (Guid.TryParse(option.Value, out var gradeLevelId))
-        {
-            await ResolveSignatureDefaultAsync(gradeLevelId);
-        }
-    }
-
-    private async Task LoadSubjectsForGradeAsync(PickerOption gradeLevel, CancellationToken ct)
+    /// <summary>
+    /// FR-58 (round <c>drop-primary-grade</c>): loads the grade side of the subject union — the union
+    /// over the given distinct grade targets' effective subject lists on the effective date. The
+    /// previous single primary grade becomes a set, so the fetch runs once per grade target with
+    /// the same per-call isolation the stream-option loader uses: a grade whose subjects cannot be
+    /// read simply contributes none and never fails the page.
+    /// </summary>
+    private async Task LoadSubjectsForGradeTargetsAsync(IReadOnlyList<Guid> gradeTargetIds, CancellationToken ct)
     {
         _loadingSubjects = true;
         try
         {
             var effectiveDate = EffectiveTopicDate();
-            _subjects = await StudentsApi.ListSubjectsByGradeEffectiveAsync(
-                Guid.Parse(gradeLevel.Value), effectiveDate, ct);
-            if (_subjects is not null)
+            var union = new List<SubjectDto>();
+            var seen = new HashSet<Guid>();
+
+            foreach (var gradeTargetId in gradeTargetIds.Distinct())
             {
-                _subjectOptions = _subjects
-                    .OrderBy(s => s.DisplayOrder)
-                    .Select(s => new PickerOption(s.Id.ToString(), s.Name))
-                    .ToArray();
+                if (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var subjects = await StudentsApi.ListSubjectsByGradeEffectiveAsync(
+                        gradeTargetId, effectiveDate, ct) ?? [];
+                    foreach (var s in subjects)
+                    {
+                        if (seen.Add(s.Id)) union.Add(s);
+                    }
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    if (_disposed) return;
+                    // Optional picker source: a grade whose subjects cannot be read contributes
+                    // none instead of failing the whole load (the stream-options posture).
+                    Logger.LogWarning(ex, "Subject options unavailable for grade target {GradeId}", gradeTargetId);
+                }
             }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to load subjects for grade {GradeId}", gradeLevel.Value);
+
+            _subjects = union.ToArray();
+            _subjectOptions = _subjects
+                .OrderBy(s => s.DisplayOrder)
+                .Select(s => new PickerOption(s.Id.ToString(), s.Name))
+                .ToArray();
         }
         finally
         {
@@ -1818,14 +1808,15 @@
     }
 
     /// <summary>FR-58 — re-filter the topic picker so only topics effective on the due date
-    /// are offered (the grade path and the group-union path both re-run here).</summary>
+    /// are offered (the grade-target path and the group-union path both re-run here).</summary>
     private async Task OnDueDateChangedAsync()
     {
-        if (_selectedGradeLevel is not null && Guid.TryParse(_selectedGradeLevel.Value, out _))
+        var gradeTargetIds = KnownGradeTargetIds;
+        if (gradeTargetIds.Count > 0)
         {
             _selectedSubject = null;
             _subjectOptions = [];
-            await LoadSubjectsForGradeAsync(_selectedGradeLevel, _loadCts?.Token ?? CancellationToken.None);
+            await LoadSubjectsForGradeTargetsAsync(gradeTargetIds, _loadCts?.Token ?? CancellationToken.None);
         }
 
         if (TargetIds(TargetKindDto.ActivityGroup).Count > 0)
@@ -1836,172 +1827,97 @@
         }
     }
 
-    private async Task OnSelectedGroupsChangedAsync(IEnumerable<PickerOption>? selected)
-    {
-        // The picker reports option objects; the ids stay the page's source of truth
-        // (validation, the FR-58 subject union and the legacy link persistence all read them).
-        _selectedGroupIds = (selected ?? [])
-            .Select(o => Guid.Parse(o.Value))
-            .ToHashSet();
-        _selectedSubject = null;
-        _groupSubjectOptions = [];
-
-        // TGT-7: the selection IS the ActivityGroup target set (D-1 — the target rows are the
-        // authored source; the legacy link table is synchronized on save).
-        _model.SetTargetsOfKind(TargetKindDto.ActivityGroup, _selectedGroupIds.ToList());
-
-        if (_selectedGroupIds.Count == 0)
-        {
-            _groupSubjects = null;
-        }
-        else
-        {
-            await LoadGroupSubjectsAsync();
-        }
-
-        await OnTargetsChangedAsync();
-    }
-
-    /// <summary>TGT-2: the Everyone toggle replaces the whole constraint set with a single
-    /// AllStudents row (the pickers then render disabled-with-reason).</summary>
-    private async Task OnEveryoneChangedAsync()
-    {
-        _model.SetEveryoneTarget(_everyone);
-        if (_everyone)
-        {
-            _selectedGroupIds.Clear();
-            _selectedStudentOptions.Clear();
-            _groupSubjectOptions = [];
-            _groupSubjects = null;
-        }
-        else
-        {
-            await ResolveRestoredStudentTargetsAsync();
-        }
-
-        await OnTargetsChangedAsync();
-    }
-
     /// <summary>
-    /// F4 / §17 (item 2, this round): switching Everyone OFF restores the target rows the toggle
-    /// replaced, which puts the student IDS back — but a chip renders from its OPTION object, and
-    /// Everyone ON cleared <see cref="_selectedStudentOptions"/>. Without this re-resolve a restored
-    /// student target rendered the <c>Student &lt;id8&gt;</c> fallback until the author touched the
-    /// picker. Fail-open: a student that cannot be read keeps that fallback chip, which stays removable.
-    /// </summary>
-    private async Task ResolveRestoredStudentTargetsAsync()
-    {
-        var ct = _loadCts?.Token ?? CancellationToken.None;
-        foreach (var studentId in TargetIds(TargetKindDto.Student))
-        {
-            if (_selectedStudentOptions.Any(o => o.Value == studentId.ToString()))
-            {
-                continue;
-            }
-
-            try
-            {
-                var student = await StudentsApi.GetStudentByIdAsync(studentId, ct);
-                if (student is null || student.IsDeleted)
-                {
-                    continue;
-                }
-
-                _selectedStudentOptions.Add(new PickerOption(student.Id.ToString(), StudentLabel(student)));
-            }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex)
-            {
-                if (_disposed) return;
-                Logger.LogWarning(ex, "Failed to resolve the restored student target {StudentId}", studentId);
-            }
-        }
-    }
-
-    private Task OnSelectedGradeTargetsChangedAsync(IEnumerable<PickerOption>? selected)
-    {
-        _model.SetTargetsOfKind(
-            TargetKindDto.GradeLevel,
-            (selected ?? []).Select(o => Guid.Parse(o.Value)).ToList());
-        return OnTargetsChangedAsync();
-    }
-
-    private Task OnSelectedStreamTargetsChangedAsync(IEnumerable<PickerOption>? selected)
-    {
-        _model.SetTargetsOfKind(
-            TargetKindDto.Stream,
-            (selected ?? []).Select(o => Guid.Parse(o.Value)).ToList());
-        return OnTargetsChangedAsync();
-    }
-
-    private Task OnSelectedStudentTargetsChangedAsync(IEnumerable<PickerOption>? selected)
-    {
-        var chosen = (selected ?? []).ToList();
-        _selectedStudentOptions.Clear();
-        _selectedStudentOptions.AddRange(chosen);
-        _model.SetTargetsOfKind(
-            TargetKindDto.Student,
-            chosen.Select(o => Guid.Parse(o.Value)).ToList());
-        return OnTargetsChangedAsync();
-    }
-
-    /// <summary>The chip list's removal action; the model re-indexes DisplayOrder 0..n-1
-    /// implicitly because the list order IS the order.</summary>
-    private async Task RemoveTargetAsync(int index)
-    {
-        var removed = index >= 0 && index < _model.Targets.Count ? _model.Targets[index] : null;
-        _model.RemoveTargetAt(index);
-        if (removed?.Kind == TargetKindDto.ActivityGroup && removed.RefId is Guid groupId)
-        {
-            _selectedGroupIds.Remove(groupId);
-            await LoadGroupSubjectsAsync();
-        }
-
-        await OnTargetsChangedAsync();
-    }
-
-    /// <summary>
-    /// The single reaction to any constraint change: mirror the picker state onto the model, derive
-    /// the primary grade (D-2) and re-schedule the debounced preview. Nothing here persists — the
-    /// preview never writes (D-4). The FR-58 subject union is refreshed by the group handler, which
-    /// own the group-selection side effects.
+    /// The single reaction to a builder edit: mirror the new target set onto the page's picker state,
+    /// refresh the subject sources the changed targets feed, re-resolve the signature default when the
+    /// DERIVED policy-scope grade moved, and re-schedule the debounced preview. Nothing here persists —
+    /// the preview never writes (D-4).
     /// </summary>
     private async Task OnTargetsChangedAsync()
     {
-        var previousGrade = _selectedGradeLevel?.Value;
-        _everyone = _model.HasAllStudents;
-        SyncTargetPickerState();
+        // P1-4 (TGT-16): the form model IS the target set the picker mirrors and the advisory
+        // preview read, so the builder's entries are projected onto it on EVERY add/remove — not
+        // only at save, which would leave the preview resolving a stale audience. The previous
+        // grade-target set is sampled BEFORE that projection, because it is what the change
+        // detection below compares against.
+        var previousGradeTargetIds = KnownGradeTargetIds;
+        var previousGroupIds = _selectedGroupIds;
+
+        SyncTargetsFromBuilder();
+
+        var gradeTargetIds = KnownGradeTargetIds;
+
+        // D-4 / F13 (the load path's posture): the advisory preview depends only on the target set the
+        // sync just wrote, so it is scheduled HERE — BEFORE the awaited subject reloads below, never held
+        // behind them (a reload would otherwise delay the debounce past a caller's clock advance). Its CTS
+        // owns the call's lifetime, so the builder's add/remove shows its new entry immediately while the
+        // preview settles in the background.
+        _ = SchedulePreviewAsync();
+
+        SyncTargetPickerState(previousGradeTargetIds);
         SyncGroupsFromTargets();
 
-        // Only a MOVED primary grade reloads the grade's subject list — a reload clears nothing
-        // itself, but keeping it tied to the grade change preserves the author's subject otherwise.
-        if (previousGrade != _selectedGradeLevel?.Value && _selectedGradeLevel is not null)
+        // Only a CHANGED grade-target set reloads the grade side of the subject union — a reload
+        // clears the author's subject otherwise. The comparison is the whole id set: a second grade
+        // target added or removed does not move the derived policy grade (still null), yet it does
+        // change the offered subjects.
+        if (!gradeTargetIds.Order().SequenceEqual(previousGradeTargetIds.Order()))
         {
-            await LoadSubjectsForGradeAsync(_selectedGradeLevel, _loadCts?.Token ?? CancellationToken.None);
+            _selectedSubject = null;
+            _subjectOptions = [];
+            _subjects = null;
+            if (gradeTargetIds.Count > 0)
+            {
+                await LoadSubjectsForGradeTargetsAsync(gradeTargetIds, _loadCts?.Token ?? CancellationToken.None);
+            }
         }
 
-        await SchedulePreviewAsync();
+        // WS-C1 (spec §7 Q1) / D2 (round drop-primary-grade): the effective policy follows the
+        // DERIVED grade, so it re-resolves exactly when that grade moves (a single grade target
+        // added or removed) — there is no picker to change.
+        if (DerivePolicyGrade(previousGradeTargetIds) != DerivedPolicyGrade)
+        {
+            await ResolveEffectivePolicyAsync(DerivedPolicyGrade);
+        }
+
+        // FR-58: the group-subject union the submit gate reads follows the group TARGETS, exactly as
+        // the retired group picker kept it in step — the author can add a group target from the builder
+        // and must not then be validated against the union of a set they just left. Only a CHANGED group
+        // set re-reads it, so a grade or stream entry does not re-issue the call.
+        if (!previousGroupIds.SetEquals(_selectedGroupIds))
+        {
+            _selectedSubject = null;
+            _groupSubjectOptions = [];
+            _groupSubjects = null;
+            if (_selectedGroupIds.Count > 0)
+            {
+                await LoadGroupSubjectsAsync();
+            }
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>D-2: a single grade target auto-derives the primary grade (the picker is disabled);
-    /// two or more leave the author's choice to <see cref="ValidateForSave"/> and the server. With
-    /// no grade target the field stays authored and nullable — never silently cleared.</summary>
-    private void SyncTargetPickerState()
+    /// <summary>
+    /// Round <c>drop-primary-grade</c>: the picker mirrors have no grade selection left to keep — the
+    /// grade half of the audience IS the target rows. What remains is dropping a stale subject selection
+    /// once the grade-target set MOVED: <paramref name="previousGradeTargetIds"/> is the set before the
+    /// edit (null on the load paths, where nothing has moved and the author's subject must survive the
+    /// reload — the persisted topic may deliberately not appear in the offered set).
+    /// </summary>
+    private void SyncTargetPickerState(IReadOnlyList<Guid>? previousGradeTargetIds = null)
     {
-        var gradeTargetIds = TargetIds(TargetKindDto.GradeLevel);
-        if (gradeTargetIds.Count != 1 || _selectedGradeLevel?.Value == gradeTargetIds[0].ToString())
+        if (previousGradeTargetIds is null
+            || KnownGradeTargetIds.Order().SequenceEqual(previousGradeTargetIds.Order()))
         {
             return;
         }
 
-        _selectedGradeLevel = _gradeLevelOptions.FirstOrDefault(o => o.Value == gradeTargetIds[0].ToString())
-            ?? new PickerOption(gradeTargetIds[0].ToString(), "Current grade");
         _selectedSubject = null;
     }
 
-    /// <summary>Mirrors the model's ActivityGroup targets onto the picker's id set (the load and
-    /// the chip-removal paths both need this without re-entering <see cref="OnSelectedGroupsChangedAsync"/>).</summary>
+    /// <summary>Mirrors the model's ActivityGroup targets onto the picker's id set (the load and the
+    /// builder sync both need this without re-entering the model).</summary>
     private void SyncGroupsFromTargets() =>
         _selectedGroupIds = TargetIds(TargetKindDto.ActivityGroup).ToHashSet();
 
@@ -2051,37 +1967,37 @@
         _streamOptions = options.ToArray();
     }
 
-    /// <summary>TGT-6: the student picker's server search (`GET /students?search=`). A short
-    /// query clears the list rather than scanning the roster.</summary>
-    private async Task OnStudentSearchAsync(OptionsSearchEventArgs<PickerOption> e)
+    /// <summary>TGT-6: the student search behind the dialog's student picker
+    /// (<c>GET /students?search=</c>). A short query answers an empty list rather than scanning the
+    /// roster. Fail-open: a failed search offers nothing instead of failing the dialog.</summary>
+    private async Task<IReadOnlyList<TargetsAndAudienceOption>> SearchStudentsAsync(
+        string query, CancellationToken ct)
     {
-        var query = (e.Text ?? string.Empty).Trim();
+        query = (query ?? string.Empty).Trim();
         if (query.Length < 2)
         {
-            e.Items = [];
-            return;
+            return [];
         }
 
         try
         {
-            var students = await StudentsApi.ListStudentsAsync(
-                _loadCts?.Token ?? CancellationToken.None, query) ?? [];
-            e.Items = students
+            var students = await StudentsApi.ListStudentsAsync(ct, query) ?? [];
+            return students
                 .Where(s => !s.IsDeleted)
                 .Take(20)
-                .Select(s => new PickerOption(s.Id.ToString(), StudentLabel(s)))
+                .Select(s => new TargetsAndAudienceOption(s.Id.ToString(), StudentLabel(s)))
                 .ToArray();
         }
-        catch (OperationCanceledException) { e.Items = []; }
+        catch (OperationCanceledException) { return []; }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Student target search failed");
-            e.Items = [];
+            return [];
         }
     }
 
-    /// <summary>TGT-6: the student option label — one spelling for the search results and the
-    /// restored-id re-resolve (F4/§17), so a chip and the picker always render the same name.</summary>
+    /// <summary>TGT-6: the student option label — one spelling for the search results and every
+    /// author-facing student name (the builder entry included), so a name never renders two ways.</summary>
     private static string StudentLabel(StudentDto student) =>
         $"{student.FirstName} {student.LastName} ({student.StudentNumber})";
 
@@ -2126,37 +2042,39 @@
         ? DateOnly.FromDateTime(_model.DueDate.Value)
         : DateOnly.FromDateTime(DateTime.UtcNow);
 
-    /// <summary>
-    /// WS-C1 (spec §7 Q1) / D2: resolves the effective guardian-signature requirement, pre-fills
-    /// the <c>RequiresSignature</c> checkbox and the <c>Mandatory</c> lock, and feeds the
-    /// read-only policy row. Fail-open: an endpoint failure is a warning, the checkbox keeps its
-    /// value and stays ENABLED — a transport failure never locks an author out of their own
-    /// choice.
+    /// <summary>WS-C1 (spec §7 Q1) / D2/OD4: resolves the effective assignment policy for the
+    /// DERIVED policy-scope grade (round <c>drop-primary-grade</c>; null ⇒ the tenant-global
+    /// default) and applies it to the page — the guardian-review lock and the five Rules readouts.
+    /// Fail-open: an endpoint failure is a warning, every readout renders "Not resolved yet" and the
+    /// author's review choice stays editable — a transport failure never locks an author out of
+    /// their own choice.
     /// </summary>
-    private async Task ResolveSignatureDefaultAsync(Guid? gradeLevelId)
+    private async Task ResolveEffectivePolicyAsync(Guid? derivedGradeId)
     {
         var ct = _loadCts?.Token ?? CancellationToken.None;
         try
         {
-            ApplySignatureRequirement(await Api.GetSignatureDefaultAsync(gradeLevelId, ct));
+            ApplyEffectivePolicy(await Api.GetEffectivePolicyAsync(derivedGradeId, ct));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
-            _signatureMandatory = false;
-            _resolvedSignatureMode = null;
-            Logger.LogWarning(ex, "Signature-default resolution failed for grade {GradeLevelId}", gradeLevelId);
+            ApplyEffectivePolicy(null);
+            Logger.LogWarning(ex, "Effective assignment policy resolution failed for grade {GradeId}", derivedGradeId);
         }
     }
 
-    /// <summary>D2: <c>Disabled</c> leaves the checkbox unticked and free, <c>Optional</c>
-    /// pre-ticks it with the author in control, and <c>Mandatory</c> pre-ticks and locks it.</summary>
-    private void ApplySignatureRequirement(SignatureRequirementMode mode)
+    /// <summary>D2/OD3: applies the resolved policy. A non-null resolved review value is the
+    /// policy's locked answer, so the Basics toggle mirrors it and renders disabled; an unset value
+    /// leaves the toggle free and keeps whatever the author (or the loaded row) already chose.</summary>
+    private void ApplyEffectivePolicy(EffectiveAssignmentPolicy? policy)
     {
-        _resolvedSignatureMode = mode;
-        _requiresSignature = mode != SignatureRequirementMode.Disabled;
-        _signatureMandatory = mode == SignatureRequirementMode.Mandatory;
+        _policy = policy;
+        if (policy?.MandatoryReview is bool policyReview)
+        {
+            _mandatoryReview = policyReview;
+        }
     }
 
     private async Task ReloadAsync()
@@ -2181,7 +2099,6 @@
             {
                 _model.LoadFrom(_item);
                 _mandatoryReview = _item.MandatoryReview;
-                _requiresSignature = _item.RequiresSignature;
 
                 // §17 (item 1, this round): a lifecycle action can move the assignment to a status whose
                 // surface is editable again (Published → Unpublish → Draft) or change the persisted
@@ -2316,6 +2233,19 @@
 
     private async Task SaveAsync()
     {
+        // P1-3 (UX-21) fail-closed: while the persisted targets could not be read, a save must not
+        // write a target set at all — the update handler reads a non-null target collection as a
+        // full replacement, which would delete rows this surface never saw.
+        if (AudienceEditorDisabledReason is not null)
+        {
+            _error = AudienceEditorDisabledReason;
+            return;
+        }
+
+        // AC-4: the builder's entries ARE the assignment's target rows, so they are projected onto the
+        // form model before the submit gate and the payload both read the target set.
+        SyncTargetsFromBuilder();
+
         if (!ValidateForSave()) return;
 
         _busy = true;
@@ -2331,9 +2261,7 @@
                     SelectedGradingFormat,
                     DerivedTargetAudience,
                     TopicId!.Value,
-                    GradeLevelId,
                     _mandatoryReview,
-                    _requiresSignature,
                     _model.ToTargetDtos());
 
                 Logger.LogInformation("Creating assignment {Title} from the authoring page", _model.Title);
@@ -2359,9 +2287,7 @@
                 SelectedGradingFormat,
                 DerivedTargetAudience,
                 TopicId!.Value,
-                GradeLevelId,
                 _mandatoryReview,
-                _requiresSignature,
                 _model.TargetsChanged ? _model.ToTargetDtos() : null);
 
             Logger.LogInformation("Updating assignment {AssignmentId} from the authoring page", Id);
@@ -2401,8 +2327,10 @@
 
     /// <summary>The client-side mirror of the server-side create/update guards: a subject is
     /// always required, at least one audience target is required (TGT-13), a group target needs
-    /// the chosen subject inside the group-subject union (FR-58), the D-2 primary-grade rule holds,
-    /// and the question / scoring gates mirror the domain rules.
+    /// the chosen subject inside the group-subject union (FR-58), and the question / scoring gates
+    /// mirror the domain rules. (The retired D-2 primary-grade rule has no successor: the
+    /// policy-scope grade is derived from the grade targets, and the server's FR-58 grade gate
+    /// still refuses a subject no targeted grade is assigned.)
     /// </summary>
     private bool ValidateForSave()
     {
@@ -2444,15 +2372,6 @@
         if (groupTargetIds.Count > 0 && !(_groupSubjects?.Any(s => s.Id == TopicId.Value) ?? false))
         {
             _error = "The selected subject is not assigned to any of the selected activity groups.";
-            return false;
-        }
-
-        // D-2: two or more grade targets require a primary grade drawn from them.
-        var gradeTargetIds = TargetIds(TargetKindDto.GradeLevel);
-        if (gradeTargetIds.Count >= 2
-            && (GradeLevelId is null || !gradeTargetIds.Contains(GradeLevelId.Value)))
-        {
-            _error = "Select a primary grade from the targeted grade levels.";
             return false;
         }
 

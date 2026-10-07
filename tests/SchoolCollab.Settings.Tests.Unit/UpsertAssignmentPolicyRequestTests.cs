@@ -18,7 +18,13 @@ public class UpsertAssignmentPolicyRequestTests
     private static SignatureRequirementMode? Resolve(
         SignatureRequirementMode? signatureRequirement, bool? legacyRequiresSignatureDefault) =>
         new AssignmentPolicyRoutes.UpsertAssignmentPolicyRequest(
-            signatureRequirement, null, null, null, legacyRequiresSignatureDefault)
+            SignatureRequirement: signatureRequirement,
+            RequiresApprovalBeforePublish: null,
+            MaxPrimaryContacts: null,
+            MaxCopyContacts: null,
+            MandatoryReview: null,
+            ArchiveGraceDays: null,
+            RequiresSignatureDefault: legacyRequiresSignatureDefault)
             .ResolveSignatureRequirement();
 
     [TestMethod]

@@ -21,7 +21,7 @@ public class AssignmentModuleResourceTests
         Assignment.Create(
             "Algebra HW", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            Guid.NewGuid(), null, null, null,
+            Guid.NewGuid(), null, null,
             createdByTeacherId: Guid.Empty)
             .WithTenant(TenantId);
 

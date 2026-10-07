@@ -32,8 +32,11 @@ public sealed class ScheduleAssignmentCommandHandler(
 
         // D3: the policy field OR the flag. The resolver is fail-open (a failed fetch
         // resolves false), so the gate can only be turned ON by the flag or by an
-        // explicitly configured policy field.
-        var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(assignment.GradeLevelId, cancellationToken);
+        // explicitly configured policy field. Round drop-primary-grade: the policy-scope grade is
+        // DERIVED from the assignment's grade targets (one distinct grade target ⇒ that grade,
+        // otherwise the tenant default).
+        var assignmentPolicy = await assignmentPolicyResolver.ResolveAsync(
+            AssignmentPolicyScope.DeriveGrade(assignment), cancellationToken);
         var approvalRequired = assignmentPolicy.RequiresApprovalBeforePublish
             || await featureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, cancellationToken);
 

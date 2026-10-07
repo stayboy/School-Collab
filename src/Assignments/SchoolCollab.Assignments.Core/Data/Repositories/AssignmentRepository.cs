@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.DTOs;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Data.Repositories;
 using SchoolCollab.Core.Notifications;
 
@@ -25,7 +26,12 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
             .OrderByDescending(a => a.UpdatedAt)
             .Select(a => new AssignmentSummary(
                 a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
-                a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
+                a.TopicId,
+                // Round drop-primary-grade: the row's grade input is its authored grade targets —
+                // projected as a correlated subquery (never client-evaluated).
+                a.Targets.Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value).ToList(),
+                a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
                 a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
                 // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
@@ -86,10 +92,14 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
     /// Same <c>IgnoreQueryFilters(["Tenant"])</c> posture as the lifecycle sweeps.
     /// Each candidate carries <c>AwaitingSignatureSince</c> (the submission's
     /// awaiting-signature moment, null when never) so the sweeper applies the
-    /// later-of publish / awaiting-signature anchor.</summary>
-    public Task<List<AssignmentReminderSweepCandidate>> ListReminderSweepCandidatesAsync(CancellationToken ct = default)
+    /// later-of publish / awaiting-signature anchor, and a <c>PolicyGradeId</c>
+    /// DERIVED from the assignment's grade targets (round <c>drop-primary-grade</c>):
+    /// the grade-target ids are projected as a correlated subquery and the one rule
+    /// (<see cref="AssignmentPolicyScope.DeriveGrade"/>) is applied to them in memory
+    /// after the read, because it has no EF translation.</summary>
+    public async Task<List<AssignmentReminderSweepCandidate>> ListReminderSweepCandidatesAsync(CancellationToken ct = default)
     {
-        return (
+        var rows = await (
             from a in Db.Assignments.IgnoreQueryFilters(TenantFilterTag).AsNoTracking()
             from r in Db.AssignmentRecipients.IgnoreQueryFilters(TenantFilterTag).AsNoTracking()
                 .Where(r => r.AssignmentId == a.Id
@@ -113,24 +123,57 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                             v.SubmissionId == s.Id
                             && v.VersionNumber == s.CurrentVersionNumber
                             && v.Passed == true)))
-            select new AssignmentReminderSweepCandidate(
-                a.Id, a.Title, a.TenantId, a.GradeLevelId, r.Id, r.ContactId,
-                r.OwnerType, r.OwnerId,
-                (NotificationChannel)(int)r.Channel, r.DeepLinkToken, r.DeepLinkExpiresAt,
-                a.PublishedAt!.Value, a.DueDate,
-                AwaitingSignatureSince: db.AssignmentSubmissions
+            select new
+            {
+                AssignmentId = a.Id,
+                a.Title,
+                a.TenantId,
+                GradeTargetIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+                RecipientId = r.Id,
+                r.ContactId,
+                r.OwnerType,
+                r.OwnerId,
+                r.Channel,
+                r.DeepLinkToken,
+                r.DeepLinkExpiresAt,
+                PublishedAt = a.PublishedAt!.Value,
+                a.DueDate,
+                AwaitingSignatureSince = db.AssignmentSubmissions
                     .IgnoreQueryFilters(TenantFilterTag)
                     .Where(s => s.AssignmentId == a.Id
                         && s.StudentId == r.WardStudentId
                         && s.SignOffState == SignOffState.AwaitingSignature)
                     .Select(s => (DateTimeOffset?)s.UpdatedAt)
-                    .FirstOrDefault()))
+                    .FirstOrDefault()
+            })
             .ToListAsync(ct);
+
+        return rows.Select(x => new AssignmentReminderSweepCandidate(
+            x.AssignmentId,
+            x.Title,
+            x.TenantId,
+            AssignmentPolicyScope.DeriveGrade(x.GradeTargetIds),
+            x.RecipientId,
+            x.ContactId,
+            x.OwnerType,
+            x.OwnerId,
+            (NotificationChannel)(int)x.Channel,
+            x.DeepLinkToken,
+            x.DeepLinkExpiresAt,
+            x.PublishedAt,
+            x.DueDate,
+            x.AwaitingSignatureSince)).ToList();
     }
 
     /// <summary>E3 (ar-19) — submissions of <b>published, non-archived</b> assignments
     /// awaiting a guardian signature joined to the guardian recipient for the ward
-    /// (completion-to-guardian candidates).</summary>
+    /// (completion-to-guardian candidates). <c>PolicyGradeId</c> is null: the completion
+    /// queue resolves no grade policy (it reuses the reminder's already-derived scope),
+    /// and a correlated collection projection would defeat this query's server-side
+    /// <c>Distinct()</c>.</summary>
     public Task<List<AssignmentCompletionSweepCandidate>> ListCompletionSweepCandidatesAsync(CancellationToken ct = default)
     {
         return (
@@ -162,9 +205,9 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
     /// the read via the same ward-completeness gate the reminder sweep uses. Returns
     /// each candidate's recipient payload for
     /// per-candidate explicit-tenant dispatch.</summary>
-    public Task<List<AssignmentOverdueSweepCandidate>> ListOverdueSweepCandidatesAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+    public async Task<List<AssignmentOverdueSweepCandidate>> ListOverdueSweepCandidatesAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
     {
-        return (
+        var rows = await (
             from a in Db.Assignments.IgnoreQueryFilters(TenantFilterTag).AsNoTracking()
             from r in Db.AssignmentRecipients.IgnoreQueryFilters(TenantFilterTag).AsNoTracking()
                 .Where(r => r.AssignmentId == a.Id
@@ -186,12 +229,39 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                             v.SubmissionId == s.Id
                             && v.VersionNumber == s.CurrentVersionNumber
                             && v.Passed == true)))
-            select new AssignmentOverdueSweepCandidate(
-                a.Id, a.Title, a.TenantId, a.GradeLevelId, r.Id, r.ContactId,
-                r.OwnerType, r.OwnerId,
-                (NotificationChannel)(int)r.Channel, r.DeepLinkToken, r.DeepLinkExpiresAt,
-                a.DueDate!.Value))
+            select new
+            {
+                AssignmentId = a.Id,
+                a.Title,
+                a.TenantId,
+                GradeTargetIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+                RecipientId = r.Id,
+                r.ContactId,
+                r.OwnerType,
+                r.OwnerId,
+                r.Channel,
+                r.DeepLinkToken,
+                r.DeepLinkExpiresAt,
+                DueDate = a.DueDate!.Value
+            })
             .ToListAsync(ct);
+
+        return rows.Select(x => new AssignmentOverdueSweepCandidate(
+            x.AssignmentId,
+            x.Title,
+            x.TenantId,
+            AssignmentPolicyScope.DeriveGrade(x.GradeTargetIds),
+            x.RecipientId,
+            x.ContactId,
+            x.OwnerType,
+            x.OwnerId,
+            (NotificationChannel)(int)x.Channel,
+            x.DeepLinkToken,
+            x.DeepLinkExpiresAt,
+            x.DueDate)).ToList();
     }
 
     /// <summary>E3 (ar-19) — per-recipient reminder log state for the cadence + cap:

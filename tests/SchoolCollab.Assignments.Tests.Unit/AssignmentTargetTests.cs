@@ -1,14 +1,16 @@
 ﻿using FluentAssertions;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
 /// <summary>
-/// R2 (documents/specs/assignment-authoring-compartments.md §7.1 TGT-1/TGT-2, TGT-13, TGT-11,
-/// §7.4 TGT-15; round decisions D-1, D-2, D-8.1). Discriminating against the pre-R2 base
-/// (<c>565e48f8</c>): <see cref="AssignmentTarget"/> and <see cref="Assignment.SetTargets"/> do not
-/// exist there, so every assertion below fails to compile / fails at runtime on the base.
+/// R2 (documents/specs/assignment-authoring-compartments.md §7.1 TGT-1/TGT-2, TGT-13, §7.4 TGT-15;
+/// round decisions D-1, D-8.1) plus round <c>drop-primary-grade</c> (the D-2 primary-grade rule is
+/// retired; the policy-scope grade is derived from the grade targets). Discriminating against the
+/// pre-R2 base (<c>565e48f8</c>): <see cref="AssignmentTarget"/> and <see cref="Assignment.SetTargets"/>
+/// do not exist there, so every assertion below fails to compile / fails at runtime on the base.
 /// </summary>
 [TestClass]
 public class AssignmentTargetTests
@@ -23,9 +25,9 @@ public class AssignmentTargetTests
     private static readonly Guid GroupA = Guid.Parse("55555555-5555-5555-5555-55555555555a");
     private static readonly Guid GroupB = Guid.Parse("55555555-5555-5555-5555-55555555555b");
 
-    private static Assignment NewAssignment(Guid? gradeLevelId = null) =>
+    private static Assignment NewAssignment() =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, gradeLevelId, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(TenantId);
 
     // ── TGT-2: the row's own shape ────────────────────────────────────────────
@@ -103,34 +105,36 @@ public class AssignmentTargetTests
         target.DisplayOrder.Should().Be(0, "DisplayOrder re-indexes 0..n-1 on every replacement");
     }
 
-    // ── D-2 / TGT-11: the primary-grade rule ─────────────────────────────────
+    // ── Round drop-primary-grade: no authored primary grade; two grade targets are publishable ──
 
     [TestMethod]
-    public void SetTargets_TwoGradeTargets_RequiresAPrimaryGradeInsideThem()
+    public void SetTargets_TwoGradeTargets_NeedNoPrimaryGrade()
     {
-        var withoutGrade = NewAssignment();
-        var act = () => withoutGrade.SetTargets(
+        var assignment = NewAssignment();
+        assignment.SetTargets(
             [(TargetKind.GradeLevel, (Guid?)GradeA), (TargetKind.GradeLevel, (Guid?)GradeB)], TenantId);
-        act.Should().Throw<ArgumentException>("D-2: the primary grade must be one of the targets");
 
-        var outside = NewAssignment(gradeLevelId: Guid.NewGuid());
-        var act2 = () => outside.SetTargets(
-            [(TargetKind.GradeLevel, (Guid?)GradeA), (TargetKind.GradeLevel, (Guid?)GradeB)], TenantId);
-        act2.Should().Throw<ArgumentException>();
-
-        var ok = NewAssignment(gradeLevelId: GradeB);
-        ok.SetTargets([(TargetKind.GradeLevel, (Guid?)GradeA), (TargetKind.GradeLevel, (Guid?)GradeB)], TenantId);
-        ok.Targets.Should().HaveCount(2);
+        assignment.Targets.Should().HaveCount(2,
+            "round drop-primary-grade: the authored grade targets ARE the grade scope — the retired "
+            + "D-2 guard refused exactly this set without a primary grade (AC-4)");
     }
 
-    [TestMethod]
-    public void SetTargets_NoGradeTarget_LeavesThePrimaryGradeAlone()
-    {
-        var assignment = NewAssignment(gradeLevelId: GradeB);
-        assignment.SetTargets([(TargetKind.Stream, (Guid?)StreamId)], TenantId);
+    // ── AssignmentPolicyScope: the one policy-scope derivation rule (round drop-primary-grade) ──
 
-        assignment.GradeLevelId.Should().Be(GradeB,
-            "D-2: the primary grade is an AUTHORED policy field — never derived from the targets");
+    [TestMethod]
+    public void DeriveGrade_Matrix()
+    {
+        AssignmentPolicyScope.DeriveGrade([]).Should().BeNull("no grade target ⇒ the tenant default");
+        AssignmentPolicyScope.DeriveGrade([GradeA]).Should().Be(GradeA, "exactly one distinct grade ⇒ that grade");
+        AssignmentPolicyScope.DeriveGrade([GradeA, GradeA]).Should().Be(GradeA, "duplicates collapse");
+        AssignmentPolicyScope.DeriveGrade([GradeA, GradeB]).Should().BeNull(
+            "two or more distinct grade targets ⇒ the tenant-default policy (AC-5b)");
+
+        var assignment = NewAssignment();
+        assignment.SetTargets(
+            [(TargetKind.GradeLevel, (Guid?)GradeB), (TargetKind.Stream, (Guid?)StreamId)], TenantId);
+
+        AssignmentPolicyScope.DeriveGrade(assignment).Should().Be(GradeB, "only grade-target rows count");
     }
 
     // ── D-8.1 / FR-22: the archived-group rule ───────────────────────────────

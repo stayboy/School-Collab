@@ -37,7 +37,7 @@ public sealed class OwnedChildInsertPostgresTests
     private static Assignment NewAssignment(ITenantProvider tenants, string title) =>
         Assignment.Create(
                 title, null, AssignmentType.Digital, GradingFormat.AutoGraded,
-                TargetAudienceType.AllStudents, TopicId, null, null, null,
+                TargetAudienceType.AllStudents, TopicId, null, null,
                 createdByTeacherId: Guid.Empty)
             .WithTenant(tenants);
 

@@ -12,9 +12,11 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Data.Outbox;
 using SchoolCollab.Core.Messaging;
+using SchoolCollab.Core.Notifications;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain;
 
@@ -39,9 +41,9 @@ public class AssignmentActivityGroupTests
     private static readonly Guid Group2 = Guid.Parse("77777777-7777-7777-7777-777777777772");
     private static readonly Guid Group3 = Guid.Parse("77777777-7777-7777-7777-777777777773");
 
-    private static Assignment NewAssignment(TargetAudienceType audience, Guid? gradeLevelId = null) =>
+    private static Assignment NewAssignment(TargetAudienceType audience) =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            audience, TopicId, gradeLevelId, null, null, TeacherId)
+            audience, TopicId, null, null, TeacherId)
             .WithTenant(TenantId);
 
     /// <summary>
@@ -58,7 +60,9 @@ public class AssignmentActivityGroupTests
         IAssignmentActivityGroupRepository linkRepo,
         IActivityGroupLookup lookup,
         IAssignmentNotificationBroadcaster broadcaster,
-        bool topicAssigned = true)
+        bool topicAssigned = true,
+        IAssignmentPolicyResolver? assignmentPolicyResolver = null,
+        INotificationPolicyResolver? notificationPolicyResolver = null)
     {
         if (assignment.Targets.Count == 0 && linkRepo is FakeLinkRepository { GroupIds.Length: > 0 } links)
         {
@@ -73,8 +77,8 @@ public class AssignmentActivityGroupTests
                new FakeAssignmentTargetResolver { StudentIds = (lookup as FakeActivityGroupLookup)?.MemberIds ?? [] },
                new FakeTenantProvider(TenantId),
                broadcaster,
-               new FakeNotificationPolicyResolver(),
-               new FakeAssignmentPolicyResolver(),
+               notificationPolicyResolver ?? new FakeNotificationPolicyResolver(),
+               assignmentPolicyResolver ?? new FakeAssignmentPolicyResolver(),
                new FakeFeatureFlagService(),
                new FakeDeepLinkTokenMinter(),
                new FakeHybridCache(),
@@ -189,14 +193,15 @@ public class AssignmentActivityGroupTests
         broadcaster.Last!.Recipients.Should().ContainSingle();
     }
 
-    // ── TGT-9: the resolved target cohort rides StudentIds; the primary grade rides GradeLevelId ──
+    // ── TGT-9: the resolved target cohort rides StudentIds; the grade targets ride GradeLevelIds ──
     [TestMethod]
     public async Task SelectedGrades_Path_ResolvesThroughTheTargetResolver()
     {
-        // D-6/D-9: the grade target resolves through IAssignmentTargetResolver (never the legacy
-        // grade cohort enumeration) and the RESOLVED ids ride StudentIds, while the assignment's
-        // primary grade still rides GradeLevelId so that grade's teacher-recipient leg survives.
-        var assignment = NewAssignment(TargetAudienceType.SelectedGrades, GradeLevelId)
+        // D-6/D-9 (round drop-primary-grade): the grade target resolves through
+        // IAssignmentTargetResolver (never the legacy grade cohort enumeration) and the RESOLVED ids
+        // ride StudentIds, while the assignment's distinct grade-target ids ride GradeLevelIds so each
+        // targeted grade's teacher-recipient leg survives.
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades)
             .WithGradeTarget(GradeLevelId);
         var resolver = new CapturingContactResolver([]);
         var handler = NewPublishHandler(
@@ -208,17 +213,119 @@ public class AssignmentActivityGroupTests
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
-        resolver.LastRequest!.GradeLevelId.Should().Be(GradeLevelId,
-            "the authored primary grade is the teacher-recipient leg (the D-6 documented widening)");
+        resolver.LastRequest!.GradeLevelIds.Should().Equal(new[] { GradeLevelId },
+            "the targeted grade is the teacher-recipient leg (the D-6 documented widening, now "
+            + "derived per grade target rather than from an authored primary grade)");
         resolver.LastRequest.StudentIds.Should().Equal(new[] { StudentId1 },
             "the resolver's union is what publish sends to (TGT-9)");
+    }
+
+    // ── AC-5 (round drop-primary-grade): every policy leg DERIVES the grade from the targets ──
+
+    [TestMethod]
+    public async Task Publish_SingleGradeTarget_ResolvesBothPoliciesForThatGrade()
+    {
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades).WithGradeTarget(GradeLevelId);
+        var contacts = new CapturingContactResolver([]);
+        var assignmentPolicy = new RecordingAssignmentPolicyResolver();
+        var notificationPolicy = new RecordingNotificationPolicyResolver();
+        var handler = NewPublishHandler(
+            assignment,
+            contacts,
+            new FakeLinkRepository(),
+            new FakeActivityGroupLookup { MemberIds = [StudentId1] },
+            new FakeBroadcaster(),
+            assignmentPolicyResolver: assignmentPolicy,
+            notificationPolicyResolver: notificationPolicy);
+
+        await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+
+        contacts.LastRequest!.GradeLevelIds.Should().Equal(new[] { GradeLevelId },
+            "AC-5a: the single grade target is the teacher-cohort grade");
+        assignmentPolicy.RequestedGradeIds.Should().Equal(new Guid?[] { GradeLevelId },
+            "AC-5a: one distinct grade target derives that grade for the assignment policy");
+        notificationPolicy.RequestedGradeIds.Should().Equal(new Guid?[] { GradeLevelId },
+            "AC-5a: …and for the notification policy — one derivation, two consumers");
+    }
+
+    [TestMethod]
+    public async Task Publish_TwoGradeTargets_KeepsBothTeacherLegs_ButDerivesTheTenantDefaultPolicy()
+    {
+        var gradeB = Guid.Parse("22222222-2222-2222-2222-22222222222b");
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades);
+        assignment.SetTargets(
+            [(TargetKind.GradeLevel, (Guid?)GradeLevelId), (TargetKind.GradeLevel, (Guid?)gradeB)], TenantId);
+        var contacts = new CapturingContactResolver([]);
+        var assignmentPolicy = new RecordingAssignmentPolicyResolver();
+        var notificationPolicy = new RecordingNotificationPolicyResolver();
+        var handler = NewPublishHandler(
+            assignment,
+            contacts,
+            new FakeLinkRepository(),
+            new FakeActivityGroupLookup { MemberIds = [StudentId1] },
+            new FakeBroadcaster(),
+            assignmentPolicyResolver: assignmentPolicy,
+            notificationPolicyResolver: notificationPolicy);
+
+        await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+
+        contacts.LastRequest!.GradeLevelIds.Should().BeEquivalentTo(new[] { GradeLevelId, gradeB },
+            "AC-5b: every targeted grade keeps its teacher-recipient leg");
+        assignmentPolicy.RequestedGradeIds.Should().Equal(new Guid?[] { null },
+            "AC-5b: two distinct grade targets derive NULL — the tenant-default policy");
+        notificationPolicy.RequestedGradeIds.Should().Equal(new Guid?[] { null });
+    }
+
+    [TestMethod]
+    public async Task Publish_NoGradeTarget_ResolvesTheTenantDefaultAndNoTeacherLeg()
+    {
+        var assignment = NewAssignment(TargetAudienceType.SelectedGroups).WithGroupTargets(Group1);
+        var contacts = new CapturingContactResolver([]);
+        var assignmentPolicy = new RecordingAssignmentPolicyResolver();
+        var notificationPolicy = new RecordingNotificationPolicyResolver();
+        var handler = NewPublishHandler(
+            assignment,
+            contacts,
+            new FakeLinkRepository(),
+            new FakeActivityGroupLookup { MemberIds = [StudentId1] },
+            new FakeBroadcaster(),
+            assignmentPolicyResolver: assignmentPolicy,
+            notificationPolicyResolver: notificationPolicy);
+
+        await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
+
+        contacts.LastRequest!.GradeLevelIds.Should().BeNullOrEmpty(
+            "AC-5c: with no grade target there is no teacher-recipient leg");
+        assignmentPolicy.RequestedGradeIds.Should().Equal(new Guid?[] { null },
+            "AC-5c: no grade target derives the tenant-default policy");
+        notificationPolicy.RequestedGradeIds.Should().Equal(new Guid?[] { null });
+    }
+
+    [TestMethod]
+    public async Task Publish_EmptyResolvedStudentSet_IsStillRefused()
+    {
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades).WithGradeTarget(GradeLevelId);
+        var broadcaster = new FakeBroadcaster();
+        var handler = NewPublishHandler(
+            assignment,
+            new FakeContactResolver([]),
+            new FakeLinkRepository(),
+            new FakeActivityGroupLookup { MemberIds = [] },
+            broadcaster);
+
+        await FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
+            .Should().ThrowAsync<InvalidOperationException>(
+                "AC-5d / D-6(c): an empty resolved target set is refused — the fail-closed mirror of the "
+                + "fail-open policy resolver");
+
+        broadcaster.Last.Should().BeNull("the refusal happens before any broadcast / recipient write");
     }
 
     // ── TGT-10 / D-6(b): a resolver outage BLOCKS the publish (fail-closed) ────────────────
     [TestMethod]
     public async Task Publish_TargetResolverOutage_IsRefused()
     {
-        var assignment = NewAssignment(TargetAudienceType.SelectedGrades, GradeLevelId)
+        var assignment = NewAssignment(TargetAudienceType.SelectedGrades)
             .WithGradeTarget(GradeLevelId);
         var broadcaster = new FakeBroadcaster();
         var handler = new PublishAssignmentCommandHandler(
@@ -400,6 +507,33 @@ public class AssignmentActivityGroupTests
         private readonly TenantContext _ctx;
         public FakeTenantProvider(Guid tenantId) => _ctx = new TenantContext(tenantId, tenantId.ToString(), TenantType.School);
         public TenantContext GetTenantContext() => _ctx;
+    }
+
+    /// <summary>Records the grade each assignment-policy leg resolved for — the observable for the
+    /// round drop-primary-grade derivation (AC-5).</summary>
+    private sealed class RecordingAssignmentPolicyResolver : IAssignmentPolicyResolver
+    {
+        public List<Guid?> RequestedGradeIds { get; } = [];
+
+        public Task<EffectiveAssignmentPolicy> ResolveAsync(
+            Guid? gradeLevelId, CancellationToken cancellationToken = default)
+        {
+            RequestedGradeIds.Add(gradeLevelId);
+            return Task.FromResult(FakeAssignmentPolicyResolver.BuiltInDefault);
+        }
+    }
+
+    /// <summary>Records the grade each notification-policy leg resolved for (AC-5).</summary>
+    private sealed class RecordingNotificationPolicyResolver : INotificationPolicyResolver
+    {
+        public List<Guid?> RequestedGradeIds { get; } = [];
+
+        public Task<EffectiveNotificationPolicy> ResolveEffectiveAsync(
+            Guid tenantId, Guid? gradeLevelId, CancellationToken cancellationToken = default)
+        {
+            RequestedGradeIds.Add(gradeLevelId);
+            return Task.FromResult(FakeNotificationPolicyResolver.Empty);
+        }
     }
 
     private sealed class FakeContactResolver : IContactResolver

@@ -36,7 +36,7 @@ public class AssignmentAttributionTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Attribution", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, Guid.Empty)
+            TargetAudienceType.AllStudents, TopicId, null, null, Guid.Empty)
             .WithTenant(TenantId);
 
     private static FakeAssignmentRepositoryForCapture NewCaptureRepo() => new();
@@ -59,11 +59,12 @@ public class AssignmentAttributionTests
             new FakeTeacherDirectory { ExistsResult = true },
             new FakeFeatureFlagService { IsEnabledValue = true }, // dev; claim governs
             new AcceptAllActivityGroupLookup(),
+            new FakeAssignmentPolicyResolver(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new CreateAssignmentCommand(
             "Attribution HW", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null));
+            TargetAudienceType.AllStudents, TopicId, null, null));
 
         var created = repo.Added.Should().ContainSingle().Subject;
         created.CreatedByTeacherId.Should().Be(PrincipalTeacher);
@@ -86,12 +87,13 @@ public class AssignmentAttributionTests
             new FakeTeacherDirectory(),
             new FakeFeatureFlagService { IsEnabledValue = false }, // real-auth (DisableOIDCAuth=false)
             new AcceptAllActivityGroupLookup(),
+            new FakeAssignmentPolicyResolver(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() =>
             handler.HandleAsync(new CreateAssignmentCommand(
                 "Attribution HW", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, TopicId, null, null, null, MandatoryReview: true)))
+                TargetAudienceType.AllStudents, TopicId, null, null, MandatoryReview: true)))
             .Should().ThrowAsync<MissingTeacherPrincipalException>();
     }
 

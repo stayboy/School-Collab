@@ -10,6 +10,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -84,7 +85,6 @@ public class DuplicateAssignmentCommandHandlerTests
                 gradingFormat: GradingFormat.TeacherGraded,
                 targetAudienceType: TargetAudienceType.SelectedGrades,
                 topicId: Guid.NewGuid(),
-                gradeLevelId: Guid.NewGuid(),
                 dueDate: new DateTimeOffset(2026, 12, 31, 23, 59, 0, TimeSpan.Zero),
                 maxScore: 100m,
                 createdByTeacherId: createdByTeacherId.Value,
@@ -127,6 +127,56 @@ public class DuplicateAssignmentCommandHandlerTests
         return source;
     }
 
+    // ── AC14 (D4, the third call site): the clone COERCES ───────────────────
+
+    /// <summary>
+    /// AC14: a legacy row may legally hold <c>RequiresSignature = true</c> with
+    /// <c>MandatoryReview = false</c> — the pair the retired author-facing checkboxes could produce.
+    /// Duplicating such a row would trip the new <c>Assignment.Create</c> D4 guard unless the clone
+    /// coerces review ON.
+    /// </summary>
+    [TestMethod]
+    public async Task Duplicate_LegacySignatureWithoutReviewRow_CoercesReviewOnTheClone()
+    {
+        var (db, cache, tenants) = BuildScope("dup-legacy-signature-pair");
+        await using var _db = db;
+
+        var source = SeedPublishedSource(db, tenants);
+        // The domain guard forbids writing this pair, so it is forced the way a pre-guard binary
+        // could have left it — the exact legacy row AC14 is about.
+        ForceLegacyPolicyPair(source);
+        db.SaveChanges();
+
+        var handler = NewHandler(db, cache, tenants);
+
+        var newId = await handler.HandleAsync(new DuplicateAssignmentCommand(source.Id));
+
+        var clone = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == newId);
+        clone.RequiresSignature.Should().BeTrue("a duplicate copies the source's signature term");
+        clone.MandatoryReview.Should().BeTrue(
+            "D4: the clone coerces review ON (source.MandatoryReview || source.RequiresSignature), so the "
+            + "create guard holds and the legacy pair never reproduces");
+    }
+
+    /// <summary>AC14: the duplicate path deliberately does NOT resolve the effective policy — a
+    /// duplicate copies the source's terms, and re-resolving would silently re-author them.</summary>
+    [TestMethod]
+    public void DuplicateHandler_DoesNotDependOnThePolicyResolver()
+    {
+        typeof(DuplicateAssignmentCommandHandler).GetConstructors().Should().ContainSingle()
+            .Which.GetParameters().Select(p => p.ParameterType)
+            .Should().NotContain(typeof(IAssignmentPolicyResolver),
+                "AC14: the clone coerces the source's terms instead of re-resolving the policy");
+    }
+
+    /// <summary>Forces the pre-guard legacy policy pair on a materialized row (the domain refuses to
+    /// create or update it — that refusal is AC3).</summary>
+    private static void ForceLegacyPolicyPair(Assignment assignment)
+    {
+        typeof(Assignment).GetProperty(nameof(Assignment.RequiresSignature))!.SetValue(assignment, true);
+        typeof(Assignment).GetProperty(nameof(Assignment.MandatoryReview))!.SetValue(assignment, false);
+    }
+
     [TestMethod]
     public async Task HandleAsync_CopiesDifficultyCounts_ButNotTheStagedQuestionsDraft()
     {
@@ -144,7 +194,6 @@ public class DuplicateAssignmentCommandHandlerTests
                 gradingFormat: GradingFormat.TeacherGraded,
                 targetAudienceType: TargetAudienceType.AllStudents,
                 topicId: Guid.NewGuid(),
-                gradeLevelId: null,
                 dueDate: null,
                 maxScore: 100m,
                 createdByTeacherId: Guid.NewGuid(),
@@ -199,7 +248,6 @@ public class DuplicateAssignmentCommandHandlerTests
         clone.GradingFormat.Should().Be(source.GradingFormat);
         clone.TargetAudienceType.Should().Be(source.TargetAudienceType);
         clone.TopicId.Should().Be(source.TopicId);
-        clone.GradeLevelId.Should().Be(source.GradeLevelId);
         clone.DueDate.Should().Be(source.DueDate);
         clone.MaxScore.Should().Be(source.MaxScore);
         clone.MandatoryReview.Should().Be(source.MandatoryReview);
@@ -337,7 +385,6 @@ public class DuplicateAssignmentCommandHandlerTests
                 gradingFormat: GradingFormat.AutoGraded,
                 targetAudienceType: TargetAudienceType.AllStudents,
                 topicId: Guid.NewGuid(),
-                gradeLevelId: null,
                 dueDate: null,
                 maxScore: null,
                 createdByTeacherId: Guid.NewGuid(),

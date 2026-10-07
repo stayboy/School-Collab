@@ -17,7 +17,7 @@ public class AssignmentDifficultyMixTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null);
+            TargetAudienceType.AllStudents, TopicId, null, null);
 
     [TestMethod]
     public void Create_Defaults_ToNullCounts_LetTheModelDecide()
@@ -34,7 +34,7 @@ public class AssignmentDifficultyMixTests
     {
         var assignment = Assignment.Create(
             "Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null,
+            TargetAudienceType.AllStudents, TopicId, null, null,
             difficultyEasy: 2, difficultyMedium: 3, difficultyHard: 1);
 
         assignment.DifficultyEasyCount.Should().Be(2);
@@ -47,7 +47,7 @@ public class AssignmentDifficultyMixTests
     {
         var act = () => Assignment.Create(
             "Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null,
+            TargetAudienceType.AllStudents, TopicId, null, null,
             difficultyHard: -1);
 
         act.Should().Throw<ArgumentException>();
@@ -59,7 +59,7 @@ public class AssignmentDifficultyMixTests
         var assignment = NewAssignment();
 
         assignment.Update("Title2", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, 50m, true,
+            TargetAudienceType.AllStudents, TopicId, null, 50m, true,
             difficultyEasy: 1, difficultyMedium: 2, difficultyHard: 3);
 
         assignment.DifficultyEasyCount.Should().Be(1);
@@ -74,7 +74,7 @@ public class AssignmentDifficultyMixTests
 
         var act = () => assignment.Update(
             "Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, 50m, true,
+            TargetAudienceType.AllStudents, TopicId, null, 50m, true,
             difficultyMedium: -2);
 
         act.Should().Throw<ArgumentException>();

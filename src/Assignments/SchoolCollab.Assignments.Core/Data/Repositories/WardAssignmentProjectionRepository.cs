@@ -22,7 +22,12 @@ internal sealed class WardAssignmentProjectionRepository(AssignmentsDbContext db
             .OrderByDescending(a => a.DueDate ?? DateTimeOffset.MaxValue)
             .Select(a => new AssignmentSummary(
                 a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
-                a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
+                a.TopicId,
+                // Round drop-primary-grade: as in the tenant-wide list read — the row's grade input
+                // is its authored grade targets, projected as a correlated subquery.
+                a.Targets.Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value).ToList(),
+                a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
                 a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
                 a.PassScore, a.MaxAttempts,

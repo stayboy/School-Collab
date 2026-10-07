@@ -54,7 +54,7 @@ public class AssignmentOwnedTypeTenancyTests
 
     private static Assignment NewAssignment(string title) =>
         Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId);
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId);
 
     [TestMethod]
     public async Task OwnedQuestions_InheritParentTenant_NoCrossTenantLeak()

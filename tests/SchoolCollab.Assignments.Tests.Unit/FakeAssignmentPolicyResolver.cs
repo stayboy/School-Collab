@@ -23,7 +23,14 @@ internal sealed class FakeAssignmentPolicyResolver : IAssignmentPolicyResolver
     /// <summary>The policy every <see cref="ResolveAsync"/> call returns.</summary>
     public EffectiveAssignmentPolicy Policy { get; set; } = BuiltInDefault;
 
+    /// <summary>Every grade the caller asked for, in call order — the observable for "which
+    /// policy-scope grade did this write resolve" and for "this path never resolves at all".</summary>
+    public List<Guid?> RequestedGradeLevelIds { get; } = [];
+
     public Task<EffectiveAssignmentPolicy> ResolveAsync(
-        Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Policy);
+        Guid? gradeLevelId, CancellationToken cancellationToken = default)
+    {
+        RequestedGradeLevelIds.Add(gradeLevelId);
+        return Task.FromResult(Policy);
+    }
 }

@@ -176,7 +176,7 @@ public class FinalizeSignOffCommandHandlerTests
 
     private static Assignment NewAssignment() =>
         Assignment.Create("Math HW", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId)
             .WithTenant(TenantId);
 
     private static SignatureEvent NewSignatureEvent() =>

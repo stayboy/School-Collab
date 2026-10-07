@@ -10,6 +10,10 @@ namespace SchoolCollab.Assignments.Tests.Unit.AssignmentPolicies;
 /// grade field inherits the tenant value, an unset tenant value falls to the exact built-in
 /// defaults (Disabled / false / null / null), and each <c>*FromOverride</c> flag is true iff the
 /// grade field was non-null. Mirrors <c>EffectiveNotificationPolicy</c>'s merge contract.
+///
+/// <para>Round <c>assignment-rules-policy-rework</c> (AC1/AC2) extends the same suite with the
+/// guardian-review and archive-window fields added to the shared set (D3/D5) and the D4 implication
+/// the resolver derives from the signature requirement.</para>
 /// </summary>
 [TestClass]
 public class EffectiveAssignmentPolicyResolverTests
@@ -36,6 +40,10 @@ public class EffectiveAssignmentPolicyResolverTests
         resolved.RequiresApprovalBeforePublish.Should().BeFalse();
         resolved.MaxPrimaryContacts.Should().BeNull("no cap configured means uncapped");
         resolved.MaxCopyContacts.Should().BeNull();
+        resolved.MandatoryReview.Should().BeNull(
+            "nothing configured leaves the guardian review to the author (the write seam falls back to true)");
+        resolved.ArchiveGraceDays.Should().BeNull(
+            "nothing configured leaves the built-in 30-day archive window to the write seam");
     }
 
     [TestMethod]
@@ -64,6 +72,8 @@ public class EffectiveAssignmentPolicyResolverTests
         resolved.RequiresApprovalBeforePublishFromOverride.Should().BeFalse();
         resolved.MaxPrimaryContactsFromOverride.Should().BeFalse();
         resolved.MaxCopyContactsFromOverride.Should().BeFalse();
+        resolved.MandatoryReviewFromOverride.Should().BeFalse();
+        resolved.ArchiveGraceDaysFromOverride.Should().BeFalse();
     }
 
     [TestMethod]
@@ -160,6 +170,63 @@ public class EffectiveAssignmentPolicyResolverTests
         resolved.SignatureRequirementFromOverride.Should().BeTrue();
     }
 
+    /// <summary>
+    /// AC1 (round <c>assignment-rules-policy-rework</c>, D5/D7): the two fields added to the shared set
+    /// merge exactly like the pre-existing four — a null grade field inherits the tenant default, a
+    /// non-null one overrides it, and each <c>*FromOverride</c> flag follows its own field.
+    /// </summary>
+    [TestMethod]
+    public void Resolve_ReviewAndArchiveFields_MergePerFieldWithTheirOwnOverrideFlags()
+    {
+        // Arrange — the tenant sets the archive window, the grade sets the review flag.
+        var tenant = new AssignmentPolicyFields { ArchiveGraceDays = 42 };
+        var grade = new AssignmentPolicyFields { MandatoryReview = true };
+
+        // Act
+        var resolved = Resolver.Resolve(tenant, grade);
+
+        // Assert
+        resolved.ArchiveGraceDays.Should().Be(42, "no grade override, so the tenant default applies");
+        resolved.ArchiveGraceDaysFromOverride.Should().BeFalse();
+        resolved.MandatoryReview.Should().BeTrue("the grade override sets it");
+        resolved.MandatoryReviewFromOverride.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// AC2 (D4 + OD2/OD5): the implication matrix. A signature requirement that is Optional or
+    /// Mandatory pins guardian review ON; Disabled leaves the merged nullable policy value alone —
+    /// including the unset case, where the author (and the write seam's <c>true</c> fallback) decides.
+    /// </summary>
+    [TestMethod]
+    public void Resolve_SignatureRequirement_DerivesMandatoryReview_AcrossTheWholeMatrix()
+    {
+        // Mandatory signature, no policy review value ⇒ review is implied ON.
+        Resolver.Resolve(new AssignmentPolicyFields { SignatureRequirement = SignatureRequirementMode.Mandatory }, null)
+            .MandatoryReview.Should().BeTrue();
+
+        // Disabled signature, policy review explicitly true ⇒ the policy value stands.
+        Resolver.Resolve(new AssignmentPolicyFields { MandatoryReview = true }, null)
+            .MandatoryReview.Should().BeTrue();
+
+        // OD5: Optional also requires a signature, so it feeds the same implication.
+        Resolver.Resolve(new AssignmentPolicyFields { SignatureRequirement = SignatureRequirementMode.Optional }, null)
+            .MandatoryReview.Should().BeTrue();
+
+        // Disabled signature, nothing set ⇒ unset (OD2): the author chooses, the seam falls back to true.
+        Resolver.Resolve(new AssignmentPolicyFields { SignatureRequirement = SignatureRequirementMode.Disabled }, null)
+            .MandatoryReview.Should().BeNull();
+
+        // D4 beats an explicit false policy review too: a signature-required assignment always
+        // requires review, so the domain backstop (Assignment.Create) can never be tripped by
+        // the resolved pair.
+        Resolver.Resolve(new AssignmentPolicyFields { MandatoryReview = false }, null)
+            .MandatoryReview.Should().BeFalse("with no signature requirement the policy's false stands");
+        Resolver.Resolve(
+                new AssignmentPolicyFields { SignatureRequirement = SignatureRequirementMode.Mandatory, MandatoryReview = false },
+                null)
+            .MandatoryReview.Should().BeTrue("a signature requirement overrides an explicit false review policy");
+    }
+
     [TestMethod]
     public void Resolve_EveryFromOverrideFlag_IsTrueIffTheGradeFieldWasNonNull()
     {
@@ -172,27 +239,53 @@ public class EffectiveAssignmentPolicyResolverTests
                 p.SignatureRequirementFromOverride
                 && !p.RequiresApprovalBeforePublishFromOverride
                 && !p.MaxPrimaryContactsFromOverride
-                && !p.MaxCopyContactsFromOverride);
+                && !p.MaxCopyContactsFromOverride
+                && !p.MandatoryReviewFromOverride
+                && !p.ArchiveGraceDaysFromOverride);
 
         Resolver.Resolve(tenant, new AssignmentPolicyFields { RequiresApprovalBeforePublish = false })
             .Should().Match<EffectiveAssignmentPolicy>(p =>
                 !p.SignatureRequirementFromOverride
                 && p.RequiresApprovalBeforePublishFromOverride
                 && !p.MaxPrimaryContactsFromOverride
-                && !p.MaxCopyContactsFromOverride);
+                && !p.MaxCopyContactsFromOverride
+                && !p.MandatoryReviewFromOverride
+                && !p.ArchiveGraceDaysFromOverride);
 
         Resolver.Resolve(tenant, new AssignmentPolicyFields { MaxPrimaryContacts = 1 })
             .Should().Match<EffectiveAssignmentPolicy>(p =>
                 !p.SignatureRequirementFromOverride
                 && !p.RequiresApprovalBeforePublishFromOverride
                 && p.MaxPrimaryContactsFromOverride
-                && !p.MaxCopyContactsFromOverride);
+                && !p.MaxCopyContactsFromOverride
+                && !p.MandatoryReviewFromOverride
+                && !p.ArchiveGraceDaysFromOverride);
 
         Resolver.Resolve(tenant, new AssignmentPolicyFields { MaxCopyContacts = 1 })
             .Should().Match<EffectiveAssignmentPolicy>(p =>
                 !p.SignatureRequirementFromOverride
                 && !p.RequiresApprovalBeforePublishFromOverride
                 && !p.MaxPrimaryContactsFromOverride
-                && p.MaxCopyContactsFromOverride);
+                && p.MaxCopyContactsFromOverride
+                && !p.MandatoryReviewFromOverride
+                && !p.ArchiveGraceDaysFromOverride);
+
+        Resolver.Resolve(tenant, new AssignmentPolicyFields { MandatoryReview = true })
+            .Should().Match<EffectiveAssignmentPolicy>(p =>
+                !p.SignatureRequirementFromOverride
+                && !p.RequiresApprovalBeforePublishFromOverride
+                && !p.MaxPrimaryContactsFromOverride
+                && !p.MaxCopyContactsFromOverride
+                && p.MandatoryReviewFromOverride
+                && !p.ArchiveGraceDaysFromOverride);
+
+        Resolver.Resolve(tenant, new AssignmentPolicyFields { ArchiveGraceDays = 7 })
+            .Should().Match<EffectiveAssignmentPolicy>(p =>
+                !p.SignatureRequirementFromOverride
+                && !p.RequiresApprovalBeforePublishFromOverride
+                && !p.MaxPrimaryContactsFromOverride
+                && !p.MaxCopyContactsFromOverride
+                && !p.MandatoryReviewFromOverride
+                && p.ArchiveGraceDaysFromOverride);
     }
 }

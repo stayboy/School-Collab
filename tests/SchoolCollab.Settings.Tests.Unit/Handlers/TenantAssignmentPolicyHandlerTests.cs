@@ -11,8 +11,9 @@ namespace SchoolCollab.Settings.Tests.Unit.Handlers;
 
 /// <summary>
 /// Round A (<c>documents/solution/assignment-policy-fields.md</c> §4) — the Settings CQRS pair
-/// round-trips the whole four-field assignment-policy shape through upsert → get, and the
-/// pre-existing 204-when-unset behaviour is unchanged.
+/// round-trips the whole assignment-policy shape through upsert → get; round
+/// <c>assignment-rules-policy-rework</c> (D3/D5, AC7) extends that shape with the guardian-review
+/// flag and the archive window, and the pre-existing 204-when-unset behaviour is unchanged.
 /// </summary>
 [TestClass]
 public class TenantAssignmentPolicyHandlerTests
@@ -58,7 +59,9 @@ public class TenantAssignmentPolicyHandlerTests
             SignatureRequirementMode.Optional,
             RequiresApprovalBeforePublish: true,
             MaxPrimaryContacts: 2,
-            MaxCopyContacts: 4));
+            MaxCopyContacts: 4,
+            MandatoryReview: true,
+            ArchiveGraceDays: 45));
 
         var result = await _getHandler.HandleAsync(GetTenantAssignmentPolicy.Instance);
 
@@ -67,6 +70,8 @@ public class TenantAssignmentPolicyHandlerTests
         result.RequiresApprovalBeforePublish.Should().BeTrue();
         result.MaxPrimaryContacts.Should().Be(2);
         result.MaxCopyContacts.Should().Be(4);
+        result.MandatoryReview.Should().BeTrue("the guardian-review field round-trips (D3)");
+        result.ArchiveGraceDays.Should().Be(45, "the archive window round-trips (D5)");
     }
 
     [TestMethod]
@@ -74,9 +79,11 @@ public class TenantAssignmentPolicyHandlerTests
     {
         AsTenant(TenantA);
         await _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
-            SignatureRequirementMode.Mandatory, true, 1, 1));
+            SignatureRequirementMode.Mandatory, true, 1, 1,
+            MandatoryReview: true, ArchiveGraceDays: 45));
         await _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
-            SignatureRequirementMode.Disabled, false, 7, 9));
+            SignatureRequirementMode.Disabled, false, 7, 9,
+            MandatoryReview: false, ArchiveGraceDays: 14));
 
         var result = await _getHandler.HandleAsync(GetTenantAssignmentPolicy.Instance);
 
@@ -84,6 +91,8 @@ public class TenantAssignmentPolicyHandlerTests
         result.RequiresApprovalBeforePublish.Should().BeFalse();
         result.MaxPrimaryContacts.Should().Be(7);
         result.MaxCopyContacts.Should().Be(9);
+        result.MandatoryReview.Should().BeFalse("the second upsert replaces the review flag too");
+        result.ArchiveGraceDays.Should().Be(14, "and the archive window");
         _db.TenantAssignmentPolicies.Count().Should().Be(1, "one policy row per tenant");
     }
 
@@ -100,6 +109,8 @@ public class TenantAssignmentPolicyHandlerTests
         result.RequiresApprovalBeforePublish.Should().BeNull();
         result.MaxPrimaryContacts.Should().BeNull();
         result.MaxCopyContacts.Should().BeNull();
+        result.MandatoryReview.Should().BeNull("null = unset — the author then chooses per assignment (D3)");
+        result.ArchiveGraceDays.Should().BeNull("null = unset — the write seam keeps the built-in 30 (D5)");
     }
 
     [TestMethod]
@@ -108,12 +119,15 @@ public class TenantAssignmentPolicyHandlerTests
         AsTenant(TenantA);
 
         var result = await _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
-            SignatureRequirementMode.Mandatory, null, 3, null));
+            SignatureRequirementMode.Mandatory, null, 3, null,
+            MandatoryReview: false, ArchiveGraceDays: 60));
 
         result.SignatureRequirement.Should().Be(SignatureRequirementMode.Mandatory);
         result.RequiresApprovalBeforePublish.Should().BeNull();
         result.MaxPrimaryContacts.Should().Be(3);
         result.MaxCopyContacts.Should().BeNull();
+        result.MandatoryReview.Should().BeFalse("false is a stored value, not 'unset'");
+        result.ArchiveGraceDays.Should().Be(60);
     }
 
     // ── Q7 — non-positive contact caps are rejected on the write path ─────

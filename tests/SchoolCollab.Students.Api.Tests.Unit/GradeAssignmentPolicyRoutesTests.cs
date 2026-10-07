@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
@@ -51,7 +51,8 @@ public class GradeAssignmentPolicyRoutesTests
             Last = command;
             return Task.FromResult(new GradeAssignmentPolicyDto(
                 command.GradeLevelId, command.SignatureRequirement, command.RequiresApprovalBeforePublish,
-                command.MaxPrimaryContacts, command.MaxCopyContacts, DateTimeOffset.UtcNow));
+                command.MaxPrimaryContacts, command.MaxCopyContacts, command.MandatoryReview,
+                command.ArchiveGraceDays, DateTimeOffset.UtcNow));
         }
     }
 
@@ -82,7 +83,8 @@ public class GradeAssignmentPolicyRoutesTests
 
             return Task.FromResult(new GradeAssignmentPolicyDto(
                 command.GradeLevelId, command.SignatureRequirement, command.RequiresApprovalBeforePublish,
-                command.MaxPrimaryContacts, command.MaxCopyContacts, DateTimeOffset.UtcNow));
+                command.MaxPrimaryContacts, command.MaxCopyContacts, command.MandatoryReview,
+                command.ArchiveGraceDays, DateTimeOffset.UtcNow));
         }
     }
 
@@ -146,7 +148,8 @@ public class GradeAssignmentPolicyRoutesTests
     {
         var (status, upsert) = await PutAsync("""
             {"signatureRequirement":"Mandatory","requiresApprovalBeforePublish":true,
-             "maxPrimaryContacts":2,"maxCopyContacts":4}
+             "maxPrimaryContacts":2,"maxCopyContacts":4,
+             "mandatoryReview":true,"archiveGraceDays":45}
             """);
 
         status.Should().Be(HttpStatusCode.OK);
@@ -157,6 +160,20 @@ public class GradeAssignmentPolicyRoutesTests
         upsert.Last.RequiresApprovalBeforePublish.Should().BeTrue();
         upsert.Last.MaxPrimaryContacts.Should().Be(2);
         upsert.Last.MaxCopyContacts.Should().Be(4);
+        upsert.Last.MandatoryReview.Should().BeTrue("the PUT body binds the guardian-review field (D3, AC7)");
+        upsert.Last.ArchiveGraceDays.Should().Be(45, "and the archive window (D5, AC7)");
+    }
+
+    /// <summary>D3/D5/AC7: the two new fields are optional on the override PUT — an absent field means
+    /// "inherit the tenant default", never a fabricated value.</summary>
+    [TestMethod]
+    public async Task Put_WithoutTheNewFields_BindsInheritForThem()
+    {
+        var (status, upsert) = await PutAsync("""{"maxPrimaryContacts":3}""");
+
+        status.Should().Be(HttpStatusCode.OK);
+        upsert.Last!.MandatoryReview.Should().BeNull();
+        upsert.Last.ArchiveGraceDays.Should().BeNull();
     }
 
     [TestMethod]
@@ -279,7 +296,8 @@ public class GradeAssignmentPolicyRoutesTests
     {
         var harness = await StartAsync(new GradeAssignmentPolicyDto(
             GradeId, SignatureRequirementMode.Optional, RequiresApprovalBeforePublish: true,
-            MaxPrimaryContacts: 2, MaxCopyContacts: null, DateTimeOffset.UtcNow));
+            MaxPrimaryContacts: 2, MaxCopyContacts: null, MandatoryReview: null, ArchiveGraceDays: 45,
+            DateTimeOffset.UtcNow));
 
         await using (harness.App)
         {

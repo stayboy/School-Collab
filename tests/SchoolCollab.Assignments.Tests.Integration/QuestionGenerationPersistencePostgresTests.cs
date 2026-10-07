@@ -14,6 +14,7 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using Npgsql;
@@ -55,7 +56,7 @@ public sealed class QuestionGenerationPersistencePostgresTests
     private static Assignment NewAssignment(ITenantProvider tenants) =>
         Assignment.Create(
                 "Generation provenance", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-                TargetAudienceType.AllStudents, TopicId, null, null, null,
+                TargetAudienceType.AllStudents, TopicId, null, null,
                 createdByTeacherId: Guid.Empty)
             .WithTenant(tenants);
 
@@ -70,7 +71,20 @@ public sealed class QuestionGenerationPersistencePostgresTests
             cache,
             Options.Create(new AttachmentUploadOptions()),
             new EmptyActivityGroupLookup(),
+            new UnsetAssignmentPolicyResolver(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
+
+    /// <summary>Round <c>assignment-rules-policy-rework</c> D6/D10: the update path now snapshots the
+    /// signature / guardian-review / archive-window terms from the resolved effective policy. This
+    /// suite exercises the generation/attachment provenance round-trip, not policy resolution, so an
+    /// all-unset policy (the built-in defaults) is the right double.</summary>
+    private sealed class UnsetAssignmentPolicyResolver : IAssignmentPolicyResolver
+    {
+        public Task<EffectiveAssignmentPolicy> ResolveAsync(
+            Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new EffectiveAssignmentPolicyResolver().Resolve(
+                tenantDefault: null, gradeOverride: null));
+    }
 
     private static RegenerateAttachmentExtractionCommandHandler NewRegenerateHandler(
         AssignmentsDbContext db, HybridCache cache, IFileStore fileStore, IAttachmentTextExtractor extractor) =>
@@ -118,7 +132,7 @@ public sealed class QuestionGenerationPersistencePostgresTests
             var command = new UpdateAssignmentCommand(
                 assignmentId, "Generation provenance", null,
                 AssignmentType.Digital, GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-                TopicId, null, null, null, MandatoryReview: true,
+                TopicId, null, null, MandatoryReview: true,
                 Questions:
                 [
                     new NewQuestionDto("Generated from attachment A?", QuestionTypeDto.ShortAnswer, 0, null,
@@ -138,7 +152,7 @@ public sealed class QuestionGenerationPersistencePostgresTests
             await NewUpdateHandler(db, cache).HandleAsync(new UpdateAssignmentCommand(
                 assignmentId, "Generation provenance", null,
                 AssignmentType.Digital, GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-                TopicId, null, null, null, MandatoryReview: true,
+                TopicId, null, null, MandatoryReview: true,
                 Questions:
                 [
                     new NewQuestionDto("Generated from attachment A?", QuestionTypeDto.ShortAnswer, 0, null,
@@ -245,7 +259,7 @@ public sealed class QuestionGenerationPersistencePostgresTests
             await NewUpdateHandler(db, cache).HandleAsync(new UpdateAssignmentCommand(
                 assignmentId, "Generation provenance", null,
                 AssignmentType.Digital, GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-                TopicId, null, null, null, MandatoryReview: true,
+                TopicId, null, null, MandatoryReview: true,
                 Attachments:
                 [
                     new NewAttachmentDto(

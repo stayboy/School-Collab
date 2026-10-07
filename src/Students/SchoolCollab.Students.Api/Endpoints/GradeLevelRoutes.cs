@@ -290,7 +290,9 @@ public static class GradeLevelRoutes
                     req.ResolveSignatureRequirement(),
                     req.RequiresApprovalBeforePublish,
                     req.MaxPrimaryContacts,
-                    req.MaxCopyContacts), ct);
+                    req.MaxCopyContacts,
+                    req.MandatoryReview,
+                    req.ArchiveGraceDays), ct);
                 return Results.Ok(result);
             }
             catch (GradeLevelNotFoundException) { return Results.NotFound(); }
@@ -327,6 +329,8 @@ internal record UpsertGradeAssignmentPolicyRequest(
     bool? RequiresApprovalBeforePublish,
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
+    bool? MandatoryReview = null,
+    int? ArchiveGraceDays = null,
     bool? RequiresSignatureDefault = null)
 {
     /// <summary>

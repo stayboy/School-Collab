@@ -109,7 +109,9 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
     /// boundary): the grade-wide leg is a null-subject-aware predicate that does not reduce to one
     /// translatable SQL predicate over a client-side (grade, subject) pair set — a `Contains` over
     /// the two columns separately would be a cross-product and could admit a subject the teacher
-    /// does not teach.</para>
+    /// does not teach. The row's grade key-set is its authored grade <b>targets</b> (round
+    /// <c>drop-primary-grade</c>), read as a correlated subquery and matched with the one
+    /// shared rule <see cref="TeacherScope.AllowsAnyTargetGrade"/>.</para>
     /// </summary>
     public async Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid teacherId, TeacherScope? scope, CancellationToken ct = default)
     {
@@ -122,11 +124,20 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
         // teacherId plays no part here.
         var assignmentKeys = await db.Assignments
             .AsNoTracking()
-            .Select(a => new { a.Id, a.CreatedByTeacherId, a.GradeLevelId, a.TopicId })
+            .Select(a => new
+            {
+                a.Id,
+                a.CreatedByTeacherId,
+                TargetGradeIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+                a.TopicId
+            })
             .ToListAsync(ct);
 
         var visibleIds = assignmentKeys
-            .Where(a => scope.Allows(a.CreatedByTeacherId, a.GradeLevelId, a.TopicId))
+            .Where(a => scope.AllowsAnyTargetGrade(a.CreatedByTeacherId, a.TargetGradeIds, a.TopicId))
             .Select(a => a.Id)
             .ToList();
 

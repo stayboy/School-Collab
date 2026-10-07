@@ -38,7 +38,7 @@ public class ConfirmQuestionsDraftCommandHandlerTests
     {
         var assignment = Assignment.Create(
                 "Title", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, null);
+                TargetAudienceType.AllStudents, Guid.NewGuid(), null, null);
         if (withExistingQuestion)
         {
             assignment.AddQuestion("Existing question", QuestionType.ShortAnswer, 1, null);

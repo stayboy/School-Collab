@@ -523,6 +523,10 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<int?>("ArchiveGraceDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("archive_grace_days");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -536,6 +540,10 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("is_deleted");
+
+                    b.Property<bool?>("MandatoryReview")
+                        .HasColumnType("boolean")
+                        .HasColumnName("mandatory_review");
 
                     b.Property<int?>("MaxCopyContacts")
                         .HasColumnType("integer")

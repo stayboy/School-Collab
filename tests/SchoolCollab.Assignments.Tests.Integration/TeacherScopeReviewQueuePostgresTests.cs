@@ -71,9 +71,20 @@ public sealed class TeacherScopeReviewQueuePostgresTests
     }
 
     /// <summary>The tenant-scoped context: the read is filtered by the global query filter as well as
-    /// by the explicit tenant id, matching the runtime path.</summary>
-    private static Assignment NewAssignment(string title, Guid creator, Guid? gradeLevelId) =>
-        Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, SubjectArt, gradeLevelId, null, null, creator)
+    /// by the explicit tenant id, matching the runtime path. Round <c>drop-primary-grade</c>: the row's
+    /// grade scope is its authored grade TARGETS, so each grade is attached as a <c>GradeLevel</c>
+    /// target row (a null grade = no grade target).</summary>
+    private static Assignment NewAssignment(string title, Guid creator, Guid? gradeLevelId)
+    {
+        var assignment = Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents, SubjectArt, null, null, creator)
             .WithTenant(TenantId);
+
+        if (gradeLevelId is Guid gradeId)
+        {
+            assignment.SetTargets([(TargetKind.GradeLevel, (Guid?)gradeId)], TenantId);
+        }
+
+        return assignment;
+    }
 }

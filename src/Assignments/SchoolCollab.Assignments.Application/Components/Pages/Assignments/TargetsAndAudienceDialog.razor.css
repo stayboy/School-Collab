@@ -1,0 +1,54 @@
+/* ── Targets & audience add dialog ──
+   The dialog body is a category selector, the demarcated picked-targets zone (caption + pills, or
+   its empty hint) and ONE single-value picker. Individual chips are the shared <Chip> component,
+   which owns its own styling. */
+
+.targets-audience-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Chip row of the picks so far, rendered above the value control and inside the
+   .picked-targets zone (the GuardianPickerDialog precedent). */
+.entity-grid-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+/* The picked-targets zone: ALWAYS rendered, so the pills have a demarcated home (and an empty
+   zone reads as "nothing picked yet" rather than as a missing row). Mirrors the
+   EnrollmentExceptionsDialog .exceptions-section frame, so the two dialogs' bounded zones look
+   alike. The muted text and the border use Fluent design tokens, so both flip with the
+   light/dark theme. */
+.picked-targets {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border: 1px solid var(--neutral-stroke-rest, rgba(0, 0, 0, 0.08));
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem 0.75rem;
+    margin-bottom: 4px;
+}
+
+/* Muted caption naming what the zone holds: the pills sit UNDER it, so the zone reads as a
+   labelled home rather than as loose chips. */
+.picked-targets__caption {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* The empty state's muted hint — the zone still communicates that nothing is picked. */
+.picked-targets__hint {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9rem;
+}
+
+/* The single-value dropdown fills the dialog body's input cell. No inline
+   style on the control (the Blazor styling rule): the class carries it. */
+.form-select--dialog {
+    width: 100%;
+}

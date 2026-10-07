@@ -40,6 +40,19 @@ public sealed class TenantAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowV
     /// <summary>Cap on other-guardian contacts per sendout. Null = unset (uncapped).</summary>
     public int? MaxCopyContacts { get; private set; }
 
+    /// <summary>
+    /// Whether guardian review is required before a student self-submits, for this tenant.
+    /// Null = unset (the author chooses per assignment). A set
+    /// <see cref="SignatureRequirement"/> also implies review (D4).
+    /// </summary>
+    public bool? MandatoryReview { get; private set; }
+
+    /// <summary>
+    /// Days added to the due date before the archive sweep archives the row, for this tenant.
+    /// Null = unset (the built-in 30-day retention floor applies).
+    /// </summary>
+    public int? ArchiveGraceDays { get; private set; }
+
     public uint RowVersion { get; private set; }
 
     /// <summary>
@@ -51,7 +64,9 @@ public sealed class TenantAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowV
         SignatureRequirementMode? signatureRequirement = null,
         bool? requiresApprovalBeforePublish = null,
         int? maxPrimaryContacts = null,
-        int? maxCopyContacts = null)
+        int? maxCopyContacts = null,
+        bool? mandatoryReview = null,
+        int? archiveGraceDays = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new TenantAssignmentPolicy
@@ -62,6 +77,8 @@ public sealed class TenantAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowV
             RequiresApprovalBeforePublish = requiresApprovalBeforePublish,
             MaxPrimaryContacts = maxPrimaryContacts,
             MaxCopyContacts = maxCopyContacts,
+            MandatoryReview = mandatoryReview,
+            ArchiveGraceDays = archiveGraceDays,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -75,12 +92,16 @@ public sealed class TenantAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowV
         SignatureRequirementMode? signatureRequirement,
         bool? requiresApprovalBeforePublish,
         int? maxPrimaryContacts,
-        int? maxCopyContacts)
+        int? maxCopyContacts,
+        bool? mandatoryReview,
+        int? archiveGraceDays)
     {
         SignatureRequirement = signatureRequirement;
         RequiresApprovalBeforePublish = requiresApprovalBeforePublish;
         MaxPrimaryContacts = maxPrimaryContacts;
         MaxCopyContacts = maxCopyContacts;
+        MandatoryReview = mandatoryReview;
+        ArchiveGraceDays = archiveGraceDays;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 }

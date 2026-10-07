@@ -75,8 +75,13 @@ public sealed class ListAssignmentsQueryHandler(
                     log.LogWarning(ex, "Feature flag resolution failed; defaulting approval to OFF");
                 }
 
+                // Round drop-primary-grade: the approval map is keyed on each row's DERIVED
+                // policy-scope grade — one distinct grade target ⇒ that grade, otherwise the
+                // tenant default (<see cref="AssignmentPolicyScope.DeriveGrade"/>). The map
+                // resolves once per DISTINCT grade per page, exactly as it did per authored score.
                 var approvalByGrade = await ResolveApprovalByGradeAsync(
-                    summaries.Select(s => s.GradeLevelId), hybridCache, tenant, policyResolver, flagOn, ct);
+                    summaries.Select(s => AssignmentPolicyScope.DeriveGrade(s.TargetGradeIds)),
+                    hybridCache, tenant, policyResolver, flagOn, ct);
 
                 return summaries.Select(s => new AssignmentSummaryDto(
                     s.Id,
@@ -86,8 +91,6 @@ public sealed class ListAssignmentsQueryHandler(
                     (GradingFormatDto)s.GradingFormat,
                     (TargetAudienceTypeDto)s.TargetAudienceType,
                     s.TopicId,
-                    null,
-                    s.GradeLevelId,
                     null,
                     (AssignmentStatusDto)s.Status,
                     s.DueDate,
@@ -116,11 +119,15 @@ public sealed class ListAssignmentsQueryHandler(
                     s.DifficultyHardCount,
                     // WS-E2b / ar-17: "has ever been published" for the failure surface.
                     PublishedAt: s.PublishedAt,
-                    // D3 / Q6: the server-derived approval gate for this row.
-                    RequiresApproval: approvalByGrade[GradeKey(s.GradeLevelId)],
+                    // D3 / Q6: the server-derived approval gate for this row, keyed on the row's
+                    // DERIVED policy-scope grade (the map was built from the same derivation).
+                    RequiresApproval: approvalByGrade[GradeKey(AssignmentPolicyScope.DeriveGrade(s.TargetGradeIds))],
                     // INS-1/INS-2 (assignment-authoring-compartments §9): student-facing
                     // text — must be mapped or every list read drops it.
-                    Instructions: s.Instructions)).ToArray();
+                    Instructions: s.Instructions,
+                    // Round drop-primary-grade: the scope input the list filter reads — must be
+                    // mapped or a scoped read silently fails closed.
+                    TargetGradeIds: s.TargetGradeIds)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],
@@ -131,8 +138,11 @@ public sealed class ListAssignmentsQueryHandler(
 
     /// <summary>
     /// [P1-3]/D3 — the caller's visibility rule applied AFTER the cache read: a scoped teacher
-    /// sees the rows they created plus the grades/subjects they teach; an unrestricted (or
-    /// scope-less) caller sees the tenant-wide list unchanged.
+    /// sees the rows they created plus the grades they teach — <b>any</b> of a row's authored
+    /// grade targets (round <c>drop-primary-grade</c>), through the one shared rule
+    /// <see cref="TeacherScope.AllowsAnyTargetGrade"/> so this filter and the by-id / review-queue
+    /// reads cannot diverge. An unrestricted (or scope-less) caller sees the tenant-wide list
+    /// unchanged.
     /// </summary>
     private static AssignmentSummaryDto[] ApplyScope(AssignmentSummaryDto[] summaries, TeacherScope? scope)
     {
@@ -142,13 +152,13 @@ public sealed class ListAssignmentsQueryHandler(
         }
 
         return summaries
-            .Where(s => scope.Allows(s.CreatedByTeacherId, s.GradeLevelId, s.TopicId))
+            .Where(s => scope.AllowsAnyTargetGrade(s.CreatedByTeacherId, s.TargetGradeIds, s.TopicId))
             .ToArray();
     }
 
     /// <summary>
-    /// Resolves, per <b>distinct</b> <c>GradeLevelId</c> in the page (a null grade resolves the
-    /// tenant default only), whether approval is required: the cached effective policy's
+    /// Resolves, per <b>distinct</b> derived policy-scope grade in the page (a null grade resolves
+    /// the tenant default only), whether approval is required: the cached effective policy's
     /// <c>RequiresApprovalBeforePublish</c> OR'd with the already-resolved flag value.
     /// </summary>
     private static async Task<Dictionary<string, bool>> ResolveApprovalByGradeAsync(

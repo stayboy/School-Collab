@@ -107,4 +107,36 @@ public sealed class TeacherScope
 
         return false;
     }
+
+    /// <summary>
+    /// The D3 visibility rule for one assignment row whose grade scope is its authored
+    /// <b>targets</b> (round <c>drop-primary-grade</c>): the caller created it, or <b>any</b> of its
+    /// grade-target ids is taught by the caller — subject-compatible through
+    /// <see cref="Allows"/> exactly as a single grade is (a null teaching subject matches the whole
+    /// grade).
+    /// <para>A row with no grade target stays visible via the creator leg only (the null-grade
+    /// posture <see cref="Allows"/> already applies); a row whose grade-target key-set is not
+    /// known (<paramref name="targetGradeIds"/> null — a cached payload from before the deploy) is
+    /// fail-closed: invisible unless the caller created it. Never widened to every grade, never
+    /// narrowed to one derived grade.</para>
+    /// <para>Declared here, once, so the by-id read, the list filter and the review queue cannot
+    /// diverge.</para>
+    /// </summary>
+    /// <param name="createdByTeacherId">The assignment's creator.</param>
+    /// <param name="targetGradeIds">The assignment's grade-target ids; null when that key-set is
+    /// unknown (fail-closed).</param>
+    /// <param name="topicId">The assignment's subject.</param>
+    public bool AllowsAnyTargetGrade(
+        Guid createdByTeacherId, IReadOnlyList<Guid>? targetGradeIds, Guid? topicId)
+    {
+        if (Allows(createdByTeacherId, null, topicId))
+        {
+            // The caller's own creation (and the unrestricted posture) — the grade leg plays no
+            // part.
+            return true;
+        }
+
+        return targetGradeIds is not null
+            && targetGradeIds.Any(gradeId => Allows(createdByTeacherId, gradeId, topicId));
+    }
 }

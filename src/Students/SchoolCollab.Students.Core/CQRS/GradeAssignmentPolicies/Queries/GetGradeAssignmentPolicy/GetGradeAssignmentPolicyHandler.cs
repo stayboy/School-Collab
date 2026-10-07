@@ -32,6 +32,8 @@ public sealed class GetGradeAssignmentPolicyHandler(StudentsDbContext db)
             policy.RequiresApprovalBeforePublish,
             policy.MaxPrimaryContacts,
             policy.MaxCopyContacts,
+            policy.MandatoryReview,
+            policy.ArchiveGraceDays,
             policy.UpdatedAt);
     }
 }

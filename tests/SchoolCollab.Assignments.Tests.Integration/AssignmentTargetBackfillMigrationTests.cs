@@ -27,6 +27,13 @@ public sealed class AssignmentTargetBackfillMigrationTests
     /// <summary>The migration immediately BEFORE <c>AddAssignmentTargets</c> — the legacy schema.</summary>
     private const string PreTargetsMigration = "20261001180607_AddAssignmentInstructions";
 
+    /// <summary>The migration under test. The forward leg is pinned to it (round
+    /// <c>drop-primary-grade</c>): the later <c>DropAssignmentGradeLevelColumn</c> removes
+    /// <c>assignments.grade_level_id</c>, which the raw legacy seeding above and the verbatim
+    /// backfill re-run below both address — a migrate-to-latest would break them, and this test is
+    /// about the backfill that shipped with THIS migration.</summary>
+    private const string AddTargetsMigration = "20261002065949_AddAssignmentTargets";
+
     private sealed record LegacyRow(
         Guid Id, int Audience, Guid? GradeLevelId, Guid[] GroupIds, string Title);
 
@@ -73,7 +80,7 @@ public sealed class AssignmentTargetBackfillMigrationTests
         // ── Act: apply the additive migration (table + indexes + the NOT EXISTS-guarded backfill). ──
         await using (var apply = AssignmentsDbFactory.CreateContext(connectionString))
         {
-            await apply.Database.MigrateAsync();
+            await apply.Database.MigrateAsync(AddTargetsMigration);
         }
 
         // ── Assert: exactly the backfilled rows the precedence prescribes. ──

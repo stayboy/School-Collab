@@ -122,8 +122,6 @@ public record AssignmentSummaryDto(
     TargetAudienceTypeDto TargetAudienceType,
     Guid TopicId,
     string? TopicName,
-    Guid? GradeLevelId,
-    string? GradeName,
     AssignmentStatusDto Status,
     DateTimeOffset? DueDate,
     decimal? MaxScore,
@@ -179,7 +177,12 @@ public record AssignmentSummaryDto(
     /// <summary>INS-1/INS-2 (assignment-authoring-compartments §9): student-facing task
     /// text, distinct from <see cref="Description"/> (the internal/author summary).
     /// Null when the author supplied none.</summary>
-    string? Instructions = null);
+    string? Instructions = null,
+    /// <summary>Round <c>drop-primary-grade</c>: the assignment's authored grade-target ids — the
+    /// list / detail / ward reads' grade input (approval resolution and teacher scoping). Always
+    /// set by the server-side projections; null only on a pre-deploy cached payload, which the
+    /// scoped reads treat as fail-closed.</summary>
+    IReadOnlyList<Guid>? TargetGradeIds = null);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -188,28 +191,26 @@ public record CreateAssignmentRequest(
     GradingFormatDto GradingFormat = GradingFormatDto.TeacherGraded,
     TargetAudienceTypeDto TargetAudienceType = TargetAudienceTypeDto.AllStudents,
     Guid TopicId = default,
-    Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null,
-    bool MandatoryReview = true,
+    /// <summary>D3/OD1 (round <c>assignment-rules-policy-rework</c>): the AUTHOR half of the
+    /// guardian-review value. Null leaves the decision to the resolved policy (and, when the policy
+    /// leaves review unset too, to the handler's <see langword="true"/> default); a non-null resolved
+    /// policy value always wins. The archived grace window and the signature requirement are no
+    /// longer author inputs — the handler snapshots both from the resolved effective policy
+    /// (D6/D10).</summary>
+    bool? MandatoryReview = null,
     string? AiPromptOverride = null,
     IReadOnlyList<NewQuestionDto>? Questions = null,
     IReadOnlyList<NewAttachmentDto>? Attachments = null,
     IReadOnlyList<NewContentModuleDto>? ContentModules = null,
     IReadOnlyList<NewResourceDto>? Resources = null,
-    /// <summary>WS-A2 / spec §7 Q6: days added to <c>DueDate</c>
-    /// before the archive sweep transitions the row to
-    /// <see cref="AssignmentStatusDto.Archived"/>. Defaults to 30.</summary>
-    int ArchiveGraceDays = 30,
     /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
     /// Null = no pass/fail signal.</summary>
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Null = unlimited.</summary>
     int? MaxAttempts = null,
-    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
-    /// after completion. Threaded to <c>Assignment.Create</c>.</summary>
-    bool RequiresSignature = false,
     /// <summary>WS-B2 (spec §3.4 line 70): requested easy-question count. Null = let the model decide.</summary>
     int? DifficultyEasyCount = null,
     /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
@@ -232,28 +233,24 @@ public record UpdateAssignmentRequest(
     GradingFormatDto GradingFormat = GradingFormatDto.TeacherGraded,
     TargetAudienceTypeDto TargetAudienceType = TargetAudienceTypeDto.AllStudents,
     Guid TopicId = default,
-    Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null,
-    bool MandatoryReview = true,
+    /// <summary>D3/OD1 (round <c>assignment-rules-policy-rework</c>): the AUTHOR half of the
+    /// guardian-review value — see <see cref="CreateAssignmentRequest.MandatoryReview"/>. The archive
+    /// grace window and the signature requirement are re-snapshotted from the currently resolved
+    /// effective policy at save time, never taken from this request (D6/D10).</summary>
+    bool? MandatoryReview = null,
     string? AiPromptOverride = null,
     IReadOnlyList<NewQuestionDto>? Questions = null,
     IReadOnlyList<NewAttachmentDto>? Attachments = null,
     IReadOnlyList<NewContentModuleDto>? ContentModules = null,
     IReadOnlyList<NewResourceDto>? Resources = null,
-    /// <summary>WS-A2 / spec §7 Q6: days added to <c>DueDate</c>
-    /// before the archive sweep transitions the row to
-    /// <see cref="AssignmentStatusDto.Archived"/>. Defaults to 30.</summary>
-    int ArchiveGraceDays = 30,
     /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
     /// Null = no pass/fail signal.</summary>
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Null = unlimited.</summary>
     int? MaxAttempts = null,
-    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
-    /// after completion. Threaded to <c>Assignment.Update</c>.</summary>
-    bool RequiresSignature = false,
     /// <summary>WS-B2 (spec §3.4 line 70): requested easy-question count. Null = let the model decide.</summary>
     int? DifficultyEasyCount = null,
     /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>

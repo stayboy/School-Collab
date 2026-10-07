@@ -123,21 +123,23 @@
     private UpsertAssignmentPolicyRequest BuildTenantRequest(EditModel model)
     {
         var t = model.TenantDefault;
-        var (sig, approval, primary, copy) = (
-            t?.SignatureRequirement, t?.RequiresApprovalBeforePublish, t?.MaxPrimaryContacts, t?.MaxCopyContacts);
-        ApplyEditedValue(model.Key, ref sig, ref approval, ref primary, ref copy,
+        var (sig, approval, primary, copy, review, grace) = (
+            t?.SignatureRequirement, t?.RequiresApprovalBeforePublish, t?.MaxPrimaryContacts, t?.MaxCopyContacts,
+            t?.MandatoryReview, t?.ArchiveGraceDays);
+        ApplyEditedValue(model.Key, ref sig, ref approval, ref primary, ref copy, ref review, ref grace,
             _globalMode, _globalBool, _globalInt);
-        return new UpsertAssignmentPolicyRequest(sig, approval, primary, copy);
+        return new UpsertAssignmentPolicyRequest(sig, approval, primary, copy, review, grace);
     }
 
     private UpsertGradeAssignmentPolicyRequest BuildGradeRequest(EditModel model)
     {
         var g = model.GradeOverride;
-        var (sig, approval, primary, copy) = (
-            g?.SignatureRequirement, g?.RequiresApprovalBeforePublish, g?.MaxPrimaryContacts, g?.MaxCopyContacts);
-        ApplyEditedValue(model.Key, ref sig, ref approval, ref primary, ref copy,
+        var (sig, approval, primary, copy, review, grace) = (
+            g?.SignatureRequirement, g?.RequiresApprovalBeforePublish, g?.MaxPrimaryContacts, g?.MaxCopyContacts,
+            g?.MandatoryReview, g?.ArchiveGraceDays);
+        ApplyEditedValue(model.Key, ref sig, ref approval, ref primary, ref copy, ref review, ref grace,
             _gradeMode, _gradeBool, _gradeInt);
-        return new UpsertGradeAssignmentPolicyRequest(sig, approval, primary, copy);
+        return new UpsertGradeAssignmentPolicyRequest(sig, approval, primary, copy, review, grace);
     }
 
     private static void ApplyEditedValue(
@@ -146,6 +148,8 @@
         ref bool? requiresApproval,
         ref int? maxPrimaryContacts,
         ref int? maxCopyContacts,
+        ref bool? mandatoryReview,
+        ref int? archiveGraceDays,
         SignatureRequirementMode? mode, bool? boolValue, int? intValue)
     {
         switch (key)
@@ -154,6 +158,8 @@
             case "RequiresApprovalBeforePublish": requiresApproval = boolValue; break;
             case "MaxPrimaryContacts": maxPrimaryContacts = intValue; break;
             case "MaxCopyContacts": maxCopyContacts = intValue; break;
+            case "MandatoryReview": mandatoryReview = boolValue; break;
+            case "ArchiveGraceDays": archiveGraceDays = intValue; break;
         }
     }
 
@@ -174,6 +180,8 @@
         "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
         "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
         "MaxCopyContacts" => policy?.MaxCopyContacts,
+        "MandatoryReview" => policy?.MandatoryReview,
+        "ArchiveGraceDays" => policy?.ArchiveGraceDays,
         _ => null,
     };
 
@@ -183,6 +191,8 @@
         "RequiresApprovalBeforePublish" => policy?.RequiresApprovalBeforePublish,
         "MaxPrimaryContacts" => policy?.MaxPrimaryContacts,
         "MaxCopyContacts" => policy?.MaxCopyContacts,
+        "MandatoryReview" => policy?.MandatoryReview,
+        "ArchiveGraceDays" => policy?.ArchiveGraceDays,
         _ => null,
     };
 }

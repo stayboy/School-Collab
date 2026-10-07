@@ -11,6 +11,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
@@ -55,12 +56,25 @@ public sealed class AttachmentExtractionPersistencePostgresTests
             cache,
             Options.Create(new AttachmentUploadOptions()),
             new EmptyActivityGroupLookup(),
+            new UnsetAssignmentPolicyResolver(),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
+
+    /// <summary>Round <c>assignment-rules-policy-rework</c> D6/D10: the update path now snapshots the
+    /// signature / guardian-review / archive-window terms from the resolved effective policy. This
+    /// suite exercises the attachment round-trip, not policy resolution, so an all-unset policy (the
+    /// built-in defaults) is the right double.</summary>
+    private sealed class UnsetAssignmentPolicyResolver : IAssignmentPolicyResolver
+    {
+        public Task<EffectiveAssignmentPolicy> ResolveAsync(
+            Guid? gradeLevelId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new EffectiveAssignmentPolicyResolver().Resolve(
+                tenantDefault: null, gradeOverride: null));
+    }
 
     private static Assignment NewAssignment(ITenantProvider tenants) =>
         Assignment.Create(
                 "Attachment round-trip", null, AssignmentType.Digital, GradingFormat.AutoGraded,
-                TargetAudienceType.AllStudents, TopicId, null, null, null,
+                TargetAudienceType.AllStudents, TopicId, null, null,
                 createdByTeacherId: Guid.Empty)
             .WithTenant(tenants);
 
@@ -75,7 +89,7 @@ public sealed class AttachmentExtractionPersistencePostgresTests
         string? error = null) =>
         new(assignmentId, "Attachment round-trip", null,
             AssignmentType.Digital, GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-            TopicId, null, null, null, MandatoryReview: true,
+            TopicId, null, null, MandatoryReview: true,
             Attachments:
             [
                 new NewAttachmentDto(
@@ -181,7 +195,7 @@ public sealed class AttachmentExtractionPersistencePostgresTests
             var command = new UpdateAssignmentCommand(
                 assignmentId, "Attachment round-trip", null,
                 AssignmentType.Digital, GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
-                TopicId, null, null, null, MandatoryReview: true,
+                TopicId, null, null, MandatoryReview: true,
                 Attachments: [new NewAttachmentDto("old.pdf", "application/pdf", 2048, "tenants/t/staging/old.pdf")]);
             await NewUpdateHandler(db, cache).HandleAsync(command);
         }

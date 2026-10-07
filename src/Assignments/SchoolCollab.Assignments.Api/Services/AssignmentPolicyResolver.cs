@@ -20,7 +20,11 @@ namespace SchoolCollab.Assignments.Api.Services;
 /// <c>null</c>; failed / absent grade row ⇒ inherit), so the built-in defaults
 /// (<see cref="SignatureRequirementMode.Disabled"/>, no approval requirement, uncapped) apply and
 /// neither the create wizard nor a publish is blocked by policy — the fail-open posture of the
-/// resolver it replaces.</para>
+/// resolver it replaces. For the two resolved write-seam fields that posture is explicit: a
+/// degraded fetch leaves <c>MandatoryReview</c> <see langword="null"/> (the write seam keeps today's
+/// mandatory-review default) and <c>ArchiveGraceDays</c> <see langword="null"/> (the write seam keeps
+/// the built-in 30-day retention floor) — degradation never turns a stricter policy ON and never
+/// silently zeroes the archive window.</para>
 /// </summary>
 public sealed class AssignmentPolicyResolver(
     IHttpClientFactory httpClientFactory,
@@ -91,6 +95,8 @@ public sealed class AssignmentPolicyResolver(
         RequiresApprovalBeforePublish = dto.RequiresApprovalBeforePublish,
         MaxPrimaryContacts = dto.MaxPrimaryContacts,
         MaxCopyContacts = dto.MaxCopyContacts,
+        MandatoryReview = dto.MandatoryReview,
+        ArchiveGraceDays = dto.ArchiveGraceDays,
     };
 
     private static AssignmentPolicyFields ToFields(GradeAssignmentPolicyDto dto) => new()
@@ -99,5 +105,7 @@ public sealed class AssignmentPolicyResolver(
         RequiresApprovalBeforePublish = dto.RequiresApprovalBeforePublish,
         MaxPrimaryContacts = dto.MaxPrimaryContacts,
         MaxCopyContacts = dto.MaxCopyContacts,
+        MandatoryReview = dto.MandatoryReview,
+        ArchiveGraceDays = dto.ArchiveGraceDays,
     };
 }

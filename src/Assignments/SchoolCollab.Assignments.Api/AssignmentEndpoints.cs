@@ -26,10 +26,10 @@ public static class AssignmentEndpoints
         // ── Teacher-portal reads (round teacher-scope-auth D4 / [P1-1]) ──────────
         // The reader policy is applied to this NESTED SUB-GROUP — never to the whole
         // /assignments group. The group also serves the Families ward/guardian routes, the
-        // create-wizard reads (signature-default, ai-prompt-policy, recipient-preview, …) and
+        // create-wizard reads (effective-policy, ai-prompt-policy, recipient-preview, …) and
         // every create/edit/publish/approve write, all reachable by principals that carry no
         // role claim at all; a group-wide policy would 403 all of them. The sub-group carries
-        // exactly the six GETs in the Covered table, mapped by MapAssignmentReaderRoutes.
+        // exactly the seven GETs in the Covered table, mapped by MapAssignmentReaderRoutes.
         var readerGroup = group.MapGroup(string.Empty);
         if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {

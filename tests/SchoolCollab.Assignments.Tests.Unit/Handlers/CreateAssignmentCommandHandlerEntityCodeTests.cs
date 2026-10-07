@@ -64,6 +64,7 @@ public class CreateAssignmentCommandHandlerEntityCodeTests
                new FakeTeacherDirectory(),
                new FakeFeatureFlagService { IsEnabledValue = true },
                new AcceptAllActivityGroupLookup(),
+               new FakeAssignmentPolicyResolver(),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
 
     private static CreateAssignmentCommand SampleCommand() =>
@@ -74,7 +75,6 @@ public class CreateAssignmentCommandHandlerEntityCodeTests
             GradingFormat: GradingFormat.TeacherGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: Guid.NewGuid(),
-            GradeLevelId: null,
             DueDate: null,
             MaxScore: null,
             MandatoryReview: true);
