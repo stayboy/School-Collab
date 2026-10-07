@@ -1,57 +1,211 @@
-.resources-section-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-}
+/*
+    Scoped styles for compartment 5 — Content & Resources (round
+    content-questions-modern-ui, spec §3 DL + §5 CR).
 
-.resources-section-count {
-    color: var(--neutral-foreground-hint, #6b7280);
-    font-size: 0.875rem;
-}
+    The card chrome, the inner drop tile, the two labelled groups (Files, Links)
+    and their hairline rows are all styled here, using ONLY Fluent design tokens
+    (DL-1) so light/dark both follow automatically. The shared --cq-* custom
+    properties are declared once on the composition row in
+    AssignmentAuthoring.razor.css and inherit across the component boundary;
+    every reference carries a fallback so this file is also correct in isolation
+    (the bUnit suite renders ResourcesSection on its own).
+*/
 
-.resources-section-error {
-    margin-bottom: 0.75rem;
-}
-
-.resources-section-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+.resources-section {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--cq-gap, 12px);
 }
 
-.resources-section-row {
+/* ── Card header band (CR-1) ─────────────────────────────────────────── */
+
+.cq-header {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--neutral-stroke-divider, #e5e7eb);
-    border-radius: 0.375rem;
-    background: var(--neutral-layer-1, #ffffff);
+    gap: 8px;
 }
 
-.resources-section-row-name {
+.cq-header .authoring-compartment-title {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    margin: 0;
 }
 
-.resources-section-row-size {
-    color: var(--neutral-foreground-hint, #6b7280);
-    font-size: 0.875rem;
+.cq-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: var(--cq-chip-radius, 999px);
+    background: var(--neutral-fill-rest);
+    color: var(--neutral-foreground-hint);
+    font-size: 0.78rem;
     font-variant-numeric: tabular-nums;
 }
 
-.resources-section-url-actions {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+/* ── Drop tile (CR-2/CR-3/CR-4) ──────────────────────────────────────── */
+
+.cq-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 16px;
+    border-radius: var(--cq-radius-tile, 10px);
+    background: var(--neutral-layer-2);
+    text-align: center;
 }
 
-.resources-section-urls {
-  margin-top: 0.75rem;
+.cq-tile-art {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 40px;
+    color: var(--neutral-foreground-hint);
+}
+
+.cq-tile-art-back {
+    position: absolute;
+    transform: translate(-8px, -4px);
+    opacity: 0.55;
+}
+
+.cq-tile-art-badge {
+    position: absolute;
+    transform: translate(16px, 12px);
+}
+
+.cq-tile-text {
+    margin: 0;
+    max-width: 320px;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.85rem;
+    line-height: 1.35;
+}
+
+/* The FluentInputFile is a child component: its web-component internals live
+   outside this component's scope, so the wrapper + ::deep reaches them. */
+.cq-tile-upload ::deep fluent-input-file {
+    display: inline-flex;
+}
+
+.cq-tile-upload ::deep fluent-button {
+    --accent-fill-rest: var(--accent-fill-rest);
+    font-size: 0.85rem;
+}
+
+.cq-tile-empty {
+    margin: 0;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.8rem;
+}
+
+/* ── Groups + rows (CR-5…CR-8) ───────────────────────────────────────── */
+
+.cq-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.cq-group-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest);
+}
+
+.cq-group-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--neutral-foreground-rest);
+}
+
+.cq-group-count {
+    color: var(--neutral-foreground-hint);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.cq-rows {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.cq-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: var(--cq-row-pad, 14px 4px);
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest);
+    transition: background-color 120ms ease;
+}
+
+.cq-row:hover {
+    background: var(--neutral-fill-secondary-hover);
+}
+
+.cq-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.cq-row-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9375rem;
+}
+
+.cq-row-main .cq-row-name {
+    flex: none;
+}
+
+.cq-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.8125rem;
+}
+
+.cq-row-size {
+    font-variant-numeric: tabular-nums;
+}
+
+.cq-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.cq-link-form {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.resources-section-error {
+    margin: 8px 0 0;
+}
+
+/* DL-8: the only transition added is the row hover band — disabled when the
+   user asks for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+    .cq-row {
+        transition: none;
+    }
 }

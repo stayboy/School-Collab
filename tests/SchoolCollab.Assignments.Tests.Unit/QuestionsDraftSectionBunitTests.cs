@@ -85,7 +85,8 @@ public class QuestionsDraftSectionBunitTests : BunitContext
         bool gateEnabled = true,
         bool promptLocked = false,
         EventCallback? onConfirmed = null,
-        AssignmentEditFormModel? model = null)
+        AssignmentEditFormModel? model = null,
+        bool expand = true)
     {
         Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
 
@@ -95,7 +96,7 @@ public class QuestionsDraftSectionBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json",
                 $"{{\"generationId\":\"{GenerationId}\"}}");
 
-        return Render<QuestionsDraftSection>(parameters =>
+        var cut = Render<QuestionsDraftSection>(parameters =>
         {
             parameters.Add(p => p.AssignmentId, AssignmentId);
             parameters.Add(p => p.Model, model ?? new AssignmentEditFormModel());
@@ -104,6 +105,48 @@ public class QuestionsDraftSectionBunitTests : BunitContext
             parameters.Add(p => p.TopicId, TopicId);
             parameters.Add(p => p.TopicName, "Photosynthesis");
             parameters.Add(p => p.OnConfirmed, onConfirmed ?? EventCallback.Empty);
+        });
+
+        // QA-18/D12 (round content-questions-modern-ui): the "Draft preview" panel is collapsed by
+        // default, so the shared fixture expands it and drives the controls exactly as before. The
+        // collapsed default itself is asserted by DraftPanel_IsCollapsedByDefault_ThenExpands.
+        if (expand)
+        {
+            // Explicit 5s budget: the initial GET + render can exceed bUnit's 1s default under a
+            // loaded full-solution run (this wait timed out once on CI-shaped load).
+            cut.WaitForAssertion(() => cut.Find("#cq-draft-panel"), TimeSpan.FromSeconds(5));
+            if (string.Equals(cut.Find("#cq-draft-panel").GetAttribute("aria-expanded"), "false", StringComparison.OrdinalIgnoreCase))
+            {
+                cut.Find("#cq-draft-panel").Click();
+            }
+            cut.WaitForAssertion(() => cut.Find("#cq-draft-body").Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        }
+        return cut;
+    }
+
+    /// <summary>QA-18/D12: the disclosure starts collapsed and toggles open.</summary>
+    [TestMethod]
+    public void DraftPanel_IsCollapsedByDefault_ThenExpands()
+    {
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+
+        var cut = RenderSection(new FakeQuestionGenerator(), expand: false);
+
+        cut.WaitForAssertion(() =>
+        {
+            var toggle = cut.Find("#cq-draft-panel");
+            toggle.GetAttribute("aria-expanded").Should().Be("false",
+                "the draft panel starts collapsed so its duplicate controls do not weigh on the page");
+            cut.FindAll("#cq-draft-body").Should().BeEmpty();
+        });
+
+        cut.Find("#cq-draft-panel").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#cq-draft-panel").GetAttribute("aria-expanded").Should().Be("true");
+            cut.Find("#cq-draft-body").Should().NotBeNull();
         });
     }
 
@@ -345,7 +388,7 @@ public class QuestionsDraftSectionBunitTests : BunitContext
         {
             cut.Markup.Should().Contain("Existing Q1");
             cut.Markup.Should().Contain("Existing Q2");
-        });
+        }, TimeSpan.FromSeconds(5));
         _mockHttp.VerifyNoOutstandingExpectation();
     }
 

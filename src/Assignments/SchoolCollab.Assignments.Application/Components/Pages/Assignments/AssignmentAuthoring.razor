@@ -347,74 +347,96 @@
                     </section>
                 </div>
 
-                @* ── 5 · Content & Resources (always active, UX-19) ───────────── *@
-                <section id="authoring-content" class="authoring-compartment">
-                    <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
-                    @if (IsReadOnly)
-                    {
-                        <p class="authoring-hint">
-                            Attachments and URL resources are managed on the assignment's edit surface.
-                        </p>
-                    }
-                    else if (ChildrenEditorDisabledReason is not null)
-                    {
-                        @* P1 fail-closed: no live-empty editor, so an add can never replace the
-                           persisted set (the update handler full-replaces a non-null collection). *@
-                        <p class="authoring-reason" id="authoring-content-reason">@ChildrenEditorDisabledReason</p>
-                    }
-                    else
-                    {
-                        <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" />
-                    }
-                </section>
-
-                @* ── 6 · Questions & AI (UX-19: disabled-with-reason, never hidden) ── *@
-                <section id="authoring-questions" class="authoring-compartment">
-                    <h3 class="authoring-compartment-title">Questions &amp; AI</h3>
-                    @if (IsReadOnly)
-                    {
-                        <p class="authoring-hint">
-                            Questions are managed on the assignment's edit surface.
-                        </p>
-                    }
-                    else if (ChildrenEditorDisabledReason is not null)
-                    {
-                        <p class="authoring-reason" id="authoring-questions-reason">@ChildrenEditorDisabledReason</p>
-                    }
-                    else if (!GateEnabled)
-                    {
-                        <p class="authoring-reason" id="authoring-questions-reason">@QuestionGenerationGate.DisabledHint</p>
-                        <QuestionGenerationSection Model="_model"
-                                                   GateEnabled="false"
-                                                   TopicId="@TopicId"
-                                                   TopicName="@_selectedSubject?.Label"
-                                                   PromptLocked="_aiPromptLocked"
-                                                   AssignmentId="_item?.Id"
-                                                   OnQuestionsChanged="OnModelChanged" />
-                        <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
-                    }
-                    else
-                    {
-                        <QuestionGenerationSection Model="_model"
-                                                   GateEnabled="true"
-                                                   TopicId="@TopicId"
-                                                   TopicName="@_selectedSubject?.Label"
-                                                   PromptLocked="_aiPromptLocked"
-                                                   AssignmentId="_item?.Id"
-                                                   OnQuestionsChanged="OnModelChanged" />
-                        <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
-                        @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
+                @* ── Row 2 · Content & Resources / Questions & AI ────────────────
+                   Round content-questions-modern-ui (spec §4, decisions D1/D9): the two
+                   compartments are composed as ONE row mirroring the reference project page —
+                   Questions & AI in the main column, Content & Resources in the rail. Grid
+                   AREAS do the placing; DOM order stays content → questions so the compartment
+                   order assertion and the jump-nav order are untouched. *@
+                <div class="authoring-layout authoring-layout--cq">
+                    @* ── 5 · Content & Resources (always active, UX-19) ───────────── *@
+                    <section id="authoring-content" class="authoring-compartment authoring-compartment--cq">
+                        @if (IsReadOnly)
                         {
-                            <QuestionsDraftSection AssignmentId="_item.Id"
-                                                   Model="_model"
-                                                   GateEnabled="true"
-                                                   PromptLocked="_aiPromptLocked"
-                                                   TopicId="@TopicId"
-                                                   TopicName="@_selectedSubject?.Label"
-                                                   OnConfirmed="ReloadAsync" />
+                            <div class="cq-header">
+                                <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
+                            </div>
+                            <p class="authoring-hint">
+                                Attachments and URL resources are managed on the assignment's edit surface.
+                            </p>
                         }
-                    }
-                </section>
+                        else if (ChildrenEditorDisabledReason is not null)
+                        {
+                            <div class="cq-header">
+                                <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
+                            </div>
+                            @* P1 fail-closed: no live-empty editor, so an add can never replace the
+                               persisted set (the update handler full-replaces a non-null collection). *@
+                            <p class="authoring-reason" id="authoring-content-reason">@ChildrenEditorDisabledReason</p>
+                        }
+                        else
+                        {
+                            @* CR-1/D3: on the live surface the section owns its card header
+                               (title + count + the + that reveals the link input), so the page
+                               renders no duplicate heading here — X-1 still holds because the
+                               h3 is a descendant of #authoring-content. *@
+                            <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" />
+                        }
+                    </section>
+
+                    @* ── 6 · Questions & AI (UX-19: disabled-with-reason, never hidden) ── *@
+                    <section id="authoring-questions" class="authoring-compartment authoring-compartment--cq">
+                        <div class="cq-header">
+                            <h3 class="authoring-compartment-title">Questions &amp; AI</h3>
+                        </div>
+                        @if (IsReadOnly)
+                        {
+                            <p class="authoring-hint">
+                                Questions are managed on the assignment's edit surface.
+                            </p>
+                        }
+                        else if (ChildrenEditorDisabledReason is not null)
+                        {
+                            <p class="authoring-reason" id="authoring-questions-reason">@ChildrenEditorDisabledReason</p>
+                        }
+                        else if (!GateEnabled)
+                        {
+                            <p class="authoring-reason" id="authoring-questions-reason">@QuestionGenerationGate.DisabledHint</p>
+                            <QuestionGenerationSection Model="_model"
+                                                       GateEnabled="false"
+                                                       TopicId="@TopicId"
+                                                       TopicName="@_selectedSubject?.Label"
+                                                       TargetGradeLevels="@TargetGradeLevels"
+                                                       PromptLocked="_aiPromptLocked"
+                                                       AssignmentId="_item?.Id"
+                                                       OnQuestionsChanged="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                        }
+                        else
+                        {
+                            <QuestionGenerationSection Model="_model"
+                                                       GateEnabled="true"
+                                                       TopicId="@TopicId"
+                                                       TopicName="@_selectedSubject?.Label"
+                                                       TargetGradeLevels="@TargetGradeLevels"
+                                                       PromptLocked="_aiPromptLocked"
+                                                       AssignmentId="_item?.Id"
+                                                       OnQuestionsChanged="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
+                            {
+                                <QuestionsDraftSection AssignmentId="_item.Id"
+                                                       Model="_model"
+                                                       GateEnabled="true"
+                                                       PromptLocked="_aiPromptLocked"
+                                                       TopicId="@TopicId"
+                                                       TopicName="@_selectedSubject?.Label"
+                                                       TargetGradeLevels="@TargetGradeLevels"
+                                                       OnConfirmed="ReloadAsync" />
+                            }
+                        }
+                    </section>
+                </div>
             </div>
         }
     </ChildContent>
@@ -974,6 +996,16 @@
     /// </summary>
     private IReadOnlyList<Guid> KnownGradeTargetIds =>
         _model.TargetsLoaded ? TargetIds(TargetKindDto.GradeLevel) : _item?.TargetGradeIds ?? [];
+
+    /// <summary>R3 (D18/PB-3): the targeted grades' canonical levels, ascending — resolved from the
+    /// already-loaded grade levels so the composed narrative can name them without a new API call.</summary>
+    private IReadOnlyList<int> TargetGradeLevels =>
+        _gradeLevels is null
+            ? []
+            : _gradeLevels.Where(g => KnownGradeTargetIds.Contains(g.Id))
+                .Select(g => g.Level)
+                .OrderBy(l => l)
+                .ToList();
 
     /// <summary>
     /// Round <c>drop-primary-grade</c>: the policy-scope grade the effective-policy resolution asks

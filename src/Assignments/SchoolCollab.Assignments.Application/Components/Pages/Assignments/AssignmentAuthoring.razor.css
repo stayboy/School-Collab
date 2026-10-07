@@ -145,6 +145,79 @@
     align-items: start;
 }
 
+/* ── Row 2 composition (round content-questions-modern-ui, spec §4) ──────
+   The reference project page: Questions & AI in the main column, Content &
+   Resources in the rail. Grid AREAS do the placing while DOM order stays
+   content → questions, so the compartment order assertion and the jump-nav
+   order both survive unchanged. The rail track is deliberately IDENTICAL to
+   row 1's, so the two stacked rows share one column grid (no ragged edge).
+   The --cq-* custom properties live here once and cascade to every child
+   section (custom properties inherit across component boundaries, unlike
+   scoped class rules), so retuning the composition is a one-line edit. */
+.authoring-layout--cq {
+    --cq-radius-card: 14px;
+    --cq-radius-tile: 10px;
+    --cq-chip-radius: 999px;
+    --cq-gap: 12px;
+    --cq-row-pad: 14px 4px;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
+    grid-template-areas: "questions content";
+}
+
+.authoring-layout--cq > #authoring-content {
+    grid-area: content;
+}
+
+.authoring-layout--cq > #authoring-questions {
+    grid-area: questions;
+}
+
+@media (max-width: 1100px) {
+    .authoring-layout--cq {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "questions" "content";
+    }
+}
+
+/* The modern card chrome for the two recomposed compartments: the legacy bubble
+   is reset and replaced by the reference's flat, hairline, large-radius card. */
+.authoring-compartment--cq {
+    gap: var(--cq-gap, 12px);
+    padding: 16px;
+    border-radius: var(--cq-radius-card, 14px);
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    background-color: var(--neutral-layer-1);
+}
+
+/* Card header band: title left, count chip and trailing actions right.
+   Used by the page-rendered headers (Questions & AI always; Content & Resources
+   on its disabled / read-only branches); the live Content & Resources header is
+   rendered by ResourcesSection and carries its own scoped copy of this rule. */
+.authoring-compartment--cq .cq-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.authoring-compartment--cq .cq-header .authoring-compartment-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.authoring-compartment--cq .cq-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: var(--cq-chip-radius, 999px);
+    background: var(--neutral-fill-rest);
+    color: var(--neutral-foreground-hint);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Right-hand column: the compact card stack right of Basics — the audience builder card and, since
    round authoring-compact-fields, the Rules readouts card beneath it. The column draws NO frame of
    its own — the base .authoring-compartment chrome is reset here because the SectionCards it hosts

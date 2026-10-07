@@ -1,0 +1,22 @@
+/* Scoped styles for the question edit dialog (round content-questions-modern-ui, spec §6.2).
+   Only the per-type option rows are styled here; the shell (container, error bar, footer,
+   Cancel/Save) is the shared dialog-shell chrome. */
+
+.cq-qedit-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0 12px;
+}
+
+.cq-qedit-sublabel {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--neutral-foreground-hint);
+}
+
+.cq-qedit-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

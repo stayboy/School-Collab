@@ -41,3 +41,57 @@
 .questions-draft-prompt {
     margin-top: 0.75rem;
 }
+
+/* PB-11: the draft surface's read-only summary + Configure row (mirrors the composer's).
+   Tokens only (DL-1) — no literals. */
+.cq-composer-config {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.cq-config-summary {
+    color: var(--neutral-foreground-hint);
+    font-size: 0.8125rem;
+}
+
+/* ── "Draft preview" disclosure (spec §6.3 QA-18, D12) ─────────────────── */
+
+.cq-draft-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 0;
+    border: none;
+    background: transparent;
+    color: var(--neutral-foreground-rest);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cq-draft-chevron {
+    transition: transform 120ms ease;
+}
+
+.cq-draft-chevron.is-open {
+    transform: rotate(90deg);
+}
+
+.cq-draft-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cq-draft-chevron {
+        transition: none;
+    }
+}
