@@ -355,13 +355,50 @@ the tester never derives or expands its own scope.
    the provenance in the round doc (e.g. "pass 3 completed via escalation").
    Do not steer or revive a run whose bash has been open past a plausible
    build/test window — interrupt it; a hung process never settles.
+   **Time-box rule — probe with the `grill-me` skill, then park.** The escalation pattern
+   above assumes the block has a known cause and a short path. When a pass (or the
+   parent's own verification) is over its time box, **measurably** — there is no
+   "expected duration" to estimate against, so the trigger is a recorded bound, not a
+   judgement: a **worker pass** that has hit its 30-minute cap once **and** whose single
+   escalation pass then also timed out, stalled, or was interrupted without completing the
+   pass (never re-dispatch a third time), **or** the **parent's own verification**
+   (build/test) exceeding the same 30-minute cap or producing no output for 10 minutes.
+   Once over the time box, stop iterating on it:
+   - **Probe the block with the `grill-me` skill.** An unexplained hold-up is an open decision,
+     not something to grind on: put the whole frontier to the owner in the skill's own
+     `❓ **Qn** — **title**` / `➡️ <recommended answer>` format — one round, numbered,
+     each item with a recommended answer and its cost (the "cost" wording is this repo's
+     `AGENTS.md` rule, layered onto grill-me, which does not itself ask for it) — e.g.
+     "stuck command vs. harness defect vs. product defect vs. unknown?",
+     "interrupt now vs. let it finish?", "fix in this round vs. park?". Resolve every
+     fact first (run status, live processes, disk state, transcript tail); never ask
+     the owner for what `status`/`git`/`tasklist` can answer.
+   - **If the grill cannot settle it cheaply, park the work.** Record it as an explicit
+     **backlog / follow-up item for a dedicated look at that specific issue** — a line
+     in the round doc **plus** a durable follow-up note in `documents/solution/` (or a line in
+     the relevant existing spec's follow-up section) plus a backlog entry in
+     `documents/specs/*backlog*.md` — this repo tracks work by PR, backlog doc and
+     `documents/solution/` note, **not** GitHub Issues, so do not write an issue clause —
+     then preserve the on-disk state (branch, round doc, whatever the pass produced) so it
+     resumes via `resume-interrupted-orchestrator-round`. That skill resumes from a round doc
+     **and its frozen patch**, so freeze `diffs-<slug>.patch` from the live tree *before*
+     parking (the resume skill's own step 7 shows how) — a round parked at step 3 has no
+     patch yet. Leave the partial work **uncommitted** unless the owner explicitly says
+     commit, and record in the round doc what is and is not committed.
+   A parked block ends the round honestly; an endlessly retried one burns the round, the
+   token budget, and the owner's patience.
+   **A parked round takes no verdict and skips steps 4–8**: set its `**Status:**` to `PARKED`,
+   and its acceptance *is* the follow-up reference, not a pass. It is picked up by a later round
+   that plans it explicitly, or resumed via `resume-interrupted-orchestrator-round` when the
+   owner asks.
 4. **Freeze the diff, then verify in parallel.** The parent writes
    `diffs-<slug>.patch` (`git diff`, or `git diff <base-sha>` when the tree
    was dirty at start), then concurrently:
    - (a) The parent runs the authoritative `dotnet build SchoolCollab.slnx`
      (incremental after the worker) and `dotnet test` on the affected
      projects **plus `SchoolCollab.ArchitectureTests.Unit`** (repo-wide
-     scanner — always include it).
+     scanner — always include it). A parent verification run that exceeds the time box
+     is parked the same way (interrupt, probe with the `grill-me` skill, park) — see step 3.
    - (b) Tiers 2–3: dispatch the static reviewer with the plan + patch path +
      WORKER REPORT; the reviewer returns the REVIEW block. Tier 1 has no
      reviewer — the parent does the scope check itself (diff-stat vs plan
@@ -522,16 +559,21 @@ the tester never derives or expands its own scope.
   `dotnet`/`testhost` processes first; and when a parent test run looks hung, suspect process contention *before* concluding that the
   suite (or the code) hangs. A false "the tests hang" diagnosis sends you hunting a defect that does not
   exist, in a change you were about to accept.
+- **A block that outlives its time box is parked, not retried forever.** See the time-box rule
+  in step 3; re-dispatching the same blocked pass is the failure mode it exists to stop, and it
+  is what turns one bad pass into a lost session.
 
 ## Verification
 
-1. All child runs completed (subagent status completed, exit 0).
+1. All child runs completed (subagent status completed, exit 0) — a parked round is exempt
+   (see the time-box rule in step 3).
 2. Parent-run `dotnet build SchoolCollab.slnx -c Debug`: 0 errors.
 3. Parent-run `dotnet test` — affected projects **plus
    `SchoolCollab.ArchitectureTests.Unit`**: 0 failures; pass counts recorded
    in the round doc.
 4. The round doc exists with tier-appropriate sections filled and an explicit
-   verdict (CLOSED, or remaining P1s listed), plus the provider/models header.
+   verdict (CLOSED, PARKED with the follow-up reference, or remaining P1s listed), plus
+   the provider/models header.
 5. No P1 findings remain unaddressed, or the user explicitly accepted the
    residuals. Loop bounds respected (Tier 2 reviewer loop ≤1; Tier 3 reviewer
    ≤2, tester ≤2).

@@ -25,7 +25,12 @@ specs that remain the source of truth**.
   round only by rebuilding its delta from a *sibling* round's patch. Generate the
   patch alongside the round doc, from the round's own base.
 - **Flip the round doc's `**Status:**` line when the round closes** — set it to
-  `CLOSED` and name the PR/commit that carried it. Round docs left at `planned`
+  `CLOSED` and name the PR/commit that carried it, or to `PARKED` when the round was
+  stopped mid-flight by the time-box rule
+  (`.pi/skills/orchestrator-worker-reviewer/SKILL.md`, step 3). A parked round names the
+  backlog/follow-up item it was parked as and ships its `diffs-<slug>.patch` frozen at the
+  point of the park, so `resume-interrupted-orchestrator-round` can pick it up. Round docs
+  left at `planned`
   rot silently: three were found stale on 2026-10-06 (their rounds had merged days
   earlier), and a reader cannot tell a finished round from an abandoned one. Same
   rule as the status-line convention in `documents/README.md`.
