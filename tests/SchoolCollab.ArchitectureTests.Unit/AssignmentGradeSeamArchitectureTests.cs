@@ -154,7 +154,12 @@ public class AssignmentGradeSeamArchitectureTests
 
         var dropDesigner = designers.SingleOrDefault(p => p.Contains(DropMigrationName));
         dropDesigner.Should().NotBeNull($"the round ships exactly one {DropMigrationName} migration");
-        var preDropDesigner = designers.Last(p => !p.Contains(DropMigrationName));
+        // R4 (round <c>assignment-context-strands-lessons</c>): the predecessor is the designer
+        // IMMEDIATELY BEFORE the drop in migration order, not "the last designer that is not the
+        // drop" — a later round may (and this one does) add migrations AFTER the drop, and that
+        // spelling would then select the newest migration instead of the pre-drop one the assertion
+        // is about.
+        var preDropDesigner = designers[designers.IndexOf(dropDesigner!) - 1];
 
         File.ReadAllText(preDropDesigner).Should().Contain("grade_level_id",
             "the migration that runs immediately BEFORE the drop is an immutable record of the legacy column");

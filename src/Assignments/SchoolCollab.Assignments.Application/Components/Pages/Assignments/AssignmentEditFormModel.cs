@@ -91,6 +91,25 @@ public sealed class AssignmentEditFormModel
     /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
     public int? DifficultyHardCount { get; set; }
 
+    // ── R4 (CP-1/CP-5/CP-11): the authoring context picks ────────────────────
+
+    /// <summary>R4 (CP-2/CP-5): the picked root strand ids, in pick order. Always non-null;
+    /// the list starts empty, which is the one representation of "no strand picked".</summary>
+    public List<Guid> ContextStrandIds { get; } = [];
+
+    /// <summary>R4 (CP-2/CP-5): the picked lesson ids — see <see cref="ContextStrandIds"/>.</summary>
+    public List<Guid> ContextLessonIds { get; } = [];
+
+    /// <summary>
+    /// R4 (P4.6) fail-closed marker: true once the persisted picks have been READ (or a Create
+    /// surface — which genuinely starts with none — has been marked as read). False means the
+    /// children read failed/cancelled or delivered no pick fields (a pre-deploy payload), so the
+    /// projections emit <see langword="null"/> for the picks and the update handler reads that as
+    /// "preserve": a failed read must never wipe a picks-bearing assignment on the author's next
+    /// scalar-only save.
+    /// </summary>
+    public bool ContextPicksLoaded { get; private set; }
+
     /// <summary>R2 (TGT-1): one authored targeting constraint in the form model — the kind plus
     /// its reference (null exactly for <see cref="TargetKindDto.AllStudents"/>). The list order IS
     /// the display order, re-indexed 0..n-1 by <see cref="ToTargetDtos"/>.</summary>
@@ -280,10 +299,15 @@ public sealed class AssignmentEditFormModel
             // R2 (UX-21): the target load shares this fail-closed contract — a null children read
             // leaves the targeting constraints NOT loaded, so their editor renders disabled.
             LoadTargets(null);
+            // R4 (P4.6): the picks share it too — an unknown set projects null (preserve).
+            LoadContextPicks(null, null);
             return;
         }
 
         LoadTargets(children.Targets);
+        // R4 (CP-5/CP-11): the persisted picks. A payload that carries neither field (pre-deploy)
+        // leaves them UNKNOWN, exactly like a failed read.
+        LoadContextPicks(children.ContextStrandIds, children.ContextLessonIds);
 
         // Display order is re-indexed 0..n by load position (EC-7) — the read already
         // ordered by the persisted DisplayOrder.
@@ -352,6 +376,64 @@ public sealed class AssignmentEditFormModel
     }
 
     /// <summary>
+    /// R4 (CP-5/P4.6): loads the persisted context picks and marks them read. A null argument
+    /// means that kind is UNKNOWN (a failed/cancelled children read, or a pre-deploy payload):
+    /// the marker then stays false and the projections emit null — the update wire's "preserve" —
+    /// so an unknown set can never be written over the persisted one. Create marks the picks as
+    /// read with two empty lists: a create genuinely starts with none, so there is nothing to
+    /// preserve.
+    /// </summary>
+    /// <param name="strandIds">The persisted strand picks, or null when unknown.</param>
+    /// <param name="lessonIds">The persisted lesson picks, or null when unknown.</param>
+    public void LoadContextPicks(IReadOnlyList<Guid>? strandIds, IReadOnlyList<Guid>? lessonIds)
+    {
+        ContextStrandIds.Clear();
+        ContextLessonIds.Clear();
+
+        if (strandIds is not null)
+        {
+            ContextStrandIds.AddRange(strandIds);
+        }
+
+        if (lessonIds is not null)
+        {
+            ContextLessonIds.AddRange(lessonIds);
+        }
+
+        ContextPicksLoaded = strandIds is not null && lessonIds is not null;
+    }
+
+    /// <summary>
+    /// R4 (CP-11/P4.6): one pick kind's ids as the save payload carries them — the CP-11 payload
+    /// filter. <paramref name="resolvedNames"/> is the call's resolution map (the ids the
+    /// successfully-loaded picker lists know): an id the map does not contain is EXCLUDED from the
+    /// payload, which is CP-11's letter ("filtered out of the save payload").
+    /// <para>A null map is NOT authoritative — it means the list did not load, so the picks are
+    /// kept verbatim: filtering on a failed fetch would silently clear valid picks on the next save
+    /// (the <c>(removed)</c> marker demands a list that loaded and is authoritatively empty of the
+    /// id).</para>
+    /// <para>Returns null when the kind's set is unknown (the wire's preserve).
+    /// <paramref name="collapseEmptyToNull"/> is the CREATE half of the contract — there, empty and
+    /// null both mean "no picks"; on update an empty list is the only expressible "clear".</para>
+    /// </summary>
+    private IReadOnlyList<Guid>? ContextPicksForWire(
+        IReadOnlyList<Guid> ids,
+        IReadOnlyDictionary<Guid, string>? resolvedNames,
+        bool collapseEmptyToNull)
+    {
+        if (!ContextPicksLoaded)
+        {
+            return null;
+        }
+
+        var filtered = resolvedNames is null
+            ? ids.ToList()
+            : ids.Where(resolvedNames.ContainsKey).ToList();
+
+        return collapseEmptyToNull && filtered.Count == 0 ? null : filtered;
+    }
+
+    /// <summary>
     /// Projects this form model into a <see cref="CreateAssignmentRequest"/>
     /// that the API client submits. Page-level values that live outside the
     /// model (type, grading, audience, subject, mandatory review) are passed in
@@ -372,7 +454,13 @@ public sealed class AssignmentEditFormModel
         /// <summary>R2 (TGT-1): the authored targeting constraints. Null on a create means "no
         /// targets supplied" (publish is then refused until they are authored); on an update null
         /// preserves the persisted set (the caller's change gate).</summary>
-        IReadOnlyList<AssignmentTargetDto>? targets = null)
+        IReadOnlyList<AssignmentTargetDto>? targets = null,
+        /// <summary>R4 (CP-11): the strand ids the successfully-loaded strand list resolved — the
+        /// payload filter's map. Null when that list did not load, in which case nothing is filtered
+        /// (the page-supplied-argument convention of <paramref name="targets"/>).</summary>
+        IReadOnlyDictionary<Guid, string>? strandNames = null,
+        /// <summary>R4 (CP-11): the lesson resolution map — see <paramref name="strandNames"/>.</summary>
+        IReadOnlyDictionary<Guid, string>? lessonNames = null)
     {
         IReadOnlyList<NewQuestionDto>? questions = null;
         if (Questions.Count > 0)
@@ -470,7 +558,11 @@ public sealed class AssignmentEditFormModel
             // INS-1 (assignment-authoring-compartments §9): student-facing text.
             Instructions: Instructions,
             // R2 (TGT-1 / D-1): the authored targeting constraints.
-            Targets: targets);
+            Targets: targets,
+            // R4 (CP-5): the picks — an empty set collapses to the wire's null ("no picks", the
+            // create semantic: there is no prior state to preserve).
+            ContextStrandIds: ContextPicksForWire(ContextStrandIds, strandNames, collapseEmptyToNull: true),
+            ContextLessonIds: ContextPicksForWire(ContextLessonIds, lessonNames, collapseEmptyToNull: true));
     }
 
     /// <summary>
@@ -489,11 +581,15 @@ public sealed class AssignmentEditFormModel
         TargetAudienceTypeDto targetAudienceType,
         Guid topicId,
         bool? mandatoryReview,
-        IReadOnlyList<AssignmentTargetDto>? targets = null)
+        IReadOnlyList<AssignmentTargetDto>? targets = null,
+        /// <summary>R4 (CP-11): the strand resolution map — see <see cref="ToCreateRequest"/>.</summary>
+        IReadOnlyDictionary<Guid, string>? strandNames = null,
+        /// <summary>R4 (CP-11): the lesson resolution map — see <see cref="ToCreateRequest"/>.</summary>
+        IReadOnlyDictionary<Guid, string>? lessonNames = null)
     {
         var create = ToCreateRequest(
             assignmentType, gradingFormat, targetAudienceType, topicId,
-            mandatoryReview, targets);
+            mandatoryReview, targets, strandNames, lessonNames);
 
         return new UpdateAssignmentRequest(
             Title: create.Title,
@@ -516,7 +612,12 @@ public sealed class AssignmentEditFormModel
             DifficultyMediumCount: create.DifficultyMediumCount,
             DifficultyHardCount: create.DifficultyHardCount,
             Instructions: Instructions,
-            Targets: create.Targets);
+            Targets: create.Targets,
+            // R4 (CP-10): DELIBERATELY not the create-projected pair above — on the update wire an
+            // EMPTY list is the only expressible "clear every pick" (removing the author's last pick
+            // must not degrade into the preserve-null and leave the removed pick alive).
+            ContextStrandIds: ContextPicksForWire(ContextStrandIds, strandNames, collapseEmptyToNull: false),
+            ContextLessonIds: ContextPicksForWire(ContextLessonIds, lessonNames, collapseEmptyToNull: false));
     }
 
     /// <summary>
@@ -762,9 +863,9 @@ public sealed class AssignmentEditFormModel
     /// <para>Completeness rule for the walk below: it mixes <b>every</b> field
     /// <see cref="ToUpdateRequest"/> hands to the wire — the scalars in the order the projection
     /// takes them, then each child collection at the position it occupies on the request
-    /// (questions, attachments, content modules, resources, targets) — not merely the fields some
-    /// editor mutates today. The equivalence matrix is written to the same rule. A payload field
-    /// added later without its mix would make a real edit read as "clean", so the navigation prompt
+    /// (questions, attachments, content modules, resources, targets, context picks) — not merely the
+    /// fields some editor mutates today. The equivalence matrix is written to the same rule. A payload
+    /// field added later without its mix would make a real edit read as "clean", so the navigation prompt
     /// would never fire and the edit would be lost silently.</para>
     /// <para>§17 (round <c>authoring-residuals-mopup</c>) item 5: the guard reads this on EVERY render
     /// (<c>OnAfterRenderAsync</c> → <c>SyncBeforeUnloadGuardAsync</c> → <c>IsDirty</c>), so building and
@@ -780,7 +881,12 @@ public sealed class AssignmentEditFormModel
         GradingFormatDto gradingFormat,
         TargetAudienceTypeDto targetAudienceType,
         Guid topicId,
-        bool? mandatoryReview)
+        bool? mandatoryReview,
+        /// <summary>R4 (CP-5/CP-11): the same strand/lesson resolution maps the save passes to
+        /// <see cref="ToUpdateRequest"/>, so the fingerprint mixes the FILTERED picks the payload
+        /// actually carries — a dangling id the payload drops must not read as an unsaved edit.</summary>
+        IReadOnlyDictionary<Guid, string>? strandNames = null,
+        IReadOnlyDictionary<Guid, string>? lessonNames = null)
     {
         var hash = new SaveSnapshotHash();
 
@@ -894,6 +1000,26 @@ public sealed class AssignmentEditFormModel
         {
             hash.Add((int)target.Kind);
             hash.Add(target.RefId);
+        }
+
+        // ── R4 (CP-5 checklist): the context picks, in the shape ToUpdateRequest hands them to the
+        // wire — the CP-11-FILTERED lists plus the loaded marker, so "unknown, preserve" (null) and
+        // "read, empty" (a clear) fingerprint differently. Mixing the filtered set (not the raw ids)
+        // is required by the completeness rule above: a dangling id the payload drops but the
+        // snapshot kept would leave a pick-removal reading as dirty forever.
+        hash.Add(ContextPicksLoaded);
+        var strandPicks = ContextPicksForWire(ContextStrandIds, strandNames, collapseEmptyToNull: false);
+        hash.Add(strandPicks is not null);
+        foreach (var strandId in strandPicks ?? [])
+        {
+            hash.Add((Guid?)strandId);
+        }
+
+        var lessonPicks = ContextPicksForWire(ContextLessonIds, lessonNames, collapseEmptyToNull: false);
+        hash.Add(lessonPicks is not null);
+        foreach (var lessonId in lessonPicks ?? [])
+        {
+            hash.Add((Guid?)lessonId);
         }
 
         return hash.Value;

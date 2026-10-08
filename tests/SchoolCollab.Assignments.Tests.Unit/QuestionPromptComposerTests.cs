@@ -127,6 +127,67 @@ public class QuestionPromptComposerTests
             .Should().Be("10 questions · — · Balanced mix");
     }
 
+    /// <summary>R4 (CP-7; round <c>assignment-context-strands-lessons</c>): the inline summary names
+    /// the picks in CP-7's exact shape, appended after the knobs it already reported.</summary>
+    [TestMethod]
+    public void ComposeSummary_RendersThePickedStrandsAndLessons()
+    {
+        QuestionPromptComposer.ComposeSummary(
+                Inputs(strands: ["Fractions", "Decimals"], lessons: ["Equivalent fractions"]))
+            .Should().Be(
+                "10 questions · 4 easy / 4 medium / 2 hard · Multiple choice, Short answer" +
+                " · Strands: Fractions, Decimals · Lessons: Equivalent fractions");
+    }
+
+    [TestMethod]
+    public void ComposeSummary_NoPicks_RendersNoPickSegments()
+    {
+        QuestionPromptComposer.ComposeSummary(Inputs(strands: [], lessons: []))
+            .Should().Be("10 questions · 4 easy / 4 medium / 2 hard · Multiple choice, Short answer");
+    }
+
+    [TestMethod]
+    public void ComposeSummary_OnlyOnePickKind_RendersOnlyThatSegment()
+    {
+        QuestionPromptComposer.ComposeSummary(Inputs(strands: ["Fractions"])).Should().EndWith(" · Strands: Fractions");
+        QuestionPromptComposer.ComposeSummary(Inputs(lessons: ["Halves"]))
+            .Should().EndWith(" · Lessons: Halves").And.NotContain("Strands:");
+    }
+
+    /// <summary>R4 (CP-9/PB-6): the shipped parser accepts every strand/lesson ± resource
+    /// combination the composer can emit, each line independently — no parser change was needed.</summary>
+    [TestMethod]
+    public void TryParse_AcceptsEveryStrandLessonResourceCombination()
+    {
+        foreach (var resources in new IReadOnlyList<string>?[] { null, ["a.pdf"] })
+        {
+            foreach (var strands in new IReadOnlyList<string>?[] { null, ["Fractions"] })
+            {
+                foreach (var lessons in new IReadOnlyList<string>?[] { null, ["Halves"] })
+                {
+                    var narrative = QuestionPromptComposer.Compose(
+                        Inputs(resources: resources, strands: strands, lessons: lessons));
+
+                    QuestionPromptComposer.IsTemplateMatch(narrative).Should().BeTrue(
+                        $"the parser must round-trip resources={resources is not null}, strands={strands is not null}, lessons={lessons is not null}");
+                }
+            }
+        }
+    }
+
+    /// <summary>R4 (CP-9): the pick lines are each INDEPENDENTLY optional, so a lessons-only pick
+    /// set is a skeleton the composer can really emit (the lessons picker offers every lesson of the
+    /// subject while no strand is picked) and the parser must round-trip it.</summary>
+    [TestMethod]
+    public void TryParse_LessonsWithoutStrands_StillMatches()
+    {
+        var narrative = QuestionPromptComposer.Compose(Inputs(lessons: ["Halves"]));
+
+        narrative.Should().Contain("Lessons: Halves.").And.NotContain("Strands:");
+        QuestionPromptComposer.IsTemplateMatch(narrative).Should().BeTrue(
+            "each optional pick line is rendered independently, in strict order");
+    }
+
     [TestMethod]
     public void TryParse_ARoundTrippedNarrative_RecoversCountAndTypes()
     {

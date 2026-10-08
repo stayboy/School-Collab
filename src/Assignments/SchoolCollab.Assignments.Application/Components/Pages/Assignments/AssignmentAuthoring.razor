@@ -201,14 +201,40 @@
                             @QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat)
                         </p>
 
+                        @* R4 (CP-4): an explicit SelectedOptionChanged handler replaces @bind — the
+                           page must CLEAR the context picks and re-read the strand/lesson sources when the
+                           subject changes (a strand belongs to a subject). *@
                         <FormRow Label="Subject" Required For="authoring-basics-subject">
                             <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
-                                          Items="@SubjectOptions" @bind-SelectedOption="_selectedSubject"
+                                          Items="@SubjectOptions"
+                                          SelectedOption="@_selectedSubject"
+                                          SelectedOptionChanged="@OnSubjectChangedAsync"
                                           OptionText="@(o => o?.Label ?? string.Empty)"
                                           OptionValue="@(o => o?.Value ?? string.Empty)"
                                           Placeholder="@SubjectPickerPlaceholder"
                                           Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
                         </FormRow>
+
+                        @* R4 (CP-1/CP-2/CP-3, spec §6A; OD-3): the optional strands & lessons context
+                           row, directly beneath Subject. Create/Edit only — View mode renders NO pick
+                           chrome this round. The section owns no compartment title, so the Basics h3
+                           above is still the compartment's single title (X-1). *@
+                        @if (!IsReadOnly)
+                        {
+                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-basics-strands">
+                                <ContextPicksSection Model="_model"
+                                                     StrandOptions="_strandPickOptions"
+                                                     LessonOptions="_lessonPickOptions"
+                                                     StrandNames="_strandNames"
+                                                     LessonNames="_lessonNames"
+                                                     StrandsLoaded="_strandsLoaded"
+                                                     LessonsLoaded="_lessonsLoaded"
+                                                     Disabled="ContextPickersDisabled"
+                                                     DisabledReason="@ContextPickersDisabledReason"
+                                                     StrandPicksChanged="OnContextStrandPicksChangedAsync"
+                                                     Changed="OnModelChanged" />
+                            </FormRow>
+                        }
 
                         @* D1/D2: the retired Delivery & Publishing compartment's lifecycle facts and its one
                            author field. Rules is readouts-only, so the author's due date and the two
@@ -407,6 +433,8 @@
                                                        TopicId="@TopicId"
                                                        TopicName="@_selectedSubject?.Label"
                                                        TargetGradeLevels="@TargetGradeLevels"
+                                                       ContextStrandNames="@ContextStrandNames"
+                                                       ContextLessonNames="@ContextLessonNames"
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
@@ -419,6 +447,8 @@
                                                        TopicId="@TopicId"
                                                        TopicName="@_selectedSubject?.Label"
                                                        TargetGradeLevels="@TargetGradeLevels"
+                                                       ContextStrandNames="@ContextStrandNames"
+                                                       ContextLessonNames="@ContextLessonNames"
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
@@ -432,6 +462,8 @@
                                                        TopicId="@TopicId"
                                                        TopicName="@_selectedSubject?.Label"
                                                        TargetGradeLevels="@TargetGradeLevels"
+                                                       ContextStrandNames="@ContextStrandNames"
+                                                       ContextLessonNames="@ContextLessonNames"
                                                        OnConfirmed="ReloadAsync" />
                             }
                         }
@@ -610,6 +642,30 @@
     private bool _activityGroupsEnabled;
     private PickerOption[] _activityGroupOptions = [];
     private HashSet<Guid> _selectedGroupIds = [];
+
+    // ── R4 (CP-1/CP-2/CP-3/CP-11): the strands & lessons context picks ──────
+
+    /// <summary>R4 (CP-1): the selected subject's ROOT strands, as the picker's options (a
+    /// lesson — a <c>TopicStrand</c> with a parent — is deliberately filtered out: an unfiltered
+    /// fetch would surface lessons here and duplicate the lessons picker).</summary>
+    private ContextPicksSection.ContextPickOption[] _strandPickOptions = [];
+
+    /// <summary>R4 (CP-2/G31): the lessons offered by the lessons picker — the union over the
+    /// PICKED strands' lessons, or every lesson of the subject while no strand is picked.</summary>
+    private ContextPicksSection.ContextPickOption[] _lessonPickOptions = [];
+
+    /// <summary>R4 (CP-11): the ids the loaded strand list resolves, with their names — the chip
+    /// labels, the narrative's strand names and the save payload's CP-11 filter.</summary>
+    private readonly Dictionary<Guid, string> _strandNames = [];
+
+    /// <summary>R4 (CP-11): the lesson resolution map — see <see cref="_strandNames"/>.</summary>
+    private readonly Dictionary<Guid, string> _lessonNames = [];
+
+    /// <summary>R4 (P4.7/P8-4): per-fetch isolation markers. False means the list did NOT load, so
+    /// it is not authoritative: a pick it fails to resolve is PRESERVED (never marked
+    /// <c>(removed)</c>, never filtered from the payload), unlike a loaded-but-empty list.</summary>
+    private bool _strandsLoaded;
+    private bool _lessonsLoaded;
 
     /// <summary>R2/grill: the single "Targets &amp; audience" builder's entries.
     /// UI-only, in-memory (no new table/migration); each entry is a category plus the TYPED value
@@ -1068,6 +1124,38 @@
         || _loadingSubjects
         || _loadingGroupSubjects;
 
+    // ── R4 (CP-3/CP-6/CP-9): the picks' page-level projections ────────────
+
+    /// <summary>R4 (CP-3): with no subject picked there is no strand/lesson source to offer, so the
+    /// pickers render disabled with <see cref="ContextPicksSection.NoSubjectReason"/> — the
+    /// disabled-with-reason treatment, never hidden (UX-17/UX-19).</summary>
+    private bool ContextPickersDisabled => TopicId is null;
+
+    private string? ContextPickersDisabledReason =>
+        ContextPickersDisabled ? ContextPicksSection.NoSubjectReason : null;
+
+    /// <summary>R4 (CP-6): the picked strands' display NAMES, in pick order — the generation
+    /// request's structured <c>ContextStrands</c> field. A pick the loaded strand list does not
+    /// resolve contributes no name (CP-11 excludes the dangling ones; a pick whose list never loaded
+    /// could not be named at all — it stays in the payload instead).</summary>
+    private IReadOnlyList<string> ContextStrandNames => ResolvedPickNames(_model.ContextStrandIds, _strandNames);
+
+    /// <summary>R4 (CP-7): the picked lessons' display names — the half of the context that rides
+    /// the composed prompt text (and therefore disappears for a locked org, while the strands
+    /// survive on the structured field — D19/G40).</summary>
+    private IReadOnlyList<string> ContextLessonNames => ResolvedPickNames(_model.ContextLessonIds, _lessonNames);
+
+    private static IReadOnlyList<string> ResolvedPickNames(
+        IReadOnlyList<Guid> pickedIds, IReadOnlyDictionary<Guid, string> names) =>
+        pickedIds.Where(names.ContainsKey).Select(id => names[id]).ToList();
+
+    /// <summary>R4 (CP-11): the strand resolution map the save projects/filters with — null while
+    /// the list did not load, which means "not authoritative, filter nothing".</summary>
+    private IReadOnlyDictionary<Guid, string>? StrandFilterMap => _strandsLoaded ? _strandNames : null;
+
+    /// <summary>R4 (CP-11): the lesson half of <see cref="StrandFilterMap"/>.</summary>
+    private IReadOnlyDictionary<Guid, string>? LessonFilterMap => _lessonsLoaded ? _lessonNames : null;
+
     private string SubjectPickerPlaceholder =>
         KnownGradeTargetIds.Count == 0 && _selectedGroupIds.Count == 0
             ? "Select a grade level or activity group first"
@@ -1264,7 +1352,11 @@
         SelectedGradingFormat,
         DerivedTargetAudience,
         TopicId ?? Guid.Empty,
-        _mandatoryReview);
+        _mandatoryReview,
+        // R4 (CP-11): the same resolution maps the save projects with, so the fingerprint mixes the
+        // FILTERED picks the payload actually carries (a dangling id must not read as an edit).
+        StrandFilterMap,
+        LessonFilterMap);
 
     /// <summary>UX-7 (D3): moves the baseline onto the form's current content — the two moments the
     /// form IS the persisted state: the end of a load, and the component's own exit after a save
@@ -1478,6 +1570,9 @@
                 {
                     // Create has no persisted targets to lose, so its targeting editor is live.
                     _model.LoadTargets([]);
+                    // R4 (P4.6): a create genuinely starts with NO picks — marked as READ (an empty
+                    // set), so the save writes "no picks" rather than the fail-closed preserve.
+                    _model.LoadContextPicks([], []);
                 }
 
                 // Create has no persisted set to read and View does not read one either, so only the
@@ -1554,6 +1649,13 @@
         _groupSubjectOptions = [];
         _streamOptions = [];
 
+        _strandPickOptions = [];
+        _lessonPickOptions = [];
+        _strandNames.Clear();
+        _lessonNames.Clear();
+        _strandsLoaded = false;
+        _lessonsLoaded = false;
+
         _targetsAndAudience.Clear();
         _preview = null;
         _previewDegraded = false;
@@ -1588,6 +1690,179 @@
         {
             await LoadGroupSubjectsAsync();
         }
+
+        // R4 (CP-1/CP-2): the strand/lesson pick sources, read AFTER the persisted picks above
+        // because the lessons offered are the union over the PICKED strands (G31).
+        await LoadContextPickSourcesAsync(ct);
+    }
+
+    /// <summary>
+    /// R4 (CP-1/CP-2/P4.7): reads the context pick sources for the resolved subject — the root
+    /// strands, then the lessons of the picked strands. Every fetch is isolated (the
+    /// <c>/activity-groups</c> posture): a failed list leaves its marker false, so nothing is
+    /// misread as an authoritative empty list and no pick is filtered on a fetch that never
+    /// happened (P8-4).
+    /// </summary>
+    private async Task LoadContextPickSourcesAsync(CancellationToken ct)
+    {
+        _strandNames.Clear();
+        _strandPickOptions = [];
+        _strandsLoaded = false;
+        _lessonNames.Clear();
+        _lessonPickOptions = [];
+        _lessonsLoaded = false;
+
+        if (TopicId is not Guid topicId)
+        {
+            return;
+        }
+
+        await LoadStrandPickSourceAsync(topicId, ct);
+        if (ct.IsCancellationRequested)
+        {
+            return;
+        }
+
+        await LoadLessonPickSourceAsync(topicId, ct);
+    }
+
+    /// <summary>R4 (CP-1): the subject's root strands — the picker's options and the CP-11
+    /// resolution map. Fail-open: a failed fetch answers no options and leaves
+    /// <see cref="_strandsLoaded"/> false (never an empty authoritative list).</summary>
+    private async Task LoadStrandPickSourceAsync(Guid topicId, CancellationToken ct)
+    {
+        try
+        {
+            var strands = await StudentsApi.ListTopicStrandsAsync(topicId, null, ct) ?? [];
+
+            foreach (var strand in strands)
+            {
+                // A rooted row only: a `TopicStrand` with a parent IS a lesson (the
+                // strand-lesson unification model), and offering one here would duplicate the
+                // lessons picker's own list.
+                if (strand.IsLesson || strand.ParentStrandId is not null)
+                {
+                    continue;
+                }
+
+                _strandNames[strand.Id] = strand.Name;
+            }
+
+            _strandPickOptions = _strandNames
+                .OrderBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => new ContextPicksSection.ContextPickOption(pair.Key, pair.Value))
+                .ToArray();
+            _strandsLoaded = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Strand options unavailable for topic {TopicId}", topicId);
+        }
+    }
+
+    /// <summary>R4 (CP-2/G31): the lessons the picker offers — the union over the PICKED strands'
+    /// lessons (one fetch per strand, G31's stated cost), or every lesson of the subject while no
+    /// strand is picked. Fail-open like the strand half.</summary>
+    private async Task LoadLessonPickSourceAsync(Guid topicId, CancellationToken ct)
+    {
+        try
+        {
+            var strandIds = _model.ContextStrandIds.ToList();
+
+            if (strandIds.Count == 0)
+            {
+                AddLessonOptions(await StudentsApi.ListTopicLessonsAsync(topicId, null, ct) ?? []);
+            }
+            else
+            {
+                foreach (var strandId in strandIds)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    AddLessonOptions(await StudentsApi.ListTopicLessonsAsync(topicId, strandId, ct) ?? []);
+                }
+            }
+
+            _lessonPickOptions = _lessonNames
+                .OrderBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => new ContextPicksSection.ContextPickOption(pair.Key, pair.Value))
+                .ToArray();
+            _lessonsLoaded = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Lesson options unavailable for topic {TopicId}", topicId);
+        }
+
+        void AddLessonOptions(IReadOnlyList<TopicLessonDto> lessons)
+        {
+            foreach (var lesson in lessons)
+            {
+                _lessonNames[lesson.Id] = lesson.Name;
+            }
+        }
+    }
+
+    /// <summary>
+    /// R4 (CP-4): the author changed the subject. A strand belongs to a subject, so the picks are
+    /// CLEARED (marking the form dirty through the fingerprint's pick mix) and both sources are
+    /// re-read for the new topic. The cleared picks are written as a READ, empty set — the create
+    /// surface's "genuinely none" state — not as the unknown state, so the next save writes the
+    /// clear rather than preserving the previous subject's picks.
+    /// <para>A null report is NOT an author action and is ignored: this picker's options are
+    /// rebuilt under it (the grade/group subject union), so FluentUI settles an unmatched selection
+    /// to null and fires a spurious cleared callback (dropdown-ui/SKILL.md §5's double-fire). The
+    /// subject is required anyway, so honouring a null would only let an infrastructure settle clear
+    /// the author's context picks and drop the resolved topic.</para>
+    /// </summary>
+    private async Task OnSubjectChangedAsync(PickerOption? option)
+    {
+        if (option is null)
+        {
+            return;
+        }
+
+        var changed = !string.Equals(_selectedSubject?.Value, option.Value, StringComparison.Ordinal);
+        _selectedSubject = option;
+
+        // A select whose SelectedOption is absent from Items re-raises SelectedOptionChanged on every
+        // render — the same loop LoadSubjectsForGradeTargetsAsync closes for the persisted topic. A
+        // caller can still hand this handler a subject the current list does not offer (a stale target
+        // set, a host that swapped the assignment), so the chosen subject is kept selectable here too.
+        if (!_subjectOptions.Any(o => string.Equals(o.Value, option.Value, StringComparison.Ordinal)))
+        {
+            _subjectOptions = [.. _subjectOptions, option];
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        _model.LoadContextPicks([], []);
+        await LoadContextPickSourcesAsync(_loadCts?.Token ?? CancellationToken.None);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>R4 (CP-2/G31): the strand picks moved, so the lesson options the picker offers follow
+    /// them — reloaded without touching the picks themselves (the lessons fetch is scoped by
+    /// strand).</summary>
+    private async Task OnContextStrandPicksChangedAsync()
+    {
+        if (TopicId is not Guid topicId)
+        {
+            return;
+        }
+
+        await LoadLessonPickSourceAsync(topicId, _loadCts?.Token ?? CancellationToken.None);
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>Loads grade levels, activity groups (flag-gated) and, for a loaded assignment,
@@ -1692,6 +1967,13 @@
     private async Task LoadChildrenAsync(Guid assignmentId, CancellationToken ct)
     {
         _childrenLoaded = false;
+
+        // R4 (P4.6) fail-closed: the picks are UNKNOWN until this read delivers them (the model's
+        // LoadChildren marks them read); a failed/cancelled read therefore leaves the projections
+        // emitting null — the update handler's preserve — instead of an empty list that would CLEAR
+        // a picks-bearing assignment on the author's next scalar-only save.
+        _model.LoadContextPicks(null, null);
+
         try
         {
             var children = await Api.GetAuthoringChildrenAsync(assignmentId, ct);
@@ -1791,6 +2073,13 @@
     /// previous single primary grade becomes a set, so the fetch runs once per grade target with
     /// the same per-call isolation the stream-option loader uses: a grade whose subjects cannot be
     /// read simply contributes none and never fails the page.
+    /// <para>R4 (CP-4): the loaded union is ordered and set first, and the persisted topic option
+    /// already seeded by <see cref="LoadPickersAsync"/> is then KEPT after it (together with any
+    /// other option the union did not supply) rather than being replaced by it. Dropping that
+    /// option leaves the subject picker with a selected value that is not in its Items; the
+    /// explicit <c>SelectedOptionChanged</c> handler then fires repeatedly and re-renders the page
+    /// in a loop. Keeping the topic selectable matches the author's persisted subject and closes
+    /// the loop.</para>
     /// </summary>
     private async Task LoadSubjectsForGradeTargetsAsync(IReadOnlyList<Guid> gradeTargetIds, CancellationToken ct)
     {
@@ -1828,9 +2117,11 @@
             }
 
             _subjects = union.ToArray();
-            _subjectOptions = _subjects
+            var loadedIds = new HashSet<string>(union.Select(s => s.Id.ToString()));
+            _subjectOptions = union
                 .OrderBy(s => s.DisplayOrder)
                 .Select(s => new PickerOption(s.Id.ToString(), s.Name))
+                .Concat(_subjectOptions.Where(o => !loadedIds.Contains(o.Value)))
                 .ToArray();
         }
         finally
@@ -2294,7 +2585,10 @@
                     DerivedTargetAudience,
                     TopicId!.Value,
                     _mandatoryReview,
-                    _model.ToTargetDtos());
+                    _model.ToTargetDtos(),
+                    // R4 (CP-11): the resolution maps — the payload filter's authoritative source.
+                    StrandFilterMap,
+                    LessonFilterMap);
 
                 Logger.LogInformation("Creating assignment {Title} from the authoring page", _model.Title);
                 var assignmentId = await Api.CreateAsync(request, ct);
@@ -2320,7 +2614,9 @@
                 DerivedTargetAudience,
                 TopicId!.Value,
                 _mandatoryReview,
-                _model.TargetsChanged ? _model.ToTargetDtos() : null);
+                _model.TargetsChanged ? _model.ToTargetDtos() : null,
+                StrandFilterMap,
+                LessonFilterMap);
 
             Logger.LogInformation("Updating assignment {AssignmentId} from the authoring page", Id);
             await Api.UpdateAsync(Id!.Value, update, ct);

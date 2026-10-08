@@ -136,6 +136,12 @@ public sealed class DuplicateAssignmentCommandHandler(
                 clone.TenantId);
         }
 
+        // R4 (CP-5/D23): a copy carries its context picks — the same unconditional copy the
+        // modules/resources above are, and the only path by which "round-trip through
+        // create/update/duplicate" holds for the picks. Both lists are already normalized
+        // (Distinct, empty-not-null), so they pass straight through.
+        clone.SetContextPicks(source.ContextStrandIds, source.ContextLessonIds);
+
         // The duplicate IS a new assignment creation on the wire — mirror the
         // create-handler tail verbatim: enqueue the integration event for each
         // AssignmentCreatedEvent (Create() already emits it), persist, invalidate

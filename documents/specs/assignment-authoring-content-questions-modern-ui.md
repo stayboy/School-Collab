@@ -313,7 +313,7 @@ The summary line (QA-3) and this narrative are **two renderings of the same part
 | **CP-2** | **Pickers** — multi-select **strands** for the selected subject via `ListTopicStrandsAsync(topicId)`, **filtered to `IsLesson == false` / `ParentStrandId == null`** (lessons are `TopicStrand` rows too — `ListTopicStrands` returns them, so an unfiltered picker would duplicate the lessons list), and multi-select **lessons** via `ListTopicLessonsAsync(topicId, strandId?)` narrowed to the picked strands when any are picked (D25/W3). Both optional. |
 | **CP-3** | **Empty / absent states** (D26) — no subject → the pickers render **disabled with reason**; a subject with no strands/lessons → a muted note ("This subject has no strands yet."); nothing picked → "No strand selected — the AI uses the whole subject." |
 | **CP-4** | **Subject change** reloads the lists and **clears** the picks (a strand belongs to a subject), and marks the form dirty. |
-| **CP-5** | **Persistence (D23/X1 = B)** — the picks are an assignment property: persisted link rows that survive reload and round-trip through create/update/duplicate. **[R4 plan decision]** the storage shape — PostgreSQL `uuid[]` columns (`ContextStrandIds` / `ContextLessonIds`) vs a join table + entity — is settled in R4's plan; the EF migration and the contract fields (`CreateAssignmentRequest`, `UpdateAssignmentRequest`, `AssignmentSummaryDto`/read DTO, duplicate handler) land together. **[R4 plan checklist]** the picks must also join the **unsaved-changes fingerprint** — `CaptureSaveSnapshot`'s completeness rule makes a payload field without its mix read as *clean* — and the guard test `SaveSnapshot_MatchesTheSerializedPayload_OnEveryDirtyRelevantField` must be updated. |
+| **CP-5** | **Persistence (D23/X1 = B)** — the picks are an assignment property: persisted link rows that survive reload and round-trip through create/update/duplicate. **[R4 plan decision — PINNED 2026-10-07]** the storage shape is **PostgreSQL `uuid[]` columns** (`ContextStrandIds` / `ContextLessonIds` on `assignments`; no join table, no new entity — OD-1, §13.5); the EF migration and the contract fields (`CreateAssignmentRequest`, `UpdateAssignmentRequest`, **`AssignmentAuthoringChildrenDto`** — the `/authoring` children read, **not** `AssignmentSummaryDto`, which would force dead correlated projections into the list/ward/sweep reads for no consumer — OD-2, §13.5, plus the duplicate handler) land together. **[R4 plan checklist]** the picks must also join the **unsaved-changes fingerprint** — `CaptureSaveSnapshot`'s completeness rule makes a payload field without its mix read as *clean* — and the guard test `SaveSnapshot_MatchesTheSerializedPayload_OnEveryDirtyRelevantField` must be updated. |
 | **CP-6** | **Generation wiring (D24)** — the picked strands ride `QuestionGenerationRequest.ContextStrands` **structurally** — its elements are the picked strands' **display names** (the field is `IReadOnlyList<string>?`), matched 1:1 to the picked ids; the picked **lesson names** are written into the composed narrative (and are therefore stripped for a locked org, per D19). |
 | **CP-7** | **Summary (D26)** — the picks appear in the composer's config summary (QA-3), e.g. `… · Strands: Fractions · Lessons: Equivalent fractions`. |
 | **CP-8** | **Draft parity** — `QuestionsDraftSection`'s generation uses the same picks and the same composed narrative (D20). |
@@ -515,7 +515,7 @@ and is delivered as a stack layer on top of R1 if R1's PR is still open.
 | **G38** | The all-off hint (Q3) | Dialog-only; the composer summary carries `Balanced mix` | no composer-level restatement of the state |
 | **G39** | EC-10 residual guard (Q4) | `OnGenerateAsync`'s `_questionCount < 1` guard stays as defence-in-depth, untested | EC-10 is proven by the dialog suite, not the composer suite |
 | **G40** | R4's lessons channel (Q5) | Keep D24/G30 — lessons ride the narrative, **no** AI-host field | a locked org keeps strands but loses lesson names (re-confirm at R4) |
-| **G41** | R4's storage shape (Q6) | Stays a Tier-3 plan decision (CP-5) | one later decision, made by the plan author |
+| **G41** | R4's storage shape (Q6) | Stays a Tier-3 plan decision (CP-5) — **settled 2026-10-07 as `uuid[]` columns** (OD-1, §13.5) | the decision moved into R4's plan as intended |
 | **G42** | R4 timing (Q7) | R4 starts only after R3 is committed and its PR is open | R4's migration diff stays isolated from R3's UI churn |
 | **G43** | Shipping R1–R3 (Q8) | **One PR** from `feat/authoring-content-questions-modern-ui` — no related PR is open, so no stack | a larger single review; each round is documented separately |
 
@@ -528,7 +528,18 @@ and is delivered as a stack layer on top of R1 if R1's PR is still open.
 | **G46** | `Chip` coverage (Q3) | Add **`ChipBunitTests`**, and correct both CH-1 (which *prescribed* the defect) and §10's claim | a new test file in an already-large PR |
 | **G47** | The load-flaky draft-preload test (Q4) | Raise its `WaitForAssertion` budget to an explicit 5s | a longer timeout could mask a genuinely slow path (bounded, still fails loudly) |
 | **G48** | D8/VM read-only chrome (Q5) | **Withdrawn — a recorded non-goal** of this spec | View mode stays visually thinner than Edit |
-| **G49** | The manual light/dark + keyboard pass (Q6) | Run it **after the PR opens**; findings become a follow-up commit | a possible second commit on the PR |
+| **G49** | The manual light/dark + keyboard pass (Q6) | Run it **after the PR opens**; findings become a follow-up commit — **waived 2026-10-07**: the owner skipped the live pass, so R1–R3 were accepted on CI's green run alone | a possible second commit on the PR; the §12 visual/keyboard checklist stays unrun for R1–R3 |
+
+### 13.5 R4 plan decisions (owner, 2026-10-07)
+
+Declared as `Open decisions` by R4's orchestrator run and answered by the owner **before** the plan gate.
+The round doc's `## Pinned decisions` carries the orchestrator's original rationale of record.
+
+| # | Question | Owner answer |
+|---|---|---|
+| **OD-1** | CP-5 storage shape (G41-deferred) | **`uuid[]` columns** — `ContextStrandIds` / `ContextLessonIds`, two nullable arrays on `assignments`; no join table, no entity |
+| **OD-2** | Which read DTO carries the picks | **`AssignmentAuthoringChildrenDto`** (the `/authoring` children read) — not `AssignmentSummaryDto`, which would add dead correlated projections to the list/ward/sweep reads for no consumer |
+| **OD-3** | View-mode display of the picks | **None this round** — Create/Edit only; View-mode picks are a follow-up alongside the withdrawn D8/VM chrome (G48) |
 
 ---
 

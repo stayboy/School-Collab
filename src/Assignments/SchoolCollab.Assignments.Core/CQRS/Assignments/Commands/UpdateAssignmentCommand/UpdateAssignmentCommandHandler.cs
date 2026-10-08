@@ -91,6 +91,16 @@ public sealed class UpdateAssignmentCommandHandler(
             assignment.TenantId,
             inactiveGroupIds);
 
+        // R4 (CP-10/D23): the picks follow the questions/attachments precedent — null preserves
+        // the persisted set, a non-null (even empty) list is a full replacement. The gate is per
+        // PAIR of arguments while SetContextPicks preserves the kind whose argument is null, so
+        // "clear the strands and leave the lessons alone" is expressible; the whole call is
+        // skipped when neither kind was supplied, which is the null-means-preserve case.
+        if (command.ContextStrandIds is not null || command.ContextLessonIds is not null)
+        {
+            assignment.SetContextPicks(command.ContextStrandIds, command.ContextLessonIds);
+        }
+
         // Full-replacement semantics for questions + attachments (decision b):
         // snapshot existing child ids, remove each, then re-add inbound. Re-index
         // DisplayOrder 0..n by inbound list position (EC-7). When the inbound

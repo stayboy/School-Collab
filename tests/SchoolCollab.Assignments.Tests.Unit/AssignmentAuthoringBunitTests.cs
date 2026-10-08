@@ -1789,6 +1789,31 @@ public class AssignmentAuthoringBunitTests : BunitContext
         AssertSnapshotTracksPayload("difficulty mix", SnapshotProbeModel(), SnapshotProbeModel(m => m.DifficultyHardCount = 4));
         AssertSnapshotTracksPayload("AiPromptOverride", SnapshotProbeModel(), SnapshotProbeModel(m => m.AiPromptOverride = null));
 
+        // R4 (CP-5 checklist): the picks join the fingerprint. A payload field the fingerprint cannot
+        // distinguish makes a real edit read as clean, and CP-10 gives the picks THREE wire states —
+        // null (preserve) / empty (clear) / non-empty (replace). "Not loaded" is the preserve case;
+        // "loaded and empty" is the clear — the two must not collide.
+        var strandPick = Guid.NewGuid();
+        var lessonPick = Guid.NewGuid();
+        AssertSnapshotTracksPayload("context picks: not loaded → loaded-empty (preserve vs clear)",
+            SnapshotProbeModel(), SnapshotProbeModel(m => m.LoadContextPicks([], [])));
+        AssertSnapshotTracksPayload("context picks not loaded (payload-equal)",
+            SnapshotProbeModel(), SnapshotProbeModel(m => m.ContextStrandIds.Add(strandPick)));
+        AssertSnapshotTracksPayload("context strand picks",
+            SnapshotProbeModel(m => m.LoadContextPicks([], [])),
+            SnapshotProbeModel(m =>
+            {
+                m.LoadContextPicks([], []);
+                m.ContextStrandIds.Add(strandPick);
+            }));
+        AssertSnapshotTracksPayload("context lesson picks",
+            SnapshotProbeModel(m => m.LoadContextPicks([], [])),
+            SnapshotProbeModel(m =>
+            {
+                m.LoadContextPicks([], []);
+                m.ContextLessonIds.Add(lessonPick);
+            }));
+
         // OD1/D3: guardian review is nullable on the wire now — "unset" (the author left it to the
         // policy) is a different payload from an explicit value, so the fingerprint must tell them apart.
         CaptureProbe(SnapshotProbeModel(), mandatoryReview: true).Snapshot.Should().NotBe(

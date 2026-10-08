@@ -557,7 +557,10 @@ public static class AssignmentRoutes
                     // INS-1 (assignment-authoring-compartments §9): student-facing text.
                     req.Instructions,
                     // R2 (TGT-1 / D-1): the authored targeting constraints (null = none supplied).
-                    req.Targets);
+                    req.Targets,
+                    // R4 (CP-5/D23): the picked strands & lessons — opaque Students-context ids.
+                    req.ContextStrandIds,
+                    req.ContextLessonIds);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -626,7 +629,10 @@ public static class AssignmentRoutes
                     // INS-1 (assignment-authoring-compartments §9): student-facing text.
                     req.Instructions,
                     // R2 (TGT-1 / D-1 / UX-21): full-replacement when non-null, preserve when null.
-                    req.Targets);
+                    req.Targets,
+                    // R4 (CP-10/D23): null = preserve the persisted picks, empty = clear.
+                    req.ContextStrandIds,
+                    req.ContextLessonIds);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }

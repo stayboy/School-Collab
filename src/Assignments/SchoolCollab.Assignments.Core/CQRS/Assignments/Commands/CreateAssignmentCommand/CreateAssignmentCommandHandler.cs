@@ -124,6 +124,10 @@ public sealed class CreateAssignmentCommandHandler(
             assignment.TenantId,
             inactiveGroupIds);
 
+        // R4 (CP-5/D23): the picked strands & lessons. A create has no persisted set to
+        // preserve, so both lists pass straight through (null and empty both mean "no picks").
+        assignment.SetContextPicks(command.ContextStrandIds, command.ContextLessonIds);
+
         if (command.Questions is { Count: > 0 })
         {
             // Re-index DisplayOrder 0..n by list position (EC-7) — the payload's

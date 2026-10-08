@@ -86,7 +86,10 @@ public class QuestionsDraftSectionBunitTests : BunitContext
         bool promptLocked = false,
         EventCallback? onConfirmed = null,
         AssignmentEditFormModel? model = null,
-        bool expand = true)
+        bool expand = true,
+        // R4 (CP-8): the same page-supplied pick names compartment 6 receives.
+        IReadOnlyList<string>? contextStrandNames = null,
+        IReadOnlyList<string>? contextLessonNames = null)
     {
         Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
 
@@ -104,6 +107,8 @@ public class QuestionsDraftSectionBunitTests : BunitContext
             parameters.Add(p => p.PromptLocked, promptLocked);
             parameters.Add(p => p.TopicId, TopicId);
             parameters.Add(p => p.TopicName, "Photosynthesis");
+            parameters.Add(p => p.ContextStrandNames, contextStrandNames ?? []);
+            parameters.Add(p => p.ContextLessonNames, contextLessonNames ?? []);
             parameters.Add(p => p.OnConfirmed, onConfirmed ?? EventCallback.Empty);
         });
 
@@ -176,6 +181,36 @@ public class QuestionsDraftSectionBunitTests : BunitContext
             cut.Markup.Should().Contain("G-Q3");
         });
         _mockHttp.VerifyNoOutstandingExpectation();
+    }
+
+    /// <summary>R4 (CP-8): the draft surface threads the SAME pick names compartment 6 gets — its
+    /// generation rides the one shared composed-prompt seam, so its context is the page's, not a
+    /// second copy that could drift.</summary>
+    [TestMethod]
+    public void DraftGeneration_CarriesThePickedStrandsAndSummary()
+    {
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+        _mockHttp.When(HttpMethod.Put, "http://localhost/assignments/*/questions-draft")
+            .Respond(HttpStatusCode.NoContent);
+
+        var fake = new FakeQuestionGenerator();
+        var cut = RenderSection(
+            fake,
+            model: new AssignmentEditFormModel(),
+            contextStrandNames: ["Fractions"],
+            contextLessonNames: ["Equivalent fractions"]);
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.GenerateCalls.Should().Be(1));
+        fake.LastRequest!.ContextStrands.Should().Equal(new[] { "Fractions" },
+            "CP-8/D24: the draft surface's generation carries the picked strand names too");
+        cut.Find("#cq-draft-config-summary").TextContent.Should()
+            .Contain(" · Strands: Fractions")
+            .And.Contain(" · Lessons: Equivalent fractions", "CP-7: the same inline summary shape");
     }
 
     [TestMethod]

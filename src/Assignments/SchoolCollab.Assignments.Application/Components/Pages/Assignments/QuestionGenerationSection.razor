@@ -130,6 +130,19 @@
     /// <c>KnownGradeTargetIds</c> + the loaded grade levels — no new API call.</summary>
     [Parameter] public IReadOnlyList<int> TargetGradeLevels { get; set; } = [];
 
+    /// <summary>R4 (CP-6/D24): the picked strands' display NAMES, matched 1:1 to the picked ids the
+    /// page resolved. They ride the generation request's structured
+    /// <see cref="QuestionGenerationRequest.ContextStrands"/> field, which the AI host does NOT strip
+    /// under an org prompt lock — so a locked org still steers a generation by its picked strands.
+    /// <see cref="ContextLessonNames"/> deliberately does NOT share that property: the lesson names
+    /// exist only inside the composed prompt text, which the server nulls for a locked org
+    /// (D19/G40 — the recorded asymmetry this round accepts).</summary>
+    [Parameter] public IReadOnlyList<string> ContextStrandNames { get; set; } = [];
+
+    /// <summary>R4 (CP-7/CP-8/D24): the picked lessons' display NAMES — see
+    /// <see cref="ContextStrandNames"/> for why a locked org loses them.</summary>
+    [Parameter] public IReadOnlyList<string> ContextLessonNames { get; set; } = [];
+
     /// <summary>QA-3: the read-only summary line — the same parts the narrative is built from.</summary>
     private string ConfigSummary => QuestionPromptComposer.ComposeSummary(NarrativeInputs());
 
@@ -157,7 +170,12 @@
         DifficultyMedium: Model.DifficultyMediumCount,
         DifficultyHard: Model.DifficultyHardCount,
         Types: SelectedTypes(),
-        ResourceNames: ResourceNames());
+        ResourceNames: ResourceNames(),
+        // R4 (CP-8/D24): BOTH surfaces share this one composed-prompt seam. The strands ride the
+        // structured wire field (see the request below) so they survive a tenant lock; the lesson
+        // names are prompt TEXT only, so a locked org loses them (D19/G40).
+        StrandNames: ContextStrandNames,
+        LessonNames: PromptLocked ? [] : ContextLessonNames);
 
     /// <summary>PB-6: open the knobs dialog. Difficulty always opens from the PERSISTED assignment
     /// counts (PB-6(i)); the count and type mix come from the template parse only when the prompt
@@ -364,7 +382,11 @@
         var request = new QuestionGenerationRequest(
             TopicId: TopicId.Value,
             TopicName: TopicName ?? string.Empty,
-            ContextStrands: null,
+            // R4 (CP-6/D24): the picked strand NAMES, 1:1 with the picked ids (CP-11's dangling ids
+            // are already excluded). This is the round's ONLY generation-surface change: the AI
+            // host's request shape and its prompt-lock stripping are untouched (G40), and the host
+            // already forwards this structured field under a lock.
+            ContextStrands: ContextStrandNames.Count > 0 ? ContextStrandNames : null,
             QuestionCount: _questionCount,
             Types: types,
             PromptOverride: Model.AiPromptOverride,

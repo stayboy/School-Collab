@@ -69,7 +69,10 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         string? topicName = null,
         EventCallback? onQuestionsChanged = null,
         IUrlTextExtractor? urlExtractor = null,
-        Guid? assignmentId = null)
+        Guid? assignmentId = null,
+        // R4 (CP-6/CP-7/CP-8): the page-supplied pick NAMES this surface composes from.
+        IReadOnlyList<string>? contextStrandNames = null,
+        IReadOnlyList<string>? contextLessonNames = null)
     {
         Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
         // WS-B2 (step 6): the section depends on the reference-URL extraction
@@ -94,6 +97,8 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             parameters.Add(p => p.TopicId, topicId);
             parameters.Add(p => p.TopicName, topicName);
             parameters.Add(p => p.AssignmentId, assignmentId);
+            parameters.Add(p => p.ContextStrandNames, contextStrandNames ?? []);
+            parameters.Add(p => p.ContextLessonNames, contextLessonNames ?? []);
             parameters.Add(p => p.OnQuestionsChanged,
                 onQuestionsChanged ?? EventCallback.Empty);
         });
@@ -529,6 +534,95 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             "below is not vacuous");
         cut.Markup.Should().NotContain("were read but not included in this generation",
             "nothing was dropped, so no attachment warning is rendered");
+    }
+
+    // ── R4 (CP-6/CP-7/CP-8): the picked strands & lessons reach the generation ─
+
+    /// <summary>The composer's own template-matched text, so a Generate refreshes it with the picks
+    /// (QA-23's refresh only rewrites text that still structurally matches the skeleton).</summary>
+    private static string TemplatePrompt() => QuestionPromptComposer.Compose(
+        new QuestionPromptNarrativeInputs(
+            TopicName: "Topic",
+            GradeLevels: [],
+            QuestionCount: 5,
+            DifficultyEasy: null,
+            DifficultyMedium: null,
+            DifficultyHard: null,
+            Types: [],
+            ResourceNames: null));
+
+    [TestMethod]
+    public void ContextPicks_RideTheStructuredFieldAndTheNarrative()
+    {
+        var model = new AssignmentEditFormModel { AiPromptOverride = TemplatePrompt() };
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Math",
+            contextStrandNames: ["Fractions", "Decimals"],
+            contextLessonNames: ["Equivalent fractions"]);
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ContextStrands.Should().Equal(
+            new[] { "Fractions", "Decimals" },
+            "CP-6: the picked strands ride the structured, lock-proof request field as NAMES");
+        fake.LastRequest.PromptOverride.Should().Contain(
+                "Strands: Fractions, Decimals.")
+            .And.Contain("Lessons: Equivalent fractions.",
+                "CP-8: the same seam composes the lesson names into the narrative");
+
+        cut.Find("#cq-config-summary").TextContent.Should().Contain(" · Strands: Fractions, Decimals")
+            .And.Contain(" · Lessons: Equivalent fractions", "CP-7: the inline summary names the picks");
+    }
+
+    [TestMethod]
+    public void ContextPicks_LockedOrg_KeepsStrandsButDropsLessonNames()
+    {
+        var model = new AssignmentEditFormModel { AiPromptOverride = TemplatePrompt() };
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(
+            model, fake, promptLocked: true, topicId: Guid.NewGuid(), topicName: "Math",
+            contextStrandNames: ["Fractions"],
+            contextLessonNames: ["Equivalent fractions"]);
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ContextStrands.Should().Equal(new[] { "Fractions" },
+            "D24: the structured strand field survives a tenant prompt lock (the AI host does not strip it)");
+        // The prompt TEXT itself is left alone on a locked org (the client never rewrites it), which
+        // is exactly why the lesson names cannot reach the model there: they exist only in that text
+        // (D19/G40's recorded cost). The client-visible half of the asymmetry is the summary line.
+        fake.LastRequest.PromptOverride.Should().Be(TemplatePrompt(),
+            "a locked org's prompt text is not rewritten by the client");
+        cut.Find("#cq-config-summary").TextContent.Should().Contain(" · Strands: Fractions")
+            .And.NotContain("Lessons:",
+                "D19/G40: the lesson names live only in the prompt text, and a locked org loses them");
+    }
+
+    [TestMethod]
+    public void ContextPicks_None_RendersNoPickSegmentsAndSendsNull()
+    {
+        var model = new AssignmentEditFormModel { AiPromptOverride = TemplatePrompt() };
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(model, fake, topicId: Guid.NewGuid(), topicName: "Math");
+
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ContextStrands.Should().BeNull("no picks = the wire's absent field, not an empty list");
+        fake.LastRequest.PromptOverride.Should().NotContain("Strands:").And.NotContain("Lessons:");
+        cut.Find("#cq-config-summary").TextContent.Should().NotContain("Strands:");
     }
 
     // ── WS-B2 (round-10 binding list): difficulty, lock, URL cases ────────

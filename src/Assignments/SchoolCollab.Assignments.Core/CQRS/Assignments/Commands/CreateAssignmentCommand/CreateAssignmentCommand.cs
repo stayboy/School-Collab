@@ -47,4 +47,10 @@ public sealed record CreateAssignmentCommand(
     /// <summary>R2 (TGT-1 / D-1): the authored targeting constraints. Null = none supplied;
     /// a non-null list must hold at least one entry (TGT-13). The handler attaches them with
     /// <c>SetTargets</c> once the tenant is stamped.</summary>
-    IReadOnlyList<AssignmentTargetDto>? Targets = null) : ICommand;
+    IReadOnlyList<AssignmentTargetDto>? Targets = null,
+    /// <summary>R4 (CP-5/D23): the picked strand ids, threaded to
+    /// <c>Assignment.SetContextPicks</c> (a create passes both lists straight through — there is
+    /// no persisted state to preserve).</summary>
+    IReadOnlyList<Guid>? ContextStrandIds = null,
+    /// <summary>R4 (CP-5/D23): the picked lesson ids — see <see cref="ContextStrandIds"/>.</summary>
+    IReadOnlyList<Guid>? ContextLessonIds = null) : ICommand;

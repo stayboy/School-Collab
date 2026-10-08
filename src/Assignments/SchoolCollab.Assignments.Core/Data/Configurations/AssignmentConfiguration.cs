@@ -87,6 +87,26 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.ApprovedBy);
         builder.Property(x => x.ApprovedAt);
 
+        // ── R4 (CP-5/D23): the authoring context picks ─────────────────────────
+        // Two Npgsql first-class `uuid[]` arrays (no owned entity, no converter, no join
+        // table) — the picks are an opaque id set with no per-row metadata, and a join
+        // table's only real advantage (referential integrity) is impossible here because the
+        // strands/lessons live in the Students context's database.
+        //
+        // NOT NULL with an empty-array default: the CLR properties are non-nullable, so EF
+        // marks the columns required, and the default backfills every existing row in the one
+        // additive ADD COLUMN — a NOT NULL column with no default would fail on a non-empty
+        // table. "No picks" therefore has exactly one representation, the empty array: the
+        // property initializer runs at construction only, so a NULL column value would not
+        // read back as empty. No index: the picks feed no query path (they ride the single-row
+        // authoring-children read), and one would be speculative scaffolding.
+        builder.Property(x => x.ContextStrandIds)
+            .HasColumnType("uuid[]")
+            .HasDefaultValue(Array.Empty<Guid>());
+        builder.Property(x => x.ContextLessonIds)
+            .HasColumnType("uuid[]")
+            .HasDefaultValue(Array.Empty<Guid>());
+
 
         builder.HasIndex(x => x.TopicId)
             .HasDatabaseName("ix_assignments_topic_id");

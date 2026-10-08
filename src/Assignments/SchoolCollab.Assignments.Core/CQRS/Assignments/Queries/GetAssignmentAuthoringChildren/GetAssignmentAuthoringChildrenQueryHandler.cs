@@ -88,6 +88,17 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
             .Select(t => new AssignmentTargetDto((TargetKindDto)t.Kind, t.RefId, t.DisplayOrder))
             .ToList();
 
-        return new AssignmentAuthoringChildrenDto(assignment.Id, questions, attachments, resources, targets);
+        return new AssignmentAuthoringChildrenDto(
+            assignment.Id,
+            questions,
+            attachments,
+            resources,
+            targets,
+            // R4 (CP-5/CP-11, OD-2): the picks live on the aggregate (not on a child table), and
+            // they ride this read so the Edit surface's pickers start from the persisted set —
+            // the same fail-closed load-half posture as the targeting rows above. Always a list
+            // (possibly empty), never null: one representation of "no picks".
+            assignment.ContextStrandIds,
+            assignment.ContextLessonIds);
     }
 }

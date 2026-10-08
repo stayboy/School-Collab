@@ -1,0 +1,297 @@
+@*
+    R4 (spec §6A CP-1/CP-2/CP-3/CP-11) — the Basics compartment's "Strands & lessons" row.
+
+    Two OPTIONAL multi-value pickers (D25) that give a generation its subject context:
+    the root strands of the picked subject, and the lessons of the picked strands (the
+    strand-lesson unification model: a lesson IS a `TopicStrand` row with a parent). The
+    picks are a persisted assignment property — this component only edits the form model's
+    pick lists; the page owns the option/name sources, the fetches and the save project.
+
+    The control vehicle is the raw `FluentSelect` with `Multiple` (the repo's own
+    multi-select precedent — `GradeLevelCreateDialog.razor`, `JoinGroupsDialog.razor`,
+    `TeacherEditDialog.razor`; `dropdown-ui/SKILL.md` routes multi-select pickers to the raw
+    control because every shared wrapper is single-value), with the picks rendered beneath it
+    as dismissible `Chip`s (`Admin.Shared/Components/Chip.razor`, the
+    `TargetsAndAudienceDialog` precedent) so a pick the control can no longer offer — a
+    dangling id (CP-11) — still has a home and a remove action.
+
+    Deliberately NO compartment title of its own: the Basics `<h3>` above is still rendered
+    exactly once, by the page (X-1).
+*@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+
+<div class="context-picks">
+    @if (DisabledReason is not null)
+    {
+        <p class="context-picks__reason" id="authoring-context-picks-reason">@DisabledReason</p>
+    }
+
+    <div class="context-picks__row">
+        <FluentSelect TOption="ContextPickOption" Id="authoring-basics-strands"
+                      Items="@StrandOptions"
+                      OptionText="@(o => o?.Label ?? string.Empty)"
+                      OptionValue="@(o => o?.Id.ToString() ?? string.Empty)"
+                      Multiple="true"
+                      SelectedOptions="@SelectedStrandOptions"
+                      SelectedOptionsChanged="@OnSelectedStrandOptionsChanged"
+                      Disabled="@(Disabled || !StrandsLoaded)"
+                      aria-label="Strands"
+                      Title="@StrandPickerTitle" />
+        <div class="context-picks__chips" id="authoring-basics-strand-chips">
+            @foreach (var id in Model.ContextStrandIds)
+            {
+                <Chip Label="@StrandChipLabel(id)"
+                      Subtitle="@StrandChipSubtitle(id)"
+                      DismissTitle="Remove strand"
+                      OnDismiss="@(() => RemoveStrand(id))" />
+            }
+        </div>
+    </div>
+
+    @if (StrandNoteText is not null)
+    {
+        <p class="context-picks__note" id="authoring-strands-none">@StrandNoteText</p>
+    }
+
+    <div class="context-picks__row">
+        <FluentSelect TOption="ContextPickOption" Id="authoring-basics-lessons"
+                      Items="@LessonOptions"
+                      OptionText="@(o => o?.Label ?? string.Empty)"
+                      OptionValue="@(o => o?.Id.ToString() ?? string.Empty)"
+                      Multiple="true"
+                      SelectedOptions="@SelectedLessonOptions"
+                      SelectedOptionsChanged="@OnSelectedLessonOptionsChanged"
+                      Disabled="@(Disabled || !LessonsLoaded)"
+                      aria-label="Lessons"
+                      Title="@LessonPickerTitle" />
+        <div class="context-picks__chips" id="authoring-basics-lesson-chips">
+            @foreach (var id in Model.ContextLessonIds)
+            {
+                <Chip Label="@LessonChipLabel(id)"
+                      Subtitle="@LessonChipSubtitle(id)"
+                      DismissTitle="Remove lesson"
+                      OnDismiss="@(() => RemoveLesson(id))" />
+            }
+        </div>
+    </div>
+
+    @if (LessonNoteText is not null)
+    {
+        <p class="context-picks__note" id="authoring-lessons-none">@LessonNoteText</p>
+    }
+</div>
+
+@code {
+    /// <summary>CP-11: the marker a pick carries when the successfully-loaded picker list does not
+    /// resolve its id — the strand/lesson was deleted (or is no longer offered) since it was
+    /// picked. Such a pick is excluded from the narrative, the prompt summary and the save
+    /// payload.</summary>
+    public const string RemovedPickMarker = "(removed)";
+
+    /// <summary>CP-3's subject-less state note — the reason BOTH pickers render disabled with while
+    /// no subject is picked (UX-17/UX-19's disabled-with-reason treatment; the pickers are never
+    /// hidden).</summary>
+    public const string NoSubjectReason = "Select a subject first — strands and lessons belong to it.";
+
+    /// <summary>CP-3: the strand source resolved EMPTY for a picked subject.</summary>
+    public const string NoStrandsText = "This subject has no strands yet.";
+
+    /// <summary>CP-3: nothing is picked, so the AI uses the whole subject.</summary>
+    public const string NoStrandPickedText = "No strand selected — the AI uses the whole subject.";
+
+    /// <summary>CP-3: the lesson source resolved empty for the picked strands (or the whole
+    /// subject when no strand is picked).</summary>
+    public const string NoLessonsText = "No lessons for this strand yet.";
+
+    /// <summary>P4.7's per-fetch isolation: the strand/lesson list did not load. Deliberately a
+    /// DIFFERENT note from <see cref="NoStrandsText"/>/<see cref="NoLessonsText"/> — an unreadable
+    /// list is not an empty one, and CP-11's <c>(removed)</c> marker must never be derived from a
+    /// fetch that never happened (the pick is preserved in the payload instead).</summary>
+    public const string PickSourceUnavailableText = "…is unavailable right now — reload the page to try again.";
+
+    /// <summary>One picker option: the id plus its display label. Declared here (not shared with the
+    /// page's own <c>PickerOption</c>, which is nested in the authoring component) — the
+    /// <c>TargetsAndAudienceDialog</c> precedent.</summary>
+    public sealed record ContextPickOption(Guid Id, string Label);
+
+    /// <summary>The form model that owns the picked ids — the single source of truth the control
+    /// mirrors, exactly as the targeting pickers mirror the model's target rows.</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
+
+    /// <summary>The pickable ROOT strands of the selected subject (never lesson rows: an unfiltered
+    /// fetch would surface lessons here too and duplicate the lessons picker).</summary>
+    [Parameter] public IReadOnlyList<ContextPickOption> StrandOptions { get; set; } = [];
+
+    /// <summary>The pickable lessons — the union over the picked strands' lessons, or every lesson
+    /// of the subject while no strand is picked.</summary>
+    [Parameter] public IReadOnlyList<ContextPickOption> LessonOptions { get; set; } = [];
+
+    /// <summary>The ids the successfully-loaded strand list resolves, with their display names (the
+    /// CP-11 resolution map and the chip label source).</summary>
+    [Parameter] public IReadOnlyDictionary<Guid, string> StrandNames { get; set; } = new Dictionary<Guid, string>();
+
+    /// <summary>The lesson resolution map — see <see cref="StrandNames"/>.</summary>
+    [Parameter] public IReadOnlyDictionary<Guid, string> LessonNames { get; set; } = new Dictionary<Guid, string>();
+
+    /// <summary>Whether the strand list LOADED (authoritative, possibly empty) — the marker that
+    /// separates CP-3's "no strands yet" from <see cref="PickSourceUnavailableText"/>.</summary>
+    [Parameter] public bool StrandsLoaded { get; set; }
+
+    /// <summary>Whether the lesson list loaded — see <see cref="StrandsLoaded"/>.</summary>
+    [Parameter] public bool LessonsLoaded { get; set; }
+
+    /// <summary>CP-3: with no subject picked there is nothing to pick from, so both pickers render
+    /// disabled. The page also sets this on a read-only surface (OD-3: no View-mode pickers).</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>The inline reason rendered beside the disabled pickers — <see cref="NoSubjectReason"/>
+    /// from the page.</summary>
+    [Parameter] public string? DisabledReason { get; set; }
+
+    /// <summary>Raised after the strand picks change, so the page can re-read the lesson options for
+    /// the newly picked strands (G31: the lessons fetch is per picked strand).</summary>
+    [Parameter] public EventCallback StrandPicksChanged { get; set; }
+
+    /// <summary>Raised after either pick kind changes, so the page can re-render (the
+    /// <c>QuestionEditorSection</c> precedent).</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IEnumerable<ContextPickOption> SelectedStrandOptions =>
+        StrandOptions.Where(o => Model.ContextStrandIds.Contains(o.Id));
+
+    private IEnumerable<ContextPickOption> SelectedLessonOptions =>
+        LessonOptions.Where(o => Model.ContextLessonIds.Contains(o.Id));
+
+    private string StrandPickerTitle => StrandsLoaded
+        ? "Pick the strands this assignment's questions should focus on. Optional — with none picked the AI uses the whole subject."
+        : PickSourceUnavailableText;
+
+    private string LessonPickerTitle => LessonsLoaded
+        ? "Pick the lessons this assignment's questions should focus on. Optional — the lessons offered follow the picked strands."
+        : PickSourceUnavailableText;
+
+    /// <summary>CP-3's strand note, exactly one of which ever renders: the empty-source note, the
+    /// unavailable note, the "nothing picked" note, or nothing at all.</summary>
+    private string? StrandNoteText
+    {
+        get
+        {
+            if (Disabled || !StrandsLoaded)
+            {
+                return null;
+            }
+
+            if (StrandOptions.Count == 0)
+            {
+                return NoStrandsText;
+            }
+
+            return Model.ContextStrandIds.Count == 0 ? NoStrandPickedText : null;
+        }
+    }
+
+    /// <summary>CP-3's lesson note — the lessons row's own muted none-note.</summary>
+    private string? LessonNoteText
+    {
+        get
+        {
+            if (Disabled || !LessonsLoaded)
+            {
+                return null;
+            }
+
+            return LessonOptions.Count == 0 ? NoLessonsText : null;
+        }
+    }
+
+    /// <summary>Writes the control's strand selection back to the model, then tells the page the
+    /// lesson scope moved. Ids the picker does not offer (a dangling pick) are DROPPED here: the
+    /// control is the author's authoritative strand selection, and a pick this list does not resolve
+    /// is excluded from the payload anyway (CP-11). The callbacks are raised only when the set
+    /// actually changed, so a programmatic re-render of the same selection cannot re-enter the load
+    /// path (the page-level wiring reloads lessons on this event).</summary>
+    private async Task OnSelectedStrandOptionsChanged(IEnumerable<ContextPickOption>? selected)
+    {
+        var selectedIds = (selected ?? []).Select(o => o.Id).ToList();
+        if (selectedIds.SequenceEqual(Model.ContextStrandIds))
+        {
+            return;
+        }
+
+        Model.ContextStrandIds.Clear();
+        Model.ContextStrandIds.AddRange(selectedIds);
+
+        await StrandPicksChanged.InvokeAsync();
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>Writes the control's lesson selection back to the model. Ignored entirely while the
+    /// lesson list is NOT loaded: a report over an option set that never loaded is not an author's
+    /// selection, and honouring it would silently clear valid picks (P8-4's fetch-failure rule
+    /// applied to the interactive path). The callback is raised only when the set actually changed,
+    /// so a programmatic re-render cannot loop.</summary>
+    private async Task OnSelectedLessonOptionsChanged(IEnumerable<ContextPickOption>? selected)
+    {
+        if (!LessonsLoaded)
+        {
+            return;
+        }
+
+        var selectedIds = (selected ?? []).Select(o => o.Id).ToList();
+        if (selectedIds.SequenceEqual(Model.ContextLessonIds))
+        {
+            return;
+        }
+
+        Model.ContextLessonIds.Clear();
+        Model.ContextLessonIds.AddRange(selectedIds);
+
+        await Changed.InvokeAsync();
+    }
+
+    private async Task RemoveStrand(Guid id)
+    {
+        var removed = Model.ContextStrandIds.RemoveAll(x => x == id) > 0;
+        if (!removed)
+        {
+            return;
+        }
+
+        await StrandPicksChanged.InvokeAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task RemoveLesson(Guid id)
+    {
+        var removed = Model.ContextLessonIds.RemoveAll(x => x == id) > 0;
+        if (!removed)
+        {
+            return;
+        }
+
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>CP-11: a resolved pick names itself; an UNRESOLVED one is marked
+    /// <see cref="RemovedPickMarker"/>; while the list never loaded the pick is neither — it renders
+    /// the id-less unavailable state (the fetch failure is not evidence the entity is gone).</summary>
+    private string StrandChipLabel(Guid id) => ChipLabel(StrandNames, StrandsLoaded, id, "Strand");
+
+    private string LessonChipLabel(Guid id) => ChipLabel(LessonNames, LessonsLoaded, id, "Lesson");
+
+    private static string ChipLabel(
+        IReadOnlyDictionary<Guid, string> names, bool loaded, Guid id, string noun) =>
+        names.TryGetValue(id, out var name) ? name
+        : loaded ? $"{noun} {RemovedPickMarker}"
+        : $"{noun} (unavailable)";
+
+    /// <summary>The chip's secondary line: the raw pick id, so a marked pick the author cannot name
+    /// is still identifiable. Null for a resolved pick (its name is the whole signal).</summary>
+    private static string? ChipSubtitleFor(IReadOnlyDictionary<Guid, string> names, Guid id) =>
+        names.ContainsKey(id) ? null : id.ToString();
+
+    private string? StrandChipSubtitle(Guid id) => ChipSubtitleFor(StrandNames, id);
+
+    private string? LessonChipSubtitle(Guid id) => ChipSubtitleFor(LessonNames, id);
+}

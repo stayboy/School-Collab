@@ -45,4 +45,10 @@ public sealed record UpdateAssignmentCommand(
     string? Instructions = null,
     /// <summary>R2 (TGT-1 / D-1 / UX-21): the authored targeting constraints — full
     /// replacement when non-null, preserve when null. Threaded to <c>SetTargets</c>.</summary>
-    IReadOnlyList<AssignmentTargetDto>? Targets = null) : ICommand;
+    IReadOnlyList<AssignmentTargetDto>? Targets = null,
+    /// <summary>R4 (CP-10/D23): the picked strand ids — null preserves the persisted set, a
+    /// non-null (even empty) list is a full replacement. Threaded to
+    /// <c>Assignment.SetContextPicks</c>, which preserves the kind whose argument is null.</summary>
+    IReadOnlyList<Guid>? ContextStrandIds = null,
+    /// <summary>R4 (CP-10/D23): the picked lesson ids — see <see cref="ContextStrandIds"/>.</summary>
+    IReadOnlyList<Guid>? ContextLessonIds = null) : ICommand;
