@@ -37,6 +37,23 @@ public class InstructionEditorListBunitTests : BunitContext
         };
 
     [TestMethod]
+    public void ReadOnly_RendersTheBlocksWithoutAffordances()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Text, Text = "Read it twice." },
+        };
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.ReadOnly, true));
+
+        cut.FindAll("#instr-add").Should().BeEmpty("View mode offers no add affordance");
+        cut.FindAll("#instr-remove-0").Should().BeEmpty("…and no destructive one either");
+        cut.Markup.Should().Contain("Read it twice.", "the block's payload is shown, not editable");
+    }
+
+    [TestMethod]
     public void Empty_RendersTheEmptyStateAndTheAddAffordance()
     {
         var cut = Render([]);

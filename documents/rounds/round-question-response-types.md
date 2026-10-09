@@ -417,3 +417,34 @@ the same list, so the two cannot drift without a test noticing.
 2. **A7**: the route-level 400 test for the typed rule rejections (kinds + D15).
 3. The round's work is **uncommitted** — PR #324 currently carries the pre-A6 layer only.
 
+## 16. A6 complete (2026-10-09, uncommitted)
+
+| Piece | What landed |
+|---|---|
+| Instructions compartment | `AssignmentAuthoring.razor` renders the shared `InstructionEditorList` under the Instructions text field (`#authoring-instruction-items`), wired to the page's staging seam and `ReadOnly="@IsReadOnly"` for View mode — so the two owners use one editor and the text keeps rendering first (§5.7) |
+| U4 banner | `#authoring-response-kinds-banner` beside the error bar: "N question(s) need a response definition…", shown only where `RequiresResponseKinds` holds and a question has none. It uses **the same predicate the server enforces**, so the banner can never disagree with the 400 a save would return |
+| Read-only mode | the component gains `ReadOnly` — kind + payload shown, no add/remove affordances (the posture the Instructions textarea already takes) |
+
+### Third wipe-class bug found and fixed
+
+`AssignmentEditFormModel` marks the assignment's instruction rows as *loaded* only from a children read; a
+**Create** surface never loads, so a block the author added there projected `null` = "preserve" and was
+silently dropped on create. Fixed with `MarkInstructionItemsLoaded(...)`, called at the same three sites the
+page already marks the context picks (`LoadContextPicks([], [])` twice for Create, `(null, null)` for the
+reset) — the two markers now move in lockstep.
+
+### Tests (5 new)
+
+`Edit_InstructionsCompartment_RendersTheSharedInstructionEditor` ·
+`Edit_InstructionBlockAddedInTheCompartment_RidesTheSavePayload` (the PUT body carries the block) ·
+`ResponseKindsBanner_TeacherMarkedLegacyQuestion_ShowsTheCount` ·
+`ResponseKindsBanner_AutoScoredAssignment_IsAbsent` · `ReadOnly_RendersTheBlocksWithoutAffordances`.
+The fixture's `MakeChildren` now carries `InstructionItems` (the real read always delivers the list).
+
+**Evidence:** Assignments unit suite **1064 total · 1064 passed · 0 failed**; Application builds 0 errors.
+
+### The only thing left in the round
+
+**A7**: the route-level 400 test for the two typed rule rejections (kinds + D15). Everything else the spec
+asks for is implemented, tested and documented.
+

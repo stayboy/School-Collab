@@ -238,8 +238,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         IReadOnlyList<AssignmentQuestionReadDto>? questions = null,
         IReadOnlyList<AssignmentAttachmentReadDto>? attachments = null,
         IReadOnlyList<ResourceDto>? resources = null,
-        IReadOnlyList<AssignmentTargetDto>? targets = null) =>
-        new(Guid.NewGuid(), questions ?? [], attachments ?? [], resources ?? [], targets ?? []);
+        IReadOnlyList<AssignmentTargetDto>? targets = null,
+        IReadOnlyList<InstructionReadDto>? instructionItems = null) =>
+        new(Guid.NewGuid(), questions ?? [], attachments ?? [], resources ?? [], targets ?? [],
+            // QR-5: the real children read always delivers the list (empty = none recorded), so the
+            // fixture defaults to the empty list — the fail-closed "unknown read" case is its own test.
+            InstructionItems: instructionItems ?? []);
 
     /// <param name="enterEditFields">assignment-create-edit-redesign D1: Edit/View routes now open
     /// on the SUMMARY surface, so a test that inspects the compartment form must flip the pencil.
@@ -1757,6 +1761,82 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() =>
             cut.Find("#authoring-error").TextContent.Should().Contain("at least one response kind",
                 "the author is told WHICH question needs a definition, before any request is sent"));
+    }
+
+    [TestMethod]
+    public void Edit_InstructionsCompartment_RendersTheSharedInstructionEditor()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle(
+                "QR-5/§5.6: the assignment's own instruction blocks live in the Instructions compartment"),
+            TimeSpan.FromSeconds(5));
+        cut.FindAll("#authoring-instruction-items-add").Should().ContainSingle(
+            "…as the same shared editor the question dialog uses");
+    }
+
+    [TestMethod]
+    public async Task Edit_InstructionBlockAddedInTheCompartment_RidesTheSavePayload()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+
+        var editor = cut.FindComponent<InstructionEditorList>();
+        await cut.InvokeAsync(() => editor.Instance.AddAsync());
+
+        // The shared editor mutates the MODEL's own row, and the payload is projected from the model at
+        // save time — so the text is set on the row rather than through the DOM (Fluent's inner <input>
+        // is not up in bUnit; the same reason the checkbox is driven through its component instance).
+        editor.Instance.Rows.Should().ContainSingle();
+        editor.Instance.Rows[0].Text = "Watch the worked example first.";
+
+        string? updateBody = null;
+        _mockHttp.Expect(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}")
+            .With(req =>
+            {
+                updateBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.NoContent);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        updateBody.Should().Contain("Watch the worked example first.",
+            "the assignment's own instruction rides the create/update payload");
+    }
+
+    [TestMethod]
+    public void ResponseKindsBanner_TeacherMarkedLegacyQuestion_ShowsTheCount()
+    {
+        // MakeDto defaults to Teacher Marked, where a definition is required — and LoadedQuestion(kinds:
+        // false) is a question saved before response definitions existed.
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Find("#authoring-response-kinds-banner").TextContent
+            .Should().Contain("1 question(s) need a response definition",
+                "U4: the legacy question is surfaced as a count the author can act on"));
+    }
+
+    [TestMethod]
+    public void ResponseKindsBanner_AutoScoredAssignment_IsAbsent()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, grading: GradingFormatDto.AutoGraded),
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"), TimeSpan.FromSeconds(5));
+        cut.FindAll("#authoring-response-kinds-banner").Should().BeEmpty(
+            "Auto Scored forbids every kind, so nothing is missing on it (round Q1(ii))");
     }
 
     [TestMethod]

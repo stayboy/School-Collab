@@ -16,21 +16,30 @@
             @foreach (var (row, index) in Rows.Select((r, i) => (r, i)))
             {
                 <li class="cq-instruction-row" @key="row">
-                    <DropdownForEnum TEnum="InstructionKindDto"
-                                     @bind-SelectedValue="row.Kind"
-                                     Label="Kind"
-                                     Class="cq-instruction-kind" />
+                    @if (ReadOnly)
+                    {
+                        <span class="cq-instruction-kind cq-instruction-kind-readonly">@EnumHelper.GetDescription(row.Kind)</span>
+                    }
+                    else
+                    {
+                        <DropdownForEnum TEnum="InstructionKindDto"
+                                         @bind-SelectedValue="row.Kind"
+                                         Label="Kind"
+                                         Class="cq-instruction-kind" />
+                    }
 
                     @switch (row.Kind)
                     {
                         case InstructionKindDto.Text:
                             <FluentTextField @bind-Value="row.Text"
+                                             ReadOnly="@ReadOnly"
                                              Placeholder="What the student should read or do"
                                              class="cq-instruction-payload" />
                             break;
 
                         case InstructionKindDto.Url:
                             <FluentTextField @bind-Value="row.Url"
+                                             ReadOnly="@ReadOnly"
                                              Placeholder="https://…"
                                              class="cq-instruction-payload" />
                             break;
@@ -50,31 +59,40 @@
                                 <span class="cq-instruction-file" title="@row.FileName">
                                     @row.FileName (@AttachmentUploadPolicy.FormatFileSize(row.FileSize))
                                 </span>
-                                <FluentButton Appearance="Appearance.Stealth"
-                                              Id="@($"{Id}-clear-media-{index}")"
-                                              OnClick="@(() => ClearMediaAsync(row))"
-                                              aria-label="Remove the attached file">×</FluentButton>
+                                @if (!ReadOnly)
+                                {
+                                    <FluentButton Appearance="Appearance.Stealth"
+                                                  Id="@($"{Id}-clear-media-{index}")"
+                                                  OnClick="@(() => ClearMediaAsync(row))"
+                                                  aria-label="Remove the attached file">×</FluentButton>
+                                }
                             }
                             break;
                     }
 
-                    <FluentButton Appearance="Appearance.Stealth"
-                                  Id="@($"{Id}-remove-{index}")"
-                                  OnClick="@(() => RemoveAsync(row))"
-                                  aria-label="Remove instruction">×</FluentButton>
+                    @if (!ReadOnly)
+                    {
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      Id="@($"{Id}-remove-{index}")"
+                                      OnClick="@(() => RemoveAsync(row))"
+                                      aria-label="Remove instruction">×</FluentButton>
+                    }
                 </li>
             }
         </ul>
     }
 
-    <div class="cq-instruction-actions">
-        <FluentButton Appearance="Appearance.Outline"
-                      Id="@($"{Id}-add")"
-                      IconStart="@FluentIcons.Add"
-                      OnClick="AddAsync">
-            Add instruction
-        </FluentButton>
-    </div>
+    @if (!ReadOnly)
+    {
+        <div class="cq-instruction-actions">
+            <FluentButton Appearance="Appearance.Outline"
+                          Id="@($"{Id}-add")"
+                          IconStart="@FluentIcons.Add"
+                          OnClick="AddAsync">
+                Add instruction
+            </FluentButton>
+        </div>
+    }
 
     @if (_error is not null)
 @code {
@@ -92,6 +110,10 @@
 
     /// <summary>Raised after any mutation, so the host can re-render counts and its submit gate.</summary>
     [Parameter] public EventCallback Changed { get; set; }
+
+    /// <summary>View mode (the authoring page's <c>IsReadOnly</c>): the blocks render as read-only text
+    /// with no add/remove affordances — the same posture the Instructions textarea takes.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
 
     private bool _staging;
     private string? _error;

@@ -299,6 +299,13 @@ public sealed class AssignmentEditFormModel
     /// the editors disabled in that case — a cleared form is never submitted as a
     /// replacement).
     /// </summary>
+    /// <summary>QR-5: marks the assignment's instruction blocks KNOWN — a Create surface genuinely
+    /// starts with none, so its list is "empty", not "unknown" (the <c>LoadContextPicks([], [])</c>
+    /// posture the page already uses). Pass <paramref name="loaded"/> false for a reset that must go
+    /// back to the fail-closed preserve. Without the Create marking, a block the author adds there
+    /// would project null = "preserve" and be silently dropped.</summary>
+    public void MarkInstructionItemsLoaded(bool loaded = true) => InstructionItemsLoaded = loaded;
+
     /// <summary>QR-5: loads the assignment's own instruction blocks and records whether the read
     /// delivered them at all — null means UNKNOWN (the fail-closed posture), never "none".</summary>
     private void LoadInstructionItems(IReadOnlyList<InstructionReadDto>? items)
