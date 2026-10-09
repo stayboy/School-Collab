@@ -564,6 +564,10 @@ public static class AssignmentRoutes
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
+            catch (AssignmentTypeGradingValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
             catch (AssignmentQuestionValidationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
@@ -635,6 +639,10 @@ public static class AssignmentRoutes
                     req.ContextLessonIds);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
+            }
+            catch (AssignmentTypeGradingValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
             }
             catch (AssignmentNotFoundException)
             {

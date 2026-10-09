@@ -278,16 +278,29 @@
                              these are neither (enum-with-description, see above).
                            *@
                             <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
-                                          Items="@TypeOptions" @bind-SelectedOption="_selectedType"
+                                          Items="@TypeOptions"
+                                          SelectedOption="@_selectedType"
+                                          SelectedOptionChanged="@OnTypeChangedAsync"
                                           OptionText="@(o => o?.Label ?? string.Empty)"
                                           OptionValue="@(o => o?.Value ?? string.Empty)"
                                           Disabled="@IsReadOnly" Class="w-6" />
                             <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
-                                          Items="@GradingFormatOptions" @bind-SelectedOption="_selectedGradingFormat"
+                                          Items="@GradingFormatOptions"
+                                          SelectedOption="@_selectedGradingFormat"
+                                          SelectedOptionChanged="@OnGradingFormatChanged"
                                           OptionText="@(o => o?.Label ?? string.Empty)"
                                           OptionValue="@(o => o?.Value ?? string.Empty)"
                                           Disabled="@IsReadOnly" Class="w-6" />
                         </FormRow>
+
+                        @* D15 (owner, 2026-10-09): an applied side effect with a visible reason —
+                           the CP-4 subject-change shape. Rendered only after a type change
+                           actually switched the grading format, so the author is never left
+                           wondering why their grading choice moved. *@
+                        @if (_gradingSwitchReason is not null)
+                        {
+                            <p class="authoring-hint" id="authoring-grading-switched">@_gradingSwitchReason</p>
+                        }
 
                         @* D6/§3: Due date sits directly after the type & grading choice — the date an
                            author sets right after deciding WHAT the assignment is. *@
@@ -833,6 +846,10 @@
     // Type / grading / review selection state.
     private PickerOption? _selectedType;
     private PickerOption? _selectedGradingFormat;
+
+    /// <summary>D15: set only while an automatic type→grading switch is in force; the note it
+    /// feeds explains the applied change and clears the moment the author picks a format.</summary>
+    private string? _gradingSwitchReason;
     private bool _mandatoryReview = true;
 
     /// <summary>D2/OD4: the single resolved effective policy the Rules readouts and the
@@ -1243,14 +1260,21 @@
         "What these drive: the grading format powers the scoring fields below — Auto Scored and "
         + "Instant Feedback score submissions automatically at submit and unlock the Pass threshold "
         + "(Instant Feedback shows students their per-question results right away; Auto Scored holds "
-        + "them for your review); Teacher Marked leaves all marking to you and disables those fields. "
-        + "The assignment type joins the grading format in gating AI question generation (below).";
+        + "them for your review); Teacher Marked leaves all marking to you and disables those fields.";
 
-    /// <summary>D11 + D14f: the paired row's ONE label carries one (i) help icon whose tooltip
-    /// is three labelled lines — the purpose sentence (D14f), the AI-availability text and the
-    /// feedback-mode narrative — no inline prose anywhere.</summary>
+    /// <summary>D15: the selected type's own meaning — the owner's definition, verbatim (D14f's
+    /// hint now also states the type→grading rule, so an author can see WHY a format is missing).</summary>
+    private string TypeMeaningHint => SelectedType is { } type
+        ? $"{AssignmentTypeGradingRules.TypeDefinesGradingHint}: "
+          + AssignmentTypeGradingRules.MeaningOf(type)
+        : string.Empty;
+
+    /// <summary>D11 + D14f + D15: the paired row's ONE label carries one (i) help icon whose
+    /// tooltip is four labelled lines — what the fields drive, the selected type's meaning (with
+    /// the type→grading rule), the AI-availability text and the feedback-mode narrative — no
+    /// inline prose anywhere.</summary>
     private string GradingRowHelp =>
-        $"{TypeGradingPurposeHint}\n{GenerationHintTooltip}\n{FeedbackModeTooltip}";
+        $"{TypeGradingPurposeHint}\n{TypeMeaningHint}\n{GenerationHintTooltip}\n{FeedbackModeTooltip}";
 
     /// <summary>D1: the pencil's click handler — flips to the full form. Never guarded (D9):
     /// nothing is navigated to and nothing is discarded.</summary>
@@ -1325,6 +1349,40 @@
         _selectedGradingFormat is not null
             ? (GradingFormatDto)int.Parse(_selectedGradingFormat.Value)
             : _item?.GradingFormat ?? GradingFormatDto.TeacherGraded;
+
+    /// <summary>D15 (owner, 2026-10-09): the assignment type defines which grading formats are
+    /// possible, and the matrix lives in exactly one place — <see cref="AssignmentTypeGradingRules"/>
+    /// (Contracts, the only project both this UI and the domain handlers can see), which the
+    /// create/update handlers also enforce. The page speaks the DTO enums directly.</summary>
+    private static PickerOption GradingOptionFor(GradingFormatDto format) =>
+        new(((int)format).ToString(), EnumHelper.GetDescription(format));
+
+    /// <summary>D15: a type change can invalidate the current grading format (an Offline
+    /// assignment is always Teacher Marked), so the page applies the type's fallback and records
+    /// the reason for the #authoring-grading-switched note — never a silent rewrite. The CP-4
+    /// subject-change handler is the precedent for an applied side effect with a visible reason.</summary>
+    private Task OnTypeChangedAsync(PickerOption? option)
+    {
+        _selectedType = option;
+        _gradingSwitchReason = null;
+
+        if (SelectedType is { } type
+            && !AssignmentTypeGradingRules.IsPermitted(type, SelectedGradingFormat))
+        {
+            _selectedGradingFormat = GradingOptionFor(AssignmentTypeGradingRules.FallbackFor(type));
+            _gradingSwitchReason = AssignmentTypeGradingRules.FormatSwitchedReason;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>D15: an author's own grading pick clears the switch note — it explained a past
+    /// automatic change, not a standing condition.</summary>
+    private void OnGradingFormatChanged(PickerOption? option)
+    {
+        _selectedGradingFormat = option;
+        _gradingSwitchReason = null;
+    }
 
     /// <summary>D-1: the legacy compat audience the request still carries, DERIVED from the
     /// authored target rows by the same precedence the aggregate applies in
@@ -1554,12 +1612,29 @@
         new(((int)AssignmentTypeDto.Manual).ToString(), EnumHelper.GetDescription(AssignmentTypeDto.Manual))
     ];
 
-    private PickerOption[] GradingFormatOptions =>
-    [
-        new(((int)GradingFormatDto.TeacherGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.TeacherGraded)),
-        new(((int)GradingFormatDto.AutoGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.AutoGraded)),
-        new(((int)GradingFormatDto.InstantGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.InstantGraded))
-    ];
+    /// <summary>D15 (owner, 2026-10-09): the picker offers only the formats the SELECTED type
+    /// permits — an Offline assignment is always Teacher Marked. Q3's legacy tolerance keeps an
+    /// out-of-matrix persisted pick in the list so its label still renders; the value is never
+    /// silently rewritten, and an impossible pair is rejected server-side by
+    /// <c>AssignmentTypeGradingRules.EnsurePermitted</c>.</summary>
+    private PickerOption[] GradingFormatOptions
+    {
+        get
+        {
+            var type = SelectedType ?? AssignmentTypeDto.Manual;
+            var options = AssignmentTypeGradingRules.PermittedFormats(type)
+                .Select(GradingOptionFor)
+                .ToList();
+
+            if (_selectedGradingFormat is { } selected
+                && options.All(option => option.Value != selected.Value))
+            {
+                options.Insert(0, selected);
+            }
+
+            return [.. options];
+        }
+    }
 
     // ── Live recipient preview (TGT-16 / D-4) ─────────────────────────────────
 
@@ -1878,8 +1953,10 @@
                     _model.LoadFrom(_item);
                     _mandatoryReview = _item.MandatoryReview;
                     _selectedType = TypeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
-                    _selectedGradingFormat = GradingFormatOptions
-                        .FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
+                    // D15/Q3: resolve the persisted format from the FULL enum, never from the
+                    // filtered picker — an out-of-matrix stored pair (e.g. an older Offline + Auto
+                    // Scored row) must keep its value and label instead of resolving to null.
+                    _selectedGradingFormat = GradingOptionFor(_item.GradingFormat);
                 }
             }
             else if (Mode == AssignmentAuthoringMode.Create)
@@ -1887,8 +1964,7 @@
                 // A new assignment starts on the authored defaults the retired wizard used
                 // (Offline / Teacher Marked / no targets yet — TGT-13 requires the author to add one).
                 _selectedType = TypeOptions.Single(o => o.Value == ((int)AssignmentTypeDto.Manual).ToString());
-                _selectedGradingFormat = GradingFormatOptions
-                    .Single(o => o.Value == ((int)GradingFormatDto.TeacherGraded).ToString());
+                _selectedGradingFormat = GradingOptionFor(GradingFormatDto.TeacherGraded);
             }
 
             await LoadPickersAsync(_item, ct);

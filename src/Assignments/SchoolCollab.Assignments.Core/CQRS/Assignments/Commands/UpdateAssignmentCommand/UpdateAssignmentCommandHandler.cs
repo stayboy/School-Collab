@@ -54,6 +54,12 @@ public sealed class UpdateAssignmentCommandHandler(
         var policy = await assignmentPolicyResolver.ResolveAsync(
             AssignmentPolicyScope.DeriveGrade(policyGradeIds), cancellationToken);
 
+        // D15 (owner, 2026-10-09): reject an impossible type/grading pair before the aggregate
+        // is mutated (an Offline assignment is always Teacher Marked).
+        AssignmentTypeGradingRules.EnsurePermitted(
+            (AssignmentTypeDto)(int)command.AssignmentType,
+            (GradingFormatDto)(int)command.GradingFormat);
+
         assignment.Update(
             command.Title,
             command.Description,

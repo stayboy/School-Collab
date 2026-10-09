@@ -84,6 +84,12 @@ public sealed class CreateAssignmentCommandHandler(
         var policy = await assignmentPolicyResolver.ResolveAsync(
             DerivePolicyGrade(command.Targets), cancellationToken);
 
+        // D15 (owner, 2026-10-09): the assignment type defines the permitted grading formats —
+        // an Offline assignment can never be auto-scored. Fail before the aggregate is built.
+        AssignmentTypeGradingRules.EnsurePermitted(
+            (AssignmentTypeDto)(int)command.AssignmentType,
+            (GradingFormatDto)(int)command.GradingFormat);
+
         var assignment = Assignment.Create(
             command.Title,
             command.Description,

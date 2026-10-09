@@ -1068,6 +1068,83 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
+    // ── D15 (owner, 2026-10-09): the assignment type defines the available grading formats ──
+
+    /// <summary>D15: the grading picker offers only what the selected type permits — an Offline
+    /// assignment is Teacher Marked only, while Online and Hybrid keep all three formats.</summary>
+    [TestMethod]
+    public void GradingPicker_OffersOnlyTheSelectedTypesPermittedFormats()
+    {
+        var offline = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Manual,
+                grading: GradingFormatDto.TeacherGraded));
+
+        offline.WaitForAssertion(() =>
+            Picker(offline, "authoring-basics-grading").Items!.Select(option => option.Value)
+                .Should().Equal(
+                    new[] { ((int)GradingFormatDto.TeacherGraded).ToString() },
+                    "offline work is handwritten — there is nothing for the engine to score"));
+
+        var online = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Digital,
+                grading: GradingFormatDto.AutoGraded));
+
+        online.WaitForAssertion(() =>
+            Picker(online, "authoring-basics-grading").Items!.Select(option => option.Value)
+                .Should().Equal(
+                    new[]
+                    {
+                        ((int)GradingFormatDto.TeacherGraded).ToString(),
+                        ((int)GradingFormatDto.AutoGraded).ToString(),
+                        ((int)GradingFormatDto.InstantGraded).ToString(),
+                    },
+                    "the details are published online, so a teacher may mark by hand or let the engine score"));
+    }
+
+    /// <summary>D15: switching to Offline while an auto format is selected applies the type's
+    /// fallback and SAYS SO — the CP-4 applied-side-effect shape, never a silent rewrite.</summary>
+    [TestMethod]
+    public async Task SwitchingToOffline_MovesTheGradingFormat_AndExplainsWhy()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Digital,
+                grading: GradingFormatDto.AutoGraded));
+
+        await SelectAsync(cut, "authoring-basics-type", ((int)AssignmentTypeDto.Manual).ToString());
+
+        cut.WaitForAssertion(() =>
+        {
+            Picker(cut, "authoring-basics-grading").SelectedOption!.Value
+                .Should().Be(((int)GradingFormatDto.TeacherGraded).ToString(),
+                    "an Offline assignment is always Teacher Marked");
+            cut.Find("#authoring-grading-switched").TextContent.Trim()
+                .Should().Be(AssignmentTypeGradingRules.FormatSwitchedReason,
+                    "an applied side effect is never silent");
+        });
+    }
+
+    /// <summary>D15/Q3 (legacy tolerance): a persisted out-of-matrix pair keeps its label and is
+    /// never rewritten on load — the picker shows what is stored until the author changes it.</summary>
+    [TestMethod]
+    public void LegacyOfflineWithAnAutoFormat_KeepsTheStoredPick()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Manual,
+                grading: GradingFormatDto.AutoGraded));
+
+        cut.WaitForAssertion(() =>
+        {
+            Picker(cut, "authoring-basics-grading").Items!.Select(option => option.Value)
+                .Should().Contain(((int)GradingFormatDto.AutoGraded).ToString(),
+                    "the out-of-matrix stored value stays in the list so its label renders");
+            Picker(cut, "authoring-basics-grading").SelectedOption!.Value
+                .Should().Be(((int)GradingFormatDto.AutoGraded).ToString(),
+                    "the page never rewrites the persisted pair on load");
+            cut.FindAll("#authoring-grading-switched").Should().BeEmpty(
+                "no automatic switch happened — the note explains an applied change, not a condition");
+        });
+    }
+
     [TestMethod]
     public void ChangingGradingFormat_TogglesEnablement_NotPresence()
     {
@@ -1522,8 +1599,10 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 .GetAttribute("title") ?? string.Empty;
             gradingRowHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
                 "D14f: the row's (i) icon explains what type & grading DRIVE, not just what they are");
-            gradingRowHelp.Split('\n').Should().HaveCount(3,
-                "D14f/Q1a: three labelled lines — purpose, AI availability, feedback mode");
+            gradingRowHelp.Should().Contain(AssignmentTypeGradingRules.OnlineMeaning,
+                "D15: the row also states the SELECTED type's own meaning (Online in this fixture)");
+            gradingRowHelp.Split('\n').Should().HaveCount(4,
+                "D14f/D15: four labelled lines — purpose, the type's meaning, AI availability, feedback mode");
             basics.QuerySelector("#scoringFieldsPassScore").Should().NotBeNull();
             cut.FindAll("#authoring-submission").Should().BeEmpty(
                 "D1: the Submission & Sign-off compartment is retired");

@@ -343,3 +343,29 @@ Three P2 fixes applied (owner "all as recommended" after a grill round):
 
 Post-fix re-verification: no residual jargon/old wording; fences balanced in all three edited files.
 
+
+**Follow-up 9 — D15: the assignment type defines the grading format (owner, 2026-10-09, same branch)**
+
+Owner supplied the three type definitions and the rule that follows, then grilled ("all as
+recommended") and asked for a plan before code. Delivered after the plan was approved:
+
+| Piece | Detail |
+|---|---|
+| `Contracts/AssignmentTypeGradingRules.cs` (**new**) | The owner's three definitions verbatim + the matrix (**Offline → Teacher Marked only**; Online/Hybrid keep all three), `PermittedFormats` / `IsPermitted` / `FallbackFor` / `EnsurePermitted` / `NotPermittedMessage`, plus `AssignmentTypeGradingValidationException`. Lives in **Contracts** because `Assignments.Application` does not reference `Assignments.Core` (verified) and Contracts is the only shared project — no architecture test forbids the Application→Core reference, but this keeps the UI free of the domain assembly |
+| Create + Update handlers | `EnsurePermitted((AssignmentTypeDto)(int)command.AssignmentType, …)` before the aggregate is built/mutated |
+| `AssignmentRoutes` (+2 catches) | `AssignmentTypeGradingValidationException` → **400**, beside the existing typed validators on both the create and update routes |
+| `AssignmentAuthoring.razor` | Type select drives `OnTypeChangedAsync`: on an invalidating change the grading picker switches to `FallbackFor` **and** renders `#authoring-grading-switched` with `FormatSwitchedReason` (cleared by the author's own pick); `GradingFormatOptions` filters by the type **and keeps an out-of-matrix persisted pick** so its label renders; the load path resolves the stored format from the **full enum** (a bug the new tests caught — `FirstOrDefault` over the filtered list silently dropped the value); the row hint gains a fourth line (the rule + the selected type's meaning) |
+| Tests | **new** `AssignmentTypeGradingRulesTests` (matrix, fallback, guard message in the owner's vocabulary, every permitted pair accepted, definitions); 3 new bUnit tests in `AssignmentAuthoringBunitTests` (picker filters per type · type-switch applies + explains · legacy pair keeps its pick with no note) + the scoring test's help-title assertion widened to four lines and the Online meaning |
+| Docs | **new** `documents/solution/assignment-type-grading-definitions.md` (definitions, the grading-format behaviours, the rule, why Contracts, the UX rules, the FR-220 relationship); spec D15 row + §9 item 13 |
+
+Gates: Application and Core build 0 errors · `SchoolCollab.Assignments.Tests.Unit`
+**1020/1020 passed** (test csproj built with `/p:BuildProjectReferences=false` — the owner's
+running F5 session holds the Worker's bin).
+
+**Named next step (owner request, same message):** a follow-up spec for *writing questions* —
+per-question **response definitions** (video · recorded audio · uploaded resource (doc/image)
+· or a mix, chosen at question setup), **teacher instructions on a question** (text · audio ·
+video · URL/image resource), and for **Teacher Marked** assignments a required teacher
+**review + response** per submitted response; the AI generation either emits those definitions
+or (as it stands) leaves generated questions for the author to complete.
+
