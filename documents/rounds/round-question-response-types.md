@@ -14,9 +14,9 @@ settled) — read it first; this round doc is the execution plan, not the design
 | A2 Domain | **done** — enums, `AssignmentInstruction`, aggregate collection/accessor/setter, `AssignmentQuestion.ResponseKinds` (+ persisted as an array property), `AddQuestion(responseKinds:)` + `RemoveQuestion` purging its instruction rows, the ≥1-kind rule in `QuestionOptionDtoValidator`, and `InstructionDtoValidator` for instruction payloads (Text needs text · Url an absolute http(s) URL · media the staged file's name/type/path). Core builds 0 errors |
 | A4 Persistence + migration | **generated, presented for the gate** — `assignment_questions.response_kinds` (`integer[]`, NOT NULL, default `{}` — the one additive `ADD COLUMN`, safe on populated tables) and the new `assignment_instructions` table (nullable `question_id`, `kind` default 0, media columns, `display_order`, PK, FK→assignments cascade, indexes on `assignment_id` + `question_id`). File: `Migrations/20261009052346_AddAssignmentInstructionsAndResponseKinds.cs`. **Not applied to any database** — it lands as a file for review; the migration test follows in A7 |
 | A5 Handlers | **done** — `InstructionItems` on both commands + routes; both handlers validate instructions and the media rule and map kinds/instructions onto the re-mint; the children read round-trips them; the two data-loss paths (draft **confirm**, **duplicate**) now carry kinds + instruction rows; `QuestionResponseKindValidationException` mapped to **400** on both routes. Core + Application + Api build 0 errors |
-| A6 UI | **in progress** — the model half is done and green: `QuestionEditorRow` carries `ResponseKinds` + `Instructions`, `AssignmentEditFormModel` carries the assignment's own `InstructionItems` behind the fail-closed `InstructionItemsLoaded` marker (the `ContextPicksLoaded` posture), both projections + `LoadChildren` round-trip them, and `QuestionsPassSubmitGate` mirrors the scoped kinds rule so a legacy Teacher-Marked question is a one-line prompt instead of a server 400. New `InstructionEditorRow` (one shape, two owners, `ToDto()`). Controls pending: the kind picker, the instruction list component, the compartment block |
-| A7 Tests | **in progress** — suite **1029 total · 1029 passed · 0 failed**; new `QuestionResponseKindRulesTests` (7) + the Q1(ii) boundary tests in the create-handler suite (2); the Teacher-Marked draft fixtures now carry kinds. Still to add: the migration test (populated-DB apply, FK cascade, indexes, enum-array round-trip, `RemoveQuestion` purge) and a route-level 400 for the kinds mapping |
-| A8 Docs | pending |
+| A6 UI | **done** — the model half (`QuestionEditorRow` kinds + instructions, `AssignmentEditFormModel`'s own `InstructionItems` behind the fail-closed `InstructionItemsLoaded` marker, `QuestionsPassSubmitGate`) plus the controls: the response-kind picker (canonical order, disabled-with-reason on Auto/Instant), the shared `InstructionEditorList` in the question dialog **and** the Instructions compartment block, the U4 banner, and View-mode read-only rendering. See §13–§16 |
+| A7 Tests | **done** — Assignments unit suite **1064 total · 1064 passed · 0 failed**; `QuestionResponseKindRulesTests` (7), the Q1(ii) boundary tests, the instruction validator/handler round-trips, the migration test on real Postgres (**2/2**), the A6 UI tests, and the route-level 400 test (`AssignmentRuleRejectionRouteTests`, 6 cases — API project **166/166**). See §16–§17 |
+| A8 Docs | **done** (the spec's "optionally") — `documents/solution/question-response-definitions.md` records the definitions, the owner rule and the two rules' shared write-surface guard |
 
 **Design deviations from the spec's sketch (recorded, both build-verified):**
 
@@ -411,13 +411,13 @@ Owner answered **all as recommended** on the four findings from §14 and the int
 allow-list change; the `AttachmentUploadPolicy` client mirror and the server `StagedFileValidator` read
 the same list, so the two cannot drift without a test noticing.
 
-### Still open (the whole remainder)
+### Still open at the time of this grill (both since closed)
 
-1. **A6**: the Instructions compartment block on the authoring page + the U4 banner.
-2. **A7**: the route-level 400 test for the typed rule rejections (kinds + D15).
-3. The round's work is **uncommitted** — PR #324 currently carries the pre-A6 layer only.
+1. **A6**: the Instructions compartment block + the U4 banner — **done, §16**.
+2. **A7**: the route-level 400 test for the typed rule rejections (kinds + D15) — **done, §17**.
+3. The round's work was uncommitted then; §16's layer reached PR #324 as `b53158fe`.
 
-## 16. A6 complete (2026-10-09, uncommitted)
+## 16. A6 complete (2026-10-09, committed as `b53158fe`)
 
 | Piece | What landed |
 |---|---|
@@ -445,6 +445,41 @@ The fixture's `MakeChildren` now carries `InstructionItems` (the real read alway
 
 ### The only thing left in the round
 
-**A7**: the route-level 400 test for the two typed rule rejections (kinds + D15). Everything else the spec
-asks for is implemented, tested and documented.
+**A7**: the route-level 400 test for the two typed rule rejections (kinds + D15) — **landed, §17**.
+
+## 17. A7 complete — the route-level 400 test (2026-10-09)
+
+`tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentRuleRejectionRouteTests.cs` — 6 cases proving
+the two typed rule rejections reach the client as a **400 carrying the rule's own message**, on
+**both** write surfaces.
+
+| Case | Asserts |
+|---|---|
+| `Create_` / `Update_MediaKindRejection_Is400_WithTheRulesOwnMessage` | QR/Q5 — `QuestionResponseKindValidationException` on `POST /assignments` **and** `PUT /assignments/{id}` |
+| `Create_` / `Update_OfflineAutoScoredRejection_Is400_WithTheRulesOwnMessage` | D15 — `AssignmentTypeGradingValidationException` on both surfaces |
+| `Create_ACleanHandler_Is201_…` / `Update_ACleanHandler_Is204_…` | the controls: the same body on the same route succeeds when the handler does not reject |
+
+Two design points worth keeping:
+
+- **The messages come from the production producers.** Each case builds its exception by *calling* the
+  real guard — `QuestionResponseKindRules.EnsurePermitted(...)`,
+  `AssignmentTypeGradingRules.EnsurePermitted(...)` — inside a try/catch, so the assertion cannot drift
+  from the rule's text the way a copied string would.
+- **The controls are the point.** A bare status assertion cannot tell a catch arm from a mis-bound body
+  (both are 400s), and the catch arms are duplicated per verb — exactly the wiring one copy loses. The
+  controls prove the payload binds and the route resolves when the handler is clean, so the four 400s
+  above can only be the mapping.
+
+Harness: `SignOffRoutesTests`' minimal TestServer (`MapAssignmentEndpoints` over a
+`FEATURE:DisableOIDCAuth`-ON flag stub, handlers scripted directly) — no Postgres, RabbitMQ or Keycloak.
+
+**Evidence:** the API route-test project **166 total · 166 passed · 0 failed** (its 6 new cases
+included); solution build **0 errors**.
+
+### Feature A — closed
+
+Every spec task (A1–A7) is implemented, tested and documented; the spec's own §7.3 was amended this
+pass to record the route test landing and to keep its two deliberate deferrals honest (the legacy-row
+prompt/backfill — now *surfaced* by the U4 banner but untouched by design — and Q6's AI contract
+widening). The uncommitted state is this section's layer only.
 

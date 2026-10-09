@@ -218,10 +218,16 @@ format generation lives on. Settled:
 | R3 | Consequence for generation: **unchanged this round** (Q6 stands). Kind-less drafts are legal on the formats generation is offered on, and the author completes the definitions in the editor |
 | R4 | Consequence for the other write paths: the questions-draft **confirm** and **duplicate** handlers carry `ResponseKinds` + instruction rows across their re-mints — omitting them silently changed what a question asked for (or dropped an assignment's instructions) |
 
+Landed 2026-10-09 (A7): both typed rejections now have a route-level test —
+`AssignmentRuleRejectionRouteTests` covers the kinds rule (QR/Q5) **and** D15's type↔grading rule on
+**both** write surfaces (`POST /assignments`, `PUT /assignments/{id}`), each paired with a control that
+proves the 400 comes from the catch arm rather than from body binding.
+
 Still open, deliberately deferred: the **legacy Teacher Marked rows** (empty kinds, indistinguishable
-from "author cleared it" — the column default is the empty array) need an editor prompt or a backfill;
-the **AI contract widening** (Q6's named follow-up); and a **route-level 400 test** for the kinds
-mapping (the D15 mapping has no route test either).
+from "author cleared it" — the column default is the empty array) need an editor **prompt or a
+backfill** — the U4 banner now *surfaces* them ("N questions need a response definition"), but it does
+not touch a pre-existing row, so the indistinguishable state stays until an author edits it; and the
+**AI contract widening** (Q6's named follow-up).
 
 ## 8. Follow-up feature (owner, 2026-10-09): WYSIWYG rich instruction
 
