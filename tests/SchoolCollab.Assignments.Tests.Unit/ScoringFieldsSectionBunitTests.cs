@@ -10,16 +10,16 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// <summary>
 /// WS-A3 (spec §3.3 + §7 Q4) — <see cref="ScoringFieldsSection"/>
 /// renders the Pass Score input for AutoGraded / InstantGraded; for
-/// TeacherGraded it renders <b>disabled with an inline reason</b>
-/// (assignment-authoring-compartments UX-17/D12 — never hidden, so the authoring page does
-/// not reflow when the grading format changes). The <c>ScoringFieldsPassSubmitGate</c>
-/// safety rule is unchanged: a TeacherGraded submit never blocks on the hidden-then,
-/// disabled-now values.
+/// TeacherGraded it renders <b>a disabled checkbox whose LABEL carries the
+/// reason</b> (D11, assignment-create-edit-redesign — no inline paragraphs,
+/// no disabled number field). The <c>ScoringFieldsPassSubmitGate</c>
+/// safety rule is unchanged: a TeacherGraded submit never blocks on the
+/// disabled state's values.
 ///
 /// Round <c>authoring-compact-fields</c> (OD1): the attempt cap moved out of this section into the
 /// authoring page's Basics <c>(Max score · Max attempts)</c> pair, so these tests pin the section's
-/// new shape — ONE number field — and the shared gate the page still asks for the moved control.
-/// The cap's disabled-with-reason behaviour is pinned at page level
+/// shape — ONE control, the number field or its D11 checkbox — and the shared gate the page still
+/// asks for the moved control. The cap's disabled-with-reason behaviour is pinned at page level
 /// (<c>AssignmentAuthoringBunitTests.TeacherGraded_ScoringFields_RenderDisabledWithReason</c>).
 /// </summary>
 [TestClass]
@@ -73,16 +73,18 @@ public class ScoringFieldsSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            // UX-17 / D12 (assignment-authoring-compartments §12): inapplicable controls are
-            // disabled with an inline reason, never hidden — the compartment must not reflow
-            // when the grading format changes.
-            var fields = cut.FindAll("fluent-number-field");
-            fields.Should().ContainSingle("only the Pass Score field is this section's (OD1)");
-            fields.Should().OnlyContain(f => f.HasAttribute("disabled"),
-                "TeacherGraded disables the Pass Score field");
+            // D11 (assignment-create-edit-redesign): the inapplicable state is a DISABLED
+            // CHECKBOX whose LABEL carries the reason — never the number field, never a
+            // standalone paragraph; the control id survives in both states.
+            cut.FindAll("fluent-number-field").Should().BeEmpty(
+                "D11: the number field is replaced by the checkbox while inapplicable");
+            var passScore = cut.Find("#scoringFieldsPassScore");
+            passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox");
+            passScore.HasAttribute("disabled").Should().BeTrue(
+                "TeacherGraded disables the control");
+            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
+                "the checkbox's label explains why scoring cannot be edited");
             cut.Markup.Should().Contain("Pass Score");
-            cut.Markup.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the inline reason explains why the field cannot be edited");
         });
     }
 

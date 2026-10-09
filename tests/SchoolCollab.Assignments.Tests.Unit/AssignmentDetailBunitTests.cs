@@ -221,12 +221,12 @@ public class AssignmentDetailBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Scheduled");
-            // Round authoring-compact-fields paired Status with Available from, so the label no longer
-            // reads "Available from" alone — the scheduled window is asserted through the Basics
-            // lifecycle readout itself (UX-15), which is what the old text proxy stood in for.
-            cut.Find("#authoring-basics-available-from").TextContent.Trim()
+            // assignment-create-edit-redesign D2/D3: the View surface the Detail page embeds is now
+            // the SUMMARY, so the scheduled window is asserted through its facts grid (the same
+            // local-time "g" rendering the Basics lifecycle readout used).
+            cut.Find("#authoring-fact-available-from").TextContent.Trim()
                 .Should().Be(dto.AvailableFromUtc!.Value.ToLocalTime().ToString("g"),
-                    "the Basics lifecycle readout surfaces the Scheduled window (UX-15)");
+                    "the summary facts grid surfaces the Scheduled window (UX-15)");
             // §11: Scheduled's primary action is Unpublish; the secondary actions are in the
             // kebab (Reschedule replaces the retired "Cancel schedule" button).
             cut.Find("#authoring-primary-action").TextContent.Trim().Should().Be("Unpublish");

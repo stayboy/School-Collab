@@ -25,7 +25,7 @@
     internally for a later status so hosts never test the status themselves.
 
     Layout (UX-3/UX-4/UX-8): all five compartments stacked in one scroll as
-    section-card-style blocks, a sticky compartment jump-nav, and a sticky action bar whose
+    section-card-style blocks and a sticky action bar whose
     primary action follows the §11 status matrix with the secondary actions in a kebab.
 
     Conditional fields follow UX-17/UX-18/UX-19 — inapplicable controls render DISABLED
@@ -45,6 +45,29 @@
 
 <ErrorBoundary>
     <ChildContent>
+        <div class="authoring-page">
+            @* D8 (assignment-create-edit-redesign): breadcrumb navigation — the crumb trail sits at
+               the top of EVERY branch (spec §6: while `_item` is null — loading or not found — it
+               degrades to `Assignments › …`). First FluentBreadcrumb usage in the repo. *@
+            <nav id="authoring-breadcrumb" class="authoring-breadcrumb" aria-label="Breadcrumb">
+                <FluentBreadcrumb>
+                    <FluentBreadcrumbItem Href="/assignments">Assignments</FluentBreadcrumbItem>
+                    @if (Mode == AssignmentAuthoringMode.Create)
+                    {
+                        <FluentBreadcrumbItem>New assignment</FluentBreadcrumbItem>
+                    }
+                    else if (_item is not null)
+                    {
+                        <FluentBreadcrumbItem Href="@($"/assignments/{_item.Id}")">@_item.Title</FluentBreadcrumbItem>
+                        <FluentBreadcrumbItem>@CurrentCrumb</FluentBreadcrumbItem>
+                    }
+                    else
+                    {
+                        <FluentBreadcrumbItem>…</FluentBreadcrumbItem>
+                    }
+                </FluentBreadcrumb>
+            </nav>
+
         @if (_loading)
         {
             <FluentProgressRing />
@@ -56,7 +79,6 @@
         }
         else
         {
-            <div class="authoring-page">
                 <header class="authoring-actionbar">
                     <div class="authoring-title-group">
                         <h2 class="authoring-heading">@HeadingText</h2>
@@ -66,6 +88,17 @@
                         }
                     </div>
                     <div class="authoring-actionbar-controls">
+                        @* D1/D7: the edit-fields view's exit — pure presentation state, so it never
+                           routes and never triggers the UX-7 guard (D9: nothing is discarded by the
+                           flip, the form model travels with it). *@
+                        @if (!ShowSummary && Mode != AssignmentAuthoringMode.Create)
+                        {
+                            <FluentButton Id="authoring-summary-back"
+                                          Appearance="Appearance.Outline"
+                                          IconStart="@FluentIcons.ArrowLeft"
+                                          Disabled="@_busy"
+                                          OnClick="ExitEditFieldsView">Back to summary</FluentButton>
+                        }
                         @if (PrimaryActionLabel is not null)
                         {
                             <FluentButton Id="authoring-primary-action"
@@ -88,16 +121,9 @@
                     </div>
                 </header>
 
-                <nav class="authoring-jumpnav" aria-label="Assignment compartments">
-                    @foreach (var compartment in Compartments)
-                    {
-                        <FluentAnchor @key="compartment.Anchor"
-                                      Id="@($"jump-{compartment.Anchor}")"
-                                      Appearance="Appearance.Hypertext"
-                                      Href="@($"#authoring-{compartment.Anchor}")"
-                                      class="authoring-jumpnav-link">@compartment.Title</FluentAnchor>
-                    }
-                </nav>
+                @* D12 (owner, 2026-10-08): the compartment jump-nav is REMOVED. It was the
+                   submenu list under the page title; the sections themselves (and their ids) stay,
+                   so the kebab's `#authoring-questions` anchor still resolves. *@
 
                 @if (!string.IsNullOrEmpty(_error))
                 {
@@ -113,27 +139,66 @@
                     <p class="authoring-reason" id="authoring-unsaved-edits-discarded">@UnsavedEditsDiscardedNotice</p>
                 }
 
+                @* ── Summary view (D1/D2/D3, assignment-create-edit-redesign) ────────────
+                   The Edit route's DEFAULT surface: a read-only facts card with the pencil (top
+                   right) as the ONLY entry to the input fields. Questions & AI and the Targets
+                   accordion render below it (outside this block) — always on, ready for editing. *@
+                @if (ShowSummary && _item is not null)
+                {
+                    <section id="authoring-summary" class="authoring-summary" aria-label="Assignment summary">
+                        <div class="authoring-summary__header">
+                            <div class="authoring-title-group">
+                                <h3 class="authoring-summary__title">@_item.Title</h3>
+                                <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
+                            </div>
+                            @if (EffectiveMode == AssignmentAuthoringMode.Edit)
+                            {
+                                @* D3: the pencil exists ONLY while the assignment still accepts
+                                   structural edits (Draft|Scheduled). Published/Closed/Archived get
+                                   the same summary without it. *@
+                                <FluentButton Id="authoring-summary-edit"
+                                              Appearance="Appearance.Accent"
+                                              IconStart="@FluentIcons.Edit"
+                                              Title="Edit assignment details"
+                                              AriaLabel="Edit assignment details"
+                                              OnClick="EnterEditFieldsView" />
+                            }
+                        </div>
+                        <dl class="authoring-summary__facts">
+                            @foreach (var fact in SummaryFacts)
+                            {
+                                <div class="authoring-fact" @key="fact.Id">
+                                    <dt class="authoring-fact__label">@fact.Label</dt>
+                                    <dd class="authoring-fact__value" id="@fact.Id">@fact.Value</dd>
+                                </div>
+                            }
+                        </dl>
+                    </section>
+                }
+
                 @* ── 1 · Basics (the always-on spine, §3/UX-12) ───────────────── *@
+                @if (!ShowSummary)
+                {
                 <div class="authoring-layout">
                     <section id="authoring-basics" class="authoring-compartment">
                         <h3 class="authoring-compartment-title">Basics</h3>
 
+                        @* D6/§3 (assignment-create-edit-redesign): Status & available from LEAD the
+                           form — the lifecycle readout an author checks first. Description and
+                           Instructions moved to the bottom "Instructions" compartment (D5). *@
+                        <FormRow Label="Status &amp; available from" AlignTop
+                                 For="authoring-basics-status">
+                            <span class="authoring-readonly-value" id="authoring-basics-status">
+                                @(_item?.Status.ToString() ?? "New draft")
+                            </span>
+                            <span class="authoring-readonly-value" id="authoring-basics-available-from">
+                                @(_item?.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")
+                            </span>
+                        </FormRow>
+
                         <FormRow Label="Title" Required For="authoring-basics-title">
                             <FluentTextField Id="authoring-basics-title" @bind-Value="_model.Title" Required
                                              ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
-                        </FormRow>
-
-                        <FormRow Label="Description" For="authoring-basics-description">
-                            <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
-                                            ReadOnly="@IsReadOnly" Rows="3"
-                                            Placeholder="Internal note for other teachers…" class="full-width" />
-                        </FormRow>
-
-                        @* INS-1/INS-2: student-facing task text, distinct from Description. *@
-                        <FormRow Label="Instructions" For="authoring-basics-instructions">
-                            <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
-                                            ReadOnly="@IsReadOnly" Rows="4"
-                                            Placeholder="What the student must do — shown to students…" class="full-width" />
                         </FormRow>
 
                         @* Round authoring-compact-fields: type + grading are two short pickers, so they
@@ -143,8 +208,21 @@
                            gutter, so the pair lines up with every single-field row. Do NOT add
                            LabelPosition="Below" here: it drops that gutter and renders the pair's one
                            label under its FIRST control — no bespoke CSS, no new component. *@
+                        @* D11: the row's ONE label carries the (i) help icon whose tooltip merges
+                           the AI-availability text and the feedback-mode narrative — no inline
+                           prose anywhere on the row. *@
                         <FormRow Label="Assignment type &amp; grading format" Required AlignTop
-                                 For="authoring-basics-type">
+                                 For="authoring-basics-type" Help="@GradingRowHelp">
+                            @* RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
+                           here as that section requires. Neither shared wrapper fits:
+                           · DropdownForEnum hardcodes option text = the enum member name, but
+                             these options show each member's EnumHelper DESCRIPTION, and their
+                             VALUE is the numeric enum id that SelectedType /
+                             SelectedGradingFormat parse back — the page's projections and its
+                             whole bUnit picker seam are built on that contract.
+                           · DropdownComponent binds primitive keys to pre-loaded DTO lists;
+                             these are neither (enum-with-description, see above).
+                           *@
                             <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
                                           Items="@TypeOptions" @bind-SelectedOption="_selectedType"
                                           OptionText="@(o => o?.Label ?? string.Empty)"
@@ -155,6 +233,14 @@
                                           OptionText="@(o => o?.Label ?? string.Empty)"
                                           OptionValue="@(o => o?.Value ?? string.Empty)"
                                           Disabled="@IsReadOnly" Class="w-6" />
+                        </FormRow>
+
+                        @* D6/§3: Due date sits directly after the type & grading choice — the date an
+                           author sets right after deciding WHAT the assignment is. *@
+                        <FormRow Label="Due date" For="authoring-basics-due">
+                            <FluentDatePicker Id="authoring-basics-due" @bind-Value="_model.DueDate"
+                                              @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
+                                              Class="w-4" />
                         </FormRow>
 
                         @* D9 + OD1 (round authoring-compact-fields): the author-fed scoring fields sit
@@ -172,38 +258,35 @@
                                                Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
                         </FormRow>
 
-                        <p class="authoring-hint" id="authoring-feedback-mode">
-                            Feedback mode: @EnumHelper.GetDescription(SelectedGradingFormat)
-                        </p>
-
-                        @* UX-17/UX-18: the pass-score / attempt-cap pair renders disabled with an
-                           inline reason for TeacherGraded instead of disappearing — the disable logic
-                           moved with the fields. *@
+                        @* UX-17/UX-18 + D11: the pass-score control renders in Basics (the checkbox
+                           below carries the inapplicable state's explanation). *@
                         <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
 
                         @* OD3: the author guardian-review toggle lives beside the grading format. It is
                            editable ONLY while the effective policy leaves review unset; a policy-set value
-                           locks it (disabled with an inline reason), and Rules carries the policy readout. *@
-                        <FormRow Label="Guardian review" For="authoring-basics-mandatory-review">
+                           locks it — and the row's (i) help icon carries the lock reason (D11), while
+                           Rules carries the policy readout. *@
+                        <FormRow Label="Guardian review" For="authoring-basics-mandatory-review"
+                                 Help="@(PolicyReviewLocked ? PolicyReviewLockedReason : null)">
                             <FluentCheckbox Id="authoring-basics-mandatory-review"
                                             @bind-Value="_mandatoryReview"
                                             Label="Require guardian review before student submits"
-                                            Disabled="@(IsReadOnly || PolicyReviewLocked)"
-                                            Tooltip="@(PolicyReviewLocked ? PolicyReviewLockedReason : null)" />
+                                            Disabled="@(IsReadOnly || PolicyReviewLocked)" />
                         </FormRow>
-                        @if (PolicyReviewLocked)
-                        {
-                            <p class="authoring-reason" id="authoring-review-policy-reason">@PolicyReviewLockedReason</p>
-                        }
-
-                        @* FR-220 / UX-19: the AI-availability hint lives with the type/grading choice. *@
-                        <p class="authoring-hint" id="authoring-generation-hint">
-                            @QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat)
-                        </p>
 
                         @* R4 (CP-4): an explicit SelectedOptionChanged handler replaces @bind — the
                            page must CLEAR the context picks and re-read the strand/lesson sources when the
-                           subject changes (a strand belongs to a subject). *@
+                           subject changes (a strand belongs to a subject).
+
+                           RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
+                           here as that section requires. DropdownComponent (the DTO-list
+                           wrapper) misfits on three counts: (a) these options load
+                           ASYNCHRONOUSLY — the grade/group union — and the wrapper forbids an
+                           async window without porting CodedValueDropdown's load-key guards;
+                           (b) the page must keep a SELECTED OPTION THAT IS NOT IN ITEMS (the
+                           persisted topic of a stale target set) and DropdownComponent resolves
+                           unknown keys to null, losing the label; (c) the CP-4 side effect is
+                           async, while the wrapper's contract wants a sync `:after` Action. *@
                         <FormRow Label="Subject" Required For="authoring-basics-subject">
                             <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
                                           Items="@SubjectOptions"
@@ -215,13 +298,15 @@
                                           Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
                         </FormRow>
 
-                        @* R4 (CP-1/CP-2/CP-3, spec §6A; OD-3): the optional strands & lessons context
-                           row, directly beneath Subject. Create/Edit only — View mode renders NO pick
-                           chrome this round. The section owns no compartment title, so the Basics h3
-                           above is still the compartment's single title (X-1). *@
+                        @* R4 (CP-1/CP-2/CP-3, spec §6A; OD-3) + D4 (assignment-create-edit-redesign):
+                           the optional strands & lessons context row, directly beneath Subject — now
+                           TWO add buttons opening the picker dialog instead of two multi-selects.
+                           Create/Edit only — View mode renders NO pick chrome this round. The section
+                           owns no compartment title, so the Basics h3 above is still the
+                           compartment's single title (X-1). *@
                         @if (!IsReadOnly)
                         {
-                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-basics-strands">
+                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-add-strand">
                                 <ContextPicksSection Model="_model"
                                                      StrandOptions="_strandPickOptions"
                                                      LessonOptions="_lessonPickOptions"
@@ -236,25 +321,8 @@
                             </FormRow>
                         }
 
-                        @* D1/D2: the retired Delivery & Publishing compartment's lifecycle facts and its one
-                           author field. Rules is readouts-only, so the author's due date and the two
-                           always-derived delivery readouts sit on the always-on Basics spine instead.
-                           Round authoring-compact-fields: Status + Available from are the compact pair. *@
-                        <FormRow Label="Status &amp; available from" AlignTop
-                                 For="authoring-basics-status">
-                            <span class="authoring-readonly-value" id="authoring-basics-status">
-                                @(_item?.Status.ToString() ?? "New draft")
-                            </span>
-                            <span class="authoring-readonly-value" id="authoring-basics-available-from">
-                                @(_item?.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")
-                            </span>
-                        </FormRow>
-
-                        <FormRow Label="Due date" For="authoring-basics-due">
-                            <FluentDatePicker Id="authoring-basics-due" @bind-Value="_model.DueDate"
-                                              @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
-                                              Class="w-4" />
-                        </FormRow>
+                        @* D6/§3: Basics ends after the context row — the lifecycle readout leads the
+                           form (top) and Description/Instructions live in the bottom compartment. *@
                     </section>
 
                     <section id="authoring-targets" class="authoring-compartment authoring-compartment--right">
@@ -340,23 +408,35 @@
                            OD2: all five stay card items and the card's own row chrome wraps — no compact row
                            component, no truncation. The card header IS the compartment's single title (no
                            <h3>), ShowAddButton="false" hides the header Add (a readout list authors
-                           nothing), and #authoring-rules stays on the card's container so the jump-nav
-                           anchor still resolves. *@
+                           nothing), and #authoring-rules stays on the card's container so the
+                           readout rows keep their long-standing element ids (D12 removed the
+                           jump-nav that used to link to this anchor). *@
                         <div id="authoring-rules" class="authoring-rules-card">
                             <SectionCard TItem="PolicyReadout"
                                          Title="Rules"
+                                         HeaderHelp="@(AnyPolicyReadoutLocked ? PolicyInheritedHelpText : null)"
                                          Count="@PolicyReadouts.Length"
                                          ShowAddButton="false"
                                          OnAddClick="@NoAddActionAsync"
                                          Items="@PolicyReadouts">
                                 <ItemTemplate Context="readout">
-                                    @* UX-13: a policy-derived value is the resolved read-only text plus the
-                                       inherited badge and — when one grade owns the policy — the link to it.
-                                       The row keeps the .authoring-policy-row chrome it had in the spine. *@
+                                    @* UX-13 + D13: a policy-derived value is the resolved read-only text — plus,
+                                       when one grade owns the policy, the link to it. The "inherited from
+                                       Grade/Tenant policy" note is NO LONGER a per-row text badge; it rides the
+                                       padlock tooltip on the card header and on EVERY LOCKED subitem
+                                       (readout.Locked = inherited from policy AND not author-overridable — the
+                                       owner's rule), so five rows no longer repeat the same sentence and only
+                                       the rows that really cannot be overridden carry the padlock. The row keeps
+                                       the .authoring-policy-row chrome it had in the spine. *@
                                     <div class="authoring-policy-row" id="@readout.Id">
-                                        <span class="authoring-policy-label">@readout.Label</span>
+                                        <span class="authoring-policy-label">@readout.Label
+                                            @if (readout.Locked)
+                                            {
+                                                <HelpIcon Text="@PolicyInheritedHelpText"
+                                                          Icon="@FluentIcons.LockClosed"
+                                                          Class="authoring-policy-help" />
+                                            }</span>
                                         <span class="authoring-policy-value">@readout.Value</span>
-                                        <FluentBadge Appearance="Appearance.Lightweight">@InheritedPolicyBadgeText</FluentBadge>
                                         @if (PolicyLinkHref is not null)
                                         {
                                             <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
@@ -366,20 +446,32 @@
                                 </ItemTemplate>
                             </SectionCard>
 
-                            <p class="authoring-hint" id="authoring-rules-hint">
-                                These values are resolved from your grade and organization policy — they are not authored per assignment.
-                            </p>
+                            @* D11 + D13: no explanatory hint paragraph — the info lives in the padlock
+                               tooltip on the header and on every subitem. *@
                         </div>
                     </section>
                 </div>
+                }
 
                 @* ── Row 2 · Content & Resources / Questions & AI ────────────────
                    Round content-questions-modern-ui (spec §4, decisions D1/D9): the two
                    compartments are composed as ONE row mirroring the reference project page —
                    Questions & AI in the main column, Content & Resources in the rail. Grid
                    AREAS do the placing; DOM order stays content → questions so the compartment
-                   order assertion and the jump-nav order are untouched. *@
-                <div class="authoring-layout authoring-layout--cq">
+                   order assertion is untouched (D12 removed the jump-nav that once mirrored it).
+                   assignment-create-edit-redesign: on the SUMMARY view the same wrapper goes
+                   single-column (authoring-layout--summary) and drops Content & Resources (D2),
+                   then carries Questions & AI first and the Targets accordion directly below it —
+                   one Questions section in the DOM, rendered identically in both views.
+                   D10 (extended by the owner 2026-10-08): Create renders NEITHER section —
+                   Content & Resources and Questions & AI both live on the draft-edit surface —
+                   so the whole row-2 wrapper is skipped there; Create ends after the
+                   Instructions compartment. *@
+                @if (Mode != AssignmentAuthoringMode.Create)
+                {
+                <div class="authoring-layout authoring-layout--cq @(ShowSummary ? "authoring-layout--summary" : null)">
+                    @if (!ShowSummary)
+                    {
                     @* ── 5 · Content & Resources (always active, UX-19) ───────────── *@
                     <section id="authoring-content" class="authoring-compartment authoring-compartment--cq">
                         @if (IsReadOnly)
@@ -409,8 +501,16 @@
                             <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" />
                         }
                     </section>
+                    }
 
-                    @* ── 6 · Questions & AI (UX-19: disabled-with-reason, never hidden) ── *@
+                    @* ── 6 · Questions & AI (UX-19: disabled-with-reason, never hidden) ─────
+                       D10 (assignment-create-edit-redesign, verification round 2026-10-08):
+                       Create renders NO Questions & AI — "move questions and AI to draft edit
+                       when assignment is created" means question authoring/generation starts
+                       only once a draft exists, so the section (and the kebab's
+                       #authoring-questions anchor) exist on Edit/summary surfaces only. *@
+                    @if (Mode != AssignmentAuthoringMode.Create)
+                    {
                     <section id="authoring-questions" class="authoring-compartment authoring-compartment--cq">
                         <div class="cq-header">
                             <h3 class="authoring-compartment-title">Questions &amp; AI</h3>
@@ -468,9 +568,110 @@
                             }
                         }
                     </section>
+                    }
+
+                    @* ── Targets & audience accordion (D2/D3, summary only) ─────────
+                       Collapsed by default under Questions & AI; the expanded body reuses the
+                       SAME SectionCard readout list, disabled-with-reason treatment and live
+                       preview the edit-fields view renders — only the container differs. The
+                       card's own header title is empty here because the accordion heading above
+                       it is the compartment's single title (X-1). *@
+                    @if (ShowSummary && _item is not null)
+                    {
+                        <section id="authoring-targets" class="authoring-compartment authoring-summary__targets">
+                            @if (AudienceEditorDisabledReason is not null)
+                            {
+                                <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
+                            }
+
+                            <FluentAccordion>
+                                <FluentAccordionItem @bind-Expanded="_targetsExpanded">
+                                    <HeadingTemplate>
+                                        <span class="authoring-targets-heading">Targets &amp; audience</span>
+                                        <span class="authoring-targets-count">@_targetsAndAudience.Count</span>
+                                    </HeadingTemplate>
+                                    <ChildContent>
+                                        <div class="authoring-targets-panel" id="authoring-targets-accordion">
+                                            <SectionCard TItem="TargetsAndAudienceEntry"
+                                                         Title=""
+                                                         Count="@_targetsAndAudience.Count"
+                                                         ShowAddButton="@BuilderAddEnabled"
+                                                         AddTitle="Add target"
+                                                         AddAriaLabel="Add target"
+                                                         OnAddClick="@OpenTargetsAndAudienceDialogAsync"
+                                                         Items="@_targetsAndAudience.ToArray()"
+                                                         EmptyMessage="No targets yet. Click + to add.">
+                                                    <ItemTemplate Context="entry">
+                                                        <div class="targets-audience-item">
+                                                            <div class="targets-audience-item__text">
+                                                                <span class="targets-audience-item__label">@TargetCategoryLabel(entry.Category)</span>
+                                                                <span class="targets-audience-item__value">@entry.Label</span>
+                                                            </div>
+                                                            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                                          IconStart="@FluentIcons.Delete" Title="Remove"
+                                                                          AriaLabel="@($"Remove {entry.Label}")"
+                                                                          Disabled="@BuilderDisabled"
+                                                                          OnClick="() => RemoveTargetEntryAsync(entry)" />
+                                                        </div>
+                                                    </ItemTemplate>
+                                            </SectionCard>
+
+                                            @if (AudienceEditorDisabledReason is not null)
+                                            {
+                                                <FluentButton Appearance="Appearance.Outline"
+                                                              IconStart="@FluentIcons.Add"
+                                                              Title="Add target"
+                                                              AriaLabel="Add target"
+                                                              Disabled="true">Add target</FluentButton>
+                                            }
+
+                                            @if (!IsReadOnly && _previewDegraded)
+                                            {
+                                                <p class="authoring-reason" id="authoring-audience-preview-note">@PreviewUnavailableReason</p>
+                                            }
+                                            else
+                                            {
+                                                <p class="authoring-hint" id="authoring-audience-preview">@PreviewText</p>
+                                            }
+                                        </div>
+                                    </ChildContent>
+                                </FluentAccordionItem>
+                            </FluentAccordion>
+                        </section>
+                    }
                 </div>
-            </div>
+                }
+
+                @* ── Instructions compartment (D5/D6, assignment-create-edit-redesign) ───
+                   Description + Instructions extracted from Basics into their own bottom
+                   section, side by side (inline); each row's label sits BENEATH its textarea
+                   (FormRow's RowLabelPosition.Below — no shared-component change). *@
+                @if (!ShowSummary)
+                {
+                    <section id="authoring-instructions" class="authoring-compartment">
+                        <h3 class="authoring-compartment-title">Instructions</h3>
+                        <div class="authoring-instructions-grid">
+                            <div class="authoring-instructions-cell">
+                                <FormRow Label="Description" For="authoring-basics-description" AlignTop
+                                         LabelPosition="RowLabelPosition.Below">
+                                    <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
+                                                    ReadOnly="@IsReadOnly" Rows="4"
+                                                    Placeholder="Internal note for other teachers…" class="full-width" />
+                                </FormRow>
+                            </div>
+                            <div class="authoring-instructions-cell">
+                                <FormRow Label="Instructions" For="authoring-basics-instructions" AlignTop
+                                         LabelPosition="RowLabelPosition.Below">
+                                    <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
+                                                    ReadOnly="@IsReadOnly" Rows="4"
+                                                    Placeholder="What the student must do — shown to students…" class="full-width" />
+                                </FormRow>
+                            </div>
+                        </div>
+                    </section>
+                }
         }
+        </div>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -478,9 +679,14 @@
 </ErrorBoundary>
 
 @code {
-    /// <summary>UX-13: the badge every policy-derived (non-editable) value carries.
-    /// Declared once so the markup, the spec wording and the bUnit suite cannot drift.</summary>
-    public const string InheritedPolicyBadgeText = "Inherited from Grade/Tenant policy";
+    /// <summary>UX-13 + D13 (owner, 2026-10-08): the note that a policy-derived value is inherited
+    /// and NOT overridable here — carried by the padlock tooltip on the Rules card's header and on
+    /// each LOCKED readout (see <see cref="PolicyReadouts"/>). Declared once so the markup, the spec
+    /// wording and the bUnit suite cannot drift. D13 folded D11's retired hint sentence in here: the
+    /// tooltip is now the single place this information appears.</summary>
+    public const string PolicyInheritedHelpText =
+        "Inherited from Grade/Tenant policy — resolved from your grade and organization policy and "
+        + "not overridable on this assignment.";
 
     /// <summary>D3/OD3 (round <c>assignment-rules-policy-rework</c>): the inline reason (also the
     /// toggle's tooltip) shown when the resolved effective policy SETS guardian review — a
@@ -906,41 +1112,46 @@
     /// parameter this card can never invoke.</summary>
     private static Task NoAddActionAsync() => Task.CompletedTask;
 
-    private sealed record Compartment(string Anchor, string Title);
-
     /// <summary>OD2 (round authoring-compact-fields): one resolved policy readout — a Rules card item.
     /// <see cref="Id"/> is the readout's long-standing element id (the bUnit suite's seam), so the
     /// five readouts keep their ids now that <see cref="PolicyReadouts"/> renders them from data
-    /// instead of five hand-written rows.</summary>
-    private sealed record PolicyReadout(string Id, string Label, string Value);
+    /// instead of five hand-written rows.
+    /// <para><b>D13.</b> <see cref="Locked"/> is the padlock condition the owner defined: the value
+    /// is inherited from grade/tenant policy <i>and</i> the author may not override it. Only a
+    /// locked readout (and the card header of a card that holds one) shows the padlock hint.</para></summary>
+    private sealed record PolicyReadout(string Id, string Label, string Value, bool Locked);
 
     /// <summary>The five resolved policy readouts in canonical order — the Rules card's items.
     /// Rebuilt per render from the resolved policy, so the card and its readout text cannot drift.
     /// OD3: the guardian-review entry stays a READOUT like every other (D2's "readouts only" holds
-    /// literally) — the author's toggle lives in Basics.</summary>
+    /// literally) — the author's toggle lives in Basics.
+    /// <para><b>D13 lock flags.</b> Four readouts are policy-owned end to end — nothing in this form
+    /// can change them — so they are always locked: approval (D3), the notification policy (resolved
+    /// per recipient grade at publish), the archive window, and the signature requirement (the
+    /// author has no signature control at all). Guardian review is the ONE conditional entry: while
+    /// the policy leaves it unset the author chooses in Basics, so the readout states the author's
+    /// own choice and carries NO padlock; once the policy (or the D4 signature implication) sets it,
+    /// <see cref="PolicyReviewLocked"/> disables the Basics toggle and the readout is locked too.</para></summary>
     private PolicyReadout[] PolicyReadouts =>
     [
-        new("authoring-policy-approval", "Approval before publish", ApprovalPolicyValueText),
-        new("authoring-policy-notification", "Notification policy", "Resolved per recipient grade at publish"),
-        new("authoring-policy-archive", "Archive window", ArchiveWindowPolicyValueText),
-        new("authoring-policy-signature", "Signature requirement", SignaturePolicyValueText),
-        new("authoring-policy-review", "Guardian review", GuardianReviewPolicyValueText)
+        new("authoring-policy-approval", "Approval before publish", ApprovalPolicyValueText, Locked: true),
+        new("authoring-policy-notification", "Notification policy", "Resolved per recipient grade at publish", Locked: true),
+        new("authoring-policy-archive", "Archive window", ArchiveWindowPolicyValueText, Locked: true),
+        new("authoring-policy-signature", "Signature requirement", SignaturePolicyValueText, Locked: true),
+        new("authoring-policy-review", "Guardian review", GuardianReviewPolicyValueText, PolicyReviewLocked)
     ];
 
-    /// <summary>The five compartments in canonical order (UX-1). The jump-nav renders from this list,
-    /// and each entry's anchor is the element id the link targets (<c>#authoring-{anchor}</c>).
-    /// Round <c>authoring-compact-fields</c> moved the Rules compartment out of the spine, so its
-    /// anchor now sits on the Rules card's container in the right-hand column rather than on a
-    /// full-width section — the jump-nav is unchanged. D1: the retired Delivery &amp; Publishing and
-    /// Submission &amp; Sign-off compartments are replaced by the single policy-readout Rules surface.</summary>
-    private static readonly Compartment[] Compartments =
-    [
-        new("basics", "Basics"),
-        new("targets", "Targets & audience"),
-        new("rules", "Rules"),
-        new("content", "Content & Resources"),
-        new("questions", "Questions & AI")
-    ];
+    /// <summary>D13: the Rules card's header hint states the inherited/locked rule only while the
+    /// card actually holds a locked value — the header can never claim a lock the rows do not have
+    /// (today the four policy-owned readouts always qualify, so the condition documents the intent
+    /// and keeps the header honest if any of them ever becomes overridable).</summary>
+    private bool AnyPolicyReadoutLocked => PolicyReadouts.Any(readout => readout.Locked);
+
+    /// <summary>D12 (owner, 2026-10-08): the compartment jump-nav — and with it the
+    /// <c>Compartments</c> list that only fed it — is removed. The compartment SECTIONS and their
+    /// long-standing ids stay exactly as they are (<c>#authoring-basics</c>, <c>-targets</c>,
+    /// <c>-rules</c>, <c>-content</c>, <c>-questions</c>, <c>-instructions</c>), so the kebab's
+    /// <c>#authoring-questions</c> anchor and every test seam still resolve.</summary>
 
     // ── Mode resolution (UX-9 / UX-11) ────────────────────────────────────────
 
@@ -982,6 +1193,100 @@
         AssignmentAuthoringMode.Edit => "Edit assignment",
         _ => "Assignment overview"
     };
+
+    // ── Summary-first draft edit (assignment-create-edit-redesign D1/D2/D3) ────
+
+    /// <summary>D1: whether the edit-fields (full compartment form) view is active. False = the
+    /// summary renders. Pure presentation state: the form model and every unsaved edit survive a
+    /// flip in either direction, so the toggle never routes and never raises the UX-7 guard (D9).
+    /// Reset only by <see cref="ResetLoadState"/> — a fresh instance or a host parameter swap lands
+    /// on the summary; a lifecycle reload (same instance) keeps the view the author was in.</summary>
+    private bool _editFieldsView;
+
+    /// <summary>D2: the summary's Targets accordion is collapsed by default.</summary>
+    private bool _targetsExpanded;
+
+    /// <summary>D1/D2/D3: the Edit route's DEFAULT surface. Create never shows a summary (nothing
+    /// to summarize before the first save); a degraded View (Published/Closed/Archived) FORCES the
+    /// summary even if the author was mid-edit when a lifecycle action flipped the mode — the same
+    /// facts card without the pencil (D3).</summary>
+    private bool ShowSummary =>
+        Mode != AssignmentAuthoringMode.Create
+        && (EffectiveMode == AssignmentAuthoringMode.View || !_editFieldsView);
+
+    /// <summary>D8: the breadcrumb's current (non-link) crumb — "Edit" while the assignment still
+    /// accepts structural edits, "Overview" once the surface degraded to read-only.</summary>
+    private string CurrentCrumb =>
+        EffectiveMode == AssignmentAuthoringMode.Edit ? "Edit" : "Overview";
+
+    /// <summary>D11: the feedback-mode narrative for the grading row's (i) help icon.</summary>
+    private string FeedbackModeTooltip =>
+        $"Feedback mode: {EnumHelper.GetDescription(SelectedGradingFormat)}";
+
+    /// <summary>D11: the AI-availability text for the type/grading row's (i) help icon.</summary>
+    private string GenerationHintTooltip =>
+        QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat);
+
+    /// <summary>D11: the paired row's ONE label carries one (i) help icon whose tooltip merges
+    /// the AI-availability text and the feedback-mode narrative — no inline prose anywhere.</summary>
+    private string GradingRowHelp => $"{GenerationHintTooltip} {FeedbackModeTooltip}";
+
+    /// <summary>D1: the pencil's click handler — flips to the full form. Never guarded (D9):
+    /// nothing is navigated to and nothing is discarded.</summary>
+    private void EnterEditFieldsView() => _editFieldsView = true;
+
+    /// <summary>D1/D7: back to the summary — same pure state flip as
+    /// <see cref="EnterEditFieldsView"/>, same no-guard rule (D9).</summary>
+    private void ExitEditFieldsView() => _editFieldsView = false;
+
+    /// <summary>One read-only facts-grid entry on the summary card (D2).</summary>
+    private sealed record SummaryFact(string Id, string Label, string Value);
+
+    /// <summary>D2: the summary card's read-only facts grid — no input controls, only resolved
+    /// values (Status, availability, dates, type/grading, scoring, subject, context picks and the
+    /// two long-form texts). Strands/lessons read the loaded picks and name maps — an editable Edit
+    /// surface loads them with the children; a degraded View never reads the children (unchanged
+    /// posture), so it answers "—" rather than a trustworthy-looking empty list. Empty values
+    /// render "—".</summary>
+    private SummaryFact[] SummaryFacts => _item is null
+        ? []
+        :
+        [
+            new("authoring-fact-status", "Status", _item.Status.ToString()),
+            new("authoring-fact-available-from", "Available from", FactDate(_item.AvailableFromUtc)),
+            new("authoring-fact-due-date", "Due date", FactDate(_item.DueDate)),
+            new("authoring-fact-type", "Assignment type", EnumHelper.GetDescription(_item.AssignmentType)),
+            new("authoring-fact-grading", "Grading format", EnumHelper.GetDescription(_item.GradingFormat)),
+            new("authoring-fact-max-score", "Max score", _item.MaxScore?.ToString() ?? "—"),
+            new("authoring-fact-max-attempts", "Max attempts", _item.MaxAttempts?.ToString() ?? "—"),
+            new("authoring-fact-subject", "Subject",
+                string.IsNullOrWhiteSpace(_item.TopicName) ? "—" : _item.TopicName!),
+            new("authoring-fact-strands", "Strands",
+                FactPicks(_model.ContextStrandIds, _strandNames, _strandsLoaded)),
+            new("authoring-fact-lessons", "Lessons",
+                FactPicks(_model.ContextLessonIds, _lessonNames, _lessonsLoaded)),
+            new("authoring-fact-description", "Description",
+                string.IsNullOrWhiteSpace(_item.Description) ? "—" : _item.Description!),
+            new("authoring-fact-instructions", "Instructions",
+                string.IsNullOrWhiteSpace(_item.Instructions) ? "—" : _item.Instructions!),
+        ];
+
+    /// <summary>Local-time short date/time for a facts value, or "—".</summary>
+    private static string FactDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("g") ?? "—";
+
+    /// <summary>One facts value for a context pick set: "—" while the set is empty,
+    /// "(unavailable)" while its name map never loaded — an unreadable list is not an empty one,
+    /// and spec §5.1 asks for the same wording the section's chips use (§4/CP-11) — otherwise the
+    /// resolved names with CP-11's <c>(removed)</c> marker for an id the loaded list no longer
+    /// resolves.</summary>
+    private static string FactPicks(
+        IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, string> names, bool loaded) =>
+        ids.Count == 0
+            ? "—"
+            : !loaded
+                ? "(unavailable)"
+                : string.Join(", ",
+                    ids.Select(id => names.TryGetValue(id, out var name) ? name : ContextPicksSection.RemovedPickMarker));
 
     private static Appearance StatusAppearance(AssignmentStatusDto status) => status switch
     {
@@ -1655,6 +1960,12 @@
         _lessonNames.Clear();
         _strandsLoaded = false;
         _lessonsLoaded = false;
+
+        // assignment-create-edit-redesign D1/D3: a fresh instance (or a host parameter swap) always
+        // lands on the SUMMARY view with its accordion collapsed — the same reset posture the rest
+        // of this method applies to the page-level mirrors.
+        _editFieldsView = false;
+        _targetsExpanded = false;
 
         _targetsAndAudience.Clear();
         _preview = null;
@@ -2484,12 +2795,9 @@
         {
             var actions = new List<RowAction>();
 
-            if (EffectiveMode == AssignmentAuthoringMode.Create)
-            {
-                actions.Add(GenerateQuestionsAction());
-                return actions;
-            }
-
+            // D10 (verification round): Create has NO secondary actions — its only entry used to
+            // be "Generate questions", whose #authoring-questions anchor no longer exists on the
+            // Create page. `_item is null` below returns the empty list, so no kebab renders.
             if (_item is null) return actions;
 
             var editable = EffectiveMode == AssignmentAuthoringMode.Edit;

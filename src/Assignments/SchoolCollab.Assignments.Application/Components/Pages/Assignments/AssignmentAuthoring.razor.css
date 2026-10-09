@@ -1,7 +1,8 @@
 /*
     Isolated styles for the shared assignment authoring surface
-    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): a sticky action bar,
-    a sticky compartment jump-nav, and stacked section-card-style compartments.
+    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): a sticky action bar
+    and stacked section-card-style compartments. D12: the sticky compartment jump-nav was
+    removed — the sections keep their ids (and a reduced scroll-margin) as anchors.
 */
 
 .authoring-page {
@@ -43,25 +44,6 @@
     gap: 8px;
 }
 
-/* ── Sticky compartment jump-nav (UX-4) ────────────────────────────── */
-
-.authoring-jumpnav {
-    position: sticky;
-    top: 56px;
-    z-index: 5;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    padding: 6px 12px;
-    background-color: var(--neutral-layer-1);
-    border: 1px solid var(--neutral-stroke-divider-rest);
-    border-radius: 6px;
-}
-
-.authoring-jumpnav-link {
-    white-space: nowrap;
-}
-
 /* ── Compartment cards (UX-1/UX-3/UX-8) ────────────────────────────── */
 
 .authoring-compartment {
@@ -72,7 +54,8 @@
     background-color: var(--neutral-layer-1);
     border: 1px solid var(--neutral-stroke-divider-rest);
     border-radius: 6px;
-    scroll-margin-top: 112px;
+    /* D12: the offset now clears only the sticky action bar (the jump-nav is gone). */
+    scroll-margin-top: 56px;
 }
 
 .authoring-compartment-title {
@@ -101,7 +84,8 @@
     line-height: 24px;
 }
 
-/* UX-13: policy-derived values are read-only resolved text plus the inherited badge. */
+/* D13: policy-derived values are read-only resolved text; the "inherited" note rides the
+   padlock tooltip (header + each subitem), not a per-row badge. */
 .authoring-policy-row {
     display: flex;
     flex-wrap: wrap;
@@ -254,4 +238,142 @@
 .targets-audience-item__value {
     font-weight: 600;
     word-break: break-word;
+}
+
+/* ── Breadcrumb (D8, assignment-create-edit-redesign) ──────────────────── */
+
+.authoring-breadcrumb {
+    display: flex;
+    align-items: center;
+    padding: 2px 4px;
+}
+
+/* ── Summary card (D1/D2, assignment-create-edit-redesign) ─────────────── */
+
+.authoring-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    background-color: var(--neutral-layer-1);
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: 6px;
+    scroll-margin-top: 56px;
+}
+
+.authoring-summary__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.authoring-summary__title {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+/* The read-only facts grid: two columns of label/value pairs, single column on narrow viewports. */
+.authoring-summary__facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 24px;
+    margin: 0;
+}
+
+@media (max-width: 720px) {
+    .authoring-summary__facts {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.authoring-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.authoring-fact__label {
+    font-size: var(--font-size-100, 0.75rem);
+    color: var(--neutral-foreground-hint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.authoring-fact__value {
+    margin: 0;
+    font-weight: 600;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+
+/* ── Summary row-2 layout: single column, Questions first, accordion below ─
+   Declared AFTER the --cq rules so it wins the cascade with equal specificity;
+   #authoring-questions keeps its grid-area, Content & Resources is simply not
+   rendered on the summary (D2). */
+.authoring-layout--summary {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "questions" "targets";
+}
+
+.authoring-layout--summary > #authoring-targets {
+    grid-area: targets;
+}
+
+/* The Targets accordion: heading carries the compartment title + count (X-1's single
+   title for the summary surface); the expanded body hosts the SectionCard with an
+   intentionally empty card title. */
+.authoring-summary__targets fluent-accordion {
+    width: 100%;
+}
+
+.authoring-targets-heading {
+    font-weight: 600;
+}
+
+.authoring-targets-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    margin-left: 8px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: var(--neutral-fill-rest);
+    color: var(--neutral-foreground-hint);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.authoring-targets-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+/* ── Instructions compartment (D5/D6, assignment-create-edit-redesign) ─── */
+
+.authoring-instructions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.authoring-instructions-cell {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+/* Spec §3.2: two columns at ≥720px, stacked below it. */
+@media (max-width: 719px) {
+    .authoring-instructions-cell {
+        flex-basis: 100%;
+    }
+}
+
+.authoring-instructions-cell .form-row {
+    height: 100%;
 }

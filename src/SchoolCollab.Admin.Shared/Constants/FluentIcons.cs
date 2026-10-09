@@ -52,4 +52,13 @@ public static class FluentIcons
     /// 4.14.2 icon set; <c>DocumentCopy</c> is the copy-semantic icon that
     /// does.</summary>
     public static readonly Icon DocumentCopy = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.DocumentCopy();
+
+    /// <summary>D11/D13: the small inline help-hint glyph rendered by
+    /// <see cref="Components.HelpIcon"/>. Size16 — it sits INSIDE a form row's label or a
+    /// card header, not on a button, so the 20px set would be oversized.</summary>
+    public static readonly Icon Info = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Info();
+
+    /// <summary>D13: the padlock hint for "this value is inherited from grade/tenant policy"
+    /// — used on the Rules card's header and on each of its readout subitems.</summary>
+    public static readonly Icon LockClosed = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.LockClosed();
 }

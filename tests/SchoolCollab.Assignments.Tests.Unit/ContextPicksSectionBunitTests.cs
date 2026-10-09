@@ -12,6 +12,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
 using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
@@ -76,33 +77,31 @@ public class ContextPicksSectionBunitTests : BunitContext
         });
     }
 
-    private static FluentSelect<ContextPicksSection.ContextPickOption> Picker(
-        IRenderedComponent<ContextPicksSection> cut, string id) =>
-        cut.FindComponents<FluentSelect<ContextPicksSection.ContextPickOption>>()
-            .Single(s => s.Instance.Id == id).Instance;
-
+    /// <summary>D4: the two add actions the section renders (replacing the retired multi-selects),
+    /// plus the chip strips beneath them.</summary>
     [TestMethod]
-    public void RendersTwoMultiValuePickers_WithStableIds()
+    public void RendersTwoAddButtons_WithStableIds()
     {
         var cut = RenderSection(new AssignmentEditFormModel());
 
-        var strands = Picker(cut, "authoring-basics-strands");
-        var lessons = Picker(cut, "authoring-basics-lessons");
-
-        strands.Multiple.Should().BeTrue("CP-2: multi-VALUE selection is the contract");
-        lessons.Multiple.Should().BeTrue();
-        strands.Items.Should().ContainSingle("the strand list is filtered to root strands by the page");
+        cut.Find("#authoring-add-strand").Should().NotBeNull("D4: the strand add action");
+        cut.Find("#authoring-add-lesson").Should().NotBeNull("D4: the lesson add action");
+        cut.Find("#authoring-basics-strand-chips").Should().NotBeNull(
+            "picks render as chips beneath the buttons");
+        cut.Find("#authoring-basics-lesson-chips").Should().NotBeNull();
+        cut.FindAll("fluent-select[multiple], fluent-select[multiple='true']").Should().BeEmpty(
+            "D4: the two multi-selects are retired in favour of the buttons + dialog");
     }
 
     [TestMethod]
-    public void NoSubject_DisablesBothPickersWithTheReason()
+    public void NoSubject_DisablesBothAddButtonsWithTheReason()
     {
         var cut = RenderSection(new AssignmentEditFormModel(), disabled: true);
 
         cut.Find("#authoring-context-picks-reason").TextContent.Trim()
             .Should().Be(ContextPicksSection.NoSubjectReason, "CP-3: disabled WITH a reason, never hidden");
-        Picker(cut, "authoring-basics-strands").Disabled.Should().BeTrue();
-        Picker(cut, "authoring-basics-lessons").Disabled.Should().BeTrue();
+        cut.Find("#authoring-add-strand").HasAttribute("disabled").Should().BeTrue();
+        cut.Find("#authoring-add-lesson").HasAttribute("disabled").Should().BeTrue();
     }
 
     [TestMethod]
@@ -141,20 +140,59 @@ public class ContextPicksSectionBunitTests : BunitContext
         cut.FindAll("#authoring-lessons-none").Should().BeEmpty();
     }
 
+    /// <summary>Registers a mocked <see cref="IDialogService"/> that answers the strand/lesson
+    /// picker open with a fixed OK payload (the <c>RegisterPublishDialog</c>/<c>ContactsEditorTests</c>
+    /// shell-dialog pattern), so the write-back path after the dialog runs for real.</summary>
+    private void RegisterContextPickDialog(params Guid[] selectedIds)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        var payload = new DialogShellResult<ContextPickDialogResult>(
+            new ContextPickDialogResult(selectedIds));
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(payload)));
+
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<ContextPickDialog, DialogShellData<ContextPickDialogModel>>(
+                It.IsAny<DialogShellData<ContextPickDialogModel>>(), It.IsAny<DialogParameters>()))
+            .ReturnsAsync(dialogRef.Object);
+
+        Services.AddSingleton(dialogMock.Object);
+    }
+
     [TestMethod]
-    public async Task PickingAStrand_AddsAChip_AndNotifiesThePage()
+    public void PickingAStrand_ThroughTheDialog_AddsAChip_AndNotifiesThePage()
     {
         var model = new AssignmentEditFormModel();
         var notified = 0;
+        RegisterContextPickDialog(StrandA);
         var cut = RenderSection(model, onStrandPicksChanged: () => notified++);
 
-        await cut.InvokeAsync(() => Picker(cut, "authoring-basics-strands").SelectedOptionsChanged
-            .InvokeAsync(Picker(cut, "authoring-basics-strands").Items!.ToArray()));
+        cut.Find("#authoring-add-strand").Click();
 
-        model.ContextStrandIds.Should().Equal(new[] { StrandA }, "the control writes the picks back to the model");
-        notified.Should().Be(1, "the page must re-read the lesson options for the newly picked strands (G31)");
-        cut.WaitForAssertion(() => cut.FindAll("#authoring-basics-strand-chips .chip-label")
-            .Select(e => e.TextContent.Trim()).Should().Contain("Fractions"));
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#authoring-basics-strand-chips .chip-label")
+                .Select(e => e.TextContent.Trim()).Should().Contain("Fractions");
+            model.ContextStrandIds.Should().Equal(new[] { StrandA },
+                "the dialog's OK writes the picks back to the model");
+            notified.Should().Be(1,
+                "the page must re-read the lesson options for the newly picked strands (G31)");
+        });
+    }
+
+    [TestMethod]
+    public void LessonsNeverLoaded_DisablesOnlyTheLessonAddButton()
+    {
+        // P8-4: a list that never loaded is not an authoritative list — the button that would
+        // offer it stays disabled, while the strand half (loaded here) remains usable.
+        var cut = RenderSection(new AssignmentEditFormModel(), lessonsLoaded: false);
+
+        cut.Find("#authoring-add-lesson").HasAttribute("disabled").Should().BeTrue(
+            "an unreadable lesson list is never offered (spec §9.7)");
+        cut.Find("#authoring-add-strand").HasAttribute("disabled").Should().BeFalse(
+            "the strand list itself is loaded and pickable");
+        cut.FindAll("#authoring-lessons-none").Should().BeEmpty(
+            "the empty-source note is equally not derivable from a fetch that never happened");
     }
 
     [TestMethod]
@@ -346,11 +384,34 @@ public class ContextPicksSectionBunitTests : BunitContext
                 });
         }
 
-        return Render<Authoring>(parameters =>
+        return EnterEditFields(Render<Authoring>(parameters =>
         {
             parameters.Add(p => p.Mode, AssignmentAuthoringMode.Edit);
             parameters.Add(p => p.Id, dto.Id);
-        });
+        }));
+    }
+
+    /// <summary>assignment-create-edit-redesign D1: the Edit route opens on the SUMMARY; these
+    /// page-level cases assert the form, so the pencil flip runs here (same seam as the
+    /// <c>AssignmentAuthoringBunitTests</c> helper). No-op when no pencil renders.</summary>
+    private static IRenderedComponent<Authoring> EnterEditFields(IRenderedComponent<Authoring> cut)
+    {
+        cut.WaitForAssertion(() =>
+        {
+            (cut.FindAll("#authoring-summary").Count > 0 || cut.FindAll("#authoring-basics").Count > 0)
+                .Should().BeTrue("the surface must have settled before the pencil decision");
+        }, TimeSpan.FromSeconds(5));
+
+        var pencil = cut.FindAll("#authoring-summary-edit");
+        if (pencil.Count > 0)
+        {
+            pencil.Single().Click();
+            cut.WaitForAssertion(() =>
+                cut.FindAll("#authoring-basics").Count.Should().BeGreaterThan(0,
+                    "the pencil flips the page into the edit-fields view"), TimeSpan.FromSeconds(5));
+        }
+
+        return cut;
     }
 
     private static IElement OwningFormRow(IRenderedComponent<Authoring> cut, string id)
@@ -378,25 +439,28 @@ public class ContextPicksSectionBunitTests : BunitContext
     private static FluentSelect<Authoring.PickerOption> PagePicker(IRenderedComponent<Authoring> cut, string id) =>
         cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
-    private static FluentSelect<ContextPicksSection.ContextPickOption> PageContextPicker(
-        IRenderedComponent<Authoring> cut, string id) =>
-        cut.FindComponents<FluentSelect<ContextPicksSection.ContextPickOption>>()
-            .Single(s => s.Instance.Id == id).Instance;
-
     [TestMethod]
-    public void CreateMode_RendersTheRowBeneathSubject_WithBothPickersDisabled()
+    public void CreateMode_RendersTheRowBeneathSubject_WithBothAddButtonsDisabled()
     {
         var cut = Render<Authoring>(parameters => parameters.Add(p => p.Mode, AssignmentAuthoringMode.Create));
 
-        var row = OwningFormRow(cut, "authoring-basics-strands");
-        row.TextContent.Should().Contain("Strands & lessons", "X-1/CP-1: the row is labelled in Basics");
-
-        // …and it sits BENEATH the Subject row (the CP-1 position).
-        var rows = cut.FindAll(".form-row").ToList();
-        rows.IndexOf(row).Should().BeGreaterThan(rows.IndexOf(OwningFormRow(cut, "authoring-basics-subject")));
+        cut.WaitForAssertion(() =>
+        {
+            // Re-query BOTH rows inside the wait: the page's async load re-renders the Basics
+            // section, so an element captured before it settles is no longer in a fresh
+            // `.form-row` list and `IndexOf` returns -1 (observed as a one-off flake under load).
+            var rows = cut.FindAll(".form-row").ToList();
+            var strandRow = OwningFormRow(cut, "authoring-add-strand");
+            strandRow.TextContent.Should().Contain("Strands & lessons", "X-1/CP-1: the row is labelled in Basics");
+            rows.IndexOf(strandRow).Should().BeGreaterThan(
+                rows.IndexOf(OwningFormRow(cut, "authoring-basics-subject")),
+                "…and it sits BENEATH the Subject row (the CP-1 position)");
+        });
 
         cut.Find("#authoring-context-picks-reason").TextContent.Trim()
-            .Should().Be(ContextPicksSection.NoSubjectReason, "CP-3: no subject yet, so both pickers say why");
+            .Should().Be(ContextPicksSection.NoSubjectReason, "CP-3: no subject yet, so both buttons say why");
+        cut.Find("#authoring-add-strand").HasAttribute("disabled").Should().BeTrue();
+        cut.Find("#authoring-add-lesson").HasAttribute("disabled").Should().BeTrue();
         cut.FindAll("section#authoring-basics h3.authoring-compartment-title").Should().ContainSingle(
             "X-1: the section renders no title of its own — the Basics h3 stays the only one");
     }
@@ -405,13 +469,18 @@ public class ContextPicksSectionBunitTests : BunitContext
     public void EditMode_RendersTheRowBeneathSubject()
     {
         var cut = RenderEdit(MakeDto());
-        cut.WaitForAssertion(() => cut.FindAll("#authoring-basics-strands").Should().NotBeEmpty(),
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-add-strand").Should().NotBeEmpty(),
             TimeSpan.FromSeconds(5));
 
-        var row = OwningFormRow(cut, "authoring-basics-strands");
-        row.TextContent.Should().Contain("Strands & lessons");
-        var rows = cut.FindAll(".form-row").ToList();
-        rows.IndexOf(row).Should().BeGreaterThan(rows.IndexOf(OwningFormRow(cut, "authoring-basics-subject")));
+        cut.WaitForAssertion(() =>
+        {
+            // Same stale-reference guard as the Create-mode test: re-query both rows each pass.
+            var rows = cut.FindAll(".form-row").ToList();
+            var strandRow = OwningFormRow(cut, "authoring-add-strand");
+            strandRow.TextContent.Should().Contain("Strands & lessons");
+            rows.IndexOf(strandRow).Should().BeGreaterThan(
+                rows.IndexOf(OwningFormRow(cut, "authoring-basics-subject")));
+        });
     }
 
     [TestMethod]

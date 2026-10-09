@@ -2,21 +2,22 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 
 @*
-    WS-A3 (spec §3.3 / §7 Q4): the Pass Score input.
+    WS-A3 (spec §3.3 / §7 Q4): the Pass Score control.
 
-    UX-17 / D12 (assignment-authoring-compartments §12): an inapplicable
-    control renders **disabled with an inline reason, never hidden** — the
-    authoring page must not reflow when the grading format changes. The
-    fields were hidden for TeacherGraded before R1; they now render
-    disabled so the compartment keeps its shape and the reason is visible.
+    D11 (assignment-create-edit-redesign, owner 2026-10-08):
+    - The "Set the pass threshold…" prose is the field's native `title` tooltip,
+      never an inline paragraph.
+    - The inapplicable state (Teacher Marked grading) renders a DISABLED
+      CHECKBOX whose LABEL carries <see cref="ScoringInapplicableReason"/> —
+      the label IS the explanation, so there is no standalone reason paragraph
+      and no disabled number field eating the row. The control keeps the
+      `scoringFieldsPassScore` id in both states (the bUnit seam and the page's
+      order assertions read the id, not the element type).
 
     Round `authoring-compact-fields` (OD1): the attempt cap LEFT this section
-    for the Basics `(Max score · Max attempts)` row — the authoring page pairs
-    the two short number fields, so the cap is rendered by the page. The cap
-    still carries this section's gate: the page calls
-    <see cref="IsScoringInapplicable"/> for its disabled state, and the one
-    <see cref="ScoringInapplicableReason"/> paragraph below still states why
-    BOTH fields are inapplicable (it names the pass score and the attempt cap).
+    for the Basics `(Max score · Max attempts)` row; the page still asks
+    <see cref="IsScoringInapplicable"/> for its disabled state — the checkbox
+    label names BOTH fields, exactly as the old paragraph did.
 
     The gating rule itself is unchanged (`ScoringFieldsPassSubmitGate`
     still always passes for TeacherGraded, so a stale value can never
@@ -27,23 +28,32 @@
     var inapplicable = IsScoringInapplicable(GradingFormat);
 }
 
-<p class="muted">Set the pass threshold. Leave blank for no pass threshold.</p>
-
-<FormRow Label="Pass Score" For="scoringFieldsPassScore">
-    <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3"
-                       Disabled="@inapplicable" />
-</FormRow>
-
 @if (inapplicable)
 {
-    <p class="scoring-fields-reason">@ScoringInapplicableReason</p>
+    <FormRow Label="Pass Score" For="scoringFieldsPassScore">
+        @* D11: the checkbox's LABEL explains the disabled state — no separate paragraph. *@
+        <FluentCheckbox Id="scoringFieldsPassScore" Disabled="true" Value="false"
+                        Label="@ScoringInapplicableReason" />
+    </FormRow>
+}
+else
+{
+    @* D11: the "Set the pass threshold…" hint rides the row label's (i) help icon —
+       no inline paragraph, no hover-only field title. *@
+    <FormRow Label="Pass Score" For="scoringFieldsPassScore" Help="@PassScoreHint">
+        <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3" />
+    </FormRow>
 }
 
 @code {
-    /// <summary>UX-17 / D12: the inline reason shown (and used as the field
-    /// tooltip) when the grading format does not carry pass/fail scoring.
-    /// Declared once so the component, the authoring compartment and the
-    /// bUnit suite cannot drift.</summary>
+    /// <summary>D11: the field-level hint, carried as the number field's native `title`
+    /// tooltip instead of the inline paragraph it used to be.</summary>
+    public const string PassScoreHint =
+        "Set the pass threshold. Leave blank for no pass threshold.";
+
+    /// <summary>UX-17 / D12 → D11: the reason the inapplicable state shows — the checkbox's
+    /// LABEL in the Teacher Marked state (and the field tooltip's sibling text elsewhere).
+    /// Declared once so the component, the authoring page and the bUnit suite cannot drift.</summary>
     public const string ScoringInapplicableReason =
         "Not applicable for Teacher Marked grading — pass score and attempt caps apply to Auto Scored and Instant Feedback only.";
 

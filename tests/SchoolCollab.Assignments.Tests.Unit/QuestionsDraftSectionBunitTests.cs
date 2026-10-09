@@ -117,14 +117,22 @@ public class QuestionsDraftSectionBunitTests : BunitContext
         // collapsed default itself is asserted by DraftPanel_IsCollapsedByDefault_ThenExpands.
         if (expand)
         {
-            // Explicit 5s budget: the initial GET + render can exceed bUnit's 1s default under a
-            // loaded full-solution run (this wait timed out once on CI-shaped load).
-            cut.WaitForAssertion(() => cut.Find("#cq-draft-panel"), TimeSpan.FromSeconds(5));
-            if (string.Equals(cut.Find("#cq-draft-panel").GetAttribute("aria-expanded"), "false", StringComparison.OrdinalIgnoreCase))
+            // The panel element can render BEFORE its aria-expanded state settles, and a preload
+            // (existing draft) can delay the body render — so the whole drive-and-wait runs inside
+            // ONE retry loop: click only while still collapsed (a re-check after the click sees the
+            // expanded state and stops, so unlike a menu it cannot oscillate), and let the loop's
+            // retry cover the late render. Explicit 5s budget: the initial GET + render can exceed
+            // bUnit's 1s default under a loaded full-solution run.
+            cut.WaitForAssertion(() =>
             {
-                cut.Find("#cq-draft-panel").Click();
-            }
-            cut.WaitForAssertion(() => cut.Find("#cq-draft-body").Should().NotBeNull(), TimeSpan.FromSeconds(5));
+                var panel = cut.Find("#cq-draft-panel");
+                if (string.Equals(panel.GetAttribute("aria-expanded"), "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    panel.Click();
+                }
+
+                cut.Find("#cq-draft-body").Should().NotBeNull();
+            }, TimeSpan.FromSeconds(5));
         }
         return cut;
     }

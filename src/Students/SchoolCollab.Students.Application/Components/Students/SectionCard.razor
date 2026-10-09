@@ -12,6 +12,13 @@
             <FluentIcon Value="@icon" />
         }
         <span class="section-card__title">@Title</span>
+        @if (HeaderHelp is not null)
+        {
+            @* D13: a padlock hint beside the title — the card says WHY its items are read-only
+               without spending a row (or a paragraph) on the explanation. *@
+            <HelpIcon Text="@HeaderHelp" Icon="@FluentIcons.LockClosed"
+                      Class="section-card__help" />
+        }
         <span class="section-card__count">@Count</span>
         @if (ShowAddButton)
         {
@@ -128,6 +135,14 @@
     /// Card title (e.g., "Subjects", "Teachers", "Students").
     /// </summary>
     [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional hint rendered as a padlock icon beside the title, whose native tooltip carries
+    /// this text (D13). Used by a read-only card to say WHY its items cannot be edited here
+    /// (e.g. the Rules card's "inherited from Grade/Tenant policy") without a prose paragraph
+    /// or a per-item badge.
+    /// </summary>
+    [Parameter] public string? HeaderHelp { get; set; }
 
     /// <summary>
     /// Icon to display in the header.

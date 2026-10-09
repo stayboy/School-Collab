@@ -1,25 +1,28 @@
 @*
-    R4 (spec §6A CP-1/CP-2/CP-3/CP-11) — the Basics compartment's "Strands & lessons" row.
+    R4 (spec §6A CP-1/CP-2/CP-3/CP-11) — the Basics compartment's "Strands & lessons" row,
+    restyled by documents/specs/assignment-create-edit-redesign.md D4 (round 2026-10-08).
 
-    Two OPTIONAL multi-value pickers (D25) that give a generation its subject context:
-    the root strands of the picked subject, and the lessons of the picked strands (the
-    strand-lesson unification model: a lesson IS a `TopicStrand` row with a parent). The
-    picks are a persisted assignment property — this component only edits the form model's
-    pick lists; the page owns the option/name sources, the fetches and the save project.
+    Two OPTIONAL context pick sets that give a generation its subject context: the root strands of
+    the picked subject, and the lessons of the picked strands (the strand-lesson unification model:
+    a lesson IS a `TopicStrand` row with a parent). The picks are a persisted assignment property —
+    this component only edits the form model's pick lists; the page owns the option/name sources,
+    the fetches and the save project.
 
-    The control vehicle is the raw `FluentSelect` with `Multiple` (the repo's own
-    multi-select precedent — `GradeLevelCreateDialog.razor`, `JoinGroupsDialog.razor`,
-    `TeacherEditDialog.razor`; `dropdown-ui/SKILL.md` routes multi-select pickers to the raw
-    control because every shared wrapper is single-value), with the picks rendered beneath it
-    as dismissible `Chip`s (`Admin.Shared/Components/Chip.razor`, the
-    `TargetsAndAudienceDialog` precedent) so a pick the control can no longer offer — a
-    dangling id (CP-11) — still has a home and a remove action.
+    D4 replaces the two stacked `FluentSelect Multiple` controls with TWO BUTTONS ("Add strand" /
+    "Add lesson") that open `ContextPickDialog` — a subject-filtered multi-checkbox picker over the
+    SAME already-loaded option sets — while the picked values render beneath as dismissible
+    `Chip`s (`Admin.Shared/Components/Chip.razor`, the `TargetsAndAudienceDialog` precedent), so a
+    pick the option list can no longer offer — a dangling id (CP-11) — still has a home and a
+    remove action. The dialog's OK is a full-replacement of that pick set, seeded with the current
+    picks so a dangling id survives unless its chip is dismissed.
 
     Deliberately NO compartment title of its own: the Basics `<h3>` above is still rendered
     exactly once, by the page (X-1).
 *@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@inject IDialogService DialogService
 
 <div class="context-picks">
     @if (DisabledReason is not null)
@@ -27,26 +30,31 @@
         <p class="context-picks__reason" id="authoring-context-picks-reason">@DisabledReason</p>
     }
 
-    <div class="context-picks__row">
-        <FluentSelect TOption="ContextPickOption" Id="authoring-basics-strands"
-                      Items="@StrandOptions"
-                      OptionText="@(o => o?.Label ?? string.Empty)"
-                      OptionValue="@(o => o?.Id.ToString() ?? string.Empty)"
-                      Multiple="true"
-                      SelectedOptions="@SelectedStrandOptions"
-                      SelectedOptionsChanged="@OnSelectedStrandOptionsChanged"
-                      Disabled="@(Disabled || !StrandsLoaded)"
-                      aria-label="Strands"
-                      Title="@StrandPickerTitle" />
-        <div class="context-picks__chips" id="authoring-basics-strand-chips">
-            @foreach (var id in Model.ContextStrandIds)
-            {
-                <Chip Label="@StrandChipLabel(id)"
-                      Subtitle="@StrandChipSubtitle(id)"
-                      DismissTitle="Remove strand"
-                      OnDismiss="@(() => RemoveStrand(id))" />
-            }
-        </div>
+    @* D4: the two add actions. Disabled-with-reason (never hidden) per UX-17/UX-19: the section's
+       Disabled/DisabledReason covers "no subject yet" and a read-only surface; a pick source that
+       never loaded (or resolved empty) disables its own button with the matching title, so an
+       unreadable list is never offered as an empty one. *@
+    <div class="context-picks__buttons">
+        <FluentButton Id="authoring-add-strand" Appearance="Appearance.Outline"
+                      IconStart="@FluentIcons.Add"
+                      Disabled="@(Disabled || !StrandsLoaded || StrandOptions.Count == 0)"
+                      Title="@StrandPickerTitle"
+                      OnClick="OpenStrandDialogAsync">Add strand</FluentButton>
+        <FluentButton Id="authoring-add-lesson" Appearance="Appearance.Outline"
+                      IconStart="@FluentIcons.Add"
+                      Disabled="@(Disabled || !LessonsLoaded || LessonOptions.Count == 0)"
+                      Title="@LessonPickerTitle"
+                      OnClick="OpenLessonDialogAsync">Add lesson</FluentButton>
+    </div>
+
+    <div class="context-picks__chips" id="authoring-basics-strand-chips">
+        @foreach (var id in Model.ContextStrandIds)
+        {
+            <Chip Label="@StrandChipLabel(id)"
+                  Subtitle="@StrandChipSubtitle(id)"
+                  DismissTitle="Remove strand"
+                  OnDismiss="@(() => RemoveStrand(id))" />
+        }
     </div>
 
     @if (StrandNoteText is not null)
@@ -54,26 +62,14 @@
         <p class="context-picks__note" id="authoring-strands-none">@StrandNoteText</p>
     }
 
-    <div class="context-picks__row">
-        <FluentSelect TOption="ContextPickOption" Id="authoring-basics-lessons"
-                      Items="@LessonOptions"
-                      OptionText="@(o => o?.Label ?? string.Empty)"
-                      OptionValue="@(o => o?.Id.ToString() ?? string.Empty)"
-                      Multiple="true"
-                      SelectedOptions="@SelectedLessonOptions"
-                      SelectedOptionsChanged="@OnSelectedLessonOptionsChanged"
-                      Disabled="@(Disabled || !LessonsLoaded)"
-                      aria-label="Lessons"
-                      Title="@LessonPickerTitle" />
-        <div class="context-picks__chips" id="authoring-basics-lesson-chips">
-            @foreach (var id in Model.ContextLessonIds)
-            {
-                <Chip Label="@LessonChipLabel(id)"
-                      Subtitle="@LessonChipSubtitle(id)"
-                      DismissTitle="Remove lesson"
-                      OnDismiss="@(() => RemoveLesson(id))" />
-            }
-        </div>
+    <div class="context-picks__chips" id="authoring-basics-lesson-chips">
+        @foreach (var id in Model.ContextLessonIds)
+        {
+            <Chip Label="@LessonChipLabel(id)"
+                  Subtitle="@LessonChipSubtitle(id)"
+                  DismissTitle="Remove lesson"
+                  OnDismiss="@(() => RemoveLesson(id))" />
+        }
     </div>
 
     @if (LessonNoteText is not null)
@@ -157,19 +153,17 @@
     /// <c>QuestionEditorSection</c> precedent).</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
-    private IEnumerable<ContextPickOption> SelectedStrandOptions =>
-        StrandOptions.Where(o => Model.ContextStrandIds.Contains(o.Id));
+    private string StrandPickerTitle => !StrandsLoaded
+        ? PickSourceUnavailableText
+        : StrandOptions.Count == 0
+            ? NoStrandsText
+            : "Pick the strands this assignment's questions should focus on. Optional — with none picked the AI uses the whole subject.";
 
-    private IEnumerable<ContextPickOption> SelectedLessonOptions =>
-        LessonOptions.Where(o => Model.ContextLessonIds.Contains(o.Id));
-
-    private string StrandPickerTitle => StrandsLoaded
-        ? "Pick the strands this assignment's questions should focus on. Optional — with none picked the AI uses the whole subject."
-        : PickSourceUnavailableText;
-
-    private string LessonPickerTitle => LessonsLoaded
-        ? "Pick the lessons this assignment's questions should focus on. Optional — the lessons offered follow the picked strands."
-        : PickSourceUnavailableText;
+    private string LessonPickerTitle => !LessonsLoaded
+        ? PickSourceUnavailableText
+        : LessonOptions.Count == 0
+            ? NoLessonsText
+            : "Pick the lessons this assignment's questions should focus on. Optional — the lessons offered follow the picked strands.";
 
     /// <summary>CP-3's strand note, exactly one of which ever renders: the empty-source note, the
     /// unavailable note, the "nothing picked" note, or nothing at all.</summary>
@@ -205,49 +199,73 @@
         }
     }
 
-    /// <summary>Writes the control's strand selection back to the model, then tells the page the
-    /// lesson scope moved. Ids the picker does not offer (a dangling pick) are DROPPED here: the
-    /// control is the author's authoritative strand selection, and a pick this list does not resolve
-    /// is excluded from the payload anyway (CP-11). The callbacks are raised only when the set
-    /// actually changed, so a programmatic re-render of the same selection cannot re-enter the load
-    /// path (the page-level wiring reloads lessons on this event).</summary>
-    private async Task OnSelectedStrandOptionsChanged(IEnumerable<ContextPickOption>? selected)
+    /// <summary>Opens the strand picker (D4) seeded with the current picks, then writes the dialog's
+    /// OK payload back as the FULL replacement set. Ignored while the strand list is NOT loaded — a
+    /// commit over an option set that never loaded is not an author's selection (P8-4's
+    /// fetch-failure rule applied to the interactive path). The callbacks are raised only when the
+    /// set actually changed, so re-opening and confirming an untouched dialog cannot re-enter the
+    /// page's lesson-reload path.</summary>
+    private async Task OpenStrandDialogAsync()
     {
-        var selectedIds = (selected ?? []).Select(o => o.Id).ToList();
-        if (selectedIds.SequenceEqual(Model.ContextStrandIds))
+        if (Disabled || !StrandsLoaded)
+        {
+            return;
+        }
+
+        var ids = await ShowPickDialogAsync(
+            "Pick strands", "strand", StrandOptions, NoStrandsText, Model.ContextStrandIds);
+        if (ids is null || ids.SequenceEqual(Model.ContextStrandIds))
         {
             return;
         }
 
         Model.ContextStrandIds.Clear();
-        Model.ContextStrandIds.AddRange(selectedIds);
+        Model.ContextStrandIds.AddRange(ids);
 
         await StrandPicksChanged.InvokeAsync();
         await Changed.InvokeAsync();
     }
 
-    /// <summary>Writes the control's lesson selection back to the model. Ignored entirely while the
-    /// lesson list is NOT loaded: a report over an option set that never loaded is not an author's
-    /// selection, and honouring it would silently clear valid picks (P8-4's fetch-failure rule
-    /// applied to the interactive path). The callback is raised only when the set actually changed,
-    /// so a programmatic re-render cannot loop.</summary>
-    private async Task OnSelectedLessonOptionsChanged(IEnumerable<ContextPickOption>? selected)
+    /// <summary>Opens the lesson picker (D4) — same full-replacement contract, minus the strand
+    /// reload (the lesson set does not scope the lessons a later change depends on). Ignored while
+    /// the lesson list is NOT loaded (see <see cref="OpenStrandDialogAsync"/>).</summary>
+    private async Task OpenLessonDialogAsync()
     {
-        if (!LessonsLoaded)
+        if (Disabled || !LessonsLoaded)
         {
             return;
         }
 
-        var selectedIds = (selected ?? []).Select(o => o.Id).ToList();
-        if (selectedIds.SequenceEqual(Model.ContextLessonIds))
+        var ids = await ShowPickDialogAsync(
+            "Pick lessons", "lesson", LessonOptions, NoLessonsText, Model.ContextLessonIds);
+        if (ids is null || ids.SequenceEqual(Model.ContextLessonIds))
         {
             return;
         }
 
         Model.ContextLessonIds.Clear();
-        Model.ContextLessonIds.AddRange(selectedIds);
+        Model.ContextLessonIds.AddRange(ids);
 
         await Changed.InvokeAsync();
+    }
+
+    /// <summary>Shared dialog call: seeds the model with the current picks so a dangling id (CP-11)
+    /// the option list no longer resolves survives an OK, and returns null on cancel.</summary>
+    private async Task<IReadOnlyList<Guid>?> ShowPickDialogAsync(
+        string title, string noun, IReadOnlyList<ContextPickOption> options, string emptyText,
+        IReadOnlyList<Guid> current)
+    {
+        var model = new ContextPickDialogModel
+        {
+            Noun = noun,
+            Options = options,
+            EmptyText = emptyText,
+            Selected = new HashSet<Guid>(current),
+        };
+
+        return await DialogService.ShowShellDialogAsync<
+            ContextPickDialog, ContextPickDialogModel, ContextPickDialogResult>(model, title, DialogSize.Medium)
+            is { } result ? result.Ids : null;
     }
 
     private async Task RemoveStrand(Guid id)

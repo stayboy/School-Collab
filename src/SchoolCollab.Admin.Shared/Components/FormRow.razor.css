@@ -76,6 +76,9 @@
     hyphens: auto;
 }
 
+/* D11: the (i) help icon inside a row label is the shared HelpIcon component — its own scoped
+   CSS owns the glyph chrome (display/margin/cursor/colour); nothing row-specific is needed. */
+
 /* HORIZONTAL — label cell is the FIXED 180px column. width: 180px is
    the canonical repo-wide label width. It fits the longest label in
    the admin forms ("Contact email", "Date of birth", "Student

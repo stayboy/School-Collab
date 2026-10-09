@@ -1,0 +1,41 @@
+@* Strand/lesson picker dialog (spec assignment-create-edit-redesign D4) — opened by the Basics
+   "Add strand" / "Add lesson" buttons in place of the retired inline multi-selects. A flat
+   multi-checkbox list over the section's already-loaded pick source: OK returns the checked ids as a
+   FULL REPLACEMENT set (the section seeds it with the current picks, so unchecking removes and a
+   seeded dangling id CP-11 preserves). No data fetching, no search — the option sets are small and
+   already loaded by the page. DialogShellBase/DialogShellFooter per the dialog-ui skill. *@
+@inherits DialogShellBase<ContextPickDialogModel, ContextPickDialogResult>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+
+<EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+    <DataAnnotationsValidator />
+
+    @if (Model.Options.Count == 0)
+    {
+        <p class="dialog-hint">@Model.EmptyText</p>
+    }
+    else
+    {
+        <div class="context-pick-dialog__scroll">
+            @foreach (var option in Model.Options)
+            {
+                var captured = option;
+                <FluentCheckbox Label="@captured.Label"
+                                Value="@Model.IsSelected(captured.Id)"
+                                ValueChanged="@((bool value) => Model.Set(captured.Id, value))" />
+            }
+        </div>
+    }
+
+    <DialogShellFooter Saving="@Saving" Error="@Error"
+                       OnCancel="HandleCancelAsync" SubmitText="Add" />
+</EditForm>
+
+@code {
+    /// <summary>Returns the checked set as the section's full-replacement pick list. An empty
+    /// selection is a legitimate submission ("clear every pick"), so it never sets <see cref="Error"/>.
+    /// </summary>
+    protected override Task<ContextPickDialogResult?> SubmitAsync(ContextPickDialogModel model) =>
+        Task.FromResult<ContextPickDialogResult?>(new ContextPickDialogResult(model.Selected.ToList()));
+}

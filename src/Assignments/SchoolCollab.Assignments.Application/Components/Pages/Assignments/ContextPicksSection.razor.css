@@ -1,8 +1,8 @@
-/* R4 (CP-1/CP-2): the Basics "Strands & lessons" row. Scoped to this component — the row's
-   own styles only, so the authoring page's CSS is untouched. FluentUI design variables with
-   token fallbacks — the fallback is the value used when a host has not defined the token, not a
-   hard-coded colour (Chip.razor.css and ~130 sibling *.razor.css files do the same; aligned on
-   #6b6b6b for consistency). No inline styles. */
+/* R4 (CP-1/CP-2): the Basics "Strands & lessons" row — D4's add buttons + chips. Scoped to this
+   component — the row's own styles only, so the authoring page's CSS is untouched. FluentUI design
+   variables with token fallbacks — the fallback is the value used when a host has not defined the
+   token, not a hard-coded colour (Chip.razor.css and ~130 sibling *.razor.css files do the same;
+   aligned on #6b6b6b for consistency). No inline styles. */
 
 .context-picks {
     display: flex;
@@ -12,20 +12,11 @@
     min-width: 0;
 }
 
-.context-picks__row {
+/* D4: the two add actions sit in one inline row directly under the Subject select. */
+.context-picks__buttons {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-}
-
-/* The multi-select control fills the row's input cell, mirroring the shared wrappers' width
-   contract (dropdown-ui/SKILL.md §3) without introducing a wrapper this multi-value control
-   cannot use. */
-.context-picks__row fluent-select {
-    width: 100%;
-    min-width: 0;
-    min-height: 96px;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .context-picks__chips {

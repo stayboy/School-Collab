@@ -1,3 +1,4 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @*
     Shared form-row primitive — the canonical, repo-wide building block for
     any form (create / edit / wizard step / dialog) that needs a horizontal
@@ -112,7 +113,11 @@
 
 <div class="form-row form-row--@(Orientation.ToString().ToLowerInvariant()) @(AlignTop ? "form-row--align-top" : null) @(LabelPosition == RowLabelPosition.Below ? " form-row--label-below" : null)">
     <div class="form-row-label">
-        <label for="@For" title="@LabelTip">@Label @if (Required) { <span class="form-row-required" aria-hidden="true">*</span> }</label>
+        <label for="@For" title="@LabelTip">@Label @if (Required) { <span class="form-row-required" aria-hidden="true">*</span> }@if (Help is not null)
+        {
+            @* D11: the shared HelpIcon carries the row's hint as a native tooltip. *@
+            <HelpIcon Text="@Help" Class="form-row-help" />
+        }</label>
     </div>
     <div class="form-row-input">
         @ChildContent
@@ -131,6 +136,16 @@
 
     /// <summary>Optional native tooltip on the label.</summary>
     [Parameter] public string? LabelTip { get; set; }
+
+    /// <summary>
+    /// D11 (assignment-create-edit-redesign): optional hint text rendered as a small (i)
+    /// help icon INSIDE the label; the icon's native <c>title</c> carries the text, so the
+    /// row keeps its hint without an inline narrative paragraph. Null (the default) renders
+    /// exactly the previous markup — no icon, no extra element.
+    /// <para>Distinct from <see cref="LabelTip"/>: that puts a tooltip on the whole label
+    /// and shows no affordance; <c>Help</c> shows the discoverable icon.</para>
+    /// </summary>
+    [Parameter] public string? Help { get; set; }
 
     /// <summary>
     /// Top-align the row instead of centering. Use for multi-input horizontal

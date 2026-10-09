@@ -1,0 +1,37 @@
+@* Help-hint icon (owner, 2026-10-08 — the D11/D13 "no inline narrative" pattern): a small
+    icon whose NATIVE `title` carries the hint text, so the hint costs no layout space and no
+    prose paragraph. Clicking/hovering is a plain browser tooltip — FluentUI's `Tooltip=`
+    attribute is an unmatched-attribute splat (decorative only) and `FluentSelect` drops
+    unmatched attributes entirely, so a native-title wrapper is the one mechanism that works
+    on every control.
+
+    Used by: <c>FormRow</c>'s optional <c>Help</c> parameter (Info icon), the Rules
+    <c>SectionCard</c> header and each of its readout rows (LockClosed icon, the inherited
+    Grade/Tenant-policy note).
+*@
+@using SchoolCollab.Admin.Shared.Constants
+
+<span class="@EffectiveClass" title="@Text" role="img" aria-label="More information">
+    @* `Value` (the non-generic path) takes an Icon INSTANCE. `Icon=` is the generic
+       <FluentIcon TIcon> overload: it wants the generated icon TYPE, and passing an
+       instance makes it infer the abstract base, whose parameterless ctor throws
+       "Please use the constructor including parameters." (repo rule: see
+       `.github/skills/fluentui-icons/SKILL.md` and the DashboardCard/RowActionsMenu
+       `Value="@Icon"` precedent). *@
+    <FluentIcon Value="@Icon" />
+</span>
+
+@code {
+    /// <summary>The hint text — rendered as the icon's native <c>title</c>. Required.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = default!;
+
+    /// <summary>The icon to show. Defaults to the small information glyph; callers pass a
+    /// lock for "inherited / not editable here" hints.</summary>
+    [Parameter] public Icon Icon { get; set; } = FluentIcons.Info;
+
+    /// <summary>Optional extra CSS class, appended to the component's own <c>help-icon</c>
+    /// (so a caller's scoped CSS can target its own instance without reaching inside).</summary>
+    [Parameter] public string? Class { get; set; }
+
+    private string EffectiveClass => string.IsNullOrWhiteSpace(Class) ? "help-icon" : $"help-icon {Class}";
+}

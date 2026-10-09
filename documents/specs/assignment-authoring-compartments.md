@@ -23,6 +23,12 @@
 >   and a single-line question list whose kebab opens the editor in a dialog. It changes no
 >   behaviour, gating, save semantics or contract defined below (this spec stays CLOSED and
 >   authoritative for those).
+> - `documents/specs/assignment-create-edit-redesign.md` — **presentation-only addendum
+>   (2026-10-08):** reordered Create field order, the bottom "Instructions" compartment,
+>   strand/lesson picker buttons, breadcrumb navigation, and the **summary-first draft-edit
+>   surface** (summary card with pencil + always-on Questions & AI + Targets accordion).
+>   Where it reorders or hides markup it wins; behaviour, gating, save semantics and the
+>   §11 lifecycle matrix stay authoritative here.
 >
 > **Implementation status:** **implemented in the main line.** R1 (#288), R2 (#291) and
 > R3 (#293) are merged on `main` — the compartmentalized authoring page, the targeting
