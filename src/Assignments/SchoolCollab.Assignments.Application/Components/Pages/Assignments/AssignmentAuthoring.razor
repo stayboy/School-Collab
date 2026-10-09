@@ -560,7 +560,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
                         }
                         else
                         {
@@ -574,7 +574,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
                             @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
                             {
                                 <QuestionsDraftSection AssignmentId="_item.Id"
@@ -2483,6 +2483,25 @@
             Logger.LogWarning(ex, "AI-prompt lock resolution failed");
         }
     }
+
+    /// <summary>QR-5/§5.6 (U5): stages one instruction media file through the SAME endpoint the
+    /// attachments use (stage-at-selection), so instruction media inherit its store, sweeper, caps and
+    /// 413/400 mapping — and the payload simply carries what came back. A refusal returns null: the
+    /// shared editor then asks the author to retry, rather than failing the whole edit.</summary>
+    private async Task<StagedAttachmentDto?> StageInstructionMediaAsync(
+        InstructionEditorRow row, Stream content, string fileName, string contentType, long fileSize)
+    {
+        try
+        {
+            return await Api.StageAttachmentAsync(content, fileName, contentType, fileSize);
+        }
+        catch (AttachmentStagingFailed ex)
+        {
+            Logger.LogWarning(ex, "Instruction media staging failed for {FileName}", fileName);
+            return null;
+        }
+    }
+
 
     private void OnModelChanged() { }
 

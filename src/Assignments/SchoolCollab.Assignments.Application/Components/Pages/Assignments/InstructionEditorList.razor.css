@@ -1,0 +1,53 @@
+/* Scoped styles for the shared instruction editor (QR-5, spec §5.2/§5.6). A compact list: one row
+   per block, the payload taking the width, the trailing × dropping the row. */
+
+.cq-instructions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cq-instructions-empty {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+}
+
+.cq-instruction-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cq-instruction-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cq-instruction-kind {
+    flex: 0 0 auto;
+    min-width: 120px;
+}
+
+.cq-instruction-payload {
+    flex: 1 1 auto;
+}
+
+.cq-instruction-file {
+    flex: 1 1 auto;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cq-instruction-error {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--error);
+}

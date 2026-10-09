@@ -1,0 +1,204 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Application.Helpers
+
+@* QR-5 (spec §5.2/§5.6, owner 2026-10-09): the shared INSTRUCTION editor — one shape, two owners
+   (the assignment's own blocks and each question's). Inline by construction: the dialog-ui rule
+   forbids a nested dialog, so this is a plain presentational panel, and it holds no API client — the
+   host supplies staging as StageMediaAsync, exactly as the attachments flow stages at selection. *@
+<div class="cq-instructions" id="@Id">
+    @if (Rows.Count == 0)
+    {
+        <p class="cq-instructions-empty" id="@($"{Id}-empty")">No instructions yet.</p>
+    }
+    else
+    {
+        <ul class="cq-instruction-rows" id="@($"{Id}-rows")">
+            @foreach (var (row, index) in Rows.Select((r, i) => (r, i)))
+            {
+                <li class="cq-instruction-row" @key="row">
+                    <DropdownForEnum TEnum="InstructionKindDto"
+                                     @bind-SelectedValue="row.Kind"
+                                     Label="Kind"
+                                     Class="cq-instruction-kind" />
+
+                    @switch (row.Kind)
+                    {
+                        case InstructionKindDto.Text:
+                            <FluentTextField @bind-Value="row.Text"
+                                             Placeholder="What the student should read or do"
+                                             class="cq-instruction-payload" />
+                            break;
+
+                        case InstructionKindDto.Url:
+                            <FluentTextField @bind-Value="row.Url"
+                                             Placeholder="https://…"
+                                             class="cq-instruction-payload" />
+                            break;
+
+                        default:
+                            @* Audio · Video · Image: a staged file (stage-at-selection). *@
+                            @if (string.IsNullOrWhiteSpace(row.StoragePath))
+                            {
+                                <FluentInputFile Mode="InputFileMode.Stream"
+                                                 MaximumFileCount="1"
+                                                 Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                 MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                 OnCompleted="@(args => OnFileUploadedAsync(row, args))" />
+                            }
+                            else
+                            {
+                                <span class="cq-instruction-file" title="@row.FileName">
+                                    @row.FileName (@AttachmentUploadPolicy.FormatFileSize(row.FileSize))
+                                </span>
+                                <FluentButton Appearance="Appearance.Stealth"
+                                              Id="@($"{Id}-clear-media-{index}")"
+                                              OnClick="@(() => ClearMediaAsync(row))"
+                                              aria-label="Remove the attached file">×</FluentButton>
+                            }
+                            break;
+                    }
+
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  Id="@($"{Id}-remove-{index}")"
+                                  OnClick="@(() => RemoveAsync(row))"
+                                  aria-label="Remove instruction">×</FluentButton>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="cq-instruction-actions">
+        <FluentButton Appearance="Appearance.Outline"
+                      Id="@($"{Id}-add")"
+                      IconStart="@FluentIcons.Add"
+                      OnClick="AddAsync">
+            Add instruction
+        </FluentButton>
+    </div>
+
+    @if (_error is not null)
+@code {
+    /// <summary>The container id, and the stem every inner id is built from — the bUnit/page seam.</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = default!;
+
+    /// <summary>The rows being edited — the HOST's list (a question's or the assignment's), so the
+    /// edit lands where the host projects the payload from.</summary>
+    [Parameter, EditorRequired] public List<InstructionEditorRow> Rows { get; set; } = default!;
+
+    /// <summary>The host's staging call: content + name/type/size in, the staged metadata out (null
+    /// when it refused). Null here means the host offers no uploads in this context — the media kinds
+    /// then report that instead of rendering a file input that could never succeed.</summary>
+    [Parameter] public StageInstructionMediaAsync? StageMediaAsync { get; set; }
+
+    /// <summary>Raised after any mutation, so the host can re-render counts and its submit gate.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private bool _staging;
+    private string? _error;
+
+    /// <summary>Appends a Text block — the cheapest kind to fill in first.</summary>
+    public async Task AddAsync()
+    {
+        Rows.Add(new InstructionEditorRow { Kind = InstructionKindDto.Text });
+        StateHasChanged();
+        await Changed.InvokeAsync();
+    }
+
+    public async Task RemoveAsync(InstructionEditorRow row)
+    {
+        if (Rows.Remove(row))
+        {
+            StateHasChanged();
+            await Changed.InvokeAsync();
+        }
+    }
+
+    /// <summary>Drops the staged file from a media row, keeping its kind so the author can pick
+    /// another file (or switch the kind) without losing the intent.</summary>
+    public async Task ClearMediaAsync(InstructionEditorRow row)
+    {
+        row.FileName = null;
+        row.ContentType = null;
+        row.FileSize = 0;
+        row.StoragePath = null;
+        StateHasChanged();
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>One media instruction row carries exactly one staged file, but FluentInputFile reports
+    /// its completions as a set — so the (capped-to-one) set is drained in order.</summary>
+    private async Task OnFileUploadedAsync(
+        InstructionEditorRow row, IEnumerable<FluentInputFileEventArgs> args)
+    {
+        foreach (var file in args)
+        {
+            await StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+        }
+    }
+
+    /// <summary>The testable seam (the <c>ResourcesSection.StageFileAsync</c> precedent): the client
+    /// pre-check, the host's staging call, then the row filled with what came back. bUnit drives this
+    /// directly, because the FluentInputFile JS pipeline is not up in tests.</summary>
+    public async Task StageMediaFileAsync(
+        InstructionEditorRow row, Stream content, string fileName, string contentType, long fileSize)
+    {
+        if (StageMediaAsync is null)
+        {
+            Fail("Attaching a file is not available here.");
+            return;
+        }
+
+        if (_staging)
+        {
+            Fail($"'{fileName}' is still uploading — please wait until the current upload finishes, then try again.");
+            return;
+        }
+
+        // One allow-list for every kind: it carries the media extensions (round Q1), so an audio or
+        // video instruction file passes the same pre-check as a document or an image.
+        var clientError = AttachmentUploadPolicy.Validate(fileName, fileSize);
+        if (clientError is not null)
+        {
+            Fail(clientError);
+            return;
+        }
+
+        _staging = true;
+        try
+        {
+            var staged = await StageMediaAsync(row, content, fileName, contentType, fileSize);
+            if (staged is null)
+            {
+                Fail($"'{fileName}' could not be attached — please try again.");
+                return;
+            }
+
+            row.FileName = staged.FileName;
+            row.ContentType = staged.ContentType;
+            row.FileSize = staged.FileSize;
+            row.StoragePath = staged.StoragePath;
+            _error = null;
+            StateHasChanged();
+            await Changed.InvokeAsync();
+        }
+        finally
+        {
+            _staging = false;
+        }
+    }
+
+    /// <summary>Sets the failure line and re-renders. A method invoked directly (bUnit, a test seam)
+    /// does not get the render an event handler would, so every state change renders explicitly —
+    /// which is also what lets the page/dialog re-render when they call these methods.</summary>
+    private void Fail(string message)
+    {
+        _error = message;
+        StateHasChanged();
+    }
+}
+
+    {
+        <p class="cq-instruction-error" id="@($"{Id}-error")">@_error</p>
+    }
+</div>
+

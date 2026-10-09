@@ -106,6 +106,11 @@ Blazor's diffing algorithm can reuse existing DOM nodes instead of re-creating t
 - Use `[Parameter, EditorRequired]` for required parameters — IDE warns if omitted.
 - Use `EventCallback<T>` (not `Action<T>`) for child-to-parent events — async-safe and
   automatically calls `StateHasChanged`.
+- A method invoked **directly** — a bUnit test seam, or a parent calling through `@ref` — does **not**
+  re-render the component: only event handlers do. End every public mutating method with an explicit
+  `StateHasChanged()` so the same method behaves identically from an event, a test, and a parent call.
+  (Learned the hard way: a failure line that never appeared in bUnit because the seam set the field and
+  nothing re-rendered.)
 - Implement `IAsyncDisposable` to clean up timers, subscriptions, and JS module
   references.
 

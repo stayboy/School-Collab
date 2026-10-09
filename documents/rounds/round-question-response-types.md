@@ -289,3 +289,131 @@ changed; nothing when neither was supplied).
 
 Everything else on the spec's settled list is implemented and tested.
 
+## 12. Commit / push / stack PR (2026-10-09) — unattended grill, per owner instruction
+
+Owner instruction: *"commit and push to PR (stack pr is applicable)"* plus *"'grill-me' for all open
+questions. note this"*. The open questions were therefore resolved with the grill method
+**unattended** and recorded here instead of asked ("all as recommended" on the *agent's* own
+recommendations; no plan-author recommendation auto-accepted; nothing touched a migration, the
+contract shape, auth, tenant isolation or a public route).
+
+| Q | Settled (unattended) |
+|---|---|
+| Q1 | **Change set = Feature A only.** The unrelated dirty files stayed uncommitted: `AGENTS.md`, `documents/rounds/round-assignment-context-strands-lessons.md`, `documents/rounds/.session-state.2026-09-22.md`, `documents/solution/{blazor-agent-skills-adoption,maui-agent-skills-readiness}.md`, `documents/specs/mobile-hybrid-app.md` — a feature PR must contain the feature, and the commit gate exists to keep foreign work out |
+| Q2 | **One commit** for the slice: contracts → domain → persistence → handlers → form model → tests → docs cannot land in a compiling order separately, and the round is one coherent feature |
+| Q3 | **Two-layer stack** (`fix/assignment-form-alignment-polish` → `main`, `feat/question-response-types` → base): the layer depends on the base's D14/D15 commits, so it cannot target `main` |
+| Q4 | Generated PR titles/bodies replaced with real ones — what each layer contains, its verification, and what is deliberately **not** in it |
+
+**Outcome**
+
+| | |
+|---|---|
+| Commit | `44c707a1` — `feat(assignments): question response definitions, instructions and the media/auto-scored rule` (34 files, +3542/−51) |
+| Stack | **#325** — `main ← fix/assignment-form-alignment-polish ← feat/question-response-types` |
+| PR | **#323** base layer → `main` · **#324** feature layer → `fix/assignment-form-alignment-polish` |
+| Push | both branches, with `SCHOOLCOLLAB_ALLOW_PUSH=1` for the pre-push guard |
+
+Two operational notes worth keeping: a PowerShell `utf8` write put a BOM on the commit subject, so the
+commit was **amended before the push** (the published history is clean); and `gh stack init` rejects
+`--remote` in v0.2.0 (it is local-only), while piping gh output through `Select-Object -First` breaks
+the pipe (EPIPE → spurious exit 1) — `Out-String` is the reliable read.
+
+Not done, deliberately: no merge (needs its own instruction and green checks), and this push does not
+advance A6/A7 — the UI controls, the migration test and the route-level 400 test are still pending.
+
+## 13. A6 — the response-kind picker (2026-10-09, uncommitted)
+
+The first intent-blocking UI control, plus a defect it exposed.
+
+| File | Change |
+|---|---|
+| `AssignmentQuestionEditorRows.cs` → `QuestionEditDialogTypes.cs` | `QuestionEditModel` carries the assignment's `GradingFormat` (default Teacher Marked, so non-format-aware call sites keep their meaning); `ForEdit`/`ForCreate` take it |
+| `QuestionEditDialog.razor(.css)` | the **Response** picker: one `FluentCheckbox` per kind, the set rebuilt in canonical order (Video · Audio · Document · Image) so the payload order is a function of the SET; where the media rule forbids kinds the boxes render **disabled with the reason** (`QuestionResponseKindRules.TeacherMarkedOnlyHint`) — the `ScoringFieldsSection` pattern |
+| `QuestionEditorSection.razor` | new `[Parameter, EditorRequired] GradingFormat`, threaded into the dialog model (the scoring section's precedent) |
+| `AssignmentAuthoring.razor` | both `<QuestionEditorSection>` sites pass `GradingFormat="@SelectedGradingFormat"` |
+
+### Defect found while writing the tests — fixed
+
+`QuestionEditModel.CopyRow` (the dialog's working copy) copied text/type/options/correct-answer/provenance
+but **not** the new `ResponseKinds`/`Instructions` → confirming *any* edit through the dialog would have
+silently wiped the question's definition and every instruction block. Fixed (deep copy of both) and
+locked by `ResponseKinds_AndInstructions_SurviveAnEditThroughTheDialog`.
+
+### Tests
+
+`ResponseKinds_TeacherMarked_TogglesBindAndThePayloadKeepsCanonicalOrder` (toggling the last then the
+first kind yields the canonical order) · `ResponseKinds_AutoScored_RendersDisabledWithTheReason` (all
+four disabled + the reason stated) · `ResponseKinds_AndInstructions_SurviveAnEditThroughTheDialog`.
+The boxes are driven the repo's way — `FindComponents<FluentCheckbox>().Instance.ValueChanged` (a
+FluentCheckbox renders `<fluent-checkbox>`, so `input[type=checkbox]` does not exist in bUnit markup).
+
+**Evidence:** Application builds 0 errors; Assignments unit suite **1048 total · 1048 passed · 0 failed**.
+
+### Still open in A6
+
+The shared inline instruction component (U5's `StageMediaAsync` callback shape) + the assignment's
+Instructions compartment block, and the U4 "N questions need a response definition" banner — then A7's
+migration test and route-level 400 test.
+
+## 14. A6 — the shared inline instruction editor (2026-10-09, uncommitted)
+
+| File | Change |
+|---|---|
+| `InstructionEditorList.razor(.css)` (new) | the shared editor: one row per block (kind picker → the payload that kind needs → remove), an "Add instruction" button, an inline failure line. **Presentational** — no API client; media staging arrives as the `StageMediaAsync` seam (U5) |
+| `AssignmentQuestionEditorRows.cs` | new `StageInstructionMediaAsync` delegate — the one seam every host implements |
+| `QuestionEditDialog.razor(.css)` | the per-question instruction block, using the shared editor (inline — no nested dialog, `dialog-ui` §4) |
+| `QuestionEditDialogTypes.cs`, `QuestionEditorSection.razor`, `AssignmentAuthoring.razor` | the staging seam threaded page → section → dialog model, alongside the grading format |
+
+### Two findings it exposed
+
+1. **The attachment allow-list carries no audio/video extensions** (`AttachmentUploadOptions.AllowedExtensions`
+   = pdf/doc/docx/ppt/pptx/xls/xlsx/images/text — no `.mp3`, `.mp4`, `.mov`). Reusing the staging
+   pipeline "verbatim" (round-3 Q3) therefore cannot upload the two kinds the feature exists for. The
+   client pre-check is now **kind-aware** (`AttachmentUploadPolicy.ValidateSizeOnly` for audio/video, so
+   those attempts are not blocked client-side) but the **server's `StagedFileValidator` still refuses
+   them** — so audio/video instructions do not work end-to-end until the list is widened (or a
+   purpose-scoped list is added). **This is a human-gated change** (upload validation): it needs the
+   owner's call, and it touches the AppHost parameter default + `documents/configuration.md` §2/§13.
+2. **A directly-invoked component method does not re-render.** The bUnit seam calls the component's
+   methods directly, so the failure line never appeared until every mutating path called
+   `StateHasChanged()` explicitly (a Blazor event handler would have rendered for free). Fixed
+   component-wide — it is also what makes the page/dialog re-render when they call these methods.
+
+### Tests (10 new)
+
+`InstructionEditorListBunitTests` (9): empty state · add · remove · kind switch renders the payload that
+kind needs · a staged file renders its name + clear action · a successful stage fills the row from the
+host's result · the client policy refuses a bad extension **without** calling the host · **audio is not
+client-blocked by the attachment allow-list** (the gap above, pinned as behaviour) · a host refusal asks
+for a retry · no seam says so. Plus `Instructions_AddedInTheDialog_RoundTripThroughTheWorkingCopy` in
+the dialog suite.
+
+**Evidence:** Application builds 0 errors; Assignments unit suite **1059 total · 1059 passed · 0 failed**.
+
+### Still open in A6
+
+The assignment's Instructions **compartment block** (the same component on the page, beside the
+existing text field) and the U4 minimal "N questions need a response definition" banner — then A7's
+migration test and route-level 400 test, and the allow-list decision above.
+
+## 15. Round-4 grill settlements (2026-10-09) — applied
+
+Owner answered **all as recommended** on the four findings from §14 and the intent review.
+
+| Q | Settled | What landed |
+|---|---|---|
+| Q1 | **Widen the one allow-list** (not a purpose-scoped second list) | `AttachmentUploadOptions.AllowedExtensions` + `AttachmentUploadPolicy.AllowedExtensions` gain `.mp3 .m4a .wav .ogg .aac .mp4 .webm .mov .m4v`; the AppHost parameter default (`appsettings.json`) and `documents/configuration.md` rows 134/1206 carry them. The component's kind-aware pre-check is gone — one list for every kind (`ValidateSizeOnly` deleted with it). **Audio/video instruction uploads now work end-to-end** |
+| Q2 | **The migration test follows the real-Postgres precedent** in `Tests.Integration` | `AssignmentInstructionsResponseKindsMigrationTests` — pre-migration schema asserted ABSENT first, then the column (`integer[]`, NOT NULL, `ARRAY[]::integer[]` default), the table + every column, the nullable `question_id` owner discriminator, both indexes, the assignment FK's CASCADE, the seeded pre-migration row surviving, the enum-array round-trip, the cascade through a real row, and an additive-only script assertion. **Runs via Testcontainers — 2/2 green locally (8s)** |
+| Q3 | **Codify both lessons** | `blazor-components.md` § Component parameters gains the "a directly-invoked method does not re-render — end mutating methods with `StateHasChanged()`" rule; `testing.md` gains rule 5 on driving Fluent web components (`FindComponents<T>().Instance.ValueChanged`, assert the tag/parameters, not an inner `<input>`) |
+| Q4 | **A durable solution note** | `documents/solution/question-response-definitions.md` — the requirement, the two rules (and why the mandatory-kind rule is scoped to where kinds are permitted), the model, the full-replacement write paths, the upload/allow-list story, and the file map |
+
+**Evidence:** migration test **2/2** on real Postgres; Assignments unit suite re-run green after the
+allow-list change; the `AttachmentUploadPolicy` client mirror and the server `StagedFileValidator` read
+the same list, so the two cannot drift without a test noticing.
+
+### Still open (the whole remainder)
+
+1. **A6**: the Instructions compartment block on the authoring page + the U4 banner.
+2. **A7**: the route-level 400 test for the typed rule rejections (kinds + D15).
+3. The round's work is **uncommitted** — PR #324 currently carries the pre-A6 layer only.
+

@@ -60,6 +60,13 @@ public sealed class InstructionEditorRow
         StoragePath: StoragePath);
 }
 
+/// <summary>QR-5/§5.6 (U5): stages one instruction media file on the host's behalf. The shared
+/// instruction editor is presentational — it never holds an API client — so every host (the page,
+/// the question dialog) supplies this one seam, mirroring the attachments stage-at-selection flow.</summary>
+/// <returns>The staged metadata, or null when the host refused (it owns the reason).</returns>
+public delegate Task<StagedAttachmentDto?> StageInstructionMediaAsync(
+    InstructionEditorRow row, Stream content, string fileName, string contentType, long fileSize);
+
 /// <summary>
 /// One editable question row held in
 /// <see cref="AssignmentEditFormModel.Questions"/>. Mirrors the spec §3.5
