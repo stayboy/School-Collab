@@ -29,8 +29,11 @@ public sealed class StageQuestionsDraftCommandHandler(
         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.AssignmentId);
 
-        // Validate-first: an invalid draft must never enter the blob (FR-252).
-        QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
+        // Validate-first: an invalid draft must never enter the blob (FR-252). The format decides
+        // whether the questions must define response kinds (Q1(ii)) — an auto-scored assignment's
+        // generated draft carries none, by construction.
+        QuestionOptionDtoValidator.ValidateQuestions(
+            command.Questions, (GradingFormatDto)(int)assignment.GradingFormat);
 
         var json = JsonSerializer.Serialize(command.Questions.ToList(), JsonOptions);
         assignment.StageQuestionsDraft(json);

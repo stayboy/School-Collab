@@ -1642,14 +1642,18 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
     // ── P1 rework: Edit loads the persisted children (the load half of parity) ─────
 
-    private static AssignmentQuestionReadDto LoadedQuestion() =>
+    /// <summary>QR-2/Q1(ii): a loaded question. <paramref name="kinds"/> true is an assignment
+    /// authored after response definitions existed; false reproduces a LEGACY Teacher Marked row,
+    /// whose empty set is what the form gate now surfaces as a fixable prompt (round Q2).</summary>
+    private static AssignmentQuestionReadDto LoadedQuestion(bool kinds = true) =>
         new(Guid.NewGuid(), "Loaded question?", QuestionTypeDto.MultipleChoice, DisplayOrder: 0,
             ModelAnswer: null,
             Options:
             [
                 new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "A", true),
                 new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "B", false)
-            ]);
+            ],
+            ResponseKinds: kinds ? [QuestionResponseKindDto.Image] : []);
 
     private static AssignmentAttachmentReadDto LoadedAttachment() =>
         new(Guid.NewGuid(), "syllabus.pdf", "application/pdf", 2048, "tenants/t/staging/syllabus.pdf");
@@ -1703,7 +1707,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         // Add one VALID question through the editor section's own seam (a blank row would be
         // rejected by the submit gate before any request is sent).
-        var row = new QuestionEditorRow { QuestionText = "Added question?", Type = QuestionTypeDto.ShortAnswer, ModelAnswer = "42" };
+        var row = new QuestionEditorRow
+        {
+            QuestionText = "Added question?",
+            Type = QuestionTypeDto.ShortAnswer,
+            ModelAnswer = "42",
+            // QR-2/Q1(ii): the fixture assignment is Teacher Marked, where the form gate requires the
+            // definition — a kind-less row would be refused before any request is sent.
+            ResponseKinds = { QuestionResponseKindDto.Image },
+        };
         var section = cut.FindComponents<QuestionEditorSection>().Single();
         await cut.InvokeAsync(() => section.Instance.Model.AddQuestion(row));
 
@@ -1724,6 +1736,27 @@ public class AssignmentAuthoringBunitTests : BunitContext
             "the update request carries the loaded question — not only the newly added one");
         updateBody.Should().Contain("Added question?");
         updateBody.Should().Contain("syllabus.pdf", "the loaded attachment is re-projected, not dropped");
+    }
+
+    /// <summary>Round Q2 (owner, 2026-10-09): a question saved before response definitions existed
+    /// reads back with an empty kind set. On a Teacher Marked assignment the form gate surfaces it as
+    /// one line the author can act on — deliberately not a silent backfill, which would rewrite what
+    /// already-published students are asked to submit.</summary>
+    [TestMethod]
+    public async Task Edit_LegacyQuestionWithoutAResponseKind_IsSurfacedByTheGateNotTheServer()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"));
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() =>
+            cut.Find("#authoring-error").TextContent.Should().Contain("at least one response kind",
+                "the author is told WHICH question needs a definition, before any request is sent"));
     }
 
     [TestMethod]

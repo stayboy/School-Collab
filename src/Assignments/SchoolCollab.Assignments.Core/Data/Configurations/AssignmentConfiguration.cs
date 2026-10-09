@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services;
@@ -185,6 +186,25 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             // assignment whose generation header was never recorded still round-trips.
             q.Property(q => q.GenerationId);
 
+            // ── D16/QR-2: the response kinds ────────────────────────────────────────────────
+            // A small, ordered value set with no per-row metadata, so it is a first-class array
+            // column rather than a join table — the ContextStrandIds precedent above.
+            //
+            // Deliberately NO HasConversion: EF Core's primitive-collection support maps the
+            // IReadOnlyList<T> natively and applies the enum's own element conversion to the array
+            // (`integer[]`). A hand-written converter COMPOSES with that element conversion and the
+            // model build dies with "Cannot compose converter … because the output type of the first
+            // converter doesn't match the input type of the second" — so the element-level mapping is
+            // EF's job, and the column type is all the configuration this needs.
+            //
+            // NOT NULL with an empty-array default: the CLR property is non-nullable, so the one
+            // additive ADD COLUMN backfills every existing row, and "no kinds recorded" has exactly
+            // one representation. The ≥1 rule is enforced on WRITE (QuestionOptionDtoValidator), so
+            // a legacy question reads back with an empty set instead of failing.
+            q.Property(q => q.ResponseKinds)
+                .HasColumnType("integer[]")
+                .HasDefaultValue(Array.Empty<ResponseKind>());
+
             q.OwnsMany(q => q.Options, o =>
             {
                 o.ToTable("question_options");
@@ -195,6 +215,32 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
                 o.Property(o => o.IsCorrect).IsRequired().HasDefaultValue(false);
             });
         });
+
+        // ── QR-5/§5.6 (owner, 2026-10-09): the instruction blocks ──────────────────────────
+        // ONE table for both owners: a row with QuestionId null is the ASSIGNMENT's own
+        // instruction, a row with an id belongs to that question — the shared shape the spec
+        // settled. The collection is owned by the aggregate rather than by the question because
+        // an owned type cannot be the principal of another relationship, so the question link is
+        // a plain nullable id the aggregate itself keeps consistent (RemoveQuestion purges the
+        // rows of a question it drops).
+        builder.OwnsMany(x => x.InstructionItems, i =>
+        {
+            i.ToTable("assignment_instructions");
+            i.WithOwner().HasForeignKey(i => i.AssignmentId);
+            i.HasKey(i => i.Id);
+            i.Property(i => i.Id).ValueGeneratedNever();
+            i.Property(i => i.QuestionId);
+            i.Property(i => i.Kind).IsRequired().HasDefaultValue(InstructionKind.Text);
+            i.Property(i => i.Text).HasMaxLength(4000);
+            i.Property(i => i.Url).HasMaxLength(2000);
+            i.Property(i => i.FileName).HasMaxLength(255);
+            i.Property(i => i.ContentType).HasMaxLength(100);
+            i.Property(i => i.FileSize).IsRequired();
+            i.Property(i => i.StoragePath).HasMaxLength(500);
+            i.Property(i => i.DisplayOrder).IsRequired();
+            i.HasIndex(i => i.QuestionId).HasDatabaseName("ix_assignment_instructions_question_id");
+        });
+        builder.Navigation(x => x.InstructionItems).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
 
         builder.OwnsMany(x => x.Reviews, r =>
         {

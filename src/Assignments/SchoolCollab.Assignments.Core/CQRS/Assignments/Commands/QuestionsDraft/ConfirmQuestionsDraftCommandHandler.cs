@@ -47,8 +47,10 @@ public sealed class ConfirmQuestionsDraftCommandHandler(
         }
 
         // Defensive validate: staging validates first, but a hand-written blob
-        // must not bypass the question rules on the way in (FR-252).
-        QuestionOptionDtoValidator.ValidateQuestions(drafted);
+        // must not bypass the question rules on the way in (FR-252). The format decides whether the
+        // drafted questions must define response kinds (Q1(ii)).
+        QuestionOptionDtoValidator.ValidateQuestions(
+            drafted, (GradingFormatDto)(int)assignment.GradingFormat);
 
         // Confirm REPLACES all existing questions — mirror the update handler's
         // full-replacement question-sync block (snapshot -> remove -> re-add,
@@ -59,12 +61,25 @@ public sealed class ConfirmQuestionsDraftCommandHandler(
             assignment.RemoveQuestion(qid);
         }
 
+        // QR-5 (§5.6): the drafted questions' instruction rows, re-stamped with the ids this confirm
+        // mints — the rows removed just above are gone for good, so anything omitted here is lost.
+        // The assignment's OWN rows are untouched by a questions confirm, so these are appended.
+        var questionInstructionItems = new List<(Guid? QuestionId, Domain.InstructionKind Kind, string? Text,
+            string? Url, string? FileName, string? ContentType, long FileSize, string? StoragePath)>();
+
         for (var i = 0; i < drafted.Count; i++)
         {
             var q = drafted[i];
             // R3 (D4/P1-2): the draft blob is where GenerationId is FIRST stamped by the UI, and this
             // re-mint is where it would otherwise be lost — the drafted rows are replaced wholesale.
-            var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer, q.GenerationId);
+            var question = assignment.AddQuestion(
+                q.QuestionText,
+                (Domain.QuestionType)q.QuestionType,
+                i,
+                q.ModelAnswer,
+                q.GenerationId,
+                // D16/QR-2: the drafted kinds ride the re-mint for the same reason.
+                q.ResponseKinds?.Select(kind => (Domain.ResponseKind)(int)kind).ToList());
             if (q.Options is { Count: > 0 })
             {
                 foreach (var opt in q.Options)
@@ -72,6 +87,22 @@ public sealed class ConfirmQuestionsDraftCommandHandler(
                     question.AddOption(opt.OptionText, opt.IsCorrect);
                 }
             }
+
+            // QR-5: the drafted question's instruction rows, stamped with the freshly minted id.
+            questionInstructionItems.AddRange((q.Instructions ?? []).Select(item => (
+                QuestionId: (Guid?)question.Id,
+                Kind: (Domain.InstructionKind)(int)item.Kind,
+                Text: item.Text,
+                Url: item.Url,
+                FileName: item.FileName,
+                ContentType: item.ContentType,
+                FileSize: item.FileSize,
+                StoragePath: item.StoragePath)));
+        }
+
+        if (questionInstructionItems.Count > 0)
+        {
+            assignment.AddInstructionItems(questionInstructionItems);
         }
 
         assignment.ConfirmQuestionsDraft();

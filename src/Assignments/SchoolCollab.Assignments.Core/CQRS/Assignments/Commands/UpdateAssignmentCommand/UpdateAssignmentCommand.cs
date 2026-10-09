@@ -51,4 +51,8 @@ public sealed record UpdateAssignmentCommand(
     /// <c>Assignment.SetContextPicks</c>, which preserves the kind whose argument is null.</summary>
     IReadOnlyList<Guid>? ContextStrandIds = null,
     /// <summary>R4 (CP-10/D23): the picked lesson ids — see <see cref="ContextStrandIds"/>.</summary>
-    IReadOnlyList<Guid>? ContextLessonIds = null) : ICommand;
+    IReadOnlyList<Guid>? ContextLessonIds = null,
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's own instruction blocks — null
+    /// preserves the persisted set (the child-collection contract every other collection here
+    /// follows), a non-null list is a full replacement.</summary>
+    IReadOnlyList<NewInstructionDto>? InstructionItems = null) : ICommand;

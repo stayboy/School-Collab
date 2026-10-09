@@ -72,8 +72,13 @@ public sealed class CreateAssignmentCommandHandler(
         // resources enter the aggregate (spec §3.3 / WS-A1).
         if (command.Questions is { Count: > 0 })
         {
-            QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
+            QuestionOptionDtoValidator.ValidateQuestions(
+                command.Questions, (GradingFormatDto)(int)command.GradingFormat);
         }
+
+        // QR-5 (§5.2/§5.6): the assignment's own instruction blocks, validated before the aggregate
+        // exists — the same EC-7 posture as every other inbound child collection above.
+        InstructionDtoValidator.ValidateAll(command.InstructionItems, "This assignment");
         AssignmentContentValidator.ValidateModules(command.ContentModules);
         AssignmentContentValidator.ValidateResources(command.Resources);
         AssignmentContentValidator.ValidateAttachments(command.Attachments, uploadOptions.Value);
@@ -89,6 +94,25 @@ public sealed class CreateAssignmentCommandHandler(
         AssignmentTypeGradingRules.EnsurePermitted(
             (AssignmentTypeDto)(int)command.AssignmentType,
             (GradingFormatDto)(int)command.GradingFormat);
+
+        // Q5 (spec question-response-types §5.3): every response kind is media — video, audio, a
+        // document, an image — so any question that defines kinds needs Teacher Marked grading.
+        // Fail before the aggregate is built, beside the D15 rule above.
+        QuestionResponseKindRules.EnsurePermitted(
+            (GradingFormatDto)(int)command.GradingFormat,
+            (command.Questions ?? []).SelectMany(q => q.ResponseKinds ?? []).ToList());
+
+        // QR-5/§5.6: the instruction rows for the whole aggregate — the ASSIGNMENT's own first
+        // (QuestionId null), then each question's, stamped with the id the aggregate mints below.
+        var instructionItems = (command.InstructionItems ?? []).Select(item => (
+            QuestionId: (Guid?)null,
+            Kind: (InstructionKind)(int)item.Kind,
+            item.Text,
+            item.Url,
+            item.FileName,
+            item.ContentType,
+            item.FileSize,
+            item.StoragePath)).ToList();
 
         var assignment = Assignment.Create(
             command.Title,
@@ -141,7 +165,14 @@ public sealed class CreateAssignmentCommandHandler(
             for (var i = 0; i < command.Questions.Count; i++)
             {
                 var q = command.Questions[i];
-                var question = assignment.AddQuestion(q.QuestionText, (QuestionType)q.QuestionType, i, q.ModelAnswer, q.GenerationId);
+                var question = assignment.AddQuestion(
+                    q.QuestionText,
+                    (QuestionType)q.QuestionType,
+                    i,
+                    q.ModelAnswer,
+                    q.GenerationId,
+                    // D16/QR-2 (§5.1): the response kinds the validator has already required.
+                    q.ResponseKinds?.Select(kind => (ResponseKind)(int)kind).ToList());
                 if (q.Options is { Count: > 0 })
                 {
                     foreach (var opt in q.Options)
@@ -149,7 +180,25 @@ public sealed class CreateAssignmentCommandHandler(
                         question.AddOption(opt.OptionText, opt.IsCorrect);
                     }
                 }
+
+                // QR-5 (§5.2): this question's instruction blocks, stamped with the id the
+                // aggregate just minted — the rows are re-minted on every save, so the id has to
+                // be taken here (the same reason GenerationId rides the DTO).
+                instructionItems.AddRange((q.Instructions ?? []).Select(item => (
+                    QuestionId: (Guid?)question.Id,
+                    Kind: (InstructionKind)(int)item.Kind,
+                    item.Text,
+                    item.Url,
+                    item.FileName,
+                    item.ContentType,
+                    item.FileSize,
+                    item.StoragePath)));
             }
+        }
+
+        if (instructionItems.Count > 0)
+        {
+            assignment.SetInstructionItems(instructionItems);
         }
 
         if (command.Attachments is { Count: > 0 })

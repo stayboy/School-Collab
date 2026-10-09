@@ -16,6 +16,51 @@ public sealed class OptionEditorRow
 }
 
 /// <summary>
+/// One editable instruction block (QR-5 / §5.6, owner 2026-10-09) — <b>one shape, two owners</b>:
+/// the same row backs a question's list and the assignment's own list. Plain data; for the media
+/// kinds it carries what the stage-at-selection call returned (the <see cref="AttachmentEditorRow"/>
+/// precedent), so the payload never needs a second round trip.
+/// </summary>
+public sealed class InstructionEditorRow
+{
+    /// <summary>The instruction kind: text · audio · video · url · image.</summary>
+    public InstructionKindDto Kind { get; set; }
+
+    /// <summary>The prose, for <see cref="InstructionKindDto.Text"/>.</summary>
+    public string? Text { get; set; }
+
+    /// <summary>The absolute http(s) target, for <see cref="InstructionKindDto.Url"/>.</summary>
+    public string? Url { get; set; }
+
+    /// <summary>The staged media file's original name (audio/video/image).</summary>
+    public string? FileName { get; set; }
+
+    /// <summary>The staged media file's MIME type.</summary>
+    public string? ContentType { get; set; }
+
+    /// <summary>The staged media file's size in bytes.</summary>
+    public long FileSize { get; set; }
+
+    /// <summary>The opaque storage path the staging endpoint returned (decision (b)).</summary>
+    public string? StoragePath { get; set; }
+
+    /// <summary>Whether this row carries a staged media file rather than text or a link — the single
+    /// source the UI reads for that question, mirroring the domain row's own discriminator.</summary>
+    public bool HasMedia =>
+        Kind is InstructionKindDto.Audio or InstructionKindDto.Video or InstructionKindDto.Image;
+
+    /// <summary>Projects this row onto the wire shape both owners share.</summary>
+    public NewInstructionDto ToDto() => new(
+        Kind: Kind,
+        Text: Text,
+        Url: Url,
+        FileName: FileName,
+        ContentType: ContentType,
+        FileSize: FileSize,
+        StoragePath: StoragePath);
+}
+
+/// <summary>
 /// One editable question row held in
 /// <see cref="AssignmentEditFormModel.Questions"/>. Mirrors the spec §3.5
 /// shape: question text, type discriminator, options, a single
@@ -57,6 +102,16 @@ public sealed class QuestionEditorRow
     /// <c>AppendGenerated(..., generationId)</c> after a generation; projected onto
     /// <c>NewQuestionDto.GenerationId</c> so the server's full-replacement re-mint re-attaches it.</summary>
     public Guid? GenerationId { get; set; }
+
+    /// <summary>D16/QR-2 (§5.1, round Q1(ii)): the response kinds this question expects — a set,
+    /// because the owner's requirement is "any of, or a mix of". Empty is the normal and REQUIRED
+    /// state on an Auto Scored / Instant Feedback assignment (the media rule forbids every kind
+    /// there, so nothing may be defined); on Teacher Marked the form gate requires at least one.</summary>
+    public List<QuestionResponseKindDto> ResponseKinds { get; } = [];
+
+    /// <summary>QR-5 (§5.2/§5.6): this question's instruction blocks, in the author's order. The
+    /// same <see cref="InstructionEditorRow"/> shape backs the assignment's own list.</summary>
+    public List<InstructionEditorRow> Instructions { get; } = [];
 
     /// <summary>Max options for a MultipleChoice question (spec §4.3 / EC-5 note).</summary>
     public const int MaxOptions = 6;
