@@ -43,6 +43,10 @@
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.1.0" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
+    <!-- L1 (round mobile-host-skeleton): the mobile head loads its embedded appsettings.json
+         through AddJsonStream — MAUI brings Microsoft.Extensions.Configuration itself but not
+         the JSON provider, so the provider is referenced explicitly. -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
@@ -50,6 +54,9 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+    <!-- L1 (round mobile-host-skeleton): the MAUI template's `builder.Logging.AddDebug()`
+         provider; MAUI brings Logging but not the Debug provider. -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
@@ -58,6 +65,15 @@
   <ItemGroup Label="Fluent UI">
     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.2" />
     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.2" />
+  </ItemGroup>
+  <ItemGroup Label="MAUI">
+    <!-- L1 (round mobile-host-skeleton): the Blazor Hybrid head. These two are the head's
+         first-party MAUI packages; the .csproj carries NO Version attribute (CPM). The MAUI
+         workload (android/ios/maccatalyst/maui-windows) supplies the build tasks and the
+         platform assemblies. Pinned together — the WebView package ships in lockstep with
+         Controls. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.110" />
+    <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.110" />
   </ItemGroup>
   <ItemGroup Label="OpenTelemetry">
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />

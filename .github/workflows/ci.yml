@@ -154,3 +154,49 @@ jobs:
       - name: Run the auth portal tests
         working-directory: src/SchoolCollab.AuthPortal
         run: uv run pytest
+
+  mobile:
+    # The Blazor Hybrid head cannot build on ubuntu — its TFMs are device platforms — and it is
+    # deliberately absent from SchoolCollab.slnx, so `build-and-test` never sees it. This job
+    # gates it (added 2026-10-09, round mobile-host-skeleton).
+    #
+    # It builds the head's Windows TFM, NOT `-f net10.0-android` as originally planned. Measured
+    # 2026-10-09 (round mobile-host-skeleton inventory item (a)/(b)): the Admin.Shared closure
+    # RESTORES and COMPILES for net10.0-android, but the android BUILD fails with
+    #   NETSDK1082: There was no runtime pack for Microsoft.AspNetCore.App available for the
+    #   specified RuntimeIdentifier 'android-arm64'/'android-x64'
+    # because Admin.Shared and ServiceDefaults each declare
+    # <FrameworkReference Include="Microsoft.AspNetCore.App" />, which lands on the head
+    # transitively, and a self-contained mobile app needs a runtime pack per framework reference
+    # — Microsoft.AspNetCore.App has none for any android RID. Severing that closure is L2 work,
+    # so L1 gates what genuinely builds today; the android TFM joins this job once severance
+    # lands. Windows is a real head TFM, so the job is not a proxy — the same command builds the
+    # spike page and the Admin.Shared reference it renders.
+    #
+    # The head is built as a PROJECT with an explicit `-f`, never through
+    # src/Mobile/SchoolCollab.Mobile.slnx: a solution-level `-f` passes TargetFramework as a
+    # GLOBAL PROPERTY, which overrides (does not skip) the plain-net10.0 Mobile.Logic and
+    # Mobile.Tests.Unit members and would force that TFM onto them. Those two live in the root
+    # solution and are already built and tested by `build-and-test`.
+    name: Mobile (MAUI)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      # GitHub windows runners do NOT ship the MAUI workloads (the Windows TFM needs
+      # maui-windows); this costs minutes per run and is the known price of the job.
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+
+      - name: Build the mobile head (windows)
+        run: >
+          dotnet build
+          src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
+          -f net10.0-windows10.0.19041.0
+          --configuration Release
