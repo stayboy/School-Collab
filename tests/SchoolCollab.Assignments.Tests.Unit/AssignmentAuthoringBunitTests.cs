@@ -907,10 +907,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D6: the field order — Status &amp; available from LEADS the form, the Due date sits
-    /// directly after the Assignment type &amp; grading row, and Subject follows the scoring cluster.</summary>
+    /// <summary>D6 + D14 (owner follow-up, 2026-10-09): Status &amp; available from LEADS the form,
+    /// Subject + its strands/lessons row sit right after Title — BEFORE the Assignment type &amp;
+    /// grading row (the subject is vital, D14) — and the Due date sits directly after the
+    /// type &amp; grading row.</summary>
     [TestMethod]
-    public void Basics_LeadsWithStatus_AndDueDateFollowsTypeAndGrading()
+    public void Basics_LeadsWithStatus_AndSubjectPrecedesTheTypeAndGradingRow()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
 
@@ -918,16 +920,16 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             var basics = cut.Find("#authoring-basics");
             var order = basics.QuerySelectorAll(
-                    "#authoring-basics-status, #authoring-basics-title, #authoring-basics-type, " +
-                    "#authoring-basics-due, #authoring-basics-subject")
+                    "#authoring-basics-status, #authoring-basics-title, #authoring-basics-subject, " +
+                    "#authoring-add-strand, #authoring-basics-type, #authoring-basics-due")
                 .Select(e => e.Id).ToList();
             string[] expected =
             [
-                "authoring-basics-status", "authoring-basics-title", "authoring-basics-type",
-                "authoring-basics-due", "authoring-basics-subject"
+                "authoring-basics-status", "authoring-basics-title", "authoring-basics-subject",
+                "authoring-add-strand", "authoring-basics-type", "authoring-basics-due"
             ];
             order.Should().ContainInOrder(expected,
-                "D6: status first; due date right after the type/grading row; subject after the scoring cluster");
+                "D14: subject + its picks row lead the authoring decisions (before type/grading); D6: due date right after the type/grading row");
         });
     }
 
@@ -1156,12 +1158,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D13 (owner, 2026-10-08): the inherited Grade/Tenant-policy note is a padlock
-    /// tooltip whose appearance is CONDITIONAL — inherited from policy <b>and</b> not
-    /// author-overridable. Four readouts (approval, notification, archive window, signature) are
-    /// policy-owned end to end, so they always carry it; guardian review carries it only once the
-    /// policy sets it (unset = the author chooses in Basics, so no lock). The card header carries one
-    /// padlock while the card holds at least one locked readout.</summary>
+    /// <summary>D13 (owner, 2026-10-08) + D14 (owner follow-up, 2026-10-09): the inherited
+    /// Grade/Tenant-policy note is a padlock tooltip whose appearance is CONDITIONAL — inherited
+    /// from policy <b>and</b> not author-overridable. Four readouts (approval, notification, archive
+    /// window, signature) are policy-owned end to end, so they always carry it; guardian review
+    /// carries it only once the policy sets it (unset = the author chooses in Basics, so no lock).
+    /// D14: the card header carries NO padlock of its own — only the rows state the lock.</summary>
     [TestMethod]
     public void Rules_PadlockHintAppearsOnlyForNonOverridablePolicyValues()
     {
@@ -1176,10 +1178,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
             rules.QuerySelectorAll("fluent-badge").Should().BeEmpty(
                 "D13: the inherited text badge is gone from every subitem");
 
-            var headerHelp = rules.QuerySelectorAll(".section-card__help");
-            headerHelp.Should().ContainSingle("D13: one padlock beside the card HEADER text");
-            headerHelp[0].GetAttribute("title").Should().Be(Authoring.PolicyInheritedHelpText,
-                "D13: the header padlock carries the inherited-policy note");
+            rules.QuerySelectorAll(".section-card__help").Should().BeEmpty(
+                "D14: no card-level padlock beside the header text — the owner dropped it");
 
             var rowHelp = rules.QuerySelectorAll(".authoring-policy-help");
             rowHelp.Should().HaveCount(4,
@@ -1201,8 +1201,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "D13: a policy-set guardian review is a locked value like the other four");
             rules.QuerySelectorAll("#authoring-policy-review .authoring-policy-help").Should().ContainSingle(
                 "D13: the padlock appears exactly on the row that just became non-overridable");
-            rules.QuerySelectorAll(".section-card__help").Should().ContainSingle(
-                "D13: the header keeps its single card-level hint");
+            rules.QuerySelectorAll(".section-card__help").Should().BeEmpty(
+                "D14: the header stays padlock-free on every policy shape");
         });
     }
 
@@ -1514,18 +1514,28 @@ public class AssignmentAuthoringBunitTests : BunitContext
             basics.QuerySelectorAll(".form-row-help").Should().HaveCount(2,
                 "D11: exactly the type/grading row and the Pass Score row carry help icons "
                 + "(Guardian review's is conditional and its policy is unset here)");
+
+            // D14f: the FIRST help icon is the type/grading row's — its tooltip is three
+            // labelled lines (purpose / AI availability / feedback mode), and the purpose
+            // sentence is the documented causal chain (§3.3 immediate-vs-held; FR-220 gate).
+            var gradingRowHelp = basics.QuerySelectorAll(".form-row-help")[0]
+                .GetAttribute("title") ?? string.Empty;
+            gradingRowHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
+                "D14f: the row's (i) icon explains what type & grading DRIVE, not just what they are");
+            gradingRowHelp.Split('\n').Should().HaveCount(3,
+                "D14f/Q1a: three labelled lines — purpose, AI availability, feedback mode");
             basics.QuerySelector("#scoringFieldsPassScore").Should().NotBeNull();
             cut.FindAll("#authoring-submission").Should().BeEmpty(
                 "D1: the Submission & Sign-off compartment is retired");
 
-            // "Directly after" the Grading format field: the scoring controls precede the
-            // AI-availability hint and the Subject picker that follow them in Basics.
+            // "Directly after" the Grading format field: the scoring controls follow it in Basics.
+            // D14 moved the Subject picker ABOVE the type/grading row — its new position is pinned
+            // by Basics_LeadsWithStatus_AndSubjectPrecedesTheTypeAndGradingRow.
             var order = basics.QuerySelectorAll(
-                "#authoring-basics-grading, #authoring-basics-max-score, #scoringFieldsPassScore, #authoring-basics-subject")
+                "#authoring-basics-grading, #authoring-basics-max-score, #scoringFieldsPassScore")
                 .Select(e => e.Id).ToList();
             order.Should().ContainInOrder(
-                "authoring-basics-grading", "authoring-basics-max-score", "scoringFieldsPassScore",
-                "authoring-basics-subject");
+                "authoring-basics-grading", "authoring-basics-max-score", "scoringFieldsPassScore");
         });
     }
 

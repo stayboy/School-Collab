@@ -201,6 +201,60 @@
                                              ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
                         </FormRow>
 
+                        @* D14 (owner follow-up, 2026-10-09): Subject leads the form's authoring
+                           decisions — it sits directly after Title and BEFORE the type/grading row
+                           (it used to sit below the scoring cluster), and its strands & lessons
+                           context row moves WITH it so the two stay adjacent (D4's contract: the
+                           buttons live directly beneath the Subject dropdown).
+
+                           R4 (CP-4): an explicit SelectedOptionChanged handler replaces @bind — the
+                           page must CLEAR the context picks and re-read the strand/lesson sources when the
+                           subject changes (a strand belongs to a subject).
+
+                           RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
+                           here as that section requires. DropdownComponent (the DTO-list
+                           wrapper) misfits on three counts: (a) these options load
+                           ASYNCHRONOUSLY — the grade/group union — and the wrapper forbids an
+                           async window without porting CodedValueDropdown's load-key guards;
+                           (b) the page must keep a SELECTED OPTION THAT IS NOT IN ITEMS (the
+                           persisted topic of a stale target set) and DropdownComponent resolves
+                           unknown keys to null, losing the label; (c) the CP-4 side effect is
+                           async, while the wrapper's contract wants a sync `:after` Action. *@
+                        <FormRow Label="Subject" Required For="authoring-basics-subject">
+                            <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
+                                          Items="@SubjectOptions"
+                                          SelectedOption="@_selectedSubject"
+                                          SelectedOptionChanged="@OnSubjectChangedAsync"
+                                          OptionText="@(o => o?.Label ?? string.Empty)"
+                                          OptionValue="@(o => o?.Value ?? string.Empty)"
+                                          Placeholder="@SubjectPickerPlaceholder"
+                                          Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
+                        </FormRow>
+
+                        @* R4 (CP-1/CP-2/CP-3, spec §6A; OD-3) + D4 (assignment-create-edit-redesign):
+                           the optional strands & lessons context row, directly beneath Subject — now
+                           TWO add buttons opening the picker dialog instead of two multi-selects.
+                           Create/Edit only — View mode renders NO pick chrome this round. The section
+                           owns no compartment title, so the Basics h3 above is still the
+                           compartment's single title (X-1). *@
+                        @if (!IsReadOnly)
+                        {
+                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-add-strand"
+                                     Help="@ContextPicksEmptyHint">
+                                <ContextPicksSection Model="_model"
+                                                     StrandOptions="_strandPickOptions"
+                                                     LessonOptions="_lessonPickOptions"
+                                                     StrandNames="_strandNames"
+                                                     LessonNames="_lessonNames"
+                                                     StrandsLoaded="_strandsLoaded"
+                                                     LessonsLoaded="_lessonsLoaded"
+                                                     Disabled="ContextPickersDisabled"
+                                                     DisabledReason="@ContextPickersDisabledReason"
+                                                     StrandPicksChanged="OnContextStrandPicksChangedAsync"
+                                                     Changed="OnModelChanged" />
+                            </FormRow>
+                        }
+
                         @* Round authoring-compact-fields: type + grading are two short pickers, so they
                            render as ONE row of the shared FormRow primitive. AlignTop is the
                            repo's multi-input row pattern (flex-row-input-alignment): the row's own input
@@ -274,55 +328,10 @@
                                             Disabled="@(IsReadOnly || PolicyReviewLocked)" />
                         </FormRow>
 
-                        @* R4 (CP-4): an explicit SelectedOptionChanged handler replaces @bind — the
-                           page must CLEAR the context picks and re-read the strand/lesson sources when the
-                           subject changes (a strand belongs to a subject).
-
-                           RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
-                           here as that section requires. DropdownComponent (the DTO-list
-                           wrapper) misfits on three counts: (a) these options load
-                           ASYNCHRONOUSLY — the grade/group union — and the wrapper forbids an
-                           async window without porting CodedValueDropdown's load-key guards;
-                           (b) the page must keep a SELECTED OPTION THAT IS NOT IN ITEMS (the
-                           persisted topic of a stale target set) and DropdownComponent resolves
-                           unknown keys to null, losing the label; (c) the CP-4 side effect is
-                           async, while the wrapper's contract wants a sync `:after` Action. *@
-                        <FormRow Label="Subject" Required For="authoring-basics-subject">
-                            <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
-                                          Items="@SubjectOptions"
-                                          SelectedOption="@_selectedSubject"
-                                          SelectedOptionChanged="@OnSubjectChangedAsync"
-                                          OptionText="@(o => o?.Label ?? string.Empty)"
-                                          OptionValue="@(o => o?.Value ?? string.Empty)"
-                                          Placeholder="@SubjectPickerPlaceholder"
-                                          Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
-                        </FormRow>
-
-                        @* R4 (CP-1/CP-2/CP-3, spec §6A; OD-3) + D4 (assignment-create-edit-redesign):
-                           the optional strands & lessons context row, directly beneath Subject — now
-                           TWO add buttons opening the picker dialog instead of two multi-selects.
-                           Create/Edit only — View mode renders NO pick chrome this round. The section
-                           owns no compartment title, so the Basics h3 above is still the
-                           compartment's single title (X-1). *@
-                        @if (!IsReadOnly)
-                        {
-                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-add-strand">
-                                <ContextPicksSection Model="_model"
-                                                     StrandOptions="_strandPickOptions"
-                                                     LessonOptions="_lessonPickOptions"
-                                                     StrandNames="_strandNames"
-                                                     LessonNames="_lessonNames"
-                                                     StrandsLoaded="_strandsLoaded"
-                                                     LessonsLoaded="_lessonsLoaded"
-                                                     Disabled="ContextPickersDisabled"
-                                                     DisabledReason="@ContextPickersDisabledReason"
-                                                     StrandPicksChanged="OnContextStrandPicksChangedAsync"
-                                                     Changed="OnModelChanged" />
-                            </FormRow>
-                        }
-
-                        @* D6/§3: Basics ends after the context row — the lifecycle readout leads the
-                           form (top) and Description/Instructions live in the bottom compartment. *@
+                        @* D14/D6: Subject + its strands & lessons row LEAD the authoring decisions
+                           (right after Title, before type/grading — D14); Basics therefore ends with
+                           the guardian-review toggle, and Description/Instructions live in the
+                           bottom compartment. *@
                     </section>
 
                     <section id="authoring-targets" class="authoring-compartment authoring-compartment--right">
@@ -414,7 +423,6 @@
                         <div id="authoring-rules" class="authoring-rules-card">
                             <SectionCard TItem="PolicyReadout"
                                          Title="Rules"
-                                         HeaderHelp="@(AnyPolicyReadoutLocked ? PolicyInheritedHelpText : null)"
                                          Count="@PolicyReadouts.Length"
                                          ShowAddButton="false"
                                          OnAddClick="@NoAddActionAsync"
@@ -423,7 +431,8 @@
                                     @* UX-13 + D13: a policy-derived value is the resolved read-only text — plus,
                                        when one grade owns the policy, the link to it. The "inherited from
                                        Grade/Tenant policy" note is NO LONGER a per-row text badge; it rides the
-                                       padlock tooltip on the card header and on EVERY LOCKED subitem
+                                       padlock tooltip on EVERY LOCKED subitem (D14 dropped the card-header
+                                       padlock — the owner found it noise beside the header)
                                        (readout.Locked = inherited from policy AND not author-overridable — the
                                        owner's rule), so five rows no longer repeat the same sentence and only
                                        the rows that really cannot be overridden carry the padlock. The row keeps
@@ -1141,12 +1150,6 @@
         new("authoring-policy-review", "Guardian review", GuardianReviewPolicyValueText, PolicyReviewLocked)
     ];
 
-    /// <summary>D13: the Rules card's header hint states the inherited/locked rule only while the
-    /// card actually holds a locked value — the header can never claim a lock the rows do not have
-    /// (today the four policy-owned readouts always qualify, so the condition documents the intent
-    /// and keeps the header honest if any of them ever becomes overridable).</summary>
-    private bool AnyPolicyReadoutLocked => PolicyReadouts.Any(readout => readout.Locked);
-
     /// <summary>D12 (owner, 2026-10-08): the compartment jump-nav — and with it the
     /// <c>Compartments</c> list that only fed it — is removed. The compartment SECTIONS and their
     /// long-standing ids stay exactly as they are (<c>#authoring-basics</c>, <c>-targets</c>,
@@ -1227,9 +1230,27 @@
     private string GenerationHintTooltip =>
         QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat);
 
-    /// <summary>D11: the paired row's ONE label carries one (i) help icon whose tooltip merges
-    /// the AI-availability text and the feedback-mode narrative — no inline prose anywhere.</summary>
-    private string GradingRowHelp => $"{GenerationHintTooltip} {FeedbackModeTooltip}";
+    /// <summary>D14f (owner, 2026-10-09): what the two driving fields DO, so the row's single
+    /// (i) icon explains the causal chain instead of only the current selection. Every claim is
+    /// the documented behaviour — <c>documents/solution/assignment-request-implementation-details.md</c>
+    /// §3.3 (immediate vs held feedback; the scoring fields render only for Auto Scored /
+    /// Instant Feedback), <c>documents/rounds/round-ar-6-scoring.md</c> (both auto formats score
+    /// at submit; Teacher Marked never calls the scoring engine) and FR-220
+    /// (<see cref="QuestionGenerationGate"/> — the type joins the grading format in gating AI
+    /// generation). The enum descriptions ARE the user's vocabulary (Online / Hybrid / Offline;
+    /// Teacher Marked / Auto Scored / Instant Feedback), so the hint adds no glosses of its own.</summary>
+    public const string TypeGradingPurposeHint =
+        "What these drive: the grading format powers the scoring fields below — Auto Scored and "
+        + "Instant Feedback score submissions automatically at submit and unlock the Pass threshold "
+        + "(Instant Feedback shows students their per-question results right away; Auto Scored holds "
+        + "them for your review); Teacher Marked leaves all marking to you and disables those fields. "
+        + "The assignment type joins the grading format in gating AI question generation (below).";
+
+    /// <summary>D11 + D14f: the paired row's ONE label carries one (i) help icon whose tooltip
+    /// is three labelled lines — the purpose sentence (D14f), the AI-availability text and the
+    /// feedback-mode narrative — no inline prose anywhere.</summary>
+    private string GradingRowHelp =>
+        $"{TypeGradingPurposeHint}\n{GenerationHintTooltip}\n{FeedbackModeTooltip}";
 
     /// <summary>D1: the pencil's click handler — flips to the full form. Never guarded (D9):
     /// nothing is navigated to and nothing is discarded.</summary>
@@ -1438,6 +1459,17 @@
 
     private string? ContextPickersDisabledReason =>
         ContextPickersDisabled ? ContextPicksSection.NoSubjectReason : null;
+
+    /// <summary>D14e (assignment-create-edit-redesign, owner 2026-10-09): the empty pick-source
+    /// texts no longer render as paragraphs in Basics — the row label carries them as the (i)
+    /// hint (FormRow.Help, the D11 pattern) while a source is authoritatively empty. Only the two
+    /// real empty states surface (A1): the transient "nothing picked yet" state says nothing,
+    /// and an unloaded list is never reported as empty (P8-4). B1: the condition is the
+    /// component's own <c>EmptyStateHint</c> — one logic site, one copy of each sentence.</summary>
+    private string? ContextPicksEmptyHint => ContextPicksSection.EmptyStateHint(
+        _strandsLoaded, _strandPickOptions.Length,
+        _lessonsLoaded, _lessonPickOptions.Length,
+        _model.ContextStrandIds.Count > 0);
 
     /// <summary>R4 (CP-6): the picked strands' display NAMES, in pick order — the generation
     /// request's structured <c>ContextStrands</c> field. A pick the loaded strand list does not

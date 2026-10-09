@@ -227,6 +227,17 @@
     gap: 8px;
 }
 
+/* D14 (owner follow-up 2026-10-09): the readout rows carry no horizontal padding, but the
+   shared card header's 1rem padding-indent made "Rules" sit 16px to the right of the rows
+   beneath it. The header becomes flush with the card's content box on both edges, so its
+   text shares ONE left edge with every subitem (the count badge ends level with the row
+   values' right edge). `:deep` because the header belongs to the SectionCard child
+   component, which CSS isolation's scope attribute does not reach. */
+.authoring-rules-card :deep(.section-card__header) {
+    padding-left: 0;
+    padding-right: 0;
+}
+
 /* Targets & audience builder: label on top, bold value underneath. */
 .targets-audience-item__label {
     font-size: var(--font-size-100, 0.75rem);

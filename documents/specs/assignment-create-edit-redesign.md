@@ -61,7 +61,8 @@ needs — reordered, not hidden (§3).
 | D10 | Content & Questions on Create (**added by the verification round 2026-10-08 — restores the original request the first draft of this spec had dropped**) | **Create renders NEITHER Questions & AI NOR Content & Resources.** "Move questions and AI to draft edit when assignment is created" — and Content & Resources follows the same rule (owner confirmation 2026-10-08) — means authoring children (questions, attachments, links) starts only once a draft exists. Create therefore renders no `#authoring-questions` / `#authoring-content` sections, no question/resource editors, no `Generate questions` kebab action. (Its jump-nav listed **four** entries — Basics · Targets · Rules · Instructions; that list went away with **D12**.) Edit and summary surfaces are unchanged. |
 | D11 | Inline narratives on the form (owner, 2026-10-08) | Prose paragraphs that eat the form's space become **(i) help icons on their row labels** — FormRow's new optional `Help` parameter renders a small info icon inside the label whose native `title` carries the text (null = previous markup byte-for-byte). "Feedback mode…" + the AI-availability text merge into one icon on the paired type/grading row; "Set the pass threshold…" rides the Pass Score row's icon; the guardian-review lock reason rides its row's icon (conditional — rendered only while locked). The Rules card's explanatory hint is removed outright — the "Inherited from Grade/Tenant policy" badge on every readout already said it. *(The badge itself was then replaced by padlock tooltips — **D13**.)* The Pass Score's **inapplicable** state renders a **disabled checkbox whose label carries `ScoringInapplicableReason`** instead of a disabled number field + separate reason paragraph. The Instructions compartment's two textareas render at **equal height** (both `Rows="4"`). |
 | D12 | Compartment jump-nav (**owner, 2026-10-08**) | **The jump-nav is removed from every surface** — the submenu list that used to sit under the page title ("New assignment" / the assignment title) is gone, on Create and on the edit-fields view alike (D7's hide-on-summary rule becomes moot). The **compartment sections and their long-standing ids are untouched** (`#authoring-basics`, `-targets`, `-rules`, `-content`, `-questions`, `-instructions`), so the `Generate questions` kebab action's `#authoring-questions` anchor and every bUnit test seam still resolve; the `scroll-margin-top` on those containers drops from 112px to 56px now that only the sticky action bar has to be cleared. The now-unused `Compartments`/`AllCompartments` list and the `Compartment` record are deleted, and the assertions that used to read the compartment titles *through* the nav links read the `section.authoring-compartment` order directly. |
-| D13 | Rules card: inherited note (**owner, 2026-10-08**) | **The per-row "Inherited from Grade/Tenant policy" badge is removed** — five readouts no longer repeat one sentence. The note now rides a **padlock tooltip**, and the padlock is **conditional**: it appears only when the value is *inherited from policy* **and** the author *may not override it*. Four readouts — approval before publish, the notification policy, the archive window and the signature requirement — are policy-owned end to end (the author has no control over any of them), so they always carry it; **guardian review is the one conditional entry**: while the policy leaves it unset the author chooses in Basics, so that row states the author's choice and carries **no** padlock, and once the policy (or the D4 signature implication) sets it — the same condition that disables the Basics toggle (`PolicyReviewLocked`) — the row is locked and gains it. The card **header** shows a single padlock while the card holds at least one locked readout. Each padlock's native `title` is `AssignmentAuthoring.PolicyInheritedHelpText` ("Inherited from Grade/Tenant policy — resolved from your grade and organization policy and not overridable on this assignment."), the badge text + D11's retired hint sentence folded together. Implemented as a new shared `HelpIcon` component (`src/SchoolCollab.Admin.Shared/Components/HelpIcon.razor`) — required `Text`, optional `Icon` (defaults to the info glyph) and `Class` — and `SectionCard` gains an optional **`HeaderHelp`** parameter that renders it beside the title with the lock glyph. `FormRow`'s existing `Help` hint now renders through the same component (identical markup contract: the `form-row-help` class is preserved), so the repo has exactly one help-hint implementation. |
+| D13 | Rules card: inherited note (**owner, 2026-10-08**) | **The per-row "Inherited from Grade/Tenant policy" badge is removed** — five readouts no longer repeat one sentence. The note now rides a **padlock tooltip**, and the padlock is **conditional**: it appears only when the value is *inherited from policy* **and** the author *may not override it*. Four readouts — approval before publish, the notification policy, the archive window and the signature requirement — are policy-owned end to end (the author has no control over any of them), so they always carry it; **guardian review is the one conditional entry**: while the policy leaves it unset the author chooses in Basics, so that row states the author's choice and carries **no** padlock, and once the policy (or the D4 signature implication) sets it — the same condition that disables the Basics toggle (`PolicyReviewLocked`) — the row is locked and gains it. *(D14 later dropped the card-**header** padlock and its `SectionCard.HeaderHelp` parameter — only the rows state the lock.)* Each padlock's native `title` is `AssignmentAuthoring.PolicyInheritedHelpText` ("Inherited from Grade/Tenant policy — resolved from your grade and organization policy and not overridable on this assignment."), the badge text + D11's retired hint sentence folded together. Implemented as a new shared `HelpIcon` component (`src/SchoolCollab.Admin.Shared/Components/HelpIcon.razor`) — required `Text`, optional `Icon` (defaults to the info glyph) and `Class` *(D13's `SectionCard.HeaderHelp` parameter was then removed by **D14** as unused)*. `FormRow`'s existing `Help` hint now renders through the same component (identical markup contract: the `form-row-help` class is preserved), so the repo has exactly one help-hint implementation. |
+| D14 | Form polish (**owner, 2026-10-09**) | Four follow-ups on the shipped surface: **(a) Subject moves up** — directly after Title and *before* the Assignment type & grading row (it is vital), and its **Strands & lessons row moves with it** so D4's "buttons directly beneath the Subject dropdown" contract still holds (§3.1); **(b) the Rules card's header padlock is removed** — the owner found the lock beside the header/Add area unnecessary noise; the `SectionCard.HeaderHelp` parameter (added by D13, now unused) is deleted with it, and the per-row padlocks (D13's conditional rule) remain the only place the inherited-policy lock is stated; the now-dead `AnyPolicyReadoutLocked` property goes too; **(c) the Rules card header aligns with its subitems** — the readout rows carry no horizontal padding, so the shared header's 1rem indent made "Rules" sit 16px right of the rows; a `:deep()` rule zeroes the header's horizontal padding *for this card only* (`.authoring-rules-card :deep(.section-card__header)`), leaving every other `SectionCard` consumer on the shared chrome; **(d) the Generate-questions configure box's inputs ride `FormRow`** — `QuestionPromptDialog`'s bare flex row (`.cq-prompt-nums`, per-field labels floating above their inputs) becomes three shared rows — "Number of questions" (single), "Difficulty mix" (`AlignTop` multi-input, Easy/Medium/Hard keep their visible sub-labels) and "Question types" (the chips container) — so every knob label aligns to the same 180px gutter as the rest of the authoring form; `.cq-prompt-nums` is deleted with the container; **(e) the picks row's empty-state notes are deleted** — "This subject has no strands yet." and "No lessons for this strand yet." no longer render as paragraphs in Basics (they ate two rows); they ride the disabled buttons' `title`s (unchanged) plus the "Strands & lessons" row label's (i) hint via `FormRow Help=` → the component's new static `EmptyStateHint(...)` (single source, B1; strand sentence wins, A1's icon scope), the transient "No strand selected" note is gone outright, and `.context-picks__note` CSS + `NoStrandPickedText` are deleted with the paragraphs; **(f) the type/grading row's (i) icon explains what the fields DRIVE** — new `public const string Authoring.TypeGradingPurposeHint` (the `PolicyInheritedHelpText` test-seam precedent) states the DOCUMENTED causal chain (grading format powers the scoring fields/pass threshold; Instant vs Auto = immediate vs held per-question feedback per `assignment-request-implementation-details.md` §3.3; Teacher Marked disables them; the type joins the grading format in the FR-220 AI gate — enum `[Description]` values are the user's vocabulary, no invented glosses) and `GradingRowHelp` becomes three `\n`-labelled lines — purpose, AI availability, feedback mode (native `title` renders newlines as line breaks). |
 
 
 ---
@@ -74,14 +75,14 @@ Inside `#authoring-basics` (all ids unchanged — this is markup order only):
 
 1. **Status & available from** — `authoring-basics-status`, `authoring-basics-available-from` (readout row, **first form field**)
 2. **Title** — `authoring-basics-title`
-3. **Assignment type & grading format** — `authoring-basics-type`, `authoring-basics-grading` (multi-input row)
-4. **Due date** — `authoring-basics-due` *(moved up; directly after type & grading)*
-5. **Max score & max attempts** — `authoring-basics-max-score`, `scoringFieldsMaxAttempts`
-6. Feedback-mode text · `ScoringFieldsSection` · Guardian review toggle · AI-availability text *(D11: the narratives become (i) help icons on the row labels — one merged icon on the paired type/grading row, `Help` on the Pass Score row, conditional `Help` on the Guardian review row; no inline paragraphs)*
-7. **Subject** — `authoring-basics-subject`
-8. **Strands & lessons buttons + chips row** — §4 (replaces the two stacked multi-selects)
-
-Basics then ends. Description and Instructions are **removed from Basics**.
+3. **Subject** — `authoring-basics-subject` *(D14: moved up — the subject is vital, so it leads the
+   authoring decisions right after Title)*
+4. **Strands & lessons buttons + chips row** — §4 *(D14: moves WITH the subject so the two stay
+   adjacent — D4's contract that the buttons sit directly beneath the Subject dropdown holds)*
+5. **Assignment type & grading format** — `authoring-basics-type`, `authoring-basics-grading` (multi-input row)
+6. **Due date** — `authoring-basics-due` *(moved up; directly after type & grading)*
+7. **Max score & max attempts** — `authoring-basics-max-score`, `scoringFieldsMaxAttempts`
+8. Feedback-mode text · `ScoringFieldsSection` · Guardian review toggle · AI-availability text *(D11: the narratives become (i) help icons on the row labels — one merged icon on the paired type/grading row, `Help` on the Pass Score row, conditional `Help` on the Guardian review row; no inline paragraphs)* — Basics then **ends** here
 
 ### 3.2 New compartment: Instructions
 
@@ -132,6 +133,16 @@ Replace `ContextPicksSection`'s two stacked `Multiple` selects with:
    current semantics intact: CP-11 dangling-pick markers, id subtitles for
    unresolved picks, "(unavailable)" while the name list never loaded, per-chip
    remove.
+
+4. **Empty states (D14e, owner 2026-10-09)** — no paragraphs. The two
+   empty-source sentences ("This subject has no strands yet." / "No lessons for
+   this strand yet.") ride (i) the disabled button's native `title` (unchanged)
+   and (ii) the row label's (i) hint — `FormRow Help=` wired to the component's
+   static `EmptyStateHint(...)` (the `ScoringFieldsSection.IsScoringInapplicable`
+   single-source precedent), rendered only while a source is authoritatively
+   empty; the strand sentence wins when both are (root cause). The transient
+   "No strand selected" note is **deleted outright** (A1: the normal state, not a
+   condition to flag), and an unloaded list never produces a hint (P8-4).
 
 The option/name sources, fetches and save projection on the page are **unchanged**;
 only the control vehicle changes. `ContextPicksSection.razor` becomes the
@@ -240,7 +251,7 @@ renders.
 | `…/ContextPickDialog.razor` (+ `.css`), `…/ContextPickDialogModel.cs` | **New** — the D4 multi-checkbox picker dialog and its form model (dialog state only; no behaviour/DTO/route change) |
 | `src/SchoolCollab.Admin.Shared/Components/HelpIcon.razor` (+ `.css`) | **New (D13)** — the single help-hint implementation: required `Text` (native `title`), optional `Icon` (default the info glyph) and `Class` |
 | `src/SchoolCollab.Admin.Shared/Components/FormRow.razor` (+ `.css`) | **Additive**: the optional `Help` parameter (D11) renders an (i) icon inside the label whose native `title` carries the row's hint — null (the default) renders the previous markup, so every existing caller is unchanged. **D13**: the icon is now the shared `HelpIcon` (the `form-row-help` class is preserved, so the scoped CSS/tests are unaffected) |
-| `src/Students/…/Components/Students/SectionCard.razor` | **Additive (D13)**: optional `HeaderHelp` parameter — a padlock (lock glyph) hint beside the title carrying the text |
+| `src/Students/…/Components/Students/SectionCard.razor` | ~~**Additive (D13)**: optional `HeaderHelp` parameter~~ *(D13 added the `HeaderHelp` padlock hint beside the title; **D14 removed it** as unused noise — the component is back to its pre-D13 shape)* |
 | `…/TargetsAndAudienceDialog.razor` | Unchanged (invoked from accordion body) |
 | Tests: `AssignmentAuthoringBunitTests`, `ContextPicksSectionBunitTests`, `ScoringFieldsSectionBunitTests`, `AssignmentDetailBunitTests`, `QuestionsDraftSectionBunitTests`; `AssignmentCreateBunitTests` (its two dialog-round-trip waits hardened to a named 15 s budget — pre-existing load flake) | §9 (`AssignmentContextPicksTests`/`AssignmentInstructionsTests` needed no change) |
 | `documents/specs/assignment-authoring-compartments.md` | Add this spec to the header's companion list |
@@ -311,14 +322,31 @@ dialog's form model). No change to `Create.razor` / `Edit.razor` hosts,
     used to link still resolve — `#authoring-rules` (the Rules card container)
     and `#authoring-questions` (the kebab's target) — asserted by
     `CompartmentAnchors_StillResolve_WithoutTheJumpNav`.
-11. **D13:** no `fluent-badge` inside `#authoring-rules` (the per-row
-    "Inherited from Grade/Tenant policy" text is gone); a single
-    `.section-card__help` padlock sits beside the header text while the card holds
-    a locked readout, and `.authoring-policy-help` padlocks appear **only on the
+11. **D13** (+ **D14**): no `fluent-badge` inside `#authoring-rules` (the per-row
+    "Inherited from Grade/Tenant policy" text is gone); **no** card-header padlock
+    either (`.section-card__help` renders nowhere — D14), and
+    `.authoring-policy-help` padlocks appear **only on the
     non-overridable rows** — four of them by default (guardian review is the
     author's choice while the policy leaves it unset), five once the policy sets
     it — each carrying `AssignmentAuthoring.PolicyInheritedHelpText` as its native
     `title` (`Rules_PadlockHintAppearsOnlyForNonOverridablePolicyValues`).
+12. **D14:** the Basics field order reads `status → title → subject → add-strand →
+    type → due` (subject + its picks row precede the type/grading row), asserted by
+    `Basics_LeadsWithStatus_AndSubjectPrecedesTheTypeAndGradingRow`; the
+    configure box renders three `.form-row` rows whose `.form-row-label` texts are
+    "Number of questions" / "Difficulty mix" / "Question types" and the count row's
+    `<label for>` targets `cq-prompt-count`
+    (`Knobs_RenderAsFormRows_SoEveryLabelSharesTheFormGutter`); the picks row
+    renders **no** `#authoring-strands-none` / `#authoring-lessons-none`
+    paragraphs in any state, its disabled buttons keep the empty-source
+    `title`s, and `FormRow.Help` renders the (i) hint (`.form-row-help` with
+    `NoStrandsText`) while a source is authoritatively empty
+    (`SubjectWithNoStrands_RendersNoParagraph_AndTheButtonCarriesTheText`,
+    `StrandsWithNothingPicked_RendersNoNote_AndNoRowHint`,
+    `NoLessonsForPickedStrands_RendersNoParagraph_AndTheButtonCarriesTheText`,
+    `EmptyStateHint_PrefersTheStrandSource_WhenBothAreEmpty`,
+    `UnloadedList_RendersNoEmptyNote`,
+    `Page_EmptyStrandSource_CarriesTheRowHelpIcon_NotAParagraph`).
 
 **Gate:** `dotnet build SchoolCollab.slnx` clean + `dotnet test` 0 failures
 (solo round; no UI-tester scope).

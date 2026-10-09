@@ -105,28 +105,62 @@ public class ContextPicksSectionBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void SubjectWithNoStrands_RendersTheEmptySourceNote_NotTheNothingPickedNote()
+    public void SubjectWithNoStrands_RendersNoParagraph_AndTheButtonCarriesTheText()
     {
         var cut = RenderSection(new AssignmentEditFormModel(), strandOptions: []);
 
-        cut.Find("#authoring-strands-none").TextContent.Trim().Should().Be(ContextPicksSection.NoStrandsText);
-        cut.FindAll("#authoring-strands-none").Should().ContainSingle();
+        cut.FindAll("#authoring-strands-none").Should().BeEmpty(
+            "D14e/A1: the empty-source note no longer takes a row on the form");
+        cut.Find("#authoring-add-strand").GetAttribute("title")
+            .Should().Be(ContextPicksSection.NoStrandsText,
+                "D14e/D1: the disabled button's native title still explains the empty source");
+        ContextPicksSection.EmptyStateHint(
+                strandsLoaded: true, strandOptionCount: 0,
+                lessonsLoaded: true, lessonOptionCount: 3, anyStrandPicked: false)
+            .Should().Be(ContextPicksSection.NoStrandsText,
+                "B1: the page's row hint reads the same sentence from this single source");
     }
 
     [TestMethod]
-    public void StrandsWithNothingPicked_SaysTheAiUsesTheWholeSubject()
+    public void StrandsWithNothingPicked_RendersNoNote_AndNoRowHint()
     {
         var cut = RenderSection(new AssignmentEditFormModel());
 
-        cut.Find("#authoring-strands-none").TextContent.Trim().Should().Be(ContextPicksSection.NoStrandPickedText);
+        cut.FindAll("#authoring-strands-none").Should().BeEmpty(
+            "A1: the transient 'nothing picked yet' state renders no paragraph");
+        ContextPicksSection.EmptyStateHint(
+                strandsLoaded: true, strandOptionCount: 3,
+                lessonsLoaded: true, lessonOptionCount: 0, anyStrandPicked: false)
+            .Should().BeNull(
+                "A1: it carries no row hint either — the whole subject is a valid context");
     }
 
     [TestMethod]
-    public void NoLessons_RendersTheLessonsRowOwnNoneNote()
+    public void NoLessonsForPickedStrands_RendersNoParagraph_AndTheButtonCarriesTheText()
     {
-        var cut = RenderSection(new AssignmentEditFormModel(), lessonOptions: []);
+        var model = new AssignmentEditFormModel();
+        model.ContextStrandIds.Add(StrandA);
+        var cut = RenderSection(model, lessonOptions: []);
 
-        cut.Find("#authoring-lessons-none").TextContent.Trim().Should().Be(ContextPicksSection.NoLessonsText);
+        cut.FindAll("#authoring-lessons-none").Should().BeEmpty(
+            "D14e: the lessons note no longer takes a row either");
+        cut.Find("#authoring-add-lesson").GetAttribute("title")
+            .Should().Be(ContextPicksSection.NoLessonsText,
+                "D14e/D1: the lesson button keeps the same hover explanation");
+        ContextPicksSection.EmptyStateHint(
+                strandsLoaded: true, strandOptionCount: 3,
+                lessonsLoaded: true, lessonOptionCount: 0, anyStrandPicked: true)
+            .Should().Be(ContextPicksSection.NoLessonsText);
+    }
+
+    [TestMethod]
+    public void EmptyStateHint_PrefersTheStrandSource_WhenBothAreEmpty()
+    {
+        ContextPicksSection.EmptyStateHint(
+                strandsLoaded: true, strandOptionCount: 0,
+                lessonsLoaded: true, lessonOptionCount: 0, anyStrandPicked: true)
+            .Should().Be(ContextPicksSection.NoStrandsText,
+                "the strand source is the root cause, so it wins the one row-level hint");
     }
 
     [TestMethod]
@@ -138,6 +172,33 @@ public class ContextPicksSectionBunitTests : BunitContext
 
         cut.FindAll("#authoring-strands-none").Should().BeEmpty();
         cut.FindAll("#authoring-lessons-none").Should().BeEmpty();
+        ContextPicksSection.EmptyStateHint(
+                strandsLoaded: false, strandOptionCount: 0,
+                lessonsLoaded: false, lessonOptionCount: 0, anyStrandPicked: true)
+            .Should().BeNull("P8-4/B1: an unreadable list is never reported as empty");
+    }
+
+    /// <summary>D14e: on the PAGE the empty source surfaces as the row label's (i) hint
+    /// (FormRow.Help → B1's single source), never as a paragraph.</summary>
+    [TestMethod]
+    public void Page_EmptyStrandSource_CarriesTheRowHelpIcon_NotAParagraph()
+    {
+        _strands = [];
+        _lessons = [];
+
+        var cut = RenderEdit(MakeDto());
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("#authoring-strands-none, #authoring-lessons-none").Should().BeEmpty(
+                "D14e/A1: the note paragraphs are gone from the page too");
+
+            var help = cut.Find("#authoring-add-strand").Closest(".form-row")
+                .QuerySelector(".form-row-help");
+            help.Should().NotBeNull(
+                "B1: while a pick source is authoritatively empty the row label carries the (i) hint");
+            help!.GetAttribute("title").Should().Be(ContextPicksSection.NoStrandsText);
+        });
     }
 
     /// <summary>Registers a mocked <see cref="IDialogService"/> that answers the strand/lesson
@@ -191,8 +252,11 @@ public class ContextPicksSectionBunitTests : BunitContext
             "an unreadable lesson list is never offered (spec §9.7)");
         cut.Find("#authoring-add-strand").HasAttribute("disabled").Should().BeFalse(
             "the strand list itself is loaded and pickable");
-        cut.FindAll("#authoring-lessons-none").Should().BeEmpty(
-            "the empty-source note is equally not derivable from a fetch that never happened");
+        ContextPicksSection.EmptyStateHint(
+                strandsLoaded: true, strandOptionCount: 3,
+                lessonsLoaded: false, lessonOptionCount: 0, anyStrandPicked: true)
+            .Should().BeNull(
+                "P8-4/D14e: an unreadable lesson list is equally never reported as empty — no hint");
     }
 
     [TestMethod]

@@ -51,9 +51,5 @@
     font-style: italic;
 }
 
-/* CP-3: the muted empty / unavailable / nothing-picked notes. */
-.context-picks__note {
-    margin: 0;
-    color: var(--neutral-foreground-hint, #6b6b6b);
-    font-size: 0.875rem;
-}
+/* D14e: the `.context-picks__note` empty-state paragraphs are gone — their text rides the
+   disabled buttons' titles and the page's row-level (i) hint. */

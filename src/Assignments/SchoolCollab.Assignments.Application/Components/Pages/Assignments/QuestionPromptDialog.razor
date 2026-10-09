@@ -28,14 +28,18 @@
                 }
             </dl>
 
-            @* PB-2: the editable knobs. *@
-            <div class="cq-prompt-nums">
+            @* PB-2 + D14d (assignment-create-edit-redesign): the knobs ride the repo's shared
+               FormRow, so their labels align to the same 180px gutter as the rest of the
+               authoring form instead of floating above a bare flex row. *@
+            <FormRow Label="Number of questions" For="cq-prompt-count">
                 <FluentNumberField @bind-Value="Model.QuestionCount"
                                    Id="cq-prompt-count"
-                                   Label="Number of questions"
                                    Min="1"
                                    Max="30"
                                    Class="w-2" />
+            </FormRow>
+
+            <FormRow Label="Difficulty mix" AlignTop For="cq-prompt-easy">
                 <FluentNumberField @bind-Value="Model.DifficultyEasyCount"
                                    Id="cq-prompt-easy"
                                    Label="Easy"
@@ -54,19 +58,21 @@
                                    Min="0"
                                    Max="30"
                                    Class="w-2" />
-            </div>
+            </FormRow>
 
-            <div class="cq-prompt-types" role="group" aria-label="Question types">
-                <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.MultipleChoice)"
-                      Selected="@Model.IncludeMultipleChoice"
-                      OnToggle="@(v => { Model.IncludeMultipleChoice = v; })" />
-                <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.TrueFalse)"
-                      Selected="@Model.IncludeTrueFalse"
-                      OnToggle="@(v => { Model.IncludeTrueFalse = v; })" />
-                <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.ShortAnswer)"
-                      Selected="@Model.IncludeShortAnswer"
-                      OnToggle="@(v => { Model.IncludeShortAnswer = v; })" />
-            </div>
+            <FormRow Label="Question types" AlignTop>
+                <div class="cq-prompt-types" role="group" aria-label="Question types">
+                    <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.MultipleChoice)"
+                          Selected="@Model.IncludeMultipleChoice"
+                          OnToggle="@(v => { Model.IncludeMultipleChoice = v; })" />
+                    <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.TrueFalse)"
+                          Selected="@Model.IncludeTrueFalse"
+                          OnToggle="@(v => { Model.IncludeTrueFalse = v; })" />
+                    <Chip Label="@QuestionPromptComposer.TypeName(QuestionTypeDto.ShortAnswer)"
+                          Selected="@Model.IncludeShortAnswer"
+                          OnToggle="@(v => { Model.IncludeShortAnswer = v; })" />
+                </div>
+            </FormRow>
 
             @* PB-2: "all off" keeps today's meaning (the server's balanced default). *@
             @if (!Model.IncludeMultipleChoice && !Model.IncludeTrueFalse && !Model.IncludeShortAnswer)

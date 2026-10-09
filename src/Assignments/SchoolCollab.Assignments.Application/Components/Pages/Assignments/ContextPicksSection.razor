@@ -57,10 +57,9 @@
         }
     </div>
 
-    @if (StrandNoteText is not null)
-    {
-        <p class="context-picks__note" id="authoring-strands-none">@StrandNoteText</p>
-    }
+    @* D14e (owner, 2026-10-09): the strand empty-state note ("This subject has no strands yet.")
+       no longer renders a paragraph here — its text rides the disabled button's title and the
+       page's row-level (i) hint (EmptyStateHint). *@
 
     <div class="context-picks__chips" id="authoring-basics-lesson-chips">
         @foreach (var id in Model.ContextLessonIds)
@@ -72,10 +71,8 @@
         }
     </div>
 
-    @if (LessonNoteText is not null)
-    {
-        <p class="context-picks__note" id="authoring-lessons-none">@LessonNoteText</p>
-    }
+    @* D14e: the lessons empty note ("No lessons for this strand yet.") likewise rides the
+       button title and the row-level (i) hint instead of a paragraph. *@
 </div>
 
 @code {
@@ -90,14 +87,15 @@
     /// hidden).</summary>
     public const string NoSubjectReason = "Select a subject first — strands and lessons belong to it.";
 
-    /// <summary>CP-3: the strand source resolved EMPTY for a picked subject.</summary>
+    /// <summary>CP-3 + D14e: the strand source resolved EMPTY for a picked subject. Since D14e
+    /// (owner, 2026-10-09) it never renders a paragraph on the form — it rides the disabled
+    /// button's native title and the page's row-level (i) hint (<see cref="EmptyStateHint"/>).
+    /// The transient "No strand selected" note was deleted with the paragraphs (A1).</summary>
     public const string NoStrandsText = "This subject has no strands yet.";
 
-    /// <summary>CP-3: nothing is picked, so the AI uses the whole subject.</summary>
-    public const string NoStrandPickedText = "No strand selected — the AI uses the whole subject.";
-
-    /// <summary>CP-3: the lesson source resolved empty for the picked strands (or the whole
-    /// subject when no strand is picked).</summary>
+    /// <summary>CP-3 + D14e: the lesson source resolved empty for the picked strands (or the whole
+    /// subject when no strand is picked) — same title/hint treatment as
+    /// <see cref="NoStrandsText"/>.</summary>
     public const string NoLessonsText = "No lessons for this strand yet.";
 
     /// <summary>P4.7's per-fetch isolation: the strand/lesson list did not load. Deliberately a
@@ -165,39 +163,28 @@
             ? NoLessonsText
             : "Pick the lessons this assignment's questions should focus on. Optional — the lessons offered follow the picked strands.";
 
-    /// <summary>CP-3's strand note, exactly one of which ever renders: the empty-source note, the
-    /// unavailable note, the "nothing picked" note, or nothing at all.</summary>
-    private string? StrandNoteText
-    {
-        get
-        {
-            if (Disabled || !StrandsLoaded)
-            {
-                return null;
-            }
+    /// <summary>D14e (assignment-create-edit-redesign, owner 2026-10-09): the empty-state texts
+    /// no longer render as paragraphs on the form (A1) — they ride the disabled button's native
+    /// title (unchanged) and the page's row-level (i) hint. These static helpers are the ONE
+    /// place the "which state am I in" logic lives (B1): the page calls
+    /// <see cref="EmptyStateHint"/> for FormRow.Help, and the constants above are the only copy,
+    /// so icon and tooltip can never drift. An unloaded list is NEVER an authoritative empty
+    /// list (P8-4).</summary>
+    public static string? EmptyStrandSourceHint(bool loaded, int optionCount) =>
+        loaded && optionCount == 0 ? NoStrandsText : null;
 
-            if (StrandOptions.Count == 0)
-            {
-                return NoStrandsText;
-            }
+    /// <summary>The lesson half: only meaningful once a strand is picked — before that the whole
+    /// subject is the context, so there is nothing to flag (A1).</summary>
+    public static string? EmptyLessonSourceHint(bool loaded, int optionCount, bool anyStrandPicked) =>
+        loaded && optionCount == 0 && anyStrandPicked ? NoLessonsText : null;
 
-            return Model.ContextStrandIds.Count == 0 ? NoStrandPickedText : null;
-        }
-    }
-
-    /// <summary>CP-3's lesson note — the lessons row's own muted none-note.</summary>
-    private string? LessonNoteText
-    {
-        get
-        {
-            if (Disabled || !LessonsLoaded)
-            {
-                return null;
-            }
-
-            return LessonOptions.Count == 0 ? NoLessonsText : null;
-        }
-    }
+    /// <summary>The row-level hint the page renders via FormRow.Help: the strand sentence first
+    /// (root cause), else the lesson sentence, else null (no icon).</summary>
+    public static string? EmptyStateHint(
+        bool strandsLoaded, int strandOptionCount,
+        bool lessonsLoaded, int lessonOptionCount, bool anyStrandPicked) =>
+        EmptyStrandSourceHint(strandsLoaded, strandOptionCount)
+        ?? EmptyLessonSourceHint(lessonsLoaded, lessonOptionCount, anyStrandPicked);
 
     /// <summary>Opens the strand picker (D4) seeded with the current picks, then writes the dialog's
     /// OK payload back as the FULL replacement set. Ignored while the strand list is NOT loaded — a
