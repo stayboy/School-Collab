@@ -30,6 +30,11 @@ public sealed class AssignmentInstructionsResponseKindsMigrationTests
     /// and no response-kind column.</summary>
     private const string PreMigration = "20261007195749_AddAssignmentContextPicks";
 
+    /// <summary>This test's OWN migration — the script is pinned to it rather than to the tip
+    /// (<c>toMigration: null</c> silently absorbs every later migration: the picks test's note has
+    /// the full story, and it is the same trap that hid here).</summary>
+    private const string OwnMigration = "20261009052346_AddAssignmentInstructionsAndResponseKinds";
+
     [TestMethod]
     public async Task AddInstructionsAndKinds_AddsTheColumnAndTable_KeepsRows_AndCascades()
     {
@@ -123,7 +128,7 @@ public sealed class AssignmentInstructionsResponseKindsMigrationTests
         await using var context = AssignmentsDbFactory.CreateContext(connectionString);
         var script = context.GetService<IMigrator>().GenerateScript(
             fromMigration: PreMigration,
-            toMigration: null,
+            toMigration: OwnMigration,
             MigrationsSqlGenerationOptions.Idempotent);
 
         script.Should().Contain(
