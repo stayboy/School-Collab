@@ -409,6 +409,29 @@ elements rendered by child components (including FluentUI web components like
 Without `::deep`, the scope attribute would be placed on the `td` itself, which does
 not exist in the component's direct markup.
 
+**Consumer-side overrides of a shared component's chrome.** When a shared child
+component's own scoped padding/spacing doesn't match your custom template
+content, override it **from the consumer** — a `:deep` rule under your container
+class — instead of changing the shared component for one caller:
+
+```css
+/* Page-scoped: the SectionCard header's 1rem indent vs readout rows that carry
+   none — the title sat 16px right of the rows beneath it (authoring round,
+   2026-10-09). Every other SectionCard consumer keeps the shared chrome. */
+.my-rules-card :deep(.section-card__header) {
+    padding-left: 0;
+    padding-right: 0;
+}
+```
+
+Related facts from the same round: `FluentCard` pads its content by
+`calc(var(--design-unit) * 5px)` (≈20px), so anything inside a card inherits that
+padding **on top of** the child component's own — alignment math (and any `:deep`
+fix) must account for it. And the same consumer-scoped pattern constrains content
+that would otherwise overflow a shared pill/chip in a grid cell —
+`.my-cell ::deep .chip { max-width: 100%; }` (long strand names claimed whole
+rows until that was added).
+
 ### Global styles in `wwwroot/app.css`
 
 Only add styles to `wwwroot/app.css` when they are truly application-wide. Keep
@@ -597,6 +620,17 @@ interaction in one dialog surface and avoids stacked overlays.
 
 Use FluentUI's own layout components for edit/create forms:
 
+- **Rows ride the shared `FormRow`** (`src/SchoolCollab.Admin.Shared/Components/FormRow.razor`)
+  — the canonical row primitive: a 180px label gutter + input cell, so every
+  label on a form shares ONE left edge. One `FormRow` per single field; one
+  `AlignTop` `FormRow` for a peer pair/group (sub-inputs carry their own visible
+  `Label=` or an `aria-label`); `LabelPosition="RowLabelPosition.Below"` puts the
+  row's label under its input (side-by-side textarea cells: equalise heights with
+  the same `Rows=` on each, e.g. `Rows="4"`); `Help="…"` renders a small (i) icon
+  in the label whose native tooltip carries the row's hint (see "Compact forms"
+  below). Dialogs use `FormRow` too —
+  `.github/skills/dialog-ui/SKILL.md`. `FluentStack` remains for ad-hoc grouping
+  that is not a labelled row.
 - Put form controls in a `<FluentStack Orientation="Orientation.Vertical" Gap="1rem">`
   when fields should stack vertically. This gives consistent spacing between fields
   without custom flex containers.
@@ -641,6 +675,47 @@ Use FluentUI's own layout components for edit/create forms:
     </FluentStack>
 </FluentEditForm>
 ```
+
+### Compact forms: hints, disabled states and empty notes
+
+Forms in this repo (the assignment-authoring round was the forcing example) stay
+compact by a standing set of rules — each one replaced a real block of wasted
+space:
+
+- **No inline narrative paragraphs on a form.** Prose that explains a row
+  ("Feedback mode…", "Set the pass threshold…") rides a **(i) help icon on the
+  row label** — `FormRow Help=` → the shared `HelpIcon` component
+  (`SchoolCollab.Admin.Shared/Components/HelpIcon.razor`, native `title`
+  tooltip, optional `Icon=` glyph swap). A null `Help` renders the previous
+  markup byte-for-byte.
+- **Disabled-with-reason, never hidden.** A control that cannot be used renders
+  disabled with the reason on its native `title` — and, where the row is
+  affected, on the row's (i) icon. Never a disappearing act, never a paragraph
+  — the disabled-with-reason rule of the compartments spec.
+- **Empty-state sentences are not paragraphs either.** "This subject has no
+  strands yet." rides the disabled button's `title` plus the row label's (i)
+  hint; the transient "you haven't picked X yet" state says **nothing** — it is
+  the normal state, not a condition to flag. Gate the hint on the AUTHORITATIVE
+  empty (a list that loaded and is empty): a fetch that never happened is not
+  evidence of emptiness.
+- **One static helper owns state → text.** `public static string? EmptyStateHint(...)`
+  on the component (`ContextPicksSection`, the `ScoringFieldsSection.IsScoringInapplicable`
+  precedent) feeds both the page's `FormRow Help=` and the button titles, so the
+  icon and the tooltip can never drift; the page must not duplicate the
+  condition.
+- **Shared chrome wins unless the owner asks.** Don't restyle a shared component
+  for one caller — override from the consumer with `:deep` (see "Use `::deep`…"
+  above) or add an optional parameter whose null-render is the old markup.
+- **Hints explain influence, not just meaning.** When a field drives downstream
+  UI (assignment type/grading format → the scoring fields, the AI-generation
+  gate), the driving row's (i) icon must name the consequences — compacting or
+  merging the downstream explanations is only safe while the causal chain stays
+  visible on the row that owns the choice (`Authoring.TypeGradingPurposeHint` is
+  the shipped example, composed as `\n`-labelled lines that a native `title`
+  renders as a multi-line tooltip). Ground every claim in the **documented**
+  behaviour (`documents/solution/…`), not assumed semantics — and let the
+  enum's own `[Description]` values be the user's vocabulary; never invent
+  glosses (the "Manual" value is described as *Offline*, not "in class").
 
 ## Share form fields between create & edit forms
 

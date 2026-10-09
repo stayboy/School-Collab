@@ -71,6 +71,67 @@ not treat a bug fix as complete when it only changes production code.
 
 ---
 
+## bUnit pitfalls — render crashes, dialog round-trips, element-id seams
+
+Distilled from the assignment-authoring rounds (2026-10); each entry is a
+verified failure, not a theory.
+
+### A render-time exception looks like a FLAKY TIMEOUT
+
+Any page that wraps content in `<ErrorBoundary>` (the repo rule) converts a
+render-time exception into the fallback UI instead of a test failure. In bUnit
+this surfaces as `WaitForFailedException` — "the assertion did not pass within
+the timeout period" — with the classic signature: the failing tests **pass in
+isolation and fail together** under full-suite load. The most common cause seen
+in this repo so far is an `Icon` instance passed to the generic `Icon=` parameter
+(`.github/skills/fluentui-icons/SKILL.md` § "The instance trap"). Diagnosis:
+
+1. Temporarily widen the page's `ErrorContent` from `@ex.Message` to `@ex.ToString()`.
+2. Run the single failing test; read the inner exception in the rendered fallback.
+3. Revert the widening — never commit the widened form.
+
+### Dialog round-trip tests need one named, generous budget
+
+Show → interact → submit through the real dialog shell (harness below) is
+load-sensitive: under a full-suite run the renderer can take tens of seconds to
+build the dialog. Use ONE named budget constant for every round-trip wait in a
+test class — e.g. `private static readonly TimeSpan DialogRoundTripBudget =
+TimeSpan.FromSeconds(15);` — passed to the wait helpers, instead of short
+hard-coded timeouts. Flake signature: the dialog's list is still empty after 60+
+poll checks while renders are still arriving — that is load, not a defect.
+
+### Element ids are the bUnit contract
+
+- Stable element ids on authoring/form surfaces (`authoring-basics-title`,
+  `scoringFieldsPassScore`, `cq-prompt-count`, …) are test seams. **Never rename
+  one in a refactor** without updating every assertion; prefer adding a new id
+  over reusing an old one.
+- Field ORDER is a contract: assert it with `ContainInOrder` over an id
+  sequence, and update the sequence (with a message stating the new order) in
+  the same change that moves the field.
+- When an element is deleted, keep its seam as an **absence** assertion —
+  `cut.FindAll("#old-id").Should().BeEmpty("why it is gone")` — instead of
+  deleting the test. Deleting the assertion deletes the regression guard.
+
+### Two sanctioned dialog harnesses (and the beforeunload trap)
+
+- **End-to-end (preferred for write paths):** the real `IDialogService` plus a
+  rendered `FluentDialogProvider` —
+  `DialogService.ShowShellDialogAsync<TDialog, TModel, TResult>(...)`, then
+  `provider.WaitForAssertion(() => provider.Find("form"))`. Exercises
+  show → interact → submit for real (`QuestionPromptDialogBunitTests`).
+- **Write-back only:** a mocked `IDialogService` returning a fixed OK payload
+  (`Mock<IDialogReference>` + `DialogShellResult<T>` registered in the test's
+  DI) — for asserting the caller applies the result
+  (`ContextPicksSectionBunitTests.RegisterContextPickDialog`).
+- **Beforeunload trap:** any page test whose page carries a collocated
+  `beforeunload` JS module must call
+  `JSInterop.SetupModule(<the page's module-path const>)` before rendering, or
+  every render awaits a JS import that never answers and the test hangs
+  (`Authoring.BeforeUnloadModulePath` precedent; JSInterop Mode = Loose).
+
+---
+
 ## Unit and Integration tests for feature additions
 
 Every new feature, service, or behavioural class **must** include tests in
