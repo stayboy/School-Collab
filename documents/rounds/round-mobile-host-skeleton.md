@@ -1,8 +1,8 @@
 # Round: mobile-host-skeleton (L1 of the mobile train)
 
 **Provider:** pi, full Tier 3, Option A (models: glm-5.3-flash orchestrator, glm-5.3 plan-review — registry-resolved substitute for the skill's `ollama/glm-5.3:cloud`, which no longer exists in the active registry; resolved 2026-10-09 against `~/.pi/agent/models-store.json`, deepseek-v4.1-flash worker, kimi-k2.7-code reviewer, kimi-k2.7-code escalator, minimax-m3 tester)
-**Status:** CLOSED — commit/PR pending owner authorization (nothing staged); the PR reference will be
-appended here when it lands
+**Status:** CLOSED — carried by commit `41d5bb71` on `stack/30-mobile-host-skeleton` (50 files,
++3,425/−22). Not pushed; no PR/stack registration yet (each gated on its own owner instruction).
 **Round base:** `afc189e2` — worktree `School-Collab-mobile-train`, branch `stack/30-mobile-host-skeleton`. The worktree is clean at base except this round's own documents (`documents/specs/mobile-hybrid-app.md`, this round doc).
 **Spec:** `documents/specs/mobile-hybrid-app.md` — §4 layout, §7 CI, §8 L1 acceptance, §3.2 the second-pass dependency measurement.
 
