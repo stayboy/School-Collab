@@ -186,6 +186,17 @@
     /// <summary>The targeted grades' canonical levels (D18/PB-3), supplied by the page.</summary>
     [Parameter] public IReadOnlyList<int> TargetGradeLevels { get; set; } = [];
 
+    /// <summary>R4 (CP-6/CP-8/D24): the picked strands' display NAMES, matched 1:1 to the picked ids —
+    /// they ride the structured <see cref="QuestionGenerationRequest.ContextStrands"/> field, which
+    /// the AI host does NOT strip under an org prompt lock. The lesson names
+    /// (<see cref="ContextLessonNames"/>) are prompt TEXT only and are therefore dropped for a locked
+    /// org (D19/G40) — the same asymmetry the composer documents.</summary>
+    [Parameter] public IReadOnlyList<string> ContextStrandNames { get; set; } = [];
+
+    /// <summary>R4 (CP-7/CP-8/D24): the picked lessons' display NAMES — see
+    /// <see cref="ContextStrandNames"/>.</summary>
+    [Parameter] public IReadOnlyList<string> ContextLessonNames { get; set; } = [];
+
     /// <summary>PB-11: the same read-only summary line the composer shows, over THIS surface's knobs.</summary>
     private string ConfigSummary => QuestionPromptComposer.ComposeSummary(NarrativeInputs());
 
@@ -212,7 +223,11 @@
         DifficultyMedium: _difficultyMedium,
         DifficultyHard: _difficultyHard,
         Types: SelectedTypes(),
-        ResourceNames: ResourceNames());
+        ResourceNames: ResourceNames(),
+        // R4 (CP-8/D24): the same composed-prompt seam as compartment 6 — this surface's context
+        // rides the same page-supplied parameters, so no additional wiring is needed here.
+        StrandNames: ContextStrandNames,
+        LessonNames: PromptLocked ? [] : ContextLessonNames);
 
     /// <summary>PB-11 + PB-6: the draft surface's dialog opens from THIS surface's own transient
     /// knobs — the composer's persisted-count source (PB-6(i)) deliberately does not apply here.</summary>
@@ -395,7 +410,9 @@
         var request = new QuestionGenerationRequest(
             TopicId: TopicId!.Value,
             TopicName: TopicName ?? string.Empty,
-            ContextStrands: null,
+            // R4 (CP-6/CP-8/D24): the draft surface's generation carries the same picked strand
+            // names as compartment 6 — one generation context for both surfaces.
+            ContextStrands: ContextStrandNames.Count > 0 ? ContextStrandNames : null,
             QuestionCount: _questionCount,
             Types: types,
             PromptOverride: _prompt,

@@ -1,0 +1,59 @@
+/* R4 (CP-1/CP-2): the Basics "Strands & lessons" row — D4's add buttons + chips. Scoped to this
+   component — the row's own styles only, so the authoring page's CSS is untouched. FluentUI design
+   variables with token fallbacks — the fallback is the value used when a host has not defined the
+   token, not a hard-coded colour (Chip.razor.css and ~130 sibling *.razor.css files do the same;
+   aligned on #6b6b6b for consistency). No inline styles. */
+
+.context-picks {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+/* D4: the two add actions sit in one inline row directly under the Subject select. */
+.context-picks__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.context-picks__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+/* Long strand/lesson names: the shared Chip is an inline-flex pill with no max-width and its
+   label has no min-width, so a single over-long name would otherwise claim the whole row and
+   push the picker out of its grid cell. Constrain the copy HERE (::deep reaches the Chip's own
+   elements) rather than in the shared component, which every other call site — including the
+   composer's toggle chips — depends on. */
+.context-picks__chips ::deep .chip {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.context-picks__chips ::deep .chip-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* UX-17/UX-19: the inline reason beside the disabled (never hidden) pickers. */
+.context-picks__reason {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.875rem;
+    font-style: italic;
+}
+
+/* CP-3: the muted empty / unavailable / nothing-picked notes. */
+.context-picks__note {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.875rem;
+}

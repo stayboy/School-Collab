@@ -227,7 +227,15 @@ public record CreateAssignmentRequest(
     /// constraints. <see langword="null"/> preserves the persisted set (the child-collection
     /// contract used by questions/attachments/modules); a non-null list is a full
     /// replacement and must hold at least one entry (TGT-13).</summary>
-    IReadOnlyList<AssignmentTargetDto>? Targets = null);
+    IReadOnlyList<AssignmentTargetDto>? Targets = null,
+    /// <summary>R4 (CP-5/D23): the picked strand ids — an opaque id set into the Students
+    /// context's root <c>TopicStrand</c> rows. Create semantics: a non-null list IS the picks;
+    /// null/empty both mean no picks (a create has no prior state to preserve).</summary>
+    IReadOnlyList<Guid>? ContextStrandIds = null,
+    /// <summary>R4 (CP-5/D23): the picked lesson ids — the Students context's parented
+    /// <c>TopicStrand</c> rows. Same create semantics as
+    /// <see cref="ContextStrandIds"/>.</summary>
+    IReadOnlyList<Guid>? ContextLessonIds = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -265,7 +273,14 @@ public record UpdateAssignmentRequest(
     string? Instructions = null,
     /// <summary>D-1/TGT-1: the authored targeting constraints — full replacement when
     /// non-null, preserve when null (see <see cref="CreateAssignmentRequest.Targets"/>).</summary>
-    IReadOnlyList<AssignmentTargetDto>? Targets = null);
+    IReadOnlyList<AssignmentTargetDto>? Targets = null,
+    /// <summary>R4 (CP-5/CP-10/D23): the picked strand ids — null preserves the persisted set,
+    /// a non-null list (even an EMPTY one) is a full replacement. Each kind is gated
+    /// independently; the empty list is the only expressible "remove every pick".</summary>
+    IReadOnlyList<Guid>? ContextStrandIds = null,
+    /// <summary>R4 (CP-5/CP-10/D23): the picked lesson ids — same null-means-preserve contract
+    /// as <see cref="ContextStrandIds"/>.</summary>
+    IReadOnlyList<Guid>? ContextLessonIds = null);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing
@@ -476,7 +491,15 @@ public record AssignmentAuthoringChildrenDto(
     IReadOnlyList<AssignmentQuestionReadDto> Questions,
     IReadOnlyList<AssignmentAttachmentReadDto> Attachments,
     IReadOnlyList<ResourceDto> Resources,
-    IReadOnlyList<AssignmentTargetDto> Targets);
+    IReadOnlyList<AssignmentTargetDto> Targets,
+    /// <summary>R4 (CP-5/CP-11/D23, OD-2): the persisted strand picks, so the Edit surface's
+    /// pickers round-trip them. <see langword="null"/> on a pre-deploy payload is the
+    /// fail-closed "unknown, preserve" state — the client then emits null (preserve) rather
+    /// than an empty list, which the update handler would read as "clear every pick".</summary>
+    IReadOnlyList<Guid>? ContextStrandIds = null,
+    /// <summary>R4 (CP-5/CP-11/D23, OD-2): the persisted lesson picks — same fail-closed null
+    /// posture as <see cref="ContextStrandIds"/>.</summary>
+    IReadOnlyList<Guid>? ContextLessonIds = null);
 
 /// <summary>One authored targeting constraint (TGT-1). <see cref="RefId"/> is null exactly
 /// for <see cref="TargetKindDto.AllStudents"/>. <see cref="DisplayOrder"/> is the author's

@@ -110,7 +110,11 @@ public static class QuestionPromptComposer
         }
     }
 
-    /// <summary>The QA-3 read-only summary — the same parts as the narrative, rendered inline.</summary>
+    /// <summary>The QA-3 read-only summary — the same parts as the narrative, rendered inline.
+    /// R4 (CP-7): the two pick collections append their own <c> · Strands: …</c> /
+    /// <c> · Lessons: …</c> segment when non-empty, in the same order the narrative renders
+    /// them. The composer only renders what it is handed: the D19/G40 lock filtering (a locked
+    /// org loses the lesson names) happens at the section, so this stays deterministic.</summary>
     public static string ComposeSummary(QuestionPromptNarrativeInputs inputs)
     {
         var difficulty = (inputs.DifficultyEasy, inputs.DifficultyMedium, inputs.DifficultyHard) is (null, null, null)
@@ -120,7 +124,19 @@ public static class QuestionPromptComposer
         var picked = NormalizeTypes(inputs.Types);
         var types = picked.Count == 0 ? "Balanced mix" : string.Join(", ", picked.Select(TypeName));
 
-        return $"{inputs.QuestionCount} questions · {difficulty} · {types}";
+        var summary = $"{inputs.QuestionCount} questions · {difficulty} · {types}";
+
+        if (inputs.StrandNames is { Count: > 0 } strands)
+        {
+            summary += $" · Strands: {string.Join(", ", strands)}";
+        }
+
+        if (inputs.LessonNames is { Count: > 0 } lessons)
+        {
+            summary += $" · Lessons: {string.Join(", ", lessons)}";
+        }
+
+        return summary;
     }
 
     /// <summary>PB-5/PB-6/QA-23's shared "unedited" predicate — a COMPLETE structural match of PB-4.</summary>

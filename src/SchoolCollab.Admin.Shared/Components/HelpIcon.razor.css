@@ -1,0 +1,10 @@
+/* HelpIcon (D11/D13): a small hint glyph whose native title carries the text. FluentUI design
+   variables with the repo's usual token fallback. No inline styles. */
+
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 4px;
+    cursor: help;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}

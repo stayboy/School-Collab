@@ -132,6 +132,20 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// this set (D-1), never authored against it. Unordered at the EF level; consumers that
     /// render the author's order sort by <c>DisplayOrder</c>.</summary>
     public IReadOnlyList<AssignmentTarget> Targets => _targets.AsReadOnly();
+
+    /// <summary>R4 (CP-5/D23): the picked strand ids — an opaque id set into the Students
+    /// context's <c>TopicStrand</c> rows (root strands, so no <c>ParentStrandId</c>). No
+    /// cross-context FK is possible (the strands live in another bounded context's database),
+    /// so integrity is the client's resolve-or-<c>(removed)</c> contract (CP-11).
+    /// <para>"No picks" has exactly one representation: the empty array — the column is NOT
+    /// NULL, so a NULL row value could not even be materialized into this non-nullable
+    /// property.</para></summary>
+    public IReadOnlyList<Guid> ContextStrandIds { get; private set; } = [];
+
+    /// <summary>R4 (CP-5/D23): the picked lesson ids — <c>TopicStrand</c> rows with a parent
+    /// (the strand-lesson unification model). Same opaque-id posture as
+    /// <see cref="ContextStrandIds"/>.</summary>
+    public IReadOnlyList<Guid> ContextLessonIds { get; private set; } = [];
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
     public static Assignment Create(
@@ -357,6 +371,30 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
         UpdatedAt = DateTimeOffset.UtcNow;
         SyncDerivedTargeting();
+    }
+
+    /// <summary>
+    /// R4 (CP-10/D23): replaces the authoring context picks. Each kind is INDEPENDENT — a null
+    /// argument preserves that kind's current value, a non-null (possibly empty) list is a full
+    /// replacement. Unlike <see cref="SetTargets"/>' TGT-13 at-least-one gate an empty replace is
+    /// legal: that is exactly CP-10's "clear". Duplicated ids are collapsed in first-occurrence
+    /// order, so a duplicate never lands twice in the column.
+    /// </summary>
+    /// <param name="strandIds">The picked root strand ids, or null to preserve.</param>
+    /// <param name="lessonIds">The picked lesson ids, or null to preserve.</param>
+    public void SetContextPicks(IReadOnlyList<Guid>? strandIds, IReadOnlyList<Guid>? lessonIds)
+    {
+        if (strandIds is not null)
+        {
+            ContextStrandIds = strandIds.Distinct().ToList();
+        }
+
+        if (lessonIds is not null)
+        {
+            ContextLessonIds = lessonIds.Distinct().ToList();
+        }
+
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     /// <summary>

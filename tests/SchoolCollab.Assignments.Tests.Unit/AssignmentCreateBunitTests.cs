@@ -55,6 +55,14 @@ public class AssignmentCreateBunitTests : BunitContext
     /// fail-open path is exercised (the pre-fix transport-failure case).</summary>
     private bool _effectivePolicyUnreachable;
 
+    /// <summary>Load budget for the waits that span a mocked dialog round trip plus the page's
+    /// follow-up reads. bUnit's 1 s default is far too small on a loaded full-solution run, and the
+    /// 5 s these two waits used to carry flaked twice with the SAME signature — the builder list
+    /// still empty after ~60 checks while renders kept arriving — and passed standalone every time
+    /// (round <c>assignment-create-edit-redesign</c> §Worker Report). A real defect still fails this
+    /// wait; it only takes longer to say so.</summary>
+    private static readonly TimeSpan DialogRoundTripBudget = TimeSpan.FromSeconds(15);
+
     /// <summary>D2/OD4: the effective-policy body, produced by the REAL resolver so the stubbed body
     /// can never disagree with the server's own derivation (the D4 implication included).</summary>
     private static string EffectivePolicyBody(
@@ -281,7 +289,7 @@ public class AssignmentCreateBunitTests : BunitContext
             picker.SelectedOption.Should().NotBeNull($"picker {pickerId} should have a selected option after picking {label}");
             picker.SelectedOption!.Value.Should().Be(value.ToString(),
                 $"picker {pickerId} should reflect the picked value {value}");
-        }, TimeSpan.FromSeconds(5));
+        }, DialogRoundTripBudget);
     }
 
     /// <summary>Adds ONE grade-level target through the builder's Add dialog (the mocked dialog returns
@@ -299,7 +307,7 @@ public class AssignmentCreateBunitTests : BunitContext
                     "the grade target should be the authored set");
             Picker(cut, "authoring-basics-subject").Items.Should().NotBeNullOrEmpty(
                 "the grade target's effective subject list should have landed");
-        }, TimeSpan.FromSeconds(5));
+        }, DialogRoundTripBudget);
     }
     /// <summary>Fills the Basics title through the bound text field's own callback — the create
     /// guards require a non-empty title before anything is posted.</summary>
