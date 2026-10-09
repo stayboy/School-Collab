@@ -258,16 +258,19 @@ subfolder to avoid a second root-level solution file.
   and widened, per the repo's CSS-isolation conventions (`.github/copilot/rules/blazor-components.md`)
   and with `maui-safe-area` for insets/keyboard. The 37 existing pages are the reference for behaviour,
   not markup to port.
-- **Placement + CI:** a `src/Mobile/` solution (never `SchoolCollab.slnx`, never a second `.slnx` at the
-  repo root) with its own `windows-latest` job, so the ubuntu build stays green.
-- **Execution mode for implementation — not yet chosen.** AGENTS.md requires an explicit choice
-  (Solo / Light round / Full round) before implementation begins; nothing below that line has started.
-- **Carried over:** `use-js-interop`'s upstream sample reverted verbatim, and
-  `%TEMP%\hermes-blazor-quarantine\` still holds nine superseded skill copies.
+- **Placement + CI — shipped in L1** (`#326`, merged): `src/Mobile/SchoolCollab.Mobile.slnx` holds the
+  head; `Mobile.Logic` + `Mobile.Tests.Unit` joined `SchoolCollab.slnx` so the ubuntu job builds and
+  tests them; the `windows-latest` mobile job builds the head at `-f net10.0-windows10.0.19041.0`
+  (android flips in L2).
+- **Execution mode:** L1 ran **full Tier 3** (plan gate → worker → static diff review →
+  orchestrator-accept → UI tester; recorded in `documents/rounds/round-mobile-host-skeleton.md`).
+  **L2's mode is still to be chosen** — AGENTS.md requires an explicit choice before that layer starts.
+- **Closed (2026-10-09):** `use-js-interop`'s upstream sample is **accepted as-is** — the token-storage
+  control belongs to L3's policy (`SecureStorage`, never `sessionStorage`/`localStorage`), not to a repo
+  rule written for a generic illustration; and `%TEMP%\hermes-blazor-quarantine\` has been **deleted**
+  (its replacements are byte-verified against the pinned source and lock-tracked).
 - **AppHost orchestration vs. out-of-band run.** Adopt the preview `Aspire.Hosting.Maui` (plus a CPM
   entry and the endpoint-count bump), or run the mobile head outside Aspire. Not urgent: both work.
 - **Repo-owned mobile conventions** (tenant, auth, absolute base URLs, CPM) — a rule or skill once
   §7's first item is settled.
 - **Extend or exclude the wiring guards** for the mobile head (G5).
-- **Carried over from the Blazor round:** `use-js-interop`'s upstream sample came back verbatim,
-  and `%TEMP%\hermes-blazor-quarantine\` still holds the nine superseded copies.
