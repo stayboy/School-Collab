@@ -1,0 +1,24 @@
+.spike {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin: 0 auto;
+    max-width: 40rem;
+    padding: 1.5rem 1rem;
+}
+
+.spike__title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.spike__intro {
+    color: var(--neutral-foreground-hint, #605e5c);
+    margin: 0;
+}
+
+.spike__card {
+    display: block;
+    padding: 1rem;
+}

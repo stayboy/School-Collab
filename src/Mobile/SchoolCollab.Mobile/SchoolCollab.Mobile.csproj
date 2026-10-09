@@ -1,0 +1,87 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <!-- NOTE (round mobile-host-skeleton, 2026-10-09): the `net10.0-android` build currently
+             FAILS with NETSDK1082 — "There was no runtime pack for Microsoft.AspNetCore.App
+             available for the specified RuntimeIdentifier 'android-arm64'/'android-x64'".
+             Admin.Shared and ServiceDefaults each declare
+             <FrameworkReference Include="Microsoft.AspNetCore.App" />, which lands on this
+             project transitively, and a self-contained mobile app needs a runtime pack per
+             framework reference — Microsoft.AspNetCore.App has none for any android RID. The
+             closure restores and compiles fine; severing it is L2 work. Until then the mobile CI
+             job builds the Windows TFM (.github/workflows/ci.yml, job `mobile`). Do not "fix"
+             this by stripping the framework reference here: that compiles against ~24 assemblies
+             the app would not ship (24 MSB3277) and hides the severance. -->
+        <TargetFrameworks>net10.0-android</TargetFrameworks>
+        <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+
+        <OutputType>Exe</OutputType>
+        <RootNamespace>SchoolCollab.Mobile</RootNamespace>
+        <UseMaui>true</UseMaui>
+        <SingleProject>true</SingleProject>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <EnableDefaultCssItems>false</EnableDefaultCssItems>
+        <Nullable>enable</Nullable>
+
+        <!-- Enable XAML source generation for faster build times and improved performance. -->
+        <MauiXamlInflator>SourceGen</MauiXamlInflator>
+
+        <!-- Display name -->
+        <ApplicationTitle>SchoolCollab</ApplicationTitle>
+
+        <!-- App Identifier -->
+        <ApplicationId>com.schoolcollab.mobile</ApplicationId>
+
+        <!-- Versions -->
+        <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+        <ApplicationVersion>1</ApplicationVersion>
+
+        <!-- Unpackaged Windows output, so the dev loop is a plain F5 onto the desktop target. -->
+        <WindowsPackageType>None</WindowsPackageType>
+
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- App Icon -->
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+
+        <!-- Splash Screen -->
+        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+
+        <!-- Images -->
+        <MauiImage Include="Resources\Images\*" />
+
+        <!-- Custom Fonts -->
+        <MauiFont Include="Resources\Fonts\*" />
+
+        <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+        <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- API base addresses live here, never as C# literals (spec D8). MAUI adds no
+             configuration sources of its own, so MauiProgram streams this embedded copy into
+             builder.Configuration; MobileApiOptions binds the `MobileApi` section from it. -->
+        <EmbeddedResource Include="appsettings.json" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- No Version attributes: versions are central (Directory.Packages.props, MAUI group). -->
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
+        <PackageReference Include="Microsoft.Maui.Controls" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
+        <ProjectReference Include="..\SchoolCollab.Mobile.Logic\SchoolCollab.Mobile.Logic.csproj" />
+    </ItemGroup>
+
+</Project>
