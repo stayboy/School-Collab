@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Core.CQRS;
 
@@ -51,7 +52,12 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
                 q.ModelAnswer,
                 q.Options.Select(o => new AssignmentQuestionOptionReadDto(o.Id, o.OptionText, o.IsCorrect)).ToList(),
                 // R3 (P1-2): so the Edit surface round-trips provenance instead of stripping it.
-                q.GenerationId))
+                q.GenerationId,
+                // D16/QR-2 + QR-5 (§5.1/§5.2): the response kinds and this question's instruction
+                // blocks, so the editor round-trips both instead of blanking them on the next save —
+                // the same reason GenerationId rides this read.
+                q.ResponseKinds.Select(kind => (QuestionResponseKindDto)kind).ToList(),
+                assignment.InstructionsFor(q.Id).Select(MapInstruction).ToList()))
             .ToList();
 
         var attachments = assignment.Attachments
@@ -99,6 +105,22 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
             // the same fail-closed load-half posture as the targeting rows above. Always a list
             // (possibly empty), never null: one representation of "no picks".
             assignment.ContextStrandIds,
-            assignment.ContextLessonIds);
+            assignment.ContextLessonIds,
+            // QR-5/§5.6: the assignment's OWN instruction blocks (QuestionId null) — the questions'
+            // ride their own rows above.
+            assignment.InstructionsFor(null).Select(MapInstruction).ToList());
     }
+
+    /// <summary>QR-5 (§5.6): one persisted instruction row in the wire shape both owners share.</summary>
+    private static InstructionReadDto MapInstruction(AssignmentInstruction item) =>
+        new(
+            item.Id,
+            (InstructionKindDto)item.Kind,
+            item.Text,
+            item.Url,
+            item.FileName,
+            item.ContentType,
+            item.FileSize,
+            item.StoragePath,
+            item.DisplayOrder);
 }

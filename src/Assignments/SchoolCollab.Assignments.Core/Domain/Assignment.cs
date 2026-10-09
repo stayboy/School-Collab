@@ -14,6 +14,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     private readonly List<ContentModule> _modules = [];
     private readonly List<AssignmentResource> _resources = [];
     private readonly List<AssignmentTarget> _targets = [];
+    private readonly List<AssignmentInstruction> _instructionItems = [];
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private Assignment() { }
@@ -132,6 +133,19 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// this set (D-1), never authored against it. Unordered at the EF level; consumers that
     /// render the author's order sort by <c>DisplayOrder</c>.</summary>
     public IReadOnlyList<AssignmentTarget> Targets => _targets.AsReadOnly();
+
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): every instruction block on this assignment — its own
+    /// rows (<see cref="AssignmentInstruction.QuestionId"/> null) and its questions' rows alike, one
+    /// collection, one table.</summary>
+    public IReadOnlyList<AssignmentInstruction> InstructionItems => _instructionItems.AsReadOnly();
+
+    /// <summary>The instruction blocks for one owner, in author order — <paramref name="questionId"/>
+    /// null returns the assignment's own rows (§5.6).</summary>
+    public IReadOnlyList<AssignmentInstruction> InstructionsFor(Guid? questionId) =>
+        _instructionItems
+            .Where(item => item.QuestionId == questionId)
+            .OrderBy(item => item.DisplayOrder)
+            .ToList();
 
     /// <summary>R4 (CP-5/D23): the picked strand ids — an opaque id set into the Students
     /// context's <c>TopicStrand</c> rows (root strands, so no <c>ParentStrandId</c>). No
@@ -382,6 +396,97 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// </summary>
     /// <param name="strandIds">The picked root strand ids, or null to preserve.</param>
     /// <param name="lessonIds">The picked lesson ids, or null to preserve.</param>
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): replace the assignment's instruction blocks — its own
+    /// rows (<c>QuestionId</c> null) and each question's (id set) in one call. <c>null</c> preserves
+    /// the persisted set (the child-collection contract every other collection here follows); an empty
+    /// list clears them. Order is re-indexed 0..n-1 per owner, the <see cref="SetTargets"/> precedent.
+    /// Tuple-based on purpose: the aggregate takes domain values, never a wire DTO.</summary>
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): APPEND instruction rows without touching the rows
+    /// already held — the path an update takes when only the questions changed: their rows are
+    /// purged with the re-minted questions (<see cref="RemoveQuestion"/>) and re-added here, while
+    /// the assignment's own rows keep their ids. Ordering restarts per owner, so the rows land
+    /// contiguous 0..n beside any surviving rows of the same owner.</summary>
+    public void AddInstructionItems(
+        IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
+            string? FileName, string? ContentType, long FileSize, string? StoragePath)> items)
+    {
+        foreach (var owner in items.GroupBy(item => item.QuestionId))
+        {
+            var order = _instructionItems.Count(existing => existing.QuestionId == owner.Key);
+            foreach (var item in owner)
+            {
+                _instructionItems.Add(new AssignmentInstruction(
+                    Id,
+                    item.QuestionId,
+                    item.Kind,
+                    item.Text,
+                    item.Url,
+                    item.FileName,
+                    item.ContentType,
+                    item.FileSize,
+                    item.StoragePath,
+                    order++));
+            }
+        }
+    }
+
+    /// <summary>QR-5/§5.6: replaces ONLY the assignment's own rows (<c>QuestionId</c> null), leaving
+    /// every question's rows — and their ids — exactly as they are. The path an update takes when the
+    /// author edited the assignment's instructions but not its questions: a full-collection replace
+    /// there would silently delete every question's blocks.</summary>
+    public void SetAssignmentInstructionItems(
+        IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
+            string? FileName, string? ContentType, long FileSize, string? StoragePath)> items)
+    {
+        _instructionItems.RemoveAll(item => item.QuestionId is null);
+        var order = 0;
+        foreach (var item in items.Where(item => item.QuestionId is null))
+        {
+            _instructionItems.Add(new AssignmentInstruction(
+                Id,
+                null,
+                item.Kind,
+                item.Text,
+                item.Url,
+                item.FileName,
+                item.ContentType,
+                item.FileSize,
+                item.StoragePath,
+                order++));
+        }
+    }
+
+    public void SetInstructionItems(
+        IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
+            string? FileName, string? ContentType, long FileSize, string? StoragePath)>? items)
+    {
+        if (items is null)
+        {
+            return;
+        }
+
+        _instructionItems.Clear();
+
+        foreach (var owner in items.GroupBy(item => item.QuestionId))
+        {
+            var order = 0;
+            foreach (var item in owner)
+            {
+                _instructionItems.Add(new AssignmentInstruction(
+                    Id,
+                    item.QuestionId,
+                    item.Kind,
+                    item.Text,
+                    item.Url,
+                    item.FileName,
+                    item.ContentType,
+                    item.FileSize,
+                    item.StoragePath,
+                    order++));
+            }
+        }
+    }
+
     public void SetContextPicks(IReadOnlyList<Guid>? strandIds, IReadOnlyList<Guid>? lessonIds)
     {
         if (strandIds is not null)
@@ -605,9 +710,18 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         QuestionType questionType,
         int displayOrder,
         string? modelAnswer = null,
-        Guid? generationId = null)
+        Guid? generationId = null,
+        /// <summary>D16/QR-2 (spec §5.1): the media kinds this question expects — the validator has
+        /// already required at least one by the time a handler calls this.</summary>
+        IReadOnlyList<ResponseKind>? responseKinds = null)
     {
         var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder, modelAnswer, generationId);
+
+        if (responseKinds is not null)
+        {
+            question.SetResponseKinds(responseKinds);
+        }
+
         _questions.Add(question);
         UpdatedAt = DateTimeOffset.UtcNow;
         return question;
@@ -619,6 +733,12 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         if (question is not null)
         {
             _questions.Remove(question);
+
+            // QR-5/§5.6: a question's instruction blocks go with it — the rows are owned by this
+            // aggregate (one table, QuestionId addressing the question), so leaving them would
+            // orphan rows against a deleted id.
+            _instructionItems.RemoveAll(item => item.QuestionId == questionId);
+
             UpdatedAt = DateTimeOffset.UtcNow;
         }
     }

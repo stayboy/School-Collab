@@ -130,6 +130,17 @@
                     <FluentMessageBar Id="authoring-error" Intent="MessageIntent.Error" class="authoring-message">@_error</FluentMessageBar>
                 }
 
+                @* U4 (round-3 Q2 settlement, owner 2026-10-09): the count of questions whose response
+                   definition is missing AND required by the current grading format. It sits beside the
+                   error bar — where the author reads what stands between them and the save — and it is
+                   the ONLY prompt for a legacy question, because nothing is backfilled for them. *@
+                @if (QuestionsMissingResponseDefinition > 0)
+                {
+                    <FluentMessageBar Id="authoring-response-kinds-banner" Intent="MessageIntent.Warning" class="authoring-message">
+                        @($"{QuestionsMissingResponseDefinition} question(s) need a response definition — open each question and pick what the student submits (video, audio, document or image).")
+                    </FluentMessageBar>
+                }
+
                 @* UX-7 / F17 (this round): the parameter change reloaded this instance and took unsaved
                    edits with it — the one case the in-app guard cannot see (a host swapping Id/Mode without
                    a NavigationManager navigation). It sits beside the error bar so it is read with the
@@ -560,7 +571,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
                         }
                         else
                         {
@@ -574,7 +585,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
                             @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
                             {
                                 <QuestionsDraftSection AssignmentId="_item.Id"
@@ -690,6 +701,16 @@
                                 </FormRow>
                             </div>
                         </div>
+
+                        @* QR-5/§5.6 (owner, 2026-10-09): the assignment's OWN instruction blocks —
+                           audio, video, url and image guidance beside the text field above, which keeps
+                           rendering first (§5.7). The same shared editor the question dialog uses, so the
+                           two owners cannot drift. *@
+                        <InstructionEditorList Id="authoring-instruction-items"
+                                               Rows="_model.InstructionItems"
+                                               StageMediaAsync="StageInstructionMediaAsync"
+                                               Changed="OnModelChanged"
+                                               ReadOnly="@IsReadOnly" />
                     </section>
                 }
         }
@@ -1193,6 +1214,16 @@
                 : AssignmentAuthoringMode.View;
         }
     }
+
+    /// <summary>U4 (round-3 Q2 settlement): how many questions the CURRENT format requires a response
+    /// definition for and do not have one yet — non-zero renders the banner, zero hides it. Legacy rows
+    /// (saved before definitions existed) are exactly this case; nothing is invented for them
+    /// (<c>RequiresResponseKinds</c> is the same predicate the server enforces, so the banner cannot
+    /// disagree with the 400 the save would return).</summary>
+    private int QuestionsMissingResponseDefinition =>
+        QuestionResponseKindRules.RequiresResponseKinds(SelectedGradingFormat)
+            ? _model.Questions.Count(question => question.ResponseKinds.Count == 0)
+            : 0;
 
     private bool IsReadOnly => EffectiveMode == AssignmentAuthoringMode.View;
 
@@ -1986,6 +2017,9 @@
                     // R4 (P4.6): a create genuinely starts with NO picks — marked as READ (an empty
                     // set), so the save writes "no picks" rather than the fail-closed preserve.
                     _model.LoadContextPicks([], []);
+        // QR-5: a Create surface genuinely has no instruction blocks yet - mark them KNOWN, or a block
+        // the author adds here would project null = preserve and be dropped.
+        _model.MarkInstructionItemsLoaded();
                 }
 
                 // Create has no persisted set to read and View does not read one either, so only the
@@ -2266,6 +2300,9 @@
         }
 
         _model.LoadContextPicks([], []);
+        // QR-5: a Create surface genuinely has no instruction blocks yet - mark them KNOWN, or a block
+        // the author adds here would project null = preserve and be dropped.
+        _model.MarkInstructionItemsLoaded();
         await LoadContextPickSourcesAsync(_loadCts?.Token ?? CancellationToken.None);
         await InvokeAsync(StateHasChanged);
     }
@@ -2392,6 +2429,7 @@
         // emitting null — the update handler's preserve — instead of an empty list that would CLEAR
         // a picks-bearing assignment on the author's next scalar-only save.
         _model.LoadContextPicks(null, null);
+        _model.MarkInstructionItemsLoaded(loaded: false);
 
         try
         {
@@ -2483,6 +2521,25 @@
             Logger.LogWarning(ex, "AI-prompt lock resolution failed");
         }
     }
+
+    /// <summary>QR-5/§5.6 (U5): stages one instruction media file through the SAME endpoint the
+    /// attachments use (stage-at-selection), so instruction media inherit its store, sweeper, caps and
+    /// 413/400 mapping — and the payload simply carries what came back. A refusal returns null: the
+    /// shared editor then asks the author to retry, rather than failing the whole edit.</summary>
+    private async Task<StagedAttachmentDto?> StageInstructionMediaAsync(
+        InstructionEditorRow row, Stream content, string fileName, string contentType, long fileSize)
+    {
+        try
+        {
+            return await Api.StageAttachmentAsync(content, fileName, contentType, fileSize);
+        }
+        catch (AttachmentStagingFailed ex)
+        {
+            Logger.LogWarning(ex, "Instruction media staging failed for {FileName}", fileName);
+            return null;
+        }
+    }
+
 
     private void OnModelChanged() { }
 

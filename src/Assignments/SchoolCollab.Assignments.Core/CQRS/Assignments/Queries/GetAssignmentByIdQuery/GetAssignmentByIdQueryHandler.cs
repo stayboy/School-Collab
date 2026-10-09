@@ -132,7 +132,21 @@ public sealed class GetAssignmentByIdQueryHandler(
                     // Round drop-primary-grade: the scope input the by-id read filters on
                     // (see AllowsAnyTargetGrade) — must be mapped or a scoped read silently
                     // fails closed.
-                    TargetGradeIds: AssignmentPolicyScope.GradeTargetIds(assignment));
+                    TargetGradeIds: AssignmentPolicyScope.GradeTargetIds(assignment),
+                    // QR-5/§5.6: the assignment's OWN instruction blocks. Mapped or the gate-passed
+                    // wire field stays dead on the detail read — the children read carries the
+                    // authoring half, this carries the read half. The LIST read deliberately does
+                    // not map it (payload bloat on every row of a list view).
+                    InstructionItems: assignment.InstructionsFor(null).Select(item => new InstructionReadDto(
+                        item.Id,
+                        (InstructionKindDto)item.Kind,
+                        item.Text,
+                        item.Url,
+                        item.FileName,
+                        item.ContentType,
+                        item.FileSize,
+                        item.StoragePath,
+                        item.DisplayOrder)).ToList());
             },
             CacheOptions,
             tags: ["assignments"],

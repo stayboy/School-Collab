@@ -91,7 +91,10 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewResourceDto>? resources = null,
         // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap.
         decimal? passScore = null,
-        int? maxAttempts = null) =>
+        int? maxAttempts = null,
+        // QR-5/§5.6: the assignment's OWN instruction blocks — null preserves (the child-collection
+        // contract), a non-null list replaces.
+        IReadOnlyList<NewInstructionDto>? instructionItems = null) =>
         new(
             Id: id,
             Title: "Updated",
@@ -109,7 +112,107 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             ContentModules: contentModules,
             Resources: resources,
             PassScore: passScore,
-            MaxAttempts: maxAttempts);
+            MaxAttempts: maxAttempts,
+            // QR-5/§5.6.
+            InstructionItems: instructionItems);
+
+    // ── QR-5/§5.6: the instruction blocks' update contract ────────────────────────────
+
+    private static NewInstructionDto InstructionText(string text) => new(
+        Kind: InstructionKindDto.Text, Text: text, Url: null,
+        FileName: null, ContentType: null, FileSize: 0, StoragePath: null);
+
+    private static void SeedInstructionRows(Assignment assignment, Guid firstQuestionId)
+    {
+        assignment.SetInstructionItems(
+        [
+            (null, InstructionKind.Text, "Read the question twice.", null, null, null, 0, null),
+            (firstQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null),
+        ]);
+    }
+
+    [TestMethod]
+    public async Task Update_NullInstructionItems_PreservesBothOwnersBlocks()
+    {
+        var (db, cache, tenants) = BuildScope("update-instructions-preserve");
+        using var _db = db;
+        var assignment = SeedDraft(db, tenants);
+        var firstQuestionId = assignment.Questions[0].Id;
+        SeedInstructionRows(assignment, firstQuestionId);
+        db.SaveChanges();
+
+        var repo = new CapturingAssignmentRepository { Loaded = assignment };
+        var handler = NewHandler(repo, cache);
+
+        // Scalar-only save: neither the questions nor the instruction items were supplied.
+        await handler.HandleAsync(SampleUpdate(assignment.Id));
+
+        repo.Updated.Should().NotBeNull("the handler must save the mutated aggregate");
+        var updated = repo.Updated!;
+        updated.InstructionsFor(null).Should().ContainSingle()
+            .Which.Text.Should().Be("Read the question twice.",
+                "null InstructionItems preserves the assignment's own blocks — the child-collection contract");
+        updated.InstructionsFor(firstQuestionId).Should().ContainSingle(
+            "an untouched question keeps its block too");
+    }
+
+    [TestMethod]
+    public async Task Update_SuppliedInstructionItems_ReplaceTheAssignmentRows_LeaveTheQuestionsAlone()
+    {
+        var (db, cache, tenants) = BuildScope("update-instructions-replace");
+        using var _db = db;
+        var assignment = SeedDraft(db, tenants);
+        var firstQuestionId = assignment.Questions[0].Id;
+        SeedInstructionRows(assignment, firstQuestionId);
+        db.SaveChanges();
+
+        var repo = new CapturingAssignmentRepository { Loaded = assignment };
+        var handler = NewHandler(repo, cache);
+
+        await handler.HandleAsync(SampleUpdate(assignment.Id,
+            instructionItems: [InstructionText("New guidance.")]));
+
+        repo.Updated.Should().NotBeNull("the handler must save the mutated aggregate");
+        var updated = repo.Updated!;
+        updated.InstructionsFor(null).Should().ContainSingle()
+            .Which.Text.Should().Be("New guidance.", "a non-null list is a full replacement");
+        updated.InstructionsFor(firstQuestionId).Should().ContainSingle(
+            "questions were not supplied, so their blocks ride the replacement untouched");
+    }
+
+    [TestMethod]
+    public async Task Update_QuestionsReplacedWithNullItems_ReMintsQuestionRows_AndKeepsAssignmentRowIds()
+    {
+        var (db, cache, tenants) = BuildScope("update-instructions-re-mint");
+        using var _db = db;
+        var assignment = SeedDraft(db, tenants);
+        var firstQuestionId = assignment.Questions[0].Id;
+        SeedInstructionRows(assignment, firstQuestionId);
+        var assignmentRowId = assignment.InstructionsFor(null).Single().Id;
+        db.SaveChanges();
+
+        var repo = new CapturingAssignmentRepository { Loaded = assignment };
+        var handler = NewHandler(repo, cache);
+
+        var replacement = new NewQuestionDto(
+            QuestionText: "New question?", QuestionType: QuestionTypeDto.ShortAnswer, DisplayOrder: 0,
+            Options: null, ModelAnswer: "42",
+            Instructions: [InstructionText("Show your working.")]);
+
+        await handler.HandleAsync(SampleUpdate(assignment.Id, questions: [replacement]));
+
+        repo.Updated.Should().NotBeNull("the handler must save the mutated aggregate");
+        var updated = repo.Updated!;
+        updated.InstructionsFor(null).Should().ContainSingle()
+            .Which.Id.Should().Be(assignmentRowId,
+                "the append path never re-mints the assignment's own rows — a question-only edit cannot churn their ids");
+        updated.InstructionsFor(firstQuestionId).Should().BeEmpty(
+            "the removed question's rows were purged with it (RemoveQuestion)");
+        var newQuestion = updated.Questions.Should().ContainSingle().Subject;
+        updated.InstructionsFor(newQuestion.Id).Should().ContainSingle()
+            .Which.Text.Should().Be("Show your working.",
+                "the re-minted question's rows are stamped with its fresh id");
+    }
 
     /// <summary>Capturing fake repository. The EF Core InMemory provider has a known
     /// quirk where a Same-Context Load → Replace-Owned-Children → SaveChanges

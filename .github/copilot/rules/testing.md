@@ -44,6 +44,14 @@ not treat a bug fix as complete when it only changes production code.
    regressions. Test the rendered component tree and user-facing behaviour, not only
    private methods or view models.
 
+5. **FluentUI components render web components, not native controls.** A `FluentCheckbox` renders
+   `<fluent-checkbox>`, so there is no `input[type=checkbox]` in bUnit markup to `.Change(...)`. Drive
+   it through the component instance — `FindComponents<FluentCheckbox>()` then
+   `InvokeAsync(() => box.Instance.ValueChanged.InvokeAsync(true))` — and assert on the tag, the
+   component's parameters (`box.Instance.Disabled`) or the surrounding markup. The same applies to
+   every Fluent control backed by a web component (`EnrollmentExceptionsDialogTests` is the
+   precedent).
+
    - Add `bunit` packages to the test project that owns the component if they are not
      already present.
    - Register required services (`NavigationManager`, dialog/toast providers, HTTP

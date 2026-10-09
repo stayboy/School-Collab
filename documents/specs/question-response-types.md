@@ -1,8 +1,9 @@
 # Question response definitions, teacher instructions, and the teacher response loop
 
-**Status:** spec — findings + requirements + proposed design. **Decisions open** (§7); round 1
-of the grill is in flight with the owner (2026-10-09). No implementation until the frontier is
-empty and the owner confirms.
+**Status:** spec — the decisions in §7 (feature A) and §8 (the WYSIWYG follow-up) are **settled with
+the owner (2026-10-09)**; see §7.1 and §8.4–8.5. Implementation is planned in
+`documents/rounds/round-question-response-types.md` (light round) and starts only after the owner
+clears the two gates named there (the EF migration and the contract/wire shape). No code yet.
 
 Companion specs: `assignment-authoring-compartments.md` (the authoring surface),
 `assignment-authoring-content-questions-modern-ui.md` (§6.2 the question list/editor),
@@ -79,10 +80,16 @@ Media columns are flattened (the `AssignmentAttachment` precedent) rather than a
 
 ## 5. Rules that follow (proposed; §7 settles the open ones)
 
-### 5.1 Definitions are mandatory and explicit
-Every question carries at least one `ResponseKind`. No implicit default: a definition-less
-question is invalid at save (the `SubmissionAnswerValidator` fail-closed precedent), so the
-student surface can always state what is expected — and the AI prompt can say it too.
+### 5.1 Definitions are mandatory — exactly where kinds can be carried
+Every question **on a Teacher Marked assignment** carries at least one `ResponseKind`, and no
+implicit default is invented: a definition-less question is invalid at save (the
+`SubmissionAnswerValidator` fail-closed precedent), so the student surface can always state what is
+expected. On **Auto Scored / Instant Feedback** the definition is neither required nor possible —
+§5.3 forbids every kind there, the expected answer form is already fully determined by
+`QuestionType`, and requiring one would be unsatisfiable. The two rules are therefore one invariant:
+**a kind is mandatory exactly where a kind is permitted**
+(`QuestionResponseKindRules.RequiresResponseKinds` ⟺ `IsPermitted`), asserted by a test so the pair
+cannot drift apart into a payload that is at once forbidden and demanded.
 
 ### 5.2 Instructions are optional, multi-modal, per question
 0..n instructions of any kind, ordered; the authoring surface renders them as a compact list
@@ -95,6 +102,14 @@ the same reasoning that makes Offline Teacher Marked only. Auto Scored / Instant
 questions keep to machine-scorable kinds (MultipleChoice · TrueFalse · ShortAnswer).
 (The alternative — allow the mix and let the teacher review the media answers on an auto
 assignment — is a deliberate, reviewable exception; the grill decides.)
+
+**Settled (owner, 2026-10-09 — A5 grill round, Q1(ii)):** §5.1's requirement binds exactly where
+kinds are permitted, so the mandatory rule and the media rule are satisfiable on every format. The
+consequence for generation is why this mattered: AI generation is offered only on Auto Scored /
+Instant Feedback (`QuestionGenerationGate`, FR-220) — precisely the formats that forbid kinds — so
+its kind-less drafts must be legal, which is what makes "leave-for-edit" (§5.5 / §7 Q6) meaningful.
+The rejection surfaces as **400** on both assignment routes
+(`QuestionResponseKindValidationException`, the D15 mapping precedent).
 
 ### 5.4 Teacher Marked ⇒ review + response per answer
 Every submitted media answer must receive a teacher review **and** a response payload before
@@ -121,9 +136,11 @@ The existing `Instructions` **text** column is kept as-is for the assignment; th
 migration it needs (and why no data backfill is needed) is recorded in **§5.7**.
 
 ### 5.7 Migration is required — and it is an owner gate (Q10 answer, 2026-10-09)
-Extending instructions with media kinds needs a **schema** migration: a new `instruction_items`
-table (`Id, TenantId, AssignmentId, QuestionId NULL = assignment-level, Kind, Text?, Url?, media
-columns, DisplayOrder`, audit columns) with a nullable question FK and tenant/assignment indexes.
+Extending instructions with media kinds needs a **schema** migration: a new table (as built:
+**`assignment_instructions`**, one owned collection on the `Assignment` aggregate —
+`Id, AssignmentId, QuestionId NULL = assignment-level, Kind, Text?, Url?, media columns,
+DisplayOrder`; deliberately **no `TenantId` and no audit columns**, consistent with every other
+assignment child) with a nullable question FK and assignment/question indexes.
 What is NOT needed is a **data backfill**: the existing `Instructions` text column stays exactly
 where it is, no row is created for it, and the display order is "the text first, then the items by
 `DisplayOrder`". Per AGENTS.md the EF migration reaches the owner as an explicit gate, and the
@@ -171,7 +188,7 @@ the assignment's `Instructions` text column into a `Text` instruction row (§5.6
 | Q4 | Teacher Marked ⇒ **queue obligation with a visible count**, not a hard gate |
 | Q5 | **Media kinds are forbidden on Auto Scored / Instant Feedback** questions |
 | Q6 | AI generation **stays as it stands** (leave-for-edit); refining it is a named follow-up |
-| Q7 | Media caps live as **domain constants for v1**, a policy field later |
+| Q7 | Media caps live as **domain constants for v1**, a policy field later. *(Round-3 Q3 — owner, "all as recommended" — supersedes the **mechanism**: instruction media share the attachment staging policy verbatim — same endpoint, sweeper, 25 MiB + extension caps — so no instruction-specific constants exist for v1; per-kind caps remain the named follow-up)* |
 | Q8 | Instructions are **many and ordered** per question |
 | Q9 | **Light round** for the authoring phase |
 | Q10 | One shared `InstructionItem` shape for the assignment and its questions, with the existing `Instructions` text column kept — **and the schema migration that requires is confirmed in §5.7** (a new table; no data backfill; owner gate; migration test in the round) |
@@ -186,6 +203,31 @@ the assignment's `Instructions` text column into a `Text` instruction row (§5.6
 - **Owner gate.** EF migrations are explicitly owner-gated in this repo (AGENTS.md), so the
   migration file lands only with your sign-off, alongside a migration test.
 
+
+### 7.3 Round-2 settlements (owner, 2026-10-09 — the A5 grill round)
+
+The A5 handler work exposed the contradiction behind §5.1's original wording: every kind is media
+(§5.3), so kinds are legal on Teacher Marked alone, while AI generation is offered only on Auto
+Scored / Instant Feedback — meaning "every question must carry a kind" was unsatisfiable on the one
+format generation lives on. Settled:
+
+| # | Settled decision |
+|---|---|
+| R1 | **The mandatory-kind rule binds exactly where kinds are permitted** (Teacher Marked). On Auto Scored / Instant Feedback the set is empty by design and no kind is required — the expected form is already fixed by `QuestionType`. §5.1 amended accordingly; the invariant is tested (`RequiresResponseKinds` ⟺ `IsPermitted`) |
+| R2 | **Validation order stays kinds-first**: when a payload breaks several question rules at once, the author sees the response-definition error first. Fixtures carry kinds deliberately so a rule test cannot pass for the wrong reason |
+| R3 | Consequence for generation: **unchanged this round** (Q6 stands). Kind-less drafts are legal on the formats generation is offered on, and the author completes the definitions in the editor |
+| R4 | Consequence for the other write paths: the questions-draft **confirm** and **duplicate** handlers carry `ResponseKinds` + instruction rows across their re-mints — omitting them silently changed what a question asked for (or dropped an assignment's instructions) |
+
+Landed 2026-10-09 (A7): both typed rejections now have a route-level test —
+`AssignmentRuleRejectionRouteTests` covers the kinds rule (QR/Q5) **and** D15's type↔grading rule on
+**both** write surfaces (`POST /assignments`, `PUT /assignments/{id}`), each paired with a control that
+proves the 400 comes from the catch arm rather than from body binding.
+
+Still open, deliberately deferred: the **legacy Teacher Marked rows** (empty kinds, indistinguishable
+from "author cleared it" — the column default is the empty array) need an editor **prompt or a
+backfill** — the U4 banner now *surfaces* them ("N questions need a response definition"), but it does
+not touch a pre-existing row, so the indistinguishable state stays until an author edits it; and the
+**AI contract widening** (Q6's named follow-up).
 
 ## 8. Follow-up feature (owner, 2026-10-09): WYSIWYG rich instruction
 
@@ -230,7 +272,7 @@ phase; recorded here because it authors the model §5.6 defines.
 | # | Settled decision |
 |---|---|
 | Q11 | **Sanitised HTML**, sanitised on write and again on render |
-| Q12 | A **community Blazor component** — see §8.5; **Quill is BSD-3-Clause** (this corrects the earlier "MIT" claim) and the licence hazards to avoid are named there |
+| Q12 | **Chosen (owner, 2026-10-09): `Blazored.TextEditor` (MIT) over Quill 2.x (BSD-3-Clause)** — both vendored and pinned locally (no CDN), our sanitiser + render component owning display; see §8.5 for the licence table and the rejected alternatives |
 | Q13 | **Both owners, one editor component** (assignment + question instructions) |
 | Q14 | Rich text and the media instruction items **coexist** |
 | Q15 | **One render component + one sanitiser helper**, used by every surface; no ad-hoc `MarkupString` |

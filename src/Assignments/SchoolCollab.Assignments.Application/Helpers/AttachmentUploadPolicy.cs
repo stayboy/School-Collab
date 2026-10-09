@@ -28,12 +28,15 @@ public static class AttachmentUploadPolicy
 
     /// <summary>Allowed file extensions (case-insensitive). Matches the
     /// server default. Keep in lockstep with
-    /// <c>AttachmentUploadOptions.AllowedExtensions</c>.</summary>
+    /// <c>AttachmentUploadOptions.AllowedExtensions</c> — including the audio/video extensions the
+    /// response definitions added (round Q1, owner 2026-10-09).</summary>
     public static readonly string[] AllowedExtensions =
     [
         ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
         ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".txt", ".md", ".csv"
+        ".txt", ".md", ".csv",
+        ".mp3", ".m4a", ".wav", ".ogg", ".aac",
+        ".mp4", ".webm", ".mov", ".m4v"
     ];
 
     /// <summary>Comma-joined extension list for the FluentUI upload

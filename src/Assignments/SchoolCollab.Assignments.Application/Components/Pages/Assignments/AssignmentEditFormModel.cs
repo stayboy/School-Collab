@@ -25,6 +25,18 @@ public sealed class AssignmentEditFormModel
     /// Round-trips through create/update so an edit never silently drops it.</summary>
     public string? Instructions { get; set; }
 
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's OWN instruction blocks — text ·
+    /// audio · video · url · image, ordered. The existing <see cref="Instructions"/> text renders
+    /// first (§5.7), so this list is the media/extra half of the same block.</summary>
+    public List<InstructionEditorRow> InstructionItems { get; } = [];
+
+    /// <summary>QR-5 fail-closed marker (the <see cref="ContextPicksLoaded"/> posture): true once the
+    /// persisted instruction blocks have been READ. False means the children read failed or delivered
+    /// no instruction field (a pre-deploy payload), so the projections send <see langword="null"/> —
+    /// which the update handler reads as "preserve" — rather than an empty list that would wipe
+    /// blocks the author never touched.</summary>
+    public bool InstructionItemsLoaded { get; private set; }
+
     public DateTime? DueDate { get; set; }
 
     public decimal? MaxScore { get; set; }
@@ -287,12 +299,55 @@ public sealed class AssignmentEditFormModel
     /// the editors disabled in that case — a cleared form is never submitted as a
     /// replacement).
     /// </summary>
+    /// <summary>QR-5: marks the assignment's instruction blocks KNOWN — a Create surface genuinely
+    /// starts with none, so its list is "empty", not "unknown" (the <c>LoadContextPicks([], [])</c>
+    /// posture the page already uses). Pass <paramref name="loaded"/> false for a reset that must go
+    /// back to the fail-closed preserve. Without the Create marking, a block the author adds there
+    /// would project null = "preserve" and be silently dropped.</summary>
+    public void MarkInstructionItemsLoaded(bool loaded = true) => InstructionItemsLoaded = loaded;
+
+    /// <summary>QR-5: loads the assignment's own instruction blocks and records whether the read
+    /// delivered them at all — null means UNKNOWN (the fail-closed posture), never "none".</summary>
+    private void LoadInstructionItems(IReadOnlyList<InstructionReadDto>? items)
+    {
+        InstructionItemsLoaded = items is not null;
+        if (items is null)
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            InstructionItems.Add(FromRead(item));
+        }
+    }
+
+    /// <summary>QR-5: one persisted instruction row onto an editable row. The order is the list's (the
+    /// read already ordered by <c>DisplayOrder</c>), and the persisted <c>Id</c>/<c>DisplayOrder</c>
+    /// are deliberately dropped — the save re-mints the rows, the questions precedent.</summary>
+    private static InstructionEditorRow FromRead(InstructionReadDto item) => new()
+    {
+        Kind = item.Kind,
+        Text = item.Text,
+        Url = item.Url,
+        FileName = item.FileName,
+        ContentType = item.ContentType,
+        FileSize = item.FileSize,
+        StoragePath = item.StoragePath,
+    };
+
+    /// <summary>QR-5: the assignment's own blocks as the wire shape — null when the load never
+    /// happened, which the update handler reads as "preserve".</summary>
+    private IReadOnlyList<NewInstructionDto>? InstructionItemsForWire() =>
+        InstructionItemsLoaded ? InstructionItems.Select(item => item.ToDto()).ToList() : null;
+
     public void LoadChildren(AssignmentAuthoringChildrenDto? children)
     {
         Questions.Clear();
         Attachments.Clear();
         ResourceUrls.Clear();
         PreservedResources.Clear();
+        InstructionItems.Clear();
 
         if (children is null)
         {
@@ -301,10 +356,16 @@ public sealed class AssignmentEditFormModel
             LoadTargets(null);
             // R4 (P4.6): the picks share it too — an unknown set projects null (preserve).
             LoadContextPicks(null, null);
+            // QR-5: and so do the assignment's instruction blocks — unknown projects null (preserve),
+            // so a failed read can never wipe blocks on the author's next scalar-only save.
+            LoadInstructionItems(null);
             return;
         }
 
         LoadTargets(children.Targets);
+        // QR-5/§5.6: the assignment's OWN blocks (the read excludes the questions', which ride
+        // their own rows below).
+        LoadInstructionItems(children.InstructionItems);
         // R4 (CP-5/CP-11): the persisted picks. A payload that carries neither field (pre-deploy)
         // leaves them UNKNOWN, exactly like a failed read.
         LoadContextPicks(children.ContextStrandIds, children.ContextLessonIds);
@@ -322,6 +383,15 @@ public sealed class AssignmentEditFormModel
                 // pointing at the generation that produced it instead of being re-minted without one.
                 GenerationId = question.GenerationId,
             };
+
+            // D16/QR-2 + QR-5: the question's own definition rides the row. The save is a full
+            // replacement, so anything not loaded here is silently dropped by the next save — the
+            // same reason GenerationId is carried above.
+            row.ResponseKinds.AddRange(question.ResponseKinds ?? []);
+            foreach (var item in question.Instructions ?? [])
+            {
+                row.Instructions.Add(FromRead(item));
+            }
 
             var options = question.Options ?? [];
             for (var i = 0; i < options.Count; i++)
@@ -488,7 +558,13 @@ public sealed class AssignmentEditFormModel
                     ModelAnswer: row.ModelAnswer,
                     // R3 (P1-2): the provenance link rides the payload; without this hop the server
                     // has no way to re-attach it after the full-replacement re-mint.
-                    GenerationId: row.GenerationId));
+                    GenerationId: row.GenerationId,
+                    // D16/QR-2 + QR-5: the definition and the instruction blocks ride it for exactly
+                    // the same reason — the re-mint replaces both wholesale.
+                    ResponseKinds: row.ResponseKinds.Count > 0 ? row.ResponseKinds : null,
+                    Instructions: row.Instructions.Count > 0
+                        ? row.Instructions.Select(item => item.ToDto()).ToList()
+                        : null));
             }
             questions = list;
         }
@@ -561,6 +637,9 @@ public sealed class AssignmentEditFormModel
             Targets: targets,
             // R4 (CP-5): the picks — an empty set collapses to the wire's null ("no picks", the
             // create semantic: there is no prior state to preserve).
+            // QR-5/§5.6: the assignment's own instruction blocks — null (never loaded) preserves the
+            // persisted set server-side, a list replaces it.
+            InstructionItems: InstructionItemsForWire(),
             ContextStrandIds: ContextPicksForWire(ContextStrandIds, strandNames, collapseEmptyToNull: true),
             ContextLessonIds: ContextPicksForWire(ContextLessonIds, lessonNames, collapseEmptyToNull: true));
     }
@@ -612,6 +691,9 @@ public sealed class AssignmentEditFormModel
             DifficultyMediumCount: create.DifficultyMediumCount,
             DifficultyHardCount: create.DifficultyHardCount,
             Instructions: Instructions,
+            // QR-5/§5.6: the assignment's own blocks — the same null-preserves / list-replaces
+            // contract, projected once on the create path and carried here.
+            InstructionItems: create.InstructionItems,
             Targets: create.Targets,
             // R4 (CP-10): DELIBERATELY not the create-projected pair above — on the update wire an
             // EMPTY list is the only expressible "clear every pick" (removing the author's last pick
@@ -648,6 +730,17 @@ public sealed class AssignmentEditFormModel
             if (string.IsNullOrWhiteSpace(row.QuestionText))
             {
                 error = $"Question {n} needs text.";
+                return false;
+            }
+
+            // QR-2/Q1(ii): the definition is required exactly where the format can carry kinds. A
+            // question authored before response definitions existed therefore surfaces here as a
+            // one-line fix the author can act on, instead of the server's 400 on a save they never
+            // connected to that question (round Q2: no backfill invents the answer for them).
+            if (row.ResponseKinds.Count == 0
+                && QuestionResponseKindRules.RequiresResponseKinds(gradingFormat))
+            {
+                error = $"Question {n} needs at least one response kind (video, audio, document or image).";
                 return false;
             }
 

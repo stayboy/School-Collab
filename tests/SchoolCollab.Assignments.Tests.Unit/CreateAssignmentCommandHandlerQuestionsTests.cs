@@ -83,12 +83,17 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
         int? difficultyEasyCount = null,
         int? difficultyMediumCount = null,
-        int? difficultyHardCount = null) =>
+        int? difficultyHardCount = null,
+        // Q1(ii) (owner, 2026-10-09): the grading format decides whether the questions must define
+        // response kinds — mandatory only where the format can carry them (Teacher Marked).
+        GradingFormat? gradingFormat = null,
+        // QR-5/§5.6: the assignment's OWN instruction blocks (the questions' ride their DTOs).
+        IReadOnlyList<NewInstructionDto>? instructionItems = null) =>
         new(
             Title: "Algebra HW",
             Description: null,
             AssignmentType: AssignmentType.Digital,
-            GradingFormat: GradingFormat.AutoGraded,
+            GradingFormat: gradingFormat ?? GradingFormat.AutoGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
             TopicId: Guid.NewGuid(),
             DueDate: null,
@@ -104,7 +109,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             // WS-B2 (spec §3.4 line 70): threaded to Assignment.Create.
             DifficultyEasyCount: difficultyEasyCount,
             DifficultyMediumCount: difficultyMediumCount,
-            DifficultyHardCount: difficultyHardCount);
+            DifficultyHardCount: difficultyHardCount,
+            // QR-5/§5.6: the assignment's own instruction blocks.
+            InstructionItems: instructionItems);
 
     private static NewQuestionDto McQuestion(int displayOrder) =>
         new(
@@ -234,6 +241,113 @@ public class CreateAssignmentCommandHandlerQuestionsTests
 
         await act.Should().ThrowAsync<AssignmentQuestionValidationException>()
             .WithMessage("*'True' and 'False'*");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_TeacherMarked_RequiresAResponseKind()
+    {
+        var (db, cache, tenants) = BuildScope("create-kinds-required");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        // McQuestion carries no kinds — legal on Auto Scored, rejected on Teacher Marked.
+        var questions = new[] { McQuestion(0) };
+
+        var act = async () => await handler.HandleAsync(SampleCommand(
+            questions: questions,
+            gradingFormat: GradingFormat.TeacherGraded));
+
+        await act.Should().ThrowAsync<AssignmentQuestionValidationException>()
+            .WithMessage("*at least one response kind*");
+        db.Assignments.IgnoreQueryFilters().Should().BeEmpty(
+            "the definition is mandatory where the format can carry kinds — nothing is persisted");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_AutoScored_DoesNotRequireAResponseKind()
+    {
+        var (db, cache, tenants) = BuildScope("create-kinds-optional");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        // The normal auto-scored shape: the expected answer form is fixed by QuestionType, so no
+        // response kind is required (and the media rule would reject every one of them anyway).
+        var questions = new[] { McQuestion(0) };
+
+        var id = await handler.HandleAsync(SampleCommand(
+            questions: questions,
+            gradingFormat: GradingFormat.AutoGraded));
+
+        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
+        stored.Questions.Should().ContainSingle()
+            .Which.ResponseKinds.Should().BeEmpty(
+                "requiring a kind here would be unsatisfiable — the media rule permits none on Auto Scored");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_PersistsInstructionItems_ForBothOwners_AndReindexesPerOwner()
+    {
+        var (db, cache, tenants) = BuildScope("create-instructions-both-owners");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        // AutoGraded: questions carry no kinds (Q1(ii)) but may carry instruction blocks.
+        var questions = new[]
+        {
+            new NewQuestionDto(
+                QuestionText: "Explain photosynthesis.",
+                QuestionType: QuestionTypeDto.ShortAnswer,
+                DisplayOrder: 0,
+                Options: null,
+                ModelAnswer: "Glucose",
+                Instructions:
+                [
+                    new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Answer in full sentences.", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+                    new NewInstructionDto(Kind: InstructionKindDto.Url, Text: null, Url: "https://example.com/how", FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+                ]),
+        };
+
+        var id = await handler.HandleAsync(SampleCommand(
+            questions: questions,
+            instructionItems:
+            [
+                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Photograph your written work.", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+                new NewInstructionDto(Kind: InstructionKindDto.Audio, Text: null, Url: null, FileName: "how-to.mp3", ContentType: "audio/mpeg", FileSize: 2048, StoragePath: "tenants/t/staging/g/how-to.mp3"),
+            ]));
+
+        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
+
+        var assignmentRows = stored.InstructionsFor(null);
+        assignmentRows.Select(r => (r.Kind, r.DisplayOrder)).Should()
+            .Equal([(InstructionKind.Text, 0), (InstructionKind.Audio, 1)],
+                "the assignment's own rows are re-indexed 0..n by payload position (EC-7)");
+        assignmentRows[1].StoragePath.Should().Be("tenants/t/staging/g/how-to.mp3");
+
+        var question = stored.Questions.Should().ContainSingle().Subject;
+        var questionRows = stored.InstructionsFor(question.Id);
+        questionRows.Select(r => (r.Kind, r.DisplayOrder)).Should().Equal(
+            (InstructionKind.Text, 0), (InstructionKind.Url, 1));
+        questionRows.Should().OnlyContain(r => r.QuestionId == question.Id,
+            "the question's rows are stamped with the id the aggregate minted");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_InvalidInstruction_RejectedBeforeAnyChildAdded()
+    {
+        var (db, cache, tenants) = BuildScope("create-instruction-invalid");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var act = async () => await handler.HandleAsync(SampleCommand(
+            instructionItems:
+            [
+                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "   ", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+            ]));
+
+        await act.Should().ThrowAsync<AssignmentContentValidationException>()
+            .WithMessage("*a text instruction needs its text*");
+        db.Assignments.IgnoreQueryFilters().Should().BeEmpty(
+            "an invalid block never leaves a partial aggregate behind (EC-7)");
     }
 
     [TestMethod]

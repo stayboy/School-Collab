@@ -86,6 +86,69 @@ public enum QuestionTypeDto
     ShortAnswer = 2
 }
 
+/// <summary>D16/QR-2 (spec <c>question-response-types</c> §7, owner 2026-10-09): the media kinds a
+/// student may answer a question with. A question carries <b>at least one</b> — "a mix" is simply a
+/// set of these. There is deliberately no Text kind: typed answers stay on
+/// <see cref="QuestionTypeDto.ShortAnswer"/>. Media kinds are valid only on Teacher Marked
+/// assignments (§7 Q5) — nothing about a video, a recording or an upload can be machine-scored.</summary>
+public enum QuestionResponseKindDto
+{
+    [Description("Video")]
+    Video = 0,
+    [Description("Recorded audio")]
+    Audio = 1,
+    [Description("Document")]
+    Document = 2,
+    [Description("Image")]
+    Image = 3
+}
+
+/// <summary>QR-5 (spec <c>question-response-types</c> §7 Q2/Q8, owner 2026-10-09): the kind of one
+/// instruction block. The same shape serves a question and the assignment itself (§5.6).</summary>
+public enum InstructionKindDto
+{
+    [Description("Text")]
+    Text = 0,
+    [Description("Link")]
+    Url = 1,
+    [Description("Audio")]
+    Audio = 2,
+    [Description("Video")]
+    Video = 3,
+    [Description("Image")]
+    Image = 4
+}
+
+/// <summary>An inbound instruction item on the create/update request (§5.6/§5.7): the teacher's
+/// guidance to the student, attached to a question or to the assignment itself. Text and Url carry
+/// their payload in <see cref="Text"/>/<see cref="Url"/>; Audio, Video and Image carry the media
+/// metadata of a file already staged to storage (the <see cref="NewAttachmentDto"/> contract).</summary>
+public record NewInstructionDto(
+    InstructionKindDto Kind,
+    /// <summary>The prose for <see cref="InstructionKindDto.Text"/>.</summary>
+    string? Text = null,
+    /// <summary>The target for <see cref="InstructionKindDto.Url"/>.</summary>
+    string? Url = null,
+    /// <summary>Media metadata for Audio/Video/Image — unused for Text/Url.</summary>
+    string? FileName = null,
+    string? ContentType = null,
+    long FileSize = 0,
+    string? StoragePath = null,
+    /// <summary>The author's order within its owner (0-based, re-indexed server-side).</summary>
+    int DisplayOrder = 0);
+
+/// <summary>One persisted instruction item, either owner (spec §5.6).</summary>
+public record InstructionReadDto(
+    Guid Id,
+    InstructionKindDto Kind,
+    string? Text = null,
+    string? Url = null,
+    string? FileName = null,
+    string? ContentType = null,
+    long FileSize = 0,
+    string? StoragePath = null,
+    int DisplayOrder = 0);
+
 /// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Services.AttachmentExtractionStatus</c>
 /// (R3 / D4). The status of the one text-extraction attempt made against a staged upload;
 /// <see cref="NotAttempted"/> is what every pre-R3 row and every never-parsed upload carries.</summary>
@@ -185,7 +248,12 @@ public record AssignmentSummaryDto(
     /// list / detail / ward reads' grade input (approval resolution and teacher scoping). Always
     /// set by the server-side projections; null only on a pre-deploy cached payload, which the
     /// scoped reads treat as fail-closed.</summary>
-    IReadOnlyList<Guid>? TargetGradeIds = null);
+    IReadOnlyList<Guid>? TargetGradeIds = null,
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's own instruction blocks — the same
+    /// shape the questions use, so one model serves both owners. <see cref="Instructions"/> (the
+    /// student-facing text field) is unchanged and keeps rendering first. Null on a pre-deploy
+    /// payload means "none recorded".</summary>
+    IReadOnlyList<InstructionReadDto>? InstructionItems = null);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -235,7 +303,11 @@ public record CreateAssignmentRequest(
     /// <summary>R4 (CP-5/D23): the picked lesson ids — the Students context's parented
     /// <c>TopicStrand</c> rows. Same create semantics as
     /// <see cref="ContextStrandIds"/>.</summary>
-    IReadOnlyList<Guid>? ContextLessonIds = null);
+    IReadOnlyList<Guid>? ContextLessonIds = null,
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's instruction blocks (audio, video,
+    /// image, link, or a second text block) — a create passes the list straight through; null and
+    /// empty both mean none.</summary>
+    IReadOnlyList<NewInstructionDto>? InstructionItems = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -280,7 +352,11 @@ public record UpdateAssignmentRequest(
     IReadOnlyList<Guid>? ContextStrandIds = null,
     /// <summary>R4 (CP-5/CP-10/D23): the picked lesson ids — same null-means-preserve contract
     /// as <see cref="ContextStrandIds"/>.</summary>
-    IReadOnlyList<Guid>? ContextLessonIds = null);
+    IReadOnlyList<Guid>? ContextLessonIds = null,
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's instruction blocks — null preserves
+    /// the persisted set (the child-collection contract every other collection here follows), a
+    /// non-null list is a full replacement.</summary>
+    IReadOnlyList<NewInstructionDto>? InstructionItems = null);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing
@@ -317,7 +393,14 @@ public record NewQuestionDto(
     /// question, or null for a hand-written row. Carried here — not resolved server-side — because
     /// the question rows are re-minted on every save, so this is the only path by which provenance
     /// survives the author's first edit.</summary>
-    Guid? GenerationId = null);
+    Guid? GenerationId = null,
+    /// <summary>D16/QR-2 (spec §5.1, owner 2026-10-09): the response kinds this question expects —
+    /// <b>at least one is required</b>. Media kinds (Video/Audio/Document/Image) may appear only on
+    /// a Teacher Marked assignment (§7 Q5).</summary>
+    IReadOnlyList<QuestionResponseKindDto>? ResponseKinds = null,
+    /// <summary>QR-5 (spec §5.2/§7 Q8): the teacher's instruction blocks for this question — many,
+    /// ordered. Null/empty = none.</summary>
+    IReadOnlyList<NewInstructionDto>? Instructions = null);
 
 /// <summary>An inbound attachment metadata record on the create/update request
 /// (AI spec §3.2). <see cref="StoragePath"/> is opaque to the UI — the file is
@@ -461,7 +544,11 @@ public record AssignmentQuestionReadDto(
     IReadOnlyList<AssignmentQuestionOptionReadDto>? Options = null,
     /// <summary>R3 (D4/P1-2): the generation header this row came from, so the Edit surface can
     /// round-trip it instead of stripping provenance on the next save.</summary>
-    Guid? GenerationId = null);
+    Guid? GenerationId = null,
+    /// <summary>D16/QR-2: the persisted response kinds, so the editor round-trips them (§5.1).</summary>
+    IReadOnlyList<QuestionResponseKindDto>? ResponseKinds = null,
+    /// <summary>QR-5: the persisted instruction blocks (§5.2).</summary>
+    IReadOnlyList<InstructionReadDto>? Instructions = null);
 
 /// <summary>One persisted attachment (assignment-authoring P1 rework). The metadata
 /// round-trips verbatim onto the editor row, so a loaded attachment survives an
@@ -499,7 +586,11 @@ public record AssignmentAuthoringChildrenDto(
     IReadOnlyList<Guid>? ContextStrandIds = null,
     /// <summary>R4 (CP-5/CP-11/D23, OD-2): the persisted lesson picks — same fail-closed null
     /// posture as <see cref="ContextStrandIds"/>.</summary>
-    IReadOnlyList<Guid>? ContextLessonIds = null);
+    IReadOnlyList<Guid>? ContextLessonIds = null,
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's own instruction blocks, so the Edit
+    /// surface round-trips them. <see langword="null"/> on a pre-deploy payload is the same
+    /// fail-closed "unknown, preserve" state as the picks above.</summary>
+    IReadOnlyList<InstructionReadDto>? InstructionItems = null);
 
 /// <summary>One authored targeting constraint (TGT-1). <see cref="RefId"/> is null exactly
 /// for <see cref="TargetKindDto.AllStudents"/>. <see cref="DisplayOrder"/> is the author's

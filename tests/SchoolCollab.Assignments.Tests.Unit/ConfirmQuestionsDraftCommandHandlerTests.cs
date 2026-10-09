@@ -47,7 +47,10 @@ public class ConfirmQuestionsDraftCommandHandlerTests
     }
 
     private static NewQuestionDto ShortAnswer(string text, int displayOrder) =>
-        new(text, QuestionTypeDto.ShortAnswer, displayOrder, null, "draft answer");
+        new(text, QuestionTypeDto.ShortAnswer, displayOrder, null, "draft answer",
+            // Q1(ii): the seeded assignment is Teacher Marked, so the drafted question must state
+            // what it expects (a recorded spoken answer, the spec §4 workflow).
+            ResponseKinds: [QuestionResponseKindDto.Audio]);
 
     private static string ValidDraftBlob(params (string Text, int Order)[] entries)
     {

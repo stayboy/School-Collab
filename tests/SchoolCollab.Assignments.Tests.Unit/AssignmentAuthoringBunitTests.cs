@@ -238,8 +238,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         IReadOnlyList<AssignmentQuestionReadDto>? questions = null,
         IReadOnlyList<AssignmentAttachmentReadDto>? attachments = null,
         IReadOnlyList<ResourceDto>? resources = null,
-        IReadOnlyList<AssignmentTargetDto>? targets = null) =>
-        new(Guid.NewGuid(), questions ?? [], attachments ?? [], resources ?? [], targets ?? []);
+        IReadOnlyList<AssignmentTargetDto>? targets = null,
+        IReadOnlyList<InstructionReadDto>? instructionItems = null) =>
+        new(Guid.NewGuid(), questions ?? [], attachments ?? [], resources ?? [], targets ?? [],
+            // QR-5: the real children read always delivers the list (empty = none recorded), so the
+            // fixture defaults to the empty list — the fail-closed "unknown read" case is its own test.
+            InstructionItems: instructionItems ?? []);
 
     /// <param name="enterEditFields">assignment-create-edit-redesign D1: Edit/View routes now open
     /// on the SUMMARY surface, so a test that inspects the compartment form must flip the pencil.
@@ -1642,14 +1646,18 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
     // ── P1 rework: Edit loads the persisted children (the load half of parity) ─────
 
-    private static AssignmentQuestionReadDto LoadedQuestion() =>
+    /// <summary>QR-2/Q1(ii): a loaded question. <paramref name="kinds"/> true is an assignment
+    /// authored after response definitions existed; false reproduces a LEGACY Teacher Marked row,
+    /// whose empty set is what the form gate now surfaces as a fixable prompt (round Q2).</summary>
+    private static AssignmentQuestionReadDto LoadedQuestion(bool kinds = true) =>
         new(Guid.NewGuid(), "Loaded question?", QuestionTypeDto.MultipleChoice, DisplayOrder: 0,
             ModelAnswer: null,
             Options:
             [
                 new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "A", true),
                 new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "B", false)
-            ]);
+            ],
+            ResponseKinds: kinds ? [QuestionResponseKindDto.Image] : []);
 
     private static AssignmentAttachmentReadDto LoadedAttachment() =>
         new(Guid.NewGuid(), "syllabus.pdf", "application/pdf", 2048, "tenants/t/staging/syllabus.pdf");
@@ -1703,7 +1711,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         // Add one VALID question through the editor section's own seam (a blank row would be
         // rejected by the submit gate before any request is sent).
-        var row = new QuestionEditorRow { QuestionText = "Added question?", Type = QuestionTypeDto.ShortAnswer, ModelAnswer = "42" };
+        var row = new QuestionEditorRow
+        {
+            QuestionText = "Added question?",
+            Type = QuestionTypeDto.ShortAnswer,
+            ModelAnswer = "42",
+            // QR-2/Q1(ii): the fixture assignment is Teacher Marked, where the form gate requires the
+            // definition — a kind-less row would be refused before any request is sent.
+            ResponseKinds = { QuestionResponseKindDto.Image },
+        };
         var section = cut.FindComponents<QuestionEditorSection>().Single();
         await cut.InvokeAsync(() => section.Instance.Model.AddQuestion(row));
 
@@ -1724,6 +1740,103 @@ public class AssignmentAuthoringBunitTests : BunitContext
             "the update request carries the loaded question — not only the newly added one");
         updateBody.Should().Contain("Added question?");
         updateBody.Should().Contain("syllabus.pdf", "the loaded attachment is re-projected, not dropped");
+    }
+
+    /// <summary>Round Q2 (owner, 2026-10-09): a question saved before response definitions existed
+    /// reads back with an empty kind set. On a Teacher Marked assignment the form gate surfaces it as
+    /// one line the author can act on — deliberately not a silent backfill, which would rewrite what
+    /// already-published students are asked to submit.</summary>
+    [TestMethod]
+    public async Task Edit_LegacyQuestionWithoutAResponseKind_IsSurfacedByTheGateNotTheServer()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"));
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() =>
+            cut.Find("#authoring-error").TextContent.Should().Contain("at least one response kind",
+                "the author is told WHICH question needs a definition, before any request is sent"));
+    }
+
+    [TestMethod]
+    public void Edit_InstructionsCompartment_RendersTheSharedInstructionEditor()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle(
+                "QR-5/§5.6: the assignment's own instruction blocks live in the Instructions compartment"),
+            TimeSpan.FromSeconds(5));
+        cut.FindAll("#authoring-instruction-items-add").Should().ContainSingle(
+            "…as the same shared editor the question dialog uses");
+    }
+
+    [TestMethod]
+    public async Task Edit_InstructionBlockAddedInTheCompartment_RidesTheSavePayload()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+
+        var editor = cut.FindComponent<InstructionEditorList>();
+        await cut.InvokeAsync(() => editor.Instance.AddAsync());
+
+        // The shared editor mutates the MODEL's own row, and the payload is projected from the model at
+        // save time — so the text is set on the row rather than through the DOM (Fluent's inner <input>
+        // is not up in bUnit; the same reason the checkbox is driven through its component instance).
+        editor.Instance.Rows.Should().ContainSingle();
+        editor.Instance.Rows[0].Text = "Watch the worked example first.";
+
+        string? updateBody = null;
+        _mockHttp.Expect(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}")
+            .With(req =>
+            {
+                updateBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.NoContent);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        updateBody.Should().Contain("Watch the worked example first.",
+            "the assignment's own instruction rides the create/update payload");
+    }
+
+    [TestMethod]
+    public void ResponseKindsBanner_TeacherMarkedLegacyQuestion_ShowsTheCount()
+    {
+        // MakeDto defaults to Teacher Marked, where a definition is required — and LoadedQuestion(kinds:
+        // false) is a question saved before response definitions existed.
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Find("#authoring-response-kinds-banner").TextContent
+            .Should().Contain("1 question(s) need a response definition",
+                "U4: the legacy question is surfaced as a count the author can act on"));
+    }
+
+    [TestMethod]
+    public void ResponseKindsBanner_AutoScoredAssignment_IsAbsent()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, grading: GradingFormatDto.AutoGraded),
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"), TimeSpan.FromSeconds(5));
+        cut.FindAll("#authoring-response-kinds-banner").Should().BeEmpty(
+            "Auto Scored forbids every kind, so nothing is missing on it (round Q1(ii))");
     }
 
     [TestMethod]

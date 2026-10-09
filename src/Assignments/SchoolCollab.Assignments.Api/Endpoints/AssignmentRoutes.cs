@@ -560,11 +560,20 @@ public static class AssignmentRoutes
                     req.Targets,
                     // R4 (CP-5/D23): the picked strands & lessons — opaque Students-context ids.
                     req.ContextStrandIds,
-                    req.ContextLessonIds);
+                    req.ContextLessonIds,
+                    // QR-5/§5.6: the assignment's own instruction blocks.
+                    req.InstructionItems);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
             catch (AssignmentTypeGradingValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // QR/Q5 (§5.3): the media-kind versus grading-format pairing — the D15 rule's sibling,
+            // mapped the same way so an auto-scored assignment carrying a media kind is a 400 with
+            // the rule's own message rather than an unhandled 500.
+            catch (QuestionResponseKindValidationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }
@@ -636,11 +645,18 @@ public static class AssignmentRoutes
                     req.Targets,
                     // R4 (CP-10/D23): null = preserve the persisted picks, empty = clear.
                     req.ContextStrandIds,
-                    req.ContextLessonIds);
+                    req.ContextLessonIds,
+                    // QR-5/§5.6: null = preserve the assignment's own instruction blocks.
+                    req.InstructionItems);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
             catch (AssignmentTypeGradingValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // QR/Q5 (§5.3): the media-kind versus grading-format pairing (the D15 rule's sibling).
+            catch (QuestionResponseKindValidationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }

@@ -89,17 +89,51 @@ public sealed class DuplicateAssignmentCommandHandler(
         // are sorted by their persisted DisplayOrder key.
 
         // Questions: re-index DisplayOrder 0..n by sorted position (EC-7).
+        // QR-5 (§5.6): the source's instruction rows ride the clone — the assignment's own first
+        // (QuestionId null), then each question's, stamped with the ids the clone mints below.
+        var instructionItems = source.InstructionsFor(null).Select(existing => (
+            QuestionId: (Guid?)null,
+            Kind: existing.Kind,
+            Text: existing.Text,
+            Url: existing.Url,
+            FileName: existing.FileName,
+            ContentType: existing.ContentType,
+            FileSize: existing.FileSize,
+            StoragePath: existing.StoragePath)).ToList();
+
         var sortedQuestions = source.Questions.OrderBy(q => q.DisplayOrder).ToList();
         for (var i = 0; i < sortedQuestions.Count; i++)
         {
             var q = sortedQuestions[i];
-            var newQ = clone.AddQuestion(q.QuestionText, q.QuestionType, i, q.ModelAnswer);
+            var newQ = clone.AddQuestion(
+                q.QuestionText,
+                q.QuestionType,
+                i,
+                q.ModelAnswer,
+                // D16/QR-2: the response kinds are part of the question's definition — dropping them
+                // here would silently change what a duplicated question asks its students for.
+                responseKinds: q.ResponseKinds);
             // Options in loaded order; AddOption(isCorrect: true) re-points
             // CorrectOptionId to the NEW option's id (the create-path mapping).
             foreach (var opt in q.Options)
             {
                 newQ.AddOption(opt.OptionText, opt.IsCorrect);
             }
+
+            instructionItems.AddRange(source.InstructionsFor(q.Id).Select(existing => (
+                QuestionId: (Guid?)newQ.Id,
+                Kind: existing.Kind,
+                Text: existing.Text,
+                Url: existing.Url,
+                FileName: existing.FileName,
+                ContentType: existing.ContentType,
+                FileSize: existing.FileSize,
+                StoragePath: existing.StoragePath)));
+        }
+
+        if (instructionItems.Count > 0)
+        {
+            clone.SetInstructionItems(instructionItems);
         }
 
         foreach (var attachment in source.Attachments)

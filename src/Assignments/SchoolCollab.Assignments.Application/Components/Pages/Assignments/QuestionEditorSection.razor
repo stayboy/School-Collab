@@ -63,6 +63,15 @@
     /// <summary>The form model that owns the question list being edited.</summary>
     [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
 
+    /// <summary>QR-2/Q1(ii): the assignment's grading format. The question dialog's response-kind
+    /// picker renders its disabled-with-reason state where the media rule forbids kinds — the
+    /// <c>ScoringFieldsSection.GradingFormat</c> precedent.</summary>
+    [Parameter, EditorRequired] public GradingFormatDto GradingFormat { get; set; }
+
+    /// <summary>QR-5/§5.6 (U5): the host's instruction-media staging seam, threaded into the question
+    /// dialog's model. Null means this host offers no instruction uploads.</summary>
+    [Parameter] public StageInstructionMediaAsync? StageInstructionMediaAsync { get; set; }
+
     /// <summary>Raised when the model was mutated (add / remove / dialog-confirmed edit) so the page
     /// can re-render review counts and the submit gate.</summary>
     [Parameter] public EventCallback Changed { get; set; }
@@ -107,7 +116,7 @@
     public async Task OpenEditAsync(int index, QuestionEditorRow row)
     {
         var result = await DialogService.ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>(
-            QuestionEditModel.ForEdit(index, row),
+            QuestionEditModel.ForEdit(index, row, GradingFormat, StageInstructionMediaAsync),
             title: "Edit question",
             size: DialogSize.Medium);
 

@@ -18,6 +18,37 @@
                          Label="Type"
                          Class="w-3" />
 
+        @* D16/QR-2 (spec §5.1, round Q1(ii)): what the student must submit — a SET, because the
+           owner's requirement is "any of or a mix of". On Auto Scored / Instant Feedback the media
+           rule forbids every kind, so the picker renders DISABLED WITH THE REASON (the
+           ScoringFieldsSection pattern) rather than disappearing or silently accepting a bad value. *@
+        <div class="cq-qedit-options" id="cq-qedit-kinds">
+            <span class="cq-qedit-sublabel">Response — what the student submits</span>
+            @if (KindsForbidden)
+            {
+                <p class="cq-qedit-reason" id="cq-qedit-kinds-reason">@QuestionResponseKindRules.TeacherMarkedOnlyHint</p>
+            }
+            <div class="cq-qedit-kind-row">
+                @foreach (var kind in AllKinds)
+                {
+                    <FluentCheckbox Id="@($"cq-qedit-kind-{kind}")"
+                                    Label="@EnumHelper.GetDescription(kind)"
+                                    Disabled="@KindsForbidden"
+                                    Value="@Model.Row.ResponseKinds.Contains(kind)"
+                                    ValueChanged="@(isChecked => OnKindChanged(kind, isChecked))" />
+                }
+            </div>
+        </div>
+
+        @* QR-5 (§5.2/§5.6): the per-question instruction blocks. The shared inline editor, so the
+           two owners cannot drift; no nested dialog (dialog-ui §4). *@
+        <div class="cq-qedit-options" id="cq-qedit-instructions">
+            <span class="cq-qedit-sublabel">Instructions</span>
+            <InstructionEditorList Id="cq-qedit-instructions-list"
+                                   Rows="Model.Row.Instructions"
+                                   StageMediaAsync="Model.StageMediaAsync" />
+        </div>
+
         @switch (Model.Row.Type)
         {
             case QuestionTypeDto.MultipleChoice:
@@ -94,6 +125,37 @@
 @code {
     /// <summary>A per-dialog radio-group name so each question's radios stay independent.</summary>
     private readonly string _groupName = $"qedit-{Guid.NewGuid():N}";
+
+    /// <summary>The response kinds in canonical order — the order the payload carries them in, so the
+    /// wire is a function of the SET rather than of the author's click order.</summary>
+    private static readonly QuestionResponseKindDto[] AllKinds =
+    [
+        QuestionResponseKindDto.Video,
+        QuestionResponseKindDto.Audio,
+        QuestionResponseKindDto.Document,
+        QuestionResponseKindDto.Image,
+    ];
+
+    /// <summary>True exactly where the media rule forbids every kind (Auto Scored / Instant
+    /// Feedback) — the picker stays visible, disabled, with the reason beside it.</summary>
+    private bool KindsForbidden =>
+        !QuestionResponseKindRules.RequiresResponseKinds(Model.GradingFormat);
+
+    private void OnKindChanged(QuestionResponseKindDto kind, bool? isChecked)
+    {
+        var selected = Model.Row.ResponseKinds.ToHashSet();
+        if (isChecked == true)
+        {
+            selected.Add(kind);
+        }
+        else
+        {
+            selected.Remove(kind);
+        }
+
+        Model.Row.ResponseKinds.Clear();
+        Model.Row.ResponseKinds.AddRange(AllKinds.Where(selected.Contains));
+    }
 
     private string RadioGroupKey => $"{_groupName}-{Model.Position}";
 

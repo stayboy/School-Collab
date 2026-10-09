@@ -40,6 +40,84 @@ public class QuestionEditDialogBunitTests : BunitContext
     }
 
     [TestMethod]
+    public async Task Instructions_AddedInTheDialog_RoundTripThroughTheWorkingCopy()
+    {
+        var row = new QuestionEditorRow { QuestionText = "Q?", Type = QuestionTypeDto.ShortAnswer };
+        var (provider, closed) = Open(QuestionEditModel.ForEdit(0, row));
+
+        provider.Find("#cq-qedit-instructions-list-add").Click();
+
+        provider.Find("form").Submit();
+        var result = await closed;
+
+        result.Should().NotBeNull();
+        result!.Row.Instructions.Should().ContainSingle()
+            .Which.Kind.Should().Be(InstructionKindDto.Text,
+                "the shared instruction editor is wired into the dialog's working copy");
+    }
+
+    [TestMethod]
+    public async Task ResponseKinds_TeacherMarked_TogglesBindAndThePayloadKeepsCanonicalOrder()
+    {
+        var row = new QuestionEditorRow { QuestionText = "Q?", Type = QuestionTypeDto.ShortAnswer };
+        var (provider, closed) = Open(QuestionEditModel.ForEdit(0, row, GradingFormatDto.TeacherGraded));
+
+        provider.FindAll("#cq-qedit-kinds").Should().ContainSingle(
+            "the response picker renders for every format — it is the question's definition");
+        provider.FindAll("#cq-qedit-kinds-reason").Should().BeEmpty(
+            "Teacher Marked can carry kinds, so there is nothing to explain");
+
+        var boxes = provider.FindComponents<FluentCheckbox>();
+        boxes.Should().HaveCount(4, "one box per response kind");
+        boxes[0].Instance.Disabled.Should().BeFalse("Teacher Marked can carry every kind");
+
+        // Toggle Image (last) then Video (first): the reverse of the canonical order.
+        await provider.InvokeAsync(() => boxes[3].Instance.ValueChanged.InvokeAsync(true));
+        await provider.InvokeAsync(() => boxes[0].Instance.ValueChanged.InvokeAsync(true));
+
+        provider.Find("form").Submit();
+        var result = await closed;
+
+        result.Should().NotBeNull();
+        result!.Row.ResponseKinds.Should().Equal(
+            [QuestionResponseKindDto.Video, QuestionResponseKindDto.Image],
+            "the payload order is a function of the SET, not of the author's click order");
+    }
+
+    [TestMethod]
+    public void ResponseKinds_AutoScored_RendersDisabledWithTheReason()
+    {
+        var row = new QuestionEditorRow { QuestionText = "Q?", Type = QuestionTypeDto.ShortAnswer };
+        var (provider, _) = Open(QuestionEditModel.ForEdit(0, row, GradingFormatDto.AutoGraded));
+
+        var boxes = provider.FindComponents<FluentCheckbox>();
+        boxes.Should().HaveCount(4, "one box per response kind");
+        boxes.Should().OnlyContain(box => box.Instance.Disabled,
+            "the media rule forbids every kind on Auto Scored, so none may be picked");
+        provider.Find("#cq-qedit-kinds-reason").TextContent.Should()
+            .Contain("Teacher Marked", "the reason is stated once rather than left to the author to infer");
+    }
+
+    [TestMethod]
+    public async Task ResponseKinds_AndInstructions_SurviveAnEditThroughTheDialog()
+    {
+        var row = new QuestionEditorRow { QuestionText = "Q?", Type = QuestionTypeDto.ShortAnswer };
+        row.ResponseKinds.Add(QuestionResponseKindDto.Image);
+        row.Instructions.Add(new InstructionEditorRow { Kind = InstructionKindDto.Text, Text = "Show working." });
+
+        var (provider, closed) = Open(QuestionEditModel.ForEdit(0, row));
+
+        provider.Find("form").Submit();
+        var result = await closed;
+
+        result.Should().NotBeNull();
+        result!.Row.ResponseKinds.Should().Equal([QuestionResponseKindDto.Image],
+            "the dialog edits a COPY — a copy that dropped the definition would wipe it on confirm");
+        result.Row.Instructions.Should().ContainSingle()
+            .Which.Text.Should().Be("Show working.", "the instruction blocks ride the copy too");
+    }
+
+    [TestMethod]
     public async Task MultipleChoice_RendersOptionInputsAndCorrectRadio_ThenSavesTheRow()
     {
         var row = new QuestionEditorRow { QuestionText = "MC?", Type = QuestionTypeDto.MultipleChoice };
