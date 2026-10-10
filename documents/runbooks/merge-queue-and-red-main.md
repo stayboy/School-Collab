@@ -84,6 +84,25 @@ body from memory, and do not script it against a repository you cannot roll back
 2. Confirm the trunk commit afterwards carries a green run for the required check(s).
 3. Confirm a deliberately failing PR is dropped from the queue rather than merged.
 
+## Merge ordering — one at a time, and re-sync when the base moves
+
+*Owner practice, 2026-10-10 (grill round). The miss it came from is named at the end.*
+
+- **Merge queued PRs one at a time, CI-first.** Merge the PR whose checks have already passed rather
+  than opening several and letting them race. Worked example from 2026-10-10: `#333` was opened *before*
+  `#332` merged, so when `#333`'s checks went green the merge was refused with **"the head branch is not
+  up to date with the base"** — the ruleset's up-to-date requirement doing exactly its job.
+- **When that block fires: `gh pr update-branch <n>`.** It re-syncs the head with `main` and re-runs the
+  checks. Do **not** reach for `--admin`: it bypasses the very requirement that just caught a genuinely
+  stale branch, and a merge nobody re-tested is the outcome the rule exists to prevent.
+- **Prefer `--auto`** now that auto-merge is enabled (`allow_auto_merge=true`, set 2026-10-10):
+  `gh pr merge <n> --squash --delete-branch --auto` lets GitHub land the PR the moment *every*
+  requirement — checks **and** up-to-date — is satisfied. Before the setting existed, that same night
+  needed a hand-rolled `gh pr checks --watch && gh pr merge` waiter, and its second attempt **failed by
+  reading a stale green**; auto-merge has no such race.
+- **Do not relax the ruleset's up-to-date requirement** to avoid the inconvenience — the refused merge
+  above is precisely the case it catches.
+
 ## When `main` is red (the incident procedure)
 
 The merge already happened; a red run cannot un-merge it. Read `main`'s run **once** at a decision

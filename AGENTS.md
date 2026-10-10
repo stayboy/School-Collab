@@ -53,8 +53,20 @@ ambiguous requirement — **use the `grill-me` skill** rather than asking ad hoc
   deferred.
 
 Applies to plan/spec pressure-testing and to any request that hides several
-decisions. It does not apply to a single factual question, where a direct
-question is cheaper.
+decisions.
+
+**Always, with no threshold (owner, 2026-10-10).** *Every* question the repo
+cannot answer is an open question and gets this treatment — a wording choice, a
+layout tweak, a one-line CI gate, a repository setting, a merge-ordering practice,
+a "should we enable X" that arrived as a footnote. The test is **decidability, not
+size**: if the codebase, config, or docs settle it, resolve it yourself and say
+what you found; if they cannot, it goes in a **grill round** — never as prose
+questions tacked onto the end of a reply, and never as a recommendation the agent
+quietly acts on. "I mentioned it in passing" is not a substitute for a round
+(that exact miss happened on 2026-10-10 with repository auto-merge and PR merge
+ordering, both raised as afterthoughts). The only exemption is a pure factual
+question, where a direct question is cheaper.
+
 
 ---
 
