@@ -27,11 +27,12 @@ changes; a queue also needs the `merge_group` trigger already added to `.github/
 What that means for the gap: the queue's one guarantee — *the merged result is tested before the trunk
 moves* — cannot be bought here. It has to be approximated:
 
-1. **A ruleset requiring the status check** (rulesets are available for public repositories on the
-   free plan, so this one applies here — the owner applies it): blocks a red PR from merging
-   server-side, which the repo currently does not do. It does **not** test the squashed combination;
-   pairing it with "require branches to be up to date before merging" is the closest available
-   substitute, because it forces the PR's checks to run against the `main` it will land on.
+1. **A ruleset requiring the status check** (**live since 2026-10-10** — ruleset `24835514`; this repo
+   is public, and rulesets are available for public repositories on the free plan): it blocks a red PR
+   from merging server-side, which the repository did not do before that date. It does **not** test the
+   squashed combination; it is paired with "require branches to be up to date before merging", the
+   closest available substitute, because that forces the PR's checks to run against the `main` it will
+   land on.
 2. **The reading discipline in `.github/merge-policy.md`**: read `main`'s run once after the merge, and
    treat a red trunk as an incident with a fix-forward-through-a-PR response.
 3. **Serialise merges between sessions** where practical: check `main`'s state immediately before asking
@@ -42,8 +43,12 @@ the queue — the enablement steps are retained below for that day.
 
 ## Prerequisites (for a future organisation-owned shape)
 
-- **Admin permission** on the repository — the queue and its ruleset are repository settings. Agents
-  cannot and must not apply them.
+- **Admin permission** on the repository — the queue and its ruleset are repository settings. Agents must
+  not apply them **without an explicit, named instruction from the owner**. Precedent (2026-10-10): the
+  owner instructed ruleset `24835514` (check `Build & Test`, branches up to date, no bypass actors), and
+  it was applied through the API — created **disabled** first so the API validated the payload, read back
+  (`/rulesets/{id}` and `/rules/branches/main`), then activated. Reproduce that sequence for any settings
+  change, and delete the object if the payload is rejected.
 - **Organisation ownership** plus a qualifying plan (see the availability note above).
 - **The workflow must listen for `merge_group`** — done in `.github/workflows/ci.yml`. A queue dispatches
   that event for its temporary `main/pr-N` branches and waits for the required check to report *there*;
