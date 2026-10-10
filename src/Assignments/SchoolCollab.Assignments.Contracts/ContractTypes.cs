@@ -135,7 +135,13 @@ public record NewInstructionDto(
     long FileSize = 0,
     string? StoragePath = null,
     /// <summary>The author's order within its owner (0-based, re-indexed server-side).</summary>
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    /// <summary>The material's title (round <c>instructional-materials</c>, D6/D7): REQUIRED for
+    /// <see cref="InstructionKindDto.Text"/> — a text material without a name is unreadable in a list —
+    /// optional for <see cref="InstructionKindDto.Url"/> (a label), ignored by the media kinds. The
+    /// column is nullable so rows that predate it keep loading: the validator enforces presence, never
+    /// the column, and no title is ever invented.</summary>
+    string? Title = null);
 
 /// <summary>One persisted instruction item, either owner (spec §5.6).</summary>
 public record InstructionReadDto(
@@ -147,7 +153,10 @@ public record InstructionReadDto(
     string? ContentType = null,
     long FileSize = 0,
     string? StoragePath = null,
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    /// <summary>See <see cref="NewInstructionDto.Title"/> — null on rows that predate the column, and
+    /// on media rows.</summary>
+    string? Title = null);
 
 /// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Services.AttachmentExtractionStatus</c>
 /// (R3 / D4). The status of the one text-extraction attempt made against a staged upload;
@@ -487,7 +496,11 @@ public record WardAssignmentViewDto(
     IReadOnlyList<WardModuleViewDto> Modules,
     /// <summary>INS-2 (assignment-authoring-compartments §9): the student-facing
     /// instructions, surfaced read-only on the ward player.</summary>
-    string? Instructions = null);
+    string? Instructions = null,
+    /// <summary>D11 (instructional-materials): the titled materials — kind, title/label and the url
+    /// or file name. Teacher notes are deliberately absent: they are the scalar <c>Description</c>,
+    /// never an instruction row, so the exclusion is structural rather than a filter to remember.</summary>
+    IReadOnlyList<InstructionReadDto>? Materials = null);
 
 /// <summary>WS-A5 — one row in a ward's assignment list.</summary>
 public record WardAssignmentListItemDto(

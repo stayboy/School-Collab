@@ -15,12 +15,9 @@
     <div class="cq-header">
         <h3 class="authoring-compartment-title">Content &amp; Resources</h3>
         <span class="cq-count">@(Model.Attachments.Count + Model.ResourceUrls.Count)</span>
-        <FluentButton Appearance="Appearance.Stealth"
-                      Size="ButtonSize.Small"
-                      IconStart="@FluentIcons.Add"
-                      Title="Add resource"
-                      aria-label="Add resource"
-                      OnClick="RevealLinkInputAsync" />
+        @* CR-1/CR-8's header "+" (and the hidden link input it revealed) is RETIRED into the
+           Instructions compartment's kebab (spec instructional-materials D1/§0); CR-2…CR-6,
+           CR-10…CR-12 and every X-6 string stay in force. *@
     </div>
 
     @* CR-2/CR-3: the tile IS the drop zone — FluentInputFile keeps its own drag-drop
@@ -141,21 +138,6 @@
             </ul>
         }
 
-        @if (_linkInputVisible)
-        {
-            <div class="cq-link-form" id="cq-add-link-input">
-                <FluentTextField @ref="_linkField"
-                                 @bind-Value="_newUrl"
-                                 Placeholder="https://example.com/article"
-                                 Class="w-4" />
-                <FluentButton Appearance="Appearance.Accent"
-                              Disabled="@(string.IsNullOrWhiteSpace(_newUrl))"
-                              OnClick="AddUrlAsync">
-                    Add link
-                </FluentButton>
-            </div>
-        }
-
         @if (!string.IsNullOrEmpty(_urlError))
         {
             <FluentMessageBar Intent="MessageIntent.Warning" class="resources-section-error">@_urlError</FluentMessageBar>
@@ -188,17 +170,6 @@
     // WS-B2 (decision g): reference-URL rows for AI question generation.
     private string? _newUrl;
     private string? _urlError;
-
-    /// <summary>CR-1/CR-8 (spec §5): whether the header's + has revealed the link-input row.
-    /// Sticky for the life of the surface so the rail stays clean until the author asks for it.</summary>
-    private bool _linkInputVisible;
-
-    /// <summary>Set by <see cref="RevealLinkInputAsync"/> and drained in OnAfterRender, because
-    /// the field does not exist until the reveal has re-rendered and FocusAsync cannot be awaited.</summary>
-    private bool _focusLinkPending;
-
-    /// <summary>The link field, focused after the + reveals it (FluentInputBase.FocusAsync).</summary>
-    private FluentTextField? _linkField;
 
     private async Task OnFileUploadedAsync(FluentInputFileEventArgs args)
     {
@@ -343,52 +314,38 @@
         return Task.CompletedTask;
     }
 
-    /// <summary>CR-1/CR-8 (spec §5, round content-questions-modern-ui): the card header's +
-    /// reveals the link-input row — hidden by default so the narrow rail carries only the tile
-    /// and the item rows — then focuses the field so the author lands where they are looking.
-    /// The focus has to wait for the render that creates the field (FluentInputBase.FocusAsync
-    /// returns void, so it cannot be awaited), hence the pending flag drained in OnAfterRender.
-    /// The testable seam the bUnit suite drives directly.</summary>
-    public Task RevealLinkInputAsync()
-    {
-        _linkInputVisible = true;
-        _focusLinkPending = true;
-        StateHasChanged();
-        return Task.CompletedTask;
-    }
-
-    protected override Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_focusLinkPending)
-        {
-            _focusLinkPending = false;
-            _linkField?.FocusAsync();
-        }
-        return Task.CompletedTask;
-    }
-
     /// <summary>WS-B2 (decision g) — adds the typed URL as an AI reference row
     /// (the testable seam the bUnit suite drives directly). An exact duplicate
     /// is a no-op with a warning; a blank URL is guarded client-side and by
-    /// <see cref="AssignmentEditFormModel.AddResourceUrl"/>.</summary>
-    public async Task AddUrlAsync()
+    /// <see cref="AssignmentEditFormModel.AddResourceUrl"/>.
+    ///
+    /// <para>W5 (spec <c>instructional-materials</c> §0): the reveal seam that used to hand this
+    /// method its text is retired with CR-1/CR-8, so the URL is passed in — the markup-free path the
+    /// bUnit suite drives, and the one a future affordance (the follow-up that merges the collections)
+    /// will call with its own field.</para></summary>
+    public async Task AddUrlAsync(string? url = null)
     {
         _urlError = null;
         try
         {
             if (Model is null) return;
-            var added = Model.AddResourceUrl(_newUrl ?? string.Empty);
+            var added = Model.AddResourceUrl(url ?? _newUrl ?? string.Empty);
             if (!added)
             {
                 _urlError = "That link was already added.";
+                StateHasChanged();
                 return;
             }
             _newUrl = null;
+            // A method invoked directly (bUnit, a future affordance) does not get the render an event
+            // handler would — so every state change renders explicitly, the section's own rule.
+            StateHasChanged();
             await Changed.InvokeAsync();
         }
         catch (ArgumentException ex)
         {
             _urlError = ex.Message;
+            StateHasChanged();
         }
     }
 

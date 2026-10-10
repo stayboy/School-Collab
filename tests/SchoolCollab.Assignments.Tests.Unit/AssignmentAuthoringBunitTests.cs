@@ -1774,8 +1774,81 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle(
                 "QR-5/§5.6: the assignment's own instruction blocks live in the Instructions compartment"),
             TimeSpan.FromSeconds(5));
-        cut.FindAll("#authoring-instruction-items-add").Should().ContainSingle(
-            "…as the same shared editor the question dialog uses");
+        // W4/W6 (spec instructional-materials AC-1/AC-6): the compartment's add affordance is the
+        // kebab — text, link, upload — and the shared editor's OWN button is suppressed here
+        // (grill Q1), because a second affordance beside the menu is the pattern this round replaced.
+        var menus = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>();
+        menus.SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
+            .Should().Contain(["Add text content", "Add link", "Upload from device"],
+                "AC-1: the compartment's kebab offers exactly the three D2 actions (the page action bar "
+                + "contributes its own menu, so the compartment's is identified by its items)");
+        cut.FindAll("#authoring-instruction-items-add").Should().BeEmpty(
+            "the list's own button is suppressed on the page — the section owns the add affordance");
+    }
+
+    // ── W8 (spec instructional-materials): the materials section's own contract ─────────────
+
+    [TestMethod]
+    public void View_MaterialsSection_SuppressesTheMenuTheDropzoneAndRowAffordances()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.View, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]),
+            enterEditFields: false);
+
+        cut.WaitForAssertion(() => cut.FindAll("nav.authoring-jumpnav").Should().BeEmpty(
+            "the View path renders the summary here — the premise of the assertions below"));
+        // AC-8: View mode renders no authoring affordance anywhere on the surface — no dropzone,
+        // no add button (the list's own included), and no materials kebab.
+        cut.FindAll("#authoring-materials-dropzone").Should().BeEmpty(
+            "AC-8: the dropzone is an authoring affordance, absent in View mode");
+        cut.FindAll("#authoring-instruction-items-add").Should().BeEmpty(
+            "AC-8: …and no add affordance, the list's own button included");
+        cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
+            .Should().NotContain(["Add text content", "Add link", "Upload from device"],
+                "AC-8: …and the materials kebab is not offered either");
+    }
+
+    [TestMethod]
+    public async Task Edit_MaterialsMenu_AppendsTheChosenKindsRow_WithNoConfirmationStep()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        // AC-2/D3: the action appends its row to the model on the spot — no dialog, no confirm step.
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Url));
+
+        editor.Instance.Rows.Should().ContainSingle(r => r.Kind == InstructionKindDto.Url,
+            "AC-2: the kebab's action appends the row of the chosen kind immediately");
+    }
+
+    [TestMethod]
+    public async Task Edit_MaterialRow_RefusesADocumentByName()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Audio));
+        var row = editor.Instance.Rows[^1];
+
+        using var stream = new MemoryStream([1, 2, 3]);
+        await cut.InvokeAsync(() => editor.Instance.StageMediaFileAsync(
+            row, stream, "worksheet.pdf", "application/pdf", 3));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-error").Should().ContainSingle(
+            "AC-3/D5: a document is refused by a NAMED reason, never staged into a media row"));
+        cut.Markup.Should().Contain("worksheet.pdf",
+            "…and the reason names the refused file so the author knows which drop it was");
     }
 
     [TestMethod]
@@ -1795,6 +1868,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         // save time — so the text is set on the row rather than through the DOM (Fluent's inner <input>
         // is not up in bUnit; the same reason the checkbox is driven through its component instance).
         editor.Instance.Rows.Should().ContainSingle();
+        editor.Instance.Rows[0].Title = "Watch the worked example";
         editor.Instance.Rows[0].Text = "Watch the worked example first.";
 
         string? updateBody = null;

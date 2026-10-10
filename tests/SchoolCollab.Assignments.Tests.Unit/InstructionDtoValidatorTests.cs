@@ -14,9 +14,9 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 [TestClass]
 public class InstructionDtoValidatorTests
 {
-    private static NewInstructionDto TextRow(string? text) => new(
+    private static NewInstructionDto TextRow(string? text, string? title = "Read this") => new(
         Kind: InstructionKindDto.Text, Text: text, Url: null,
-        FileName: null, ContentType: null, FileSize: 0, StoragePath: null);
+        FileName: null, ContentType: null, FileSize: 0, StoragePath: null, Title: title);
 
     private static NewInstructionDto UrlRow(string? url) => new(
         Kind: InstructionKindDto.Url, Text: null, Url: url,
@@ -54,12 +54,23 @@ public class InstructionDtoValidatorTests
     }
 
     [TestMethod]
-    public void TextRowWithoutText_Rejected_AndNamesTheOwnerAndPosition()
+    public void TextRowWithoutTitle_Rejected_AndNamesTheOwnerAndPosition()
     {
-        var act = () => InstructionDtoValidator.ValidateAll([TextRow("   ")], "Question 2");
+        // Round instructional-materials (D6/D7): the title is what a text material is NAMED by, so it is
+        // the required half. The body became optional — the case below pins that.
+        var act = () => InstructionDtoValidator.ValidateAll(
+            [TextRow(text: "Some body", title: null)], "Question 2");
 
         act.Should().Throw<AssignmentContentValidationException>()
-            .WithMessage("Question 2: instruction at position 0: a text instruction needs its text.*");
+            .WithMessage("Question 2: instruction at position 0: a text instruction needs its title.*");
+    }
+
+    [TestMethod]
+    public void TextRowWithTitleAndNoBody_IsAccepted()
+    {
+        var act = () => InstructionDtoValidator.ValidateAll([TextRow(text: null)], "Question 2");
+
+        act.Should().NotThrow("D6 made the body optional — the title is the required half");
     }
 
     [TestMethod]

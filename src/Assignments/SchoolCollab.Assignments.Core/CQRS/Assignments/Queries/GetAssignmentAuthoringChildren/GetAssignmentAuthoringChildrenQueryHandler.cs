@@ -122,5 +122,7 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
             item.ContentType,
             item.FileSize,
             item.StoragePath,
-            item.DisplayOrder);
+            item.DisplayOrder,
+            // D7: the material's name — the authoring surface reads it back for edit-in-place.
+            item.Title);
 }

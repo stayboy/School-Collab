@@ -60,7 +60,23 @@ public sealed class GetWardAssignmentViewHandler(
             query.AssignmentId, assignment.Title, assignment.DueDate, questionsUnlocked, modules,
             // INS-2 (assignment-authoring-compartments §9): the student-facing instructions
             // are surfaced read-only on the ward player.
-            Instructions: assignment.Instructions);
+            Instructions: assignment.Instructions,
+            // D11 (instructional-materials): the ward-visible materials are the assignment's OWN
+            // rows, in display order, titled — the question-owned rows stay with their questions.
+            Materials: assignment.InstructionsFor(null)
+                .OrderBy(item => item.DisplayOrder)
+                .Select(item => new InstructionReadDto(
+                    item.Id,
+                    (InstructionKindDto)item.Kind,
+                    item.Text,
+                    item.Url,
+                    item.FileName,
+                    item.ContentType,
+                    item.FileSize,
+                    item.StoragePath,
+                    item.DisplayOrder,
+                    item.Title))
+                .ToList());
     }
 
     /// <summary>Domain <see cref="ModuleType"/> → contract <see cref="ModuleTypeDto"/>

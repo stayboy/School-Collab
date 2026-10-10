@@ -311,3 +311,8 @@ pinned locally, with our sanitiser and render component owning display. Alternat
 maintained first-party component is preferred over a small community wrapper, accepting the second
 UI library.
 
+
+---
+
+> **Superseded (2026-10-10):** **§5.2/§5.6** — the instruction list as "chips/add buttons" — is replaced by the unified instructional-materials area: see `documents/specs/instructional-materials.md` §0 (D2: one kebab of "Add text content · Add link · Upload from device"). **§8 (the WYSIWYG follow-up) remains in force.**
+

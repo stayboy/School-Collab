@@ -370,3 +370,8 @@ dialog's form model). No change to `Create.razor` / `Edit.razor` hosts,
 - Autosave, new routes, Detail.razor redesign, Prefab portal surfaces.
 - Renaming existing element ids (explicitly forbidden — §7).
 
+
+---
+
+> **Superseded (2026-10-10):** **§3.2** — the Instructions compartment as a two-cell Description/Instructions grid — is replaced by the unified instructional-materials area: see `documents/specs/instructional-materials.md` §0 (D8/D9: Teacher notes stacked over Student guidance, dropzone + kebab beside them).
+

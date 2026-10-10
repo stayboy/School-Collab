@@ -553,3 +553,8 @@ The round doc's `## Pinned decisions` carries the orchestrator's original ration
 - Rules: `.github/copilot/rules/blazor-components.md` ("Blazor CSS isolation and styling"), `.github/copilot/rules/section-card.md`.
 - Skills: `blazor-css-isolation`, `dialog-ui`, `fluentui-dialog-shell`, `input-width-scale`, `flex-row-input-alignment`, `fluentui-icons-in-school-collab`, `test-dialog-opener-components`.
 - Screenshots: `C:\Users\skwar\OneDrive\Pictures\Screenshots\claude_project_question.png`, `…\claude_project_question_1.png`.
+
+---
+
+> **Superseded (2026-10-10):** **CR-1, CR-7 and CR-8** — the card header's `+` that revealed the hidden link input, and that input row — are replaced by the unified instructional-materials area: see `documents/specs/instructional-materials.md` §0. **CR-2…CR-6 and CR-10…CR-12 remain in force**, with CR-12 narrowed to `ResourcesSection` keeping its type name and the public methods still in use.
+

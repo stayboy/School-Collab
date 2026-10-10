@@ -44,6 +44,11 @@ public sealed class InstructionEditorRow
     /// <summary>The opaque storage path the staging endpoint returned (decision (b)).</summary>
     public string? StoragePath { get; set; }
 
+    /// <summary>The material's title (round <c>instructional-materials</c>, D6/D7): required for a Text
+    /// row, optional as a label for a Link row, unused by the media kinds. Null on rows that predate the
+    /// column — the validator enforces presence on write, and nothing invents a title for old data.</summary>
+    public string? Title { get; set; }
+
     /// <summary>Whether this row carries a staged media file rather than text or a link — the single
     /// source the UI reads for that question, mirroring the domain row's own discriminator.</summary>
     public bool HasMedia =>
@@ -57,7 +62,8 @@ public sealed class InstructionEditorRow
         FileName: FileName,
         ContentType: ContentType,
         FileSize: FileSize,
-        StoragePath: StoragePath);
+        StoragePath: StoragePath,
+        Title: Title);
 }
 
 /// <summary>QR-5/§5.6 (U5): stages one instruction media file on the host's behalf. The shared

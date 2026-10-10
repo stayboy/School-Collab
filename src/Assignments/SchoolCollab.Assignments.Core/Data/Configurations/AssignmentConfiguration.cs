@@ -237,6 +237,10 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             i.Property(i => i.ContentType).HasMaxLength(100);
             i.Property(i => i.FileSize).IsRequired();
             i.Property(i => i.StoragePath).HasMaxLength(500);
+            // D7 (instructional-materials): the material's NAME — required for a Text row by the
+            // validator, an optional label for a Link, unused by the media kinds. Nullable because
+            // rows written before this column carry none and nothing invents one for them.
+            i.Property(i => i.Title).HasMaxLength(200);
             i.Property(i => i.DisplayOrder).IsRequired();
             i.HasIndex(i => i.QuestionId).HasDatabaseName("ix_assignment_instructions_question_id");
         });

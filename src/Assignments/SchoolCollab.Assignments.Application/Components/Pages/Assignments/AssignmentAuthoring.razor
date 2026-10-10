@@ -684,30 +684,64 @@
                     <section id="authoring-instructions" class="authoring-compartment">
                         <h3 class="authoring-compartment-title">Instructions</h3>
                         <div class="authoring-instructions-grid">
-                            <div class="authoring-instructions-cell">
-                                <FormRow Label="Description" For="authoring-basics-description" AlignTop
+                            @* D8/D9: the wide cell stacks the two authored notes — internal first, then
+                               student-facing; both ids are preserved (they are the bUnit contract). *@
+                            <div class="authoring-instructions-cell authoring-instructions-cell-wide">
+                                <FormRow Label="Teacher notes" For="authoring-basics-description" AlignTop
                                          LabelPosition="RowLabelPosition.Below">
                                     <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
                                                     ReadOnly="@IsReadOnly" Rows="4"
                                                     Placeholder="Internal note for other teachers…" class="full-width" />
                                 </FormRow>
-                            </div>
-                            <div class="authoring-instructions-cell">
-                                <FormRow Label="Instructions" For="authoring-basics-instructions" AlignTop
+                                <FormRow Label="Student guidance" For="authoring-basics-instructions" AlignTop
                                          LabelPosition="RowLabelPosition.Below">
                                     <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
                                                     ReadOnly="@IsReadOnly" Rows="4"
                                                     Placeholder="What the student must do — shown to students…" class="full-width" />
                                 </FormRow>
                             </div>
+                            @if (!IsReadOnly)
+                            {
+                                @* D4/AC-3: the narrow cell holds the dropzone and the kebab. The dropzone
+                                   INFERS the kind from the dropped file and appends the matching row; a
+                                   document is refused BY NAME, pointing at the file-material path (D5) —
+                                   never accepted and silently dropped. *@
+                                <div class="authoring-instructions-cell authoring-instructions-cell-narrow">
+                                    <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
+                                        <FluentInputFile Mode="InputFileMode.Stream"
+                                                         MaximumFileCount="1"
+                                                         MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                         Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                         OnCompleted="@OnMaterialDroppedAsync"
+                                                         DragDropZoneVisible="true">
+                                            Drop files here — audio, video or images become materials
+                                        </FluentInputFile>
+                                    </div>
+                                    @* D2/AC-1/D12: one kebab, straight to the action (D3) — and a lone
+                                       available action would render as a plain button, the shared
+                                       component's own rule. *@
+                                    <RowActionsMenu UseMenuService="false"
+                                                    ForceKebab="true"
+                                                    Actions="@MaterialActions"
+                                                    AriaLabel="Add a material" />
+                                    @if (_materialRefusal is not null)
+                                    {
+                                        @* D5: the refusal is surfaced, named and actionable — a
+                                           FluentMessageBar, the shape every other error here takes. *@
+                                        <FluentMessageBar Id="authoring-materials-refusal"
+                                                          Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
+                                    }
+                                </div>
+                            }
                         </div>
 
-                        @* QR-5/§5.6 (owner, 2026-10-09): the assignment's OWN instruction blocks —
-                           audio, video, url and image guidance beside the text field above, which keeps
-                           rendering first (§5.7). The same shared editor the question dialog uses, so the
-                           two owners cannot drift. *@
-                        <InstructionEditorList Id="authoring-instruction-items"
+                        @* D1: the materials the compartment owns. The same shared editor the question
+                           dialog uses, so the two owners cannot drift; the section supplies the add
+                           affordance above, so the list's own button is suppressed here (grill Q1). *@
+                        <InstructionEditorList @ref="_instructionList"
+                                               Id="authoring-instruction-items"
                                                Rows="_model.InstructionItems"
+                                               ShowAddButton="false"
                                                StageMediaAsync="StageInstructionMediaAsync"
                                                Changed="OnModelChanged"
                                                ReadOnly="@IsReadOnly" />
@@ -2541,6 +2575,58 @@
     }
 
 
+    /// <summary>The shared materials editor, reached through <c>@ref</c> by the compartment's kebab
+    /// (round grill Q1): the section supplies the add affordance, so the list renders no button of its
+    /// own here.</summary>
+    private InstructionEditorList? _instructionList;
+
+    /// <summary>The D5 refusal line for a dropped document — replaced by the next drop's outcome.</summary>
+    private string? _materialRefusal;
+
+    /// <summary>D2/AC-1: the compartment's one kebab — text, link, upload — each appending its row to
+    /// the form model immediately, with no confirmation step (D3).</summary>
+    private IReadOnlyList<RowAction> MaterialActions =>
+    [
+        new()
+        {
+            Label = "Add text content",
+            OnClick = () => _instructionList?.AddRowAsync(InstructionKindDto.Text) ?? Task.CompletedTask,
+        },
+        new()
+        {
+            Label = "Add link",
+            OnClick = () => _instructionList?.AddRowAsync(InstructionKindDto.Url) ?? Task.CompletedTask,
+        },
+        new()
+        {
+            // The row is a placeholder for "whichever media the author picks": the kind follows the
+            // chosen FILE (InstructionEditorList.StageMediaFileAsync re-infers it), exactly as a drop does.
+            Label = "Upload from device",
+            OnClick = () => _instructionList?.AddRowAsync(InstructionKindDto.Audio) ?? Task.CompletedTask,
+        },
+    ];
+
+    /// <summary>AC-3/D4: a dropped file's kind is INFERRED and its row appended (staged through the
+    /// same endpoint the media rows use); a document is refused by name, pointing at the file-material
+    /// path (D5) — never accepted and silently dropped.</summary>
+    private async Task OnMaterialDroppedAsync(IEnumerable<FluentInputFileEventArgs> args)
+    {
+        foreach (var file in args)
+        {
+            var kind = InstructionKindInference.ForFile(file.Name, file.ContentType);
+            if (kind is null)
+            {
+                _materialRefusal = InstructionKindInference.DocumentRefusal(file.Name);
+                continue;
+            }
+
+            _materialRefusal = null;
+            var row = new InstructionEditorRow { Kind = kind.Value };
+            _model.InstructionItems.Add(row);
+            await _instructionList!.StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+        }
+    }
+
     private void OnModelChanged() { }
 
     /// <summary>
@@ -3184,6 +3270,14 @@
         if (!_model.ScoringFieldsPassSubmitGate(SelectedGradingFormat, out var scoringError))
         {
             _error = scoringError;
+            return false;
+        }
+        // Round instructional-materials (D6/D7): a text material without a title cannot be named in the
+        // list or on the ward surface, so the page stops the save here instead of letting the server's
+        // 400 arrive on the next round trip.
+        if (!_model.InstructionsPassSubmitGate(out var instructionError))
+        {
+            _error = instructionError;
             return false;
         }
         return true;

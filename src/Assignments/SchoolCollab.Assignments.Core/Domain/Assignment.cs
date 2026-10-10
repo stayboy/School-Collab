@@ -408,7 +408,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// contiguous 0..n beside any surviving rows of the same owner.</summary>
     public void AddInstructionItems(
         IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
-            string? FileName, string? ContentType, long FileSize, string? StoragePath)> items)
+            string? FileName, string? ContentType, long FileSize, string? StoragePath,
+            string? Title)> items)
     {
         foreach (var owner in items.GroupBy(item => item.QuestionId))
         {
@@ -425,7 +426,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                     item.ContentType,
                     item.FileSize,
                     item.StoragePath,
-                    order++));
+                    order++,
+                    title: item.Title));
             }
         }
     }
@@ -436,7 +438,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// there would silently delete every question's blocks.</summary>
     public void SetAssignmentInstructionItems(
         IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
-            string? FileName, string? ContentType, long FileSize, string? StoragePath)> items)
+            string? FileName, string? ContentType, long FileSize, string? StoragePath,
+            string? Title)> items)
     {
         _instructionItems.RemoveAll(item => item.QuestionId is null);
         var order = 0;
@@ -452,13 +455,15 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                 item.ContentType,
                 item.FileSize,
                 item.StoragePath,
-                order++));
+                order++,
+                title: item.Title));
         }
     }
 
     public void SetInstructionItems(
         IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
-            string? FileName, string? ContentType, long FileSize, string? StoragePath)>? items)
+            string? FileName, string? ContentType, long FileSize, string? StoragePath,
+            string? Title)>? items)
     {
         if (items is null)
         {
@@ -482,7 +487,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                     item.ContentType,
                     item.FileSize,
                     item.StoragePath,
-                    order++));
+                    order++,
+                    title: item.Title));
             }
         }
     }

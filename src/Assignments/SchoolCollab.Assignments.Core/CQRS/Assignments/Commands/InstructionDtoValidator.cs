@@ -42,10 +42,13 @@ internal static class InstructionDtoValidator
             switch (item.Kind)
             {
                 case InstructionKindDto.Text:
-                    if (string.IsNullOrWhiteSpace(item.Text))
+                    // Round instructional-materials (D6/D7): a text material is NAMED, not bodied. The
+                    // title is what makes it readable in the materials list and on the ward surface; the
+                    // body is optional. The title therefore replaced the old non-blank-text requirement.
+                    if (string.IsNullOrWhiteSpace(item.Title))
                     {
                         throw new AssignmentContentValidationException(
-                            $"{where}: a text instruction needs its text.");
+                            $"{where}: a text instruction needs its title.");
                     }
 
                     break;

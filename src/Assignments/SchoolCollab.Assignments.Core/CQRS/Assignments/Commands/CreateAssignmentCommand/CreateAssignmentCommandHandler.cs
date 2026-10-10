@@ -112,7 +112,8 @@ public sealed class CreateAssignmentCommandHandler(
             item.FileName,
             item.ContentType,
             item.FileSize,
-            item.StoragePath)).ToList();
+            item.StoragePath,
+            item.Title)).ToList();
 
         var assignment = Assignment.Create(
             command.Title,
@@ -192,7 +193,8 @@ public sealed class CreateAssignmentCommandHandler(
                     item.FileName,
                     item.ContentType,
                     item.FileSize,
-                    item.StoragePath)));
+                    item.StoragePath,
+                    item.Title)));
             }
         }
 
