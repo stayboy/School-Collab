@@ -94,7 +94,6 @@
         </div>
     }
 
-    @if (_error is not null)
 @code {
     /// <summary>The container id, and the stem every inner id is built from — the bUnit/page seam.</summary>
     [Parameter, EditorRequired] public string Id { get; set; } = default!;
@@ -219,6 +218,7 @@
     }
 }
 
+    @if (_error is not null)
     {
         <p class="cq-instruction-error" id="@($"{Id}-error")">@_error</p>
     }

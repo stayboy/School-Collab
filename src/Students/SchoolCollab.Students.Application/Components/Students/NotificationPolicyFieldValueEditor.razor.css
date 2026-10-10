@@ -1,0 +1,23 @@
+/* Moved out of the component's inline <style> block (razor-markup-hygiene): an always-rendered
+   <style> leaked these rules globally and re-emitted them on every render. */
+.channel-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.channel-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+.channel-option input {
+    flex: 0 0 auto;
+}
+.time-input {
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}

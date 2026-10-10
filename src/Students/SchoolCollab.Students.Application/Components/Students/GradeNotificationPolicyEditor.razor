@@ -59,15 +59,7 @@ else
     </p>
 }
 
-<style>
-    .muted { color: var(--neutral-foreground-hint); }
-    .policy-grid { width: 100%; }
-    .setting-label { font-weight: 500; }
-    .global-value { color: var(--neutral-foreground-hint); }
-    .grade-value { font-weight: 500; }
-    .inherit-badge { }
-    .grid-hint { margin-top: 0.75rem; font-size: 0.85rem; }
-</style>
+
 
 @code {
     private sealed record FieldDef(string Key, string Label, NotificationPolicyFieldEditDialog.FieldKind Kind);

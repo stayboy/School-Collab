@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -183,6 +184,50 @@ public class InstructionEditorListBunitTests : BunitContext
         await cut.InvokeAsync(() => cut.Instance.StageMediaFileAsync(
             rows[0], new MemoryStream([1]), "diagram.png", "image/png", 1));
 
+        cut.Markup.Should().Contain("not available here");
+    }
+
+    // ── the stray-brace regression (screenshot report, 2026-10-09) ────────────────────────────
+    // The error row's `@if (_error is not null)` guard had been left ABOVE the `@code` block while
+    // its body sat below it. Razor still compiled, emitting the `{`/`}` as literal markup and the
+    // error <p> UNCONDITIONALLY — a lone "}" rendered on the authoring page. These three assertions
+    // pin the structure from the DOM side: nothing stray, nothing unconditional, one row on failure.
+
+    /// <summary>The error row is conditional — an empty editor renders none.</summary>
+    [TestMethod]
+    public void ErrorRow_IsAbsent_UntilSomethingFails()
+    {
+        var cut = Render([new InstructionEditorRow { Kind = InstructionKindDto.Text }]);
+
+        cut.FindAll("#instr-error").Should().BeEmpty(
+            "no failure has happened yet — an always-rendered error row is the stray-brace defect");
+    }
+
+    /// <summary>No literal braces leak into the DOM: an orphaned block would render its own braces.</summary>
+    [TestMethod]
+    public void Markup_CarriesNoStrayBraces()
+    {
+        var cut = Render([new InstructionEditorRow { Kind = InstructionKindDto.Text }]);
+
+        // FluentUI's own components emit <style> elements, whose rule bodies legitimately contain
+        // braces — stripped first, because they are the library's markup, not ours.
+        var markup = Regex.Replace(cut.Markup, "(?s)<style.*?</style>", string.Empty);
+
+        markup.Should().NotContain("{").And.NotContain("}",
+            "an orphaned @if body renders its braces as literal text — the visible '}' bug");
+    }
+
+    /// <summary>…and the row still appears exactly once when a failure does happen.</summary>
+    [TestMethod]
+    public async Task ErrorRow_RendersOnce_WhenSomethingFails()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Image } };
+        var cut = Render(rows);
+
+        await cut.InvokeAsync(() => cut.Instance.StageMediaFileAsync(
+            rows[0], new MemoryStream([1]), "diagram.png", "image/png", 1));
+
+        cut.FindAll("#instr-error").Should().ContainSingle();
         cut.Markup.Should().Contain("not available here");
     }
 }

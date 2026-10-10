@@ -42,12 +42,7 @@ else
            @onchange="async e => await TimeTextChanged.InvokeAsync(e.Value?.ToString())" />
 }
 
-<style>
-    .channel-grid { display: flex; flex-direction: column; gap: 0.4rem; }
-    .channel-option { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
-    .channel-option input { flex: 0 0 auto; }
-    .time-input { padding: 0.4rem 0.5rem; border: 1px solid var(--neutral-stroke-rest); border-radius: 4px; width: 100%; box-sizing: border-box; }
-</style>
+
 
 @code {
     /// <summary>The current channel selection (one-way, via <c>ChannelsChanged</c>).</summary>

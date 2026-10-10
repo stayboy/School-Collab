@@ -206,3 +206,24 @@ error, top-N, selectors, href/click, tooltip, kebab, add, view-all, ItemTemplate
   handler/selector each card binds, per-card selectors, and the mutation-handler
   local-state assertions (rule 4 above). Do not re-test SectionCard rendering mechanics
   in the page tests — that is 4× duplicated logic that belongs in `SectionCardTests.cs`.
+
+## Assert the negative for every conditional block
+
+A block that renders must be asserted from **both** sides: the element is **absent** before its
+condition holds, and **present** after. Asserting only what exists is how a block that renders
+*unconditionally* passes review, CI and a UI pass.
+
+Why this is not hypothetical: a Razor block keyword separated from its `{ … }` body — an edit
+inserted another block between them — still **compiles**. Razor then emits the braces as literal
+markup and renders the guarded element always. On the authoring page that surfaced as a stray `}`
+under the Instructions compartment (2026-10-09), and the component's own tests missed it precisely
+because they asserted the ids that *do* exist (`#…-add`, `#…-empty`, the row list) and never that
+something must *not* render.
+
+- Pin it twice where the defect is visual: the component's bUnit class **and** the page that shows
+  it (`InstructionEditorListBunitTests.ErrorRow_IsAbsent_UntilSomethingFails` /
+  `AssignmentAuthoringBunitTests.CreateMarkup_CarriesNoStrayBraces`).
+- The source-shape half lives in `SchoolCollab.ArchitectureTests.Unit.RazorMarkupHygieneArchitectureTests`
+  (severed guards, inline `<style>`/`<script>`, `MarkupString`) — a structural scan is the only layer
+  that sees every `.razor` file, including components with no tests at all.
+
