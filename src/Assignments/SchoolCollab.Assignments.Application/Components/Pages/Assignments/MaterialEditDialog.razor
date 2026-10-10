@@ -1,0 +1,71 @@
+@* Round content-materials-redesign (owner 2026-10-10, Q1-Q5): the kebab's Text and Link actions are
+   captured in THIS dialog — one dialog whose fields switch on the kind — and the page appends the row
+   from the result (Q2). Built on DialogShellBase per the dialog-ui skill: never hand-rolled chrome,
+   the footer's Error bound (never a literal), actions at the dialog's bottom. Media never comes
+   through here — Upload From Device pops the file picker directly (Q3). *@
+@inherits DialogShellBase<MaterialEditFormModel, MaterialEditResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Contracts
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        @if (Model.Kind == InstructionKindDto.Text)
+        {
+            <p class="dialog-hint">A text material is named: the title is required, the body is optional.</p>
+            <FluentTextField Label="Title" @bind-Value="Model.Title" class="full-width mb-3" />
+            <FluentTextArea Label="Body (optional)" @bind-Value="Model.Body" Rows="4" class="full-width" />
+        }
+        else
+        {
+            <p class="dialog-hint">A link needs an absolute http(s) URL. Its label is optional.</p>
+            <FluentTextField Label="URL" @bind-Value="Model.Url" Placeholder="https://…" class="full-width mb-3" />
+            <FluentTextField Label="Label (optional)" @bind-Value="Model.Title" class="full-width" />
+        }
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="@SubmitText" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    protected override string SubmitText =>
+        Model.Kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link";
+
+    protected override string SavingText => "Adding…";
+
+    /// <summary>Mirrors <c>InstructionDtoValidator</c> so the author is told before the save, not after
+    /// (D6/D7, AC-4): a Text row must be NAMED (body optional); a Link row must carry an absolute
+    /// http(s) URL (its label optional). Returning null keeps the dialog open with the Error shown.</summary>
+    protected override Task<MaterialEditResult?> SubmitAsync(MaterialEditFormModel model)
+    {
+        if (model.Kind == InstructionKindDto.Text)
+        {
+            if (string.IsNullOrWhiteSpace(model.Title))
+            {
+                Error = "A text material needs its title.";
+                return Task.FromResult<MaterialEditResult?>(null);
+            }
+
+            return Task.FromResult<MaterialEditResult?>(new MaterialEditResult(
+                model.Kind,
+                model.Title!.Trim(),
+                string.IsNullOrWhiteSpace(model.Body) ? null : model.Body!.Trim(),
+                null));
+        }
+
+        if (!Uri.TryCreate(model.Url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            Error = "A link needs an absolute http(s) URL.";
+            return Task.FromResult<MaterialEditResult?>(null);
+        }
+
+        return Task.FromResult<MaterialEditResult?>(new MaterialEditResult(
+            model.Kind,
+            string.IsNullOrWhiteSpace(model.Title) ? null : model.Title!.Trim(),
+            null,
+            model.Url!.Trim()));
+    }
+}

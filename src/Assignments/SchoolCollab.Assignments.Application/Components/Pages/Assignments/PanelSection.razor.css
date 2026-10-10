@@ -1,0 +1,43 @@
+/* PanelSection: header text on the left, its actions on the right, and the thin rule underneath the
+   header row (see PanelSection.razor).
+   The CARD BOX lives here too (owner, 2026-10-10): when Rules moved off SectionCard it lost the
+   rounded border, because SectionCard's chrome — border + radius + surface — used to supply it. Any
+   panel wearing this component now looks like a panel, from one rule, which is the whole point of
+   sharing it. */
+.panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    background: #fafafa;
+}
+
+.panel-section__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.panel-section__title {
+    display: inline-flex;
+    flex-direction: column;
+    margin: 0;
+    font-size: 1.17em;
+    font-weight: 600;
+}
+
+.panel-section__rule {
+    display: block;
+    width: 100%;
+    border-bottom: 1px solid #e1e1e1;
+    margin-top: 4px;
+}
+
+.panel-section__actions {
+    display: flex;
+    align-items: center;
+}
+

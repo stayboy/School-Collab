@@ -49,6 +49,6 @@ public sealed class InstructionKindInferenceTests
         var reason = InstructionKindInference.DocumentRefusal("worksheet.pdf");
 
         reason.Should().Contain("worksheet.pdf", "the author must know WHICH drop was refused")
-            .And.Contain("Upload from device", "…and what to use instead (AC-3's named reason)");
+            .And.Contain("Upload From Device", "…and what to use instead (AC-3's named reason)");
     }
 }

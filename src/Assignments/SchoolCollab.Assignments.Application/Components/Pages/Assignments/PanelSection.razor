@@ -1,0 +1,48 @@
+@* PanelSection (owner, 2026-10-10) — the shared titled-panel header treatment the **Content & Resources**
+   block and the **Rules** card both wear, so the two cannot drift apart.
+
+   NAME: deliberately `PanelSection`, not `Panel` — `Panel` is exactly the kind of name FluentUI is
+   likely to introduce, and a bare `Panel` in this namespace would then collide or shadow. (The
+   component was written as `TitledSection`, briefly `Panel`, and settled here.)
+
+   ITS RULE — kept here because it is the thing most easily lost in a refactor:
+   **a THIN LINE runs underneath the header, spanning the FULL header row — the title AND the
+   `HeaderActions` slot (the kebab menu) — not just the width of the title text.** It is a sibling of
+   the header row (not a child of the title), full-width inside the panel's own box, with the margin
+   that separates the header from the content beneath. Owner-corrected 2026-10-10: the first pass drew
+   it as the title's own border, which stopped short of the kebab. *@
+<div class="panel-section" id="@Id">
+    <div class="panel-section__header">
+        <h4 class="panel-section__title" id="@TitleId">@Title</h4>
+        @if (HeaderActions is not null)
+        {
+            <div class="panel-section__actions">@HeaderActions</div>
+        }
+    </div>
+
+    <span class="panel-section__rule" aria-hidden="true"></span>
+
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>The panel's own id (the bUnit seam) — optional, because a caller may already own one
+    /// (the Content & Resources block keeps `authoring-materials-section` on its own `<section>`).</summary>
+    [Parameter] public string? Id { get; set; }
+
+    /// <summary>The header text. Title Case, like every other header on the authoring surface.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = default!;
+
+    /// <summary>The id for the title element itself, so an assertion can address the TEXT and the
+    /// actions separately — they are distinct elements, the rule the owner asked to keep.</summary>
+    [Parameter] public string? TitleId { get; set; }
+
+    /// <summary>Right-hand header slot: the kebab menu, a card's Add — anything on the header line that
+    /// is not the title. The rule beneath is drawn under THIS too.</summary>
+    [Parameter] public RenderFragment? HeaderActions { get; set; }
+
+    /// <summary>The panel body. Wrap it in `<ChildContent>` whenever <see cref="HeaderActions"/>
+    /// is also supplied (RZ9996).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}
+

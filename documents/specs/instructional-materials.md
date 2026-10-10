@@ -77,14 +77,14 @@ button and two or more as a `FluentMenu` of `FluentMenuItem`s; `ForceKebab="true
 
 | # | Decision |
 |---|---|
-| **D1** | **One area, one affordance.** The Instructions compartment hosts the instructional materials; text/link/media items are instruction items, uploaded files are resources, and attachments stay the collection reserved for AI-reference files. The separate "Content & Resources" add-flow is retired into it. |
-| **D2** | **The add affordance is a kebab menu** — `RowActionsMenu`, so a lone action still renders as a plain button and the rest as menu items: **Add text content · Add link · Upload from device**. |
-| **D3** | **Straight to action, committed on the spot.** An action appends its row to the form model immediately, with no confirmation dialog. Files stage to storage at selection through the existing seam; the assignment itself still persists on *Save as Draft*. |
+| **D1** | **One area, one affordance (home revised 2026-10-10).** The materials live in the **Content & Resources** block — header + kebab, the instructions list, the dropzone, the refusal bar — which **tops the right pane** on both surfaces; the two authored notes live in **Basics**; the separate **Instructions compartment is retired entirely**. Text/link/media items are instruction items, uploaded files are resources, and attachments stay the collection reserved for AI-reference files. The separate "Content & Resources" add-flow was retired into it earlier in this round. |
+| **D2** | **The add affordance is a kebab menu** — `RowActionsMenu`, so a lone action still renders as a plain button and the rest as menu items: **Add Text Content · Add Link · Upload From Device**, each with an icon (owner, 2026-10-10). Labels and section headers are Title Case. |
+| **D3** | **Captured in a dialog, appended on confirm (revised 2026-10-10).** *Add Text Content* and *Add Link* open `MaterialEditDialog` — ONE dialog whose fields switch on the kind — and the row is appended from its result only when it is confirmed; *Upload From Device* pops the file picker directly, with no dialog. Files stage to storage at selection through the existing seam; the assignment itself still persists on *Save as Draft*. |
 | **D4** | **One section-level dropzone placeholder** that infers the kind and appends the matching row. Each media/file row keeps its own replace control. |
-| **D5** | **Infer where a kind exists; refuse with a named reason where it does not** (a document dropped on the instructions side points the author at the file material path). Never accept silently and drop. |
+| **D5** | **Infer the destination where a kind exists; refuse with a named reason only where it does not.** A dropped file is routed by kind: audio/video/image → an **instruction row**; a document → a **resource** (attachment); a file in neither set is refused by name, and the refusal points at what the section does accept. Never accept silently and drop. *(Revised 2026-10-10, redesign round — the original text refused documents outright.)* |
 | **D6** | **Text content is titled: `Title` required, body optional.** |
 | **D7** | **The title is stored** — a nullable `title` column plus `Title` on `NewInstructionDto`, `InstructionReadDto` and `InstructionEditorRow`. Required by the client and the validator for **Text**; optional for **Link**; nullable for rows that predate it (fail-closed: never invent a title, never block on old data). |
-| **D8** | **Layout:** the left cell (flex 2) stacks **Teacher notes** over **Student guidance**, both textareas; the right cell (flex 1) holds the dropzone placeholder with the kebab attached. The existing grid stacks the cells below its breakpoint. |
+| **D8** | **Layout (revised 2026-10-10, second pass; notes row revised again the same day).** The two authored notes live in **Basics**, as **one row labelled "Notes"** beneath Guardian review: the two textareas **fill the row** (each cell `flex: 1 1 0`, vertically resizable) and each carries its **specific caption beneath it** ("Teacher notes", "Student guidance") — the row label is only "Notes". Ids `authoring-basics-description` and `authoring-basics-instructions` are preserved (D9). The **Instructions compartment is collapsed entirely**. The **Content & Resources** block wears the shared **`PanelSection`** header (title text left, actions right, a **thin rule directly beneath the title text**) and **tops the right pane**, above the **Targets & audience** card. Two owners still share the editor: the question dialog keeps its inline add. |
 | **D9** | **Labels:** "Teacher notes" (internal) and "Student guidance" (student-facing). The ids `authoring-basics-description` and `authoring-basics-instructions` are **preserved** — they are the bUnit contract. |
 | **D10** | **Materials infer their meaning from the instruction notes.** A non-text material carries no prose of its own; only an optional label (the Link's title). This is the rule that keeps the model small. |
 | **D11** | **The ward surface renders the materials**: the ward DTO and the Families ward card show the titled items (teacher notes excluded). The Python portal follows in its own round. |
@@ -116,8 +116,8 @@ button and two or more as a `FluentMenu` of `FluentMenuItem`s; `ForceKebab="true
 
 ## 5. Behaviour rules
 
-1. **Menu → straight to the action.** *Add text content* appends a Text row with an empty title and
-   focuses the title field; *Add link* appends a Link row and focuses its field; *Upload from device*
+1. **Menu → straight to the action.** *Add Text Content* appends a Text row with an empty title and
+   focuses the title field; *Add Link* appends a Link row and focuses its field; *Upload From Device*
    opens the file picker with the shared allow-list.
 2. **Drop → infer.** A dropped file's kind is inferred from its content type/extension: audio → Audio,
    video → Video, image → Image, document → refused with the D5 reason. Dropping onto the resources
@@ -168,14 +168,19 @@ keeping the two fields distinct. The Python portal is explicitly out of scope he
 
 | # | Criterion |
 |---|---|
-| AC-1 | The Instructions compartment offers one kebab (`RowActionsMenu`) whose items are *Add text content*, *Add link*, *Upload from device* — and it renders as a plain button when only one action is available (the shared component's own rule). |
-| AC-2 | Each action appends its row to the form model immediately, with no confirmation step, and focuses that row's first field. |
+| AC-1 | The **Content & Resources** block offers one kebab (`RowActionsMenu`) whose items are *Add Text Content*, *Add Link*, *Upload From Device* — each with an icon — and it renders as a plain button when only one action is available (the shared component's own rule). |
+| AC-2 | *Add Text Content* and *Add Link* open their dialog and append the row (focused) only on confirm — cancelling adds nothing; *Upload From Device* pops the picker with no dialog. |
 | AC-3 | The section-level dropzone infers audio/video/image kinds from the dropped file and appends the matching row; a document is refused with a named reason naming the file-material path. |
 | AC-4 | A Text row cannot be saved without a title; a Link row saves with or without one; a row that predates the column still loads and saves. |
 | AC-5 | The layout matches D8: Teacher notes stacked over Student guidance in the wide cell, dropzone + kebab in the narrow cell, stacking below the existing breakpoint. |
 | AC-6 | The retained strings (X-6) and the existing element ids still resolve; the menu, its items and the dropzone carry new ids. |
 | AC-7 | The ward card renders the titled materials and never the teacher notes. |
 | AC-8 | View mode renders the materials with no menu, no dropzone and no row affordances. |
+| **AC-9** | The dropzone section renders a **title** and, to its right, the **kebab menu** — header text and menu are distinct elements, and the menu keeps AC-1's three actions. |
+| **AC-10** | A dropped file is routed by kind (D5 revised): media → an instruction row, document → a resource; a file in neither set is refused by name. |
+| **AC-11** | The added materials render **above** the dropzone section (owner: "keep instructions to add, listed above dropzone"). |
+| **AC-12** | The dialog mirrors the validator: a Text row without a title, and a Link without an absolute http(s) URL, are refused inside the dialog — before the save, with the reason shown. |
+| **AC-13** | *Upload From Device* pops the file picker directly, with no dialog, through the page's collocated JS module. |
 
 **Test surface:** bUnit for the section (menu items, append-and-focus, inference, refusal, empty state,
 read-only), the existing `InstructionEditorListBunitTests` and `ResourcesSectionBunitTests` updated for
