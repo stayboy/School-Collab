@@ -69,9 +69,17 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 
 ### 8. Wait for CI
 
-- Run `gh pr checks <pr-number>` to see CI status.
-- Poll every 30 seconds until all checks pass or one fails.
+- Run `gh pr checks <pr-number>` to see CI status — **the PR's checks are the gate**.
+- Watch them to completion with the tool's own loop rather than a hand-rolled sleep: `gh pr checks
+  --watch --interval 30 --fail-fast` (or `gh run watch --compact --exit-status`). Background it and read
+  the log if a blocking wait is awkward.
 - If CI fails, read the logs, fix the issue, commit, then ask for explicit user instruction before pushing. Wait again after the user instructs to push.
+- **`main`'s run after the merge is a health signal, not a gate** (`.github/merge-policy.md`): read it
+  **once**, at a decision point — before starting new work off `main`, or on a failure notification.
+  Never poll it, and never treat it as something that could have blocked the merge.
+- A red `main` is an incident: fix forward on a **new branch through a PR** (never a direct push to
+  `main`, not even to repair it), and **a revert requires explicit owner agreement** — it is a manual,
+  agreed action, never a unilateral one.
 
 ### 9. Merge
 
