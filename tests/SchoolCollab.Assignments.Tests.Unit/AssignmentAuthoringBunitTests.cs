@@ -312,18 +312,16 @@ public class AssignmentAuthoringBunitTests : BunitContext
         "authoring-basics",
         "authoring-targets",
         "authoring-content",
-        "authoring-questions",
-        "authoring-instructions"
+        "authoring-questions"
     ];
 
-    /// <summary>D10 (verification round 2026-10-08, extended by the owner): Create renders the
-    /// DETAILS sections only — neither Content &amp; Resources nor Questions &amp; AI (both live on
-    /// the draft-edit surface).</summary>
+    /// <summary>D10 (verification round 2026-10-08, extended by the owner). Revised 2026-10-10: the
+    /// Instructions compartment is COLLAPSED — its notes moved into Basics and its materials block moved
+    /// into the right pane — so neither surface lists it any more.</summary>
     private static readonly string[] ExpectedCreateSections =
     [
         "authoring-basics",
-        "authoring-targets",
-        "authoring-instructions"
+        "authoring-targets"
     ];
 
     private static bool ScoringFieldDisabled(IRenderedComponent<Authoring> cut, string id) =>
@@ -629,10 +627,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
             {
                 cut.FindAll("#authoring-targets h3.authoring-compartment-title").Should().BeEmpty(
                     "the column renders no heading of its own — each card's header is its title");
-                cut.FindAll("#authoring-targets .section-card__title")
+                // Owner, 2026-10-10: the pane's headers no longer all come from SectionCard — Content &
+                // Resources and Rules wear the shared PanelSection, Targets stays a SectionCard. The
+                // ORDER is what this asserts, top-to-bottom in the column.
+                cut.FindAll("#authoring-targets .section-card__title, #authoring-targets .panel-section__title")
                     .Select(title => title.TextContent.Trim())
-                    .Should().Equal(["Targets & audience", "Rules"],
-                        "the SectionCard headers hold both titles, Targets first");
+                    .Should().Equal(["Content & Resources", "Targets & audience", "Rules"],
+                        "the pane's headers, top to bottom: Content & Resources, Targets & audience, then Rules");
                 cut.FindAll("#authoring-basics-grade").Should().BeEmpty(
                     "round drop-primary-grade: the Primary grade control is gone from every mode (AC-9)");
                 cut.Markup.Should().NotContain("Primary grade",
@@ -938,36 +939,74 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D5/D6: Description + Instructions move out of Basics into their own bottom
-    /// compartment — two inline cells whose rows put each label BENEATH its textarea
-    /// (FormRow's RowLabelPosition.Below).</summary>
+    /// <summary>D5/D6, revised by the redesign round (2026-10-10): Description + Instructions leave
+    /// Basics for their own bottom compartment — now ONE wide cell stacking Teacher notes over
+    /// Student guidance, each row keeping FormRow's label-below placement — with the materials and the
+    /// full-width titled dropzone section below it (AC-9/AC-11).</summary>
+    /// <summary>Owner, 2026-10-10 (this pass): the Instructions compartment is COLLAPSED. The two notes
+    /// now sit in BASICS as ONE row — beneath Guardian review, their textareas inline to each other
+    /// exactly like the "Assignment type &amp; grading format" row (w-6 each) — and the materials block
+    /// moved COMPLETE to the top of the right pane, above the Targets &amp; audience card (AC-9/AC-11).</summary>
     [TestMethod]
-    public void Instructions_OwnBottomCompartment_SideBySide_WithLabelsBelow()
+    public void Notes_LiveInBasicsInOneInlineRow_AndMaterialsTopTheRightPane()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
 
         cut.WaitForAssertion(() =>
         {
-            var section = cut.Find("#authoring-instructions");
-            section.QuerySelector("h3.authoring-compartment-title").TextContent.Trim().Should().Be("Instructions",
-                "the compartment title is the owner's label");
+            cut.FindAll("#authoring-instructions").Should().BeEmpty(
+                "the Instructions compartment is collapsed entirely (owner, 2026-10-10)");
 
-            cut.FindAll(".authoring-instructions-cell").Should().HaveCount(2,
-                "D6: the two textareas sit side by side (inline)");
+            // ── The notes are part of Basics: ONE row labelled "Notes", each field filling the row and
+            // carrying its own specific caption BENEATH it (owner, 2026-10-10).
+            var basics = cut.Find("#authoring-basics");
+            var noteFields = basics
+                .QuerySelectorAll("#authoring-basics-description, #authoring-basics-instructions")
+                .ToList();
+            noteFields.Should().HaveCount(2, "both notes live in Basics now — the old compartment is gone");
+            noteFields.Should().OnlyContain(f => f.ClassList.Contains("authoring-note-input"),
+                "…filling the row rather than the narrow w-6 tenth-fields the owner rejected");
+            noteFields
+                .Select(f => f.ParentElement!.QuerySelector("label.authoring-note-label")?.TextContent.Trim())
+                .Should().Equal(["Teacher notes", "Student guidance"],
+                    "…each with its own caption BENEATH the textarea, in document order");
+            basics.TextContent.Should().NotContain("Teacher notes & student guidance",
+                "the old combined row label is gone — the row is labelled 'Notes'");
+            System.Text.RegularExpressions.Regex.IsMatch(basics.InnerHtml, @">\s*Notes\s*<")
+                .Should().BeTrue("the row's own label renders as just 'Notes'");
             cut.FindComponents<FluentTextArea>()
                 .Where(t => t.Instance.Id is "authoring-basics-description" or "authoring-basics-instructions")
                 .Select(t => t.Instance.Rows)
                 .Should().OnlyContain(rows => rows == 4,
                     "D11: both textareas render at the same height");
-            cut.FindAll(".authoring-instructions-cell .form-row")
-                .Should().OnlyContain(r => r.ClassList.Contains("form-row--label-below"),
-                    "each row's own label renders beneath its textarea");
 
-            cut.Find("#authoring-basics").QuerySelectorAll("#authoring-basics-description, #authoring-basics-instructions")
-                .Should().BeEmpty("D5: they are no longer part of Basics");
+            // ── The materials block tops the right pane, above the Targets & audience card.
+            var pane = cut.Find("#authoring-targets");
+            pane.QuerySelector("#authoring-materials-section").Should().NotBeNull(
+                "Content & Resources moved into the right pane (owner, 2026-10-10)");
+            pane.InnerHtml.IndexOf("authoring-materials-section", StringComparison.Ordinal)
+                .Should().BeLessThan(
+                    pane.InnerHtml.IndexOf("section-card", StringComparison.OrdinalIgnoreCase),
+                    "…and it TOPS the pane, above the Targets & audience card");
 
-            cut.FindAll("section.authoring-compartment").Last().Id.Should().Be("authoring-instructions",
-                "the compartment renders last on the page");
+            // ── AC-9: the block's header carries a TITLE and the kebab MENU — two distinct elements.
+            cut.Find("#authoring-materials-title").TextContent.Trim().Should().Be("Content & Resources",
+                "the header is Title Case (owner, 2026-10-10)");
+            cut.Find("#authoring-materials-section").QuerySelectorAll("h4#authoring-materials-title")
+                .Should().ContainSingle("the title is TEXT — never the menu control");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+                .SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
+                .Should().Contain(["Add Text Content", "Add Link", "Upload From Device"],
+                    "AC-9: the header's menu keeps AC-1's three actions");
+
+            // ── AC-11: header text → the instructions list → the dropzone, all inside the block.
+            var markup = cut.Markup;
+            markup.IndexOf("authoring-materials-title", StringComparison.Ordinal)
+                .Should().BeLessThan(markup.IndexOf("authoring-instruction-items", StringComparison.Ordinal),
+                    "AC-11: the instructions list renders just beneath the Content & Resources header text");
+            markup.IndexOf("authoring-instruction-items", StringComparison.Ordinal)
+                .Should().BeLessThan(markup.IndexOf("authoring-materials-dropzone", StringComparison.Ordinal),
+                    "AC-11: …and above the dropzone");
         });
     }
 
@@ -1350,19 +1389,20 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 var rules = cut.Find("#authoring-rules");
                 rules.QuerySelectorAll("h3").Should().BeEmpty(
                     "the card header IS the compartment's single title — no hand-rolled h3");
-                rules.QuerySelector(".section-card__body .authoring-policy-row").Should().NotBeNull(
-                    "the readouts render as card ITEMS, not as bare children of a section");
+                rules.QuerySelector(".panel-section .authoring-policy-row").Should().NotBeNull(
+                    "the readouts render inside the shared panel (owner, 2026-10-10: SectionCard's chrome retired)");
                 rules.NextElementSibling.Should().BeNull(
                     "the Rules card closes the column: Targets card → its audience readouts → Rules card");
 
                 string[] expectedSections = mode == AssignmentAuthoringMode.Create
-                    // D10: Create renders neither Content nor Questions.
-                    ? ["authoring-basics", "authoring-targets", "authoring-instructions"]
+                    // D10: Create renders neither Content nor Questions; the Instructions compartment is
+                    // collapsed (owner, 2026-10-10), so it is not a section any more on either surface.
+                    ? ["authoring-basics", "authoring-targets"]
                     : ["authoring-basics", "authoring-targets", "authoring-content",
-                       "authoring-questions", "authoring-instructions"];
+                       "authoring-questions"];
                 cut.FindAll("section.authoring-compartment").Select(section => section.Id)
                     .Should().Equal(expectedSections,
-                        "only the spine compartments are sections any more — Rules is a card, D5 adds Instructions, and D10 drops content+questions on Create");
+                        "only the spine compartments are sections any more — Rules is a card, D10 drops content+questions on Create, and the Instructions compartment is collapsed");
             });
         }
     }
@@ -1380,13 +1420,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             rules.QuerySelectorAll("fluent-button").Should().BeEmpty(
                 "ShowAddButton=\"false\": a readouts-only card offers no Add");
-            rules.QuerySelectorAll(".section-card__title").Should().ContainSingle()
-                .Which.TextContent.Trim().Should().Be("Rules", "the card header carries the title");
+            rules.QuerySelectorAll(".panel-section__title").Should().ContainSingle()
+                .Which.TextContent.Trim().Should().Be("Rules", "the shared panel header carries the title");
 
             foreach (var id in PolicyReadoutIds)
             {
-                rules.QuerySelectorAll($".section-card__body .authoring-policy-row#{id}").Should().ContainSingle(
-                    $"{id} still renders — now as a card item");
+                rules.QuerySelectorAll($".panel-section .authoring-policy-row#{id}").Should().ContainSingle(
+                    $"{id} still renders — now inside the shared panel");
             }
 
             rules.QuerySelectorAll(".authoring-policy-row").Should().HaveCount(5,
@@ -1406,8 +1446,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             create.FindAll("nav.authoring-jumpnav").Should().BeEmpty(
                 "D12: the jump-nav is removed from the Create page");
-            create.Find("#authoring-rules .section-card__title").TextContent.Trim().Should().Be("Rules",
-                "the Rules container keeps its id — the anchor still resolves");
+            create.Find("#authoring-rules .panel-section__title").TextContent.Trim().Should().Be("Rules",
+                "the Rules container keeps its id, and now carries the shared panel header");
         });
 
         var edit = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
@@ -1418,7 +1458,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "D12: no jump-nav in the edit-fields view either");
             edit.Find("#authoring-questions").Should().NotBeNull(
                 "the kebab's #authoring-questions anchor still resolves");
-            edit.Find("#authoring-rules .section-card__title").TextContent.Trim().Should().Be("Rules");
+            edit.Find("#authoring-rules .panel-section__title").TextContent.Trim().Should().Be("Rules");
         });
     }
 
@@ -1779,9 +1819,10 @@ public class AssignmentAuthoringBunitTests : BunitContext
         // (grill Q1), because a second affordance beside the menu is the pattern this round replaced.
         var menus = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>();
         menus.SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
-            .Should().Contain(["Add text content", "Add link", "Upload from device"],
+            .Should().Contain(["Add Text Content", "Add Link", "Upload From Device"],
                 "AC-1: the compartment's kebab offers exactly the three D2 actions (the page action bar "
-                + "contributes its own menu, so the compartment's is identified by its items)");
+                + "contributes its own menu, so the compartment's is identified by its items) — Title Case, "
+                + "matching the section headers (owner, 2026-10-10)");
         cut.FindAll("#authoring-instruction-items-add").Should().BeEmpty(
             "the list's own button is suppressed on the page — the section owns the add affordance");
     }

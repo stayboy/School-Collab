@@ -24,10 +24,12 @@ public static class InstructionKindInference
     public static InstructionKindDto? ForFile(string fileName, string? contentType) =>
         FromContentType(contentType) ?? FromExtension(Path.GetExtension(fileName));
 
-    /// <summary>The named reason a dropped document is refused (AC-3): it names the file-material
-    /// path the author should use instead, so the refusal is actionable rather than silent.</summary>
+    /// <summary>The named reason a dropped document is refused by a MEDIA ROW (AC-3): it names the
+    /// file-material path the author should use instead, so the refusal is actionable rather than
+    /// silent. The section-level dropzone routes documents to resources instead (D5 revised) — this
+    /// path remains for the per-row replace control, which holds one media file.</summary>
     public static string DocumentRefusal(string fileName) =>
-        $"'{fileName}' is a document — use Upload from device, or drop it on the resources tile.";
+        $"'{fileName}' is a document — use Upload From Device, or drop it on the Content & Resources dropzone.";
 
     private static InstructionKindDto? FromContentType(string? contentType)
     {

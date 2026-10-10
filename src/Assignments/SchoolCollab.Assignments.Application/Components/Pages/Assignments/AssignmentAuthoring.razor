@@ -1,3 +1,4 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Assignments.Application.Helpers
@@ -352,10 +353,37 @@
                                             Disabled="@(IsReadOnly || PolicyReviewLocked)" />
                         </FormRow>
 
+                        @* Owner, 2026-10-10: the two notes live HERE in Basics now — ONE row beneath Guardian
+                           review, the textareas inline to each other exactly as the "Assignment type &
+                           grading format" row above places its two fields (w-6 each). The ids are D9's bUnit
+                           contract and survive the move untouched; the old copies in the Instructions
+                           compartment went with that compartment's collapse. *@
+                        @* Owner, 2026-10-10: ONE row labelled "Notes", each textarea carrying its own
+                           specific caption BENEATH it, and both filling the row's width (they were w-6 and
+                           read too narrow). *@
+                        <FormRow Label="Notes" For="authoring-basics-description" AlignTop>
+                            <div class="authoring-notes-row">
+                                <div class="authoring-note-cell">
+                                    <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
+                                                    ReadOnly="@IsReadOnly" Rows="4" aria-label="Teacher notes"
+                                                    Placeholder="Internal note for other teachers…"
+                                                    Class="authoring-note-input" />
+                                    <label class="authoring-note-label" for="authoring-basics-description">Teacher notes</label>
+                                </div>
+                                <div class="authoring-note-cell">
+                                    <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
+                                                    ReadOnly="@IsReadOnly" Rows="4" aria-label="Student guidance"
+                                                    Placeholder="What the student must do — shown to students…"
+                                                    Class="authoring-note-input" />
+                                    <label class="authoring-note-label" for="authoring-basics-instructions">Student guidance</label>
+                                </div>
+                            </div>
+                        </FormRow>
+
                         @* D14/D6: Subject + its strands & lessons row LEAD the authoring decisions
-                           (right after Title, before type/grading — D14); Basics therefore ends with
-                           the guardian-review toggle, and Description/Instructions live in the
-                           bottom compartment. *@
+                           (right after Title, before type/grading — D14); Basics ends with the two notes
+                           above, and the materials live in the Content & Resources block that now tops the
+                           right pane (owner, 2026-10-10). *@
                     </section>
 
                     <section id="authoring-targets" class="authoring-compartment authoring-compartment--right">
@@ -377,6 +405,68 @@
                         @if (AudienceEditorDisabledReason is not null)
                         {
                             <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
+                        }
+
+                        @* Owner, 2026-10-10: Content & Resources TOPS this pane now, above Targets &
+                           audience — moved here complete, with every part of it (header + kebab, the
+                           instructions list, the dropzone, the refusal bar) and its ids intact.
+                           D8 (revised)/AC-9: the header carries the title TEXT on the left and the kebab
+                           MENU on the right — two distinct elements, the kebab being the dropdown control,
+                           never the title. D5 (revised)/AC-10: the dropzone routes by kind — media to an
+                           instruction row, a document to a resource — and refuses, by name, only what it
+                           cannot take at all. *@
+                        @if (!IsReadOnly)
+                        {
+                            <section class="authoring-materials-section" id="authoring-materials-section">
+                                @* The header treatment is the SHARED component (owner, 2026-10-10) — the same one
+                                   the Rules card is to wear — so the thin rule under the title and the
+                                   title/actions split cannot drift between the two. *@
+                                <PanelSection Title="Content &amp; Resources" TitleId="authoring-materials-title">
+                                    <HeaderActions>
+                                        @* D2/AC-1/D12: one kebab, straight to the action — and a lone available
+                                           action would render as a plain button, the shared component's own rule. *@
+                                        <RowActionsMenu UseMenuService="false"
+                                                        ForceKebab="true"
+                                                        Actions="@MaterialActions"
+                                                        AriaLabel="Add a material" />
+                                    </HeaderActions>
+
+                                    @* RZ9996: with a named fragment supplied, the body must be wrapped
+                                       in an explicit ChildContent. *@
+                                    <ChildContent>
+
+                                @* The instructions list lives INSIDE Content & Resources, just beneath its
+                                   header text — and above the dropzone (AC-11). The same shared editor the
+                                   question dialog uses, so the two owners cannot drift; this block supplies
+                                   the add affordance, so its own button is suppressed here (grill Q1). *@
+                                <InstructionEditorList @ref="_instructionList"
+                                                       Id="authoring-instruction-items"
+                                                       Rows="_model.InstructionItems"
+                                                       ShowAddButton="false"
+                                                       StageMediaAsync="StageInstructionMediaAsync"
+                                                       Changed="OnModelChanged"
+                                                       ReadOnly="@IsReadOnly" />
+
+                                <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
+                                    <FluentInputFile Mode="InputFileMode.Stream"
+                                                     MaximumFileCount="1"
+                                                     MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                     Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                     OnCompleted="@OnMaterialDroppedAsync"
+                                                     DragDropZoneVisible="true">
+                                        Drop files here — images, audio or video become materials; PDFs and documents become references
+                                    </FluentInputFile>
+                                </div>
+                                @if (_materialRefusal is not null)
+                                {
+                                    @* D5: the refusal is surfaced, named and actionable — a
+                                       FluentMessageBar, the shape every other error here takes. *@
+                                    <FluentMessageBar Id="authoring-materials-refusal"
+                                                      Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
+                                }
+                                    </ChildContent>
+                                </PanelSection>
+                            </section>
                         }
 
                         @* The card keeps SectionCard's native header Add (grill Q4) and its header IS the
@@ -445,13 +535,14 @@
                            readout rows keep their long-standing element ids (D12 removed the
                            jump-nav that used to link to this anchor). *@
                         <div id="authoring-rules" class="authoring-rules-card">
-                            <SectionCard TItem="PolicyReadout"
-                                         Title="Rules"
-                                         Count="@PolicyReadouts.Length"
-                                         ShowAddButton="false"
-                                         OnAddClick="@NoAddActionAsync"
-                                         Items="@PolicyReadouts">
-                                <ItemTemplate Context="readout">
+                            @* Owner, 2026-10-10: the Rules card wears the SHARED PanelSection — the same header
+                               treatment Content & Resources uses — so the two panels cannot drift. SectionCard's
+                               chrome retires with it: its title, its count chip (PanelSection has no count slot)
+                               and its Add (already off). The readout rows keep their long-standing ids. *@
+                            <PanelSection Title="Rules" TitleId="authoring-rules-title">
+                                <ChildContent>
+                                    @foreach (var readout in PolicyReadouts)
+                                    {
                                     @* UX-13 + D13: a policy-derived value is the resolved read-only text — plus,
                                        when one grade owns the policy, the link to it. The "inherited from
                                        Grade/Tenant policy" note is NO LONGER a per-row text badge; it rides the
@@ -476,8 +567,9 @@
                                                           class="authoring-policy-link">Grade policy</FluentAnchor>
                                         }
                                     </div>
-                                </ItemTemplate>
-                            </SectionCard>
+                                    }
+                                </ChildContent>
+                            </PanelSection>
 
                             @* D11 + D13: no explanatory hint paragraph — the info lives in the padlock
                                tooltip on the header and on every subitem. *@
@@ -681,71 +773,10 @@
                    (FormRow's RowLabelPosition.Below — no shared-component change). *@
                 @if (!ShowSummary)
                 {
-                    <section id="authoring-instructions" class="authoring-compartment">
-                        <h3 class="authoring-compartment-title">Instructions</h3>
-                        <div class="authoring-instructions-grid">
-                            @* D8/D9: the wide cell stacks the two authored notes — internal first, then
-                               student-facing; both ids are preserved (they are the bUnit contract). *@
-                            <div class="authoring-instructions-cell authoring-instructions-cell-wide">
-                                <FormRow Label="Teacher notes" For="authoring-basics-description" AlignTop
-                                         LabelPosition="RowLabelPosition.Below">
-                                    <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
-                                                    ReadOnly="@IsReadOnly" Rows="4"
-                                                    Placeholder="Internal note for other teachers…" class="full-width" />
-                                </FormRow>
-                                <FormRow Label="Student guidance" For="authoring-basics-instructions" AlignTop
-                                         LabelPosition="RowLabelPosition.Below">
-                                    <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
-                                                    ReadOnly="@IsReadOnly" Rows="4"
-                                                    Placeholder="What the student must do — shown to students…" class="full-width" />
-                                </FormRow>
-                            </div>
-                            @if (!IsReadOnly)
-                            {
-                                @* D4/AC-3: the narrow cell holds the dropzone and the kebab. The dropzone
-                                   INFERS the kind from the dropped file and appends the matching row; a
-                                   document is refused BY NAME, pointing at the file-material path (D5) —
-                                   never accepted and silently dropped. *@
-                                <div class="authoring-instructions-cell authoring-instructions-cell-narrow">
-                                    <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
-                                        <FluentInputFile Mode="InputFileMode.Stream"
-                                                         MaximumFileCount="1"
-                                                         MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
-                                                         Accept="@AttachmentUploadPolicy.AcceptExtensions"
-                                                         OnCompleted="@OnMaterialDroppedAsync"
-                                                         DragDropZoneVisible="true">
-                                            Drop files here — audio, video or images become materials
-                                        </FluentInputFile>
-                                    </div>
-                                    @* D2/AC-1/D12: one kebab, straight to the action (D3) — and a lone
-                                       available action would render as a plain button, the shared
-                                       component's own rule. *@
-                                    <RowActionsMenu UseMenuService="false"
-                                                    ForceKebab="true"
-                                                    Actions="@MaterialActions"
-                                                    AriaLabel="Add a material" />
-                                    @if (_materialRefusal is not null)
-                                    {
-                                        @* D5: the refusal is surfaced, named and actionable — a
-                                           FluentMessageBar, the shape every other error here takes. *@
-                                        <FluentMessageBar Id="authoring-materials-refusal"
-                                                          Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
-                                    }
-                                </div>
-                            }
-                        </div>
-
-                        @* D1: the materials the compartment owns. The same shared editor the question
-                           dialog uses, so the two owners cannot drift; the section supplies the add
-                           affordance above, so the list's own button is suppressed here (grill Q1). *@
-                        <InstructionEditorList @ref="_instructionList"
-                                               Id="authoring-instruction-items"
-                                               Rows="_model.InstructionItems"
-                                               ShowAddButton="false"
-                                               StageMediaAsync="StageInstructionMediaAsync"
-                                               Changed="OnModelChanged"
-                                               ReadOnly="@IsReadOnly" />
-                    </section>
+                    @* Owner, 2026-10-10: the Instructions compartment is COLLAPSED, entirely. Its two notes
+                       moved into Basics (one inline row beneath Guardian review) and its Content & Resources
+                       block moved — complete, with its header, kebab, list, dropzone and refusal — to the top
+                       of the right pane above Targets & audience. Nothing renders here any more. *@
                 }
         }
         </div>
@@ -2583,48 +2614,139 @@
     /// <summary>The D5 refusal line for a dropped document — replaced by the next drop's outcome.</summary>
     private string? _materialRefusal;
 
-    /// <summary>D2/AC-1: the compartment's one kebab — text, link, upload — each appending its row to
-    /// the form model immediately, with no confirmation step (D3).</summary>
+    /// <summary>The page's collocated JS module, imported lazily — used here for the file-picker pop
+    /// (the unsaved-changes guard imports the same file for its own export).</summary>
+    private IJSObjectReference? _materialsModule;
+
+    /// <summary>D2/AC-1 (revised D3, owner 2026-10-10): the compartment's one kebab. Text and Link are
+    /// captured in MaterialEditDialog and appended from its result (Q1/Q2); Upload From Device pops the
+    /// file picker directly, with no dialog (Q3). Every item carries an icon and the labels are Title
+    /// Case, matching the section headers.</summary>
     private IReadOnlyList<RowAction> MaterialActions =>
     [
         new()
         {
-            Label = "Add text content",
-            OnClick = () => _instructionList?.AddRowAsync(InstructionKindDto.Text) ?? Task.CompletedTask,
+            Label = "Add Text Content",
+            Icon = new Icons.Regular.Size16.TextDescription(),
+            OnClick = () => AddMaterialViaDialogAsync(InstructionKindDto.Text),
         },
         new()
         {
-            Label = "Add link",
-            OnClick = () => _instructionList?.AddRowAsync(InstructionKindDto.Url) ?? Task.CompletedTask,
+            Label = "Add Link",
+            Icon = new Icons.Regular.Size16.Link(),
+            OnClick = () => AddMaterialViaDialogAsync(InstructionKindDto.Url),
         },
         new()
         {
-            // The row is a placeholder for "whichever media the author picks": the kind follows the
-            // chosen FILE (InstructionEditorList.StageMediaFileAsync re-infers it), exactly as a drop does.
-            Label = "Upload from device",
-            OnClick = () => _instructionList?.AddRowAsync(InstructionKindDto.Audio) ?? Task.CompletedTask,
+            Label = "Upload From Device",
+            Icon = new Icons.Regular.Size16.ArrowUpload(),
+            OnClick = OpenMaterialFilePickerAsync,
         },
     ];
 
-    /// <summary>AC-3/D4: a dropped file's kind is INFERRED and its row appended (staged through the
-    /// same endpoint the media rows use); a document is refused by name, pointing at the file-material
-    /// path (D5) — never accepted and silently dropped.</summary>
+    /// <summary>D3 (revised)/Q1-Q2: the Text and Link actions are captured in <see cref="MaterialEditDialog"/>
+    /// — nothing lands in the model unless the dialog is confirmed — and the row is appended HERE from its
+    /// result, so the list stays the single writer of its rows and the dialog never mutates the model.</summary>
+    private async Task AddMaterialViaDialogAsync(InstructionKindDto kind)
+    {
+        var model = new MaterialEditFormModel { Kind = kind };
+        // Medium: the Small default (420px) cannot hold the two-field Text form comfortably — the owner
+        // hit exactly that (2026-10-10). One size for both kinds keeps the dialog from jumping width
+        // as the kind switches.
+        var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            model,
+            kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link",
+            DialogSize.Medium);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        _materialRefusal = null;
+        await _instructionList!.AddRowAsync(result.Kind);
+
+        // Fill the row the editor just appended (and focused). The dialog's payload is faithful to the
+        // validator: Text carries its title (+ optional body), Link its absolute url (+ optional label).
+        var row = _model.InstructionItems[^1];
+        row.Title = result.Title;
+        row.Text = result.Body;
+        row.Url = result.Url;
+        StateHasChanged();
+    }
+
+    /// <summary>D3 (revised)/Q3: "Upload From Device" pops the picker DIRECTLY — no dialog. The dropzone's
+    /// <c>FluentInputFile</c> owns the hidden input; the collocated module clicks it (see that file's note
+    /// on the deliberate departure from the no-hidden-element-click precedent).</summary>
+    private async Task OpenMaterialFilePickerAsync()
+    {
+        _materialRefusal = null;
+        _materialsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", BeforeUnloadModulePath);
+        await _materialsModule.InvokeVoidAsync("openMaterialFilePicker", "#authoring-materials-dropzone");
+    }
+
+    /// <summary>D5 (revised)/AC-10: a dropped file is ROUTED — media becomes an instruction row
+    /// (staged through the same endpoint the media rows use), a document becomes a resource, and
+    /// only what the section cannot take at all is refused, by name. Never accepted and silently
+    /// dropped, and never refused when a destination exists.</summary>
     private async Task OnMaterialDroppedAsync(IEnumerable<FluentInputFileEventArgs> args)
     {
         foreach (var file in args)
         {
-            var kind = InstructionKindInference.ForFile(file.Name, file.ContentType);
-            if (kind is null)
+            switch (MaterialDropRouting.ForDrop(file.Name, file.ContentType, file.Size))
             {
-                _materialRefusal = InstructionKindInference.DocumentRefusal(file.Name);
-                continue;
-            }
+                case MaterialDropDestination.InstructionMedia:
+                    _materialRefusal = null;
+                    var row = new InstructionEditorRow
+                    {
+                        Kind = InstructionKindInference.ForFile(file.Name, file.ContentType)!.Value,
+                    };
+                    _model.InstructionItems.Add(row);
+                    await _instructionList!.StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+                    break;
 
-            _materialRefusal = null;
-            var row = new InstructionEditorRow { Kind = kind.Value };
-            _model.InstructionItems.Add(row);
-            await _instructionList!.StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+                case MaterialDropDestination.Resource:
+                    await StageDroppedResourceAsync(file);
+                    break;
+
+                default:
+                    _materialRefusal = MaterialDropRouting.NotAcceptedRefusal(file.Name);
+                    StateHasChanged();
+                    break;
+            }
         }
+    }
+
+    /// <summary>D5 (revised): a dropped DOCUMENT becomes a resource — the same stage endpoint and the
+    /// same row shape <c>ResourcesSection</c> uses, so the extraction outcome rides the save payload
+    /// (R3) and the file joins the AI reference set exactly as an upload from the tile does.</summary>
+    private async Task StageDroppedResourceAsync(FluentInputFileEventArgs file)
+    {
+        try
+        {
+            var staged = await Api.StageAttachmentAsync(file.Stream, file.Name, file.ContentType, file.Size);
+            _model.AddAttachment(new AttachmentEditorRow
+            {
+                FileName = staged.FileName,
+                ContentType = staged.ContentType,
+                FileSize = staged.FileSize,
+                StoragePath = staged.StoragePath,
+                // R3 (P1-3): carry the extraction outcome the stage response reported, so a dropped
+                // document is described by its extraction status exactly as a tile upload is.
+                ExtractionStatus = staged.ExtractionStatus,
+                ExtractedText = staged.ExtractedText,
+                ExtractedAt = staged.ExtractedAt,
+                ExtractionError = staged.ExtractionError,
+            });
+            _materialRefusal = null;
+        }
+        catch (AttachmentStagingFailed ex)
+        {
+            Logger.LogWarning(ex, "Material drop staging failed for {FileName}", file.Name);
+            _materialRefusal = $"'{file.Name}' could not be added — please try again.";
+        }
+
+        StateHasChanged();
     }
 
     private void OnModelChanged() { }

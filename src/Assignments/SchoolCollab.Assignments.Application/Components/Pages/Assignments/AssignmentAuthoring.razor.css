@@ -365,42 +365,63 @@
     padding-top: 8px;
 }
 
-/* ── Instructions compartment (D5/D6, assignment-create-edit-redesign) ─── */
-
-.authoring-instructions-grid {
+/* The Content & Resources block: LAYOUT only — the card box (border, radius, surface, padding) comes
+   from the shared PanelSection inside it, so it cannot drift from the Rules panel (owner, 2026-10-10:
+   the duplicate box here is what made the two panels look different). */
+.authoring-materials-section {
     display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
+    flex-direction: column;
+    gap: 8px;
 }
 
-.authoring-instructions-cell {
-    flex: 1 1 320px;
+/* Owner, 2026-10-10: the two notes FILL the row — each cell grows equally — and each carries its own
+   caption beneath the textarea, the row's own label being just "Notes". */
+.authoring-notes-row {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 12px;
     min-width: 0;
 }
 
-/* Spec §3.2: two columns at ≥720px, stacked below it. */
-@media (max-width: 719px) {
-    .authoring-instructions-cell {
-        flex-basis: 100%;
-    }
+.authoring-note-cell {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
 }
 
-.authoring-instructions-cell .form-row {
-    height: 100%;
+.authoring-note-input {
+    width: 100%;
+    resize: vertical;
 }
 
-/* D8 (instructional-materials, 2026-10-10): the two notes take two thirds of the section, the
-   dropzone + kebab the remaining third; below the breakpoint above they stack like the cells do. */
-.authoring-instructions-cell-wide {
-    flex: 2 1 420px;
-}
-
-.authoring-instructions-cell-narrow {
-    flex: 1 1 220px;
+.authoring-note-label {
+    font-size: 0.85rem;
+    color: #605e5c;
 }
 
 .authoring-materials-dropzone {
     margin-bottom: 12px;
+}
+
+/* D8 (revised, owner 2026-10-10): Content & Resources occupies the RIGHT THIRD of the Instructions
+   section and starts level with the notes cell — the two column headers sit on one line. */
+.authoring-materials-cell {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+/* (The card box and the header rules that used to live here are gone: the box and the title/header
+   treatment now come from the shared PanelSection inside this section — see PanelSection.razor.css.
+   Left as a marker so a reader does not re-add a second border.) */
+
+/* (The .authoring-materials-header and .authoring-materials-title rules that lived here are gone with
+   the header itself — the title, its actions slot and the thin rule come from PanelSection.) */
+
+/* The drop target fills the section's width so a drop anywhere on the card lands. */
+.authoring-materials-dropzone ::deep fluent-input-file {
+    width: 100%;
 }
 
 .authoring-materials-dropzone ::deep .fluent-input-file {
