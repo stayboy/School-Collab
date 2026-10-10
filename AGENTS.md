@@ -168,6 +168,19 @@ instead of duplicating it.
 | Azure AI OpenAI .NET | `.github/skills/azure-ai-openai-dotnet/SKILL.md` |
 | **.NET/C# best practices (all C# changes)** | `.github/copilot/rules/dotnet-best-practices.md` + `.github/skills/dotnet-best-practices/SKILL.md` |
 | **Portal (Python/FastAPI + Prefab UI)** | `documents/solution/portals-service-client-pattern.md` (pytest / `httpx.MockTransport` / FastAPI `TestClient` story, `.slnx` solution-items tripwire). The C# **code** rules do not apply to Python source in `src/SchoolCollab.Portals/` or `src/SchoolCollab.AuthPortal/`; their `.slnx` solution items are policed by .NET-side guards, and so is the auth portal's AppHost wiring. |
+| **Generic Blazor framework patterns** (render modes, prerendering, JS interop, disposal, cascading state, forms) | `documents/solution/blazor-agent-skills-adoption.md` — the nine installer-managed `dotnet/skills` → `dotnet-blazor` skills. Repo rules win on conflict. |
+
+**Generic Blazor skills vs. repo rules.** Nine user-level Blazor skills are installed from the
+`dotnet/skills` → `dotnet-blazor` plugin (`author-component`, `collect-user-input`,
+`configure-auth`, `coordinate-components`, `create-blazor-project`, `fetch-and-send-data`,
+`plan-ui-change`, `support-prerendering`, `use-js-interop`). They are installer-managed
+(`npx skills`, canonical copies in `~/.agents/skills/`, tracked in `~/.agents/.skill-lock.json`)
+and cover the **framework** baseline only. Where one disagrees with this repo's own rules or
+skills, the repo wins — and two of them never describe this repo's stack: `configure-auth`
+(Identity / cascading auth state; this repo is Keycloak OIDC + `FEATURE:DisableOIDCAuth`) and
+`create-blazor-project` (scaffolds `dotnet new blazor`; not used here). Refresh with
+`npx --yes skills update <name> -g -y`, never by editing the installed file — see the
+`refresh-vendored-agent-skill` skill.
 
 **Default rule for C#:** For **any** change that touches a `.cs` or `.razor` code-behind, read
 `.github/copilot/rules/dotnet-best-practices.md` (and its backing skill
