@@ -5,6 +5,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # A merge queue dispatches `merge_group` for its temporary main/pr-N branches and waits for this
+  # workflow to report THERE. No queue can exist in this user-owned repository today — GitHub offers
+  # them to organisation-owned repositories only (documents/runbooks/merge-queue-and-red-main.md) —
+  # so this trigger is future-proofing: inert now, and required the day the repo moves to an
+  # organisation and a queue becomes possible.
+  merge_group:
 
 jobs:
   build-and-test:
