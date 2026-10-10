@@ -44,11 +44,12 @@ not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
 
 ## Status checks before merge
 
-The `Build & Test` workflow is the required status check for PRs targeting `main`. **That is the intent
-and it is not yet enforced server-side** — as of 2026-10-10 `main` carries no ruleset and no branch
-protection, so the check is a convention every session must honour. A ruleset can close that: this
-repository is public, and rulesets are available for public repositories on the free plan. Applying it
-is a repository-settings change for an admin: `documents/runbooks/merge-queue-and-red-main.md`.
+The `Build & Test` workflow is the required status check for PRs targeting `main`, and it is **enforced
+server-side** since 2026-10-10: ruleset `24835514` — *main - require Build & Test, branches up to date* —
+requires the check with `strict_required_status_checks_policy` (so a branch must be up to date before it
+can merge), blocks force pushes and branch deletion, and carries **no bypass actors**. Before that date
+the check was a convention only. The ruleset's provenance, and the approximations it stands in for a
+merge queue this repository cannot have, are in `documents/runbooks/merge-queue-and-red-main.md`.
 
 - Do not merge a PR while `Build & Test` is still running.
 - Do not merge a PR while any required check is failing.
