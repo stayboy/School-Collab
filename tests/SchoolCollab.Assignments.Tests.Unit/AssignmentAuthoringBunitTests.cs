@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AngleSharp.Dom;
@@ -3545,5 +3546,51 @@ public class AssignmentAuthoringBunitTests : BunitContext
         }
 
         settled().Should().BeTrue("the authoring page settled within the bounded fake-clock advance");
+    }
+
+    /// <summary>Screenshot report (2026-10-09): a stray "}" rendered on the Create page. Its source
+    /// was the shared instruction editor's error row, whose <c>@if</c> guard had been split from its
+    /// body by the <c>@code</c> block — Razor still compiled, emitting the braces as literal markup
+    /// and rendering the row unconditionally. This pins the artefact at the page level, where it was
+    /// actually seen (the component-level twin lives in <c>InstructionEditorListBunitTests</c>).</summary>
+    [TestMethod]
+    public void CreateMarkup_CarriesNoStrayBraces()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        // FluentUI renders <style> elements whose rule bodies legitimately carry braces — that is the
+        // library's markup, not ours, so it is stripped before the assertion.
+        var markup = Regex.Replace(cut.Markup, "(?s)<style.*?</style>", string.Empty);
+
+        markup.Should().NotContain("{").And.NotContain("}",
+            "the authoring page must render no literal braces — the stray '}' screenshot defect");
+    }
+
+    /// <summary>
+    /// FluentUI's <c>FluentSelect</c> emits an inline <c>&lt;style&gt;</c> for its own popup (a
+    /// <c>z-index</c> on the listbox and the selected-value ellipsis) — a library implementation detail
+    /// we cannot remove from our markup (verified: the rule text lives in
+    /// <c>Microsoft.FluentUI.AspNetCore.Components</c> 4.14.2, not in any file of ours; it is gone in the
+    /// 5.x preview). This ratchet makes it the ONLY inline style a rendered page may carry: a new one,
+    /// from our markup or another component, fails here. Deliberately no "must exist" assertion — when
+    /// the library stops emitting it (the planned FluentUI 5 bump) this test simply stops having
+    /// anything to check rather than turning red.
+    /// </summary>
+    [TestMethod]
+    public void CreateMarkup_InlineStylesComeOnlyFromTheFluentSelect()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        var blocks = Regex.Matches(cut.Markup, "(?s)<style[^>]*>(.*?)</style>")
+            .Select(m => m.Groups[1].Value.Trim())
+            .ToList();
+
+        foreach (var css in blocks)
+        {
+            css.Should().Contain("::part(listbox)",
+                "the only inline <style> this page may carry is FluentSelect's own popup fix — nothing of ours");
+            css.Should().Contain("::part(selected-value)",
+                "…the ellipsis half of the same library workaround");
+        }
     }
 }
