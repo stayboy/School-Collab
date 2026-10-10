@@ -34,12 +34,30 @@
         {
     <div class="ward-player">
         @* INS-2 (assignment-authoring-compartments §9): the student-facing instructions,
-           read-only, above the content modules. *@
-        @if (!string.IsNullOrWhiteSpace(_view.Instructions))
+           read-only, above the content modules. D11 (instructional-materials): the titled
+           materials render in the SAME card — kind, title/label and the url or file name.
+           Teacher notes are never here: they are the internal note, not a material. *@
+        @if (!string.IsNullOrWhiteSpace(_view.Instructions) || _view.Materials is { Count: > 0 })
         {
             <FluentCard class="ward-instructions">
                 <h2>Instructions</h2>
-                <p class="ward-instructions-text">@_view.Instructions</p>
+                @if (!string.IsNullOrWhiteSpace(_view.Instructions))
+                {
+                    <p class="ward-instructions-text">@_view.Instructions</p>
+                }
+                @if (_view.Materials is { Count: > 0 })
+                {
+                    <ul class="ward-materials" id="ward-materials">
+                        @foreach (var material in _view.Materials)
+                        {
+                            <li class="ward-material" data-kind="@material.Kind">
+                                @* The label is the title, else the file name, else the url — a legacy
+                                   row with no title still renders something true, never an invented name. *@
+                                <span class="ward-material-label">@(material.Title ?? material.FileName ?? material.Url)</span>
+                            </li>
+                        }
+                    </ul>
+                }
             </FluentCard>
         }
 

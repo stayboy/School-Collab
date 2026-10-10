@@ -334,6 +334,9 @@ public sealed class AssignmentEditFormModel
         ContentType = item.ContentType,
         FileSize = item.FileSize,
         StoragePath = item.StoragePath,
+        // D7: the material's name rides the round-trip too — dropping it here would silently
+        // null the column on the author's next save.
+        Title = item.Title,
     };
 
     /// <summary>QR-5: the assignment's own blocks as the wire shape — null when the load never
@@ -700,6 +703,30 @@ public sealed class AssignmentEditFormModel
             // must not degrade into the preserve-null and leave the removed pick alive).
             ContextStrandIds: ContextPicksForWire(ContextStrandIds, strandNames, collapseEmptyToNull: false),
             ContextLessonIds: ContextPicksForWire(ContextLessonIds, lessonNames, collapseEmptyToNull: false));
+    }
+
+    /// <summary>
+    /// Client-side submit gate mirroring <c>InstructionDtoValidator</c>'s rule for text materials
+    /// (round <c>instructional-materials</c>, D6/D7): every Text row needs a title, because that is what
+    /// names the material in the list and on the ward surface. The body is optional. Returns the first
+    /// unnamed row, or <c>null</c> when they all pass — the <see cref="QuestionsPassSubmitGate"/> shape,
+    /// so an author is stopped in the page rather than by the server's 400 on a save they cannot connect
+    /// to the row.
+    /// </summary>
+    public bool InstructionsPassSubmitGate(out string? error)
+    {
+        for (var i = 0; i < InstructionItems.Count; i++)
+        {
+            var row = InstructionItems[i];
+            if (row.Kind is InstructionKindDto.Text && string.IsNullOrWhiteSpace(row.Title))
+            {
+                error = $"Instruction {i + 1} needs a title.";
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
     }
 
     /// <summary>

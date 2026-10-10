@@ -146,7 +146,8 @@ public sealed class GetAssignmentByIdQueryHandler(
                         item.ContentType,
                         item.FileSize,
                         item.StoragePath,
-                        item.DisplayOrder)).ToList());
+                        item.DisplayOrder,
+                        item.Title)).ToList());
             },
             CacheOptions,
             tags: ["assignments"],

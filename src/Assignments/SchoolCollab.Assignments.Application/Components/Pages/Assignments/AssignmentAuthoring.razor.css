@@ -388,3 +388,21 @@
 .authoring-instructions-cell .form-row {
     height: 100%;
 }
+
+/* D8 (instructional-materials, 2026-10-10): the two notes take two thirds of the section, the
+   dropzone + kebab the remaining third; below the breakpoint above they stack like the cells do. */
+.authoring-instructions-cell-wide {
+    flex: 2 1 420px;
+}
+
+.authoring-instructions-cell-narrow {
+    flex: 1 1 220px;
+}
+
+.authoring-materials-dropzone {
+    margin-bottom: 12px;
+}
+
+.authoring-materials-dropzone ::deep .fluent-input-file {
+    width: 100%;
+}

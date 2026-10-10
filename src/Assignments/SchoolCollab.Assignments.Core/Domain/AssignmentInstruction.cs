@@ -29,7 +29,13 @@ public sealed class AssignmentInstruction
         string? contentType,
         long fileSize,
         string? storagePath,
-        int displayOrder)
+        int displayOrder,
+        /// <summary>Round <c>instructional-materials</c> (D6/D7): the material's NAME — required for
+        /// a Text row (the validator's rule), an optional label for a Link, unused by the media kinds.
+        /// Trailing and defaulted deliberately (Q2, 2026-10-10): the three aggregate constructions keep
+        /// compiling while the setters are threaded one batch at a time, and the per-path round-trip
+        /// tests — not the compiler — are the gate against a site that silently persists null.</summary>
+        string? title = null)
     {
         Id = Guid.NewGuid();
         AssignmentId = assignmentId;
@@ -42,6 +48,7 @@ public sealed class AssignmentInstruction
         FileSize = fileSize;
         StoragePath = storagePath;
         DisplayOrder = displayOrder;
+        Title = title;
     }
 
     public Guid Id { get; private set; }
@@ -66,6 +73,11 @@ public sealed class AssignmentInstruction
 
     /// <summary>Opaque storage key for a staged media instruction (the attachment precedent).</summary>
     public string? StoragePath { get; private set; }
+
+    /// <summary>Round <c>instructional-materials</c> (D6/D7): the material's name — required for a Text
+    /// row, an optional label for a Link, unused by the media kinds. Nullable because rows written
+    /// before the column carry none, and nothing invents one for them.</summary>
+    public string? Title { get; private set; }
 
     /// <summary>The author's order within its owner (re-indexed 0..n-1 on every write).</summary>
     public int DisplayOrder { get; private set; }

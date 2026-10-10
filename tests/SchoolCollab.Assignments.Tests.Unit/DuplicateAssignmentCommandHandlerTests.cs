@@ -158,6 +158,37 @@ public class DuplicateAssignmentCommandHandlerTests
             + "create guard holds and the legacy pair never reproduces");
     }
 
+    /// <summary>D7 (instructional-materials, the W3 gate): the clone re-mints instruction rows from the
+    /// source's — it must carry the material's NAME across, or a duplicate silently loses it.</summary>
+    [TestMethod]
+    public async Task Duplicate_CarriesInstructionTitles_ForBothOwners()
+    {
+        var (db, cache, tenants) = BuildScope("dup-instruction-titles");
+        await using var _db = db;
+
+        var source = SeedPublishedSource(db, tenants);
+        var sourceQuestionId = source.Questions.OrderBy(q => q.DisplayOrder).First().Id;
+        source.SetInstructionItems(
+        [
+            (null, InstructionKind.Text, "Read the brief.", null, null, null, 0, null, "The brief"),
+            (sourceQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null, "Help page"),
+        ]);
+        db.SaveChanges();
+
+        var handler = NewHandler(db, cache, tenants);
+        var newId = await handler.HandleAsync(new DuplicateAssignmentCommand(source.Id));
+
+        var clone = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == newId);
+        var cloneQuestionId = clone.Questions.OrderBy(q => q.DisplayOrder).First().Id;
+
+        clone.InstructionsFor(null).Should().ContainSingle()
+            .Which.Title.Should().Be("The brief",
+                "D7: the re-mint carries the assignment-owned name — dropping it here persists null with no error");
+        clone.InstructionsFor(cloneQuestionId).Should().ContainSingle()
+            .Which.Title.Should().Be("Help page",
+                "D7: the question-owned name rides the same re-mint, re-stamped to the CLONE's question id");
+    }
+
     /// <summary>AC14: the duplicate path deliberately does NOT resolve the effective policy — a
     /// duplicate copies the source's terms, and re-resolving would silently re-author them.</summary>
     [TestMethod]

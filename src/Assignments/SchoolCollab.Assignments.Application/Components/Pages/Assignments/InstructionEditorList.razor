@@ -16,21 +16,20 @@
             @foreach (var (row, index) in Rows.Select((r, i) => (r, i)))
             {
                 <li class="cq-instruction-row" @key="row">
-                    @if (ReadOnly)
-                    {
-                        <span class="cq-instruction-kind cq-instruction-kind-readonly">@EnumHelper.GetDescription(row.Kind)</span>
-                    }
-                    else
-                    {
-                        <DropdownForEnum TEnum="InstructionKindDto"
-                                         @bind-SelectedValue="row.Kind"
-                                         Label="Kind"
-                                         Class="cq-instruction-kind" />
-                    }
+                    @* D12/§4: the kind is implied by the row's own shape, so it renders as a label —
+                       the per-row kind DROPDOWN was the replaced pattern (round grill Q2). *@
+                    <span class="cq-instruction-kind cq-instruction-kind-readonly">@EnumHelper.GetDescription(row.Kind)</span>
 
                     @switch (row.Kind)
                     {
                         case InstructionKindDto.Text:
+                            @* D6/D10: a Text material is TITLED (the title is required, the body optional) —
+                               the title is the row's first field, so it is also the focus target (AC-2). *@
+                            <FluentTextField @ref="_focusTarget"
+                                             @bind-Value="row.Title"
+                                             ReadOnly="@ReadOnly"
+                                             Placeholder="Name this material"
+                                             class="cq-instruction-title" />
                             <FluentTextField @bind-Value="row.Text"
                                              ReadOnly="@ReadOnly"
                                              Placeholder="What the student should read or do"
@@ -38,10 +37,16 @@
                             break;
 
                         case InstructionKindDto.Url:
-                            <FluentTextField @bind-Value="row.Url"
+                            <FluentTextField @ref="_focusTarget"
+                                             @bind-Value="row.Url"
                                              ReadOnly="@ReadOnly"
                                              Placeholder="https://…"
                                              class="cq-instruction-payload" />
+                            @* D7: a Link's title is an optional LABEL — never prose (D10). *@
+                            <FluentTextField @bind-Value="row.Title"
+                                             ReadOnly="@ReadOnly"
+                                             Placeholder="Label (optional)"
+                                             class="cq-instruction-title" />
                             break;
 
                         default:
@@ -82,7 +87,7 @@
         </ul>
     }
 
-    @if (!ReadOnly)
+    @if (!ReadOnly && ShowAddButton)
     {
         <div class="cq-instruction-actions">
             <FluentButton Appearance="Appearance.Outline"
@@ -114,16 +119,44 @@
     /// with no add/remove affordances — the same posture the Instructions textarea takes.</summary>
     [Parameter] public bool ReadOnly { get; set; }
 
+    /// <summary>Whether this component renders its own "Add instruction" button. The QUESTION DIALOG
+    /// keeps it (default); the authoring page sets it false because the section supplies the kebab
+    /// menu instead (round grill Q1) — a visibility seam, so the dialog's rendering is untouched.</summary>
+    [Parameter] public bool ShowAddButton { get; set; } = true;
+
     private bool _staging;
     private string? _error;
 
-    /// <summary>Appends a Text block — the cheapest kind to fill in first.</summary>
-    public async Task AddAsync()
+    /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
+    /// after an append this points at the new row's first field (AC-2's focus target).</summary>
+    private FluentTextField? _focusTarget;
+    private bool _focusPending;
+
+    /// <summary>D2/D3 (spec instructional-materials): the host's menu appends a row of the chosen kind
+    /// straight to the form model — no confirmation step — and focuses that row's first field. Called
+    /// through <c>@ref</c> by the page's kebab; the dialog reaches the same path via <see cref="AddAsync"/>.</summary>
+    public async Task AddRowAsync(InstructionKindDto kind)
     {
-        Rows.Add(new InstructionEditorRow { Kind = InstructionKindDto.Text });
+        Rows.Add(new InstructionEditorRow { Kind = kind });
+        _focusPending = true;
         StateHasChanged();
         await Changed.InvokeAsync();
     }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPending && _focusTarget is not null)
+        {
+            _focusPending = false;
+            // FocusAsync is void in this FluentUI version (the ResourcesSection:365 precedent).
+            _focusTarget.FocusAsync();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Appends a Text block — the method the question dialog and the page's own tests call.</summary>
+    public Task AddAsync() => AddRowAsync(InstructionKindDto.Text);
 
     public async Task RemoveAsync(InstructionEditorRow row)
     {
@@ -183,6 +216,18 @@
             Fail(clientError);
             return;
         }
+
+        // D4/D5: the kind follows the FILE — the row the kebab opened is a placeholder for "whichever
+        // media the author picks", and a document picked here is refused by the same named reason the
+        // dropzone uses (never staged into a row that cannot represent it).
+        var inferred = InstructionKindInference.ForFile(fileName, contentType);
+        if (inferred is null)
+        {
+            Fail(InstructionKindInference.DocumentRefusal(fileName));
+            return;
+        }
+
+        row.Kind = inferred.Value;
 
         _staging = true;
         try

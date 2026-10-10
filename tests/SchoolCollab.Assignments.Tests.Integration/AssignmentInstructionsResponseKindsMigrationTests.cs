@@ -139,6 +139,75 @@ public sealed class AssignmentInstructionsResponseKindsMigrationTests
             .And.NotContain("DROP COLUMN", "…and nothing is dropped");
     }
 
+    // ── W3 tail (spec instructional-materials D7): the title column on REAL Postgres ──────────
+
+    /// <summary>The migration immediately BEFORE the title one — the last schema whose instruction
+    /// table has no title column.</summary>
+    private const string TitlePreMigration = "20261009052346_AddAssignmentInstructionsAndResponseKinds";
+
+    /// <summary>This test's OWN migration — pinned rather than the tip, for the reason <see cref="OwnMigration"/>
+    /// records: <c>toMigration: null</c> silently absorbs every later migration.</summary>
+    private const string TitleOwnMigration = "20261010114247_AddAssignmentInstructionTitle";
+
+    [TestMethod]
+    public async Task AddInstructionTitle_AddsNullableBoundedColumn_AndKeepsLegacyRowsNull()
+    {
+        var connectionString = await AssignmentsDbFactory.CreateDatabaseAsync(Guid.NewGuid().ToString("N"));
+
+        // ── Arrange: the pre-migration schema (instruction table WITHOUT title) + one real row. ──
+        await using (var pre = AssignmentsDbFactory.CreateContext(connectionString))
+        {
+            await pre.Database.MigrateAsync(TitlePreMigration);
+        }
+
+        await RelaxLegacyNotNullAsync(connectionString);
+        var assignmentId = Guid.NewGuid();
+        await SeedAssignmentAsync(connectionString, assignmentId);
+        var questionId = Guid.NewGuid();
+        await SeedQuestionAsync(connectionString, assignmentId, questionId, kinds: new[] { 3 });
+        await SeedInstructionAsync(connectionString, assignmentId, questionId);
+
+        (await ColumnExistsAsync(connectionString, "assignment_instructions", "title")).Should().BeFalse(
+            "premise: the pre-migration schema has no title column — otherwise the assertions below are vacuous");
+
+        // ── Act: migrate to the tip. ──
+        await using (var apply = AssignmentsDbFactory.CreateContext(connectionString))
+        {
+            await apply.Database.MigrateAsync();
+        }
+
+        // ── Assert: additive, nullable, bounded at 200 — and no backfill. ──
+        (await ColumnExistsAsync(connectionString, "assignment_instructions", "title")).Should().BeTrue(
+            "D7: the migration adds assignment_instructions.title");
+        (await ColumnNullableAsync(connectionString, "assignment_instructions", "title")).Should().Be("YES",
+            "D7: nullable — rows written before the column carry none, and nothing invents one for them");
+        (await ColumnMaxLengthAsync(connectionString, "assignment_instructions", "title")).Should().Be(200,
+            "D7: bounded at 200, the config's HasMaxLength. Learned the hard way: a `--no-build` generate "
+            + "against a stale binary emits unbounded `text` and diverges from the model silently");
+        (await ScalarAsync(connectionString, "SELECT count(*) FROM assignment_instructions WHERE title IS NULL"))
+            .Should().Be(1, "the pre-existing row keeps NULL — no backfill, no invented title");
+
+        // ── Assert: the name round-trips. ──
+        await ExecuteAsync(
+            connectionString,
+            "UPDATE assignment_instructions SET title = 'Worked example' WHERE assignment_id = @id",
+            ("id", assignmentId));
+        (await ScalarAsync(
+                connectionString,
+                "SELECT count(*) FROM assignment_instructions WHERE title = 'Worked example'"))
+            .Should().Be(1, "the column stores the material's name");
+
+        // ── Assert: THIS migration's own script is additive-only. ──
+        await using var context = AssignmentsDbFactory.CreateContext(connectionString);
+        var script = context.GetService<IMigrator>().GenerateScript(
+            fromMigration: TitlePreMigration,
+            toMigration: TitleOwnMigration,
+            MigrationsSqlGenerationOptions.Idempotent);
+        script.Should().Contain("ADD title", "the title column is added")
+            .And.NotContain("DROP TABLE", "additive only")
+            .And.NotContain("DROP COLUMN", "…and nothing is dropped");
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /// <summary>The pre-migration schema's <c>assignments.subject_coded_value_id</c> is NOT NULL while
@@ -211,6 +280,23 @@ public sealed class AssignmentInstructionsResponseKindsMigrationTests
             SELECT count(*) FROM information_schema.columns
             WHERE table_name = @table AND column_name = @column
             """, ("table", tableName), ("column", columnName)) > 0;
+
+    /// <summary>The column's declared maximum length, or 0 when the type is unbounded (`text`).</summary>
+    private static async Task<int> ColumnMaxLengthAsync(
+        string connectionString, string tableName, string columnName)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT COALESCE(character_maximum_length, 0) FROM information_schema.columns
+            WHERE table_name = @table AND column_name = @column
+            """;
+        cmd.Parameters.AddWithValue("table", tableName);
+        cmd.Parameters.AddWithValue("column", columnName);
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+    }
 
     private static async Task<bool> IndexExistsAsync(string connectionString, string indexName) =>
         await ScalarAsync(connectionString,

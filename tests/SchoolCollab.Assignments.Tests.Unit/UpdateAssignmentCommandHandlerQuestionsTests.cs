@@ -118,16 +118,16 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
 
     // ── QR-5/§5.6: the instruction blocks' update contract ────────────────────────────
 
-    private static NewInstructionDto InstructionText(string text) => new(
+    private static NewInstructionDto InstructionText(string text, string? title = "Read this") => new(
         Kind: InstructionKindDto.Text, Text: text, Url: null,
-        FileName: null, ContentType: null, FileSize: 0, StoragePath: null);
+        FileName: null, ContentType: null, FileSize: 0, StoragePath: null, Title: title);
 
     private static void SeedInstructionRows(Assignment assignment, Guid firstQuestionId)
     {
         assignment.SetInstructionItems(
         [
-            (null, InstructionKind.Text, "Read the question twice.", null, null, null, 0, null),
-            (firstQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null),
+            (null, InstructionKind.Text, "Read the question twice.", null, null, null, 0, null, "Read first"),
+            (firstQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null, null),
         ]);
     }
 
@@ -154,6 +154,8 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
                 "null InstructionItems preserves the assignment's own blocks — the child-collection contract");
         updated.InstructionsFor(firstQuestionId).Should().ContainSingle(
             "an untouched question keeps its block too");
+        updated.InstructionsFor(null).Single().Title.Should().Be("Read first",
+            "D7: null InstructionItems is the PRESERVE path — the name must survive it, not be nulled");
     }
 
     [TestMethod]
@@ -178,6 +180,8 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             .Which.Text.Should().Be("New guidance.", "a non-null list is a full replacement");
         updated.InstructionsFor(firstQuestionId).Should().ContainSingle(
             "questions were not supplied, so their blocks ride the replacement untouched");
+        updated.InstructionsFor(null).Single().Title.Should().Be("Read this",
+            "D7: the SUPPLIED branch carries the replacement's own name (InstructionText's default)");
     }
 
     [TestMethod]

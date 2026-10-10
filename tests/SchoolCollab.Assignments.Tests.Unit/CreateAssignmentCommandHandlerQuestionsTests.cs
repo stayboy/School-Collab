@@ -302,7 +302,7 @@ public class CreateAssignmentCommandHandlerQuestionsTests
                 ModelAnswer: "Glucose",
                 Instructions:
                 [
-                    new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Answer in full sentences.", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+                    new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Answer in full sentences.", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null, Title: "Answer in full sentences."),
                     new NewInstructionDto(Kind: InstructionKindDto.Url, Text: null, Url: "https://example.com/how", FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
                 ]),
         };
@@ -311,7 +311,7 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             questions: questions,
             instructionItems:
             [
-                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Photograph your written work.", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Photograph your written work.", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null, Title: "Photograph your written work."),
                 new NewInstructionDto(Kind: InstructionKindDto.Audio, Text: null, Url: null, FileName: "how-to.mp3", ContentType: "audio/mpeg", FileSize: 2048, StoragePath: "tenants/t/staging/g/how-to.mp3"),
             ]));
 
@@ -322,6 +322,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             .Equal([(InstructionKind.Text, 0), (InstructionKind.Audio, 1)],
                 "the assignment's own rows are re-indexed 0..n by payload position (EC-7)");
         assignmentRows[1].StoragePath.Should().Be("tenants/t/staging/g/how-to.mp3");
+        assignmentRows[0].Title.Should().Be("Photograph your written work.",
+            "D7: the create path carries the material's NAME — a site that dropped it would persist null silently");
+        assignmentRows[1].Title.Should().BeNull("an Audio material carries no name of its own");
 
         var question = stored.Questions.Should().ContainSingle().Subject;
         var questionRows = stored.InstructionsFor(question.Id);
@@ -329,6 +332,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             (InstructionKind.Text, 0), (InstructionKind.Url, 1));
         questionRows.Should().OnlyContain(r => r.QuestionId == question.Id,
             "the question's rows are stamped with the id the aggregate minted");
+        questionRows[0].Title.Should().Be("Answer in full sentences.",
+            "D7: a question's Text row is titled by the same rule as the assignment's own");
+        questionRows[1].Title.Should().BeNull("the Link supplied no label");
     }
 
     [TestMethod]
@@ -341,11 +347,11 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         var act = async () => await handler.HandleAsync(SampleCommand(
             instructionItems:
             [
-                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "   ", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null),
+                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "   ", Url: null, FileName: null, ContentType: null, FileSize: 0, StoragePath: null, Title: null),
             ]));
 
         await act.Should().ThrowAsync<AssignmentContentValidationException>()
-            .WithMessage("*a text instruction needs its text*");
+            .WithMessage("*a text instruction needs its title*");
         db.Assignments.IgnoreQueryFilters().Should().BeEmpty(
             "an invalid block never leaves a partial aggregate behind (EC-7)");
     }

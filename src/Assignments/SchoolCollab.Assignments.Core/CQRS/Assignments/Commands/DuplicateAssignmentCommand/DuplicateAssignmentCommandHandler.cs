@@ -99,7 +99,8 @@ public sealed class DuplicateAssignmentCommandHandler(
             FileName: existing.FileName,
             ContentType: existing.ContentType,
             FileSize: existing.FileSize,
-            StoragePath: existing.StoragePath)).ToList();
+            StoragePath: existing.StoragePath,
+            Title: existing.Title)).ToList();
 
         var sortedQuestions = source.Questions.OrderBy(q => q.DisplayOrder).ToList();
         for (var i = 0; i < sortedQuestions.Count; i++)
@@ -128,7 +129,8 @@ public sealed class DuplicateAssignmentCommandHandler(
                 FileName: existing.FileName,
                 ContentType: existing.ContentType,
                 FileSize: existing.FileSize,
-                StoragePath: existing.StoragePath)));
+                StoragePath: existing.StoragePath,
+                Title: existing.Title)));
         }
 
         if (instructionItems.Count > 0)
