@@ -215,6 +215,11 @@ membership rule) — `SchoolCollab.Mobile.Logic` and `SchoolCollab.Mobile.Tests.
    target — the reuse spike; a green build alone does not satisfy this.
 4. The new `mobile` CI job exists on `windows-latest` (workload install, head-csproj
    `-f net10.0-windows10.0.19041.0` build) and the four existing job names are unchanged.
+   **It is currently SKIPPED** (owner, 2026-10-10): the job is gated on the repository variable
+   `ENABLE_MAUI_CI`, which is unset, because it costs minutes per run while the mobile work it
+   gates is still in progress. It still *exists* — re-enable with
+   `gh variable set ENABLE_MAUI_CI --body true`, or delete the gate in `.github/workflows/ci.yml`
+   once the mobile work stabilises.
 5. Existing ubuntu jobs unaffected; `CrossModuleWiringTests` + `SchoolCollab.ArchitectureTests.Unit`
    green, including the extended any-slnx registration guard and its negative discriminator.
 
