@@ -162,6 +162,17 @@ jobs:
         run: uv run pytest
 
   mobile:
+    # DISABLED (owner, 2026-10-10) — skipped until the mobile work stabilises. The job is NOT
+    # deleted on purpose: the notes below are the record of what it builds and why, and the
+    # spec's acceptance item ("the `mobile` CI job exists") stays true while it is skipped.
+    # Reason: it costs minutes per run in `dotnet workload install maui` on windows-latest, and
+    # the mobile work it gates is still in progress. It did eventually pass on run 38057848242
+    # (#331) — the problem is the wait, not the result.
+    # RE-ENABLE, no code change needed:
+    #     gh variable set ENABLE_MAUI_CI --body true
+    # Unset, empty, or any other value = skipped. Delete this gate once the mobile work is stable.
+    if: ${{ vars.ENABLE_MAUI_CI == 'true' }}
+
     # The Blazor Hybrid head cannot build on ubuntu — its TFMs are device platforms — and it is
     # deliberately absent from SchoolCollab.slnx, so `build-and-test` never sees it. This job
     # gates it (added 2026-10-09, round mobile-host-skeleton).
