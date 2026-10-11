@@ -230,4 +230,170 @@ public class InstructionEditorListBunitTests : BunitContext
         cut.FindAll("#instr-error").Should().ContainSingle();
         cut.Markup.Should().Contain("not available here");
     }
+
+    // ── Round material-row-editing: the RowEditingMode seam (Q4(b), AC-14/AC-15/AC-16) ─────────
+
+    /// <summary>AC-14: in Dialog mode the row IDENTIFIES the material — its name, no field of its own —
+    /// and offers the affordance the host hangs its dialog off. The body is deliberately absent: it is
+    /// read and edited in the dialog (owner, 2026-10-10).</summary>
+    [TestMethod]
+    public void DialogMode_IdentifiesTheRowByItsName_WithNoFields()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Text, Title = "Fraction basics", Text = "Read pages 4-6." },
+        };
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog));
+
+        cut.Markup.Should().Contain("Fraction basics", "the row identifies the material by its name");
+        cut.Markup.Should().NotContain("Read pages 4-6.",
+            "the body belongs to the dialog now — the list identifies, it does not read");
+        cut.Find(".cq-instruction-kind").GetAttribute("aria-label").Should().Be("Text",
+            "Q3: the indicator is an icon in this mode too, and still names its kind");
+        cut.FindAll("fluent-text-field").Should().BeEmpty(
+            "the dialog is the edit path, so the row renders no field");
+        cut.Find("#instr-edit-0").Should().NotBeNull("…and the affordance that opens it");
+    }
+
+    /// <summary>AC-14's Link rule: a link with a label is named by it, and a link with NO label is named
+    /// by its target — the row is never blank (the ward card's own title ?? url rule, D11).</summary>
+    [TestMethod]
+    public void DialogMode_LinkWithNoLabel_IsNamedByItsUrl()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Url, Url = "https://khan.example/fractions" },
+            new() { Kind = InstructionKindDto.Url, Url = "https://khan.example/decimals", Title = "Decimals" },
+        };
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog));
+
+        cut.Find("#instr-label-0").TextContent.Should().Be("https://khan.example/fractions",
+            "no label → the target names the link");
+        cut.Find("#instr-label-1").TextContent.Should().Be("Decimals",
+            "a label, when there is one, wins");
+    }
+
+    /// <summary>AC-14: activating the affordance asks the HOST to edit — the component owns no dialog,
+    /// and it carries its own row rather than the first or last.</summary>
+    [TestMethod]
+    public void DialogMode_EditAffordance_RaisesTheEditRequestForItsOwnRow()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Url, Url = "https://example.test/a", Title = "A" },
+            new() { Kind = InstructionKindDto.Url, Url = "https://example.test/b", Title = "B" },
+        };
+        InstructionEditorRow? requested = null;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        cut.Find("#instr-edit-1").Click();
+
+        requested.Should().BeSameAs(rows[1], "the affordance carries its own row");
+    }
+
+    /// <summary>AC-16: Inline is the DEFAULT, so the question dialog's host — which cannot open a
+    /// dialog of its own (no nesting) — keeps editing in the row without opting in.</summary>
+    [TestMethod]
+    public void InlineIsTheDefault_SoTheQuestionHostKeepsItsFields()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Text, Title = "Named." },
+        };
+        var cut = Render(rows);
+
+        cut.FindAll("#instr-edit-0").Should().BeEmpty(
+            "AC-16: no edit affordance — the question host has no dialog to open");
+        cut.FindAll("fluent-text-field").Should().NotBeEmpty("…it still edits inline");
+    }
+
+    /// <summary>Grill Q3: media rows are staged, not formed — the file IS the value, so Dialog mode
+    /// leaves them on the stage/clear flow.</summary>
+    [TestMethod]
+    public void DialogMode_LeavesMediaRowsOnTheStagedFileFlow()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new()
+            {
+                Kind = InstructionKindDto.Audio,
+                FileName = "clip.mp3",
+                ContentType = "audio/mpeg",
+                FileSize = 1024,
+                StoragePath = "staged/clip.mp3",
+            },
+        };
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog));
+
+        cut.FindAll("#instr-edit-0").Should().BeEmpty("a staged file is not seeded into a form");
+        cut.Markup.Should().Contain("clip.mp3");
+        cut.Find("#instr-clear-media-0").Should().NotBeNull("the staged-file flow is untouched");
+    }
+
+    /// <summary>AC-14 (write-back half): the applied result lands on the row through the LIST — it stays
+    /// the single writer of its rows — and the host is told (Changed), so its gate re-runs.</summary>
+    [TestMethod]
+    public async Task ApplyEdit_WritesTheResultOntoTheRow_AndRaisesChanged()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Text, Title = "Old name", Text = "Old body" },
+        };
+        var changed = 0;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.Changed, () => changed++));
+
+        await cut.InvokeAsync(() => cut.Instance.ApplyEditAsync(
+            rows[0], new MaterialEditResult(InstructionKindDto.Text, "New name", "New body", null)));
+
+        rows[0].Title.Should().Be("New name");
+        rows[0].Text.Should().Be("New body");
+        rows[0].Url.Should().BeNull("a Text result carries no url");
+        changed.Should().Be(1, "the host re-renders its counts and re-checks its submit gate");
+        cut.Markup.Should().Contain("New name", "and the read-out shows the applied values");
+    }
+    /// <summary>Grill Q1/Q2/Q4 (round material-row-editing): the kind reads as an ICON — the word is gone
+    /// from the row — and it survives only as the wrapper's accessible name, because an icon-only
+    /// indicator with no name would be an a11y regression. Also pins the glyph, and the mode
+    /// independence Q3 decided: this renders the Inline default (the Dialog read-out is asserted in
+    /// <c>DialogMode_IdentifiesTheRowByItsName_WithNoFields</c>).</summary>
+    [TestMethod]
+    public void Kind_IsAnIcon_WithTheWordAsItsAccessibleName()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Text, Title = "Fraction basics" },
+            new() { Kind = InstructionKindDto.Audio, FileName = "clip.mp3", FileSize = 1024, StoragePath = "p" },
+        };
+        var cut = Render(rows);
+
+        var labels = cut.FindAll(".cq-instruction-kind");
+        labels.Should().HaveCount(2, "every row still names its kind");
+        labels.Select(l => l.GetAttribute("aria-label")).Should().Equal(["Text", "Audio"],
+            "the word survives as the accessible name");
+        labels.Select(l => l.GetAttribute("title")).Should().Equal(["Text", "Audio"],
+            "…and as the tooltip, so hover stays honest");
+        labels.Should().OnlyContain(l => l.TextContent.Trim().Length == 0,
+            "the kind is an ICON now — no 'Text'/'Audio' word renders in the row");
+        labels.Should().OnlyContain(l => l.Children.Length > 0, "…and the glyph itself renders");
+    }
+
+
+
 }

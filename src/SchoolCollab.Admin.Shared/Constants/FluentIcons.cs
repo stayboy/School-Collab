@@ -61,4 +61,27 @@ public static class FluentIcons
     /// <summary>D13: the padlock hint for "this value is inherited from grade/tenant policy"
     /// — used on the Rules card's header and on each of its readout subitems.</summary>
     public static readonly Icon LockClosed = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.LockClosed();
+
+    // ── Instruction/material KIND glyphs (round material-row-editing, grill Q1/Q7) ──────────────
+    //
+    // The shared instruction editor names a row's kind with an ICON instead of the word, so these five
+    // are the closed set that indicator can render — one per InstructionKindDto. Text and Link
+    // deliberately reuse the authoring kebab's own two glyphs (it labels its actions "Add Text Content"
+    // and "Add Link"), because the menu that creates a row and the row itself must not drift. Size16,
+    // like Info/LockClosed: these sit inline in a list row, not on a button.
+
+    /// <summary>A Text material — the same glyph the kebab's "Add Text Content" action carries.</summary>
+    public static readonly Icon TextDescription = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.TextDescription();
+
+    /// <summary>A Link material — the same glyph the kebab's "Add Link" action carries.</summary>
+    public static readonly Icon Link = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Link();
+
+    /// <summary>An Audio material.</summary>
+    public static readonly Icon MusicNote2 = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.MusicNote2();
+
+    /// <summary>A Video material.</summary>
+    public static readonly Icon Video = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Video();
+
+    /// <summary>An Image material.</summary>
+    public static readonly Icon Image = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Image();
 }

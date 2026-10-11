@@ -16,37 +16,66 @@
             @foreach (var (row, index) in Rows.Select((r, i) => (r, i)))
             {
                 <li class="cq-instruction-row" @key="row">
-                    @* D12/§4: the kind is implied by the row's own shape, so it renders as a label —
-                       the per-row kind DROPDOWN was the replaced pattern (round grill Q2). *@
-                    <span class="cq-instruction-kind cq-instruction-kind-readonly">@EnumHelper.GetDescription(row.Kind)</span>
+                    @* D12/§4 + grill Q1/Q2 (round material-row-editing): the kind reads as an ICON
+                       befitting the material — the per-row kind DROPDOWN was the replaced pattern, and
+                       its word is gone too. The word survives only as the wrapper's accessible name, so
+                       a screen reader still hears "Text": an icon-only indicator with no name would be
+                       an a11y regression, and the tooltip keeps hover honest. *@
+                    <span class="cq-instruction-kind cq-instruction-kind-readonly"
+                          role="img"
+                          aria-label="@EnumHelper.GetDescription(row.Kind)"
+                          title="@EnumHelper.GetDescription(row.Kind)">
+                        <FluentIcon Value="@KindIcon(row.Kind)" />
+                    </span>
 
                     @switch (row.Kind)
                     {
                         case InstructionKindDto.Text:
-                            @* D6/D10: a Text material is TITLED (the title is required, the body optional) —
-                               the title is the row's first field, so it is also the focus target (AC-2). *@
-                            <FluentTextField @ref="_focusTarget"
-                                             @bind-Value="row.Title"
-                                             ReadOnly="@ReadOnly"
-                                             Placeholder="Name this material"
-                                             class="cq-instruction-title" />
-                            <FluentTextField @bind-Value="row.Text"
-                                             ReadOnly="@ReadOnly"
-                                             Placeholder="What the student should read or do"
-                                             class="cq-instruction-payload" />
+                            @if (EditingMode == RowEditingMode.Dialog)
+                            {
+                                @* Q4(b) + owner refinement (2026-10-10): the row is IDENTIFIED, not read —
+                                   an icon plus the material's NAME. A Text material's name is its title; the
+                                   body is what the dialog is for, which is where it is read and edited
+                                   (AC-14 amended to match). *@
+                                <span class="cq-instruction-readout cq-instruction-readout-payload" id="@($"{Id}-title-{index}")">@row.Title</span>
+                            }
+                            else
+                            {
+                                @* D6/D10: a Text material is TITLED (the title is required, the body optional) —
+                                   the title is the row's first field, so it is also the focus target (AC-2). *@
+                                <FluentTextField @ref="_focusTarget"
+                                                 @bind-Value="row.Title"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="Name this material"
+                                                 class="cq-instruction-title" />
+                                <FluentTextField @bind-Value="row.Text"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="What the student should read or do"
+                                                 class="cq-instruction-payload" />
+                            }
                             break;
 
                         case InstructionKindDto.Url:
-                            <FluentTextField @ref="_focusTarget"
-                                             @bind-Value="row.Url"
-                                             ReadOnly="@ReadOnly"
-                                             Placeholder="https://…"
-                                             class="cq-instruction-payload" />
-                            @* D7: a Link's title is an optional LABEL — never prose (D10). *@
-                            <FluentTextField @bind-Value="row.Title"
-                                             ReadOnly="@ReadOnly"
-                                             Placeholder="Label (optional)"
-                                             class="cq-instruction-title" />
+                            @if (EditingMode == RowEditingMode.Dialog)
+                            {
+                                @* Q4(b) + the same identification rule for a Link: its LABEL names it, and a
+                                   link with no label is named by its target — never a blank row (the ward
+                                   card's own title ?? url rule, D11). *@
+                                <span class="cq-instruction-readout cq-instruction-readout-payload" id="@($"{Id}-label-{index}")">@(string.IsNullOrWhiteSpace(row.Title) ? row.Url : row.Title)</span>
+                            }
+                            else
+                            {
+                                <FluentTextField @ref="_focusTarget"
+                                                 @bind-Value="row.Url"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="https://…"
+                                                 class="cq-instruction-payload" />
+                                @* D7: a Link's title is an optional LABEL — never prose (D10). *@
+                                <FluentTextField @bind-Value="row.Title"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="Label (optional)"
+                                                 class="cq-instruction-title" />
+                            }
                             break;
 
                         default:
@@ -77,6 +106,19 @@
 
                     @if (!ReadOnly)
                     {
+                        @* Q4(b)/AC-14: Text and Link rows are edited THROUGH the dialog, so the affordance
+                           that opens it lives here and the decision to open one stays with the host (the
+                           component holds no dialog). Media rows keep the stage/clear flow instead — the
+                           file IS their value, so there is nothing a form could seed (grill Q3). *@
+                        @if (EditingMode == RowEditingMode.Dialog && !row.HasMedia)
+                        {
+                            <FluentButton Appearance="Appearance.Stealth"
+                                          Id="@($"{Id}-edit-{index}")"
+                                          OnClick="@(() => EditRowRequested.InvokeAsync(row))"
+                                          IconStart="@FluentIcons.Edit"
+                                          aria-label="Edit this material" />
+                        }
+
                         <FluentButton Appearance="Appearance.Stealth"
                                       Id="@($"{Id}-remove-{index}")"
                                       OnClick="@(() => RemoveAsync(row))"
@@ -124,6 +166,23 @@
     /// menu instead (round grill Q1) — a visibility seam, so the dialog's rendering is untouched.</summary>
     [Parameter] public bool ShowAddButton { get; set; } = true;
 
+    /// <summary>How a Text/Link row is edited (round <c>material-row-editing</c>). <see
+    /// cref="RowEditingMode.Inline"/> is the default because the QUESTION DIALOG host cannot open a
+    /// dialog of its own (no nesting — dialog-ui §4); the authoring page states
+    /// <see cref="RowEditingMode.Dialog"/>. Two behaviours on purpose, and the parameter is where
+    /// that reason is written down.
+    /// <para>Deliberately NOT named after the enum: an attribute called <c>RowEditingMode</c> whose
+    /// value expression starts with the same identifier is legal markup but ambiguous to read — and
+    /// a mismatched name fails only at RUNTIME (Blazor passes unknown attributes through as HTML,
+    /// then throws during the render), which is exactly the defect this round's page test caught.</para></summary>
+    [Parameter] public RowEditingMode EditingMode { get; set; } = RowEditingMode.Inline;
+
+    /// <summary>Raised when a row's edit affordance is activated in <see
+    /// cref="RowEditingMode.Dialog"/> mode. The host owns the dialog (this component stays
+    /// presentational), and hands the result back through <see cref="ApplyEditAsync"/> — so the list
+    /// remains the single writer of its rows.</summary>
+    [Parameter] public EventCallback<InstructionEditorRow> EditRowRequested { get; set; }
+
     private bool _staging;
     private string? _error;
 
@@ -157,6 +216,34 @@
 
     /// <summary>Appends a Text block — the method the question dialog and the page's own tests call.</summary>
     public Task AddAsync() => AddRowAsync(InstructionKindDto.Text);
+
+    /// <summary>Writes a dialog result back onto an EXISTING row (the row-edit path, AC-14). The page
+    /// never mutates a row behind this component — the list stays the single writer of its rows (Q2) —
+    /// so the host hands the confirmed result here. Also the bUnit seam for the write-back, because the
+    /// dialog itself is the page's to open.</summary>
+    public async Task ApplyEditAsync(InstructionEditorRow row, MaterialEditResult result)
+    {
+        row.Kind = result.Kind;
+        row.Title = result.Title;
+        row.Text = result.Body;
+        row.Url = result.Url;
+        StateHasChanged();
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>Grill Q1 (round material-row-editing): the glyph per kind. Text and Link ARE the kebab's
+    /// own two glyphs, so the menu that adds a row and the row itself cannot drift; the media kinds take
+    /// the FluentUI glyph of the thing itself. An unknown kind falls back to Info rather than rendering
+    /// an empty box — the row still says something true.</summary>
+    private static Icon KindIcon(InstructionKindDto kind) => kind switch
+    {
+        InstructionKindDto.Text => FluentIcons.TextDescription,
+        InstructionKindDto.Url => FluentIcons.Link,
+        InstructionKindDto.Audio => FluentIcons.MusicNote2,
+        InstructionKindDto.Video => FluentIcons.Video,
+        InstructionKindDto.Image => FluentIcons.Image,
+        _ => FluentIcons.Info,
+    };
 
     public async Task RemoveAsync(InstructionEditorRow row)
     {

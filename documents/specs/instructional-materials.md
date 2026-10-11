@@ -181,11 +181,17 @@ keeping the two fields distinct. The Python portal is explicitly out of scope he
 | **AC-11** | The added materials render **above** the dropzone section (owner: "keep instructions to add, listed above dropzone"). |
 | **AC-12** | The dialog mirrors the validator: a Text row without a title, and a Link without an absolute http(s) URL, are refused inside the dialog — before the save, with the reason shown. |
 | **AC-13** | *Upload From Device* pops the file picker directly, with no dialog, through the page's collocated JS module. |
+| **AC-14** | A Text/Link row on the **authoring page** is identified by an **icon plus its name** — a Text material's title, a Link's label (or its URL when the label is blank, so the row is never blank) — with an **edit affordance**; activating it reopens `MaterialEditDialog` **seeded from the row**, and Apply writes the result back onto that same row. The dialog's footer saves rather than adds on this path. The body/URL text itself is read and edited in the dialog, not in the list (owner, 2026-10-10). |
+| **AC-15** | Cancelling the row edit leaves the row exactly as it was. |
+| **AC-16** | The **question dialog's** instruction list keeps **inline** fields — `RowEditingMode.Inline` is the default, because that host cannot open a dialog of its own (no nested dialogs); the authoring page states `RowEditingMode.Dialog`. Media rows stay on the stage/clear file flow in both modes. |
 
 **Test surface:** bUnit for the section (menu items, append-and-focus, inference, refusal, empty state,
 read-only), the existing `InstructionEditorListBunitTests` and `ResourcesSectionBunitTests` updated for
 the new ids without losing their assertions, ward tests for AC-7, the validator unit tests for AC-4, and
-the migration test for the column.
+the migration test for the column. AC-14…AC-16 ride on `InstructionEditorListBunitTests` (the read-out,
+the affordance's own row, the inline default, the media exemption, the write-back through `ApplyEditAsync`)
+plus `AssignmentAuthoringBunitTests` (the seeded reopen and the cancel path, both against a mocked dialog
+shell — the recorded seed IS the assertion).
 
 ## 10. Non-goals and named follow-ups
 
