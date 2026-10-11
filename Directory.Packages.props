@@ -121,11 +121,24 @@
          streaming (see AttachmentTextExtractor). -->
     <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
   </ItemGroup>
+  <ItemGroup Label="Rich text (round wysiwyg-instruction-editor)">
+    <!-- §8.4 Q12 (owner, 2026-10-09; re-confirmed 2026-10-11): Blazored.TextEditor over Quill 2.x,
+         both pinned locally, no CDN. The wrapper's own setup is CDN-first, so the Quill assets are
+         vendored under the Assignments Application RCL's wwwroot/lib/quill/ and the tags in each
+         host's App.razor point at them (see documents/rounds/round-wysiwyg-instruction-editor.md).
+         1.1.3 targets net9.0; it depends on Microsoft.AspNetCore.Components(.Web) 3.1.0, which the
+         framework's 10.x satisfies — no downgrade. -->
+    <PackageVersion Include="Blazored.TextEditor" Version="1.1.3" />
+    <!-- §8.4 Q11/Q15: the ONE allow-list sanitiser, applied on write and again on render. 9.2.1039 is
+         the latest stable (the 10.x line is beta at the time of writing). -->
+    <PackageVersion Include="HtmlSanitizer" Version="9.2.1039" />
+  </ItemGroup>
   <ItemGroup Label="Transitive Security Overrides">
-    <!-- AngleSharp is pulled in transitively by bunit. The 1.4.0 version has
-         a moderate severity vulnerability (GHSA-pgww-w46g-26qg). We pin the
-         patched 1.5.2 version explicitly in test projects so bunit keeps
-         working without the vulnerable transitive dependency. -->
-    <PackageVersion Include="AngleSharp" Version="1.5.2" />
+    <!-- AngleSharp reaches us two ways: transitively by bunit, and (>= 1.7.2) by HtmlSanitizer 9.2.1039
+         in the rich-text round. The 1.4.0 version bunit would otherwise allow has a moderate severity
+         vulnerability (GHSA-pgww-w46g-26qg), so we pin the patched line explicitly in test projects.
+         PINNED AT 1.8.4 (latest stable): bumping is what satisfies HtmlSanitizer's floor; 1.5.2 was the
+         previous pin and is now a DOWNGRADE (NU1605). -->
+    <PackageVersion Include="AngleSharp" Version="1.8.4" />
   </ItemGroup>
 </Project>

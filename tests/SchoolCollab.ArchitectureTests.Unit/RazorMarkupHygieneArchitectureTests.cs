@@ -194,17 +194,33 @@ public class RazorMarkupHygieneArchitectureTests
     /// <summary>
     /// <c>MarkupString</c> is a never (question-response-types §8 Q15): rich text is sanitised on write
     /// and again on render by ONE shared render component + sanitiser helper, never injected ad hoc.
+    ///
+    /// <para>TWO files are allowed, by name, each for a reason the round doc records (G3):
+    /// <c>RichInstruction.razor</c> <b>is</b> the shared render component — the single place a sanitised
+    /// value becomes markup, which is where this rule is enforced rather than broken; and
+    /// <c>RichInstructionEditor.razor</c> hands the editor wrapper its TOOLBAR, which is our own constant
+    /// markup and never user input. Everything else stays banned: do not extend this list to admit a
+    /// convenience — that is exactly what the ban exists to prevent.</para>
     /// </summary>
     [TestMethod]
     public void NoMarkupString_InSource()
     {
+        // Path fragments, normalised to '/' so the check holds whichever separator a caller reports.
+        string[] allowed =
+        [
+            "Components/RichText/RichInstruction.razor",
+            "Components/RichText/RichInstructionEditor.razor",
+        ];
+
         var failures = SourceFiles([".cs", ".razor"])
             .Where(f => File.ReadAllText(f).Contains("MarkupString", StringComparison.Ordinal))
             .Select(Relative)
+            .Where(rel => !allowed.Any(a => rel.Replace('\\', '/').EndsWith(a, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         failures.Should().BeEmpty(
             "MarkupString is a never — rich/HTML content must go through the shared sanitiser + render " +
-            "component (question-response-types §8 Q15). Files:\n" + string.Join("\n", failures));
+            "component (question-response-types §8 Q15), except the two files named in this test. Files:\n" +
+            string.Join("\n", failures));
     }
 }

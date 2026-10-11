@@ -600,9 +600,32 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindComponents<FluentTextArea>()
+            // Round wysiwyg-instruction-editor (owner 2026-10-11): the field is a RICH editor now, on its
+            // own full-width row — the id is unchanged, so D9's bUnit contract survives the control swap.
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
                 .Should().Contain(t => t.Instance.Id == "authoring-basics-instructions",
-                    "INS-1 + D5: Instructions is the student-facing field, now in the bottom Instructions compartment");
+                    "INS-1 + D5: Instructions is the student-facing field, in Basics, now as a rich editor");
+        });
+    }
+
+    /// <summary>Defect (3) of round <c>wysiwyg-instruction-editor</c> (2026-10-11, found by the live
+    /// verification of defect (2)): the editor's <c>Value</c> was written in the BARE attribute form
+    /// <c>Value="_model.Instructions"</c> — on a string-typed parameter Razor passes the LITERAL
+    /// text, so the editor seeded (and would have saved back) the string "_model.Instructions"
+    /// instead of the author's prose. The bound field must arrive, verbatim.</summary>
+    [TestMethod]
+    public void Edit_GuidanceEditor_ReceivesTheInstructionsField_NotTheLiteralAttributeName()
+    {
+        var cut = RenderAuthoring(
+            AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, instructions: "Read pages 4-6."));
+
+        cut.WaitForAssertion(() =>
+        {
+            var editor = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
+                .Single(t => t.Instance.Id == "authoring-basics-instructions");
+            editor.Instance.Value.Should().Be("Read pages 4-6.",
+                "Value=\"@_model.Instructions\" must bind the field; the bare form passes the literal attribute text");
         });
     }
 
@@ -939,16 +962,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D5/D6, revised by the redesign round (2026-10-10): Description + Instructions leave
-    /// Basics for their own bottom compartment — now ONE wide cell stacking Teacher notes over
-    /// Student guidance, each row keeping FormRow's label-below placement — with the materials and the
-    /// full-width titled dropzone section below it (AC-9/AC-11).</summary>
-    /// <summary>Owner, 2026-10-10 (this pass): the Instructions compartment is COLLAPSED. The two notes
-    /// now sit in BASICS as ONE row — beneath Guardian review, their textareas inline to each other
-    /// exactly like the "Assignment type &amp; grading format" row (w-6 each) — and the materials block
-    /// moved COMPLETE to the top of the right pane, above the Targets &amp; audience card (AC-9/AC-11).</summary>
+    /// <summary>The notes area after the grill round (owner 2026-10-11): BOTH notes are rich editors
+    /// inside ONE label-less, full-width TAB group in Basics (Student guidance first), the materials
+    /// block still tops the right pane (AC-9/AC-11), and the collapsed Instructions compartment stays
+    /// gone.</summary>
     [TestMethod]
-    public void Notes_LiveInBasicsInOneInlineRow_AndMaterialsTopTheRightPane()
+    public void Notes_BothFieldsAreRichEditors_InOneLabelLessFullWidthTabGroup()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
 
@@ -957,28 +976,28 @@ public class AssignmentAuthoringBunitTests : BunitContext
             cut.FindAll("#authoring-instructions").Should().BeEmpty(
                 "the Instructions compartment is collapsed entirely (owner, 2026-10-10)");
 
-            // ── The notes are part of Basics: ONE row labelled "Notes", each field filling the row and
-            // carrying its own specific caption BENEATH it (owner, 2026-10-10).
+            // ── Grill Q1/Q2 (owner 2026-10-11): one TAB group, guidance first, NO row label, ids kept.
             var basics = cut.Find("#authoring-basics");
-            var noteFields = basics
-                .QuerySelectorAll("#authoring-basics-description, #authoring-basics-instructions")
-                .ToList();
-            noteFields.Should().HaveCount(2, "both notes live in Basics now — the old compartment is gone");
-            noteFields.Should().OnlyContain(f => f.ClassList.Contains("authoring-note-input"),
-                "…filling the row rather than the narrow w-6 tenth-fields the owner rejected");
-            noteFields
-                .Select(f => f.ParentElement!.QuerySelector("label.authoring-note-label")?.TextContent.Trim())
-                .Should().Equal(["Teacher notes", "Student guidance"],
-                    "…each with its own caption BENEATH the textarea, in document order");
-            basics.TextContent.Should().NotContain("Teacher notes & student guidance",
-                "the old combined row label is gone — the row is labelled 'Notes'");
-            System.Text.RegularExpressions.Regex.IsMatch(basics.InnerHtml, @">\s*Notes\s*<")
-                .Should().BeTrue("the row's own label renders as just 'Notes'");
-            cut.FindComponents<FluentTextArea>()
-                .Where(t => t.Instance.Id is "authoring-basics-description" or "authoring-basics-instructions")
-                .Select(t => t.Instance.Rows)
-                .Should().OnlyContain(rows => rows == 4,
-                    "D11: both textareas render at the same height");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
+                .Select(t => t.Instance.Id)
+                .Should().Equal(
+                    new[] { "authoring-basics-instructions", "authoring-basics-description" },
+                    "D9's ids ride on the two editors, guidance first (Q1)");
+            cut.Find("fluent-tabs").Should().NotBeNull("the notes are a TAB group (the owner's choice)");
+            basics.InnerHtml.IndexOf(">Student guidance<", StringComparison.Ordinal)
+                .Should().BeLessThan(basics.InnerHtml.IndexOf(">Teacher notes<", StringComparison.Ordinal),
+                    "guidance is the first tab (Q1)");
+            cut.FindComponents<FluentTextArea>().Select(t => t.Instance.Id)
+                .Should().NotContain("authoring-basics-instructions")
+                .And.NotContain("authoring-basics-description",
+                    "neither note is a textarea anymore");
+            basics.QuerySelectorAll(".fluent-tab-strip label").Should().BeEmpty(
+                "the tab group carries NO label (Q2) — the tabs name the fields");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.FluentTabStrip>().Should().HaveCount(1,
+                "the chrome is the shared FluentTabStrip primitive (extracted for reuse)");
+            basics.QuerySelector("#authoring-basics-instructions").Should().NotBeNull(
+                "both tab PANELS render even while one is inactive — switching tabs must not remount an editor");
+            basics.QuerySelector("#authoring-basics-description").Should().NotBeNull();
 
             // ── The materials block tops the right pane, above the Targets & audience card.
             var pane = cut.Find("#authoring-targets");
@@ -1011,6 +1030,26 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     // ── Criterion 5: the §11 action matrix ─────────────────────────────────
+
+    /// <summary>Grill Q3 (owner 2026-10-11): View mode's surface is the SUMMARY (ShowSummary gates the
+    /// form out), so the two notes stack THERE as sanitised readers with their captions — no tabs.</summary>
+    [TestMethod]
+    public void View_BothNotesStackAsSanitisedReaders_NoTabs()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.View,
+            MakeDto(AssignmentStatusDto.Published, instructions: "<p>Read <strong>pages 4-6</strong>.</p>"));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstruction>()
+                .Should().HaveCount(2, "guidance and teacher notes both render as readers in View (Q3)");
+            cut.Find("#authoring-basics-instructions strong")!.TextContent.Should().Be("pages 4-6",
+                "the guidance reader renders sanitised markup");
+            cut.FindAll(".authoring-note-caption").Select(c => c.TextContent.Trim())
+                .Should().Equal(new[] { "Student guidance", "Teacher notes" });
+            cut.FindAll("fluent-tabs").Should().BeEmpty("a reader should not click through tabs (Q3)");
+        });
+    }
 
     [TestMethod]
     [DataRow(AssignmentStatusDto.Draft, "Publish")]
