@@ -3708,4 +3708,153 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "…the ellipsis half of the same library workaround");
         }
     }
+
+    // ── Round material-row-editing: the dialog IS the edit path (Q4(b), AC-14/AC-15) ──────────────
+
+    /// <summary>AC-13 (owed by the materials-redesign round, closed here): "Upload From Device" pops the
+    /// file picker DIRECTLY — through the page's collocated module, which clicks the hidden input the
+    /// dropzone renders — and never through a dialog. The module invocation IS the assertion: the pop is
+    /// invisible in markup, so without it the behaviour could be reverted to a dialog and every other
+    /// test would still pass.
+    /// <para>Discriminating: the module is imported for the unsaved-changes guard too, so this pins the
+    /// <c>openMaterialFilePicker</c> call and its selector, not merely "the module was used".</para></summary>
+    [TestMethod]
+    public async Task Edit_UploadFromDevice_PopsThePickerThroughTheCollocatedModule()
+    {
+        var module = JSInterop.SetupModule(Authoring.BeforeUnloadModulePath);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+
+        var upload = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .SelectMany(m => m.Instance.Actions)
+            .Single(a => a.Label == "Upload From Device");
+
+        await cut.InvokeAsync(() => upload.OnClick!());
+
+        module.Invocations.Should().Contain(
+            i => i.Identifier == "openMaterialFilePicker"
+                && i.Arguments.Contains("#authoring-materials-dropzone"),
+            "AC-13: the picker is popped directly, against the dropzone's own hidden input");
+    }
+
+    /// <summary>AC-14's delete half, which nothing asserted at the page level (only the component's own
+    /// <c>Remove_DropsTheRow</c>): the row's × drops that row from the page's model — and the list's own
+    /// empty state comes back when the last one goes.</summary>
+    [TestMethod]
+    public async Task Edit_RowRemoveAffordance_DropsThatRow()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Text));
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Text));
+        editor.Instance.Rows.Should().HaveCount(2, "the premise: two rows to tell apart");
+
+        cut.Find("#authoring-instruction-items-remove-0").Click();
+
+        editor.Instance.Rows.Should().ContainSingle("the × drops the row it belongs to");
+        cut.FindAll("#authoring-instruction-items-remove-1").Should().BeEmpty(
+            "…and the surviving row is re-indexed, so no id outlives its row");
+    }
+
+    /// <summary>Registers a mocked <see cref="IDialogService"/> whose MaterialEditDialog open resolves to
+    /// a fixed result (<c>null</c> = the author cancelled), recording the SEEDED form model the page
+    /// handed in — so the tests pin both the seed and the cancel path without rendering the dialog
+    /// itself (the <c>RegisterPublishDialog</c> pattern: <c>ShowShellDialogAsync</c> resolves to
+    /// <c>ShowDialogAsync&lt;MaterialEditDialog, DialogShellData&lt;MaterialEditFormModel&gt;&gt;</c>, and
+    /// the dialog's Result carries the <see cref="DialogShellResult{TResult}"/> it unwraps).</summary>
+    private void RegisterMaterialEditDialog(MaterialEditResult? result, List<MaterialEditFormModel> captured)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
+            result is null
+                ? DialogResult.Cancel()
+                : DialogResult.Ok<object?>(new DialogShellResult<MaterialEditResult>(result))));
+
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<MaterialEditDialog, DialogShellData<MaterialEditFormModel>>(
+                It.IsAny<DialogShellData<MaterialEditFormModel>>(), It.IsAny<DialogParameters>()))
+            .Callback<DialogShellData<MaterialEditFormModel>, DialogParameters>(
+                (data, _) => captured.Add(data.Model))
+            .ReturnsAsync(dialogRef.Object);
+
+        Services.AddSingleton(dialogMock.Object);
+    }
+
+    /// <summary>AC-14: the materials list reads its rows out (no inline fields), the affordance reopens
+    /// the SAME dialog seeded from the row, and Apply writes the result back onto that row.</summary>
+    [TestMethod]
+    public async Task Edit_RowEditAffordance_ReopensTheDialogSeeded_AndAppliesTheResult()
+    {
+        var captured = new List<MaterialEditFormModel>();
+        RegisterMaterialEditDialog(
+            new MaterialEditResult(InstructionKindDto.Url, "Khan Academy", null, "https://khan.example/fractions"),
+            captured);
+
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Url));
+        var row = editor.Instance.Rows[^1];
+        row.Title = "Khan";
+        row.Url = "https://khan.example/old";
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-label-0").Should().ContainSingle());
+
+        // Q4(b): the row reads out — the page's list is no longer a form.
+        cut.FindAll("#authoring-instruction-items fluent-text-field").Should().BeEmpty(
+            "the page edits its materials in the dialog, so no row renders a field");
+
+        cut.Find("#authoring-instruction-items-edit-0").Click();
+
+        captured.Should().ContainSingle("the affordance opened the dialog");
+        captured[0].IsEdit.Should().BeTrue("…in edit mode, so the footer saves rather than adds");
+        captured[0].Url.Should().Be("https://khan.example/old", "AC-14: seeded from the row's values");
+        captured[0].Title.Should().Be("Khan");
+        row.Url.Should().Be("https://khan.example/fractions", "AC-14: Apply writes the result back");
+        row.Title.Should().Be("Khan Academy");
+    }
+
+    /// <summary>AC-15: cancelling the edit leaves the row exactly as it was.</summary>
+    [TestMethod]
+    public async Task Edit_RowEditAffordance_CancellingLeavesTheRowUntouched()
+    {
+        var captured = new List<MaterialEditFormModel>();
+        RegisterMaterialEditDialog(result: null, captured);
+
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Text));
+        var row = editor.Instance.Rows[^1];
+        row.Title = "Fraction basics";
+        row.Text = "Read pages 4-6.";
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-title-0").Should().ContainSingle());
+
+        cut.Find("#authoring-instruction-items-edit-0").Click();
+
+        captured.Should().ContainSingle("the affordance opened the dialog");
+        row.Title.Should().Be("Fraction basics", "AC-15: a cancelled edit changes nothing");
+        row.Text.Should().Be("Read pages 4-6.");
+    }
+
 }

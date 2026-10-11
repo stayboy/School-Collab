@@ -443,6 +443,8 @@
                                                        Id="authoring-instruction-items"
                                                        Rows="_model.InstructionItems"
                                                        ShowAddButton="false"
+                                                       EditingMode="@RowEditingMode.Dialog"
+                                                       EditRowRequested="OnMaterialEditRequestedAsync"
                                                        StageMediaAsync="StageInstructionMediaAsync"
                                                        Changed="OnModelChanged"
                                                        ReadOnly="@IsReadOnly" />
@@ -2673,6 +2675,32 @@
         row.Text = result.Body;
         row.Url = result.Url;
         StateHasChanged();
+    }
+
+    /// <summary>Q4(b)/AC-14: a Text/Link row is edited THROUGH the dialog — the row reads its values
+    /// out and this affordance reopens the same dialog the kebab creates with, seeded from the row
+    /// (<see cref="MaterialEditFormModel.FromRow"/>). The result is applied back THROUGH the list
+    /// (<see cref="InstructionEditorList.ApplyEditAsync"/>), so the list stays the single writer of its
+    /// rows exactly as it is on the create path. Cancelling (a null result) changes nothing — AC-15.</summary>
+    private async Task OnMaterialEditRequestedAsync(InstructionEditorRow row)
+    {
+        var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            MaterialEditFormModel.FromRow(row),
+            row.Kind == InstructionKindDto.Text ? "Edit Text Content" : "Edit Link",
+            DialogSize.Medium);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        if (_instructionList is null)
+        {
+            return;
+        }
+
+        _materialRefusal = null;
+        await _instructionList.ApplyEditAsync(row, result);
     }
 
     /// <summary>D3 (revised)/Q3: "Upload From Device" pops the picker DIRECTLY — no dialog. The dropzone's

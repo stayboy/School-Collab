@@ -4,8 +4,12 @@
    the footer's Error bound (never a literal), actions at the dialog's bottom. Media never comes
    through here — Upload From Device pops the file picker directly (Q3). *@
 @inherits DialogShellBase<MaterialEditFormModel, MaterialEditResult>
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ILogger<MaterialEditDialog> Logger
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.JSInterop
 @using SchoolCollab.Assignments.Contracts
 
 <div class="dialog-container">
@@ -16,7 +20,7 @@
         {
             <p class="dialog-hint">A text material is named: the title is required, the body is optional.</p>
             <FluentTextField Label="Title" @bind-Value="Model.Title" class="full-width mb-3" />
-            <FluentTextArea Label="Body (optional)" @bind-Value="Model.Body" Rows="4" class="full-width" />
+            <FluentTextArea Label="Body (optional)" Id="@BodyFieldId" @bind-Value="Model.Body" Rows="4" class="full-width" />
         }
         else
         {
@@ -30,10 +34,73 @@
 </div>
 
 @code {
-    protected override string SubmitText =>
-        Model.Kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link";
+    /// <summary>The body field's id — the seam the Enter guard addresses (and the bUnit seam).</summary>
+    public const string BodyFieldId = "material-edit-body";
 
-    protected override string SavingText => "Adding…";
+    /// <summary>Owner requirement (2026-10-10): Enter in a Text material's body must not submit the
+    /// dialog — the body is multi-line prose. The guard is a native listener in the collocated module,
+    /// because <c>FluentTextArea</c> exposes no <c>OnKeyDown</c> and Blazor's static
+    /// <c>@onkeydown:preventDefault</c> cannot be made conditional (the <c>chatInput.js</c> precedent in
+    /// <c>SchoolCollab.AI.Chat</c>). It stops propagation only, so the newline the author is asking for
+    /// still happens and the binding is untouched.</summary>
+    public const string EnterGuardModulePath =
+        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/MaterialEditDialog.razor.js";
+
+    private IJSObjectReference? _enterGuardModule;
+
+    /// <summary>The guard only exists when the body field does — a Link's dialog has no textarea to
+    /// guard — and it is re-armed on EVERY render (the JS is idempotent), because a re-rendered field
+    /// that lost its listener would silently go back to submitting on Enter. A guard that did not attach
+    /// is logged rather than swallowed: that silence is what made the first, propagation-only attempt
+    /// look like it worked while Enter still submitted.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Model.Kind != InstructionKindDto.Text)
+        {
+            return;
+        }
+
+        try
+        {
+            _enterGuardModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EnterGuardModulePath);
+            var attached = await _enterGuardModule.InvokeAsync<bool>("guardEnterKey", BodyFieldId);
+            if (!attached)
+            {
+                Logger.LogWarning(
+                    "The Enter guard is not attached to {FieldId}; Enter in the material body may submit the dialog.",
+                    BodyFieldId);
+            }
+        }
+        catch (JSException ex)
+        {
+            // A missing guard must not take the form down: without it the dialog behaves exactly as it
+            // did before, which is bad but survivable — losing the dialog is not.
+            Logger.LogWarning(ex, "Could not attach the Enter guard to the material body field");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_enterGuardModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _enterGuardModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone; there is nothing left to release.
+        }
+    }
+
+    protected override string SubmitText =>
+        Model.IsEdit ? "Save"
+            : Model.Kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link";
+
+    protected override string SavingText => Model.IsEdit ? "Saving…" : "Adding…";
 
     /// <summary>Mirrors <c>InstructionDtoValidator</c> so the author is told before the save, not after
     /// (D6/D7, AC-4): a Text row must be NAMED (body optional); a Link row must carry an absolute
