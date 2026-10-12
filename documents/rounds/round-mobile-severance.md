@@ -859,3 +859,37 @@ policy-decision-8 gap) and `mobile-severance` (L2).
 - **Gate adjudication:** the plan gate **ACCEPTED** the waiver on the audit evidence recorded in
   the Execution log (the Error.razor-only statement, the six bUnit suites required green under
   AC-3, and this section's not-applicable marking).
+
+## Post-close re-verification (2026-10-12, owner-approved delivery)
+
+The round closed on base `fab7dd5e`. Before delivery, `main` moved ten commits (`598ea99e`, then
+`ea7b2df1` when #327 merged), so the branch was rebased and re-verified. The verdict above stands for
+the round as implemented; this section re-points it at the delivered base.
+
+- **Rebase:** `feat/mobile-severance` replayed onto `ea7b2df1` (commit `775b96f2`), **no conflicts**.
+  Four files overlapped with main's new work; git auto-merged each, and all four were checked to have
+  kept *both* intents rather than one silently:
+  - `.github/workflows/ci.yml` — kept main's `merge_group` trigger and `ENABLE_MAUI_CI` skip gate
+    (#332) **and** this round's android flip (`-f net10.0-android`, step renamed).
+  - `src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj` — kept this round's package swap
+    (no `FrameworkReference`) **and** main's two packages (`Blazored.TextEditor`, `HtmlSanitizer`,
+    #336) which landed *inside* the severed project.
+  - `Directory.Packages.props` — this round's three `Microsoft.AspNetCore.Components*` 10.0.8 entries
+    **and** main's rich-text group.
+  - `documents/specs/mobile-hybrid-app.md` — this round's §8 L2 outcome annex **and** main's
+    "currently SKIPPED" note on the mobile job.
+- **Carriers:** still 5 repo-wide (`AI.Chat`, `Assignments.Application`, `ServiceDefaults`,
+  `Settings.Application`, `Students.Application`) — none on the head's closure.
+- **Re-verified on `ea7b2df1` (parent-run, authoritative):** android **0 errors / 3 warnings**, the 3
+  being **pre-existing** `Admin.Shared` nullable warnings (`DialogServiceExtensions.cs:145` CS8601;
+  `AssignmentAiPromptApiClient.cs:72` and `SignatureConsentTextApiClient.cs:67` CS8603), not introduced
+  here; root `SchoolCollab.slnx` 0 errors; ArchitectureTests.Unit **105** (up from 102 — main's new
+  `RazorMarkupHygieneArchitectureTests`, which passes against the 12 moved `.razor` files),
+  Admin **651**, Core **126**, Students **624**, Assignments **1109**, Mobile **8** — 0 failures.
+- **CI:** the mobile job remains skipped behind `ENABLE_MAUI_CI` (#332), so this round's android
+  evidence is local; enabling the variable is the owner's switch (Q3(a), 2026-10-12).
+- **Observed while re-syncing (not this round's defect):** #327's required `Build & Test` failed on
+  `AssignmentCreateBunitTests.Create_MandatoryPolicy_SubmitsWithoutTheRetiredAuthorInputs` (bUnit
+  `WaitForFailedException` on `#authoring-targets .targets-audience-item__value`) — a CI-only flake in
+  the same class and on the same assertion as the 2026-10-09 flake (`Create_UnsetReviewPolicy_…`) — and
+  re-ran green. `main`'s own push runs were green throughout.

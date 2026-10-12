@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index ded21dbf..bbf4ad1f 100644
+index 6cd56b46..49573b9e 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
-@@ -160,18 +160,18 @@ jobs:
+@@ -177,18 +177,18 @@ jobs:
      # deliberately absent from SchoolCollab.slnx, so `build-and-test` never sees it. This job
      # gates it (added 2026-10-09, round mobile-host-skeleton).
      #
@@ -31,7 +31,7 @@ index ded21dbf..bbf4ad1f 100644
      #
      # The head is built as a PROJECT with an explicit `-f`, never through
      # src/Mobile/SchoolCollab.Mobile.slnx: a solution-level `-f` passes TargetFramework as a
-@@ -189,14 +189,15 @@ jobs:
+@@ -206,14 +206,15 @@ jobs:
          with:
            dotnet-version: '10.x'
  
@@ -52,7 +52,7 @@ index ded21dbf..bbf4ad1f 100644
 +          -f net10.0-android
            --configuration Release
 diff --git a/Directory.Packages.props b/Directory.Packages.props
-index 4b785c9a..4deecf5c 100644
+index b0c6dd3d..469ec1a2 100644
 --- a/Directory.Packages.props
 +++ b/Directory.Packages.props
 @@ -36,6 +36,14 @@
@@ -97,10 +97,10 @@ index 1acf35c7..7f0ad0f1 100644
     `src/AppHost/SchoolCollab.AppHost/appsettings.json` (with the default
 diff --git a/documents/rounds/round-mobile-severance.md b/documents/rounds/round-mobile-severance.md
 new file mode 100644
-index 00000000..49da901a
+index 00000000..c631d56c
 --- /dev/null
 +++ b/documents/rounds/round-mobile-severance.md
-@@ -0,0 +1,861 @@
+@@ -0,0 +1,895 @@
 +# Round: mobile-severance (L2 of the mobile train)
 +
 +**Provider:** pi, full Tier 3, Option A (models: glm-5.3-flash orchestrator + accept, kimi-k2.7-code plan-gate and diff-review, deepseek-v4.1-flash worker, kimi-k2.7-code escalator, minimax-m3 UI tester) — plan-gate substitute for the unavailable skill id ollama/glm-5.3:cloud; a glm-family substitute would put the gate on the plan author's own id, which round-runner-model-policy.md item 3 forbids (gate must differ from the author in family or clearly-bigger tier)
@@ -962,6 +962,40 @@ index 00000000..49da901a
 +- **Gate adjudication:** the plan gate **ACCEPTED** the waiver on the audit evidence recorded in
 +  the Execution log (the Error.razor-only statement, the six bUnit suites required green under
 +  AC-3, and this section's not-applicable marking).
++
++## Post-close re-verification (2026-10-12, owner-approved delivery)
++
++The round closed on base `fab7dd5e`. Before delivery, `main` moved ten commits (`598ea99e`, then
++`ea7b2df1` when #327 merged), so the branch was rebased and re-verified. The verdict above stands for
++the round as implemented; this section re-points it at the delivered base.
++
++- **Rebase:** `feat/mobile-severance` replayed onto `ea7b2df1` (commit `775b96f2`), **no conflicts**.
++  Four files overlapped with main's new work; git auto-merged each, and all four were checked to have
++  kept *both* intents rather than one silently:
++  - `.github/workflows/ci.yml` — kept main's `merge_group` trigger and `ENABLE_MAUI_CI` skip gate
++    (#332) **and** this round's android flip (`-f net10.0-android`, step renamed).
++  - `src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj` — kept this round's package swap
++    (no `FrameworkReference`) **and** main's two packages (`Blazored.TextEditor`, `HtmlSanitizer`,
++    #336) which landed *inside* the severed project.
++  - `Directory.Packages.props` — this round's three `Microsoft.AspNetCore.Components*` 10.0.8 entries
++    **and** main's rich-text group.
++  - `documents/specs/mobile-hybrid-app.md` — this round's §8 L2 outcome annex **and** main's
++    "currently SKIPPED" note on the mobile job.
++- **Carriers:** still 5 repo-wide (`AI.Chat`, `Assignments.Application`, `ServiceDefaults`,
++  `Settings.Application`, `Students.Application`) — none on the head's closure.
++- **Re-verified on `ea7b2df1` (parent-run, authoritative):** android **0 errors / 3 warnings**, the 3
++  being **pre-existing** `Admin.Shared` nullable warnings (`DialogServiceExtensions.cs:145` CS8601;
++  `AssignmentAiPromptApiClient.cs:72` and `SignatureConsentTextApiClient.cs:67` CS8603), not introduced
++  here; root `SchoolCollab.slnx` 0 errors; ArchitectureTests.Unit **105** (up from 102 — main's new
++  `RazorMarkupHygieneArchitectureTests`, which passes against the 12 moved `.razor` files),
++  Admin **651**, Core **126**, Students **624**, Assignments **1109**, Mobile **8** — 0 failures.
++- **CI:** the mobile job remains skipped behind `ENABLE_MAUI_CI` (#332), so this round's android
++  evidence is local; enabling the variable is the owner's switch (Q3(a), 2026-10-12).
++- **Observed while re-syncing (not this round's defect):** #327's required `Build & Test` failed on
++  `AssignmentCreateBunitTests.Create_MandatoryPolicy_SubmitsWithoutTheRetiredAuthorInputs` (bUnit
++  `WaitForFailedException` on `#authoring-targets .targets-audience-item__value`) — a CI-only flake in
++  the same class and on the same assertion as the 2026-10-09 flake (`Create_UnsetReviewPolicy_…`) — and
++  re-ran green. `main`'s own push runs were green throughout.
 \ No newline at end of file
 diff --git a/documents/solution/assignment-request-implementation-details.md b/documents/solution/assignment-request-implementation-details.md
 index 317a37cf..aada926a 100644
@@ -1030,10 +1064,10 @@ index d9b854b4..220d5dfa 100644
  | Fan-out | `WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", …)` to **admin**, **families**, the **auth service** and the **auth portal** (precedent `Program.cs:288,357`) |
  | Read time | **Startup** — auth pipelines are fixed at startup (`DisableOIDCAuth` precedent documented in `SchoolCollab.Admin/Program.cs`) |
 diff --git a/documents/specs/mobile-hybrid-app.md b/documents/specs/mobile-hybrid-app.md
-index 93f0bce4..320ee3a2 100644
+index 4c97ad08..c38c139a 100644
 --- a/documents/specs/mobile-hybrid-app.md
 +++ b/documents/specs/mobile-hybrid-app.md
-@@ -229,6 +229,43 @@ membership rule) — `SchoolCollab.Mobile.Logic` and `SchoolCollab.Mobile.Tests.
+@@ -234,6 +234,43 @@ membership rule) — `SchoolCollab.Mobile.Logic` and `SchoolCollab.Mobile.Tests.
     and the gates' tests stay green.
  4. The mobile CI job's assertion flips to the android TFM.
  
@@ -1077,6 +1111,43 @@ index 93f0bce4..320ee3a2 100644
  **L3 — credential + registration path**
  1. The realm JSON contains the new public client with all five claim mappers plus the audience
     mapper; `AppHostRealmImportArchitectureTests` still passes.
+diff --git a/documents/specs/ui-implementation-backlog.md b/documents/specs/ui-implementation-backlog.md
+index 75c2cfb8..297cd647 100644
+--- a/documents/specs/ui-implementation-backlog.md
++++ b/documents/specs/ui-implementation-backlog.md
+@@ -333,16 +333,22 @@
+ Tracked outside the sprint count below (it is not part of the period/activity-group arc).
+ 
+ L1 — the Hybrid head, the `Admin.Shared` reuse spike and the mobile CI job — is **merged** (`#326`,
+-`fab7dd5e`, CI 5/5). The remaining layers are sequential, and **L2 blocks L3/L4**: no device TFM builds
+-until severance lands.
+-
+-- [ ] **P0** **L2 — severance.** Drop `Admin.Shared`'s unused `ServiceDefaults` ProjectReference; move
+-  the `Core.Features` abstractions (`IFeatureFlagService`, `IFeatureFlagChangeNotifier`,
+-  `FeatureFlagKeys`) to a mobile-safe home; re-verify the four web hosts and the root solution.
+-  Headline criterion: `dotnet build src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
+-  -f net10.0-android` → **0 errors** (today: NETSDK1082 — the transitive `Microsoft.AspNetCore.App`
+-  FrameworkReference has no runtime pack for android RIDs), then flip the mobile CI job's assertion
+-  from the Windows TFM to android. *Source:* `mobile-hybrid-app.md` §8 L2 + §3.2.
++`fab7dd5e`, CI 5/5). The layers are sequential: **L2 blocked L3/L4** because no device TFM built until
++severance landed — and it has landed, so device TFMs now build.
++
++- [x] **P0** **L2 — severance — DONE** (round `mobile-severance`; re-verified on `ea7b2df1`,
++  2026-10-12). Delivered: `Admin.Shared`'s `Microsoft.AspNetCore.App` `FrameworkReference` became
++  `Microsoft.AspNetCore.Components[.Authorization|.Web]` packages (10.0.8) and it dropped its
++  `ServiceDefaults` / `Students.Core` / `Core` references, so the head's closure carries no framework
++  reference; the new zero-dependency `SchoolCollab.Core.Abstractions` project hosts `Core.Features`
++  plus the two enums `SignatureRequirementMode` / `NotificationChannel` — the plan gate proved
++  `Core` was *itself* a carrier, because its `JwtBearer`/`OpenIdConnect` packages declare the
++  framework reference; the 12-file contacts/guardian family moved to `Students.Application`; and
++  `Students.Core` / `Students.Contracts` dropped their unused `ServiceDefaults` references.
++  Verified: `-f net10.0-android` **0 errors**; root solution 0 errors; ArchitectureTests 105, Admin 651,
++  Core 126, Students 624, Assignments 1109, Mobile 8 — 0 failures. The mobile CI job asserts
++  `-f net10.0-android` but is still skipped behind `ENABLE_MAUI_CI`. *Source:* `mobile-hybrid-app.md`
++  §8 L2; `documents/rounds/round-mobile-severance.md`.
+ - [ ] **P0** **L3 — credential + registration path.** New public Keycloak client (PKCE via
+   `WebAuthenticator`), mapper parity plus an audience mapper emitting `school-collab-client`, a bearer
+   `DelegatingHandler`, tokens in `SecureStorage` (never `sessionStorage`/`localStorage`), the
 diff --git a/src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj b/src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
 index ec04bd57..c5072556 100644
 --- a/src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
@@ -1131,7 +1202,7 @@ index 591dfb8c..c3b4e912 100644
  @using Microsoft.FluentUI.AspNetCore.Components
  @using SchoolCollab.Admin.Shared
 diff --git a/src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj b/src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj
-index d11b7af1..95840e78 100644
+index 143ea7a6..b9295d82 100644
 --- a/src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj
 +++ b/src/SchoolCollab.Admin.Shared/SchoolCollab.Admin.Shared.csproj
 @@ -7,7 +7,15 @@
@@ -1151,7 +1222,7 @@ index d11b7af1..95840e78 100644
    </ItemGroup>
  
    <ItemGroup>
-@@ -16,9 +24,7 @@
+@@ -22,9 +30,7 @@
    </ItemGroup>
  
    <ItemGroup>
