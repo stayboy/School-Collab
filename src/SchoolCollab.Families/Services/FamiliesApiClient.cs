@@ -90,6 +90,25 @@ public sealed class FamiliesApiClient(
         return await response.Content.ReadFromJsonAsync<WardAssignmentViewDto>(FamiliesJson.Options, ct);
     }
 
+    /// <summary>Recording materials (spec <c>recording-materials</c> D4/D5) — fetch one media
+    /// instruction's staged file so the ward player can play it. A raw <c>&lt;audio src&gt;</c> /
+    /// <c>&lt;video src&gt;</c> cannot attach the bearer token the assignments-api requires (it opts into
+    /// the Bearer scheme, not cookies), so — exactly as the guardian certificate download does — the
+    /// bytes are pulled through this authenticated client and handed to JS as a Blob URL (a Blob URL
+    /// seeks natively in-browser, so the player still scrubs). Returns null on 404 (missing
+    /// assignment/instruction/file); a non-success, non-404 status throws for the UI to surface.</summary>
+    public async Task<byte[]?> GetInstructionMediaAsync(Guid assignmentId, Guid studentId, Guid instructionId, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync(
+            $"/{_assignments}/{assignmentId}/students/{studentId}/materials/{instructionId}", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(ct);
+    }
+
     /// <summary>WS-E1 (ar-14-deep-links) — idempotent first-visit <c>OpenedAt</c> stamp, invoked
     /// server-side by the public deep-link landing. The Assignments API marks the recipient
     /// at most once (Sent → Viewed chain) and returns 404 for an unknown (assignment, contact)

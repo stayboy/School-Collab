@@ -71,3 +71,24 @@
     font-size: 0.85rem;
     color: var(--error);
 }
+
+/* Recording materials (spec recording-materials D3/D10): the upload control and the Record affordance
+   share the media row's capture slot — side by side so neither wraps the other. */
+.cq-instruction-capture {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.cq-instruction-capture ::deep fluent-input-file {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* The open recorder is its OWN list item beneath the row (never inside the row's flex line), so it
+   simply fills the list column. The list's gap already separates it from its row. */
+.cq-instruction-recorder {
+    display: block;
+}

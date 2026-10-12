@@ -13,15 +13,18 @@ public sealed class AttachmentUploadOptions
     /// <summary>Configuration section name.</summary>
     public const string SectionName = "Assignments:AttachmentUpload";
 
-    /// <summary>Per-file size cap enforced at stage (bytes).
-    /// Default 25 MiB — under Kestrel's default 30 MB request-body
-    /// limit; raising this above ~30 MB also requires raising the
-    /// Kestrel <c>MaxRequestBodySize</c>.</summary>
-    public long MaxFileSizeBytes { get; set; } = 26214400;
+    /// <summary>Per-file size cap enforced at stage (bytes). Default 100 MiB — raised
+    /// from 25 MiB for the recording feature (spec <c>recording-materials</c> D7), so a
+    /// ~5-minute 720p video (~94 MB) fits with headroom. This now exceeds Kestrel's
+    /// default ~30 MB request-body limit, so the assignments-api Kestrel
+    /// <c>Limits.MaxRequestBodySize</c> is raised to match (see the API appsettings).</summary>
+    public long MaxFileSizeBytes { get; set; } = 104857600;
 
     /// <summary>Total attachment size cap enforced on create/update
-    /// (bytes). Default 100 MiB.</summary>
-    public long MaxTotalSizeBytes { get; set; } = 104857600;
+    /// (bytes). Default 300 MiB — raised from 100 MiB alongside the per-file cap
+    /// (recording-materials D7): ~3 recordings, or a realistic mix of recordings
+    /// and documents.</summary>
+    public long MaxTotalSizeBytes { get; set; } = 314572800;
 
     /// <summary>Allowed file extensions (case-insensitive). Default
     /// mirrors the WS-A1 spec allowlist (PDF/DOC/DOCX/PPT/PPTX/XLS/XLSX

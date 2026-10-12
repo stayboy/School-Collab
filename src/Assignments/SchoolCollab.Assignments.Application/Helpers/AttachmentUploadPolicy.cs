@@ -16,7 +16,14 @@ namespace SchoolCollab.Assignments.Application.Helpers;
 public static class AttachmentUploadPolicy
 {
     /// <summary>Per-file size cap (bytes). Matches the server default.</summary>
-    public const long MaxFileSizeBytes = 26214400; // 25 MiB
+    public const long MaxFileSizeBytes = 104857600; // 100 MiB
+
+    /// <summary>The byte threshold at which the in-browser recorder auto-stops (recording-materials
+    /// D7). Deliberately a few MiB under <see cref="MaxFileSizeBytes"/>: it halts a take before it can
+    /// be lost to a server 413, while the raised server cap remains the real ceiling. A guard, not the
+    /// limiter — the recorder is not bitrate-constrained, so a browser's 720p output is simply stopped
+    /// here if it ever approaches the cap.</summary>
+    public const long RecorderAutoStopBytes = 99614720; // 95 MiB
 
     /// <summary>Maximum number of files in a single selection batch.
     /// Matches the configured <c>FluentInputFile.MaximumFileCount</c> and is

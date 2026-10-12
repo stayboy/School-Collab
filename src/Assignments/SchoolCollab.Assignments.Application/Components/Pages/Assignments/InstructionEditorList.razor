@@ -1,3 +1,4 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Application.Helpers
 
@@ -82,11 +83,27 @@
                             @* Audio · Video · Image: a staged file (stage-at-selection). *@
                             @if (string.IsNullOrWhiteSpace(row.StoragePath))
                             {
-                                <FluentInputFile Mode="InputFileMode.Stream"
-                                                 MaximumFileCount="1"
-                                                 Accept="@AttachmentUploadPolicy.AcceptExtensions"
-                                                 MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
-                                                 OnCompleted="@(args => OnFileUploadedAsync(row, args))" />
+                                @* D3/D10 (recording-materials): the Record affordance sits beside the upload
+                                   control in the SAME capture slot — a recording is just a second input path
+                                   to the same staged media row. Toggling it expands the inline RecorderPanel;
+                                   its OnRecorded stages through the same StageMediaFileAsync seam an upload
+                                   uses, so the list stays the single writer of its rows. *@
+                                <div class="cq-instruction-capture">
+                                    <FluentInputFile Mode="InputFileMode.Stream"
+                                                     MaximumFileCount="1"
+                                                     Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                     MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                     OnCompleted="@(args => OnFileUploadedAsync(row, args))" />
+                                    @if (!ReadOnly && StageMediaAsync is not null)
+                                    {
+                                        <FluentButton Appearance="Appearance.Neutral"
+                                                      Id="@($"{Id}-record-{index}")"
+                                                      IconStart="@(new Icons.Regular.Size20.Video())"
+                                                      OnClick="@(() => ToggleRecorderAsync(row))">
+                                            Record
+                                        </FluentButton>
+                                    }
+                                </div>
                             }
                             else
                             {
@@ -125,6 +142,19 @@
                                       aria-label="Remove instruction">×</FluentButton>
                     }
                 </li>
+                @* D3 (recording-materials): the open recorder renders as its OWN list item beneath the
+                   row — the row is a non-wrapping flex line (kind · payload · actions), so nesting the
+                   panel inside it would either overflow or strand the row's actions below the panel.
+                   Gated on the row still being unstaged so a file arriving mid-recording closes the
+                   panel rather than showing it beside a file readout it no longer owns. *@
+                @if (_recordingRow == row && string.IsNullOrWhiteSpace(row.StoragePath))
+                {
+                    <li class="cq-instruction-recorder" @key="@($"{row}-recorder")">
+                        <RecorderPanel Id="@($"{Id}-recorder-{index}")"
+                                       IsVideo="@(row.Kind == InstructionKindDto.Video)"
+                                       OnRecorded="@(media => OnRecordedAsync(row, media))" />
+                    </li>
+                }
             }
         </ul>
     }
@@ -186,6 +216,11 @@
     private bool _staging;
     private string? _error;
 
+    /// <summary>D3/D10 (recording-materials): the row whose inline <see cref="RecorderPanel"/> is open —
+    /// null when none is. Only one recorder is ever open at a time (one camera/mic), so toggling a new
+    /// row's recorder closes the previous one.</summary>
+    private InstructionEditorRow? _recordingRow;
+
     /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
     /// after an append this points at the new row's first field (AC-2's focus target).</summary>
     private FluentTextField? _focusTarget;
@@ -200,6 +235,16 @@
         _focusPending = true;
         StateHasChanged();
         await Changed.InvokeAsync();
+    }
+
+    /// <summary>D2/D3 (recording-materials): appends a MEDIA row of the chosen kind and opens its inline
+    /// recorder in one step — the page's "Record Audio"/"Record Video" kebab action calls this. Reuses
+    /// <see cref="AddRowAsync"/> to append + focus, then opens the recorder on that just-added row.</summary>
+    public async Task AddRowWithRecorderAsync(InstructionKindDto kind)
+    {
+        await AddRowAsync(kind);
+        _recordingRow = Rows.Count > 0 ? Rows[^1] : null;
+        StateHasChanged();
     }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
@@ -338,6 +383,33 @@
         {
             _staging = false;
         }
+    }
+
+    /// <summary>D3/D10 (recording-materials): opens/closes the inline <see cref="RecorderPanel"/> for a
+    /// media row. One recorder at a time — toggling the same row closes it; toggling another row moves
+    /// the recorder (releasing the previous camera/mic via the panel's own disposal).</summary>
+    private Task ToggleRecorderAsync(InstructionEditorRow row)
+    {
+        _recordingRow = _recordingRow == row ? null : row;
+        _error = null;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>D3 (recording-materials): the recorder's commit seam. The recorded take (delivered as a
+    /// Stream via the panel's hidden InputFile) stages through the SAME <see cref="StageMediaFileAsync"/>
+    /// path an uploaded media file takes, so the row is filled identically and the list stays the single
+    /// writer of its rows. The recorder then closes.</summary>
+    private async Task OnRecordedAsync(InstructionEditorRow row, RecorderPanel.RecordedMedia media)
+    {
+        if (StageMediaAsync is null)
+        {
+            Fail("Recording is not available here.");
+            return;
+        }
+
+        _recordingRow = null;
+        await StageMediaFileAsync(row, media.Content, media.FileName, media.ContentType, media.FileSize);
     }
 
     /// <summary>Sets the failure line and re-renders. A method invoked directly (bUnit, a test seam)

@@ -1,0 +1,48 @@
+/* Scoped styles for the inline recorder (spec recording-materials D3). The panel sits inside a
+   media row's capture slot, so it stays compact and breaks onto its own lines — the row above it
+   keeps its single-line layout, and the panel never squashes the upload control. */
+
+.recorder-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    /* Fills the list column — the panel is its own list item beneath the row, never a flex child of
+       the row's single-line layout. */
+    width: 100%;
+    min-width: 240px;
+    padding: 10px;
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: var(--border-radius, 4px);
+    background: var(--neutral-layer-1);
+}
+
+.recorder-unsupported {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+}
+
+/* The live camera preview: bounded so a 720p stream never blows the panel (and a collapsed video
+   element would otherwise render at its intrinsic size before a stream binds). */
+.recorder-preview {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    aspect-ratio: 16 / 9;
+    background: var(--neutral-fill-secondary);
+    border-radius: var(--border-radius, 4px);
+    object-fit: cover;
+}
+
+.recorder-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.recorder-live {
+    /* The ● Recording badge keeps its accent colour; only pin the alignment so it sits on the same
+       baseline as the Stop button. */
+    align-self: center;
+}
