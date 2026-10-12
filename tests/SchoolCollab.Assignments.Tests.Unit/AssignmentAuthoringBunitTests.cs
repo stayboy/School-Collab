@@ -600,9 +600,32 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindComponents<FluentTextArea>()
+            // Round wysiwyg-instruction-editor (owner 2026-10-11): the field is a RICH editor now, on its
+            // own full-width row — the id is unchanged, so D9's bUnit contract survives the control swap.
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
                 .Should().Contain(t => t.Instance.Id == "authoring-basics-instructions",
-                    "INS-1 + D5: Instructions is the student-facing field, now in the bottom Instructions compartment");
+                    "INS-1 + D5: Instructions is the student-facing field, in Basics, now as a rich editor");
+        });
+    }
+
+    /// <summary>Defect (3) of round <c>wysiwyg-instruction-editor</c> (2026-10-11, found by the live
+    /// verification of defect (2)): the editor's <c>Value</c> was written in the BARE attribute form
+    /// <c>Value="_model.Instructions"</c> — on a string-typed parameter Razor passes the LITERAL
+    /// text, so the editor seeded (and would have saved back) the string "_model.Instructions"
+    /// instead of the author's prose. The bound field must arrive, verbatim.</summary>
+    [TestMethod]
+    public void Edit_GuidanceEditor_ReceivesTheInstructionsField_NotTheLiteralAttributeName()
+    {
+        var cut = RenderAuthoring(
+            AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, instructions: "Read pages 4-6."));
+
+        cut.WaitForAssertion(() =>
+        {
+            var editor = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
+                .Single(t => t.Instance.Id == "authoring-basics-instructions");
+            editor.Instance.Value.Should().Be("Read pages 4-6.",
+                "Value=\"@_model.Instructions\" must bind the field; the bare form passes the literal attribute text");
         });
     }
 
@@ -939,16 +962,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D5/D6, revised by the redesign round (2026-10-10): Description + Instructions leave
-    /// Basics for their own bottom compartment — now ONE wide cell stacking Teacher notes over
-    /// Student guidance, each row keeping FormRow's label-below placement — with the materials and the
-    /// full-width titled dropzone section below it (AC-9/AC-11).</summary>
-    /// <summary>Owner, 2026-10-10 (this pass): the Instructions compartment is COLLAPSED. The two notes
-    /// now sit in BASICS as ONE row — beneath Guardian review, their textareas inline to each other
-    /// exactly like the "Assignment type &amp; grading format" row (w-6 each) — and the materials block
-    /// moved COMPLETE to the top of the right pane, above the Targets &amp; audience card (AC-9/AC-11).</summary>
+    /// <summary>The notes area after the grill round (owner 2026-10-11): BOTH notes are rich editors
+    /// inside ONE label-less, full-width TAB group in Basics (Student guidance first), the materials
+    /// block still tops the right pane (AC-9/AC-11), and the collapsed Instructions compartment stays
+    /// gone.</summary>
     [TestMethod]
-    public void Notes_LiveInBasicsInOneInlineRow_AndMaterialsTopTheRightPane()
+    public void Notes_BothFieldsAreRichEditors_InOneLabelLessFullWidthTabGroup()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
 
@@ -957,28 +976,28 @@ public class AssignmentAuthoringBunitTests : BunitContext
             cut.FindAll("#authoring-instructions").Should().BeEmpty(
                 "the Instructions compartment is collapsed entirely (owner, 2026-10-10)");
 
-            // ── The notes are part of Basics: ONE row labelled "Notes", each field filling the row and
-            // carrying its own specific caption BENEATH it (owner, 2026-10-10).
+            // ── Grill Q1/Q2 (owner 2026-10-11): one TAB group, guidance first, NO row label, ids kept.
             var basics = cut.Find("#authoring-basics");
-            var noteFields = basics
-                .QuerySelectorAll("#authoring-basics-description, #authoring-basics-instructions")
-                .ToList();
-            noteFields.Should().HaveCount(2, "both notes live in Basics now — the old compartment is gone");
-            noteFields.Should().OnlyContain(f => f.ClassList.Contains("authoring-note-input"),
-                "…filling the row rather than the narrow w-6 tenth-fields the owner rejected");
-            noteFields
-                .Select(f => f.ParentElement!.QuerySelector("label.authoring-note-label")?.TextContent.Trim())
-                .Should().Equal(["Teacher notes", "Student guidance"],
-                    "…each with its own caption BENEATH the textarea, in document order");
-            basics.TextContent.Should().NotContain("Teacher notes & student guidance",
-                "the old combined row label is gone — the row is labelled 'Notes'");
-            System.Text.RegularExpressions.Regex.IsMatch(basics.InnerHtml, @">\s*Notes\s*<")
-                .Should().BeTrue("the row's own label renders as just 'Notes'");
-            cut.FindComponents<FluentTextArea>()
-                .Where(t => t.Instance.Id is "authoring-basics-description" or "authoring-basics-instructions")
-                .Select(t => t.Instance.Rows)
-                .Should().OnlyContain(rows => rows == 4,
-                    "D11: both textareas render at the same height");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
+                .Select(t => t.Instance.Id)
+                .Should().Equal(
+                    new[] { "authoring-basics-instructions", "authoring-basics-description" },
+                    "D9's ids ride on the two editors, guidance first (Q1)");
+            cut.Find("fluent-tabs").Should().NotBeNull("the notes are a TAB group (the owner's choice)");
+            basics.InnerHtml.IndexOf(">Student guidance<", StringComparison.Ordinal)
+                .Should().BeLessThan(basics.InnerHtml.IndexOf(">Teacher notes<", StringComparison.Ordinal),
+                    "guidance is the first tab (Q1)");
+            cut.FindComponents<FluentTextArea>().Select(t => t.Instance.Id)
+                .Should().NotContain("authoring-basics-instructions")
+                .And.NotContain("authoring-basics-description",
+                    "neither note is a textarea anymore");
+            basics.QuerySelectorAll(".fluent-tab-strip label").Should().BeEmpty(
+                "the tab group carries NO label (Q2) — the tabs name the fields");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.FluentTabStrip>().Should().HaveCount(1,
+                "the chrome is the shared FluentTabStrip primitive (extracted for reuse)");
+            basics.QuerySelector("#authoring-basics-instructions").Should().NotBeNull(
+                "both tab PANELS render even while one is inactive — switching tabs must not remount an editor");
+            basics.QuerySelector("#authoring-basics-description").Should().NotBeNull();
 
             // ── The materials block tops the right pane, above the Targets & audience card.
             var pane = cut.Find("#authoring-targets");
@@ -1011,6 +1030,26 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     // ── Criterion 5: the §11 action matrix ─────────────────────────────────
+
+    /// <summary>Grill Q3 (owner 2026-10-11): View mode's surface is the SUMMARY (ShowSummary gates the
+    /// form out), so the two notes stack THERE as sanitised readers with their captions — no tabs.</summary>
+    [TestMethod]
+    public void View_BothNotesStackAsSanitisedReaders_NoTabs()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.View,
+            MakeDto(AssignmentStatusDto.Published, instructions: "<p>Read <strong>pages 4-6</strong>.</p>"));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstruction>()
+                .Should().HaveCount(2, "guidance and teacher notes both render as readers in View (Q3)");
+            cut.Find("#authoring-basics-instructions strong")!.TextContent.Should().Be("pages 4-6",
+                "the guidance reader renders sanitised markup");
+            cut.FindAll(".authoring-note-caption").Select(c => c.TextContent.Trim())
+                .Should().Equal(new[] { "Student guidance", "Teacher notes" });
+            cut.FindAll("fluent-tabs").Should().BeEmpty("a reader should not click through tabs (Q3)");
+        });
+    }
 
     [TestMethod]
     [DataRow(AssignmentStatusDto.Draft, "Publish")]
@@ -1101,14 +1140,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "UX-17: an inapplicable control is disabled, never hidden");
             var passScore = cut.Find("#scoringFieldsPassScore");
             passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox",
-                "D11: the inapplicable state is a checkbox whose LABEL explains the disabled state");
-            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the label IS the explanation (FluentCheckbox renders its Label as child content)");
+                "D11: the inapplicable state is a disabled checkbox");
+            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableShortLabel,
+                "owner 2026-10-11: the checkbox label stays SHORT (FluentCheckbox renders its Label as child content)");
             cut.FindAll(".scoring-fields-reason").Should().BeEmpty(
                 "D11: the standalone reason paragraph is gone");
             ScoringFieldDisabled(cut, "scoringFieldsMaxAttempts").Should().BeTrue();
-            cut.Markup.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the label carries the reason the fields cannot be edited");
+            cut.FindAll(".form-row-cell-help").Select(h => h.GetAttribute("title"))
+                .Should().Contain(t => t != null && t.Contains(ScoringFieldsSection.ScoringInapplicableReason),
+                "owner 2026-10-11: the long reason travels as the pass score CELL's help-hint tooltip");
         });
     }
 
@@ -1479,8 +1519,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             var pairs = new (string Name, string[] Ids)[]
             {
-                ("type & grading format", ["authoring-basics-type", "authoring-basics-grading"]),
-                ("max score & max attempts", ["authoring-basics-max-score", "scoringFieldsMaxAttempts"]),
+                ("grading", ["authoring-basics-type", "authoring-basics-grading"]),
+                ("score", ["authoring-basics-max-score", "scoringFieldsMaxAttempts", "scoringFieldsPassScore"]),
                 ("status & available from", ["authoring-basics-status", "authoring-basics-available-from"])
             };
 
@@ -1502,8 +1542,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 // element children also carry FluentUI's own <style> elements, so the assertion
                 // counts the CONTROLS, never the cell's children.)
                 var cell = row.QuerySelector(".form-row-input")!;
-                cell.QuerySelectorAll("fluent-select, fluent-number-field, span.authoring-readonly-value")
-                    .Should().HaveCount(2, $"both {name} controls sit in the ONE input cell, so they sit inline");
+                cell.QuerySelectorAll("fluent-select, fluent-number-field, fluent-checkbox, span.authoring-readonly-value")
+                    .Should().HaveCount(ids.Length, $"all {name} controls sit in the ONE input cell, so they sit inline");
                 ids.Should().OnlyContain(id => cell.QuerySelector($"#{id}") != null,
                     $"both {name} controls belong to that one row");
 
@@ -1512,6 +1552,22 @@ public class AssignmentAuthoringBunitTests : BunitContext
                     cut.FindAll($"#{id}").Should().ContainSingle($"{id} renders exactly once");
                 }
             }
+
+            // Owner refinement (2026-10-11): each paired input carries its own FormRowCell caption
+            // UNDER it, while the row keeps the short group label — "Grading" and "Score".
+            var captions = basics.QuerySelectorAll(".form-row-cell-caption");
+            captions.Select(c => c.TextContent.Trim()).Should().Contain(new[]
+            {
+                "Assignment type", "Grading format", "Max score", "Max attempts", "Pass score",
+            });
+            foreach (var caption in captions)
+            {
+                var forId = caption.GetAttribute("for");
+                basics.QuerySelector($"#{forId}").Should().NotBeNull(
+                    $"the \"{caption.TextContent.Trim()}\" caption labels a real control");
+            }
+            basics.TextContent.Should().MatchRegex(@"Grading").And.MatchRegex(@"Score",
+                "the rows are named by their short group labels");
         });
     }
 
@@ -1626,28 +1682,38 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             var basics = cut.Find("#authoring-basics");
             basics.QuerySelector("#authoring-basics-max-score").Should().NotBeNull();
-            basics.InnerHtml.Should().Contain("Feedback mode:",
-                "D11: the feedback-mode narrative rides the (i) help icon on the grading row's label");
-            basics.InnerHtml.Should().Contain(ScoringFieldsSection.PassScoreHint,
-                "D11: the pass-threshold hint rides the Pass Score row's (i) help icon");
-            basics.InnerHtml.Should().Contain(
-                QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded),
-                "D11: the AI-availability text rides the same merged icon on the paired row");
-            basics.QuerySelectorAll(".form-row-help").Should().HaveCount(2,
-                "D11: exactly the type/grading row and the Pass Score row carry help icons "
+            basics.QuerySelectorAll(".form-row-help").Should().HaveCount(1,
+                "owner 2026-10-11: only the type/grading row keeps a ROW-level help icon — the "
+                + "pass-threshold hint moved to the Pass score CELL's caption icon "
                 + "(Guardian review's is conditional and its policy is unset here)");
+            basics.QuerySelectorAll(".form-row-cell-help").Select(h => h.GetAttribute("title"))
+                .Should().Contain(t => t == ScoringFieldsSection.PassScoreHint,
+                "owner 2026-10-11: the pass-threshold hint rides the Pass score cell's help icon");
 
-            // D14f: the FIRST help icon is the type/grading row's — its tooltip is three
-            // labelled lines (purpose / AI availability / feedback mode), and the purpose
-            // sentence is the documented causal chain (§3.3 immediate-vs-held; FR-220 gate).
-            var gradingRowHelp = basics.QuerySelectorAll(".form-row-help")[0]
-                .GetAttribute("title") ?? string.Empty;
-            gradingRowHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
-                "D14f: the row's (i) icon explains what type & grading DRIVE, not just what they are");
-            gradingRowHelp.Should().Contain(AssignmentTypeGradingRules.OnlineMeaning,
-                "D15: the row also states the SELECTED type's own meaning (Online in this fixture)");
-            gradingRowHelp.Split('\n').Should().HaveCount(4,
-                "D14f/D15: four labelled lines — purpose, the type's meaning, AI availability, feedback mode");
+            // Owner 2026-10-11: the merged row tooltip is SPLIT onto the two cells — each input's
+            // (i) icon carries only the lines that apply to it, and the row label keeps ONE
+            // minimal sentence.
+            string CellHelpTitle(string controlId) =>
+                basics.QuerySelector($".form-row-cell-caption[for='{controlId}'] .help-icon")
+                    ?.GetAttribute("title") ?? string.Empty;
+
+            basics.QuerySelectorAll(".form-row-help")[0].GetAttribute("title")
+                .Should().Be(Authoring.GradingGroupHint,
+                    "owner 2026-10-11: the Grading row label's hint stays MINIMAL");
+
+            var typeHelp = CellHelpTitle("authoring-basics-type");
+            typeHelp.Should().Contain(AssignmentTypeGradingRules.OnlineMeaning,
+                "D15: the SELECTED type's own meaning (Online in this fixture) rides the Assignment type cell");
+            typeHelp.Should().Contain(
+                QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded),
+                "FR-220: the AI-availability text rides the Assignment type cell");
+
+            var gradingFormatHelp = CellHelpTitle("authoring-basics-grading");
+            gradingFormatHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
+                "D14f: what the grading format POWERS rides the Grading format cell");
+            gradingFormatHelp.Should().Contain("Feedback mode:",
+                "D11: the feedback-mode narrative rides the Grading format cell");
+
             basics.QuerySelector("#scoringFieldsPassScore").Should().NotBeNull();
             cut.FindAll("#authoring-submission").Should().BeEmpty(
                 "D1: the Submission & Sign-off compartment is retired");

@@ -43,7 +43,13 @@
                 <h2>Instructions</h2>
                 @if (!string.IsNullOrWhiteSpace(_view.Instructions))
                 {
-                    <p class="ward-instructions-text">@_view.Instructions</p>
+                    @* Q4 safety ordering (round wysiwyg-instruction-editor): authored HTML is stored in
+                       Instructions now, so the ward renders through the ONE sanitiser-fed component — a
+                       stored script can never execute here — and legacy plain text renders exactly as
+                       before (Q16/AC-4). *@
+                    <div class="ward-instructions-text">
+                        <RichInstruction Value="@_view.Instructions" />
+                    </div>
                 }
                 @if (_view.Materials is { Count: > 0 })
                 {

@@ -1,0 +1,43 @@
+@* FormRowCell (owner, 2026-10-11) — the paired-input cell of the shared FormRow family. Use it
+   when ONE row stacks two (or more) short inputs side by side and each input needs its OWN name
+   written under it: the FormRow keeps its short GROUP label ("Grading", "Score") in the shared
+   180px gutter, and every FormRowCell Caption names the input it sits under. Cells share the
+   row's input space equally and fill it — no per-row width utilities.
+
+       <FormRow Label="Grading" Required AlignTop For="…">
+           <FormRowCell Caption="Assignment type" For="…">
+               <FluentSelect Id="…" … />
+           </FormRowCell>
+           <FormRowCell Caption="Grading format" For="…">
+               <FluentSelect Id="…" … />
+           </FormRowCell>
+       </FormRow> *@
+<div class="form-row-cell">
+    @ChildContent
+    @if (!string.IsNullOrEmpty(Caption) || !string.IsNullOrEmpty(Help))
+    {
+        <label class="form-row-cell-caption" for="@For">
+            @Caption
+            @if (!string.IsNullOrEmpty(Help))
+            {
+                <HelpIcon Text="@Help" Class="form-row-cell-help" />
+            }
+        </label>
+    }
+</div>
+
+@code {
+    /// <summary>The cell's input(s) — typically one form control.</summary>
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+
+    /// <summary>The input's own name, rendered as a quiet subtext caption UNDER the input. Null
+    /// renders no caption — the cell is then a plain stacked grouping.</summary>
+    [Parameter] public string? Caption { get; set; }
+
+    /// <summary>The DOM id the caption labels (the <c>&lt;label for&gt;</c> target).</summary>
+    [Parameter] public string? For { get; set; }
+
+    /// <summary>Optional hint carried as a help icon on the caption (the FormRow <c>Help</c>
+    /// pattern, cell-scoped): the long wording lives in the icon's tooltip, never inline.</summary>
+    [Parameter] public string? Help { get; set; }
+}

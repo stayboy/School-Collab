@@ -1,0 +1,8 @@
+/* The rich body's label (grill extension, owner 2026-10-11): the FluentTextArea carried its own Label,
+   so the editor replacement needs the caption element itself — sized like the other field labels. */
+.material-body-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+}

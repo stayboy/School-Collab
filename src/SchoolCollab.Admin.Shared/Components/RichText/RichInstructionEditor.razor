@@ -1,0 +1,230 @@
+@using Microsoft.JSInterop
+@using Blazored.TextEditor
+@inject IJSRuntime JS
+@inject ILogger<RichInstructionEditor> Logger
+@implements IAsyncDisposable
+@* RichInstructionEditor (round wysiwyg-instruction-editor, §8.4 Q12) — the shared rich-text editor for
+   instruction prose, and the answer to "don't replicate the wrapper and its JS in every host": this
+   component lives in the shared UI library, imports its own asset loader, and mounts the wrapper only
+   once Quill exists. Hosts declare nothing.
+
+   The wrapper IS the interop (owner, 2026-10-11) — we write no JS bridge. What we read at submit is
+   sanitised by the caller, and what we seed is a plain string. *@
+<div class="rich-instruction-editor" id="@Id">
+    @if (_assetsReady)
+    {
+        <BlazoredTextEditor @ref="_editor"
+                            Theme="snow"
+                            Placeholder="@Placeholder"
+                            ReadOnly="@ReadOnly">
+            <ToolbarContent>@((MarkupString)ToolbarMarkup)</ToolbarContent>
+        </BlazoredTextEditor>
+    }
+    else
+    {
+        @* The assets are loading: an empty box beats handing the wrapper a page where window.Quill
+           does not exist yet. *@
+        <div class="rich-instruction-editor-loading" aria-hidden="true"></div>
+    }
+</div>
+
+@code {
+    /// <summary>Optional element id (the bUnit/page seam).</summary>
+    [Parameter] public string? Id { get; set; }
+
+    /// <summary>The stored instruction text to seed the editor with — plain text or sanitised HTML.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>Read-only posture (the authoring page's View mode).</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Shown while the editor is empty.</summary>
+    [Parameter] public string Placeholder { get; set; } = "Write the instructions…";
+
+    /// <summary>
+    /// The asset loader in THIS library — the reason no host declares a tag.
+    /// The <c>./</c> prefix is MANDATORY, not stylistic: blazor.web.js's "import" interop handler
+    /// rewrites only specifiers starting with <c>./</c> to absolute URLs (via document.baseURI)
+    /// before calling <c>import()</c>. A bare specifier like <c>_content/…</c> is passed through
+    /// raw, fails module resolution ("Failed to resolve module specifier") BEFORE any fetch, and
+    /// lands as a swallowed JSException — the editor then stays on its loading placeholder for
+    /// ever (the reported "editor not displaying" defect, diagnosed 2026-10-11). Every working
+    /// module import in this repo carries the prefix: dialogDrawer.js, chatInput.js, the
+    /// collocated *.razor.js modules — see the constant below.
+    /// </summary>
+    public const string AssetsModulePath = "./_content/SchoolCollab.Admin.Shared/js/quillAssets.js";
+
+    /// <summary>
+    /// The toolbar. This constant is the round's one <b>named</b> MarkupString exception (G3): it is OUR
+    /// markup, never user input. The formats are tag-based only (G4) — no colour, background, font or
+    /// size, because those emit inline <c>style</c> that <c>RichInstructionSanitizer</c> refuses to
+    /// admit — and no image, because Q14 keeps media as instruction ITEMS rather than inline embeds.
+    /// </summary>
+    private const string ToolbarMarkup = """
+        <span class="ql-formats">
+            <select class="ql-header">
+                <option selected></option>
+                <option value="1"></option>
+                <option value="2"></option>
+                <option value="3"></option>
+                <option value="4"></option>
+            </select>
+        </span>
+        <span class="ql-formats">
+            <button class="ql-bold"></button>
+            <button class="ql-italic"></button>
+            <button class="ql-underline"></button>
+            <button class="ql-strike"></button>
+        </span>
+        <span class="ql-formats">
+            <button class="ql-list" value="ordered"></button>
+            <button class="ql-list" value="bullet"></button>
+        </span>
+        <span class="ql-formats">
+            <button class="ql-link"></button>
+            <button class="ql-clean"></button>
+        </span>
+        """;
+
+    private BlazoredTextEditor? _editor;
+    private IJSObjectReference? _assetsModule;
+    private bool _assetsReady;
+    private bool _seeded;
+    private string? _seededValue;
+
+    /// <summary>Whether the render pass that gives the WRAPPER its initialisation turn has run —
+    /// see <see cref="OnAfterRenderAsync"/> for why the seed must not share the mount batch.</summary>
+    private bool _editorMounted;
+
+    /// <summary>Bounded seed retries: each attempt is one render pass, so a permanently broken
+    /// interop can never loop, and a transient one gets more than one chance.</summary>
+    private int _seedAttempts;
+
+    private const int MaxSeedAttempts = 3;
+
+    /// <summary>A new value (the dialog reopening on another row) re-seeds, rather than leaving the
+    /// previous row's prose on screen.</summary>
+    protected override void OnParametersSet()
+    {
+        if (_seededValue != Value)
+        {
+            _seededValue = Value;
+            _seeded = false;
+            _seedAttempts = 0;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _assetsModule = await JS.InvokeAsync<IJSObjectReference>("import", AssetsModulePath);
+                if (_assetsModule is null)
+                {
+                    // bUnit's loose default; a real browser either resolves the module or throws.
+                    return;
+                }
+
+                await _assetsModule.InvokeAsync<bool>("ensureQuillAssets");
+            }
+            catch (JSException ex)
+            {
+                // Without the assets there is no editor to show; the box stays empty and the reason is
+                // logged rather than swallowed (the lesson from the Enter-guard round).
+                Logger.LogWarning(ex, "Quill assets could not be loaded; the instruction editor is unavailable in this session.");
+                return;
+            }
+
+            // Blazor calls a CHILD's OnAfterRenderAsync before its parent's, so the wrapper would have
+            // initialised against a page with no window.Quill. Mount it on the render AFTER the assets
+            // are in place instead.
+            _assetsReady = true;
+            StateHasChanged();
+            return;
+        }
+
+        if (!_assetsReady || _editor is null)
+        {
+            return;
+        }
+
+        if (!_editorMounted)
+        {
+            // The 2026-10-11 "editor not displaying" defect, found by a live instrumented repro:
+            // in the batch where the WRAPPER first renders, this parent's OnAfterRenderAsync runs
+            // BEFORE the child's, so a seed issued here reached QuillFunctions.loadQuillHTMLContent
+            // while the element had no __quill yet (createQuill had not run) — the resulting
+            // TypeError surfaced as a JSException and the PAGE's ErrorBoundary replaced the whole
+            // form. Rendering one more pass hands the child its initialisation turn: the next batch
+            // is processed only after the wrapper's createQuill has been awaited to completion.
+            _editorMounted = true;
+            StateHasChanged();
+            return;
+        }
+
+        if (_seeded || string.IsNullOrEmpty(Value) || _seedAttempts >= MaxSeedAttempts)
+        {
+            return;
+        }
+
+        _seedAttempts++;
+        try
+        {
+            _seeded = true; // cleared in the catch so the next render pass may retry
+            await _editor.LoadHTMLContent(Value); // G6: a string seed, so no MarkupString is needed.
+        }
+        catch (JSException ex)
+        {
+            _seeded = false;
+            Logger.LogWarning(
+                ex,
+                "Seeding the instruction editor failed (attempt {Attempt} of {Max}); it will be retried on a later render pass.",
+                _seedAttempts,
+                MaxSeedAttempts);
+        }
+    }
+
+    /// <summary>
+    /// The editor's HTML, read when the caller submits (G6). The wrapper has no change callback, and
+    /// reading at submit keeps sanitising to one point: where the value can enter the model.
+    /// <para><c>null</c> means "the editor is not available in this session" (assets never loaded, or
+    /// the interop failed) — the caller keeps the model's current value rather than wiping the
+    /// guidance or faulting the save through the page's ErrorBoundary.</para>
+    /// </summary>
+    public async Task<string?> GetHtmlAsync()
+    {
+        if (_editor is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _editor.GetHTML();
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Reading the instruction editor's HTML failed; the caller keeps its current value.");
+            return null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_assetsModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _assetsModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone; there is nothing left to release.
+        }
+    }
+}

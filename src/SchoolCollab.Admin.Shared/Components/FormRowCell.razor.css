@@ -1,0 +1,22 @@
+/* FormRowCell — the paired-input cell (owner, 2026-10-11). Cells are CONTENT-SIZED: the input
+   keeps its intrinsic width (never stretched to fill — owner refinement) and the caption is a
+   quiet SUBTEXT under it, deliberately smaller/lighter/italic so the row's group label stays the
+   thing that reads first. */
+.form-row-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.form-row-cell-caption {
+    display: block;
+    font-size: 0.72rem;
+    color: #797775;
+    font-style: italic;
+}
+
+.form-row-cell-help {
+    margin-left: 2px;
+}

@@ -142,6 +142,28 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         });
     }
 
+    /// <summary>Q4 safety ordering (round wysiwyg-instruction-editor): authored HTML is stored in
+    /// Instructions now, so the ward renders through the ONE sanitiser-fed component — a stored
+    /// payload carrying a script never executes here, and the prose still renders (AC-3).</summary>
+    [TestMethod]
+    public void Instructions_WithStoredHtml_RendersSanitised_NeverAScript()
+    {
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 0, null)
+            ],
+            Instructions: "<p>Read <strong>chapter 5</strong>.</p><script>alert('x')</script>");
+        SetupView(view);
+        SetupResultNotFound();
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("<strong>chapter 5</strong>"));
+        cut.FindAll("script").Should().NotContain(s => s.TextContent.Contains("alert"),
+            "display sanitises AGAIN, whatever reached storage");
+    }
+
     [TestMethod]
     public void Materials_Render_WithTheirTitles_AndNeverTheTeacherNotes()
     {

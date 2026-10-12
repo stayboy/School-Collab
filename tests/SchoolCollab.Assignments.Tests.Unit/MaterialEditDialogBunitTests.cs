@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
+using SchoolCollab.Admin.Shared.Components.RichText;
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Contracts;
 
@@ -136,14 +137,13 @@ public class MaterialEditDialogBunitTests : BunitContext
     }
 
 
-    /// <summary>The seed must be VISIBLE, not merely present in the model. Owner-found (2026-10-10):
-    /// editing a Text Content material appeared to LOSE its body. Asserting the submitted payload alone
-    /// let a seeded-but-unpopulated field through — under a web component, a value that never reaches the
-    /// rendered element is a body the author cannot see, and a submit that then pushes the empty field
-    /// back into the model clears it. So this pins the RENDERED field, which is the contract the browser
-    /// actually honours.</summary>
+    /// <summary>The seed must reach the CONTROL, not merely the model (owner-found 2026-10-10, retargeted
+    /// 2026-10-11): the body field is the rich editor now, so the seam is the editor's Value parameter —
+    /// the seed the wrapper hands Quill through <c>LoadHTMLContent</c>. Whether it paints is browser-side
+    /// (excluded from bUnit by Q17); the rendered-seed half is pinned live and by
+    /// <c>RichInstructionBunitTests</c>' connected-read seam.</summary>
     [TestMethod]
-    public async Task Edit_ShowsTheSeededBodyInTheField_NotJustInTheModel()
+    public async Task Edit_ShowsTheSeededBodyInTheEditor_NotJustInTheModel()
     {
         var cut = RenderProvider();
         var row = new InstructionEditorRow
@@ -158,20 +158,22 @@ public class MaterialEditDialogBunitTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
-        var area = cut.Find("fluent-text-area");
-        area.OuterHtml.Should().Contain("Read pages 4-6 and answer the questions.",
-            "the seeded body must be in the rendered field the author reads and the browser posts back");
+        cut.FindComponents<RichInstructionEditor>()
+            .Should().ContainSingle(e => e.Instance.Id == MaterialEditDialog.BodyFieldId
+                && e.Instance.Value == "Read pages 4-6 and answer the questions.",
+                "the seeded body must reach the editor that paints it");
         cut.Find("fluent-text-field").OuterHtml.Should().Contain("Fraction basics",
             "…and so must the seeded title");
     }
 
     /// <summary>The write-back half — the scenario the owner hit: the author EDITS the body and saves.
-    /// A seeded field that never pushes its change back leaves the body looking untouched, which is
-    /// exactly "the edit lost my body". Drives the change through the rendered control, so a field whose
-    /// two-way binding is not actually wired fails here rather than in the app.</summary>
+    /// The editor has no binding (G6), so the dialog reads its HTML at submit; this pins that read
+    /// travelling into the result, sanitised on the way (Q11 write-side).</summary>
     [TestMethod]
     public async Task Edit_ChangingTheBody_ReturnsTheEditedBody()
     {
+        JSInterop.Setup<string>("QuillFunctions.getQuillHTML", _ => true)
+            .SetResult("<p>Read pages 4-6, then do the worksheet.</p>");
         var cut = RenderProvider();
         var row = new InstructionEditorRow
         {
@@ -184,47 +186,59 @@ public class MaterialEditDialogBunitTests : BunitContext
             MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogSize.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
-        cut.Find("fluent-text-area").Change("Read pages 4-6, then do the worksheet.");
         cut.Find("form").Submit();
 
         var result = await task;
         result.Should().NotBeNull();
-        result!.Body.Should().Be("Read pages 4-6, then do the worksheet.",
-            "the edited body is what the row must receive");
+        result!.Body.Should().Be("<p>Read pages 4-6, then do the worksheet.</p>",
+            "the edited body — read from the editor and sanitised — is what the row must receive");
     }
 
-    /// <summary>Owner requirement (2026-10-10): Enter inside a Text material's BODY must not submit the
-    /// dialog — the body is multi-line prose. Pins the WIRING (the collocated module is imported and
-    /// asked to guard the body field), because the behaviour itself is browser-side: FluentTextArea
-    /// exposes no <c>OnKeyDown</c>, which is why the guard is a native listener rather than a Blazor
-    /// handler (the <c>chatInput.js</c> precedent). A Link's dialog has no textarea, so it is not
-    /// guarded at all — asserted below so the guard cannot drift into a no-op.</summary>
+    /// <summary>Q11 write-side on the dialog's own path: whatever the editor yields is sanitised before
+    /// it can become the material's body — a stored script can never ride along in the payload.</summary>
     [TestMethod]
-    public async Task Text_BodyField_IsGuardedAgainstEnterSubmitting()
+    public async Task Text_BodyHtml_IsSanitisedOnWrite()
     {
-        var module = JSInterop.SetupModule(MaterialEditDialog.EnterGuardModulePath);
-        module.Setup<bool>("guardEnterKey", MaterialEditDialog.BodyFieldId).SetResult(true);
+        JSInterop.Setup<string>("QuillFunctions.getQuillHTML", _ => true)
+            .SetResult("<p>Hi<script>alert(1)</script></p>");
         var cut = RenderProvider();
 
-        _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+        var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Text, Title = "Fraction basics" },
             "Add Text Content", DialogSize.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        cut.Find("form").Submit();
 
-        module.Invocations.Should().Contain(
-            i => i.Identifier == "guardEnterKey"
-                && i.Arguments.Contains(MaterialEditDialog.BodyFieldId),
-            "the body field is guarded, so Enter inserts a newline instead of submitting");
-        cut.Find("fluent-text-area").Id.Should().Be(MaterialEditDialog.BodyFieldId,
-            "…and the guard's selector is the field's real id");
+        var result = await task;
+        result.Should().NotBeNull();
+        result!.Body.Should().Be("<p>Hi</p>", "the allow-list drops the script, never the prose");
     }
 
-    /// <summary>The other half of the guard's scope: a Link's dialog has nothing to guard.</summary>
+    /// <summary>An EMPTY rich editor yields Quill's <c>&lt;p&gt;&lt;br&gt;&lt;/p&gt;</c> — that is "no body",
+    /// not a body worth storing (grill extension, owner 2026-10-11).</summary>
     [TestMethod]
-    public async Task Link_HasNoBodyField_SoNothingIsGuarded()
+    public async Task Text_EmptyEditorBody_StoresNull()
     {
-        var module = JSInterop.SetupModule(MaterialEditDialog.EnterGuardModulePath);
+        JSInterop.Setup<string>("QuillFunctions.getQuillHTML", _ => true).SetResult("<p><br></p>");
+        var cut = RenderProvider();
+
+        var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel { Kind = InstructionKindDto.Text, Title = "Fraction basics" },
+            "Add Text Content", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        cut.Find("form").Submit();
+
+        var result = await task;
+        result.Should().NotBeNull();
+        result!.Body.Should().BeNull("an editor holding nothing stores no body — never the empty payload");
+    }
+
+    /// <summary>The other half of the body's scope: a Link's dialog has no body to render.</summary>
+    [TestMethod]
+    public async Task Link_HasNoBodyField_SoNoEditorIsRendered()
+    {
         var cut = RenderProvider();
 
         _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
@@ -233,8 +247,6 @@ public class MaterialEditDialogBunitTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
-        cut.FindAll("fluent-text-area").Should().BeEmpty("a Link has no body");
-        module.Invocations.Should().NotContain(i => i.Identifier == "guardEnterKey",
-            "…so there is nothing to attach the Enter guard to");
+        cut.FindComponents<RichInstructionEditor>().Should().BeEmpty("a Link has no body");
     }
 }

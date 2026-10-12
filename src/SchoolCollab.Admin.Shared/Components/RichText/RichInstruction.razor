@@ -1,0 +1,25 @@
+@* RichInstruction (round wysiwyg-instruction-editor, §8.4 Q15) — the ONE place authored instruction
+   HTML becomes markup, and therefore the only MarkupString in the tree (AC-6). It is fed exclusively by
+   RichInstructionSanitizer, on every render: a payload that somehow carries a script is neutralised here
+   as well as on write, which is the defence in depth Q11 asks for.
+
+   Used by every surface that PRINTS instruction text — the ward card, the assignment detail, question
+   surfaces — so no surface can forget. Plain text passes through untouched (Q16/AC-4). *@
+@if (!string.IsNullOrEmpty(_sanitized))
+{
+    <div class="rich-instruction" id="@Id">@((MarkupString)_sanitized)</div>
+}
+
+@code {
+    /// <summary>The stored instruction text — plain text or authored HTML; both are accepted.</summary>
+    [Parameter, EditorRequired] public string? Value { get; set; }
+
+    /// <summary>Optional element id (the bUnit seam).</summary>
+    [Parameter] public string? Id { get; set; }
+
+    private string _sanitized = string.Empty;
+
+    /// <summary>Sanitise on RENDER, not in the markup: the guard has to run wherever the value comes
+    /// from — a page, a re-render, or a future caller this component has never met.</summary>
+    protected override void OnParametersSet() => _sanitized = RichInstructionSanitizer.Sanitize(Value);
+}

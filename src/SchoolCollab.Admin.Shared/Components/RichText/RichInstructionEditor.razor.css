@@ -1,0 +1,22 @@
+/* The rich instruction editor's box. Sizing lives here (never an inline style): the wrapper renders a
+   bare contenteditable surface, which would otherwise collapse to nothing inside a dialog. */
+.rich-instruction-editor ::deep .ql-toolbar,
+.rich-instruction-editor ::deep .ql-container {
+    font-family: inherit;
+}
+
+.rich-instruction-editor ::deep .ql-container {
+    min-height: 8rem;
+}
+
+.rich-instruction-editor ::deep .ql-editor {
+    min-height: 8rem;
+}
+
+/* The placeholder shown while the Quill assets load — the same height as the editor, so the dialog does
+   not jump when the real control arrives. */
+.rich-instruction-editor-loading {
+    min-height: 10rem;
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 4px;
+}

@@ -185,6 +185,28 @@
                                 </div>
                             }
                         </dl>
+                        @* Grill Q3 (owner 2026-10-11): the View surface IS the summary, so the two notes
+                           stack HERE as sanitised readers with their captions — a reader sees everything
+                           at once, no tabs. Legacy plain text renders exactly as before (Q16). *@
+                        @if (!string.IsNullOrWhiteSpace(_item.Instructions) || !string.IsNullOrWhiteSpace(_item.Description))
+                        {
+                            <div class="authoring-summary-notes">
+                                @if (!string.IsNullOrWhiteSpace(_item.Instructions))
+                                {
+                                    <div class="authoring-note-reader">
+                                        <label class="authoring-note-caption" for="authoring-basics-instructions">Student guidance</label>
+                                        <RichInstruction Id="authoring-basics-instructions" Value="@_item.Instructions" />
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_item.Description))
+                                {
+                                    <div class="authoring-note-reader">
+                                        <label class="authoring-note-caption" for="authoring-basics-description">Teacher notes</label>
+                                        <RichInstruction Id="authoring-basics-description" Value="@_item.Description" />
+                                    </div>
+                                }
+                            </div>
+                        }
                     </section>
                 }
 
@@ -268,17 +290,18 @@
                         }
 
                         @* Round authoring-compact-fields: type + grading are two short pickers, so they
-                           render as ONE row of the shared FormRow primitive. AlignTop is the
-                           repo's multi-input row pattern (flex-row-input-alignment): the row's own input
-                           cell already lays its children inline (8px gap) and top-aligned, and the row keeps the shared 180px label
-                           gutter, so the pair lines up with every single-field row. Do NOT add
-                           LabelPosition="Below" here: it drops that gutter and renders the pair's one
-                           label under its FIRST control — no bespoke CSS, no new component. *@
+                           render as ONE row of the shared FormRow primitive. Owner refinement
+                           2026-10-11: the row's label is the short GROUP name — "Grading" — and each
+                           picker carries its own caption under it via the shared FormRowCell
+                           ("Assignment type" / "Grading format"). AlignTop keeps the repo's
+                           multi-input row pattern, the 180px label gutter still lines the pair up
+                           with every single-field row, and the required asterisk stays on the group.
+                           Do NOT add LabelPosition="Below" here: it drops that gutter. *@
                         @* D11: the row's ONE label carries the (i) help icon whose tooltip merges
                            the AI-availability text and the feedback-mode narrative — no inline
                            prose anywhere on the row. *@
-                        <FormRow Label="Assignment type &amp; grading format" Required AlignTop
-                                 For="authoring-basics-type" Help="@GradingRowHelp">
+                        <FormRow Label="Grading" Required AlignTop
+                                 For="authoring-basics-type" Help="@GradingGroupHint">
                             @* RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
                            here as that section requires. Neither shared wrapper fits:
                            · DropdownForEnum hardcodes option text = the enum member name, but
@@ -289,20 +312,24 @@
                            · DropdownComponent binds primitive keys to pre-loaded DTO lists;
                              these are neither (enum-with-description, see above).
                            *@
-                            <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
-                                          Items="@TypeOptions"
-                                          SelectedOption="@_selectedType"
-                                          SelectedOptionChanged="@OnTypeChangedAsync"
-                                          OptionText="@(o => o?.Label ?? string.Empty)"
-                                          OptionValue="@(o => o?.Value ?? string.Empty)"
-                                          Disabled="@IsReadOnly" Class="w-6" />
-                            <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
-                                          Items="@GradingFormatOptions"
-                                          SelectedOption="@_selectedGradingFormat"
-                                          SelectedOptionChanged="@OnGradingFormatChanged"
-                                          OptionText="@(o => o?.Label ?? string.Empty)"
-                                          OptionValue="@(o => o?.Value ?? string.Empty)"
-                                          Disabled="@IsReadOnly" Class="w-6" />
+                            <FormRowCell Caption="Assignment type" For="authoring-basics-type" Help="@TypeCellHelp">
+                                <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
+                                              Items="@TypeOptions"
+                                              SelectedOption="@_selectedType"
+                                              SelectedOptionChanged="@OnTypeChangedAsync"
+                                              OptionText="@(o => o?.Label ?? string.Empty)"
+                                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                                              Disabled="@IsReadOnly" />
+                            </FormRowCell>
+                            <FormRowCell Caption="Grading format" For="authoring-basics-grading" Help="@GradingFormatCellHelp">
+                                <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
+                                              Items="@GradingFormatOptions"
+                                              SelectedOption="@_selectedGradingFormat"
+                                              SelectedOptionChanged="@OnGradingFormatChanged"
+                                              OptionText="@(o => o?.Label ?? string.Empty)"
+                                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                                              Disabled="@IsReadOnly" />
+                            </FormRowCell>
                         </FormRow>
 
                         @* D15 (owner, 2026-10-09): an applied side effect with a visible reason —
@@ -324,22 +351,27 @@
 
                         @* D9 + OD1 (round authoring-compact-fields): the author-fed scoring fields sit
                            directly under the Grading format control that already drives them. The attempt
-                           cap joins the max score here — the two short number fields are paired — and it
-                           keeps the UX-17/D12 gate: for TeacherGraded it renders DISABLED with the one
-                           reason ScoringFieldsSection still prints below the pass score, so the page
-                           never reflows when the grading format changes. *@
-                        <FormRow Label="Max score &amp; max attempts" AlignTop
+                           cap joins the max score here — and owner 2026-10-11: the PASS SCORE control
+                           joins them as the third FormRowCell, so all three score fields live in ONE
+                           "Score" row (the section renders the control only, never a FormRow). The
+                           UX-17/D12 gate is unchanged: for TeacherGraded the cap and the pass score
+                           render DISABLED, and the long inapplicable reason rides the pass score
+                           CELL's help-hint tooltip — the checkbox label stays short. *@
+                        <FormRow Label="Score" AlignTop
                                  For="authoring-basics-max-score">
-                            <FluentNumberField Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
-                                               ReadOnly="@IsReadOnly" Class="w-3" />
-                            <FluentNumberField Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
-                                               Class="w-3"
-                                               Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
+                            <FormRowCell Caption="Max score" For="authoring-basics-max-score">
+                                <FluentNumberField Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
+                                                   ReadOnly="@IsReadOnly" />
+                            </FormRowCell>
+                            <FormRowCell Caption="Max attempts" For="scoringFieldsMaxAttempts">
+                                <FluentNumberField Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
+                                                   Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
+                            </FormRowCell>
+                            <FormRowCell Caption="Pass score" For="scoringFieldsPassScore"
+                                         Help="@(ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat) ? ScoringFieldsSection.ScoringInapplicableReason : ScoringFieldsSection.PassScoreHint)">
+                                <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
+                            </FormRowCell>
                         </FormRow>
-
-                        @* UX-17/UX-18 + D11: the pass-score control renders in Basics (the checkbox
-                           below carries the inapplicable state's explanation). *@
-                        <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
 
                         @* OD3: the author guardian-review toggle lives beside the grading format. It is
                            editable ONLY while the effective policy leaves review unset; a policy-set value
@@ -353,32 +385,47 @@
                                             Disabled="@(IsReadOnly || PolicyReviewLocked)" />
                         </FormRow>
 
-                        @* Owner, 2026-10-10: the two notes live HERE in Basics now — ONE row beneath Guardian
-                           review, the textareas inline to each other exactly as the "Assignment type &
-                           grading format" row above places its two fields (w-6 each). The ids are D9's bUnit
-                           contract and survive the move untouched; the old copies in the Instructions
-                           compartment went with that compartment's collapse. *@
-                        @* Owner, 2026-10-10: ONE row labelled "Notes", each textarea carrying its own
-                           specific caption BENEATH it, and both filling the row's width (they were w-6 and
-                           read too narrow). *@
-                        <FormRow Label="Notes" For="authoring-basics-description" AlignTop>
-                            <div class="authoring-notes-row">
-                                <div class="authoring-note-cell">
-                                    <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
-                                                    ReadOnly="@IsReadOnly" Rows="4" aria-label="Teacher notes"
-                                                    Placeholder="Internal note for other teachers…"
-                                                    Class="authoring-note-input" />
-                                    <label class="authoring-note-label" for="authoring-basics-description">Teacher notes</label>
+                        @* Owner 2026-10-11 (grill round, wysiwyg-instruction-editor extension): the two
+                           notes are ONE label-less TAB group that FILL the row's width — Student guidance
+                           (student-facing, first tab and active) and Teacher notes (internal), each a
+                           full rich editor. The tabs carry the field names, so the FormRow label went
+                           with the pairing (Q2: no label; FormRow cannot render one, hence the plain
+                           container). The chrome is the shared FluentTabStrip primitive (extracted for
+                           reuse across the repo). Ids are D9's bUnit contract and ride on the editors
+                           themselves.
+
+                           View mode is a READER, never tabs (Q3): both fields stack as sanitised
+                           readers so a reader sees everything at once. *@
+                        @if (IsReadOnly)
+                        {
+                            <div class="authoring-notes-readers">
+                                <div class="authoring-note-reader">
+                                    <label class="authoring-note-caption" for="authoring-basics-instructions">Student guidance</label>
+                                    <RichInstruction Id="authoring-basics-instructions" Value="@_model.Instructions" />
                                 </div>
-                                <div class="authoring-note-cell">
-                                    <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
-                                                    ReadOnly="@IsReadOnly" Rows="4" aria-label="Student guidance"
-                                                    Placeholder="What the student must do — shown to students…"
-                                                    Class="authoring-note-input" />
-                                    <label class="authoring-note-label" for="authoring-basics-instructions">Student guidance</label>
+                                <div class="authoring-note-reader">
+                                    <label class="authoring-note-caption" for="authoring-basics-description">Teacher notes</label>
+                                    <RichInstruction Id="authoring-basics-description" Value="@_model.Description" />
                                 </div>
                             </div>
-                        </FormRow>
+                        }
+                        else
+                        {
+                            <FluentTabStrip>
+                                <FluentTab Label="Student guidance">
+                                    <RichInstructionEditor @ref="_guidanceEditor"
+                                                           Id="authoring-basics-instructions"
+                                                           Value="@_model.Instructions"
+                                                           Placeholder="What the student must do — shown to students…" />
+                                </FluentTab>
+                                <FluentTab Label="Teacher notes">
+                                    <RichInstructionEditor @ref="_teacherNotesEditor"
+                                                           Id="authoring-basics-description"
+                                                           Value="@_model.Description"
+                                                           Placeholder="Internal note for other teachers…" />
+                                </FluentTab>
+                            </FluentTabStrip>
+                        }
 
                         @* D14/D6: Subject + its strands & lessons row LEAD the authoring decisions
                            (right after Title, before type/grading — D14); Basics ends with the two notes
@@ -1337,11 +1384,13 @@
     private string CurrentCrumb =>
         EffectiveMode == AssignmentAuthoringMode.Edit ? "Edit" : "Overview";
 
-    /// <summary>D11: the feedback-mode narrative for the grading row's (i) help icon.</summary>
+    /// <summary>D11: the feedback-mode narrative — now the GRADING FORMAT cell's (i) help icon
+    /// (owner 2026-10-11, split from the row label).</summary>
     private string FeedbackModeTooltip =>
         $"Feedback mode: {EnumHelper.GetDescription(SelectedGradingFormat)}";
 
-    /// <summary>D11: the AI-availability text for the type/grading row's (i) help icon.</summary>
+    /// <summary>D11: the AI-availability text — now the ASSIGNMENT TYPE cell's (i) help icon
+    /// (owner 2026-10-11, split from the row label).</summary>
     private string GenerationHintTooltip =>
         QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat);
 
@@ -1367,12 +1416,20 @@
           + AssignmentTypeGradingRules.MeaningOf(type)
         : string.Empty;
 
-    /// <summary>D11 + D14f + D15: the paired row's ONE label carries one (i) help icon whose
-    /// tooltip is four labelled lines — what the fields drive, the selected type's meaning (with
-    /// the type→grading rule), the AI-availability text and the feedback-mode narrative — no
-    /// inline prose anywhere.</summary>
-    private string GradingRowHelp =>
-        $"{TypeGradingPurposeHint}\n{TypeMeaningHint}\n{GenerationHintTooltip}\n{FeedbackModeTooltip}";
+    /// <summary>D11 + D14f + D15 → owner 2026-10-11 (split): each cell's (i) icon carries the
+    /// lines that apply to ITS input, and the row label keeps one minimal sentence.</summary>
+    private string TypeCellHelp =>
+        $"{TypeMeaningHint}\n{GenerationHintTooltip}";
+
+    private string GradingFormatCellHelp =>
+        $"{TypeGradingPurposeHint}\n{FeedbackModeTooltip}";
+
+    /// <summary>Owner 2026-10-11: the Grading row label's hint stays MINIMAL — one short
+    /// sentence. The details live on the cells: the type's meaning and AI availability on the
+    /// Assignment type cell, the scoring-fields story and the feedback-mode narrative on the
+    /// Grading format cell.</summary>
+    public const string GradingGroupHint =
+        "These two choices drive how submissions are scored and what feedback students see.";
 
     /// <summary>D1: the pencil's click handler — flips to the full form. Never guarded (D9):
     /// nothing is navigated to and nothing is discarded.</summary>
@@ -1409,9 +1466,13 @@
             new("authoring-fact-lessons", "Lessons",
                 FactPicks(_model.ContextLessonIds, _lessonNames, _lessonsLoaded)),
             new("authoring-fact-description", "Description",
-                string.IsNullOrWhiteSpace(_item.Description) ? "—" : _item.Description!),
+                string.IsNullOrWhiteSpace(_item.Description)
+                    ? "—"
+                    : RichInstructionSanitizer.ToPlainText(_item.Description)),
             new("authoring-fact-instructions", "Instructions",
-                string.IsNullOrWhiteSpace(_item.Instructions) ? "—" : _item.Instructions!),
+                string.IsNullOrWhiteSpace(_item.Instructions)
+                    ? "—"
+                    : RichInstructionSanitizer.ToPlainText(_item.Instructions)),
         ];
 
     /// <summary>Local-time short date/time for a facts value, or "—".</summary>
@@ -2613,6 +2674,15 @@
     /// own here.</summary>
     private InstructionEditorList? _instructionList;
 
+    /// <summary>The Student guidance rich editor (round <c>wysiwyg-instruction-editor</c>). The wrapper
+    /// has no change callback (G6), so the page reads its HTML when it saves — see <c>SaveAsync</c> — and
+    /// that read is where the value is sanitised on the way into the model (Q11/AC-2).</summary>
+    private RichInstructionEditor? _guidanceEditor;
+
+    /// <summary>The Teacher notes rich editor (grill round, owner 2026-10-11): the internal note took the
+    /// same control as the guidance — same read-at-submit, same sanitise-on-write.</summary>
+    private RichInstructionEditor? _teacherNotesEditor;
+
     /// <summary>The D5 refusal line for a dropped document — replaced by the next drop's outcome.</summary>
     private string? _materialRefusal;
 
@@ -3277,6 +3347,35 @@
         // AC-4: the builder's entries ARE the assignment's target rows, so they are projected onto the
         // form model before the submit gate and the payload both read the target set.
         SyncTargetsFromBuilder();
+
+        // Round wysiwyg-instruction-editor (owner 2026-10-11): the rich editors have no binding, so
+        // their HTML is pulled HERE — before the gate, so the gate validates what is actually stored —
+        // and sanitised on the way in. That is the write-side half of Q11's defence in depth: the model
+        // can only ever hold clean HTML, and the render side sanitises again on display.
+        if (!IsReadOnly)
+        {
+            // A null read means the editor is unavailable in this session (assets failed to load, or the
+            // interop threw) — keep whatever the model already holds rather than wiping the field or
+            // faulting the save through the page's ErrorBoundary (the tolerant seam of the 2026-10-11
+            // "editor not displaying" fix).
+            if (_guidanceEditor is not null)
+            {
+                var guidanceHtml = await _guidanceEditor.GetHtmlAsync();
+                if (guidanceHtml is not null)
+                {
+                    _model.Instructions = RichInstructionSanitizer.Sanitize(guidanceHtml);
+                }
+            }
+
+            if (_teacherNotesEditor is not null)
+            {
+                var notesHtml = await _teacherNotesEditor.GetHtmlAsync();
+                if (notesHtml is not null)
+                {
+                    _model.Description = RichInstructionSanitizer.Sanitize(notesHtml);
+                }
+            }
+        }
 
         if (!ValidateForSave()) return;
 

@@ -2,14 +2,15 @@
    captured in THIS dialog — one dialog whose fields switch on the kind — and the page appends the row
    from the result (Q2). Built on DialogShellBase per the dialog-ui skill: never hand-rolled chrome,
    the footer's Error bound (never a literal), actions at the dialog's bottom. Media never comes
-   through here — Upload From Device pops the file picker directly (Q3). *@
+   through here — Upload From Device pops the file picker directly (Q3).
+
+   Round wysiwyg-instruction-editor, grill extension (owner 2026-10-11): a Text material's BODY is the
+   shared RICH editor — read at submit and sanitised on the way out (Q11's write half). The Enter guard
+   retired WITH the textarea it existed for: Quill's contenteditable never submits a form on Enter, and
+   it inserts the newline itself. *@
 @inherits DialogShellBase<MaterialEditFormModel, MaterialEditResult>
-@implements IAsyncDisposable
-@inject IJSRuntime JS
-@inject ILogger<MaterialEditDialog> Logger
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
-@using Microsoft.JSInterop
 @using SchoolCollab.Assignments.Contracts
 
 <div class="dialog-container">
@@ -20,7 +21,11 @@
         {
             <p class="dialog-hint">A text material is named: the title is required, the body is optional.</p>
             <FluentTextField Label="Title" @bind-Value="Model.Title" class="full-width mb-3" />
-            <FluentTextArea Label="Body (optional)" Id="@BodyFieldId" @bind-Value="Model.Body" Rows="4" class="full-width" />
+            <label class="material-body-label" for="@BodyFieldId">Body (optional)</label>
+            <RichInstructionEditor @ref="_bodyEditor"
+                                   Id="@BodyFieldId"
+                                   Value="@Model.Body"
+                                   Placeholder="What this material covers…" />
         }
         else
         {
@@ -34,67 +39,13 @@
 </div>
 
 @code {
-    /// <summary>The body field's id — the seam the Enter guard addresses (and the bUnit seam).</summary>
+    /// <summary>The body field's id — the seam the rich editor wraps (and the bUnit seam).</summary>
     public const string BodyFieldId = "material-edit-body";
 
-    /// <summary>Owner requirement (2026-10-10): Enter in a Text material's body must not submit the
-    /// dialog — the body is multi-line prose. The guard is a native listener in the collocated module,
-    /// because <c>FluentTextArea</c> exposes no <c>OnKeyDown</c> and Blazor's static
-    /// <c>@onkeydown:preventDefault</c> cannot be made conditional (the <c>chatInput.js</c> precedent in
-    /// <c>SchoolCollab.AI.Chat</c>). It stops propagation only, so the newline the author is asking for
-    /// still happens and the binding is untouched.</summary>
-    public const string EnterGuardModulePath =
-        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/MaterialEditDialog.razor.js";
-
-    private IJSObjectReference? _enterGuardModule;
-
-    /// <summary>The guard only exists when the body field does — a Link's dialog has no textarea to
-    /// guard — and it is re-armed on EVERY render (the JS is idempotent), because a re-rendered field
-    /// that lost its listener would silently go back to submitting on Enter. A guard that did not attach
-    /// is logged rather than swallowed: that silence is what made the first, propagation-only attempt
-    /// look like it worked while Enter still submitted.</summary>
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (Model.Kind != InstructionKindDto.Text)
-        {
-            return;
-        }
-
-        try
-        {
-            _enterGuardModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EnterGuardModulePath);
-            var attached = await _enterGuardModule.InvokeAsync<bool>("guardEnterKey", BodyFieldId);
-            if (!attached)
-            {
-                Logger.LogWarning(
-                    "The Enter guard is not attached to {FieldId}; Enter in the material body may submit the dialog.",
-                    BodyFieldId);
-            }
-        }
-        catch (JSException ex)
-        {
-            // A missing guard must not take the form down: without it the dialog behaves exactly as it
-            // did before, which is bad but survivable — losing the dialog is not.
-            Logger.LogWarning(ex, "Could not attach the Enter guard to the material body field");
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_enterGuardModule is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _enterGuardModule.DisposeAsync();
-        }
-        catch (JSDisconnectedException)
-        {
-            // The circuit is gone; there is nothing left to release.
-        }
-    }
+    /// <summary>The rich body editor (grill extension, owner 2026-10-11). No binding exists (G6), so
+    /// its HTML is read in <see cref="SubmitAsync"/> — the one point where the value can enter the
+    /// result — and sanitised there.</summary>
+    private RichInstructionEditor? _bodyEditor;
 
     protected override string SubmitText =>
         Model.IsEdit ? "Save"
@@ -104,35 +55,52 @@
 
     /// <summary>Mirrors <c>InstructionDtoValidator</c> so the author is told before the save, not after
     /// (D6/D7, AC-4): a Text row must be NAMED (body optional); a Link row must carry an absolute
-    /// http(s) URL (its label optional). Returning null keeps the dialog open with the Error shown.</summary>
-    protected override Task<MaterialEditResult?> SubmitAsync(MaterialEditFormModel model)
+    /// http(s) URL (its label optional). Returning null keeps the dialog open with the Error shown.
+    /// <para>The Text half reads the rich editor here (Q11 write-side): a null read = editor unavailable
+    /// → the form's value is kept, never wiped; an editor that holds nothing yields the Quill empty
+    /// payload <c>&lt;p&gt;&lt;br&gt;&lt;/p&gt;</c>, which is stored as <c>null</c> — never as junk markup.</para></summary>
+    protected override async Task<MaterialEditResult?> SubmitAsync(MaterialEditFormModel model)
     {
         if (model.Kind == InstructionKindDto.Text)
         {
+            if (_bodyEditor is not null)
+            {
+                var bodyHtml = await _bodyEditor.GetHtmlAsync();
+                if (bodyHtml is not null)
+                {
+                    model.Body = RichInstructionSanitizer.Sanitize(bodyHtml);
+                }
+            }
+
+            if (model.Body is not null && string.IsNullOrWhiteSpace(RichInstructionSanitizer.ToPlainText(model.Body)))
+            {
+                model.Body = null;
+            }
+
             if (string.IsNullOrWhiteSpace(model.Title))
             {
                 Error = "A text material needs its title.";
-                return Task.FromResult<MaterialEditResult?>(null);
+                return null;
             }
 
-            return Task.FromResult<MaterialEditResult?>(new MaterialEditResult(
+            return new MaterialEditResult(
                 model.Kind,
                 model.Title!.Trim(),
                 string.IsNullOrWhiteSpace(model.Body) ? null : model.Body!.Trim(),
-                null));
+                null);
         }
 
         if (!Uri.TryCreate(model.Url, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             Error = "A link needs an absolute http(s) URL.";
-            return Task.FromResult<MaterialEditResult?>(null);
+            return null;
         }
 
-        return Task.FromResult<MaterialEditResult?>(new MaterialEditResult(
+        return new MaterialEditResult(
             model.Kind,
             string.IsNullOrWhiteSpace(model.Title) ? null : model.Title!.Trim(),
             null,
-            model.Url!.Trim()));
+            model.Url!.Trim());
     }
 }
