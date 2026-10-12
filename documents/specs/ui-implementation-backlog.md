@@ -328,6 +328,44 @@
 
 ---
 
+## Mobile (Blazor Hybrid) train — `mobile-hybrid-app.md`
+
+Tracked outside the sprint count below (it is not part of the period/activity-group arc).
+
+L1 — the Hybrid head, the `Admin.Shared` reuse spike and the mobile CI job — is **merged** (`#326`,
+`fab7dd5e`, CI 5/5). The layers are sequential: **L2 blocked L3/L4** because no device TFM built until
+severance landed — and it has landed, so device TFMs now build.
+
+- [x] **P0** **L2 — severance — DONE** (round `mobile-severance`; re-verified on `ea7b2df1`,
+  2026-10-12). Delivered: `Admin.Shared`'s `Microsoft.AspNetCore.App` `FrameworkReference` became
+  `Microsoft.AspNetCore.Components[.Authorization|.Web]` packages (10.0.8) and it dropped its
+  `ServiceDefaults` / `Students.Core` / `Core` references, so the head's closure carries no framework
+  reference; the new zero-dependency `SchoolCollab.Core.Abstractions` project hosts `Core.Features`
+  plus the two enums `SignatureRequirementMode` / `NotificationChannel` — the plan gate proved
+  `Core` was *itself* a carrier, because its `JwtBearer`/`OpenIdConnect` packages declare the
+  framework reference; the 12-file contacts/guardian family moved to `Students.Application`; and
+  `Students.Core` / `Students.Contracts` dropped their unused `ServiceDefaults` references.
+  Verified: `-f net10.0-android` **0 errors**; root solution 0 errors; ArchitectureTests 105, Admin 651,
+  Core 126, Students 624, Assignments 1109, Mobile 8 — 0 failures. The mobile CI job asserts
+  `-f net10.0-android` but is still skipped behind `ENABLE_MAUI_CI`. *Source:* `mobile-hybrid-app.md`
+  §8 L2; `documents/rounds/round-mobile-severance.md`.
+- [ ] **P0** **L3 — credential + registration path.** New public Keycloak client (PKCE via
+  `WebAuthenticator`), mapper parity plus an audience mapper emitting `school-collab-client`, a bearer
+  `DelegatingHandler`, tokens in `SecureStorage` (never `sessionStorage`/`localStorage`), the
+  client-side `AuthenticationStateProvider` bridge, and the client-side registration of the module
+  clients (replacing ~22 registrations / ~204 lines of `ModuleServices.cs`). *Source:* §8 L3.
+- [ ] **P2** **L4 — first vertical slice** (assignments list → detail): mobile-first layouts built from
+  the 94-component layer; opens with its own severance-or-copy decision, because
+  `Assignments.Application` → `Students.Application` → `Students.Core` re-imports the closure L2
+  removes. *Source:* §8 L4, §9 OD1.
+- [ ] **P2** **Open decisions the spec still carries:** OD2 (token refresh policy), OD3 (how much of
+  the Logic split is enforced), OD4 (dev-loop base URL). *Source:* §9.
+- [ ] **P2** **G5 — wiring guards:** decide whether `CrossModuleWiringTests` is extended to the mobile
+  head or the head is recorded as permanently outside its `AddProject`-derived host model.
+  *Source:* `maui-agent-skills-readiness.md` §4 G5.
+
+---
+
 ## Dependency Graph
 
 ```

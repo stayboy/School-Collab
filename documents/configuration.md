@@ -750,7 +750,7 @@ if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
 
 ### Adding a new flag
 
-1. Add a constant to `src/SchoolCollab.Core/Features/FeatureFlagKeys.cs`
+1. Add a constant to `src/SchoolCollab.Core.Abstractions/FeatureFlagKeys.cs`
    using the form `FEATURE:<FlagName>`.
 2. Add a `Parameters:feature-flag-<name>` entry to
    `src/AppHost/SchoolCollab.AppHost/appsettings.json` (with the default

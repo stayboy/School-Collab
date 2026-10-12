@@ -184,7 +184,7 @@ src/Students/SchoolCollab.Students.Api/Endpoints/   GuardianRoutes.cs, StudentGu
 src/Assignments/SchoolCollab.Assignments.Api/Endpoints/ AssignmentRecipientRoutes.cs, GuardianReviewRoutes.cs, SubmissionRoutes.cs, SubmissionReviewRoutes.cs
 
 src/Students/SchoolCollab.Students.Admin/Components/Pages/Guardians/   Guardians.razor (landing + TenantGate + search), GuardianSetupWizard.razor (NEW — mirrors GradeLevelWizard), Create/Edit, name-history
-src/SchoolCollab.Admin.Shared/Components/ContactsEditor.razor (+ .razor.css)   # NEW shared multi-channel contacts editor (add/remove/verify/subscribe) — like StudentFormFields; reused by guardian wizard, GradeLevelWizard guardian step, student/guardian ContactsTab
+src/Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor (+ .razor.css)   # NEW shared multi-channel contacts editor (add/remove/verify/subscribe) — like StudentFormFields; reused by guardian wizard, GradeLevelWizard guardian step, student/guardian ContactsTab
 # GradeLevelWizard.razor (existing) gains a new 'add guardians for grade students' step (per-student Primary/CC StudentGuardian links, created on save)
 src/Students/SchoolCollab.Students.Admin/Components/Pages/Teachers/    (teacher admin + SetupWizard)  # NEW
 src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/.../ContactsTab + GuardiansTab

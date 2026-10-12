@@ -1,6 +1,6 @@
 using SchoolCollab.Students.Core.Domain;
 
-namespace SchoolCollab.Admin.Shared.Components;
+namespace SchoolCollab.Students.Application.Components.Contacts;
 
 /// <summary>Working-copy model for <see cref="GuardianEditFields"/>. Holds
 /// the guardian's link-metadata fields (title / names / relationship / role)

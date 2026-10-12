@@ -279,7 +279,7 @@ Keycloak unreachable) degrade to error cards, mirroring the portals pattern
 
 | Property | Value |
 |---|---|
-| Key | `FEATURE:DisableKeycloakLoginUi` (added to `src/SchoolCollab.Core/Features/FeatureFlagKeys.cs`) |
+| Key | `FEATURE:DisableKeycloakLoginUi` (added to `src/SchoolCollab.Core/Features/FeatureFlagKeys.cs`; now `src/SchoolCollab.Core.Abstractions/FeatureFlagKeys.cs`) |
 | AppHost parameter | `feature-flag-disable-keycloak-login-ui` (in the AppHost `appsettings.json` `Parameters:` block — precedent `feature-flag-require-assignment-approval`, `appsettings.json:24`) |
 | Fan-out | `WithEnvironment("FeatureFlags__FEATURE__DisableKeycloakLoginUi", …)` to **admin**, **families**, the **auth service** and the **auth portal** (precedent `Program.cs:288,357`) |
 | Read time | **Startup** — auth pipelines are fixed at startup (`DisableOIDCAuth` precedent documented in `SchoolCollab.Admin/Program.cs`) |

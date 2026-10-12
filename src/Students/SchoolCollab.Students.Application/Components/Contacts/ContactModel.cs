@@ -1,6 +1,6 @@
 using SchoolCollab.Students.Core.Domain;
 
-namespace SchoolCollab.Admin.Shared.Components;
+namespace SchoolCollab.Students.Application.Components.Contacts;
 
 /// <summary>
 /// Mutable in-memory contact model used by <see cref="ContactsEditor"/> in

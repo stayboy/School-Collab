@@ -234,6 +234,43 @@ membership rule) — `SchoolCollab.Mobile.Logic` and `SchoolCollab.Mobile.Tests.
    and the gates' tests stay green.
 4. The mobile CI job's assertion flips to the android TFM.
 
+**L2 — outcome (MET, round `mobile-severance`, 2026-10-09).** All four criteria are met, and the
+severance went further than this list anticipated: the plan gate found that `SchoolCollab.Core`
+delivered `Microsoft.AspNetCore.App` **through its packages** — the
+`Microsoft.AspNetCore.Authentication.JwtBearer` / `OpenIdConnect` nuspecs each declare
+`<frameworkReference name="Microsoft.AspNetCore.App" />` — even though `Core.csproj` has no
+`<FrameworkReference>` element. `Core` therefore had to leave the closure as well. Final shape:
+
+- **`Admin.Shared` is now a portable design-system RCL.** Its `FrameworkReference` became
+  `Microsoft.AspNetCore.Components` / `.Components.Authorization` / `.Components.Web` package
+  references (resolved to **10.0.8** from the restored graph — the plan's guess was wrong and was
+  corrected by the P2 obligation to resolve, never guess), and it references only
+  `SchoolCollab.Core.Abstractions` plus FluentUI.
+- **New zero-dependency project `src/SchoolCollab.Core.Abstractions/`** (`net10.0`; zero packages,
+  zero project references, zero framework references) hosts three **namespace-preserved**
+  abstractions: `SchoolCollab.Core.Features` (`IFeatureFlagService`,
+  `IFeatureFlagChangeNotifier`, `FeatureFlagKeys`) plus the two enums
+  `SchoolCollab.Core.AssignmentPolicies.SignatureRequirementMode` and
+  `SchoolCollab.Core.Notifications.NotificationChannel` — the complete set of `Core` types
+  `Admin.Shared` still needed. Preserving the namespaces left every consumer file untouched;
+  `ConfigurationFeatureFlagService` stays in `Core`.
+- **The 12-file contacts/guardian component family moved** (4 `.razor` + 4 `.cs` models +
+  4 `.razor.css`) from `Admin.Shared` to
+  `src/Students/SchoolCollab.Students.Application/Components/Contacts/` — the bounded context that
+  owns the `Students.Core` domain types those components bind. That move is what let `Admin.Shared`
+  drop its `Students.Core` reference, and the four source-unused `ServiceDefaults` references on the
+  path (`Admin.Shared`, `Students.Core`, `Students.Contracts`) went with it.
+- **The head's closure** is now `head → Admin.Shared → {Core.Abstractions, FluentUI, Components
+  packages}` and `head → Mobile.Logic`: no `FrameworkReference` carrier, and **no server-side
+  package** (the android target graph resolves 0 EF Core / Npgsql / RabbitMQ).
+- The `mobile` CI job asserts **`-f net10.0-android`** — this discharges the Windows-TFM deferral
+  recorded in L1's criteria 2 and 4.
+
+Evidence: `dotnet build src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj -f net10.0-android`
+**0 errors / 0 warnings**; `dotnet build SchoolCollab.slnx` 0 errors; ArchitectureTests 102,
+Admin.Tests 632, Core.Tests 126, Students.Tests 624, Assignments.Tests 1064 — 0 failures. Full
+record: `documents/rounds/round-mobile-severance.md` (+ `diffs-mobile-severance.patch`).
+
 **L3 — credential + registration path**
 1. The realm JSON contains the new public client with all five claim mappers plus the audience
    mapper; `AppHostRealmImportArchitectureTests` still passes.

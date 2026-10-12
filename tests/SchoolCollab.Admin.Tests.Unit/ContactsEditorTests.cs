@@ -14,6 +14,7 @@ using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Constants;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Students.Application.Components.Contacts;
 using SchoolCollab.Students.Core.Contracts;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;

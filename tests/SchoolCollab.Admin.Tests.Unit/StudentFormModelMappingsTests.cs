@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Students.Application.Components.Contacts;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Domain;

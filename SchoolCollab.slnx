@@ -9,6 +9,7 @@
     <Project Path="src/SchoolCollab.Admin/SchoolCollab.Admin.csproj" />
     <Project Path="src/SchoolCollab.Auth/SchoolCollab.Auth.csproj" />
     <Project Path="src/SchoolCollab.Core/SchoolCollab.Core.csproj" />
+    <Project Path="src/SchoolCollab.Core.Abstractions/SchoolCollab.Core.Abstractions.csproj" />
     <Project Path="src/SchoolCollab.Families/SchoolCollab.Families.csproj" />
     <Project Path="src/SchoolCollab.MigrationService/SchoolCollab.MigrationService.csproj" />
   </Folder>

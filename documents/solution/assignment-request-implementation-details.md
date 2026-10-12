@@ -178,7 +178,8 @@ recommend `IDataProtection`-signed tokens (purpose-scoped, TTL from
 
 ### 1.9 Feature flags
 
-`IFeatureFlagService` (`SchoolCollab.Core/Features/FeatureFlagService.cs`):
+`IFeatureFlagService` (`SchoolCollab.Core.Abstractions/IFeatureFlagService.cs`; the config-backed
+implementation stays in `SchoolCollab.Core/Features/ConfigurationFeatureFlagService.cs`):
 config-based (`FeatureFlags:KEY` env) default; DB-backed tenant-override impl in
 Settings (ConfigFlags admin page; `PilotActivityGroupFlagOverrideSeeder` in
 MigrationService is the dark-launch seeding precedent). `FeatureFlagKeys` holds
