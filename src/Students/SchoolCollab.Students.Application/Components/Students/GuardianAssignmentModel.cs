@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
-using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Students.Application.Components.Contacts;
 
 namespace SchoolCollab.Students.Application.Components.Students;
 

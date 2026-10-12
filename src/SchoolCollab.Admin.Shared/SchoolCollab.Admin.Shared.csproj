@@ -7,7 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Portable design-system RCL: no Microsoft.AspNetCore.App framework reference.
+         The Blazor component family + the two Extensions abstractions it uses are
+         declared as packages so this project (and the mobile head that references it)
+         can build for a device TFM. -->
+    <PackageReference Include="Microsoft.AspNetCore.Components" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,9 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
-    <ProjectReference Include="..\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
+    <ProjectReference Include="..\SchoolCollab.Core.Abstractions\SchoolCollab.Core.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

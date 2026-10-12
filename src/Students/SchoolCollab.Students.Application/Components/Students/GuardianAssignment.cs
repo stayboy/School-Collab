@@ -1,5 +1,5 @@
 using SchoolCollab.Students.Core.Domain;
-using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Students.Application.Components.Contacts;
 
 namespace SchoolCollab.Students.Application.Components.Students;
 

@@ -38,10 +38,10 @@ public class StudentFormFieldsSectionEditTests
         "Students/SchoolCollab.Students.Application/Components/Students/StudentEditDialog.razor");
 
     private static string ReadContactsEditorSource() => ReadSource(
-        "SchoolCollab.Admin.Shared/Components/ContactsEditor.razor");
+        "Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor");
 
     private static string ReadContactFormFieldsSource() => ReadSource(
-        "SchoolCollab.Admin.Shared/Components/ContactFormFields.razor");
+        "Students/SchoolCollab.Students.Application/Components/Contacts/ContactFormFields.razor");
 
     private static string ReadGuardianSectionSource() => ReadSource(
         "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor");
@@ -59,7 +59,7 @@ public class StudentFormFieldsSectionEditTests
         "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor.css");
 
     private static string ReadGuardianEditFieldsSource() => ReadSource(
-        "SchoolCollab.Admin.Shared/Components/GuardianEditFields.razor");
+        "Students/SchoolCollab.Students.Application/Components/Contacts/GuardianEditFields.razor");
 
     // ---- Both editors expose View { Readonly, Edit } ----
 

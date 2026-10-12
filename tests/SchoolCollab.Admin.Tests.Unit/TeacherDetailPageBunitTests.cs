@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Students.Application.Components.Contacts;
 using SchoolCollab.Students.Application.Components.Pages.Teachers;
 using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Contracts;
