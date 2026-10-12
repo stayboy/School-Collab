@@ -16,6 +16,12 @@
   <ItemGroup>
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
+    <!-- §8 WYSIWYG round (owner 2026-10-11, Q1): the ward surface renders authored instruction HTML, so
+         it needs the SAME sanitiser-fed render component every other surface uses. That component lives
+         in the shared UI library — the cross-app UI home already referenced by the Assignments and
+         Students applications. Nothing new arrives transitively: Families already depends on Core,
+         Students.Core and ServiceDefaults, which is all Admin.Shared brings. -->
+    <ProjectReference Include="..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
     <!-- WS-E1 (ar-14-deep-links): Settings.Core provides the cached, DB-backed
          AddConfigFeatureFlagClient used to resolve the runtime EnableDeepLinks flag
          (mirrors the Admin host's config feature-flag client pattern). -->

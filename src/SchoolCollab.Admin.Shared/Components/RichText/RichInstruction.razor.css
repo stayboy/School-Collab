@@ -1,0 +1,23 @@
+/* The rendered instruction prose. Deliberately small: the sanitised HTML carries no styles of its own
+   (the allow-list refuses them), so this only restores the spacing the browser's defaults get wrong
+   inside a card. */
+.rich-instruction {
+    line-height: 1.5;
+}
+
+.rich-instruction ::deep p {
+    margin: 0 0 0.5rem;
+}
+
+.rich-instruction ::deep p:last-child {
+    margin-bottom: 0;
+}
+
+.rich-instruction ::deep ul,
+.rich-instruction ::deep ol {
+    margin: 0 0 0.5rem 1.25rem;
+}
+
+.rich-instruction ::deep :first-child {
+    margin-top: 0;
+}

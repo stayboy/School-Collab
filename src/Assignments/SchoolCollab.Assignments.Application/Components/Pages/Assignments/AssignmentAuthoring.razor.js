@@ -41,3 +41,19 @@ export function unregisterBeforeUnload() {
     window.removeEventListener('beforeunload', onBeforeUnload);
     dirtyRegistered = false;
 }
+
+// Owner, 2026-10-10 (round content-materials-redesign, Q3) — the kebab's "Upload From Device" pops the
+// file picker DIRECTLY, with no dialog in between.
+//
+// FluentInputFile owns its own hidden <input type="file"> and exposes no API to open it, so this
+// reaches the one it rendered inside the dropzone and clicks it. The selector is pinned by the
+// component (`#authoring-materials-dropzone`) and the bUnit suite asserts that the action makes this
+// call — so the deliberate departure from the "no JS, no hidden-element click" note in
+// ResourcesSection stays visible rather than becoming a silent habit.
+export function openMaterialFilePicker(dropzoneSelector) {
+    const input = document.querySelector(`${dropzoneSelector} input[type=file]`);
+
+    if (input) {
+        input.click();
+    }
+}

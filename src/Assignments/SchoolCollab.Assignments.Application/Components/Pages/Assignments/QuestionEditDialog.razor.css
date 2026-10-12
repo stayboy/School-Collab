@@ -20,3 +20,17 @@
     align-items: center;
     gap: 8px;
 }
+
+/* D16/QR-2: the response-kind picker — a wrapping row of checkboxes, plus the reason shown when the
+   assignment's format cannot carry kinds at all (Auto Scored / Instant Feedback). */
+.cq-qedit-kind-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.cq-qedit-reason {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+}

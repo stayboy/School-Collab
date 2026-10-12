@@ -14,20 +14,49 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands;
 internal static class QuestionOptionDtoValidator
 {
     /// <summary>Validate every inbound question; throw on the first violation.</summary>
-    public static void ValidateQuestions(IReadOnlyList<NewQuestionDto> questions)
+    /// <param name="gradingFormat">The assignment's own format. It decides whether a question MUST
+    /// define a response kind — mandatory exactly where kinds can be carried (Q1(ii), owner
+    /// 2026-10-09; see <see cref="QuestionResponseKindRules.RequiresResponseKinds"/>).</param>
+    public static void ValidateQuestions(
+        IReadOnlyList<NewQuestionDto> questions, GradingFormatDto gradingFormat)
     {
         for (var i = 0; i < questions.Count; i++)
         {
-            ValidateQuestion(questions[i], listIndex: i);
+            ValidateQuestion(questions[i], listIndex: i, gradingFormat);
         }
     }
 
-    private static void ValidateQuestion(NewQuestionDto q, int listIndex)
+    private static void ValidateQuestion(
+        NewQuestionDto q, int listIndex, GradingFormatDto gradingFormat)
     {
         if (string.IsNullOrWhiteSpace(q.QuestionText))
         {
             throw new AssignmentQuestionValidationException(
                 $"Question at position {listIndex}: QuestionText is required.");
+        }
+
+        // D16/QR-2 (§5.1), as amended by Q1(ii) (owner, 2026-10-09): a question states what it
+        // expects — at least one kind — WHERE THE FORMAT CAN CARRY KINDS. Every kind is media and the
+        // media rule permits them on Teacher Marked alone, so on Auto Scored / Instant Feedback the
+        // definition is not required: the expected answer form is already fixed by QuestionType, and
+        // forcing a kind there would be unsatisfiable — the media rule rejects every one of them —
+        // while breaking AI generation, which those formats are the only home of.
+        var responseKinds = q.ResponseKinds ?? [];
+        if (responseKinds.Count == 0
+            && QuestionResponseKindRules.RequiresResponseKinds(gradingFormat))
+        {
+            throw new AssignmentQuestionValidationException(
+                $"Question at position {listIndex}: at least one response kind is required "
+                + "(video, audio, document or image).");
+        }
+
+        foreach (var kind in responseKinds)
+        {
+            if (!Enum.IsDefined(kind))
+            {
+                throw new AssignmentQuestionValidationException(
+                    $"Question at position {listIndex}: unsupported response kind '{(int)kind}'.");
+            }
         }
 
         switch (q.QuestionType)

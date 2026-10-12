@@ -53,4 +53,7 @@ public sealed record CreateAssignmentCommand(
     /// no persisted state to preserve).</summary>
     IReadOnlyList<Guid>? ContextStrandIds = null,
     /// <summary>R4 (CP-5/D23): the picked lesson ids — see <see cref="ContextStrandIds"/>.</summary>
-    IReadOnlyList<Guid>? ContextLessonIds = null) : ICommand;
+    IReadOnlyList<Guid>? ContextLessonIds = null,
+    /// <summary>QR-5/§5.6 (owner, 2026-10-09): the assignment's own instruction blocks (audio,
+    /// video, image, link or a second text block) — the shared shape the questions use.</summary>
+    IReadOnlyList<NewInstructionDto>? InstructionItems = null) : ICommand;

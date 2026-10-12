@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AngleSharp.Dom;
@@ -238,8 +239,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         IReadOnlyList<AssignmentQuestionReadDto>? questions = null,
         IReadOnlyList<AssignmentAttachmentReadDto>? attachments = null,
         IReadOnlyList<ResourceDto>? resources = null,
-        IReadOnlyList<AssignmentTargetDto>? targets = null) =>
-        new(Guid.NewGuid(), questions ?? [], attachments ?? [], resources ?? [], targets ?? []);
+        IReadOnlyList<AssignmentTargetDto>? targets = null,
+        IReadOnlyList<InstructionReadDto>? instructionItems = null) =>
+        new(Guid.NewGuid(), questions ?? [], attachments ?? [], resources ?? [], targets ?? [],
+            // QR-5: the real children read always delivers the list (empty = none recorded), so the
+            // fixture defaults to the empty list — the fail-closed "unknown read" case is its own test.
+            InstructionItems: instructionItems ?? []);
 
     /// <param name="enterEditFields">assignment-create-edit-redesign D1: Edit/View routes now open
     /// on the SUMMARY surface, so a test that inspects the compartment form must flip the pencil.
@@ -307,18 +312,16 @@ public class AssignmentAuthoringBunitTests : BunitContext
         "authoring-basics",
         "authoring-targets",
         "authoring-content",
-        "authoring-questions",
-        "authoring-instructions"
+        "authoring-questions"
     ];
 
-    /// <summary>D10 (verification round 2026-10-08, extended by the owner): Create renders the
-    /// DETAILS sections only — neither Content &amp; Resources nor Questions &amp; AI (both live on
-    /// the draft-edit surface).</summary>
+    /// <summary>D10 (verification round 2026-10-08, extended by the owner). Revised 2026-10-10: the
+    /// Instructions compartment is COLLAPSED — its notes moved into Basics and its materials block moved
+    /// into the right pane — so neither surface lists it any more.</summary>
     private static readonly string[] ExpectedCreateSections =
     [
         "authoring-basics",
-        "authoring-targets",
-        "authoring-instructions"
+        "authoring-targets"
     ];
 
     private static bool ScoringFieldDisabled(IRenderedComponent<Authoring> cut, string id) =>
@@ -597,9 +600,32 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindComponents<FluentTextArea>()
+            // Round wysiwyg-instruction-editor (owner 2026-10-11): the field is a RICH editor now, on its
+            // own full-width row — the id is unchanged, so D9's bUnit contract survives the control swap.
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
                 .Should().Contain(t => t.Instance.Id == "authoring-basics-instructions",
-                    "INS-1 + D5: Instructions is the student-facing field, now in the bottom Instructions compartment");
+                    "INS-1 + D5: Instructions is the student-facing field, in Basics, now as a rich editor");
+        });
+    }
+
+    /// <summary>Defect (3) of round <c>wysiwyg-instruction-editor</c> (2026-10-11, found by the live
+    /// verification of defect (2)): the editor's <c>Value</c> was written in the BARE attribute form
+    /// <c>Value="_model.Instructions"</c> — on a string-typed parameter Razor passes the LITERAL
+    /// text, so the editor seeded (and would have saved back) the string "_model.Instructions"
+    /// instead of the author's prose. The bound field must arrive, verbatim.</summary>
+    [TestMethod]
+    public void Edit_GuidanceEditor_ReceivesTheInstructionsField_NotTheLiteralAttributeName()
+    {
+        var cut = RenderAuthoring(
+            AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, instructions: "Read pages 4-6."));
+
+        cut.WaitForAssertion(() =>
+        {
+            var editor = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
+                .Single(t => t.Instance.Id == "authoring-basics-instructions");
+            editor.Instance.Value.Should().Be("Read pages 4-6.",
+                "Value=\"@_model.Instructions\" must bind the field; the bare form passes the literal attribute text");
         });
     }
 
@@ -624,10 +650,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
             {
                 cut.FindAll("#authoring-targets h3.authoring-compartment-title").Should().BeEmpty(
                     "the column renders no heading of its own — each card's header is its title");
-                cut.FindAll("#authoring-targets .section-card__title")
+                // Owner, 2026-10-10: the pane's headers no longer all come from SectionCard — Content &
+                // Resources and Rules wear the shared PanelSection, Targets stays a SectionCard. The
+                // ORDER is what this asserts, top-to-bottom in the column.
+                cut.FindAll("#authoring-targets .section-card__title, #authoring-targets .panel-section__title")
                     .Select(title => title.TextContent.Trim())
-                    .Should().Equal(["Targets & audience", "Rules"],
-                        "the SectionCard headers hold both titles, Targets first");
+                    .Should().Equal(["Content & Resources", "Targets & audience", "Rules"],
+                        "the pane's headers, top to bottom: Content & Resources, Targets & audience, then Rules");
                 cut.FindAll("#authoring-basics-grade").Should().BeEmpty(
                     "round drop-primary-grade: the Primary grade control is gone from every mode (AC-9)");
                 cut.Markup.Should().NotContain("Primary grade",
@@ -907,10 +936,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D6: the field order — Status &amp; available from LEADS the form, the Due date sits
-    /// directly after the Assignment type &amp; grading row, and Subject follows the scoring cluster.</summary>
+    /// <summary>D6 + D14 (owner follow-up, 2026-10-09): Status &amp; available from LEADS the form,
+    /// Subject + its strands/lessons row sit right after Title — BEFORE the Assignment type &amp;
+    /// grading row (the subject is vital, D14) — and the Due date sits directly after the
+    /// type &amp; grading row.</summary>
     [TestMethod]
-    public void Basics_LeadsWithStatus_AndDueDateFollowsTypeAndGrading()
+    public void Basics_LeadsWithStatus_AndSubjectPrecedesTheTypeAndGradingRow()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
 
@@ -918,53 +949,107 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             var basics = cut.Find("#authoring-basics");
             var order = basics.QuerySelectorAll(
-                    "#authoring-basics-status, #authoring-basics-title, #authoring-basics-type, " +
-                    "#authoring-basics-due, #authoring-basics-subject")
+                    "#authoring-basics-status, #authoring-basics-title, #authoring-basics-subject, " +
+                    "#authoring-add-strand, #authoring-basics-type, #authoring-basics-due")
                 .Select(e => e.Id).ToList();
             string[] expected =
             [
-                "authoring-basics-status", "authoring-basics-title", "authoring-basics-type",
-                "authoring-basics-due", "authoring-basics-subject"
+                "authoring-basics-status", "authoring-basics-title", "authoring-basics-subject",
+                "authoring-add-strand", "authoring-basics-type", "authoring-basics-due"
             ];
             order.Should().ContainInOrder(expected,
-                "D6: status first; due date right after the type/grading row; subject after the scoring cluster");
+                "D14: subject + its picks row lead the authoring decisions (before type/grading); D6: due date right after the type/grading row");
         });
     }
 
-    /// <summary>D5/D6: Description + Instructions move out of Basics into their own bottom
-    /// compartment — two inline cells whose rows put each label BENEATH its textarea
-    /// (FormRow's RowLabelPosition.Below).</summary>
+    /// <summary>The notes area after the grill round (owner 2026-10-11): BOTH notes are rich editors
+    /// inside ONE label-less, full-width TAB group in Basics (Student guidance first), the materials
+    /// block still tops the right pane (AC-9/AC-11), and the collapsed Instructions compartment stays
+    /// gone.</summary>
     [TestMethod]
-    public void Instructions_OwnBottomCompartment_SideBySide_WithLabelsBelow()
+    public void Notes_BothFieldsAreRichEditors_InOneLabelLessFullWidthTabGroup()
     {
         var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
 
         cut.WaitForAssertion(() =>
         {
-            var section = cut.Find("#authoring-instructions");
-            section.QuerySelector("h3.authoring-compartment-title").TextContent.Trim().Should().Be("Instructions",
-                "the compartment title is the owner's label");
+            cut.FindAll("#authoring-instructions").Should().BeEmpty(
+                "the Instructions compartment is collapsed entirely (owner, 2026-10-10)");
 
-            cut.FindAll(".authoring-instructions-cell").Should().HaveCount(2,
-                "D6: the two textareas sit side by side (inline)");
-            cut.FindComponents<FluentTextArea>()
-                .Where(t => t.Instance.Id is "authoring-basics-description" or "authoring-basics-instructions")
-                .Select(t => t.Instance.Rows)
-                .Should().OnlyContain(rows => rows == 4,
-                    "D11: both textareas render at the same height");
-            cut.FindAll(".authoring-instructions-cell .form-row")
-                .Should().OnlyContain(r => r.ClassList.Contains("form-row--label-below"),
-                    "each row's own label renders beneath its textarea");
+            // ── Grill Q1/Q2 (owner 2026-10-11): one TAB group, guidance first, NO row label, ids kept.
+            var basics = cut.Find("#authoring-basics");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstructionEditor>()
+                .Select(t => t.Instance.Id)
+                .Should().Equal(
+                    new[] { "authoring-basics-instructions", "authoring-basics-description" },
+                    "D9's ids ride on the two editors, guidance first (Q1)");
+            cut.Find("fluent-tabs").Should().NotBeNull("the notes are a TAB group (the owner's choice)");
+            basics.InnerHtml.IndexOf(">Student guidance<", StringComparison.Ordinal)
+                .Should().BeLessThan(basics.InnerHtml.IndexOf(">Teacher notes<", StringComparison.Ordinal),
+                    "guidance is the first tab (Q1)");
+            cut.FindComponents<FluentTextArea>().Select(t => t.Instance.Id)
+                .Should().NotContain("authoring-basics-instructions")
+                .And.NotContain("authoring-basics-description",
+                    "neither note is a textarea anymore");
+            basics.QuerySelectorAll(".fluent-tab-strip label").Should().BeEmpty(
+                "the tab group carries NO label (Q2) — the tabs name the fields");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.FluentTabStrip>().Should().HaveCount(1,
+                "the chrome is the shared FluentTabStrip primitive (extracted for reuse)");
+            basics.QuerySelector("#authoring-basics-instructions").Should().NotBeNull(
+                "both tab PANELS render even while one is inactive — switching tabs must not remount an editor");
+            basics.QuerySelector("#authoring-basics-description").Should().NotBeNull();
 
-            cut.Find("#authoring-basics").QuerySelectorAll("#authoring-basics-description, #authoring-basics-instructions")
-                .Should().BeEmpty("D5: they are no longer part of Basics");
+            // ── The materials block tops the right pane, above the Targets & audience card.
+            var pane = cut.Find("#authoring-targets");
+            pane.QuerySelector("#authoring-materials-section").Should().NotBeNull(
+                "Content & Resources moved into the right pane (owner, 2026-10-10)");
+            pane.InnerHtml.IndexOf("authoring-materials-section", StringComparison.Ordinal)
+                .Should().BeLessThan(
+                    pane.InnerHtml.IndexOf("section-card", StringComparison.OrdinalIgnoreCase),
+                    "…and it TOPS the pane, above the Targets & audience card");
 
-            cut.FindAll("section.authoring-compartment").Last().Id.Should().Be("authoring-instructions",
-                "the compartment renders last on the page");
+            // ── AC-9: the block's header carries a TITLE and the kebab MENU — two distinct elements.
+            cut.Find("#authoring-materials-title").TextContent.Trim().Should().Be("Content & Resources",
+                "the header is Title Case (owner, 2026-10-10)");
+            cut.Find("#authoring-materials-section").QuerySelectorAll("h4#authoring-materials-title")
+                .Should().ContainSingle("the title is TEXT — never the menu control");
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+                .SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
+                .Should().Contain(["Add Text Content", "Add Link", "Upload From Device"],
+                    "AC-9: the header's menu keeps AC-1's three actions");
+
+            // ── AC-11: header text → the instructions list → the dropzone, all inside the block.
+            var markup = cut.Markup;
+            markup.IndexOf("authoring-materials-title", StringComparison.Ordinal)
+                .Should().BeLessThan(markup.IndexOf("authoring-instruction-items", StringComparison.Ordinal),
+                    "AC-11: the instructions list renders just beneath the Content & Resources header text");
+            markup.IndexOf("authoring-instruction-items", StringComparison.Ordinal)
+                .Should().BeLessThan(markup.IndexOf("authoring-materials-dropzone", StringComparison.Ordinal),
+                    "AC-11: …and above the dropzone");
         });
     }
 
     // ── Criterion 5: the §11 action matrix ─────────────────────────────────
+
+    /// <summary>Grill Q3 (owner 2026-10-11): View mode's surface is the SUMMARY (ShowSummary gates the
+    /// form out), so the two notes stack THERE as sanitised readers with their captions — no tabs.</summary>
+    [TestMethod]
+    public void View_BothNotesStackAsSanitisedReaders_NoTabs()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.View,
+            MakeDto(AssignmentStatusDto.Published, instructions: "<p>Read <strong>pages 4-6</strong>.</p>"));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RichText.RichInstruction>()
+                .Should().HaveCount(2, "guidance and teacher notes both render as readers in View (Q3)");
+            cut.Find("#authoring-basics-instructions strong")!.TextContent.Should().Be("pages 4-6",
+                "the guidance reader renders sanitised markup");
+            cut.FindAll(".authoring-note-caption").Select(c => c.TextContent.Trim())
+                .Should().Equal(new[] { "Student guidance", "Teacher notes" });
+            cut.FindAll("fluent-tabs").Should().BeEmpty("a reader should not click through tabs (Q3)");
+        });
+    }
 
     [TestMethod]
     [DataRow(AssignmentStatusDto.Draft, "Publish")]
@@ -1055,14 +1140,92 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "UX-17: an inapplicable control is disabled, never hidden");
             var passScore = cut.Find("#scoringFieldsPassScore");
             passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox",
-                "D11: the inapplicable state is a checkbox whose LABEL explains the disabled state");
-            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the label IS the explanation (FluentCheckbox renders its Label as child content)");
+                "D11: the inapplicable state is a disabled checkbox");
+            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableShortLabel,
+                "owner 2026-10-11: the checkbox label stays SHORT (FluentCheckbox renders its Label as child content)");
             cut.FindAll(".scoring-fields-reason").Should().BeEmpty(
                 "D11: the standalone reason paragraph is gone");
             ScoringFieldDisabled(cut, "scoringFieldsMaxAttempts").Should().BeTrue();
-            cut.Markup.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the label carries the reason the fields cannot be edited");
+            cut.FindAll(".form-row-cell-help").Select(h => h.GetAttribute("title"))
+                .Should().Contain(t => t != null && t.Contains(ScoringFieldsSection.ScoringInapplicableReason),
+                "owner 2026-10-11: the long reason travels as the pass score CELL's help-hint tooltip");
+        });
+    }
+
+    // ── D15 (owner, 2026-10-09): the assignment type defines the available grading formats ──
+
+    /// <summary>D15: the grading picker offers only what the selected type permits — an Offline
+    /// assignment is Teacher Marked only, while Online and Hybrid keep all three formats.</summary>
+    [TestMethod]
+    public void GradingPicker_OffersOnlyTheSelectedTypesPermittedFormats()
+    {
+        var offline = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Manual,
+                grading: GradingFormatDto.TeacherGraded));
+
+        offline.WaitForAssertion(() =>
+            Picker(offline, "authoring-basics-grading").Items!.Select(option => option.Value)
+                .Should().Equal(
+                    new[] { ((int)GradingFormatDto.TeacherGraded).ToString() },
+                    "offline work is handwritten — there is nothing for the engine to score"));
+
+        var online = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Digital,
+                grading: GradingFormatDto.AutoGraded));
+
+        online.WaitForAssertion(() =>
+            Picker(online, "authoring-basics-grading").Items!.Select(option => option.Value)
+                .Should().Equal(
+                    new[]
+                    {
+                        ((int)GradingFormatDto.TeacherGraded).ToString(),
+                        ((int)GradingFormatDto.AutoGraded).ToString(),
+                        ((int)GradingFormatDto.InstantGraded).ToString(),
+                    },
+                    "the details are published online, so a teacher may mark by hand or let the engine score"));
+    }
+
+    /// <summary>D15: switching to Offline while an auto format is selected applies the type's
+    /// fallback and SAYS SO — the CP-4 applied-side-effect shape, never a silent rewrite.</summary>
+    [TestMethod]
+    public async Task SwitchingToOffline_MovesTheGradingFormat_AndExplainsWhy()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Digital,
+                grading: GradingFormatDto.AutoGraded));
+
+        await SelectAsync(cut, "authoring-basics-type", ((int)AssignmentTypeDto.Manual).ToString());
+
+        cut.WaitForAssertion(() =>
+        {
+            Picker(cut, "authoring-basics-grading").SelectedOption!.Value
+                .Should().Be(((int)GradingFormatDto.TeacherGraded).ToString(),
+                    "an Offline assignment is always Teacher Marked");
+            cut.Find("#authoring-grading-switched").TextContent.Trim()
+                .Should().Be(AssignmentTypeGradingRules.FormatSwitchedReason,
+                    "an applied side effect is never silent");
+        });
+    }
+
+    /// <summary>D15/Q3 (legacy tolerance): a persisted out-of-matrix pair keeps its label and is
+    /// never rewritten on load — the picker shows what is stored until the author changes it.</summary>
+    [TestMethod]
+    public void LegacyOfflineWithAnAutoFormat_KeepsTheStoredPick()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, type: AssignmentTypeDto.Manual,
+                grading: GradingFormatDto.AutoGraded));
+
+        cut.WaitForAssertion(() =>
+        {
+            Picker(cut, "authoring-basics-grading").Items!.Select(option => option.Value)
+                .Should().Contain(((int)GradingFormatDto.AutoGraded).ToString(),
+                    "the out-of-matrix stored value stays in the list so its label renders");
+            Picker(cut, "authoring-basics-grading").SelectedOption!.Value
+                .Should().Be(((int)GradingFormatDto.AutoGraded).ToString(),
+                    "the page never rewrites the persisted pair on load");
+            cut.FindAll("#authoring-grading-switched").Should().BeEmpty(
+                "no automatic switch happened — the note explains an applied change, not a condition");
         });
     }
 
@@ -1156,12 +1319,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
         });
     }
 
-    /// <summary>D13 (owner, 2026-10-08): the inherited Grade/Tenant-policy note is a padlock
-    /// tooltip whose appearance is CONDITIONAL — inherited from policy <b>and</b> not
-    /// author-overridable. Four readouts (approval, notification, archive window, signature) are
-    /// policy-owned end to end, so they always carry it; guardian review carries it only once the
-    /// policy sets it (unset = the author chooses in Basics, so no lock). The card header carries one
-    /// padlock while the card holds at least one locked readout.</summary>
+    /// <summary>D13 (owner, 2026-10-08) + D14 (owner follow-up, 2026-10-09): the inherited
+    /// Grade/Tenant-policy note is a padlock tooltip whose appearance is CONDITIONAL — inherited
+    /// from policy <b>and</b> not author-overridable. Four readouts (approval, notification, archive
+    /// window, signature) are policy-owned end to end, so they always carry it; guardian review
+    /// carries it only once the policy sets it (unset = the author chooses in Basics, so no lock).
+    /// D14: the card header carries NO padlock of its own — only the rows state the lock.</summary>
     [TestMethod]
     public void Rules_PadlockHintAppearsOnlyForNonOverridablePolicyValues()
     {
@@ -1176,10 +1339,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
             rules.QuerySelectorAll("fluent-badge").Should().BeEmpty(
                 "D13: the inherited text badge is gone from every subitem");
 
-            var headerHelp = rules.QuerySelectorAll(".section-card__help");
-            headerHelp.Should().ContainSingle("D13: one padlock beside the card HEADER text");
-            headerHelp[0].GetAttribute("title").Should().Be(Authoring.PolicyInheritedHelpText,
-                "D13: the header padlock carries the inherited-policy note");
+            rules.QuerySelectorAll(".section-card__help").Should().BeEmpty(
+                "D14: no card-level padlock beside the header text — the owner dropped it");
 
             var rowHelp = rules.QuerySelectorAll(".authoring-policy-help");
             rowHelp.Should().HaveCount(4,
@@ -1201,8 +1362,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "D13: a policy-set guardian review is a locked value like the other four");
             rules.QuerySelectorAll("#authoring-policy-review .authoring-policy-help").Should().ContainSingle(
                 "D13: the padlock appears exactly on the row that just became non-overridable");
-            rules.QuerySelectorAll(".section-card__help").Should().ContainSingle(
-                "D13: the header keeps its single card-level hint");
+            rules.QuerySelectorAll(".section-card__help").Should().BeEmpty(
+                "D14: the header stays padlock-free on every policy shape");
         });
     }
 
@@ -1268,19 +1429,20 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 var rules = cut.Find("#authoring-rules");
                 rules.QuerySelectorAll("h3").Should().BeEmpty(
                     "the card header IS the compartment's single title — no hand-rolled h3");
-                rules.QuerySelector(".section-card__body .authoring-policy-row").Should().NotBeNull(
-                    "the readouts render as card ITEMS, not as bare children of a section");
+                rules.QuerySelector(".panel-section .authoring-policy-row").Should().NotBeNull(
+                    "the readouts render inside the shared panel (owner, 2026-10-10: SectionCard's chrome retired)");
                 rules.NextElementSibling.Should().BeNull(
                     "the Rules card closes the column: Targets card → its audience readouts → Rules card");
 
                 string[] expectedSections = mode == AssignmentAuthoringMode.Create
-                    // D10: Create renders neither Content nor Questions.
-                    ? ["authoring-basics", "authoring-targets", "authoring-instructions"]
+                    // D10: Create renders neither Content nor Questions; the Instructions compartment is
+                    // collapsed (owner, 2026-10-10), so it is not a section any more on either surface.
+                    ? ["authoring-basics", "authoring-targets"]
                     : ["authoring-basics", "authoring-targets", "authoring-content",
-                       "authoring-questions", "authoring-instructions"];
+                       "authoring-questions"];
                 cut.FindAll("section.authoring-compartment").Select(section => section.Id)
                     .Should().Equal(expectedSections,
-                        "only the spine compartments are sections any more — Rules is a card, D5 adds Instructions, and D10 drops content+questions on Create");
+                        "only the spine compartments are sections any more — Rules is a card, D10 drops content+questions on Create, and the Instructions compartment is collapsed");
             });
         }
     }
@@ -1298,13 +1460,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             rules.QuerySelectorAll("fluent-button").Should().BeEmpty(
                 "ShowAddButton=\"false\": a readouts-only card offers no Add");
-            rules.QuerySelectorAll(".section-card__title").Should().ContainSingle()
-                .Which.TextContent.Trim().Should().Be("Rules", "the card header carries the title");
+            rules.QuerySelectorAll(".panel-section__title").Should().ContainSingle()
+                .Which.TextContent.Trim().Should().Be("Rules", "the shared panel header carries the title");
 
             foreach (var id in PolicyReadoutIds)
             {
-                rules.QuerySelectorAll($".section-card__body .authoring-policy-row#{id}").Should().ContainSingle(
-                    $"{id} still renders — now as a card item");
+                rules.QuerySelectorAll($".panel-section .authoring-policy-row#{id}").Should().ContainSingle(
+                    $"{id} still renders — now inside the shared panel");
             }
 
             rules.QuerySelectorAll(".authoring-policy-row").Should().HaveCount(5,
@@ -1324,8 +1486,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             create.FindAll("nav.authoring-jumpnav").Should().BeEmpty(
                 "D12: the jump-nav is removed from the Create page");
-            create.Find("#authoring-rules .section-card__title").TextContent.Trim().Should().Be("Rules",
-                "the Rules container keeps its id — the anchor still resolves");
+            create.Find("#authoring-rules .panel-section__title").TextContent.Trim().Should().Be("Rules",
+                "the Rules container keeps its id, and now carries the shared panel header");
         });
 
         var edit = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
@@ -1336,7 +1498,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "D12: no jump-nav in the edit-fields view either");
             edit.Find("#authoring-questions").Should().NotBeNull(
                 "the kebab's #authoring-questions anchor still resolves");
-            edit.Find("#authoring-rules .section-card__title").TextContent.Trim().Should().Be("Rules");
+            edit.Find("#authoring-rules .panel-section__title").TextContent.Trim().Should().Be("Rules");
         });
     }
 
@@ -1357,8 +1519,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             var pairs = new (string Name, string[] Ids)[]
             {
-                ("type & grading format", ["authoring-basics-type", "authoring-basics-grading"]),
-                ("max score & max attempts", ["authoring-basics-max-score", "scoringFieldsMaxAttempts"]),
+                ("grading", ["authoring-basics-type", "authoring-basics-grading"]),
+                ("score", ["authoring-basics-max-score", "scoringFieldsMaxAttempts", "scoringFieldsPassScore"]),
                 ("status & available from", ["authoring-basics-status", "authoring-basics-available-from"])
             };
 
@@ -1380,8 +1542,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 // element children also carry FluentUI's own <style> elements, so the assertion
                 // counts the CONTROLS, never the cell's children.)
                 var cell = row.QuerySelector(".form-row-input")!;
-                cell.QuerySelectorAll("fluent-select, fluent-number-field, span.authoring-readonly-value")
-                    .Should().HaveCount(2, $"both {name} controls sit in the ONE input cell, so they sit inline");
+                cell.QuerySelectorAll("fluent-select, fluent-number-field, fluent-checkbox, span.authoring-readonly-value")
+                    .Should().HaveCount(ids.Length, $"all {name} controls sit in the ONE input cell, so they sit inline");
                 ids.Should().OnlyContain(id => cell.QuerySelector($"#{id}") != null,
                     $"both {name} controls belong to that one row");
 
@@ -1390,6 +1552,22 @@ public class AssignmentAuthoringBunitTests : BunitContext
                     cut.FindAll($"#{id}").Should().ContainSingle($"{id} renders exactly once");
                 }
             }
+
+            // Owner refinement (2026-10-11): each paired input carries its own FormRowCell caption
+            // UNDER it, while the row keeps the short group label — "Grading" and "Score".
+            var captions = basics.QuerySelectorAll(".form-row-cell-caption");
+            captions.Select(c => c.TextContent.Trim()).Should().Contain(new[]
+            {
+                "Assignment type", "Grading format", "Max score", "Max attempts", "Pass score",
+            });
+            foreach (var caption in captions)
+            {
+                var forId = caption.GetAttribute("for");
+                basics.QuerySelector($"#{forId}").Should().NotBeNull(
+                    $"the \"{caption.TextContent.Trim()}\" caption labels a real control");
+            }
+            basics.TextContent.Should().MatchRegex(@"Grading").And.MatchRegex(@"Score",
+                "the rows are named by their short group labels");
         });
     }
 
@@ -1504,28 +1682,50 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             var basics = cut.Find("#authoring-basics");
             basics.QuerySelector("#authoring-basics-max-score").Should().NotBeNull();
-            basics.InnerHtml.Should().Contain("Feedback mode:",
-                "D11: the feedback-mode narrative rides the (i) help icon on the grading row's label");
-            basics.InnerHtml.Should().Contain(ScoringFieldsSection.PassScoreHint,
-                "D11: the pass-threshold hint rides the Pass Score row's (i) help icon");
-            basics.InnerHtml.Should().Contain(
-                QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded),
-                "D11: the AI-availability text rides the same merged icon on the paired row");
-            basics.QuerySelectorAll(".form-row-help").Should().HaveCount(2,
-                "D11: exactly the type/grading row and the Pass Score row carry help icons "
+            basics.QuerySelectorAll(".form-row-help").Should().HaveCount(1,
+                "owner 2026-10-11: only the type/grading row keeps a ROW-level help icon — the "
+                + "pass-threshold hint moved to the Pass score CELL's caption icon "
                 + "(Guardian review's is conditional and its policy is unset here)");
+            basics.QuerySelectorAll(".form-row-cell-help").Select(h => h.GetAttribute("title"))
+                .Should().Contain(t => t == ScoringFieldsSection.PassScoreHint,
+                "owner 2026-10-11: the pass-threshold hint rides the Pass score cell's help icon");
+
+            // Owner 2026-10-11: the merged row tooltip is SPLIT onto the two cells — each input's
+            // (i) icon carries only the lines that apply to it, and the row label keeps ONE
+            // minimal sentence.
+            string CellHelpTitle(string controlId) =>
+                basics.QuerySelector($".form-row-cell-caption[for='{controlId}'] .help-icon")
+                    ?.GetAttribute("title") ?? string.Empty;
+
+            basics.QuerySelectorAll(".form-row-help")[0].GetAttribute("title")
+                .Should().Be(Authoring.GradingGroupHint,
+                    "owner 2026-10-11: the Grading row label's hint stays MINIMAL");
+
+            var typeHelp = CellHelpTitle("authoring-basics-type");
+            typeHelp.Should().Contain(AssignmentTypeGradingRules.OnlineMeaning,
+                "D15: the SELECTED type's own meaning (Online in this fixture) rides the Assignment type cell");
+            typeHelp.Should().Contain(
+                QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded),
+                "FR-220: the AI-availability text rides the Assignment type cell");
+
+            var gradingFormatHelp = CellHelpTitle("authoring-basics-grading");
+            gradingFormatHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
+                "D14f: what the grading format POWERS rides the Grading format cell");
+            gradingFormatHelp.Should().Contain("Feedback mode:",
+                "D11: the feedback-mode narrative rides the Grading format cell");
+
             basics.QuerySelector("#scoringFieldsPassScore").Should().NotBeNull();
             cut.FindAll("#authoring-submission").Should().BeEmpty(
                 "D1: the Submission & Sign-off compartment is retired");
 
-            // "Directly after" the Grading format field: the scoring controls precede the
-            // AI-availability hint and the Subject picker that follow them in Basics.
+            // "Directly after" the Grading format field: the scoring controls follow it in Basics.
+            // D14 moved the Subject picker ABOVE the type/grading row — its new position is pinned
+            // by Basics_LeadsWithStatus_AndSubjectPrecedesTheTypeAndGradingRow.
             var order = basics.QuerySelectorAll(
-                "#authoring-basics-grading, #authoring-basics-max-score, #scoringFieldsPassScore, #authoring-basics-subject")
+                "#authoring-basics-grading, #authoring-basics-max-score, #scoringFieldsPassScore")
                 .Select(e => e.Id).ToList();
             order.Should().ContainInOrder(
-                "authoring-basics-grading", "authoring-basics-max-score", "scoringFieldsPassScore",
-                "authoring-basics-subject");
+                "authoring-basics-grading", "authoring-basics-max-score", "scoringFieldsPassScore");
         });
     }
 
@@ -1553,14 +1753,18 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
     // ── P1 rework: Edit loads the persisted children (the load half of parity) ─────
 
-    private static AssignmentQuestionReadDto LoadedQuestion() =>
+    /// <summary>QR-2/Q1(ii): a loaded question. <paramref name="kinds"/> true is an assignment
+    /// authored after response definitions existed; false reproduces a LEGACY Teacher Marked row,
+    /// whose empty set is what the form gate now surfaces as a fixable prompt (round Q2).</summary>
+    private static AssignmentQuestionReadDto LoadedQuestion(bool kinds = true) =>
         new(Guid.NewGuid(), "Loaded question?", QuestionTypeDto.MultipleChoice, DisplayOrder: 0,
             ModelAnswer: null,
             Options:
             [
                 new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "A", true),
                 new AssignmentQuestionOptionReadDto(Guid.NewGuid(), "B", false)
-            ]);
+            ],
+            ResponseKinds: kinds ? [QuestionResponseKindDto.Image] : []);
 
     private static AssignmentAttachmentReadDto LoadedAttachment() =>
         new(Guid.NewGuid(), "syllabus.pdf", "application/pdf", 2048, "tenants/t/staging/syllabus.pdf");
@@ -1614,7 +1818,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         // Add one VALID question through the editor section's own seam (a blank row would be
         // rejected by the submit gate before any request is sent).
-        var row = new QuestionEditorRow { QuestionText = "Added question?", Type = QuestionTypeDto.ShortAnswer, ModelAnswer = "42" };
+        var row = new QuestionEditorRow
+        {
+            QuestionText = "Added question?",
+            Type = QuestionTypeDto.ShortAnswer,
+            ModelAnswer = "42",
+            // QR-2/Q1(ii): the fixture assignment is Teacher Marked, where the form gate requires the
+            // definition — a kind-less row would be refused before any request is sent.
+            ResponseKinds = { QuestionResponseKindDto.Image },
+        };
         var section = cut.FindComponents<QuestionEditorSection>().Single();
         await cut.InvokeAsync(() => section.Instance.Model.AddQuestion(row));
 
@@ -1635,6 +1847,178 @@ public class AssignmentAuthoringBunitTests : BunitContext
             "the update request carries the loaded question — not only the newly added one");
         updateBody.Should().Contain("Added question?");
         updateBody.Should().Contain("syllabus.pdf", "the loaded attachment is re-projected, not dropped");
+    }
+
+    /// <summary>Round Q2 (owner, 2026-10-09): a question saved before response definitions existed
+    /// reads back with an empty kind set. On a Teacher Marked assignment the form gate surfaces it as
+    /// one line the author can act on — deliberately not a silent backfill, which would rewrite what
+    /// already-published students are asked to submit.</summary>
+    [TestMethod]
+    public async Task Edit_LegacyQuestionWithoutAResponseKind_IsSurfacedByTheGateNotTheServer()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"));
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() =>
+            cut.Find("#authoring-error").TextContent.Should().Contain("at least one response kind",
+                "the author is told WHICH question needs a definition, before any request is sent"));
+    }
+
+    [TestMethod]
+    public void Edit_InstructionsCompartment_RendersTheSharedInstructionEditor()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle(
+                "QR-5/§5.6: the assignment's own instruction blocks live in the Instructions compartment"),
+            TimeSpan.FromSeconds(5));
+        // W4/W6 (spec instructional-materials AC-1/AC-6): the compartment's add affordance is the
+        // kebab — text, link, upload — and the shared editor's OWN button is suppressed here
+        // (grill Q1), because a second affordance beside the menu is the pattern this round replaced.
+        var menus = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>();
+        menus.SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
+            .Should().Contain(["Add Text Content", "Add Link", "Upload From Device"],
+                "AC-1: the compartment's kebab offers exactly the three D2 actions (the page action bar "
+                + "contributes its own menu, so the compartment's is identified by its items) — Title Case, "
+                + "matching the section headers (owner, 2026-10-10)");
+        cut.FindAll("#authoring-instruction-items-add").Should().BeEmpty(
+            "the list's own button is suppressed on the page — the section owns the add affordance");
+    }
+
+    // ── W8 (spec instructional-materials): the materials section's own contract ─────────────
+
+    [TestMethod]
+    public void View_MaterialsSection_SuppressesTheMenuTheDropzoneAndRowAffordances()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.View, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]),
+            enterEditFields: false);
+
+        cut.WaitForAssertion(() => cut.FindAll("nav.authoring-jumpnav").Should().BeEmpty(
+            "the View path renders the summary here — the premise of the assertions below"));
+        // AC-8: View mode renders no authoring affordance anywhere on the surface — no dropzone,
+        // no add button (the list's own included), and no materials kebab.
+        cut.FindAll("#authoring-materials-dropzone").Should().BeEmpty(
+            "AC-8: the dropzone is an authoring affordance, absent in View mode");
+        cut.FindAll("#authoring-instruction-items-add").Should().BeEmpty(
+            "AC-8: …and no add affordance, the list's own button included");
+        cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .SelectMany(m => m.Instance.Actions).Where(a => !a.IsSeparator).Select(a => a.Label)
+            .Should().NotContain(["Add text content", "Add link", "Upload from device"],
+                "AC-8: …and the materials kebab is not offered either");
+    }
+
+    [TestMethod]
+    public async Task Edit_MaterialsMenu_AppendsTheChosenKindsRow_WithNoConfirmationStep()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        // AC-2/D3: the action appends its row to the model on the spot — no dialog, no confirm step.
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Url));
+
+        editor.Instance.Rows.Should().ContainSingle(r => r.Kind == InstructionKindDto.Url,
+            "AC-2: the kebab's action appends the row of the chosen kind immediately");
+    }
+
+    [TestMethod]
+    public async Task Edit_MaterialRow_RefusesADocumentByName()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Audio));
+        var row = editor.Instance.Rows[^1];
+
+        using var stream = new MemoryStream([1, 2, 3]);
+        await cut.InvokeAsync(() => editor.Instance.StageMediaFileAsync(
+            row, stream, "worksheet.pdf", "application/pdf", 3));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-error").Should().ContainSingle(
+            "AC-3/D5: a document is refused by a NAMED reason, never staged into a media row"));
+        cut.Markup.Should().Contain("worksheet.pdf",
+            "…and the reason names the refused file so the author knows which drop it was");
+    }
+
+    [TestMethod]
+    public async Task Edit_InstructionBlockAddedInTheCompartment_RidesTheSavePayload()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+
+        var editor = cut.FindComponent<InstructionEditorList>();
+        await cut.InvokeAsync(() => editor.Instance.AddAsync());
+
+        // The shared editor mutates the MODEL's own row, and the payload is projected from the model at
+        // save time — so the text is set on the row rather than through the DOM (Fluent's inner <input>
+        // is not up in bUnit; the same reason the checkbox is driven through its component instance).
+        editor.Instance.Rows.Should().ContainSingle();
+        editor.Instance.Rows[0].Title = "Watch the worked example";
+        editor.Instance.Rows[0].Text = "Watch the worked example first.";
+
+        string? updateBody = null;
+        _mockHttp.Expect(HttpMethod.Put, $"http://localhost/assignments/{dto.Id}")
+            .With(req =>
+            {
+                updateBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.NoContent);
+
+        SaveDraft(cut);
+
+        cut.WaitForAssertion(() => updateBody.Should().NotBeNull(), TimeSpan.FromSeconds(5));
+        updateBody.Should().Contain("Watch the worked example first.",
+            "the assignment's own instruction rides the create/update payload");
+    }
+
+    [TestMethod]
+    public void ResponseKindsBanner_TeacherMarkedLegacyQuestion_ShowsTheCount()
+    {
+        // MakeDto defaults to Teacher Marked, where a definition is required — and LoadedQuestion(kinds:
+        // false) is a question saved before response definitions existed.
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Find("#authoring-response-kinds-banner").TextContent
+            .Should().Contain("1 question(s) need a response definition",
+                "U4: the legacy question is surfaced as a count the author can act on"));
+    }
+
+    [TestMethod]
+    public void ResponseKindsBanner_AutoScoredAssignment_IsAbsent()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit,
+            MakeDto(AssignmentStatusDto.Draft, grading: GradingFormatDto.AutoGraded),
+            children: MakeChildren(questions: [LoadedQuestion(kinds: false)], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Loaded question?"), TimeSpan.FromSeconds(5));
+        cut.FindAll("#authoring-response-kinds-banner").Should().BeEmpty(
+            "Auto Scored forbids every kind, so nothing is missing on it (round Q1(ii))");
     }
 
     [TestMethod]
@@ -3344,4 +3728,199 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         settled().Should().BeTrue("the authoring page settled within the bounded fake-clock advance");
     }
+
+    /// <summary>Screenshot report (2026-10-09): a stray "}" rendered on the Create page. Its source
+    /// was the shared instruction editor's error row, whose <c>@if</c> guard had been split from its
+    /// body by the <c>@code</c> block — Razor still compiled, emitting the braces as literal markup
+    /// and rendering the row unconditionally. This pins the artefact at the page level, where it was
+    /// actually seen (the component-level twin lives in <c>InstructionEditorListBunitTests</c>).</summary>
+    [TestMethod]
+    public void CreateMarkup_CarriesNoStrayBraces()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        // FluentUI renders <style> elements whose rule bodies legitimately carry braces — that is the
+        // library's markup, not ours, so it is stripped before the assertion.
+        var markup = Regex.Replace(cut.Markup, "(?s)<style.*?</style>", string.Empty);
+
+        markup.Should().NotContain("{").And.NotContain("}",
+            "the authoring page must render no literal braces — the stray '}' screenshot defect");
+    }
+
+    /// <summary>
+    /// FluentUI's <c>FluentSelect</c> emits an inline <c>&lt;style&gt;</c> for its own popup (a
+    /// <c>z-index</c> on the listbox and the selected-value ellipsis) — a library implementation detail
+    /// we cannot remove from our markup (verified: the rule text lives in
+    /// <c>Microsoft.FluentUI.AspNetCore.Components</c> 4.14.2, not in any file of ours; it is gone in the
+    /// 5.x preview). This ratchet makes it the ONLY inline style a rendered page may carry: a new one,
+    /// from our markup or another component, fails here. Deliberately no "must exist" assertion — when
+    /// the library stops emitting it (the planned FluentUI 5 bump) this test simply stops having
+    /// anything to check rather than turning red.
+    /// </summary>
+    [TestMethod]
+    public void CreateMarkup_InlineStylesComeOnlyFromTheFluentSelect()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Create);
+
+        var blocks = Regex.Matches(cut.Markup, "(?s)<style[^>]*>(.*?)</style>")
+            .Select(m => m.Groups[1].Value.Trim())
+            .ToList();
+
+        foreach (var css in blocks)
+        {
+            css.Should().Contain("::part(listbox)",
+                "the only inline <style> this page may carry is FluentSelect's own popup fix — nothing of ours");
+            css.Should().Contain("::part(selected-value)",
+                "…the ellipsis half of the same library workaround");
+        }
+    }
+
+    // ── Round material-row-editing: the dialog IS the edit path (Q4(b), AC-14/AC-15) ──────────────
+
+    /// <summary>AC-13 (owed by the materials-redesign round, closed here): "Upload From Device" pops the
+    /// file picker DIRECTLY — through the page's collocated module, which clicks the hidden input the
+    /// dropzone renders — and never through a dialog. The module invocation IS the assertion: the pop is
+    /// invisible in markup, so without it the behaviour could be reverted to a dialog and every other
+    /// test would still pass.
+    /// <para>Discriminating: the module is imported for the unsaved-changes guard too, so this pins the
+    /// <c>openMaterialFilePicker</c> call and its selector, not merely "the module was used".</para></summary>
+    [TestMethod]
+    public async Task Edit_UploadFromDevice_PopsThePickerThroughTheCollocatedModule()
+    {
+        var module = JSInterop.SetupModule(Authoring.BeforeUnloadModulePath);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+
+        var upload = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .SelectMany(m => m.Instance.Actions)
+            .Single(a => a.Label == "Upload From Device");
+
+        await cut.InvokeAsync(() => upload.OnClick!());
+
+        module.Invocations.Should().Contain(
+            i => i.Identifier == "openMaterialFilePicker"
+                && i.Arguments.Contains("#authoring-materials-dropzone"),
+            "AC-13: the picker is popped directly, against the dropzone's own hidden input");
+    }
+
+    /// <summary>AC-14's delete half, which nothing asserted at the page level (only the component's own
+    /// <c>Remove_DropsTheRow</c>): the row's × drops that row from the page's model — and the list's own
+    /// empty state comes back when the last one goes.</summary>
+    [TestMethod]
+    public async Task Edit_RowRemoveAffordance_DropsThatRow()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Text));
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Text));
+        editor.Instance.Rows.Should().HaveCount(2, "the premise: two rows to tell apart");
+
+        cut.Find("#authoring-instruction-items-remove-0").Click();
+
+        editor.Instance.Rows.Should().ContainSingle("the × drops the row it belongs to");
+        cut.FindAll("#authoring-instruction-items-remove-1").Should().BeEmpty(
+            "…and the surviving row is re-indexed, so no id outlives its row");
+    }
+
+    /// <summary>Registers a mocked <see cref="IDialogService"/> whose MaterialEditDialog open resolves to
+    /// a fixed result (<c>null</c> = the author cancelled), recording the SEEDED form model the page
+    /// handed in — so the tests pin both the seed and the cancel path without rendering the dialog
+    /// itself (the <c>RegisterPublishDialog</c> pattern: <c>ShowShellDialogAsync</c> resolves to
+    /// <c>ShowDialogAsync&lt;MaterialEditDialog, DialogShellData&lt;MaterialEditFormModel&gt;&gt;</c>, and
+    /// the dialog's Result carries the <see cref="DialogShellResult{TResult}"/> it unwraps).</summary>
+    private void RegisterMaterialEditDialog(MaterialEditResult? result, List<MaterialEditFormModel> captured)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
+            result is null
+                ? DialogResult.Cancel()
+                : DialogResult.Ok<object?>(new DialogShellResult<MaterialEditResult>(result))));
+
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<MaterialEditDialog, DialogShellData<MaterialEditFormModel>>(
+                It.IsAny<DialogShellData<MaterialEditFormModel>>(), It.IsAny<DialogParameters>()))
+            .Callback<DialogShellData<MaterialEditFormModel>, DialogParameters>(
+                (data, _) => captured.Add(data.Model))
+            .ReturnsAsync(dialogRef.Object);
+
+        Services.AddSingleton(dialogMock.Object);
+    }
+
+    /// <summary>AC-14: the materials list reads its rows out (no inline fields), the affordance reopens
+    /// the SAME dialog seeded from the row, and Apply writes the result back onto that row.</summary>
+    [TestMethod]
+    public async Task Edit_RowEditAffordance_ReopensTheDialogSeeded_AndAppliesTheResult()
+    {
+        var captured = new List<MaterialEditFormModel>();
+        RegisterMaterialEditDialog(
+            new MaterialEditResult(InstructionKindDto.Url, "Khan Academy", null, "https://khan.example/fractions"),
+            captured);
+
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Url));
+        var row = editor.Instance.Rows[^1];
+        row.Title = "Khan";
+        row.Url = "https://khan.example/old";
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-label-0").Should().ContainSingle());
+
+        // Q4(b): the row reads out — the page's list is no longer a form.
+        cut.FindAll("#authoring-instruction-items fluent-text-field").Should().BeEmpty(
+            "the page edits its materials in the dialog, so no row renders a field");
+
+        cut.Find("#authoring-instruction-items-edit-0").Click();
+
+        captured.Should().ContainSingle("the affordance opened the dialog");
+        captured[0].IsEdit.Should().BeTrue("…in edit mode, so the footer saves rather than adds");
+        captured[0].Url.Should().Be("https://khan.example/old", "AC-14: seeded from the row's values");
+        captured[0].Title.Should().Be("Khan");
+        row.Url.Should().Be("https://khan.example/fractions", "AC-14: Apply writes the result back");
+        row.Title.Should().Be("Khan Academy");
+    }
+
+    /// <summary>AC-15: cancelling the edit leaves the row exactly as it was.</summary>
+    [TestMethod]
+    public async Task Edit_RowEditAffordance_CancellingLeavesTheRowUntouched()
+    {
+        var captured = new List<MaterialEditFormModel>();
+        RegisterMaterialEditDialog(result: null, captured);
+
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto,
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items").Should().ContainSingle());
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowAsync(InstructionKindDto.Text));
+        var row = editor.Instance.Rows[^1];
+        row.Title = "Fraction basics";
+        row.Text = "Read pages 4-6.";
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-title-0").Should().ContainSingle());
+
+        cut.Find("#authoring-instruction-items-edit-0").Click();
+
+        captured.Should().ContainSingle("the affordance opened the dialog");
+        row.Title.Should().Be("Fraction basics", "AC-15: a cancelled edit changes nothing");
+        row.Text.Should().Be("Read pages 4-6.");
+    }
+
 }

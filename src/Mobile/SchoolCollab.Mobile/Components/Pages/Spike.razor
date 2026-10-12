@@ -1,0 +1,39 @@
+@page "/"
+
+@* Reuse spike (L1, round `mobile-host-skeleton`): one unmodified component from
+   SchoolCollab.Admin.Shared rendered inside the Blazor Hybrid head. The values are
+   hard-coded on purpose — this page proves the shared component layer crosses the host
+   boundary, it does not load data. Styles live in Spike.razor.css (CSS isolation). *@
+
+<PageTitle>Admin.Shared reuse spike</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <section class="spike">
+            <h1 class="spike__title">Admin.Shared reuse spike</h1>
+            <p class="spike__intro">
+                One unmodified component from <code>SchoolCollab.Admin.Shared</code>, rendered in
+                the mobile head without a single edit to the shared library.
+            </p>
+
+            <FluentCard class="spike__card">
+                <FluentStack Orientation="Orientation.Vertical" Gap="1rem">
+                    <FieldDisplay Label="Student">@StudentName</FieldDisplay>
+                    <FieldDisplay Label="Class" Orientation="FieldDisplayOrientation.Horizontal">
+                        @ClassName
+                    </FieldDisplay>
+                </FluentStack>
+            </FluentCard>
+        </section>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">
+            The Admin.Shared component failed to render: @ex.Message
+        </FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private const string StudentName = "Ada Lovelace";
+    private const string ClassName = "Grade 5 Blue";
+}

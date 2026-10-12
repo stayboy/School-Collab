@@ -59,7 +59,10 @@ public class StageQuestionsDraftCommandHandlerTests
             "Pick the capital of France.",
             QuestionTypeDto.MultipleChoice,
             displayOrder,
-            [new NewQuestionOptionDto("Berlin", false), new NewQuestionOptionDto("Paris", true)]);
+            [new NewQuestionOptionDto("Berlin", false), new NewQuestionOptionDto("Paris", true)],
+            // Q1(ii): the seeded assignment is Teacher Marked, so every question must state what it
+            // expects — a photographed page of working, the spec §4 workflow.
+            ResponseKinds: [QuestionResponseKindDto.Image]);
 
     [TestMethod]
     public async Task Stages_ValidatedQuestions_IntoBlob()
@@ -111,7 +114,11 @@ public class StageQuestionsDraftCommandHandlerTests
 
         var invalid = new NewQuestionDto(
             "Q?", QuestionTypeDto.MultipleChoice, 0,
-            [new NewQuestionOptionDto("A", false), new NewQuestionOptionDto("B", false)]);
+            [new NewQuestionOptionDto("A", false), new NewQuestionOptionDto("B", false)],
+            // Carries its kind deliberately: the kinds rule runs first (round Q2), so a kind-less
+            // payload would be rejected by that rule instead and this test would pass for the wrong
+            // reason. With the kind present, the option rule is what rejects it.
+            ResponseKinds: [QuestionResponseKindDto.Image]);
 
         var act = async () => await handler.HandleAsync(new StageQuestionsDraftCommand(assignment.Id, [invalid]));
 

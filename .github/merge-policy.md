@@ -44,19 +44,41 @@ not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
 
 ## Status checks before merge
 
-The `Build & Test` workflow is the required status check for PRs targeting `main`.
+The `Build & Test` workflow is the required status check for PRs targeting `main`, and it is **enforced
+server-side** since 2026-10-10: ruleset `24835514` — *main - require Build & Test, branches up to date* —
+requires the check with `strict_required_status_checks_policy` (so a branch must be up to date before it
+can merge), blocks force pushes and branch deletion, and carries **no bypass actors**. Before that date
+the check was a convention only. The ruleset's provenance, and the approximations it stands in for a
+merge queue this repository cannot have, are in `documents/runbooks/merge-queue-and-red-main.md`.
 
 - Do not merge a PR while `Build & Test` is still running.
 - Do not merge a PR while any required check is failing.
 - If CI fails, fix the failure on the branch and wait for a green workflow before merging.
 
-GitHub branch protection or rulesets should enforce this server-side where available:
+Enforce this server-side (the runbook is the checklist):
 
 - Require pull requests before merging.
-- Require the `Build & Test` status check to pass.
+- Require the `Build & Test` status check to pass — and **require branches to be up to date before
+  merging**, so the checks run against the `main` the PR will actually land on. That is the closest
+  available substitute for a merge queue, which this repository cannot have while it is user-owned.
 - Require approvals when review policy is enabled.
 - Disallow force pushes.
 - Prevent direct pushes to `main`.
+
+## After the merge: `main`'s run is a health signal, not a gate
+
+The merge has already happened — a post-merge failure cannot un-merge it. Read `main`'s run **once**, at a
+decision point: before starting new work off `main`, or when a failure notification arrives. Never poll it
+as a gate, and never as a blocking wait loop.
+
+A red `main` is an **incident**:
+
+- **Failure in the code just merged** → fix forward on a **new branch, through a PR**. Never push to
+  `main` directly, not even to repair it.
+- **Reverting a merged PR is a manual, owner-agreed action** — it is never taken unilaterally, no matter
+  how red the trunk is.
+- **Failure in another session's job** (for example the `Mobile (MAUI)` job the hybrid-mobile train added)
+  → report it and leave it; that train owns it.
 
 ## Merge strategy
 

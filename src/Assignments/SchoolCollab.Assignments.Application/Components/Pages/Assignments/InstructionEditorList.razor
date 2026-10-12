@@ -1,0 +1,358 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Application.Helpers
+
+@* QR-5 (spec §5.2/§5.6, owner 2026-10-09): the shared INSTRUCTION editor — one shape, two owners
+   (the assignment's own blocks and each question's). Inline by construction: the dialog-ui rule
+   forbids a nested dialog, so this is a plain presentational panel, and it holds no API client — the
+   host supplies staging as StageMediaAsync, exactly as the attachments flow stages at selection. *@
+<div class="cq-instructions" id="@Id">
+    @if (Rows.Count == 0)
+    {
+        <p class="cq-instructions-empty" id="@($"{Id}-empty")">No instructions yet.</p>
+    }
+    else
+    {
+        <ul class="cq-instruction-rows" id="@($"{Id}-rows")">
+            @foreach (var (row, index) in Rows.Select((r, i) => (r, i)))
+            {
+                <li class="cq-instruction-row" @key="row">
+                    @* D12/§4 + grill Q1/Q2 (round material-row-editing): the kind reads as an ICON
+                       befitting the material — the per-row kind DROPDOWN was the replaced pattern, and
+                       its word is gone too. The word survives only as the wrapper's accessible name, so
+                       a screen reader still hears "Text": an icon-only indicator with no name would be
+                       an a11y regression, and the tooltip keeps hover honest. *@
+                    <span class="cq-instruction-kind cq-instruction-kind-readonly"
+                          role="img"
+                          aria-label="@EnumHelper.GetDescription(row.Kind)"
+                          title="@EnumHelper.GetDescription(row.Kind)">
+                        <FluentIcon Value="@KindIcon(row.Kind)" />
+                    </span>
+
+                    @switch (row.Kind)
+                    {
+                        case InstructionKindDto.Text:
+                            @if (EditingMode == RowEditingMode.Dialog)
+                            {
+                                @* Q4(b) + owner refinement (2026-10-10): the row is IDENTIFIED, not read —
+                                   an icon plus the material's NAME. A Text material's name is its title; the
+                                   body is what the dialog is for, which is where it is read and edited
+                                   (AC-14 amended to match). *@
+                                <span class="cq-instruction-readout cq-instruction-readout-payload" id="@($"{Id}-title-{index}")">@row.Title</span>
+                            }
+                            else
+                            {
+                                @* D6/D10: a Text material is TITLED (the title is required, the body optional) —
+                                   the title is the row's first field, so it is also the focus target (AC-2). *@
+                                <FluentTextField @ref="_focusTarget"
+                                                 @bind-Value="row.Title"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="Name this material"
+                                                 class="cq-instruction-title" />
+                                <FluentTextField @bind-Value="row.Text"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="What the student should read or do"
+                                                 class="cq-instruction-payload" />
+                            }
+                            break;
+
+                        case InstructionKindDto.Url:
+                            @if (EditingMode == RowEditingMode.Dialog)
+                            {
+                                @* Q4(b) + the same identification rule for a Link: its LABEL names it, and a
+                                   link with no label is named by its target — never a blank row (the ward
+                                   card's own title ?? url rule, D11). *@
+                                <span class="cq-instruction-readout cq-instruction-readout-payload" id="@($"{Id}-label-{index}")">@(string.IsNullOrWhiteSpace(row.Title) ? row.Url : row.Title)</span>
+                            }
+                            else
+                            {
+                                <FluentTextField @ref="_focusTarget"
+                                                 @bind-Value="row.Url"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="https://…"
+                                                 class="cq-instruction-payload" />
+                                @* D7: a Link's title is an optional LABEL — never prose (D10). *@
+                                <FluentTextField @bind-Value="row.Title"
+                                                 ReadOnly="@ReadOnly"
+                                                 Placeholder="Label (optional)"
+                                                 class="cq-instruction-title" />
+                            }
+                            break;
+
+                        default:
+                            @* Audio · Video · Image: a staged file (stage-at-selection). *@
+                            @if (string.IsNullOrWhiteSpace(row.StoragePath))
+                            {
+                                <FluentInputFile Mode="InputFileMode.Stream"
+                                                 MaximumFileCount="1"
+                                                 Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                 MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                 OnCompleted="@(args => OnFileUploadedAsync(row, args))" />
+                            }
+                            else
+                            {
+                                <span class="cq-instruction-file" title="@row.FileName">
+                                    @row.FileName (@AttachmentUploadPolicy.FormatFileSize(row.FileSize))
+                                </span>
+                                @if (!ReadOnly)
+                                {
+                                    <FluentButton Appearance="Appearance.Stealth"
+                                                  Id="@($"{Id}-clear-media-{index}")"
+                                                  OnClick="@(() => ClearMediaAsync(row))"
+                                                  aria-label="Remove the attached file">×</FluentButton>
+                                }
+                            }
+                            break;
+                    }
+
+                    @if (!ReadOnly)
+                    {
+                        @* Q4(b)/AC-14: Text and Link rows are edited THROUGH the dialog, so the affordance
+                           that opens it lives here and the decision to open one stays with the host (the
+                           component holds no dialog). Media rows keep the stage/clear flow instead — the
+                           file IS their value, so there is nothing a form could seed (grill Q3). *@
+                        @if (EditingMode == RowEditingMode.Dialog && !row.HasMedia)
+                        {
+                            <FluentButton Appearance="Appearance.Stealth"
+                                          Id="@($"{Id}-edit-{index}")"
+                                          OnClick="@(() => EditRowRequested.InvokeAsync(row))"
+                                          IconStart="@FluentIcons.Edit"
+                                          aria-label="Edit this material" />
+                        }
+
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      Id="@($"{Id}-remove-{index}")"
+                                      OnClick="@(() => RemoveAsync(row))"
+                                      aria-label="Remove instruction">×</FluentButton>
+                    }
+                </li>
+            }
+        </ul>
+    }
+
+    @if (!ReadOnly && ShowAddButton)
+    {
+        <div class="cq-instruction-actions">
+            <FluentButton Appearance="Appearance.Outline"
+                          Id="@($"{Id}-add")"
+                          IconStart="@FluentIcons.Add"
+                          OnClick="AddAsync">
+                Add instruction
+            </FluentButton>
+        </div>
+    }
+
+@code {
+    /// <summary>The container id, and the stem every inner id is built from — the bUnit/page seam.</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = default!;
+
+    /// <summary>The rows being edited — the HOST's list (a question's or the assignment's), so the
+    /// edit lands where the host projects the payload from.</summary>
+    [Parameter, EditorRequired] public List<InstructionEditorRow> Rows { get; set; } = default!;
+
+    /// <summary>The host's staging call: content + name/type/size in, the staged metadata out (null
+    /// when it refused). Null here means the host offers no uploads in this context — the media kinds
+    /// then report that instead of rendering a file input that could never succeed.</summary>
+    [Parameter] public StageInstructionMediaAsync? StageMediaAsync { get; set; }
+
+    /// <summary>Raised after any mutation, so the host can re-render counts and its submit gate.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    /// <summary>View mode (the authoring page's <c>IsReadOnly</c>): the blocks render as read-only text
+    /// with no add/remove affordances — the same posture the Instructions textarea takes.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Whether this component renders its own "Add instruction" button. The QUESTION DIALOG
+    /// keeps it (default); the authoring page sets it false because the section supplies the kebab
+    /// menu instead (round grill Q1) — a visibility seam, so the dialog's rendering is untouched.</summary>
+    [Parameter] public bool ShowAddButton { get; set; } = true;
+
+    /// <summary>How a Text/Link row is edited (round <c>material-row-editing</c>). <see
+    /// cref="RowEditingMode.Inline"/> is the default because the QUESTION DIALOG host cannot open a
+    /// dialog of its own (no nesting — dialog-ui §4); the authoring page states
+    /// <see cref="RowEditingMode.Dialog"/>. Two behaviours on purpose, and the parameter is where
+    /// that reason is written down.
+    /// <para>Deliberately NOT named after the enum: an attribute called <c>RowEditingMode</c> whose
+    /// value expression starts with the same identifier is legal markup but ambiguous to read — and
+    /// a mismatched name fails only at RUNTIME (Blazor passes unknown attributes through as HTML,
+    /// then throws during the render), which is exactly the defect this round's page test caught.</para></summary>
+    [Parameter] public RowEditingMode EditingMode { get; set; } = RowEditingMode.Inline;
+
+    /// <summary>Raised when a row's edit affordance is activated in <see
+    /// cref="RowEditingMode.Dialog"/> mode. The host owns the dialog (this component stays
+    /// presentational), and hands the result back through <see cref="ApplyEditAsync"/> — so the list
+    /// remains the single writer of its rows.</summary>
+    [Parameter] public EventCallback<InstructionEditorRow> EditRowRequested { get; set; }
+
+    private bool _staging;
+    private string? _error;
+
+    /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
+    /// after an append this points at the new row's first field (AC-2's focus target).</summary>
+    private FluentTextField? _focusTarget;
+    private bool _focusPending;
+
+    /// <summary>D2/D3 (spec instructional-materials): the host's menu appends a row of the chosen kind
+    /// straight to the form model — no confirmation step — and focuses that row's first field. Called
+    /// through <c>@ref</c> by the page's kebab; the dialog reaches the same path via <see cref="AddAsync"/>.</summary>
+    public async Task AddRowAsync(InstructionKindDto kind)
+    {
+        Rows.Add(new InstructionEditorRow { Kind = kind });
+        _focusPending = true;
+        StateHasChanged();
+        await Changed.InvokeAsync();
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPending && _focusTarget is not null)
+        {
+            _focusPending = false;
+            // FocusAsync is void in this FluentUI version (the ResourcesSection:365 precedent).
+            _focusTarget.FocusAsync();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Appends a Text block — the method the question dialog and the page's own tests call.</summary>
+    public Task AddAsync() => AddRowAsync(InstructionKindDto.Text);
+
+    /// <summary>Writes a dialog result back onto an EXISTING row (the row-edit path, AC-14). The page
+    /// never mutates a row behind this component — the list stays the single writer of its rows (Q2) —
+    /// so the host hands the confirmed result here. Also the bUnit seam for the write-back, because the
+    /// dialog itself is the page's to open.</summary>
+    public async Task ApplyEditAsync(InstructionEditorRow row, MaterialEditResult result)
+    {
+        row.Kind = result.Kind;
+        row.Title = result.Title;
+        row.Text = result.Body;
+        row.Url = result.Url;
+        StateHasChanged();
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>Grill Q1 (round material-row-editing): the glyph per kind. Text and Link ARE the kebab's
+    /// own two glyphs, so the menu that adds a row and the row itself cannot drift; the media kinds take
+    /// the FluentUI glyph of the thing itself. An unknown kind falls back to Info rather than rendering
+    /// an empty box — the row still says something true.</summary>
+    private static Icon KindIcon(InstructionKindDto kind) => kind switch
+    {
+        InstructionKindDto.Text => FluentIcons.TextDescription,
+        InstructionKindDto.Url => FluentIcons.Link,
+        InstructionKindDto.Audio => FluentIcons.MusicNote2,
+        InstructionKindDto.Video => FluentIcons.Video,
+        InstructionKindDto.Image => FluentIcons.Image,
+        _ => FluentIcons.Info,
+    };
+
+    public async Task RemoveAsync(InstructionEditorRow row)
+    {
+        if (Rows.Remove(row))
+        {
+            StateHasChanged();
+            await Changed.InvokeAsync();
+        }
+    }
+
+    /// <summary>Drops the staged file from a media row, keeping its kind so the author can pick
+    /// another file (or switch the kind) without losing the intent.</summary>
+    public async Task ClearMediaAsync(InstructionEditorRow row)
+    {
+        row.FileName = null;
+        row.ContentType = null;
+        row.FileSize = 0;
+        row.StoragePath = null;
+        StateHasChanged();
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>One media instruction row carries exactly one staged file, but FluentInputFile reports
+    /// its completions as a set — so the (capped-to-one) set is drained in order.</summary>
+    private async Task OnFileUploadedAsync(
+        InstructionEditorRow row, IEnumerable<FluentInputFileEventArgs> args)
+    {
+        foreach (var file in args)
+        {
+            await StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+        }
+    }
+
+    /// <summary>The testable seam (the <c>ResourcesSection.StageFileAsync</c> precedent): the client
+    /// pre-check, the host's staging call, then the row filled with what came back. bUnit drives this
+    /// directly, because the FluentInputFile JS pipeline is not up in tests.</summary>
+    public async Task StageMediaFileAsync(
+        InstructionEditorRow row, Stream content, string fileName, string contentType, long fileSize)
+    {
+        if (StageMediaAsync is null)
+        {
+            Fail("Attaching a file is not available here.");
+            return;
+        }
+
+        if (_staging)
+        {
+            Fail($"'{fileName}' is still uploading — please wait until the current upload finishes, then try again.");
+            return;
+        }
+
+        // One allow-list for every kind: it carries the media extensions (round Q1), so an audio or
+        // video instruction file passes the same pre-check as a document or an image.
+        var clientError = AttachmentUploadPolicy.Validate(fileName, fileSize);
+        if (clientError is not null)
+        {
+            Fail(clientError);
+            return;
+        }
+
+        // D4/D5: the kind follows the FILE — the row the kebab opened is a placeholder for "whichever
+        // media the author picks", and a document picked here is refused by the same named reason the
+        // dropzone uses (never staged into a row that cannot represent it).
+        var inferred = InstructionKindInference.ForFile(fileName, contentType);
+        if (inferred is null)
+        {
+            Fail(InstructionKindInference.DocumentRefusal(fileName));
+            return;
+        }
+
+        row.Kind = inferred.Value;
+
+        _staging = true;
+        try
+        {
+            var staged = await StageMediaAsync(row, content, fileName, contentType, fileSize);
+            if (staged is null)
+            {
+                Fail($"'{fileName}' could not be attached — please try again.");
+                return;
+            }
+
+            row.FileName = staged.FileName;
+            row.ContentType = staged.ContentType;
+            row.FileSize = staged.FileSize;
+            row.StoragePath = staged.StoragePath;
+            _error = null;
+            StateHasChanged();
+            await Changed.InvokeAsync();
+        }
+        finally
+        {
+            _staging = false;
+        }
+    }
+
+    /// <summary>Sets the failure line and re-renders. A method invoked directly (bUnit, a test seam)
+    /// does not get the render an event handler would, so every state change renders explicitly —
+    /// which is also what lets the page/dialog re-render when they call these methods.</summary>
+    private void Fail(string message)
+    {
+        _error = message;
+        StateHasChanged();
+    }
+}
+
+    @if (_error is not null)
+    {
+        <p class="cq-instruction-error" id="@($"{Id}-error")">@_error</p>
+    }
+</div>
+

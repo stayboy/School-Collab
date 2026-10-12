@@ -1,3 +1,4 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Assignments.Application.Helpers
@@ -130,6 +131,17 @@
                     <FluentMessageBar Id="authoring-error" Intent="MessageIntent.Error" class="authoring-message">@_error</FluentMessageBar>
                 }
 
+                @* U4 (round-3 Q2 settlement, owner 2026-10-09): the count of questions whose response
+                   definition is missing AND required by the current grading format. It sits beside the
+                   error bar — where the author reads what stands between them and the save — and it is
+                   the ONLY prompt for a legacy question, because nothing is backfilled for them. *@
+                @if (QuestionsMissingResponseDefinition > 0)
+                {
+                    <FluentMessageBar Id="authoring-response-kinds-banner" Intent="MessageIntent.Warning" class="authoring-message">
+                        @($"{QuestionsMissingResponseDefinition} question(s) need a response definition — open each question and pick what the student submits (video, audio, document or image).")
+                    </FluentMessageBar>
+                }
+
                 @* UX-7 / F17 (this round): the parameter change reloaded this instance and took unsaved
                    edits with it — the one case the in-app guard cannot see (a host swapping Id/Mode without
                    a NavigationManager navigation). It sits beside the error bar so it is read with the
@@ -173,6 +185,28 @@
                                 </div>
                             }
                         </dl>
+                        @* Grill Q3 (owner 2026-10-11): the View surface IS the summary, so the two notes
+                           stack HERE as sanitised readers with their captions — a reader sees everything
+                           at once, no tabs. Legacy plain text renders exactly as before (Q16). *@
+                        @if (!string.IsNullOrWhiteSpace(_item.Instructions) || !string.IsNullOrWhiteSpace(_item.Description))
+                        {
+                            <div class="authoring-summary-notes">
+                                @if (!string.IsNullOrWhiteSpace(_item.Instructions))
+                                {
+                                    <div class="authoring-note-reader">
+                                        <label class="authoring-note-caption" for="authoring-basics-instructions">Student guidance</label>
+                                        <RichInstruction Id="authoring-basics-instructions" Value="@_item.Instructions" />
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(_item.Description))
+                                {
+                                    <div class="authoring-note-reader">
+                                        <label class="authoring-note-caption" for="authoring-basics-description">Teacher notes</label>
+                                        <RichInstruction Id="authoring-basics-description" Value="@_item.Description" />
+                                    </div>
+                                }
+                            </div>
+                        }
                     </section>
                 }
 
@@ -201,80 +235,13 @@
                                              ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
                         </FormRow>
 
-                        @* Round authoring-compact-fields: type + grading are two short pickers, so they
-                           render as ONE row of the shared FormRow primitive. AlignTop is the
-                           repo's multi-input row pattern (flex-row-input-alignment): the row's own input
-                           cell already lays its children inline (8px gap) and top-aligned, and the row keeps the shared 180px label
-                           gutter, so the pair lines up with every single-field row. Do NOT add
-                           LabelPosition="Below" here: it drops that gutter and renders the pair's one
-                           label under its FIRST control — no bespoke CSS, no new component. *@
-                        @* D11: the row's ONE label carries the (i) help icon whose tooltip merges
-                           the AI-availability text and the feedback-mode narrative — no inline
-                           prose anywhere on the row. *@
-                        <FormRow Label="Assignment type &amp; grading format" Required AlignTop
-                                 For="authoring-basics-type" Help="@GradingRowHelp">
-                            @* RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
-                           here as that section requires. Neither shared wrapper fits:
-                           · DropdownForEnum hardcodes option text = the enum member name, but
-                             these options show each member's EnumHelper DESCRIPTION, and their
-                             VALUE is the numeric enum id that SelectedType /
-                             SelectedGradingFormat parse back — the page's projections and its
-                             whole bUnit picker seam are built on that contract.
-                           · DropdownComponent binds primitive keys to pre-loaded DTO lists;
-                             these are neither (enum-with-description, see above).
-                           *@
-                            <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
-                                          Items="@TypeOptions" @bind-SelectedOption="_selectedType"
-                                          OptionText="@(o => o?.Label ?? string.Empty)"
-                                          OptionValue="@(o => o?.Value ?? string.Empty)"
-                                          Disabled="@IsReadOnly" Class="w-6" />
-                            <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
-                                          Items="@GradingFormatOptions" @bind-SelectedOption="_selectedGradingFormat"
-                                          OptionText="@(o => o?.Label ?? string.Empty)"
-                                          OptionValue="@(o => o?.Value ?? string.Empty)"
-                                          Disabled="@IsReadOnly" Class="w-6" />
-                        </FormRow>
+                        @* D14 (owner follow-up, 2026-10-09): Subject leads the form's authoring
+                           decisions — it sits directly after Title and BEFORE the type/grading row
+                           (it used to sit below the scoring cluster), and its strands & lessons
+                           context row moves WITH it so the two stay adjacent (D4's contract: the
+                           buttons live directly beneath the Subject dropdown).
 
-                        @* D6/§3: Due date sits directly after the type & grading choice — the date an
-                           author sets right after deciding WHAT the assignment is. *@
-                        <FormRow Label="Due date" For="authoring-basics-due">
-                            <FluentDatePicker Id="authoring-basics-due" @bind-Value="_model.DueDate"
-                                              @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
-                                              Class="w-4" />
-                        </FormRow>
-
-                        @* D9 + OD1 (round authoring-compact-fields): the author-fed scoring fields sit
-                           directly under the Grading format control that already drives them. The attempt
-                           cap joins the max score here — the two short number fields are paired — and it
-                           keeps the UX-17/D12 gate: for TeacherGraded it renders DISABLED with the one
-                           reason ScoringFieldsSection still prints below the pass score, so the page
-                           never reflows when the grading format changes. *@
-                        <FormRow Label="Max score &amp; max attempts" AlignTop
-                                 For="authoring-basics-max-score">
-                            <FluentNumberField Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
-                                               ReadOnly="@IsReadOnly" Class="w-3" />
-                            <FluentNumberField Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
-                                               Class="w-3"
-                                               Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
-                        </FormRow>
-
-                        @* UX-17/UX-18 + D11: the pass-score control renders in Basics (the checkbox
-                           below carries the inapplicable state's explanation). *@
-                        <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
-
-                        @* OD3: the author guardian-review toggle lives beside the grading format. It is
-                           editable ONLY while the effective policy leaves review unset; a policy-set value
-                           locks it — and the row's (i) help icon carries the lock reason (D11), while
-                           Rules carries the policy readout. *@
-                        <FormRow Label="Guardian review" For="authoring-basics-mandatory-review"
-                                 Help="@(PolicyReviewLocked ? PolicyReviewLockedReason : null)">
-                            <FluentCheckbox Id="authoring-basics-mandatory-review"
-                                            @bind-Value="_mandatoryReview"
-                                            Label="Require guardian review before student submits"
-                                            Disabled="@(IsReadOnly || PolicyReviewLocked)" />
-                        </FormRow>
-
-                        @* R4 (CP-4): an explicit SelectedOptionChanged handler replaces @bind — the
+                           R4 (CP-4): an explicit SelectedOptionChanged handler replaces @bind — the
                            page must CLEAR the context picks and re-read the strand/lesson sources when the
                            subject changes (a strand belongs to a subject).
 
@@ -306,7 +273,8 @@
                            compartment's single title (X-1). *@
                         @if (!IsReadOnly)
                         {
-                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-add-strand">
+                            <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-add-strand"
+                                     Help="@ContextPicksEmptyHint">
                                 <ContextPicksSection Model="_model"
                                                      StrandOptions="_strandPickOptions"
                                                      LessonOptions="_lessonPickOptions"
@@ -321,8 +289,148 @@
                             </FormRow>
                         }
 
-                        @* D6/§3: Basics ends after the context row — the lifecycle readout leads the
-                           form (top) and Description/Instructions live in the bottom compartment. *@
+                        @* Round authoring-compact-fields: type + grading are two short pickers, so they
+                           render as ONE row of the shared FormRow primitive. Owner refinement
+                           2026-10-11: the row's label is the short GROUP name — "Grading" — and each
+                           picker carries its own caption under it via the shared FormRowCell
+                           ("Assignment type" / "Grading format"). AlignTop keeps the repo's
+                           multi-input row pattern, the 180px label gutter still lines the pair up
+                           with every single-field row, and the required asterisk stays on the group.
+                           Do NOT add LabelPosition="Below" here: it drops that gutter. *@
+                        @* D11: the row's ONE label carries the (i) help icon whose tooltip merges
+                           the AI-availability text and the feedback-mode narrative — no inline
+                           prose anywhere on the row. *@
+                        <FormRow Label="Grading" Required AlignTop
+                                 For="authoring-basics-type" Help="@GradingGroupHint">
+                            @* RAW FluentSelect — the dropdown-ui skill §1 escape hatch, documented
+                           here as that section requires. Neither shared wrapper fits:
+                           · DropdownForEnum hardcodes option text = the enum member name, but
+                             these options show each member's EnumHelper DESCRIPTION, and their
+                             VALUE is the numeric enum id that SelectedType /
+                             SelectedGradingFormat parse back — the page's projections and its
+                             whole bUnit picker seam are built on that contract.
+                           · DropdownComponent binds primitive keys to pre-loaded DTO lists;
+                             these are neither (enum-with-description, see above).
+                           *@
+                            <FormRowCell Caption="Assignment type" For="authoring-basics-type" Help="@TypeCellHelp">
+                                <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
+                                              Items="@TypeOptions"
+                                              SelectedOption="@_selectedType"
+                                              SelectedOptionChanged="@OnTypeChangedAsync"
+                                              OptionText="@(o => o?.Label ?? string.Empty)"
+                                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                                              Disabled="@IsReadOnly" />
+                            </FormRowCell>
+                            <FormRowCell Caption="Grading format" For="authoring-basics-grading" Help="@GradingFormatCellHelp">
+                                <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
+                                              Items="@GradingFormatOptions"
+                                              SelectedOption="@_selectedGradingFormat"
+                                              SelectedOptionChanged="@OnGradingFormatChanged"
+                                              OptionText="@(o => o?.Label ?? string.Empty)"
+                                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                                              Disabled="@IsReadOnly" />
+                            </FormRowCell>
+                        </FormRow>
+
+                        @* D15 (owner, 2026-10-09): an applied side effect with a visible reason —
+                           the CP-4 subject-change shape. Rendered only after a type change
+                           actually switched the grading format, so the author is never left
+                           wondering why their grading choice moved. *@
+                        @if (_gradingSwitchReason is not null)
+                        {
+                            <p class="authoring-hint" id="authoring-grading-switched">@_gradingSwitchReason</p>
+                        }
+
+                        @* D6/§3: Due date sits directly after the type & grading choice — the date an
+                           author sets right after deciding WHAT the assignment is. *@
+                        <FormRow Label="Due date" For="authoring-basics-due">
+                            <FluentDatePicker Id="authoring-basics-due" @bind-Value="_model.DueDate"
+                                              @bind-Value:after="OnDueDateChangedAsync" ReadOnly="@IsReadOnly"
+                                              Class="w-4" />
+                        </FormRow>
+
+                        @* D9 + OD1 (round authoring-compact-fields): the author-fed scoring fields sit
+                           directly under the Grading format control that already drives them. The attempt
+                           cap joins the max score here — and owner 2026-10-11: the PASS SCORE control
+                           joins them as the third FormRowCell, so all three score fields live in ONE
+                           "Score" row (the section renders the control only, never a FormRow). The
+                           UX-17/D12 gate is unchanged: for TeacherGraded the cap and the pass score
+                           render DISABLED, and the long inapplicable reason rides the pass score
+                           CELL's help-hint tooltip — the checkbox label stays short. *@
+                        <FormRow Label="Score" AlignTop
+                                 For="authoring-basics-max-score">
+                            <FormRowCell Caption="Max score" For="authoring-basics-max-score">
+                                <FluentNumberField Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
+                                                   ReadOnly="@IsReadOnly" />
+                            </FormRowCell>
+                            <FormRowCell Caption="Max attempts" For="scoringFieldsMaxAttempts">
+                                <FluentNumberField Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
+                                                   Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
+                            </FormRowCell>
+                            <FormRowCell Caption="Pass score" For="scoringFieldsPassScore"
+                                         Help="@(ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat) ? ScoringFieldsSection.ScoringInapplicableReason : ScoringFieldsSection.PassScoreHint)">
+                                <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
+                            </FormRowCell>
+                        </FormRow>
+
+                        @* OD3: the author guardian-review toggle lives beside the grading format. It is
+                           editable ONLY while the effective policy leaves review unset; a policy-set value
+                           locks it — and the row's (i) help icon carries the lock reason (D11), while
+                           Rules carries the policy readout. *@
+                        <FormRow Label="Guardian review" For="authoring-basics-mandatory-review"
+                                 Help="@(PolicyReviewLocked ? PolicyReviewLockedReason : null)">
+                            <FluentCheckbox Id="authoring-basics-mandatory-review"
+                                            @bind-Value="_mandatoryReview"
+                                            Label="Require guardian review before student submits"
+                                            Disabled="@(IsReadOnly || PolicyReviewLocked)" />
+                        </FormRow>
+
+                        @* Owner 2026-10-11 (grill round, wysiwyg-instruction-editor extension): the two
+                           notes are ONE label-less TAB group that FILL the row's width — Student guidance
+                           (student-facing, first tab and active) and Teacher notes (internal), each a
+                           full rich editor. The tabs carry the field names, so the FormRow label went
+                           with the pairing (Q2: no label; FormRow cannot render one, hence the plain
+                           container). The chrome is the shared FluentTabStrip primitive (extracted for
+                           reuse across the repo). Ids are D9's bUnit contract and ride on the editors
+                           themselves.
+
+                           View mode is a READER, never tabs (Q3): both fields stack as sanitised
+                           readers so a reader sees everything at once. *@
+                        @if (IsReadOnly)
+                        {
+                            <div class="authoring-notes-readers">
+                                <div class="authoring-note-reader">
+                                    <label class="authoring-note-caption" for="authoring-basics-instructions">Student guidance</label>
+                                    <RichInstruction Id="authoring-basics-instructions" Value="@_model.Instructions" />
+                                </div>
+                                <div class="authoring-note-reader">
+                                    <label class="authoring-note-caption" for="authoring-basics-description">Teacher notes</label>
+                                    <RichInstruction Id="authoring-basics-description" Value="@_model.Description" />
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <FluentTabStrip>
+                                <FluentTab Label="Student guidance">
+                                    <RichInstructionEditor @ref="_guidanceEditor"
+                                                           Id="authoring-basics-instructions"
+                                                           Value="@_model.Instructions"
+                                                           Placeholder="What the student must do — shown to students…" />
+                                </FluentTab>
+                                <FluentTab Label="Teacher notes">
+                                    <RichInstructionEditor @ref="_teacherNotesEditor"
+                                                           Id="authoring-basics-description"
+                                                           Value="@_model.Description"
+                                                           Placeholder="Internal note for other teachers…" />
+                                </FluentTab>
+                            </FluentTabStrip>
+                        }
+
+                        @* D14/D6: Subject + its strands & lessons row LEAD the authoring decisions
+                           (right after Title, before type/grading — D14); Basics ends with the two notes
+                           above, and the materials live in the Content & Resources block that now tops the
+                           right pane (owner, 2026-10-10). *@
                     </section>
 
                     <section id="authoring-targets" class="authoring-compartment authoring-compartment--right">
@@ -344,6 +452,70 @@
                         @if (AudienceEditorDisabledReason is not null)
                         {
                             <p class="authoring-reason" id="authoring-targets-reason">@AudienceEditorDisabledReason</p>
+                        }
+
+                        @* Owner, 2026-10-10: Content & Resources TOPS this pane now, above Targets &
+                           audience — moved here complete, with every part of it (header + kebab, the
+                           instructions list, the dropzone, the refusal bar) and its ids intact.
+                           D8 (revised)/AC-9: the header carries the title TEXT on the left and the kebab
+                           MENU on the right — two distinct elements, the kebab being the dropdown control,
+                           never the title. D5 (revised)/AC-10: the dropzone routes by kind — media to an
+                           instruction row, a document to a resource — and refuses, by name, only what it
+                           cannot take at all. *@
+                        @if (!IsReadOnly)
+                        {
+                            <section class="authoring-materials-section" id="authoring-materials-section">
+                                @* The header treatment is the SHARED component (owner, 2026-10-10) — the same one
+                                   the Rules card is to wear — so the thin rule under the title and the
+                                   title/actions split cannot drift between the two. *@
+                                <PanelSection Title="Content &amp; Resources" TitleId="authoring-materials-title">
+                                    <HeaderActions>
+                                        @* D2/AC-1/D12: one kebab, straight to the action — and a lone available
+                                           action would render as a plain button, the shared component's own rule. *@
+                                        <RowActionsMenu UseMenuService="false"
+                                                        ForceKebab="true"
+                                                        Actions="@MaterialActions"
+                                                        AriaLabel="Add a material" />
+                                    </HeaderActions>
+
+                                    @* RZ9996: with a named fragment supplied, the body must be wrapped
+                                       in an explicit ChildContent. *@
+                                    <ChildContent>
+
+                                @* The instructions list lives INSIDE Content & Resources, just beneath its
+                                   header text — and above the dropzone (AC-11). The same shared editor the
+                                   question dialog uses, so the two owners cannot drift; this block supplies
+                                   the add affordance, so its own button is suppressed here (grill Q1). *@
+                                <InstructionEditorList @ref="_instructionList"
+                                                       Id="authoring-instruction-items"
+                                                       Rows="_model.InstructionItems"
+                                                       ShowAddButton="false"
+                                                       EditingMode="@RowEditingMode.Dialog"
+                                                       EditRowRequested="OnMaterialEditRequestedAsync"
+                                                       StageMediaAsync="StageInstructionMediaAsync"
+                                                       Changed="OnModelChanged"
+                                                       ReadOnly="@IsReadOnly" />
+
+                                <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
+                                    <FluentInputFile Mode="InputFileMode.Stream"
+                                                     MaximumFileCount="1"
+                                                     MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                     Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                     OnCompleted="@OnMaterialDroppedAsync"
+                                                     DragDropZoneVisible="true">
+                                        Drop files here — images, audio or video become materials; PDFs and documents become references
+                                    </FluentInputFile>
+                                </div>
+                                @if (_materialRefusal is not null)
+                                {
+                                    @* D5: the refusal is surfaced, named and actionable — a
+                                       FluentMessageBar, the shape every other error here takes. *@
+                                    <FluentMessageBar Id="authoring-materials-refusal"
+                                                      Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
+                                }
+                                    </ChildContent>
+                                </PanelSection>
+                            </section>
                         }
 
                         @* The card keeps SectionCard's native header Add (grill Q4) and its header IS the
@@ -412,18 +584,19 @@
                            readout rows keep their long-standing element ids (D12 removed the
                            jump-nav that used to link to this anchor). *@
                         <div id="authoring-rules" class="authoring-rules-card">
-                            <SectionCard TItem="PolicyReadout"
-                                         Title="Rules"
-                                         HeaderHelp="@(AnyPolicyReadoutLocked ? PolicyInheritedHelpText : null)"
-                                         Count="@PolicyReadouts.Length"
-                                         ShowAddButton="false"
-                                         OnAddClick="@NoAddActionAsync"
-                                         Items="@PolicyReadouts">
-                                <ItemTemplate Context="readout">
+                            @* Owner, 2026-10-10: the Rules card wears the SHARED PanelSection — the same header
+                               treatment Content & Resources uses — so the two panels cannot drift. SectionCard's
+                               chrome retires with it: its title, its count chip (PanelSection has no count slot)
+                               and its Add (already off). The readout rows keep their long-standing ids. *@
+                            <PanelSection Title="Rules" TitleId="authoring-rules-title">
+                                <ChildContent>
+                                    @foreach (var readout in PolicyReadouts)
+                                    {
                                     @* UX-13 + D13: a policy-derived value is the resolved read-only text — plus,
                                        when one grade owns the policy, the link to it. The "inherited from
                                        Grade/Tenant policy" note is NO LONGER a per-row text badge; it rides the
-                                       padlock tooltip on the card header and on EVERY LOCKED subitem
+                                       padlock tooltip on EVERY LOCKED subitem (D14 dropped the card-header
+                                       padlock — the owner found it noise beside the header)
                                        (readout.Locked = inherited from policy AND not author-overridable — the
                                        owner's rule), so five rows no longer repeat the same sentence and only
                                        the rows that really cannot be overridden carry the padlock. The row keeps
@@ -443,8 +616,9 @@
                                                           class="authoring-policy-link">Grade policy</FluentAnchor>
                                         }
                                     </div>
-                                </ItemTemplate>
-                            </SectionCard>
+                                    }
+                                </ChildContent>
+                            </PanelSection>
 
                             @* D11 + D13: no explanatory hint paragraph — the info lives in the padlock
                                tooltip on the header and on every subitem. *@
@@ -538,7 +712,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
                         }
                         else
                         {
@@ -552,7 +726,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
                             @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
                             {
                                 <QuestionsDraftSection AssignmentId="_item.Id"
@@ -648,27 +822,10 @@
                    (FormRow's RowLabelPosition.Below — no shared-component change). *@
                 @if (!ShowSummary)
                 {
-                    <section id="authoring-instructions" class="authoring-compartment">
-                        <h3 class="authoring-compartment-title">Instructions</h3>
-                        <div class="authoring-instructions-grid">
-                            <div class="authoring-instructions-cell">
-                                <FormRow Label="Description" For="authoring-basics-description" AlignTop
-                                         LabelPosition="RowLabelPosition.Below">
-                                    <FluentTextArea Id="authoring-basics-description" @bind-Value="_model.Description"
-                                                    ReadOnly="@IsReadOnly" Rows="4"
-                                                    Placeholder="Internal note for other teachers…" class="full-width" />
-                                </FormRow>
-                            </div>
-                            <div class="authoring-instructions-cell">
-                                <FormRow Label="Instructions" For="authoring-basics-instructions" AlignTop
-                                         LabelPosition="RowLabelPosition.Below">
-                                    <FluentTextArea Id="authoring-basics-instructions" @bind-Value="_model.Instructions"
-                                                    ReadOnly="@IsReadOnly" Rows="4"
-                                                    Placeholder="What the student must do — shown to students…" class="full-width" />
-                                </FormRow>
-                            </div>
-                        </div>
-                    </section>
+                    @* Owner, 2026-10-10: the Instructions compartment is COLLAPSED, entirely. Its two notes
+                       moved into Basics (one inline row beneath Guardian review) and its Content & Resources
+                       block moved — complete, with its header, kebab, list, dropzone and refusal — to the top
+                       of the right pane above Targets & audience. Nothing renders here any more. *@
                 }
         }
         </div>
@@ -824,6 +981,10 @@
     // Type / grading / review selection state.
     private PickerOption? _selectedType;
     private PickerOption? _selectedGradingFormat;
+
+    /// <summary>D15: set only while an automatic type→grading switch is in force; the note it
+    /// feeds explains the applied change and clears the moment the author picks a format.</summary>
+    private string? _gradingSwitchReason;
     private bool _mandatoryReview = true;
 
     /// <summary>D2/OD4: the single resolved effective policy the Rules readouts and the
@@ -1141,12 +1302,6 @@
         new("authoring-policy-review", "Guardian review", GuardianReviewPolicyValueText, PolicyReviewLocked)
     ];
 
-    /// <summary>D13: the Rules card's header hint states the inherited/locked rule only while the
-    /// card actually holds a locked value — the header can never claim a lock the rows do not have
-    /// (today the four policy-owned readouts always qualify, so the condition documents the intent
-    /// and keeps the header honest if any of them ever becomes overridable).</summary>
-    private bool AnyPolicyReadoutLocked => PolicyReadouts.Any(readout => readout.Locked);
-
     /// <summary>D12 (owner, 2026-10-08): the compartment jump-nav — and with it the
     /// <c>Compartments</c> list that only fed it — is removed. The compartment SECTIONS and their
     /// long-standing ids stay exactly as they are (<c>#authoring-basics</c>, <c>-targets</c>,
@@ -1173,6 +1328,16 @@
                 : AssignmentAuthoringMode.View;
         }
     }
+
+    /// <summary>U4 (round-3 Q2 settlement): how many questions the CURRENT format requires a response
+    /// definition for and do not have one yet — non-zero renders the banner, zero hides it. Legacy rows
+    /// (saved before definitions existed) are exactly this case; nothing is invented for them
+    /// (<c>RequiresResponseKinds</c> is the same predicate the server enforces, so the banner cannot
+    /// disagree with the 400 the save would return).</summary>
+    private int QuestionsMissingResponseDefinition =>
+        QuestionResponseKindRules.RequiresResponseKinds(SelectedGradingFormat)
+            ? _model.Questions.Count(question => question.ResponseKinds.Count == 0)
+            : 0;
 
     private bool IsReadOnly => EffectiveMode == AssignmentAuthoringMode.View;
 
@@ -1219,17 +1384,52 @@
     private string CurrentCrumb =>
         EffectiveMode == AssignmentAuthoringMode.Edit ? "Edit" : "Overview";
 
-    /// <summary>D11: the feedback-mode narrative for the grading row's (i) help icon.</summary>
+    /// <summary>D11: the feedback-mode narrative — now the GRADING FORMAT cell's (i) help icon
+    /// (owner 2026-10-11, split from the row label).</summary>
     private string FeedbackModeTooltip =>
         $"Feedback mode: {EnumHelper.GetDescription(SelectedGradingFormat)}";
 
-    /// <summary>D11: the AI-availability text for the type/grading row's (i) help icon.</summary>
+    /// <summary>D11: the AI-availability text — now the ASSIGNMENT TYPE cell's (i) help icon
+    /// (owner 2026-10-11, split from the row label).</summary>
     private string GenerationHintTooltip =>
         QuestionGenerationGate.HintText(SelectedType, SelectedGradingFormat);
 
-    /// <summary>D11: the paired row's ONE label carries one (i) help icon whose tooltip merges
-    /// the AI-availability text and the feedback-mode narrative — no inline prose anywhere.</summary>
-    private string GradingRowHelp => $"{GenerationHintTooltip} {FeedbackModeTooltip}";
+    /// <summary>D14f (owner, 2026-10-09): what the two driving fields DO, so the row's single
+    /// (i) icon explains the causal chain instead of only the current selection. Every claim is
+    /// the documented behaviour — <c>documents/solution/assignment-request-implementation-details.md</c>
+    /// §3.3 (immediate vs held feedback; the scoring fields render only for Auto Scored /
+    /// Instant Feedback), <c>documents/rounds/round-ar-6-scoring.md</c> (both auto formats score
+    /// at submit; Teacher Marked never calls the scoring engine) and FR-220
+    /// (<see cref="QuestionGenerationGate"/> — the type joins the grading format in gating AI
+    /// generation). The enum descriptions ARE the user's vocabulary (Online / Hybrid / Offline;
+    /// Teacher Marked / Auto Scored / Instant Feedback), so the hint adds no glosses of its own.</summary>
+    public const string TypeGradingPurposeHint =
+        "What these drive: the grading format powers the scoring fields below — Auto Scored and "
+        + "Instant Feedback score submissions automatically at submit and unlock the Pass threshold "
+        + "(Instant Feedback shows students their per-question results right away; Auto Scored holds "
+        + "them for your review); Teacher Marked leaves all marking to you and disables those fields.";
+
+    /// <summary>D15: the selected type's own meaning — the owner's definition, verbatim (D14f's
+    /// hint now also states the type→grading rule, so an author can see WHY a format is missing).</summary>
+    private string TypeMeaningHint => SelectedType is { } type
+        ? $"{AssignmentTypeGradingRules.TypeDefinesGradingHint}: "
+          + AssignmentTypeGradingRules.MeaningOf(type)
+        : string.Empty;
+
+    /// <summary>D11 + D14f + D15 → owner 2026-10-11 (split): each cell's (i) icon carries the
+    /// lines that apply to ITS input, and the row label keeps one minimal sentence.</summary>
+    private string TypeCellHelp =>
+        $"{TypeMeaningHint}\n{GenerationHintTooltip}";
+
+    private string GradingFormatCellHelp =>
+        $"{TypeGradingPurposeHint}\n{FeedbackModeTooltip}";
+
+    /// <summary>Owner 2026-10-11: the Grading row label's hint stays MINIMAL — one short
+    /// sentence. The details live on the cells: the type's meaning and AI availability on the
+    /// Assignment type cell, the scoring-fields story and the feedback-mode narrative on the
+    /// Grading format cell.</summary>
+    public const string GradingGroupHint =
+        "These two choices drive how submissions are scored and what feedback students see.";
 
     /// <summary>D1: the pencil's click handler — flips to the full form. Never guarded (D9):
     /// nothing is navigated to and nothing is discarded.</summary>
@@ -1266,9 +1466,13 @@
             new("authoring-fact-lessons", "Lessons",
                 FactPicks(_model.ContextLessonIds, _lessonNames, _lessonsLoaded)),
             new("authoring-fact-description", "Description",
-                string.IsNullOrWhiteSpace(_item.Description) ? "—" : _item.Description!),
+                string.IsNullOrWhiteSpace(_item.Description)
+                    ? "—"
+                    : RichInstructionSanitizer.ToPlainText(_item.Description)),
             new("authoring-fact-instructions", "Instructions",
-                string.IsNullOrWhiteSpace(_item.Instructions) ? "—" : _item.Instructions!),
+                string.IsNullOrWhiteSpace(_item.Instructions)
+                    ? "—"
+                    : RichInstructionSanitizer.ToPlainText(_item.Instructions)),
         ];
 
     /// <summary>Local-time short date/time for a facts value, or "—".</summary>
@@ -1304,6 +1508,40 @@
         _selectedGradingFormat is not null
             ? (GradingFormatDto)int.Parse(_selectedGradingFormat.Value)
             : _item?.GradingFormat ?? GradingFormatDto.TeacherGraded;
+
+    /// <summary>D15 (owner, 2026-10-09): the assignment type defines which grading formats are
+    /// possible, and the matrix lives in exactly one place — <see cref="AssignmentTypeGradingRules"/>
+    /// (Contracts, the only project both this UI and the domain handlers can see), which the
+    /// create/update handlers also enforce. The page speaks the DTO enums directly.</summary>
+    private static PickerOption GradingOptionFor(GradingFormatDto format) =>
+        new(((int)format).ToString(), EnumHelper.GetDescription(format));
+
+    /// <summary>D15: a type change can invalidate the current grading format (an Offline
+    /// assignment is always Teacher Marked), so the page applies the type's fallback and records
+    /// the reason for the #authoring-grading-switched note — never a silent rewrite. The CP-4
+    /// subject-change handler is the precedent for an applied side effect with a visible reason.</summary>
+    private Task OnTypeChangedAsync(PickerOption? option)
+    {
+        _selectedType = option;
+        _gradingSwitchReason = null;
+
+        if (SelectedType is { } type
+            && !AssignmentTypeGradingRules.IsPermitted(type, SelectedGradingFormat))
+        {
+            _selectedGradingFormat = GradingOptionFor(AssignmentTypeGradingRules.FallbackFor(type));
+            _gradingSwitchReason = AssignmentTypeGradingRules.FormatSwitchedReason;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>D15: an author's own grading pick clears the switch note — it explained a past
+    /// automatic change, not a standing condition.</summary>
+    private void OnGradingFormatChanged(PickerOption? option)
+    {
+        _selectedGradingFormat = option;
+        _gradingSwitchReason = null;
+    }
 
     /// <summary>D-1: the legacy compat audience the request still carries, DERIVED from the
     /// authored target rows by the same precedence the aggregate applies in
@@ -1439,6 +1677,17 @@
     private string? ContextPickersDisabledReason =>
         ContextPickersDisabled ? ContextPicksSection.NoSubjectReason : null;
 
+    /// <summary>D14e (assignment-create-edit-redesign, owner 2026-10-09): the empty pick-source
+    /// texts no longer render as paragraphs in Basics — the row label carries them as the (i)
+    /// hint (FormRow.Help, the D11 pattern) while a source is authoritatively empty. Only the two
+    /// real empty states surface (A1): the transient "nothing picked yet" state says nothing,
+    /// and an unloaded list is never reported as empty (P8-4). B1: the condition is the
+    /// component's own <c>EmptyStateHint</c> — one logic site, one copy of each sentence.</summary>
+    private string? ContextPicksEmptyHint => ContextPicksSection.EmptyStateHint(
+        _strandsLoaded, _strandPickOptions.Length,
+        _lessonsLoaded, _lessonPickOptions.Length,
+        _model.ContextStrandIds.Count > 0);
+
     /// <summary>R4 (CP-6): the picked strands' display NAMES, in pick order — the generation
     /// request's structured <c>ContextStrands</c> field. A pick the loaded strand list does not
     /// resolve contributes no name (CP-11 excludes the dangling ones; a pick whose list never loaded
@@ -1522,12 +1771,29 @@
         new(((int)AssignmentTypeDto.Manual).ToString(), EnumHelper.GetDescription(AssignmentTypeDto.Manual))
     ];
 
-    private PickerOption[] GradingFormatOptions =>
-    [
-        new(((int)GradingFormatDto.TeacherGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.TeacherGraded)),
-        new(((int)GradingFormatDto.AutoGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.AutoGraded)),
-        new(((int)GradingFormatDto.InstantGraded).ToString(), EnumHelper.GetDescription(GradingFormatDto.InstantGraded))
-    ];
+    /// <summary>D15 (owner, 2026-10-09): the picker offers only the formats the SELECTED type
+    /// permits — an Offline assignment is always Teacher Marked. Q3's legacy tolerance keeps an
+    /// out-of-matrix persisted pick in the list so its label still renders; the value is never
+    /// silently rewritten, and an impossible pair is rejected server-side by
+    /// <c>AssignmentTypeGradingRules.EnsurePermitted</c>.</summary>
+    private PickerOption[] GradingFormatOptions
+    {
+        get
+        {
+            var type = SelectedType ?? AssignmentTypeDto.Manual;
+            var options = AssignmentTypeGradingRules.PermittedFormats(type)
+                .Select(GradingOptionFor)
+                .ToList();
+
+            if (_selectedGradingFormat is { } selected
+                && options.All(option => option.Value != selected.Value))
+            {
+                options.Insert(0, selected);
+            }
+
+            return [.. options];
+        }
+    }
 
     // ── Live recipient preview (TGT-16 / D-4) ─────────────────────────────────
 
@@ -1846,8 +2112,10 @@
                     _model.LoadFrom(_item);
                     _mandatoryReview = _item.MandatoryReview;
                     _selectedType = TypeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
-                    _selectedGradingFormat = GradingFormatOptions
-                        .FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
+                    // D15/Q3: resolve the persisted format from the FULL enum, never from the
+                    // filtered picker — an out-of-matrix stored pair (e.g. an older Offline + Auto
+                    // Scored row) must keep its value and label instead of resolving to null.
+                    _selectedGradingFormat = GradingOptionFor(_item.GradingFormat);
                 }
             }
             else if (Mode == AssignmentAuthoringMode.Create)
@@ -1855,8 +2123,7 @@
                 // A new assignment starts on the authored defaults the retired wizard used
                 // (Offline / Teacher Marked / no targets yet — TGT-13 requires the author to add one).
                 _selectedType = TypeOptions.Single(o => o.Value == ((int)AssignmentTypeDto.Manual).ToString());
-                _selectedGradingFormat = GradingFormatOptions
-                    .Single(o => o.Value == ((int)GradingFormatDto.TeacherGraded).ToString());
+                _selectedGradingFormat = GradingOptionFor(GradingFormatDto.TeacherGraded);
             }
 
             await LoadPickersAsync(_item, ct);
@@ -1878,6 +2145,9 @@
                     // R4 (P4.6): a create genuinely starts with NO picks — marked as READ (an empty
                     // set), so the save writes "no picks" rather than the fail-closed preserve.
                     _model.LoadContextPicks([], []);
+        // QR-5: a Create surface genuinely has no instruction blocks yet - mark them KNOWN, or a block
+        // the author adds here would project null = preserve and be dropped.
+        _model.MarkInstructionItemsLoaded();
                 }
 
                 // Create has no persisted set to read and View does not read one either, so only the
@@ -2158,6 +2428,9 @@
         }
 
         _model.LoadContextPicks([], []);
+        // QR-5: a Create surface genuinely has no instruction blocks yet - mark them KNOWN, or a block
+        // the author adds here would project null = preserve and be dropped.
+        _model.MarkInstructionItemsLoaded();
         await LoadContextPickSourcesAsync(_loadCts?.Token ?? CancellationToken.None);
         await InvokeAsync(StateHasChanged);
     }
@@ -2284,6 +2557,7 @@
         // emitting null — the update handler's preserve — instead of an empty list that would CLEAR
         // a picks-bearing assignment on the author's next scalar-only save.
         _model.LoadContextPicks(null, null);
+        _model.MarkInstructionItemsLoaded(loaded: false);
 
         try
         {
@@ -2374,6 +2648,203 @@
             if (_disposed) return;
             Logger.LogWarning(ex, "AI-prompt lock resolution failed");
         }
+    }
+
+    /// <summary>QR-5/§5.6 (U5): stages one instruction media file through the SAME endpoint the
+    /// attachments use (stage-at-selection), so instruction media inherit its store, sweeper, caps and
+    /// 413/400 mapping — and the payload simply carries what came back. A refusal returns null: the
+    /// shared editor then asks the author to retry, rather than failing the whole edit.</summary>
+    private async Task<StagedAttachmentDto?> StageInstructionMediaAsync(
+        InstructionEditorRow row, Stream content, string fileName, string contentType, long fileSize)
+    {
+        try
+        {
+            return await Api.StageAttachmentAsync(content, fileName, contentType, fileSize);
+        }
+        catch (AttachmentStagingFailed ex)
+        {
+            Logger.LogWarning(ex, "Instruction media staging failed for {FileName}", fileName);
+            return null;
+        }
+    }
+
+
+    /// <summary>The shared materials editor, reached through <c>@ref</c> by the compartment's kebab
+    /// (round grill Q1): the section supplies the add affordance, so the list renders no button of its
+    /// own here.</summary>
+    private InstructionEditorList? _instructionList;
+
+    /// <summary>The Student guidance rich editor (round <c>wysiwyg-instruction-editor</c>). The wrapper
+    /// has no change callback (G6), so the page reads its HTML when it saves — see <c>SaveAsync</c> — and
+    /// that read is where the value is sanitised on the way into the model (Q11/AC-2).</summary>
+    private RichInstructionEditor? _guidanceEditor;
+
+    /// <summary>The Teacher notes rich editor (grill round, owner 2026-10-11): the internal note took the
+    /// same control as the guidance — same read-at-submit, same sanitise-on-write.</summary>
+    private RichInstructionEditor? _teacherNotesEditor;
+
+    /// <summary>The D5 refusal line for a dropped document — replaced by the next drop's outcome.</summary>
+    private string? _materialRefusal;
+
+    /// <summary>The page's collocated JS module, imported lazily — used here for the file-picker pop
+    /// (the unsaved-changes guard imports the same file for its own export).</summary>
+    private IJSObjectReference? _materialsModule;
+
+    /// <summary>D2/AC-1 (revised D3, owner 2026-10-10): the compartment's one kebab. Text and Link are
+    /// captured in MaterialEditDialog and appended from its result (Q1/Q2); Upload From Device pops the
+    /// file picker directly, with no dialog (Q3). Every item carries an icon and the labels are Title
+    /// Case, matching the section headers.</summary>
+    private IReadOnlyList<RowAction> MaterialActions =>
+    [
+        new()
+        {
+            Label = "Add Text Content",
+            Icon = new Icons.Regular.Size16.TextDescription(),
+            OnClick = () => AddMaterialViaDialogAsync(InstructionKindDto.Text),
+        },
+        new()
+        {
+            Label = "Add Link",
+            Icon = new Icons.Regular.Size16.Link(),
+            OnClick = () => AddMaterialViaDialogAsync(InstructionKindDto.Url),
+        },
+        new()
+        {
+            Label = "Upload From Device",
+            Icon = new Icons.Regular.Size16.ArrowUpload(),
+            OnClick = OpenMaterialFilePickerAsync,
+        },
+    ];
+
+    /// <summary>D3 (revised)/Q1-Q2: the Text and Link actions are captured in <see cref="MaterialEditDialog"/>
+    /// — nothing lands in the model unless the dialog is confirmed — and the row is appended HERE from its
+    /// result, so the list stays the single writer of its rows and the dialog never mutates the model.</summary>
+    private async Task AddMaterialViaDialogAsync(InstructionKindDto kind)
+    {
+        var model = new MaterialEditFormModel { Kind = kind };
+        // Medium: the Small default (420px) cannot hold the two-field Text form comfortably — the owner
+        // hit exactly that (2026-10-10). One size for both kinds keeps the dialog from jumping width
+        // as the kind switches.
+        var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            model,
+            kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link",
+            DialogSize.Medium);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        _materialRefusal = null;
+        await _instructionList!.AddRowAsync(result.Kind);
+
+        // Fill the row the editor just appended (and focused). The dialog's payload is faithful to the
+        // validator: Text carries its title (+ optional body), Link its absolute url (+ optional label).
+        var row = _model.InstructionItems[^1];
+        row.Title = result.Title;
+        row.Text = result.Body;
+        row.Url = result.Url;
+        StateHasChanged();
+    }
+
+    /// <summary>Q4(b)/AC-14: a Text/Link row is edited THROUGH the dialog — the row reads its values
+    /// out and this affordance reopens the same dialog the kebab creates with, seeded from the row
+    /// (<see cref="MaterialEditFormModel.FromRow"/>). The result is applied back THROUGH the list
+    /// (<see cref="InstructionEditorList.ApplyEditAsync"/>), so the list stays the single writer of its
+    /// rows exactly as it is on the create path. Cancelling (a null result) changes nothing — AC-15.</summary>
+    private async Task OnMaterialEditRequestedAsync(InstructionEditorRow row)
+    {
+        var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            MaterialEditFormModel.FromRow(row),
+            row.Kind == InstructionKindDto.Text ? "Edit Text Content" : "Edit Link",
+            DialogSize.Medium);
+
+        if (result is null)
+        {
+            return;
+        }
+
+        if (_instructionList is null)
+        {
+            return;
+        }
+
+        _materialRefusal = null;
+        await _instructionList.ApplyEditAsync(row, result);
+    }
+
+    /// <summary>D3 (revised)/Q3: "Upload From Device" pops the picker DIRECTLY — no dialog. The dropzone's
+    /// <c>FluentInputFile</c> owns the hidden input; the collocated module clicks it (see that file's note
+    /// on the deliberate departure from the no-hidden-element-click precedent).</summary>
+    private async Task OpenMaterialFilePickerAsync()
+    {
+        _materialRefusal = null;
+        _materialsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", BeforeUnloadModulePath);
+        await _materialsModule.InvokeVoidAsync("openMaterialFilePicker", "#authoring-materials-dropzone");
+    }
+
+    /// <summary>D5 (revised)/AC-10: a dropped file is ROUTED — media becomes an instruction row
+    /// (staged through the same endpoint the media rows use), a document becomes a resource, and
+    /// only what the section cannot take at all is refused, by name. Never accepted and silently
+    /// dropped, and never refused when a destination exists.</summary>
+    private async Task OnMaterialDroppedAsync(IEnumerable<FluentInputFileEventArgs> args)
+    {
+        foreach (var file in args)
+        {
+            switch (MaterialDropRouting.ForDrop(file.Name, file.ContentType, file.Size))
+            {
+                case MaterialDropDestination.InstructionMedia:
+                    _materialRefusal = null;
+                    var row = new InstructionEditorRow
+                    {
+                        Kind = InstructionKindInference.ForFile(file.Name, file.ContentType)!.Value,
+                    };
+                    _model.InstructionItems.Add(row);
+                    await _instructionList!.StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+                    break;
+
+                case MaterialDropDestination.Resource:
+                    await StageDroppedResourceAsync(file);
+                    break;
+
+                default:
+                    _materialRefusal = MaterialDropRouting.NotAcceptedRefusal(file.Name);
+                    StateHasChanged();
+                    break;
+            }
+        }
+    }
+
+    /// <summary>D5 (revised): a dropped DOCUMENT becomes a resource — the same stage endpoint and the
+    /// same row shape <c>ResourcesSection</c> uses, so the extraction outcome rides the save payload
+    /// (R3) and the file joins the AI reference set exactly as an upload from the tile does.</summary>
+    private async Task StageDroppedResourceAsync(FluentInputFileEventArgs file)
+    {
+        try
+        {
+            var staged = await Api.StageAttachmentAsync(file.Stream, file.Name, file.ContentType, file.Size);
+            _model.AddAttachment(new AttachmentEditorRow
+            {
+                FileName = staged.FileName,
+                ContentType = staged.ContentType,
+                FileSize = staged.FileSize,
+                StoragePath = staged.StoragePath,
+                // R3 (P1-3): carry the extraction outcome the stage response reported, so a dropped
+                // document is described by its extraction status exactly as a tile upload is.
+                ExtractionStatus = staged.ExtractionStatus,
+                ExtractedText = staged.ExtractedText,
+                ExtractedAt = staged.ExtractedAt,
+                ExtractionError = staged.ExtractionError,
+            });
+            _materialRefusal = null;
+        }
+        catch (AttachmentStagingFailed ex)
+        {
+            Logger.LogWarning(ex, "Material drop staging failed for {FileName}", file.Name);
+            _materialRefusal = $"'{file.Name}' could not be added — please try again.";
+        }
+
+        StateHasChanged();
     }
 
     private void OnModelChanged() { }
@@ -2877,6 +3348,35 @@
         // form model before the submit gate and the payload both read the target set.
         SyncTargetsFromBuilder();
 
+        // Round wysiwyg-instruction-editor (owner 2026-10-11): the rich editors have no binding, so
+        // their HTML is pulled HERE — before the gate, so the gate validates what is actually stored —
+        // and sanitised on the way in. That is the write-side half of Q11's defence in depth: the model
+        // can only ever hold clean HTML, and the render side sanitises again on display.
+        if (!IsReadOnly)
+        {
+            // A null read means the editor is unavailable in this session (assets failed to load, or the
+            // interop threw) — keep whatever the model already holds rather than wiping the field or
+            // faulting the save through the page's ErrorBoundary (the tolerant seam of the 2026-10-11
+            // "editor not displaying" fix).
+            if (_guidanceEditor is not null)
+            {
+                var guidanceHtml = await _guidanceEditor.GetHtmlAsync();
+                if (guidanceHtml is not null)
+                {
+                    _model.Instructions = RichInstructionSanitizer.Sanitize(guidanceHtml);
+                }
+            }
+
+            if (_teacherNotesEditor is not null)
+            {
+                var notesHtml = await _teacherNotesEditor.GetHtmlAsync();
+                if (notesHtml is not null)
+                {
+                    _model.Description = RichInstructionSanitizer.Sanitize(notesHtml);
+                }
+            }
+        }
+
         if (!ValidateForSave()) return;
 
         _busy = true;
@@ -3019,6 +3519,14 @@
         if (!_model.ScoringFieldsPassSubmitGate(SelectedGradingFormat, out var scoringError))
         {
             _error = scoringError;
+            return false;
+        }
+        // Round instructional-materials (D6/D7): a text material without a title cannot be named in the
+        // list or on the ward surface, so the page stops the save here instead of letting the server's
+        // 400 arrive on the next round trip.
+        if (!_model.InstructionsPassSubmitGate(out var instructionError))
+        {
+            _error = instructionError;
             return false;
         }
         return true;

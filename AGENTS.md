@@ -53,8 +53,20 @@ ambiguous requirement — **use the `grill-me` skill** rather than asking ad hoc
   deferred.
 
 Applies to plan/spec pressure-testing and to any request that hides several
-decisions. It does not apply to a single factual question, where a direct
-question is cheaper.
+decisions.
+
+**Always, with no threshold (owner, 2026-10-10).** *Every* question the repo
+cannot answer is an open question and gets this treatment — a wording choice, a
+layout tweak, a one-line CI gate, a repository setting, a merge-ordering practice,
+a "should we enable X" that arrived as a footnote. The test is **decidability, not
+size**: if the codebase, config, or docs settle it, resolve it yourself and say
+what you found; if they cannot, it goes in a **grill round** — never as prose
+questions tacked onto the end of a reply, and never as a recommendation the agent
+quietly acts on. "I mentioned it in passing" is not a substitute for a round
+(that exact miss happened on 2026-10-10 with repository auto-merge and PR merge
+ordering, both raised as afterthoughts). The only exemption is a pure factual
+question, where a direct question is cheaper.
+
 
 ---
 
@@ -93,10 +105,10 @@ Workflow:
 
 ### Installed skills are read-only — refresh, never patch
 
-Skill folders installed outside this repo (e.g.
-`C:\Users\skwar\.pi\agent\pi-hermes-memory\skills\grill-me`) are **vendored
-copies of an external source** — provenance and the upstream URL live in the
-frontmatter `source:` field (or, for installer-managed skills, in
+Skill folders installed outside this repo (e.g. `~/.agents/skills/` and the
+`~/.pi/agent/skills/`, `~/.claude/skills/` entries linked into it) are
+**vendored copies of an external source** — provenance and the upstream URL live
+in the frontmatter `source:` field (or, for installer-managed skills, in
 `~/.agents/.skill-lock.json`, whose entry carries e.g. `source`, `sourceUrl`,
 `skillPath`, `skillFolderHash` and `updatedAt`). Never edit them locally: a
 local patch drifts
@@ -107,8 +119,8 @@ exactly how `grill-me` got polluted before its 2026-10-05 refresh from
 - **Wrong or stale skill?** Re-fetch from the upstream URL (frontmatter
   `source:`, or the lock entry's `sourceUrl` for installer-managed skills), bump
   `version` / `updated` — do not patch in place.
-- **Enforcement (deny-ACL):** the locked skill file (today: `grill-me/SKILL.md`)
-  carries a deny `(W)` — which `icacls` renders as *Write, Synchronize*, and since
+- **Enforcement (deny-ACL):** a write-locked skill file carries a deny `(W)` —
+  which `icacls` renders as *Write, Synchronize*, and since
   almost every open requests Synchronize it refuses **reads as well as writes**
   (verified 2026-10-05: `.NET OpenRead`, `OpenText`, `Get-Content -ErrorAction
   Stop` and `cmd /c type` all fail with *Access denied*, while an undenyed skill
@@ -117,18 +129,21 @@ exactly how `grill-me` got polluted before its 2026-10-05 refresh from
   `OpenWrite` and `Add-Content`. **Do not re-add a deny on the folder:** the
   folder-level `(W,D,DC)` deny was removed on 2026-10-05 after the skill tooling
   began failing against it (`skill_manage create` reported `EPERM … scandir
-  '<…>/grill-me'`) — that is the strongly-indicated cause, though the failing
+  '<…>/<skill-folder>'`) — that is the strongly-indicated cause, though the failing
   `create` was never retried. With it gone, delete-and-recreate is no longer
-  blocked; the file deny is the whole enforcement. Unlock → refresh → re-apply:
+  blocked; the file deny is the whole enforcement. Nothing was write-locked as of
+  2026-10-12 — the sequence below is the convention to use *if* you lock one.
+  Unlock → refresh → re-apply:
   ```powershell
   $file = "<skill-folder>/SKILL.md"
   icacls $file /remove:d $env:USERNAME
   # ...re-fetch from upstream...
   icacls $file /deny "${env:USERNAME}:(WD,AD)"   # write-only; (W) also blocks reads
   ```
-- **Cost to the author — updating to the latest upstream is now deliberately
-  awkward.** The skill can no longer be refreshed by simply editing the file:
-  every update must go through the unlock → re-fetch → re-lock sequence above,
+- **Cost to the author — for a write-locked skill, updating to the latest
+  upstream is deliberately awkward.** It can no longer be refreshed by simply
+  editing the file: every update must go through the unlock → re-fetch → re-lock
+  sequence above,
   or the write fails with *Access denied*. Budget one extra unlock + one re-lock
   per refreshed file; when several skills need updating, run all the unlocks in one
   pass, re-fetch each, then re-apply every deny afterwards. If this friction

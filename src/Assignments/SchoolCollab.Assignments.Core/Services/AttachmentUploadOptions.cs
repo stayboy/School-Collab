@@ -30,7 +30,13 @@ public sealed class AttachmentUploadOptions
     [
         ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
         ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".txt", ".md", ".csv"
+        ".txt", ".md", ".csv",
+        // QR-5 / round Q1 (owner, 2026-10-09): the media kinds a question response or an instruction
+        // can carry. The list was document/image-only while it existed for AI grounding alone; the
+        // response definitions make audio and video first-class, so the same list — the one the
+        // server's StagedFileValidator and the client policy both read — carries them.
+        ".mp3", ".m4a", ".wav", ".ogg", ".aac",
+        ".mp4", ".webm", ".mov", ".m4v"
     ];
 
     /// <summary>How long staged files live before the sweep is

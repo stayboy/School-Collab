@@ -42,12 +42,8 @@
     font-size: 0.875rem;
 }
 
-.cq-prompt-nums {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 12px;
-}
+/* D14d: the knobs now ride FormRow (the shared label gutter) — the old
+   `.cq-prompt-nums` bare-flex container is gone with them. */
 
 .cq-prompt-types {
     display: flex;

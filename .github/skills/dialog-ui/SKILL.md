@@ -91,6 +91,17 @@ Every "form" dialog in this repo derives from the shared shell in
   `PrimaryAction = null`, `SecondaryAction = null`,
   `PreventDismissOnOverlayClick = true`, plus the caller's `Title` + `Width`.
   Do NOT pass custom primary/secondary actions.
+- **§5's `FormRow` rule extends to every dialog INPUT GROUP.** Beyond one row
+  per field: a peer group (a count plus its difficulty splits, etc.) is ONE
+  `AlignTop` `FormRow` whose sub-inputs keep their own visible `Label=` (or get
+  an `aria-label`) — never a bare flex row of per-field `Label=` inputs.
+  Shipped precedent: `QuestionPromptDialog`'s old `.cq-prompt-nums` flex row
+  migrated to three FormRows ("Number of questions" / "Difficulty mix" /
+  "Question types"); the shape is pinned by
+  `QuestionPromptDialogBunitTests.Knobs_RenderAsFormRows_SoEveryLabelSharesTheFormGutter`.
+  Dialog **test** harnesses (real vs mocked `IDialogService`, the collocated
+  `beforeunload` `JSInterop.SetupModule` trap): `.github/copilot/rules/testing.md`
+  §"bUnit pitfalls".
 
 ---
 

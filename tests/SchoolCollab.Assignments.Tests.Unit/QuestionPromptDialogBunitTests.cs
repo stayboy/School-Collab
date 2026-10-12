@@ -104,6 +104,26 @@ public class QuestionPromptDialogBunitTests : BunitContext
         provider.Find("#cq-prompt-hard").GetAttribute("value").Should().Be("2");
     }
 
+    /// <summary>D14d (assignment-create-edit-redesign, owner 2026-10-09): the configure box's
+    /// inputs ride the shared FormRow, so every knob label aligns to the form's label gutter
+    /// instead of floating above a bare flex row.</summary>
+    [TestMethod]
+    public void Knobs_RenderAsFormRows_SoEveryLabelSharesTheFormGutter()
+    {
+        var (provider, _) = Open(Model());
+
+        var rows = provider.FindAll(".form-row");
+        rows.Should().HaveCount(3,
+            "D14d: number of questions, difficulty mix and question types each ride a shared FormRow");
+
+        provider.FindAll(".form-row-label").Select(l => l.TextContent.Trim())
+            .Should().Contain(["Number of questions", "Difficulty mix", "Question types"],
+                "D14d: the row labels carry the knob names on the common gutter");
+
+        provider.FindAll(".form-row-label-for-cq-prompt-count, label[for='cq-prompt-count']")
+            .Should().NotBeEmpty("the count row's label is wired to its input (FormRow.For)");
+    }
+
     [TestMethod]
     public void TypeChips_AreToggleButtonsCarryingAriaPressed()
     {

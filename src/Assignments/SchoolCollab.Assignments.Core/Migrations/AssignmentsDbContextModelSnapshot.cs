@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Assignments.Core.Data;
+using SchoolCollab.Assignments.Core.Domain;
 
 #nullable disable
 
@@ -1302,6 +1303,80 @@ namespace SchoolCollab.Assignments.Core.Migrations
                                 .HasConstraintName("fk_assignment_attachments_assignments_assignment_id");
                         });
 
+                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentInstruction", "InstructionItems", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<Guid>("AssignmentId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("assignment_id");
+
+                            b1.Property<string>("ContentType")
+                                .HasMaxLength(100)
+                                .HasColumnType("character varying(100)")
+                                .HasColumnName("content_type");
+
+                            b1.Property<int>("DisplayOrder")
+                                .HasColumnType("integer")
+                                .HasColumnName("display_order");
+
+                            b1.Property<string>("FileName")
+                                .HasMaxLength(255)
+                                .HasColumnType("character varying(255)")
+                                .HasColumnName("file_name");
+
+                            b1.Property<long>("FileSize")
+                                .HasColumnType("bigint")
+                                .HasColumnName("file_size");
+
+                            b1.Property<int>("Kind")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer")
+                                .HasDefaultValue(0)
+                                .HasColumnName("kind");
+
+                            b1.Property<Guid?>("QuestionId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("question_id");
+
+                            b1.Property<string>("StoragePath")
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("storage_path");
+
+                            b1.Property<string>("Text")
+                                .HasMaxLength(4000)
+                                .HasColumnType("character varying(4000)")
+                                .HasColumnName("text");
+
+                            b1.Property<string>("Title")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("title");
+
+                            b1.Property<string>("Url")
+                                .HasMaxLength(2000)
+                                .HasColumnType("character varying(2000)")
+                                .HasColumnName("url");
+
+                            b1.HasKey("Id")
+                                .HasName("pk_assignment_instructions");
+
+                            b1.HasIndex("AssignmentId")
+                                .HasDatabaseName("ix_assignment_instructions_assignment_id");
+
+                            b1.HasIndex("QuestionId")
+                                .HasDatabaseName("ix_assignment_instructions_question_id");
+
+                            b1.ToTable("assignment_instructions", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("AssignmentId")
+                                .HasConstraintName("fk_assignment_instructions_assignments_assignment_id");
+                        });
+
                     b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentQuestion", "Questions", b1 =>
                         {
                             b1.Property<Guid>("Id")
@@ -1340,6 +1415,13 @@ namespace SchoolCollab.Assignments.Core.Migrations
                                 .HasColumnType("integer")
                                 .HasDefaultValue(0)
                                 .HasColumnName("question_type");
+
+                            b1.PrimitiveCollection<int[]>("ResponseKinds")
+                                .IsRequired()
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer[]")
+                                .HasDefaultValue(new int[0])
+                                .HasColumnName("response_kinds");
 
                             b1.HasKey("Id")
                                 .HasName("pk_assignment_questions");
@@ -1433,6 +1515,8 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         });
 
                     b.Navigation("Attachments");
+
+                    b.Navigation("InstructionItems");
 
                     b.Navigation("Questions");
 

@@ -36,6 +36,19 @@ public sealed class AssignmentQuestion
     /// the questions-draft confirm path. Dropping it there silently strips provenance.</para></summary>
     public Guid? GenerationId { get; private set; }
 
+    /// <summary>D16/QR-2 (spec §5.1, owner 2026-10-09): the media kinds this question expects — the
+    /// validator requires <b>at least one</b> on every authored question, and
+    /// <c>QuestionResponseKindRules</c> forbids any of them on a non-Teacher-Marked assignment.
+    /// Persisted as a first-class <c>integer[]</c> array (the <c>ContextStrandIds</c> precedent — a
+    /// small ordered value set with no per-row metadata).</summary>
+    public IReadOnlyList<ResponseKind> ResponseKinds { get; private set; } = [];
+
+    /// <summary>Replaces the response-kind set (the child-collection contract: the caller passes the
+    /// full set it wants; an empty list clears it, which the validator then rejects on save).
+    /// Duplicates collapse; the author's order survives.</summary>
+    internal void SetResponseKinds(IEnumerable<ResponseKind> responseKinds) =>
+        ResponseKinds = responseKinds.Distinct().ToList();
+
     public IReadOnlyList<QuestionOption> Options => _options.AsReadOnly();
 
     public QuestionOption AddOption(string optionText, bool isCorrect = false)

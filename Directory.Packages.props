@@ -43,6 +43,10 @@
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.1.0" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
+    <!-- L1 (round mobile-host-skeleton): the mobile head loads its embedded appsettings.json
+         through AddJsonStream — MAUI brings Microsoft.Extensions.Configuration itself but not
+         the JSON provider, so the provider is referenced explicitly. -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
@@ -50,6 +54,9 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+    <!-- L1 (round mobile-host-skeleton): the MAUI template's `builder.Logging.AddDebug()`
+         provider; MAUI brings Logging but not the Debug provider. -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
@@ -58,6 +65,15 @@
   <ItemGroup Label="Fluent UI">
     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.2" />
     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.2" />
+  </ItemGroup>
+  <ItemGroup Label="MAUI">
+    <!-- L1 (round mobile-host-skeleton): the Blazor Hybrid head. These two are the head's
+         first-party MAUI packages; the .csproj carries NO Version attribute (CPM). The MAUI
+         workload (android/ios/maccatalyst/maui-windows) supplies the build tasks and the
+         platform assemblies. Pinned together — the WebView package ships in lockstep with
+         Controls. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.110" />
+    <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.110" />
   </ItemGroup>
   <ItemGroup Label="OpenTelemetry">
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
@@ -105,11 +121,24 @@
          streaming (see AttachmentTextExtractor). -->
     <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
   </ItemGroup>
+  <ItemGroup Label="Rich text (round wysiwyg-instruction-editor)">
+    <!-- §8.4 Q12 (owner, 2026-10-09; re-confirmed 2026-10-11): Blazored.TextEditor over Quill 2.x,
+         both pinned locally, no CDN. The wrapper's own setup is CDN-first, so the Quill assets are
+         vendored under the Assignments Application RCL's wwwroot/lib/quill/ and the tags in each
+         host's App.razor point at them (see documents/rounds/round-wysiwyg-instruction-editor.md).
+         1.1.3 targets net9.0; it depends on Microsoft.AspNetCore.Components(.Web) 3.1.0, which the
+         framework's 10.x satisfies — no downgrade. -->
+    <PackageVersion Include="Blazored.TextEditor" Version="1.1.3" />
+    <!-- §8.4 Q11/Q15: the ONE allow-list sanitiser, applied on write and again on render. 9.2.1039 is
+         the latest stable (the 10.x line is beta at the time of writing). -->
+    <PackageVersion Include="HtmlSanitizer" Version="9.2.1039" />
+  </ItemGroup>
   <ItemGroup Label="Transitive Security Overrides">
-    <!-- AngleSharp is pulled in transitively by bunit. The 1.4.0 version has
-         a moderate severity vulnerability (GHSA-pgww-w46g-26qg). We pin the
-         patched 1.5.2 version explicitly in test projects so bunit keeps
-         working without the vulnerable transitive dependency. -->
-    <PackageVersion Include="AngleSharp" Version="1.5.2" />
+    <!-- AngleSharp reaches us two ways: transitively by bunit, and (>= 1.7.2) by HtmlSanitizer 9.2.1039
+         in the rich-text round. The 1.4.0 version bunit would otherwise allow has a moderate severity
+         vulnerability (GHSA-pgww-w46g-26qg), so we pin the patched line explicitly in test projects.
+         PINNED AT 1.8.4 (latest stable): bumping is what satisfies HtmlSanitizer's floor; 1.5.2 was the
+         previous pin and is now a DOWNGRADE (NU1605). -->
+    <PackageVersion Include="AngleSharp" Version="1.8.4" />
   </ItemGroup>
 </Project>

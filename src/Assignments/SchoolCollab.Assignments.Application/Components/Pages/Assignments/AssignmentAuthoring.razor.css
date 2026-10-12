@@ -156,7 +156,11 @@
     grid-area: questions;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1400px) {
+    /* Owner, 2026-10-11 (round wysiwyg-instruction-editor): raised from 1100px. Between 1100 and
+       ~1400 the two columns still held, leaving the left pane — and the rich editor inside it, behind a
+       fixed 180px label column — squeezed to ≈170–520px, which is a laptop's whole range. Stacking here
+       gives every authoring field the full width where it matters most. */
     .authoring-layout--cq {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas: "questions" "content";
@@ -225,6 +229,17 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+/* D14 (owner follow-up 2026-10-09): the readout rows carry no horizontal padding, but the
+   shared card header's 1rem padding-indent made "Rules" sit 16px to the right of the rows
+   beneath it. The header becomes flush with the card's content box on both edges, so its
+   text shares ONE left edge with every subitem (the count badge ends level with the row
+   values' right edge). `:deep` because the header belongs to the SectionCard child
+   component, which CSS isolation's scope attribute does not reach. */
+.authoring-rules-card :deep(.section-card__header) {
+    padding-left: 0;
+    padding-right: 0;
 }
 
 /* Targets & audience builder: label on top, bold value underneath. */
@@ -354,26 +369,56 @@
     padding-top: 8px;
 }
 
-/* ── Instructions compartment (D5/D6, assignment-create-edit-redesign) ─── */
-
-.authoring-instructions-grid {
+/* The Content & Resources block: LAYOUT only — the card box (border, radius, surface, padding) comes
+   from the shared PanelSection inside it, so it cannot drift from the Rules panel (owner, 2026-10-10:
+   the duplicate box here is what made the two panels look different). */
+.authoring-materials-section {
     display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
+    flex-direction: column;
+    gap: 8px;
 }
 
-.authoring-instructions-cell {
-    flex: 1 1 320px;
+/* Rich text, BOTH notes (grill round, owner 2026-10-11): the tab CHROME lives in the shared
+   FluentTabStrip primitive (Admin.Shared) — nothing tab-shaped is styled here. What remains is the
+   View-mode reader stack: captions over the sanitised readers, stacked with a gap. */
+.authoring-note-reader + .authoring-note-reader {
+    margin-top: 16px;
+}
+
+.authoring-summary-notes {
+    margin-top: 16px;
+}
+
+.authoring-note-caption {
+    display: block;
+    font-size: 0.85rem;
+    color: #605e5c;
+    margin-bottom: 4px;
+}
+
+.authoring-materials-dropzone {
+    margin-bottom: 12px;
+}
+
+/* D8 (revised, owner 2026-10-10): Content & Resources occupies the RIGHT THIRD of the Instructions
+   section and starts level with the notes cell — the two column headers sit on one line. */
+.authoring-materials-cell {
+    flex: 1 1 220px;
     min-width: 0;
 }
 
-/* Spec §3.2: two columns at ≥720px, stacked below it. */
-@media (max-width: 719px) {
-    .authoring-instructions-cell {
-        flex-basis: 100%;
-    }
+/* (The card box and the header rules that used to live here are gone: the box and the title/header
+   treatment now come from the shared PanelSection inside this section — see PanelSection.razor.css.
+   Left as a marker so a reader does not re-add a second border.) */
+
+/* (The .authoring-materials-header and .authoring-materials-title rules that lived here are gone with
+   the header itself — the title, its actions slot and the thin rule come from PanelSection.) */
+
+/* The drop target fills the section's width so a drop anywhere on the card lands. */
+.authoring-materials-dropzone ::deep fluent-input-file {
+    width: 100%;
 }
 
-.authoring-instructions-cell .form-row {
-    height: 100%;
+.authoring-materials-dropzone ::deep .fluent-input-file {
+    width: 100%;
 }

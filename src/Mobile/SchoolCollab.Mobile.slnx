@@ -1,0 +1,23 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <!-- The mobile train's own solution, deliberately NOT at the repo root (two .slnx in one
+       directory is an error) and NOT the head's ticket into SchoolCollab.slnx. Membership is
+       split by TFM: SchoolCollab.Mobile.Logic and SchoolCollab.Mobile.Tests.Unit are plain
+       `net10.0` and therefore also registered in the root solution, where the ubuntu
+       build-and-test job sees them; the MAUI head itself builds only on a device-capable
+       runner and lives here alone. The architecture guard's "registered in any .slnx" rule
+       is what keeps this split honest. -->
+  <Folder Name="/src/">
+    <Project Path="SchoolCollab.Mobile/SchoolCollab.Mobile.csproj" />
+  </Folder>
+  <Folder Name="/src/Mobile/">
+    <Project Path="SchoolCollab.Mobile.Logic/SchoolCollab.Mobile.Logic.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="../tests/SchoolCollab.Mobile.Tests.Unit/SchoolCollab.Mobile.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

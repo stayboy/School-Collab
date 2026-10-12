@@ -47,7 +47,10 @@ public class ConfirmQuestionsDraftCommandHandlerTests
     }
 
     private static NewQuestionDto ShortAnswer(string text, int displayOrder) =>
-        new(text, QuestionTypeDto.ShortAnswer, displayOrder, null, "draft answer");
+        new(text, QuestionTypeDto.ShortAnswer, displayOrder, null, "draft answer",
+            // Q1(ii): the seeded assignment is Teacher Marked, so the drafted question must state
+            // what it expects (a recorded spoken answer, the spec §4 workflow).
+            ResponseKinds: [QuestionResponseKindDto.Audio]);
 
     private static string ValidDraftBlob(params (string Text, int Order)[] entries)
     {
@@ -94,6 +97,36 @@ public class ConfirmQuestionsDraftCommandHandlerTests
 
         assignment.QuestionsDraftJson.Should().BeNull();
         assignment.Questions.Should().HaveCount(1);
+    }
+
+    /// <summary>D7 (instructional-materials, the W3 gate): confirm RE-MINTS the drafted questions'
+    /// instruction rows, so the drafted NAME must survive it — this is one of the two re-mint paths
+    /// where a missed site drops the title with no error.</summary>
+    [TestMethod]
+    public async Task Confirm_CarriesInstructionTitles_FromTheDraft()
+    {
+        var cache = NewCache();
+        var assignment = NewDraftAssignment(withExistingQuestion: true);
+        var drafted = new NewQuestionDto(
+            "Titled draft", QuestionTypeDto.ShortAnswer, 0, null, "draft answer",
+            ResponseKinds: [QuestionResponseKindDto.Audio],
+            Instructions:
+            [
+                new NewInstructionDto(Kind: InstructionKindDto.Text, Text: "Answer aloud.", Url: null,
+                    FileName: null, ContentType: null, FileSize: 0, StoragePath: null, Title: "Speak it"),
+            ]);
+        assignment.StageQuestionsDraft(JsonSerializer.Serialize(
+            new List<NewQuestionDto> { drafted }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        var repo = MockRepo(assignment);
+        var handler = NewHandler(repo.Object, cache);
+
+        await handler.HandleAsync(new ConfirmQuestionsDraftCommand(assignment.Id));
+
+        var confirmed = assignment.Questions.Should().ContainSingle().Subject;
+        assignment.InstructionsFor(confirmed.Id).Should().ContainSingle()
+            .Which.Title.Should().Be("Speak it",
+                "D7: the drafted material's name must survive the confirm re-mint, not be nulled");
     }
 
     [TestMethod]

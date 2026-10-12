@@ -8,19 +8,15 @@ using SchoolCollab.Assignments.Contracts;
 namespace SchoolCollab.Assignments.Tests.Unit;
 
 /// <summary>
-/// WS-A3 (spec §3.3 + §7 Q4) — <see cref="ScoringFieldsSection"/>
-/// renders the Pass Score input for AutoGraded / InstantGraded; for
-/// TeacherGraded it renders <b>a disabled checkbox whose LABEL carries the
-/// reason</b> (D11, assignment-create-edit-redesign — no inline paragraphs,
-/// no disabled number field). The <c>ScoringFieldsPassSubmitGate</c>
-/// safety rule is unchanged: a TeacherGraded submit never blocks on the
-/// disabled state's values.
+/// WS-A3 (spec §3.3 + §7 Q4) — <see cref="ScoringFieldsSection"/> renders the Pass Score
+/// CONTROL (owner 2026-10-11: never a FormRow of its own — it lives inside the authoring page's
+/// Basics "Score" row as its third FormRowCell). For AutoGraded / InstantGraded it is the number
+/// field; for TeacherGraded it is <b>a disabled checkbox with the SHORT label</b> while the long
+/// reason travels as the page-level cell's help-hint tooltip. The <c>ScoringFieldsPassSubmitGate</c>
+/// safety rule is unchanged: a TeacherGraded submit never blocks on the disabled state's values.
 ///
-/// Round <c>authoring-compact-fields</c> (OD1): the attempt cap moved out of this section into the
-/// authoring page's Basics <c>(Max score · Max attempts)</c> pair, so these tests pin the section's
-/// shape — ONE control, the number field or its D11 checkbox — and the shared gate the page still
-/// asks for the moved control. The cap's disabled-with-reason behaviour is pinned at page level
-/// (<c>AssignmentAuthoringBunitTests.TeacherGraded_ScoringFields_RenderDisabledWithReason</c>).
+/// Round <c>authoring-compact-fields</c> (OD1): the attempt cap moved out earlier; these tests pin
+/// the section's shape — ONE control in each state — and the shared gate the page still asks for.
 /// </summary>
 [TestClass]
 public class ScoringFieldsSectionBunitTests : BunitContext
@@ -47,10 +43,10 @@ public class ScoringFieldsSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("Pass Score",
-                "AutoGraded must show the Pass Score field");
+            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-number-field",
+                "AutoGraded must show the Pass Score number field");
             cut.Markup.Should().NotContain("Max Attempts",
-                "OD1: the attempt cap is the authoring page's Basics pair, not this section's");
+                "OD1: the attempt cap is the authoring page's Basics row, not this section's");
         });
     }
 
@@ -61,30 +57,33 @@ public class ScoringFieldsSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("Pass Score");
+            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-number-field");
             cut.Markup.Should().NotContain("Max Attempts");
         });
     }
 
     [TestMethod]
-    public void TeacherGraded_RendersThePassScoreDisabledWithReason()
+    public void TeacherGraded_RendersThePassScoreDisabledWithShortLabel()
     {
         var cut = Render(new AssignmentEditFormModel(), GradingFormatDto.TeacherGraded);
 
         cut.WaitForAssertion(() =>
         {
-            // D11 (assignment-create-edit-redesign): the inapplicable state is a DISABLED
-            // CHECKBOX whose LABEL carries the reason — never the number field, never a
-            // standalone paragraph; the control id survives in both states.
+            // D11 (assignment-create-edit-redesign) → owner 2026-10-11: the inapplicable state is a
+            // DISABLED CHECKBOX with the SHORT label; the control id survives in both states, and the
+            // LONG reason is never the label — it travels as the Score cell's help-hint tooltip,
+            // which the PAGE attaches (pinned in AssignmentAuthoringBunitTests).
             cut.FindAll("fluent-number-field").Should().BeEmpty(
                 "D11: the number field is replaced by the checkbox while inapplicable");
             var passScore = cut.Find("#scoringFieldsPassScore");
             passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox");
             passScore.HasAttribute("disabled").Should().BeTrue(
                 "TeacherGraded disables the control");
-            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the checkbox's label explains why scoring cannot be edited");
-            cut.Markup.Should().Contain("Pass Score");
+            passScore.TextContent.Trim().Should().Be(ScoringFieldsSection.ScoringInapplicableShortLabel,
+                "owner 2026-10-11: the label is SHORT — the long wording is the cell's tooltip "
+                + "(FluentCheckbox renders its Label as child content)");
+            cut.Markup.Should().NotContain(ScoringFieldsSection.ScoringInapplicableReason,
+                "the section renders the control only; the long reason lives at the page level");
         });
     }
 

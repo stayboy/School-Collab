@@ -1,0 +1,43 @@
+/* FluentTabStrip — the traditional folder-tab chrome (round wysiwyg-instruction-editor, owner
+   2026-10-11). Sizing and borders live here, never inline. FluentUI marks the active tab with
+   aria-selected="true" (no class, no attribute) and hides inactive panels with [hidden]. */
+.fluent-tab-strip {
+    width: 100%;
+}
+
+.fluent-tab-strip ::deep fluent-tabs {
+    width: 100%;
+}
+
+.fluent-tab-strip ::deep fluent-tab {
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 6px 6px 0 0;
+    background: transparent;
+    margin: 0 4px -1px 0;
+    padding: 6px 14px 7px;
+    font-size: 0.9rem;
+    min-width: unset;
+    position: relative;
+    z-index: 1;
+}
+
+/* Selected: no bottom border, and the opaque fill covers the panel's top border under the tab —
+   the only place the content area's top line is allowed to break. */
+.fluent-tab-strip ::deep fluent-tab[aria-selected="true"] {
+    border-bottom-color: transparent;
+    background: var(--neutral-layer-1, #ffffff);
+    font-weight: 600;
+}
+
+.fluent-tab-strip ::deep fluent-tabs::part(activeIndicator) {
+    display: none;
+}
+
+/* The panel is the box the selected tab opens into: a FULL continuous border (top line included),
+   rounded bottom corners. */
+.fluent-tab-strip ::deep fluent-tab-panel:not([hidden]) {
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 0 0 6px 6px;
+    padding: 12px;
+    margin-top: 0;
+}

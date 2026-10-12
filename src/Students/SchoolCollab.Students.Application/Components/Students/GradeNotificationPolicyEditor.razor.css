@@ -13,8 +13,6 @@
 .effective-value {
     font-weight: 500;
 }
-.source-badge {
-}
 .override-list {
     gap: 0.6rem;
 }
@@ -27,8 +25,6 @@
 .channel-toggle {
     display: flex;
     gap: 1rem;
-}
-.time-input {
 }
 .tenant-default {
     border: 1px solid var(--neutral-stroke-rest);
@@ -48,4 +44,23 @@
 .td-label {
     min-width: 220px;
     color: var(--neutral-foreground-hint);
+}
+
+/* Moved out of the component's inline <style> block (razor-markup-hygiene): an always-rendered
+   <style> leaked these rules globally and re-emitted them on every render. */
+.muted {
+    color: var(--neutral-foreground-hint);
+}
+.setting-label {
+    font-weight: 500;
+}
+.global-value {
+    color: var(--neutral-foreground-hint);
+}
+.grade-value {
+    font-weight: 500;
+}
+.grid-hint {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
 }

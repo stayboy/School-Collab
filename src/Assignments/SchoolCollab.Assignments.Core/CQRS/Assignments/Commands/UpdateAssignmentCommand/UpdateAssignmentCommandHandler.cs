@@ -34,8 +34,12 @@ public sealed class UpdateAssignmentCommandHandler(
         // FR-252 violation never leaves the aggregate with a partial replacement.
         if (command.Questions is { Count: > 0 })
         {
-            QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
+            QuestionOptionDtoValidator.ValidateQuestions(
+                command.Questions, (GradingFormatDto)(int)command.GradingFormat);
         }
+
+        // QR-5 (§5.2/§5.6): the assignment's own instruction blocks (null = preserve, handled below).
+        InstructionDtoValidator.ValidateAll(command.InstructionItems, "This assignment");
         AssignmentContentValidator.ValidateModules(command.ContentModules);
         AssignmentContentValidator.ValidateResources(command.Resources);
         AssignmentContentValidator.ValidateAttachments(command.Attachments, uploadOptions.Value);
@@ -53,6 +57,47 @@ public sealed class UpdateAssignmentCommandHandler(
             : AssignmentPolicyScope.GradeTargetIds(assignment);
         var policy = await assignmentPolicyResolver.ResolveAsync(
             AssignmentPolicyScope.DeriveGrade(policyGradeIds), cancellationToken);
+
+        // D15 (owner, 2026-10-09): reject an impossible type/grading pair before the aggregate
+        // is mutated (an Offline assignment is always Teacher Marked).
+        AssignmentTypeGradingRules.EnsurePermitted(
+            (AssignmentTypeDto)(int)command.AssignmentType,
+            (GradingFormatDto)(int)command.GradingFormat);
+
+        // Q5 (spec question-response-types §5.3): every response kind is media, so any question
+        // defining kinds needs Teacher Marked grading — the same rule the create path applies.
+        QuestionResponseKindRules.EnsurePermitted(
+            (GradingFormatDto)(int)command.GradingFormat,
+            (command.Questions ?? []).SelectMany(q => q.ResponseKinds ?? []).ToList());
+
+        // QR-5/§5.6: assemble the aggregate's instruction rows. The ASSIGNMENT's own rows come from
+        // the command when it supplied them (non-null = full replacement, the child-collection
+        // contract every other collection here follows) and are PRESERVED when it did not — because
+        // the call below replaces the whole collection, and an unrelated edit must not silently drop
+        // them. Each QUESTION's rows come from that question's payload: the question rows are
+        // re-minted further down and their instruction rows are purged with them.
+        var instructionItems = (command.InstructionItems is null
+                ? assignment.InstructionsFor(null).Select(existing => (
+                    QuestionId: (Guid?)null,
+                    Kind: existing.Kind,
+                    Text: existing.Text,
+                    Url: existing.Url,
+                    FileName: existing.FileName,
+                    ContentType: existing.ContentType,
+                    FileSize: existing.FileSize,
+                    StoragePath: existing.StoragePath,
+                    Title: existing.Title))
+                : command.InstructionItems.Select(item => (
+                    QuestionId: (Guid?)null,
+                    Kind: (InstructionKind)(int)item.Kind,
+                    Text: item.Text,
+                    Url: item.Url,
+                    FileName: item.FileName,
+                    ContentType: item.ContentType,
+                    FileSize: item.FileSize,
+                    StoragePath: item.StoragePath,
+                    Title: item.Title)))
+            .ToList();
 
         assignment.Update(
             command.Title,
@@ -115,13 +160,26 @@ public sealed class UpdateAssignmentCommandHandler(
                 assignment.RemoveQuestion(qid);
             }
 
+            // QR-5 (§5.2): the instruction rows the re-minted questions are about to need.
+            var questionInstructionItems = new List<(Guid? QuestionId, InstructionKind Kind, string? Text,
+                string? Url, string? FileName, string? ContentType, long FileSize, string? StoragePath,
+                string? Title)>();
+
             for (var i = 0; i < command.Questions.Count; i++)
             {
                 var q = command.Questions[i];
                 // R3 (D4/P1-2): carry GenerationId across the re-mint. The rows removed just above
                 // are gone for good, so this hop is the ONLY thing that keeps provenance from being
                 // stripped by the author's first save of a generated question set.
-                var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer, q.GenerationId);
+                var question = assignment.AddQuestion(
+                    q.QuestionText,
+                    (Domain.QuestionType)q.QuestionType,
+                    i,
+                    q.ModelAnswer,
+                    q.GenerationId,
+                    // D16/QR-2 (§5.1): the response kinds — required by the validator, so a payload
+                    // that reached here always carries at least one.
+                    q.ResponseKinds?.Select(kind => (ResponseKind)(int)kind).ToList());
                 if (q.Options is { Count: > 0 })
                 {
                     foreach (var opt in q.Options)
@@ -129,7 +187,40 @@ public sealed class UpdateAssignmentCommandHandler(
                         question.AddOption(opt.OptionText, opt.IsCorrect);
                     }
                 }
+
+                // QR-5: this question's instruction rows, stamped with the freshly minted id.
+                questionInstructionItems.AddRange((q.Instructions ?? []).Select(item => (
+                    QuestionId: (Guid?)question.Id,
+                    Kind: (InstructionKind)(int)item.Kind,
+                    Text: item.Text,
+                    Url: item.Url,
+                    FileName: item.FileName,
+                    ContentType: item.ContentType,
+                    FileSize: item.FileSize,
+                    StoragePath: item.StoragePath,
+                    Title: item.Title)));
             }
+
+            if (command.InstructionItems is not null)
+            {
+                // A supplied assignment list is a full replacement: the command's own rows + the
+                // questions' rows land together in one Set.
+                instructionItems.AddRange(questionInstructionItems);
+                assignment.SetInstructionItems(instructionItems);
+            }
+            else if (questionInstructionItems.Count > 0)
+            {
+                // Only the questions changed — append their rows and leave the assignment's own
+                // rows (and their ids) exactly as they were.
+                assignment.AddInstructionItems(questionInstructionItems);
+            }
+        }
+        else if (command.InstructionItems is not null)
+        {
+            // Questions untouched, the assignment's own blocks replaced. A FULL replace here would
+            // take the questions' rows with it, so this is the per-owner replace — their rows (and
+            // their ids) are untouched, exactly as the questions themselves are.
+            assignment.SetAssignmentInstructionItems(instructionItems);
         }
 
         if (command.Attachments is not null)

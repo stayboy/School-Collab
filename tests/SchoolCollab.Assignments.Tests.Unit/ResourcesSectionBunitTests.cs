@@ -498,19 +498,10 @@ public class ResourcesSectionBunitTests : BunitContext
         var model = new AssignmentEditFormModel();
         var cut = RenderSection(model);
 
-        // CR-1/CR-8 (round content-questions-modern-ui): the link input is hidden until the
-        // card header's + reveals it, so the narrow rail carries only the tile + item rows.
-        cut.FindAll("fluent-button")
-            .First(b => b.GetAttribute("aria-label") == "Add resource")
-            .Click();
-        cut.WaitForAssertion(() => cut.FindComponent<FluentTextField>());
-
-        // Type a URL into the bound text field, then click the Add link button.
-        var field = cut.FindComponent<FluentTextField>();
-        await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/notes"));
-        cut.FindAll("fluent-button")
-            .First(b => b.TextContent.Trim() == "Add link")
-            .Click();
+        // W5 (spec instructional-materials §0): the header "+" reveal seam is retired with CR-1/CR-8,
+        // so the URL goes straight through the section's public seam. The row / count / duplicate
+        // assertions below are FEATURE coverage, not reveal coverage, and survive unchanged.
+        await cut.InvokeAsync(() => cut.Instance.AddUrlAsync("https://example.com/notes"));
 
         cut.WaitForAssertion(() =>
         {
@@ -524,10 +515,7 @@ public class ResourcesSectionBunitTests : BunitContext
 
         // Same URL again → the model AddResourceUrl dedupes; the section surfaces
         // the friendly duplicate warning and does NOT add a second row.
-        await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/notes"));
-        cut.FindAll("fluent-button")
-            .First(b => b.TextContent.Trim() == "Add link")
-            .Click();
+        await cut.InvokeAsync(() => cut.Instance.AddUrlAsync("https://example.com/notes"));
 
         cut.WaitForAssertion(() =>
         {
@@ -561,17 +549,9 @@ public class ResourcesSectionBunitTests : BunitContext
         var model = new AssignmentEditFormModel { Title = "T" };
         var cut = RenderSection(model);
 
-        // CR-1/CR-8: reveal the link input through the card header's + first.
-        cut.FindAll("fluent-button")
-            .First(b => b.GetAttribute("aria-label") == "Add resource")
-            .Click();
-        cut.WaitForAssertion(() => cut.FindComponent<FluentTextField>());
-
-        var field = cut.FindComponent<FluentTextField>();
-        await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/source"));
-        cut.FindAll("fluent-button")
-            .First(b => b.TextContent.Trim() == "Add link")
-            .Click();
+        // W5 (spec instructional-materials §0): the reveal seam retires with CR-1/CR-8 — the payload
+        // mapping this test proves is unaffected, so the URL goes straight through the public seam.
+        await cut.InvokeAsync(() => cut.Instance.AddUrlAsync("https://example.com/source"));
 
         cut.WaitForAssertion(() => model.ResourceUrls.Should().HaveCount(1));
 

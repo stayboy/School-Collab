@@ -1,0 +1,48 @@
+using SchoolCollab.Assignments.Contracts;
+
+namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+
+/// <summary>The dialog's form state (Q1: ONE dialog, its fields switching on <see cref="Kind"/>) —
+/// the shape the DialogShellBase contract wants: a mutable <c>class</c>.</summary>
+public sealed class MaterialEditFormModel
+{
+    /// <summary>Text or Link — the two kinds this dialog captures. Media never comes through here:
+    /// an upload pops the picker directly (Q3).</summary>
+    public InstructionKindDto Kind { get; set; } = InstructionKindDto.Text;
+
+    /// <summary>The Text material's NAME (required — D6/D7) and the Link's optional LABEL, one field
+    /// per kind so the dialog can render one input and the handler can read one value.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>The Text material's optional body.</summary>
+    public string? Body { get; set; }
+
+    /// <summary>The Link's target — required, absolute http(s) (mirrors the validator).</summary>
+    public string? Url { get; set; }
+
+    /// <summary>True when this dialog was opened on an EXISTING row rather than to create one
+    /// (round <c>material-row-editing</c>): only the footer's verbs change — "Save" instead of
+    /// "Add Text Content"/"Add Link". The fields, the validator mirror and the payload are the same
+    /// shape on both paths, which is the whole point of Q4(b): one dialog, create and edit.</summary>
+    public bool IsEdit { get; set; }
+
+    /// <summary>Seeds the form from a row being edited (AC-14: the row's values ARE what the dialog
+    /// opens with). The Text row's body travels as <see cref="Body"/> and its prose as
+    /// <see cref="InstructionEditorRow.Text"/> — the one rename this mapping exists to hold.</summary>
+    public static MaterialEditFormModel FromRow(InstructionEditorRow row) => new()
+    {
+        Kind = row.Kind,
+        Title = row.Title,
+        Body = row.Text,
+        Url = row.Url,
+        IsEdit = true,
+    };
+}
+
+/// <summary>What the dialog hands back when it is confirmed. The page appends the row from this — the
+/// dialog never touches the list (Q2: the list stays the single writer of its rows).</summary>
+public sealed record MaterialEditResult(
+    InstructionKindDto Kind,
+    string? Title,
+    string? Body,
+    string? Url);

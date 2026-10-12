@@ -30,6 +30,12 @@ public sealed class AssignmentContextPicksMigrationTests
     /// context pick columns, so the round-trip can start from a real pre-R4 database.</summary>
     private const string PrePicksMigration = "20261006225404_DropAssignmentGradeLevelColumn";
 
+    /// <summary>This test's OWN migration. The script below is pinned to it because
+    /// <c>toMigration: null</c> means "to the tip" — it silently absorbs every migration that lands
+    /// afterwards, which is how a later sibling migration (one that legitimately creates a table)
+    /// turned this file's <c>NotContain("CREATE TABLE")</c> red from a distance.</summary>
+    private const string PicksMigration = "20261007195749_AddAssignmentContextPicks";
+
     [TestMethod]
     public async Task AddPicks_AddsTwoNotNullUuidArraysDefaultingToEmpty_AndKeepsRows()
     {
@@ -132,15 +138,16 @@ public sealed class AssignmentContextPicksMigrationTests
         await cmd.ExecuteNonQueryAsync();
     }
 
-    /// <summary>The migration's own SQL between the pre-R4 migration and the tip — the observable
-    /// for "the migration adds the two columns and nothing else".</summary>
+    /// <summary>The picks migration's OWN SQL — <see cref="PrePicksMigration"/> to
+    /// <see cref="PicksMigration"/>, never the tip — the observable for "this migration adds the two
+    /// columns and nothing else".</summary>
     private static async Task<string> MigrationScriptAsync(string connectionString)
     {
         await using var context = AssignmentsDbFactory.CreateContext(connectionString);
         var migrator = context.GetService<IMigrator>();
         return migrator.GenerateScript(
             fromMigration: PrePicksMigration,
-            toMigration: null,
+            toMigration: PicksMigration,
             MigrationsSqlGenerationOptions.Idempotent);
     }
 

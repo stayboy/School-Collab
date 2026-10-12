@@ -1,0 +1,1561 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d5162022..ded21dbf 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -154,3 +154,49 @@ jobs:
+       - name: Run the auth portal tests
+         working-directory: src/SchoolCollab.AuthPortal
+         run: uv run pytest
++
++  mobile:
++    # The Blazor Hybrid head cannot build on ubuntu — its TFMs are device platforms — and it is
++    # deliberately absent from SchoolCollab.slnx, so `build-and-test` never sees it. This job
++    # gates it (added 2026-10-09, round mobile-host-skeleton).
++    #
++    # It builds the head's Windows TFM, NOT `-f net10.0-android` as originally planned. Measured
++    # 2026-10-09 (round mobile-host-skeleton inventory item (a)/(b)): the Admin.Shared closure
++    # RESTORES and COMPILES for net10.0-android, but the android BUILD fails with
++    #   NETSDK1082: There was no runtime pack for Microsoft.AspNetCore.App available for the
++    #   specified RuntimeIdentifier 'android-arm64'/'android-x64'
++    # because Admin.Shared and ServiceDefaults each declare
++    # <FrameworkReference Include="Microsoft.AspNetCore.App" />, which lands on the head
++    # transitively, and a self-contained mobile app needs a runtime pack per framework reference
++    # — Microsoft.AspNetCore.App has none for any android RID. Severing that closure is L2 work,
++    # so L1 gates what genuinely builds today; the android TFM joins this job once severance
++    # lands. Windows is a real head TFM, so the job is not a proxy — the same command builds the
++    # spike page and the Admin.Shared reference it renders.
++    #
++    # The head is built as a PROJECT with an explicit `-f`, never through
++    # src/Mobile/SchoolCollab.Mobile.slnx: a solution-level `-f` passes TargetFramework as a
++    # GLOBAL PROPERTY, which overrides (does not skip) the plain-net10.0 Mobile.Logic and
++    # Mobile.Tests.Unit members and would force that TFM onto them. Those two live in the root
++    # solution and are already built and tested by `build-and-test`.
++    name: Mobile (MAUI)
++    runs-on: windows-latest
++
++    steps:
++      - uses: actions/checkout@v4
++
++      - name: Setup .NET 10
++        uses: actions/setup-dotnet@v4
++        with:
++          dotnet-version: '10.x'
++
++      # GitHub windows runners do NOT ship the MAUI workloads (the Windows TFM needs
++      # maui-windows); this costs minutes per run and is the known price of the job.
++      - name: Install MAUI workload
++        run: dotnet workload install maui
++
++      - name: Build the mobile head (windows)
++        run: >
++          dotnet build
++          src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
++          -f net10.0-windows10.0.19041.0
++          --configuration Release
+diff --git a/Directory.Packages.props b/Directory.Packages.props
+index 04d011f7..4b785c9a 100644
+--- a/Directory.Packages.props
++++ b/Directory.Packages.props
+@@ -43,6 +43,10 @@
+     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.1.0" />
+     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
++    <!-- L1 (round mobile-host-skeleton): the mobile head loads its embedded appsettings.json
++         through AddJsonStream — MAUI brings Microsoft.Extensions.Configuration itself but not
++         the JSON provider, so the provider is referenced explicitly. -->
++    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
+     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
+     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+@@ -50,6 +54,9 @@
+     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
++    <!-- L1 (round mobile-host-skeleton): the MAUI template's `builder.Logging.AddDebug()`
++         provider; MAUI brings Logging but not the Debug provider. -->
++    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
+@@ -59,6 +66,15 @@
+     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.2" />
+     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.2" />
+   </ItemGroup>
++  <ItemGroup Label="MAUI">
++    <!-- L1 (round mobile-host-skeleton): the Blazor Hybrid head. These two are the head's
++         first-party MAUI packages; the .csproj carries NO Version attribute (CPM). The MAUI
++         workload (android/ios/maccatalyst/maui-windows) supplies the build tasks and the
++         platform assemblies. Pinned together — the WebView package ships in lockstep with
++         Controls. -->
++    <PackageVersion Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.110" />
++    <PackageVersion Include="Microsoft.Maui.Controls" Version="10.0.110" />
++  </ItemGroup>
+   <ItemGroup Label="OpenTelemetry">
+     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+diff --git a/SchoolCollab.slnx b/SchoolCollab.slnx
+index 97f22dad..e285fbb3 100644
+--- a/SchoolCollab.slnx
++++ b/SchoolCollab.slnx
+@@ -55,6 +55,13 @@
+     <File Path="src/SchoolCollab.AuthPortal/views/errors.py" />
+     <File Path="src/SchoolCollab.AuthPortal/views/login.py" />
+   </Folder>
++  <Folder Name="/src/Mobile/">
++    <!-- The MAUI head (src/Mobile/SchoolCollab.Mobile) is deliberately NOT registered here:
++         its TFMs need a device-capable runner, so it lives only in
++         src/Mobile/SchoolCollab.Mobile.slnx. Only the plain net10.0 Mobile.Logic library
++         joins the root solution, which is what puts it on the ubuntu build-and-test job. -->
++    <Project Path="src/Mobile/SchoolCollab.Mobile.Logic/SchoolCollab.Mobile.Logic.csproj" />
++  </Folder>
+   <Folder Name="/src/SchoolCollab.Portals/">
+     <File Path="src/SchoolCollab.Portals/app.py" />
+     <File Path="src/SchoolCollab.Portals/pyproject.toml" />
+@@ -108,6 +115,7 @@
+     <Project Path="tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.Families.Tests.Unit/SchoolCollab.Families.Tests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.MigrationService.Tests.Unit/SchoolCollab.MigrationService.Tests.Unit.csproj" />
++    <Project Path="tests/SchoolCollab.Mobile.Tests.Unit/SchoolCollab.Mobile.Tests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.Settings.Api.Tests.Unit/SchoolCollab.Settings.Api.Tests.Unit.csproj" />
+     <Project Path="tests/SchoolCollab.Settings.Tests.Integration/SchoolCollab.Settings.Tests.Integration.csproj" />
+     <Project Path="tests/SchoolCollab.Settings.Tests.Playwright/SchoolCollab.Settings.Tests.Playwright.csproj" />
+diff --git a/src/Mobile/SchoolCollab.Mobile.Logic/MobileApiOptions.cs b/src/Mobile/SchoolCollab.Mobile.Logic/MobileApiOptions.cs
+new file mode 100644
+index 00000000..22688f7d
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile.Logic/MobileApiOptions.cs
+@@ -0,0 +1,98 @@
++using Microsoft.Extensions.Configuration;
++
++namespace SchoolCollab.Mobile.Logic;
++
++/// <summary>
++/// The module API base addresses the mobile head talks to, bound from the
++/// <see cref="SectionName"/> section of the head's <c>appsettings*.json</c>.
++/// </summary>
++/// <remarks>
++/// Base addresses are configuration, never C# literals (spec D8): one build has to reach the
++/// AppHost from an Android emulator (<c>10.0.2.2</c>), a LAN device, and a deployed
++/// environment, and a compiled-in host could serve none of those three.
++/// <see cref="Resolve"/> normalizes every configured value to an absolute <see cref="Uri"/>
++/// with a trailing slash, which is the shape <c>HttpClient.BaseAddress</c> requires before
++/// relative request paths are appended.
++/// </remarks>
++public sealed class MobileApiOptions
++{
++    /// <summary>The configuration section this class is bound from.</summary>
++    public const string SectionName = "MobileApi";
++
++    /// <summary>Every API name this class recognizes, in report order.</summary>
++    public static readonly IReadOnlyList<string> ApiNames =
++    [
++        nameof(StudentsApi),
++        nameof(SettingsApi),
++        nameof(AssignmentsApi),
++    ];
++
++    /// <summary>Base address of the Students API.</summary>
++    public string? StudentsApi { get; set; }
++
++    /// <summary>Base address of the Settings API.</summary>
++    public string? SettingsApi { get; set; }
++
++    /// <summary>Base address of the Assignments API.</summary>
++    public string? AssignmentsApi { get; set; }
++
++    /// <summary>
++    /// Binds a new instance from the <see cref="SectionName"/> section of
++    /// <paramref name="configuration"/>.
++    /// </summary>
++    /// <exception cref="ArgumentNullException"><paramref name="configuration"/> is <see langword="null"/>.</exception>
++    public static MobileApiOptions FromConfiguration(IConfiguration configuration)
++    {
++        ArgumentNullException.ThrowIfNull(configuration);
++
++        var options = new MobileApiOptions();
++        configuration.GetSection(SectionName).Bind(options);
++        return options;
++    }
++
++    /// <summary>
++    /// The configured base address of <paramref name="apiName"/>, normalized to an absolute
++    /// <see cref="Uri"/> with a trailing slash — or <see langword="null"/> when the value is
++    /// absent or blank, so a caller can degrade one API without the whole configuration
++    /// failing.
++    /// </summary>
++    /// <exception cref="ArgumentOutOfRangeException"><paramref name="apiName"/> is not one of <see cref="ApiNames"/>.</exception>
++    /// <exception cref="InvalidOperationException">The configured value is not an absolute URI.</exception>
++    public Uri? Resolve(string apiName)
++    {
++        var value = RawValue(apiName);
++        return string.IsNullOrWhiteSpace(value) ? null : ToBaseAddress(apiName, value);
++    }
++
++    /// <summary>Names from <see cref="ApiNames"/> whose base address is not configured.</summary>
++    public IReadOnlyList<string> MissingBaseAddresses() =>
++        [.. ApiNames.Where(name => Resolve(name) is null)];
++
++    private string? RawValue(string apiName) => apiName switch
++    {
++        nameof(StudentsApi) => StudentsApi,
++        nameof(SettingsApi) => SettingsApi,
++        nameof(AssignmentsApi) => AssignmentsApi,
++        _ => throw new ArgumentOutOfRangeException(
++            nameof(apiName),
++            apiName,
++            $"Unknown API name; expected one of {string.Join(", ", ApiNames)}."),
++    };
++
++    private static Uri ToBaseAddress(string apiName, string value)
++    {
++        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
++        {
++            throw new InvalidOperationException(
++                $"{SectionName}:{apiName} must be an absolute URL; got '{value}'.");
++        }
++
++        var builder = new UriBuilder(uri);
++        if (!builder.Path.EndsWith('/'))
++        {
++            builder.Path += "/";
++        }
++
++        return builder.Uri;
++    }
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile.Logic/SchoolCollab.Mobile.Logic.csproj b/src/Mobile/SchoolCollab.Mobile.Logic/SchoolCollab.Mobile.Logic.csproj
+new file mode 100644
+index 00000000..b91c699d
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile.Logic/SchoolCollab.Mobile.Logic.csproj
+@@ -0,0 +1,18 @@
++<Project Sdk="Microsoft.NET.Sdk">
++
++  <PropertyGroup>
++    <TargetFramework>net10.0</TargetFramework>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <IsPackable>false</IsPackable>
++  </PropertyGroup>
++
++  <!-- The plain `net10.0` TFM is load-bearing, not cosmetic: the MAUI head's TFMs
++       (android/ios/maccatalyst/windows) cannot build or test on the ubuntu runners, so
++       everything CI has to see lives here and only host wiring stays in the head. -->
++  <ItemGroup>
++    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
++    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
++  </ItemGroup>
++
++</Project>
+diff --git a/src/Mobile/SchoolCollab.Mobile.slnx b/src/Mobile/SchoolCollab.Mobile.slnx
+new file mode 100644
+index 00000000..088a61d3
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile.slnx
+@@ -0,0 +1,23 @@
++<Solution>
++  <Configurations>
++    <Platform Name="Any CPU" />
++    <Platform Name="x64" />
++    <Platform Name="x86" />
++  </Configurations>
++  <!-- The mobile train's own solution, deliberately NOT at the repo root (two .slnx in one
++       directory is an error) and NOT the head's ticket into SchoolCollab.slnx. Membership is
++       split by TFM: SchoolCollab.Mobile.Logic and SchoolCollab.Mobile.Tests.Unit are plain
++       `net10.0` and therefore also registered in the root solution, where the ubuntu
++       build-and-test job sees them; the MAUI head itself builds only on a device-capable
++       runner and lives here alone. The architecture guard's "registered in any .slnx" rule
++       is what keeps this split honest. -->
++  <Folder Name="/src/">
++    <Project Path="SchoolCollab.Mobile/SchoolCollab.Mobile.csproj" />
++  </Folder>
++  <Folder Name="/src/Mobile/">
++    <Project Path="SchoolCollab.Mobile.Logic/SchoolCollab.Mobile.Logic.csproj" />
++  </Folder>
++  <Folder Name="/tests/">
++    <Project Path="../tests/SchoolCollab.Mobile.Tests.Unit/SchoolCollab.Mobile.Tests.Unit.csproj" />
++  </Folder>
++</Solution>
+diff --git a/src/Mobile/SchoolCollab.Mobile/App.xaml b/src/Mobile/SchoolCollab.Mobile/App.xaml
+new file mode 100644
+index 00000000..01fd74d7
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/App.xaml
+@@ -0,0 +1,10 @@
++﻿<?xml version="1.0" encoding="UTF-8" ?>
++<Application xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
++             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
++             xmlns:local="clr-namespace:SchoolCollab.Mobile"
++             x:Class="SchoolCollab.Mobile.App">
++    <Application.Resources>
++        <ResourceDictionary>
++        </ResourceDictionary>
++    </Application.Resources>
++</Application>
+diff --git a/src/Mobile/SchoolCollab.Mobile/App.xaml.cs b/src/Mobile/SchoolCollab.Mobile/App.xaml.cs
+new file mode 100644
+index 00000000..5a3cd771
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/App.xaml.cs
+@@ -0,0 +1,14 @@
++﻿namespace SchoolCollab.Mobile;
++
++public partial class App : Application
++{
++	public App()
++	{
++		InitializeComponent();
++	}
++
++	protected override Window CreateWindow(IActivationState? activationState)
++	{
++		return new Window(new MainPage()) { Title = "SchoolCollab.Mobile" };
++	}
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/Layout/MainLayout.razor b/src/Mobile/SchoolCollab.Mobile/Components/Layout/MainLayout.razor
+new file mode 100644
+index 00000000..e1a9a756
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Components/Layout/MainLayout.razor
+@@ -0,0 +1,3 @@
++﻿@inherits LayoutComponentBase
++
++@Body
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/Layout/MainLayout.razor.css b/src/Mobile/SchoolCollab.Mobile/Components/Layout/MainLayout.razor.css
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/Pages/NotFound.razor b/src/Mobile/SchoolCollab.Mobile/Components/Pages/NotFound.razor
+new file mode 100644
+index 00000000..091b6b8b
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Components/Pages/NotFound.razor
+@@ -0,0 +1,5 @@
++﻿@page "/not-found"
++@layout MainLayout
++
++<h3>Not Found</h3>
++<p>Sorry, the content you are looking for does not exist.</p>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor b/src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor
+new file mode 100644
+index 00000000..ebccca30
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor
+@@ -0,0 +1,39 @@
++@page "/"
++
++@* Reuse spike (L1, round `mobile-host-skeleton`): one unmodified component from
++   SchoolCollab.Admin.Shared rendered inside the Blazor Hybrid head. The values are
++   hard-coded on purpose — this page proves the shared component layer crosses the host
++   boundary, it does not load data. Styles live in Spike.razor.css (CSS isolation). *@
++
++<PageTitle>Admin.Shared reuse spike</PageTitle>
++
++<ErrorBoundary>
++    <ChildContent>
++        <section class="spike">
++            <h1 class="spike__title">Admin.Shared reuse spike</h1>
++            <p class="spike__intro">
++                One unmodified component from <code>SchoolCollab.Admin.Shared</code>, rendered in
++                the mobile head without a single edit to the shared library.
++            </p>
++
++            <FluentCard class="spike__card">
++                <FluentStack Orientation="Orientation.Vertical" Gap="1rem">
++                    <FieldDisplay Label="Student">@StudentName</FieldDisplay>
++                    <FieldDisplay Label="Class" Orientation="FieldDisplayOrientation.Horizontal">
++                        @ClassName
++                    </FieldDisplay>
++                </FluentStack>
++            </FluentCard>
++        </section>
++    </ChildContent>
++    <ErrorContent Context="ex">
++        <FluentMessageBar Intent="MessageIntent.Error">
++            The Admin.Shared component failed to render: @ex.Message
++        </FluentMessageBar>
++    </ErrorContent>
++</ErrorBoundary>
++
++@code {
++    private const string StudentName = "Ada Lovelace";
++    private const string ClassName = "Grade 5 Blue";
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor.css b/src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor.css
+new file mode 100644
+index 00000000..b617cfc5
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Components/Pages/Spike.razor.css
+@@ -0,0 +1,24 @@
++.spike {
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++    margin: 0 auto;
++    max-width: 40rem;
++    padding: 1.5rem 1rem;
++}
++
++.spike__title {
++    font-size: 1.25rem;
++    font-weight: 600;
++    margin: 0;
++}
++
++.spike__intro {
++    color: var(--neutral-foreground-hint, #605e5c);
++    margin: 0;
++}
++
++.spike__card {
++    display: block;
++    padding: 1rem;
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/Routes.razor b/src/Mobile/SchoolCollab.Mobile/Components/Routes.razor
+new file mode 100644
+index 00000000..90595917
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Components/Routes.razor
+@@ -0,0 +1,6 @@
++﻿<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
++    <Found Context="routeData">
++        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
++        <FocusOnNavigate RouteData="routeData" Selector="h1" />
++    </Found>
++</Router>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Components/_Imports.razor b/src/Mobile/SchoolCollab.Mobile/Components/_Imports.razor
+new file mode 100644
+index 00000000..2d2f7193
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Components/_Imports.razor
+@@ -0,0 +1,13 @@
++@using System.Net.Http
++@using System.Net.Http.Json
++@using Microsoft.AspNetCore.Components.Forms
++@using Microsoft.AspNetCore.Components.Routing
++@using Microsoft.AspNetCore.Components.Web
++@using Microsoft.AspNetCore.Components.Web.Virtualization
++@using Microsoft.FluentUI.AspNetCore.Components
++@using Microsoft.JSInterop
++@using SchoolCollab.Admin.Shared.Components
++@using SchoolCollab.Mobile
++@using SchoolCollab.Mobile.Components
++@using SchoolCollab.Mobile.Components.Layout
++@using SchoolCollab.Mobile.Logic
+diff --git a/src/Mobile/SchoolCollab.Mobile/MainPage.xaml b/src/Mobile/SchoolCollab.Mobile/MainPage.xaml
+new file mode 100644
+index 00000000..8e8690d8
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/MainPage.xaml
+@@ -0,0 +1,14 @@
++﻿<?xml version="1.0" encoding="utf-8" ?>
++<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
++             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
++             xmlns:local="clr-namespace:SchoolCollab.Mobile"
++             xmlns:components="clr-namespace:SchoolCollab.Mobile.Components"
++             x:Class="SchoolCollab.Mobile.MainPage">
++
++    <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
++        <BlazorWebView.RootComponents>
++            <RootComponent Selector="#app" ComponentType="{x:Type components:Routes}" />
++        </BlazorWebView.RootComponents>
++    </BlazorWebView>
++
++</ContentPage>
+diff --git a/src/Mobile/SchoolCollab.Mobile/MainPage.xaml.cs b/src/Mobile/SchoolCollab.Mobile/MainPage.xaml.cs
+new file mode 100644
+index 00000000..28962a18
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/MainPage.xaml.cs
+@@ -0,0 +1,9 @@
++﻿namespace SchoolCollab.Mobile;
++
++public partial class MainPage : ContentPage
++{
++	public MainPage()
++	{
++		InitializeComponent();
++	}
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/MauiProgram.cs b/src/Mobile/SchoolCollab.Mobile/MauiProgram.cs
+new file mode 100644
+index 00000000..dac42983
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/MauiProgram.cs
+@@ -0,0 +1,54 @@
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Mobile.Logic;
++
++namespace SchoolCollab.Mobile;
++
++public static class MauiProgram
++{
++    /// <summary>
++    /// The embedded copy of <c>appsettings.json</c>. MAUI adds no configuration sources of
++    /// its own, so this is how the head's base URLs (spec D8: configuration, never a C#
++    /// literal) reach the app.
++    /// </summary>
++    private const string AppSettingsResourceName = "SchoolCollab.Mobile.appsettings.json";
++
++    public static MauiApp CreateMauiApp()
++    {
++        var builder = MauiApp.CreateBuilder();
++        builder
++            .UseMauiApp<App>()
++            .ConfigureFonts(fonts =>
++            {
++                fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
++            });
++
++        AddAppSettings(builder);
++        builder.Services.AddSingleton(MobileApiOptions.FromConfiguration(builder.Configuration));
++
++        builder.Services.AddMauiBlazorWebView();
++
++#if DEBUG
++        builder.Services.AddBlazorWebViewDeveloperTools();
++        builder.Logging.AddDebug();
++#endif
++
++        return builder.Build();
++    }
++
++    /// <summary>
++    /// Streams the head's embedded <c>appsettings.json</c> into
++    /// <paramref name="builder"/>'s configuration.
++    /// </summary>
++    /// <exception cref="InvalidOperationException">The embedded resource is missing from the assembly.</exception>
++    private static void AddAppSettings(MauiAppBuilder builder)
++    {
++        var assembly = typeof(MauiProgram).Assembly;
++        using var stream = assembly.GetManifestResourceStream(AppSettingsResourceName)
++            ?? throw new InvalidOperationException(
++                $"Embedded resource '{AppSettingsResourceName}' is missing — check the " +
++                "EmbeddedResource item in SchoolCollab.Mobile.csproj.");
++
++        builder.Configuration.AddJsonStream(stream);
++    }
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Android/AndroidManifest.xml b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/AndroidManifest.xml
+new file mode 100644
+index 00000000..dbf9e7e5
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/AndroidManifest.xml
+@@ -0,0 +1,6 @@
++﻿<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++    <application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"></application>
++    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.INTERNET" />
++</manifest>
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Android/MainActivity.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/MainActivity.cs
+new file mode 100644
+index 00000000..ae4f06f3
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/MainActivity.cs
+@@ -0,0 +1,10 @@
++﻿using Android.App;
++using Android.Content.PM;
++using Android.OS;
++
++namespace SchoolCollab.Mobile;
++
++[Activity(Theme = "@style/Maui.SplashTheme", MainLauncher = true, ConfigurationChanges = ConfigChanges.ScreenSize | ConfigChanges.Orientation | ConfigChanges.UiMode | ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize | ConfigChanges.Density)]
++public class MainActivity : MauiAppCompatActivity
++{
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Android/MainApplication.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/MainApplication.cs
+new file mode 100644
+index 00000000..a78425c5
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/MainApplication.cs
+@@ -0,0 +1,15 @@
++﻿using Android.App;
++using Android.Runtime;
++
++namespace SchoolCollab.Mobile;
++
++[Application]
++public class MainApplication : MauiApplication
++{
++	public MainApplication(IntPtr handle, JniHandleOwnership ownership)
++		: base(handle, ownership)
++	{
++	}
++
++	protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Android/Resources/values/colors.xml b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/Resources/values/colors.xml
+new file mode 100644
+index 00000000..c04d7492
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Android/Resources/values/colors.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="colorPrimary">#512BD4</color>
++    <color name="colorPrimaryDark">#2B0B98</color>
++    <color name="colorAccent">#2B0B98</color>
++</resources>
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/AppDelegate.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/AppDelegate.cs
+new file mode 100644
+index 00000000..1d450b6d
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/AppDelegate.cs
+@@ -0,0 +1,9 @@
++﻿using Foundation;
++
++namespace SchoolCollab.Mobile;
++
++[Register("AppDelegate")]
++public class AppDelegate : MauiUIApplicationDelegate
++{
++	protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Entitlements.plist b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Entitlements.plist
+new file mode 100644
+index 00000000..de4adc94
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Entitlements.plist
+@@ -0,0 +1,14 @@
++﻿<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++    <!-- See https://aka.ms/maui-publish-app-store#add-entitlements for more information about adding entitlements.-->
++    <dict>
++        <!-- App Sandbox must be enabled to distribute a MacCatalyst app through the Mac App Store. -->
++        <key>com.apple.security.app-sandbox</key>
++        <true/>
++        <!-- When App Sandbox is enabled, this value is required to open outgoing network connections. -->
++        <key>com.apple.security.network.client</key>
++        <true/>
++    </dict>
++</plist>
++
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Info.plist b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Info.plist
+new file mode 100644
+index 00000000..7b1e6e62
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Info.plist
+@@ -0,0 +1,38 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++    <!-- The Mac App Store requires you specify if the app uses encryption. -->
++    <!-- Please consult https://developer.apple.com/documentation/bundleresources/information_property_list/itsappusesnonexemptencryption -->
++    <!-- <key>ITSAppUsesNonExemptEncryption</key> -->
++    <!-- Please indicate <true/> or <false/> here. -->
++
++    <!-- Specify the category for your app here. -->
++    <!-- Please consult https://developer.apple.com/documentation/bundleresources/information_property_list/lsapplicationcategorytype -->
++    <!-- <key>LSApplicationCategoryType</key> -->
++    <!-- <string>public.app-category.YOUR-CATEGORY-HERE</string> -->
++    <key>UIDeviceFamily</key>
++    <array>
++        <integer>2</integer>
++    </array>
++    <key>UIRequiredDeviceCapabilities</key>
++    <array>
++        <string>arm64</string>
++    </array>
++    <key>UISupportedInterfaceOrientations</key>
++    <array>
++        <string>UIInterfaceOrientationPortrait</string>
++        <string>UIInterfaceOrientationLandscapeLeft</string>
++        <string>UIInterfaceOrientationLandscapeRight</string>
++    </array>
++    <key>UISupportedInterfaceOrientations~ipad</key>
++    <array>
++        <string>UIInterfaceOrientationPortrait</string>
++        <string>UIInterfaceOrientationPortraitUpsideDown</string>
++        <string>UIInterfaceOrientationLandscapeLeft</string>
++        <string>UIInterfaceOrientationLandscapeRight</string>
++    </array>
++    <key>XSAppIconAssets</key>
++    <string>Assets.xcassets/appicon.appiconset</string>
++</dict>
++</plist>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Program.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Program.cs
+new file mode 100644
+index 00000000..05ce773f
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/MacCatalyst/Program.cs
+@@ -0,0 +1,15 @@
++﻿using ObjCRuntime;
++using UIKit;
++
++namespace SchoolCollab.Mobile;
++
++public class Program
++{
++	// This is the main entry point of the application.
++	static void Main(string[] args)
++	{
++		// if you want to use a different Application Delegate class from "AppDelegate"
++		// you can specify it here.
++		UIApplication.Main(args, null, typeof(AppDelegate));
++	}
++}
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/App.xaml b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/App.xaml
+new file mode 100644
+index 00000000..b868b2f5
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/App.xaml
+@@ -0,0 +1,8 @@
++﻿<maui:MauiWinUIApplication
++    x:Class="SchoolCollab.Mobile.WinUI.App"
++    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
++    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
++    xmlns:maui="using:Microsoft.Maui"
++    xmlns:local="using:SchoolCollab.Mobile.WinUI">
++
++</maui:MauiWinUIApplication>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/App.xaml.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/App.xaml.cs
+new file mode 100644
+index 00000000..97e3c162
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/App.xaml.cs
+@@ -0,0 +1,21 @@
++﻿using Microsoft.UI.Xaml;
++
++namespace SchoolCollab.Mobile.WinUI;
++
++/// <summary>
++/// Provides application-specific behavior to supplement the default Application class.
++/// </summary>
++public partial class App : MauiWinUIApplication
++{
++	/// <summary>
++	/// Initializes the singleton application object.  This is the first line of authored code
++	/// executed, and as such is the logical equivalent of main() or WinMain().
++	/// </summary>
++	public App()
++	{
++		this.InitializeComponent();
++	}
++
++	protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
++}
++
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/Package.appxmanifest b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/Package.appxmanifest
+new file mode 100644
+index 00000000..9522769e
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/Package.appxmanifest
+@@ -0,0 +1,46 @@
++﻿<?xml version="1.0" encoding="utf-8"?>
++<Package
++  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
++  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
++  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
++  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
++  IgnorableNamespaces="uap rescap">
++
++  <Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
++
++  <mp:PhoneIdentity PhoneProductId="5F80AD55-AF3D-43F7-A81C-AA32DBF55A16" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
++
++  <Properties>
++    <DisplayName>$placeholder$</DisplayName>
++    <PublisherDisplayName>User Name</PublisherDisplayName>
++    <Logo>$placeholder$.png</Logo>
++  </Properties>
++
++  <Dependencies>
++    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
++    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
++  </Dependencies>
++
++  <Resources>
++    <Resource Language="x-generate" />
++  </Resources>
++
++  <Applications>
++    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
++      <uap:VisualElements
++        DisplayName="$placeholder$"
++        Description="$placeholder$"
++        Square150x150Logo="$placeholder$.png"
++        Square44x44Logo="$placeholder$.png"
++        BackgroundColor="transparent">
++        <uap:DefaultTile Square71x71Logo="$placeholder$.png" Wide310x150Logo="$placeholder$.png" Square310x310Logo="$placeholder$.png" />
++        <uap:SplashScreen Image="$placeholder$.png" />
++      </uap:VisualElements>
++    </Application>
++  </Applications>
++
++  <Capabilities>
++    <rescap:Capability Name="runFullTrust" />
++  </Capabilities>
++
++</Package>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/app.manifest b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/app.manifest
+new file mode 100644
+index 00000000..d55fb17e
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/Windows/app.manifest
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="utf-8"?>
++<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
++  <assemblyIdentity version="1.0.0.0" name="SchoolCollab.Mobile.WinUI.app"/>
++
++  <application xmlns="urn:schemas-microsoft-com:asm.v3">
++    <windowsSettings>
++      <!-- The combination of below two tags have the following effect:
++           1) Per-Monitor for >= Windows 10 Anniversary Update
++           2) System < Windows 10 Anniversary Update
++      -->
++      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
++      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
++
++      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
++    </windowsSettings>
++  </application>
++</assembly>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/AppDelegate.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/AppDelegate.cs
+new file mode 100644
+index 00000000..1d450b6d
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/AppDelegate.cs
+@@ -0,0 +1,9 @@
++﻿using Foundation;
++
++namespace SchoolCollab.Mobile;
++
++[Register("AppDelegate")]
++public class AppDelegate : MauiUIApplicationDelegate
++{
++	protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Info.plist b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Info.plist
+new file mode 100644
+index 00000000..ecb7f719
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Info.plist
+@@ -0,0 +1,32 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++    <key>LSRequiresIPhoneOS</key>
++    <true/>
++    <key>UIDeviceFamily</key>
++    <array>
++        <integer>1</integer>
++        <integer>2</integer>
++    </array>
++    <key>UIRequiredDeviceCapabilities</key>
++    <array>
++        <string>arm64</string>
++    </array>
++    <key>UISupportedInterfaceOrientations</key>
++    <array>
++        <string>UIInterfaceOrientationPortrait</string>
++        <string>UIInterfaceOrientationLandscapeLeft</string>
++        <string>UIInterfaceOrientationLandscapeRight</string>
++    </array>
++    <key>UISupportedInterfaceOrientations~ipad</key>
++    <array>
++        <string>UIInterfaceOrientationPortrait</string>
++        <string>UIInterfaceOrientationPortraitUpsideDown</string>
++        <string>UIInterfaceOrientationLandscapeLeft</string>
++        <string>UIInterfaceOrientationLandscapeRight</string>
++    </array>
++    <key>XSAppIconAssets</key>
++    <string>Assets.xcassets/appicon.appiconset</string>
++</dict>
++</plist>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Program.cs b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Program.cs
+new file mode 100644
+index 00000000..44f029c7
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Program.cs
+@@ -0,0 +1,15 @@
++﻿using ObjCRuntime;
++using UIKit;
++
++namespace SchoolCollab.Mobile;
++
++public class Program
++{
++	// This is the main entry point of the application.
++	static void Main(string[] args)
++	{
++		// if you want to use a different Application Delegate class from "AppDelegate"
++		// you can specify it here.
++		UIApplication.Main(args, null, typeof(AppDelegate));
++	}
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Resources/PrivacyInfo.xcprivacy b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Resources/PrivacyInfo.xcprivacy
+new file mode 100644
+index 00000000..24ab3b43
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Platforms/iOS/Resources/PrivacyInfo.xcprivacy
+@@ -0,0 +1,51 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++This is the minimum required version of the Apple Privacy Manifest for .NET MAUI apps.
++The contents below are needed because of APIs that are used in the .NET framework and .NET MAUI SDK.
++
++You are responsible for adding extra entries as needed for your application.
++
++More information: https://aka.ms/maui-privacy-manifest
++-->
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++    <key>NSPrivacyAccessedAPITypes</key>
++    <array>
++        <dict>
++            <key>NSPrivacyAccessedAPIType</key>
++            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
++            <key>NSPrivacyAccessedAPITypeReasons</key>
++            <array>
++                <string>C617.1</string>
++            </array>
++        </dict>
++        <dict>
++            <key>NSPrivacyAccessedAPIType</key>
++            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
++            <key>NSPrivacyAccessedAPITypeReasons</key>
++            <array>
++                <string>35F9.1</string>
++            </array>
++        </dict>
++        <dict>
++            <key>NSPrivacyAccessedAPIType</key>
++            <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
++            <key>NSPrivacyAccessedAPITypeReasons</key>
++            <array>
++                <string>E174.1</string>
++            </array>
++        </dict>
++        <!--
++            The entry below is only needed when you're using the Preferences API in your app.
++        <dict>
++            <key>NSPrivacyAccessedAPIType</key>
++            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
++            <key>NSPrivacyAccessedAPITypeReasons</key>
++            <array>
++                <string>CA92.1</string>
++            </array>
++        </dict> -->
++    </array>
++</dict>
++</plist>
+diff --git a/src/Mobile/SchoolCollab.Mobile/Properties/launchSettings.json b/src/Mobile/SchoolCollab.Mobile/Properties/launchSettings.json
+new file mode 100644
+index 00000000..4f857936
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Properties/launchSettings.json
+@@ -0,0 +1,8 @@
++{
++  "profiles": {
++    "Windows Machine": {
++      "commandName": "Project",
++      "nativeDebugging": false
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/Resources/AppIcon/appicon.svg b/src/Mobile/SchoolCollab.Mobile/Resources/AppIcon/appicon.svg
+new file mode 100644
+index 00000000..9d63b651
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Resources/AppIcon/appicon.svg
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
++    <rect x="0" y="0" width="456" height="456" fill="#512BD4" />
++</svg>
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/Resources/AppIcon/appiconfg.svg b/src/Mobile/SchoolCollab.Mobile/Resources/AppIcon/appiconfg.svg
+new file mode 100644
+index 00000000..21dfb25f
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Resources/AppIcon/appiconfg.svg
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
++<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
++    <path d="m 105.50037,281.60863 c -2.70293,0 -5.00091,-0.90042 -6.893127,-2.70209 -1.892214,-1.84778 -2.837901,-4.04181 -2.837901,-6.58209 0,-2.58722 0.945687,-4.80389 2.837901,-6.65167 1.892217,-1.84778 4.190197,-2.77167 6.893127,-2.77167 2.74819,0 5.06798,0.92389 6.96019,2.77167 1.93749,1.84778 2.90581,4.06445 2.90581,6.65167 0,2.54028 -0.96832,4.73431 -2.90581,6.58209 -1.89221,1.80167 -4.212,2.70209 -6.96019,2.70209 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++    <path d="M 213.56111,280.08446 H 195.99044 L 149.69953,207.0544 c -1.17121,-1.84778 -2.14037,-3.76515 -2.90581,-5.75126 h -0.40578 c 0.36051,2.12528 0.54076,6.67515 0.54076,13.6496 v 65.13172 h -15.54349 v -99.36009 h 18.71925 l 44.7374,71.29798 c 1.89222,2.95695 3.1087,4.98917 3.64945,6.09751 h 0.26996 c -0.45021,-2.6325 -0.67573,-7.09015 -0.67573,-13.37293 v -64.02256 h 15.47557 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++    <path d="m 289.25134,280.08446 h -54.40052 v -99.36009 h 52.23835 v 13.99669 h -36.15411 v 28.13085 h 33.31621 v 13.9271 h -33.31621 v 29.37835 h 38.31628 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++    <path d="M 366.56466,194.72106 H 338.7222 v 85.3634 h -16.08423 v -85.3634 h -27.77455 v -13.99669 h 71.70124 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++</svg>
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/Resources/Fonts/OpenSans-Regular.ttf b/src/Mobile/SchoolCollab.Mobile/Resources/Fonts/OpenSans-Regular.ttf
+new file mode 100644
+index 00000000..2cc82d2e
+Binary files /dev/null and b/src/Mobile/SchoolCollab.Mobile/Resources/Fonts/OpenSans-Regular.ttf differ
+diff --git a/src/Mobile/SchoolCollab.Mobile/Resources/Raw/AboutAssets.txt b/src/Mobile/SchoolCollab.Mobile/Resources/Raw/AboutAssets.txt
+new file mode 100644
+index 00000000..6de1c152
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Resources/Raw/AboutAssets.txt
+@@ -0,0 +1,15 @@
++﻿Any raw assets you want to be deployed with your application can be placed in
++this directory (and child directories). Deployment of the asset to your application
++is automatically handled by the following `MauiAsset` Build Action within your `.csproj`.
++
++    <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
++
++These files will be deployed with your package and will be accessible using Essentials:
++
++    async Task LoadMauiAsset()
++    {
++        using var stream = await FileSystem.OpenAppPackageFileAsync("AboutAssets.txt");
++        using var reader = new StreamReader(stream);
++
++        var contents = reader.ReadToEnd();
++    }
+diff --git a/src/Mobile/SchoolCollab.Mobile/Resources/Splash/splash.svg b/src/Mobile/SchoolCollab.Mobile/Resources/Splash/splash.svg
+new file mode 100644
+index 00000000..21dfb25f
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/Resources/Splash/splash.svg
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
++<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
++<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
++    <path d="m 105.50037,281.60863 c -2.70293,0 -5.00091,-0.90042 -6.893127,-2.70209 -1.892214,-1.84778 -2.837901,-4.04181 -2.837901,-6.58209 0,-2.58722 0.945687,-4.80389 2.837901,-6.65167 1.892217,-1.84778 4.190197,-2.77167 6.893127,-2.77167 2.74819,0 5.06798,0.92389 6.96019,2.77167 1.93749,1.84778 2.90581,4.06445 2.90581,6.65167 0,2.54028 -0.96832,4.73431 -2.90581,6.58209 -1.89221,1.80167 -4.212,2.70209 -6.96019,2.70209 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++    <path d="M 213.56111,280.08446 H 195.99044 L 149.69953,207.0544 c -1.17121,-1.84778 -2.14037,-3.76515 -2.90581,-5.75126 h -0.40578 c 0.36051,2.12528 0.54076,6.67515 0.54076,13.6496 v 65.13172 h -15.54349 v -99.36009 h 18.71925 l 44.7374,71.29798 c 1.89222,2.95695 3.1087,4.98917 3.64945,6.09751 h 0.26996 c -0.45021,-2.6325 -0.67573,-7.09015 -0.67573,-13.37293 v -64.02256 h 15.47557 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++    <path d="m 289.25134,280.08446 h -54.40052 v -99.36009 h 52.23835 v 13.99669 h -36.15411 v 28.13085 h 33.31621 v 13.9271 h -33.31621 v 29.37835 h 38.31628 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++    <path d="M 366.56466,194.72106 H 338.7222 v 85.3634 h -16.08423 v -85.3634 h -27.77455 v -13.99669 h 71.70124 z" style="fill:#ffffff;fill-rule:nonzero;stroke-width:0.838376" />
++</svg>
+\ No newline at end of file
+diff --git a/src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj b/src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
+new file mode 100644
+index 00000000..ec04bd57
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj
+@@ -0,0 +1,87 @@
++<Project Sdk="Microsoft.NET.Sdk.Razor">
++
++    <PropertyGroup>
++        <!-- NOTE (round mobile-host-skeleton, 2026-10-09): the `net10.0-android` build currently
++             FAILS with NETSDK1082 — "There was no runtime pack for Microsoft.AspNetCore.App
++             available for the specified RuntimeIdentifier 'android-arm64'/'android-x64'".
++             Admin.Shared and ServiceDefaults each declare
++             <FrameworkReference Include="Microsoft.AspNetCore.App" />, which lands on this
++             project transitively, and a self-contained mobile app needs a runtime pack per
++             framework reference — Microsoft.AspNetCore.App has none for any android RID. The
++             closure restores and compiles fine; severing it is L2 work. Until then the mobile CI
++             job builds the Windows TFM (.github/workflows/ci.yml, job `mobile`). Do not "fix"
++             this by stripping the framework reference here: that compiles against ~24 assemblies
++             the app would not ship (24 MSB3277) and hides the severance. -->
++        <TargetFrameworks>net10.0-android</TargetFrameworks>
++        <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
++        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
++
++        <OutputType>Exe</OutputType>
++        <RootNamespace>SchoolCollab.Mobile</RootNamespace>
++        <UseMaui>true</UseMaui>
++        <SingleProject>true</SingleProject>
++        <ImplicitUsings>enable</ImplicitUsings>
++        <EnableDefaultCssItems>false</EnableDefaultCssItems>
++        <Nullable>enable</Nullable>
++
++        <!-- Enable XAML source generation for faster build times and improved performance. -->
++        <MauiXamlInflator>SourceGen</MauiXamlInflator>
++
++        <!-- Display name -->
++        <ApplicationTitle>SchoolCollab</ApplicationTitle>
++
++        <!-- App Identifier -->
++        <ApplicationId>com.schoolcollab.mobile</ApplicationId>
++
++        <!-- Versions -->
++        <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
++        <ApplicationVersion>1</ApplicationVersion>
++
++        <!-- Unpackaged Windows output, so the dev loop is a plain F5 onto the desktop target. -->
++        <WindowsPackageType>None</WindowsPackageType>
++
++        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
++        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
++        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
++        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
++        <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
++    </PropertyGroup>
++
++    <ItemGroup>
++        <!-- App Icon -->
++        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
++
++        <!-- Splash Screen -->
++        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
++
++        <!-- Images -->
++        <MauiImage Include="Resources\Images\*" />
++
++        <!-- Custom Fonts -->
++        <MauiFont Include="Resources\Fonts\*" />
++
++        <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
++        <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
++    </ItemGroup>
++
++    <ItemGroup>
++        <!-- API base addresses live here, never as C# literals (spec D8). MAUI adds no
++             configuration sources of its own, so MauiProgram streams this embedded copy into
++             builder.Configuration; MobileApiOptions binds the `MobileApi` section from it. -->
++        <EmbeddedResource Include="appsettings.json" />
++    </ItemGroup>
++
++    <ItemGroup>
++        <!-- No Version attributes: versions are central (Directory.Packages.props, MAUI group). -->
++        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" />
++        <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
++        <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
++        <PackageReference Include="Microsoft.Maui.Controls" />
++    </ItemGroup>
++
++    <ItemGroup>
++        <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
++        <ProjectReference Include="..\SchoolCollab.Mobile.Logic\SchoolCollab.Mobile.Logic.csproj" />
++    </ItemGroup>
++
++</Project>
+diff --git a/src/Mobile/SchoolCollab.Mobile/appsettings.json b/src/Mobile/SchoolCollab.Mobile/appsettings.json
+new file mode 100644
+index 00000000..00bfb34d
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/appsettings.json
+@@ -0,0 +1,7 @@
++{
++  "MobileApi": {
++    "StudentsApi": "https://localhost:7450",
++    "SettingsApi": "https://localhost:7460",
++    "AssignmentsApi": "https://localhost:7199"
++  }
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/wwwroot/app.css b/src/Mobile/SchoolCollab.Mobile/wwwroot/app.css
+new file mode 100644
+index 00000000..4f7a27bd
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/wwwroot/app.css
+@@ -0,0 +1,79 @@
++h1:focus {
++    outline: none;
++}
++
++.valid.modified:not([type=checkbox]) {
++    outline: 1px solid #26b050;
++}
++
++.invalid {
++    outline: 1px solid #e50000;
++}
++
++.validation-message {
++    color: #e50000;
++}
++
++#blazor-error-ui {
++    color-scheme: light only;
++    background: lightyellow;
++    bottom: 0;
++    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
++    box-sizing: border-box;
++    display: none;
++    left: 0;
++    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
++    position: fixed;
++    width: 100%;
++    z-index: 1000;
++}
++
++    #blazor-error-ui .dismiss {
++        cursor: pointer;
++        position: absolute;
++        right: 0.75rem;
++        top: 0.5rem;
++    }
++
++.blazor-error-boundary {
++    background: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNDkiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIG92ZXJmbG93PSJoaWRkZW4iPjxkZWZzPjxjbGlwUGF0aCBpZD0iY2xpcDAiPjxyZWN0IHg9IjIzNSIgeT0iNTEiIHdpZHRoPSI1NiIgaGVpZ2h0PSI0OSIvPjwvY2xpcFBhdGg+PC9kZWZzPjxnIGNsaXAtcGF0aD0idXJsKCNjbGlwMCkiIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0yMzUgLTUxKSI+PHBhdGggZD0iTTI2My41MDYgNTFDMjY0LjcxNyA1MSAyNjUuODEzIDUxLjQ4MzcgMjY2LjYwNiA1Mi4yNjU4TDI2Ny4wNTIgNTIuNzk4NyAyNjcuNTM5IDUzLjYyODMgMjkwLjE4NSA5Mi4xODMxIDI5MC41NDUgOTIuNzk1IDI5MC42NTYgOTIuOTk2QzI5MC44NzcgOTMuNTEzIDI5MSA5NC4wODE1IDI5MSA5NC42NzgyIDI5MSA5Ny4wNjUxIDI4OS4wMzggOTkgMjg2LjYxNyA5OUwyNDAuMzgzIDk5QzIzNy45NjMgOTkgMjM2IDk3LjA2NTEgMjM2IDk0LjY3ODIgMjM2IDk0LjM3OTkgMjM2LjAzMSA5NC4wODg2IDIzNi4wODkgOTMuODA3MkwyMzYuMzM4IDkzLjAxNjIgMjM2Ljg1OCA5Mi4xMzE0IDI1OS40NzMgNTMuNjI5NCAyNTkuOTYxIDUyLjc5ODUgMjYwLjQwNyA1Mi4yNjU4QzI2MS4yIDUxLjQ4MzcgMjYyLjI5NiA1MSAyNjMuNTA2IDUxWk0yNjMuNTg2IDY2LjAxODNDMjYwLjczNyA2Ni4wMTgzIDI1OS4zMTMgNjcuMTI0NSAyNTkuMzEzIDY5LjMzNyAyNTkuMzEzIDY5LjYxMDIgMjU5LjMzMiA2OS44NjA4IDI1OS4zNzEgNzAuMDg4N0wyNjEuNzk1IDg0LjAxNjEgMjY1LjM4IDg0LjAxNjEgMjY3LjgyMSA2OS43NDc1QzI2Ny44NiA2OS43MzA5IDI2Ny44NzkgNjkuNTg3NyAyNjcuODc5IDY5LjMxNzkgMjY3Ljg3OSA2Ny4xMTgyIDI2Ni40NDggNjYuMDE4MyAyNjMuNTg2IDY2LjAxODNaTTI2My41NzYgODYuMDU0N0MyNjEuMDQ5IDg2LjA1NDcgMjU5Ljc4NiA4Ny4zMDA1IDI1OS43ODYgODkuNzkyMSAyNTkuNzg2IDkyLjI4MzcgMjYxLjA0OSA5My41Mjk1IDI2My41NzYgOTMuNTI5NSAyNjYuMTE2IDkzLjUyOTUgMjY3LjM4NyA5Mi4yODM3IDI2Ny4zODcgODkuNzkyMSAyNjcuMzg3IDg3LjMwMDUgMjY2LjExNiA4Ni4wNTQ3IDI2My41NzYgODYuMDU0N1oiIGZpbGw9IiNGRkU1MDAiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjwvZz48L3N2Zz4=) no-repeat 1rem/1.8rem, #b32121;
++    padding: 1rem 1rem 1rem 3.7rem;
++    color: white;
++}
++
++    .blazor-error-boundary::after {
++        content: "An error has occurred."
++    }
++
++.darker-border-checkbox.form-check-input {
++    border-color: #929292;
++}
++
++.form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
++    color: var(--bs-secondary-color);
++    text-align: end;
++}
++
++.form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
++    text-align: start;
++}
++
++.status-bar-safe-area {
++    display: none;
++}
++
++@supports (-webkit-touch-callout: none) {
++    .status-bar-safe-area {
++        display: flex;
++        position: sticky;
++        top: 0;
++        height: env(safe-area-inset-top);
++        background-color: #f7f7f7;
++        width: 100%;
++        z-index: 1;
++    }
++
++    .flex-column, .navbar-brand {
++        padding-left: env(safe-area-inset-left);
++    }
++}
+diff --git a/src/Mobile/SchoolCollab.Mobile/wwwroot/index.html b/src/Mobile/SchoolCollab.Mobile/wwwroot/index.html
+new file mode 100644
+index 00000000..a1e5dd82
+--- /dev/null
++++ b/src/Mobile/SchoolCollab.Mobile/wwwroot/index.html
+@@ -0,0 +1,29 @@
++<!DOCTYPE html>
++<html lang="en">
++<head>
++    <meta charset="utf-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
++    <title>SchoolCollab.Mobile</title>
++    <base href="/" />
++    <link rel="stylesheet" href="app.css" />
++    <link rel="stylesheet" href="SchoolCollab.Mobile.styles.css" />
++    <link rel="icon" href="data:,">
++</head>
++
++<body>
++
++    <div class="status-bar-safe-area"></div>
++
++    <div id="app">Loading...</div>
++
++    <div id="blazor-error-ui" data-nosnippet>
++        An unhandled error has occurred.
++        <a href="." class="reload">Reload</a>
++        <span class="dismiss">🗙</span>
++    </div>
++
++    <script src="_framework/blazor.webview.js" autostart="false"></script>
++
++</body>
++
++</html>
+\ No newline at end of file
+diff --git a/tests/SchoolCollab.ArchitectureTests.Unit/NewProjectsSolutionRegistrationArchitectureTests.cs b/tests/SchoolCollab.ArchitectureTests.Unit/NewProjectsSolutionRegistrationArchitectureTests.cs
+index 5db569ef..31f76dc6 100644
+--- a/tests/SchoolCollab.ArchitectureTests.Unit/NewProjectsSolutionRegistrationArchitectureTests.cs
++++ b/tests/SchoolCollab.ArchitectureTests.Unit/NewProjectsSolutionRegistrationArchitectureTests.cs
+@@ -7,16 +7,28 @@ namespace SchoolCollab.ArchitectureTests.Unit;
+ /// <summary>
+ /// Guards against orphaned projects — the <c>SchoolCollab.Students.Tests.Integration</c>
+ /// lesson (an integration suite that has been out of every solution file for a long
+-/// time, so its breakage never surfaced in CI). The solution is the XML
+-/// <c>SchoolCollab.slnx</c> and has NO globbing: every <c>src/**/*.csproj</c> and
+-/// <c>tests/**/*.csproj</c> present on disk must appear there explicitly, or the
++/// time, so its breakage never surfaced in CI). The solutions are the XML
++/// <c>*.slnx</c> files and they have NO globbing: every <c>src/**/*.csproj</c> and
++/// <c>tests/**/*.csproj</c> present on disk must appear in a solution explicitly, or the
+ /// project silently drops out of solution build/test runs. New projects (e.g.
+ /// <c>src/SchoolCollab.Auth</c>) must therefore be registered in the same change
+-/// set — this guard is what forces it. The on-disk set is derived by walking the
+-/// repo (skipping <c>bin</c>/<c>obj</c>), and both sets are asserted non-empty so
+-/// the guard cannot pass vacuously. The discovery helper follows the
+-/// <c>AppHostRealmImportArchitectureTests</c> precedent (walk-up from
+-/// <c>AppContext.BaseDirectory</c>) and THROWS when the solution cannot be found.
++/// set — this guard is what forces it.
++/// <para>
++/// <b>Registration is "in ANY checked-in <c>*.slnx</c>", not "in <c>SchoolCollab.slnx</c>".</b>
++/// The mobile train added a second solution (<c>src/Mobile/SchoolCollab.Mobile.slnx</c>)
++/// whose MAUI head cannot build on the ubuntu runners and so must stay out of the root
++/// solution — but it is not orphaned, and listing it in
++/// <see cref="KnownOrphanedProjects"/> would be a lie. The guard's purpose is preserved
++/// by unioning every solution: a project in <i>no</i> solution still fails, which is the
++/// failure mode this test exists for. Each solution's <c>Project Path</c> values resolve
++/// against <i>that solution's own directory</i> (the mobile solution's paths are relative
++/// to <c>src/Mobile/</c>) and are then normalized to the repo-root-relative form the
++/// on-disk walk produces.
++/// </para>
++/// The on-disk set is derived by walking the repo (skipping <c>bin</c>/<c>obj</c>), and both
++/// sets are asserted non-empty so the guard cannot pass vacuously. The discovery helper
++/// follows the <c>AppHostRealmImportArchitectureTests</c> precedent (walk-up from
++/// <c>AppContext.BaseDirectory</c>) and THROWS when the root solution cannot be found.
+ /// </summary>
+ [TestClass]
+ public class NewProjectsSolutionRegistrationArchitectureTests
+@@ -34,17 +46,28 @@ public class NewProjectsSolutionRegistrationArchitectureTests
+         "tests/SchoolCollab.Students.Tests.Integration/SchoolCollab.Students.Tests.Integration.csproj",
+     ];
+ 
++    /// <summary>
++    /// Directories the <c>*.slnx</c> walk never descends into: build output, VCS metadata, and
++    /// package caches. None of them can hold a checked-in solution.
++    /// </summary>
++    private static readonly string[] SkippedDirectories =
++    [
++        "bin", "obj", ".git", ".vs", "node_modules", ".venv", "TestResults", "artifacts",
++    ];
++
+     [TestMethod]
+-    public void EveryProjectOnDisk_IsRegisteredInTheSolution()
++    public void EveryProjectOnDisk_IsRegisteredInASolution()
+     {
+         var repoRoot = FindRepoRoot();
+-        var solutionFile = Path.Combine(repoRoot, "SchoolCollab.slnx");
+ 
+         var onDisk = EnumerateProjects(repoRoot).ToList();
+         onDisk.Should().NotBeEmpty("the on-disk project walk must never pass vacuously by finding nothing.");
+ 
+-        var registered = ReadRegisteredProjectPaths(solutionFile);
+-        registered.Should().NotBeEmpty("SchoolCollab.slnx must list its projects explicitly (it has no globbing).");
++        var solutionFiles = EnumerateSolutionFiles(repoRoot).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
++        solutionFiles.Should().NotBeEmpty("the repository must contain at least the root SchoolCollab.slnx.");
++
++        var registered = ReadRegisteredProjectPaths(solutionFiles, repoRoot);
++        registered.Should().NotBeEmpty("a .slnx lists its projects explicitly (it has no globbing).");
+ 
+         // The known orphans must still exist so the exclusion is live — deleting the
+         // folder (the intended end state) fails this check and forces cleanup here.
+@@ -61,7 +84,7 @@ public class NewProjectsSolutionRegistrationArchitectureTests
+             .ToList();
+ 
+         unregistered.Should().BeEmpty(
+-            "every src/** and tests/** project on disk must be registered in SchoolCollab.slnx — unregistered: " +
++            "every src/** and tests/** project on disk must be registered in any checked-in .slnx — unregistered: " +
+             string.Join(", ", unregistered));
+     }
+ 
+@@ -85,16 +108,66 @@ public class NewProjectsSolutionRegistrationArchitectureTests
+         }
+     }
+ 
+-    /// <summary>Reads every <c>Project Path=</c> attribute from the .slnx document,
+-    /// normalized to forward slashes.</summary>
+-    private static HashSet<string> ReadRegisteredProjectPaths(string solutionFile)
++    /// <summary>
++    /// Every checked-in <c>*.slnx</c> under the repository root, skipping
++    /// <see cref="SkippedDirectories"/>. There is more than one solution since the mobile
++    /// train added <c>src/Mobile/SchoolCollab.Mobile.slnx</c>.
++    /// </summary>
++    private static IEnumerable<string> EnumerateSolutionFiles(string repoRoot)
+     {
+-        var doc = XDocument.Load(solutionFile);
+-        return doc.Descendants("Project")
+-            .Select(e => e.Attribute("Path")?.Value)
+-            .Where(p => p is not null)
+-            .Select(p => Normalize(p!))
+-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
++        var pending = new Stack<string>();
++        pending.Push(repoRoot);
++
++        while (pending.Count > 0)
++        {
++            var directory = pending.Pop();
++
++            foreach (var solutionFile in Directory.EnumerateFiles(directory, "*.slnx"))
++            {
++                yield return solutionFile;
++            }
++
++            foreach (var subdirectory in Directory.EnumerateDirectories(directory))
++            {
++                if (SkippedDirectories.Contains(Path.GetFileName(subdirectory), StringComparer.OrdinalIgnoreCase))
++                {
++                    continue;
++                }
++
++                pending.Push(subdirectory);
++            }
++        }
++    }
++
++    /// <summary>
++    /// Reads every <c>Project Path=</c> attribute from every solution file, resolving each
++    /// value against <i>that solution's own directory</i> (a .slnx lists its projects
++    /// relative to itself — the mobile solution's paths are relative to <c>src/Mobile/</c>)
++    /// and normalizing the result to a repo-root-relative forward-slash path so it can be
++    /// compared with the on-disk walk.
++    /// </summary>
++    private static HashSet<string> ReadRegisteredProjectPaths(
++        IEnumerable<string> solutionFiles,
++        string repoRoot)
++    {
++        var registered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
++
++        foreach (var solutionFile in solutionFiles)
++        {
++            var solutionDirectory = Path.GetDirectoryName(Path.GetFullPath(solutionFile))!;
++            var doc = XDocument.Load(solutionFile);
++            var paths = doc.Descendants("Project")
++                .Select(e => e.Attribute("Path")?.Value)
++                .Where(p => p is not null);
++
++            foreach (var path in paths)
++            {
++                var absolute = Path.GetFullPath(Path.Combine(solutionDirectory, path!));
++                registered.Add(Normalize(Path.GetRelativePath(repoRoot, absolute)));
++            }
++        }
++
++        return registered;
+     }
+ 
+     private static string Normalize(string path) => path.Replace('\\', '/');
+diff --git a/tests/SchoolCollab.Mobile.Tests.Unit/MobileApiOptionsTests.cs b/tests/SchoolCollab.Mobile.Tests.Unit/MobileApiOptionsTests.cs
+new file mode 100644
+index 00000000..5d74c10a
+--- /dev/null
++++ b/tests/SchoolCollab.Mobile.Tests.Unit/MobileApiOptionsTests.cs
+@@ -0,0 +1,109 @@
++using FluentAssertions;
++using Microsoft.Extensions.Configuration;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Mobile.Logic;
++
++namespace SchoolCollab.Mobile.Tests.Unit;
++
++/// <summary>
++/// Covers <see cref="MobileApiOptions"/> — the mobile head's config-only base-address rule
++/// (spec D8). Addresses are built with <see cref="UriBuilder"/> rather than typed as literals
++/// on purpose: the rule the class enforces is "never a URL string literal in C#", and a test
++/// that violated it would be the one place the rule is allowed to rot.
++/// </summary>
++[TestClass]
++public class MobileApiOptionsTests
++{
++    [TestMethod]
++    public void FromConfiguration_BindsEveryConfiguredApi_FromTheMobileApiSection()
++    {
++        var options = MobileApiOptions.FromConfiguration(BuildConfiguration(
++            ("MobileApi:StudentsApi", Root("students.example", 7450)),
++            ("MobileApi:SettingsApi", Root("settings.example", 7460)),
++            ("MobileApi:AssignmentsApi", Root("assignments.example", 7199))));
++
++        options.Resolve(nameof(MobileApiOptions.StudentsApi)).Should().Be(new Uri(Root("students.example", 7450)));
++        options.Resolve(nameof(MobileApiOptions.SettingsApi)).Should().Be(new Uri(Root("settings.example", 7460)));
++        options.Resolve(nameof(MobileApiOptions.AssignmentsApi)).Should().Be(new Uri(Root("assignments.example", 7199)));
++        options.MissingBaseAddresses().Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public void Resolve_AppendsTheTrailingSlashToAPathSuffix()
++    {
++        var options = MobileApiOptions.FromConfiguration(BuildConfiguration(
++            ("MobileApi:AssignmentsApi", WithPath("assignments.example", 7199, "api"))));
++
++        options.Resolve(nameof(MobileApiOptions.AssignmentsApi))
++            .Should().Be(new Uri($"{WithPath("assignments.example", 7199, "api")}/"));
++    }
++
++    [TestMethod]
++    public void Resolve_ReturnsNull_ForAnUnconfiguredApi()
++    {
++        var options = MobileApiOptions.FromConfiguration(BuildConfiguration());
++
++        options.Resolve(nameof(MobileApiOptions.StudentsApi)).Should().BeNull();
++    }
++
++    [TestMethod]
++    public void Resolve_ReturnsNull_ForABlankApi()
++    {
++        var options = MobileApiOptions.FromConfiguration(BuildConfiguration(
++            ("MobileApi:StudentsApi", "   ")));
++
++        options.Resolve(nameof(MobileApiOptions.StudentsApi)).Should().BeNull();
++    }
++
++    [TestMethod]
++    public void MissingBaseAddresses_ListsOnlyTheUnconfiguredApis_InApiNamesOrder()
++    {
++        var options = MobileApiOptions.FromConfiguration(BuildConfiguration(
++            ("MobileApi:StudentsApi", Root("students.example", 7450))));
++
++        options.MissingBaseAddresses().Should().Equal(
++            nameof(MobileApiOptions.SettingsApi),
++            nameof(MobileApiOptions.AssignmentsApi));
++    }
++
++    [TestMethod]
++    public void Resolve_RejectsANonAbsoluteValue()
++    {
++        var options = MobileApiOptions.FromConfiguration(BuildConfiguration(
++            ("MobileApi:SettingsApi", "settings-api")));
++
++        Action resolve = () => options.Resolve(nameof(MobileApiOptions.SettingsApi));
++
++        resolve.Should().Throw<InvalidOperationException>().WithMessage("*MobileApi:SettingsApi*");
++    }
++
++    [TestMethod]
++    public void Resolve_RejectsAnUnknownApiName()
++    {
++        var options = new MobileApiOptions();
++
++        Action resolve = () => options.Resolve("GradesApi");
++
++        resolve.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("apiName");
++    }
++
++    [TestMethod]
++    public void FromConfiguration_RejectsANullConfiguration()
++    {
++        Action bind = () => MobileApiOptions.FromConfiguration(null!);
++
++        bind.Should().Throw<ArgumentNullException>();
++    }
++
++    private static IConfiguration BuildConfiguration(params (string Key, string Value)[] values) =>
++        new ConfigurationBuilder()
++            .AddInMemoryCollection(values.ToDictionary(v => v.Key, v => (string?)v.Value))
++            .Build();
++
++    /// <summary>An address with no path, as the AppHost publishes it (e.g. <c>students-api</c>).</summary>
++    private static string Root(string host, int port) =>
++        new UriBuilder(Uri.UriSchemeHttps, host, port).Uri.ToString();
++
++    private static string WithPath(string host, int port, string path) =>
++        new UriBuilder(Uri.UriSchemeHttps, host, port, path).Uri.ToString();
++}
+diff --git a/tests/SchoolCollab.Mobile.Tests.Unit/SchoolCollab.Mobile.Tests.Unit.csproj b/tests/SchoolCollab.Mobile.Tests.Unit/SchoolCollab.Mobile.Tests.Unit.csproj
+new file mode 100644
+index 00000000..f31deb0c
+--- /dev/null
++++ b/tests/SchoolCollab.Mobile.Tests.Unit/SchoolCollab.Mobile.Tests.Unit.csproj
+@@ -0,0 +1,24 @@
++<Project Sdk="Microsoft.NET.Sdk">
++
++  <PropertyGroup>
++    <OutputType>Exe</OutputType>
++    <EnableMSTestRunner>true</EnableMSTestRunner>
++    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
++    <TargetFramework>net10.0</TargetFramework>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <Nullable>enable</Nullable>
++    <IsPackable>false</IsPackable>
++    <IsTestProject>true</IsTestProject>
++  </PropertyGroup>
++
++  <ItemGroup>
++    <PackageReference Include="MSTest" />
++    <PackageReference Include="FluentAssertions" />
++    <PackageReference Include="Microsoft.Extensions.Configuration" />
++  </ItemGroup>
++
++  <ItemGroup>
++    <ProjectReference Include="..\..\src\Mobile\SchoolCollab.Mobile.Logic\SchoolCollab.Mobile.Logic.csproj" />
++  </ItemGroup>
++
++</Project>

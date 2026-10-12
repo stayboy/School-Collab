@@ -13,6 +13,12 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
+    <!-- §8 WYSIWYG round (owner 2026-10-11): the rich instruction editor lives HERE so no host
+         replicates its assets or its wiring. Blazored.TextEditor is the wrapper (MIT) over the Quill
+         2.0.3 assets vendored in wwwroot/lib/quill; HtmlSanitizer is the ONE allow-list sanitiser
+         (write + render). Versions live in Directory.Packages.props (CPM) — never here. -->
+    <PackageReference Include="Blazored.TextEditor" />
+    <PackageReference Include="HtmlSanitizer" />
   </ItemGroup>
 
   <ItemGroup>

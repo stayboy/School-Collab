@@ -142,6 +142,63 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         });
     }
 
+    /// <summary>Q4 safety ordering (round wysiwyg-instruction-editor): authored HTML is stored in
+    /// Instructions now, so the ward renders through the ONE sanitiser-fed component — a stored
+    /// payload carrying a script never executes here, and the prose still renders (AC-3).</summary>
+    [TestMethod]
+    public void Instructions_WithStoredHtml_RendersSanitised_NeverAScript()
+    {
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 0, null)
+            ],
+            Instructions: "<p>Read <strong>chapter 5</strong>.</p><script>alert('x')</script>");
+        SetupView(view);
+        SetupResultNotFound();
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("<strong>chapter 5</strong>"));
+        cut.FindAll("script").Should().NotContain(s => s.TextContent.Contains("alert"),
+            "display sanitises AGAIN, whatever reached storage");
+    }
+
+    [TestMethod]
+    public void Materials_Render_WithTheirTitles_AndNeverTheTeacherNotes()
+    {
+        // D11 (instructional-materials): the ward card renders the titled materials read-only, and the
+        // card no longer requires a student-facing instruction paragraph to exist alongside them.
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 0, null)
+            ],
+            Instructions: null,
+            Materials:
+            [
+                new InstructionReadDto(Guid.NewGuid(), InstructionKindDto.Text, "Read the worked example.", null,
+                    null, null, 0, null, 0, "Worked example"),
+                new InstructionReadDto(Guid.NewGuid(), InstructionKindDto.Url, null, "https://example.com/help",
+                    null, null, 0, null, 1, null),
+            ]);
+        SetupView(view);
+        SetupResultNotFound();
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Worked example", "AC-7: the material's TITLE renders");
+            cut.Markup.Should().Contain("https://example.com/help",
+                "a titleless Link falls back to its url rather than having a label invented for it");
+            cut.FindAll("#ward-materials").Should().ContainSingle("AC-7: the materials list renders");
+        });
+        // Teacher notes are the internal scalar note, never an instruction row — so this asserts the
+        // structural exclusion (D11) instead of a filter someone has to remember to re-apply.
+        cut.Markup.Should().NotContain("Teacher notes");
+    }
+
     [TestMethod]
     public void Instructions_CardAbsent_WhenNotAuthored()
     {

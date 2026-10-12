@@ -1,0 +1,24 @@
+@* FluentTabStrip (round wysiwyg-instruction-editor, owner 2026-10-11) — the repo's TRADITIONAL
+   folder-tab chrome over FluentTabs, extracted for reuse: every tab wears a 1px border with rounded
+   top corners; the PANEL carries one continuous top border across the full width; the SELECTED tab
+   loses its bottom border and, filled opaque, masks the panel's line exactly beneath itself — the
+   only break in that line — while unselected tabs keep theirs (coinciding with the panel's border,
+   so it reads single). FluentUI's accent underline is retired through the exposed ::part.
+
+   Pass FluentTab elements as children — FluentUI's semantics (aria-selected, keyboard navigation,
+   and the hidden-panel behaviour rich editors inside tabs rely on) are preserved untouched:
+
+       <FluentTabStrip>
+           <FluentTab Label="First">…</FluentTab>
+           <FluentTab Label="Second">…</FluentTab>
+       </FluentTabStrip> *@
+<div class="fluent-tab-strip">
+    <FluentTabs>
+        @ChildContent
+    </FluentTabs>
+</div>
+
+@code {
+    /// <summary>The tab set — <c>FluentTab</c> elements, rendered through the chrome untouched.</summary>
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+}

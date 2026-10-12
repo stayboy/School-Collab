@@ -46,7 +46,8 @@ the icon type directly:
 <FluentIcon Icon="@(Icons.Regular.Size24.CheckmarkCircle)" Width="16" Height="16" />
 ```
 
-For custom images, use the `Value` property with an `Icon` instance:
+For `Icon` **instances** — shared constants and custom images alike — use the
+non-generic `Value` property:
 
 ```razor
 <FluentIcon Value="@(Icon.FromImageUrl("/images/custom-icon.png"))" />
@@ -103,6 +104,35 @@ Common icons: `Save`, `Delete`, `Search`, `Add`, `AddCircle`, `Home`, `Edit`,
 | Icon shows blank | Missing `Microsoft.FluentUI.AspNetCore.Components.Icons` package | Add the Icons NuGet package |
 | Icon not found at design time | Missing `@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons` | Add the alias to `_Imports.razor` |
 | `@using` alias conflicts | Multiple `Icons` namespaces | Use the explicit `@using Icons = ...` alias form |
+| Render-time throw `"Please use the constructor including parameters."` | An `Icon` **instance** passed to the generic `Icon=` parameter — it infers the abstract `Icon` base, whose parameterless ctor throws at render time | Instances go through `Value=`; types through `Icon=`. Full trap + diagnosis below |
+
+## The instance trap — a mystery "timeout" in bUnit
+
+`<FluentIcon>` is generic: `Icon=` wants the generated icon **type**
+(`<FluentIcon Icon="@Icons.Regular.Size20.Save" />`). Passing an **instance** to
+`Icon=` makes Blazor infer the abstract `Icon` base, whose parameterless
+constructor throws `ArgumentNullException: "Please use the constructor including
+parameters."` — at **render time**, inside the component tree:
+
+- The page's `<ErrorBoundary>` (the repo rule) swallows it into the fallback UI,
+  so the app shows "Something went wrong" while the markup still looks fine in
+  review.
+- In bUnit it reads as a **flaky timeout**: `WaitForFailedException` ("the
+  assertion did not pass within the timeout period"). The signature: the
+  affected tests **pass in isolation and fail together** under full-suite load
+  (7 at once in the assignment-authoring round, 2026-10-08) — the crash kills
+  the render pipeline mid-`WaitForAssertion`.
+
+Rule: instances always go through `Value=` (`<FluentIcon Value="@FluentIcons.Add" />`
+— the `DashboardCard` / `RowActionsMenu` / `HelpIcon` precedent); types through
+`Icon=`.
+
+Diagnosis recipe when a page suddenly renders its ErrorBoundary fallback:
+
+1. Temporarily widen the page's `ErrorContent` from `@ex.Message` to `@ex.ToString()`.
+2. Re-run the single failing test and read the INNER exception in the rendered fallback.
+3. Revert the widening — never commit it. Workflow:
+   `.github/copilot/rules/testing.md` §"bUnit pitfalls".
 
 ## Recommended `_Imports.razor`
 

@@ -535,3 +535,8 @@ invisible to that gate *and* to the runtime `HasPendingModelChanges()` guard in 
 - `documents/specs/notification-delivery-plan.md` — notification policy.
 - `documents/solution/assignment-request-go-forward-breakdown.md` — WS-A…WS-G workstreams and shipped-state inventory. Its **WS-A2 decision (f)** (archive command sweep-only) is **superseded by §11 LIF-3**.
 - `.github/copilot/rules/blazor-components.md`, `.github/skills/dialog-ui/SKILL.md`, `.github/skills/input-width-scale/SKILL.md` — UI conventions this page must follow.
+
+---
+
+> **Superseded (2026-10-10):** **INS-2** — where the instructions render — is replaced by the unified instructional-materials area: see `documents/specs/instructional-materials.md` §0. **INS-1 and INS-3 remain in force** (the student-facing text field; instruction items stay out of the AI reference set).
+

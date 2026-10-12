@@ -2,22 +2,21 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 
 @*
-    WS-A3 (spec §3.3 / §7 Q4): the Pass Score control.
+    WS-A3 (spec §3.3 / §7 Q4): the Pass Score CONTROL — now rendered inside the authoring page's
+    Basics "Score" row as its third FormRowCell (owner 2026-10-11), so this component owns the
+    control and its two states, never a FormRow of its own.
 
-    D11 (assignment-create-edit-redesign, owner 2026-10-08):
-    - The "Set the pass threshold…" prose is the field's native `title` tooltip,
-      never an inline paragraph.
-    - The inapplicable state (Teacher Marked grading) renders a DISABLED
-      CHECKBOX whose LABEL carries <see cref="ScoringInapplicableReason"/> —
-      the label IS the explanation, so there is no standalone reason paragraph
-      and no disabled number field eating the row. The control keeps the
-      `scoringFieldsPassScore` id in both states (the bUnit seam and the page's
-      order assertions read the id, not the element type).
+    D11 (assignment-create-edit-redesign, owner 2026-10-08) → owner 2026-10-11:
+    - The applicable state is the number field; "Set the pass threshold…" rides the SCORE CELL's
+      help-hint tooltip (the page attaches <see cref="PassScoreHint"/>).
+    - The inapplicable state (Teacher Marked grading) is a DISABLED CHECKBOX with the SHORT label
+      <see cref="ScoringInapplicableShortLabel"/>; the long <see cref="ScoringInapplicableReason"/>
+      rides the same cell's help tooltip — the row reads clean, the explanation stays one hover
+      away. The control keeps the `scoringFieldsPassScore` id in both states (the bUnit seam and
+      the page's order assertions read the id, not the element type).
 
-    Round `authoring-compact-fields` (OD1): the attempt cap LEFT this section
-    for the Basics `(Max score · Max attempts)` row; the page still asks
-    <see cref="IsScoringInapplicable"/> for its disabled state — the checkbox
-    label names BOTH fields, exactly as the old paragraph did.
+    Round `authoring-compact-fields` (OD1): the attempt cap LEFT this section earlier; the page
+    still asks <see cref="IsScoringInapplicable"/> for its disabled state.
 
     The gating rule itself is unchanged (`ScoringFieldsPassSubmitGate`
     still always passes for TeacherGraded, so a stale value can never
@@ -30,32 +29,31 @@
 
 @if (inapplicable)
 {
-    <FormRow Label="Pass Score" For="scoringFieldsPassScore">
-        @* D11: the checkbox's LABEL explains the disabled state — no separate paragraph. *@
-        <FluentCheckbox Id="scoringFieldsPassScore" Disabled="true" Value="false"
-                        Label="@ScoringInapplicableReason" />
-    </FormRow>
+    @* Owner 2026-10-11: the checkbox label is SHORT — the long reason is the SCORE cell's
+       help-hint tooltip, not the label. *@
+    <FluentCheckbox Id="scoringFieldsPassScore" Disabled="true" Value="false"
+                    Label="@ScoringInapplicableShortLabel" />
 }
 else
 {
-    @* D11: the "Set the pass threshold…" hint rides the row label's (i) help icon —
-       no inline paragraph, no hover-only field title. *@
-    <FormRow Label="Pass Score" For="scoringFieldsPassScore" Help="@PassScoreHint">
-        <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3" />
-    </FormRow>
+    <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" />
 }
 
 @code {
-    /// <summary>D11: the field-level hint, carried as the number field's native `title`
-    /// tooltip instead of the inline paragraph it used to be.</summary>
+    /// <summary>D11: the field-level hint, carried as the SCORE cell's help-hint tooltip
+    /// instead of the inline paragraph it used to be.</summary>
     public const string PassScoreHint =
         "Set the pass threshold. Leave blank for no pass threshold.";
 
-    /// <summary>UX-17 / D12 → D11: the reason the inapplicable state shows — the checkbox's
-    /// LABEL in the Teacher Marked state (and the field tooltip's sibling text elsewhere).
-    /// Declared once so the component, the authoring page and the bUnit suite cannot drift.</summary>
+    /// <summary>UX-17 / D12 → D11 → owner 2026-10-11: the LONG reason the inapplicable state
+    /// shows — the SCORE cell's help-hint tooltip in the Teacher Marked state. Declared once so
+    /// the component, the authoring page and the bUnit suite cannot drift.</summary>
     public const string ScoringInapplicableReason =
         "Not applicable for Teacher Marked grading — pass score and attempt caps apply to Auto Scored and Instant Feedback only.";
+
+    /// <summary>Owner 2026-10-11: the disabled checkbox's SHORT label — the long wording lives in
+    /// the cell's help tooltip (<see cref="ScoringInapplicableReason"/>), never inline.</summary>
+    public const string ScoringInapplicableShortLabel = "Not applicable";
 
     /// <summary>The shared form model (PassScore lives here — and MaxAttempts
     /// still does, so the authoring page's request projection and
