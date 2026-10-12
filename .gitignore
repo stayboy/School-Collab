@@ -505,5 +505,6 @@ ci-artifacts/
 .pytest_cache/
 
 # Round / agent scratch — never commit
-.session-state.md
+.session-state*.md
+*.pid
 brainstorms/

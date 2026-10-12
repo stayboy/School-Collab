@@ -294,11 +294,20 @@ section below.
 - **Targets:** run `dotnet build SchoolCollab.slnx` from the repo root — the solution uses the **`.slnx`** XML format. Do **not** re-add a `SchoolCollab.sln`: CI runs no-arg `dotnet build` / `dotnet test` and relies on single-solution discovery (two solution files in one directory is an error). Tests
   aren't required for the in-session check unless the change touches test
   files directly.
-- **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a previous
-  `dotnet run` (AppHost, API, or worker) is still holding output binaries.
-  When this happens: stop the running service (close the terminal that
-  launched it, or `Get-Process dotnet` / `pkill dotnet` from a new shell),
-  then rerun the build. Don't retry the build in a loop — surface the lock to
+- **Fast UI-iteration loop (hot reload):** for local visual iteration, prefer IDE hot
+  reload (human) or a detached `dotnet watch` on the AppHost (agent) over the
+  kill→build→restart cycle — markup/CSS/method-body edits then apply in place and
+  Playwright can re-assert without a restart. Full recipe, observed caveats and
+  recovery: `documents/runbooks/dev-loop-hot-reload.md`. Hot reload accelerates
+  observation; it never replaces the build/test gates below.
+- **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a running
+  service — a plain `dotnet run` (AppHost, API, worker), an IDE-launched debugger
+  session, or a detached `dotnet watch` — is still holding output binaries (an
+  open Visual Studio counts too). **Any running process from the repo's output
+  dirs locks its own outputs**: before a full-solution build, stop them all
+  (`taskkill /PID <pid> /T /F` on the watcher/apphost, close the IDE session);
+  a project-scoped build (`dotnet build <proj.csproj>`) is safe while unrelated
+  services run. Don't retry the build in a loop — surface the lock to
   the user and let them choose how to stop the offending process.
 
 ## Central Package Management (CPM)
