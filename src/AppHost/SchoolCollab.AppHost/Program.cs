@@ -146,6 +146,10 @@ var periodActivationToleranceDays = builder.AddParameter("period-activation-tole
 // Assignments__AttachmentUpload__MaxTotalSizeBytes, and
 // Assignments__AttachmentUpload__AllowedExtensions (comma-separated; the config
 // binder splits it into the AllowedExtensions array).
+// Round recording-materials (D7): the per-file cap is 100 MiB / total 300 MiB (raised from
+// 25/100 MiB for video). Because that exceeds Kestrel's ~30 MB default request-body limit, the
+// assignments-api Kestrel Limits.MaxRequestBodySize is raised to 120 MiB in its own appsettings.json
+// (a server concern, not fanned from here).
 var assignmentFileStoreRoot       = builder.AddParameter("assignment-file-store-root");
 var assignmentUploadMaxFileBytes  = builder.AddParameter("assignment-upload-max-file-bytes");
 var assignmentUploadMaxTotalBytes = builder.AddParameter("assignment-upload-max-total-bytes");

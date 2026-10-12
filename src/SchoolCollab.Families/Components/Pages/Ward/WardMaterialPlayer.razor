@@ -1,0 +1,114 @@
+@* Recording materials (spec recording-materials D4/D5) — the ward-facing player for ONE media
+   instruction (Audio · Video · Image). The staged file is fetched through the authenticated
+   FamiliesApiClient and turned into a same-origin Blob URL by ./js/mediaPlayer.js, which a native
+   <audio>/<video>/<img> binds to. Text/Url materials are rendered as labels by the page instead —
+   this component handles only the media kinds.
+
+   Presentational + self-loading: it owns the fetch, the JS module reference, and the object-URL
+   lifecycle (revoked on dispose — the use-js-interop pattern). It never touches the page's state. *@
+@using SchoolCollab.Assignments.Contracts
+@inject FamiliesApiClient Api
+@inject IJSRuntime JS
+@inject ILogger<WardMaterialPlayer> Logger
+@implements IAsyncDisposable
+
+<li class="ward-material ward-material--media" data-kind="@Material.Kind">
+    <span class="ward-material-label">@(Material.Title ?? Material.FileName ?? "Recording")</span>
+
+    @if (_loading)
+    {
+        <FluentProgressRing />
+    }
+    else if (_error is not null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">@_error</FluentMessageBar>
+    }
+    else if (_mediaUrl is not null)
+    {
+        @switch (Material.Kind)
+        {
+            case InstructionKindDto.Video:
+                <video controls class="ward-material-video" src="@_mediaUrl"></video>
+                break;
+            case InstructionKindDto.Image:
+                <img class="ward-material-image" src="@_mediaUrl" alt="@(Material.Title ?? Material.FileName ?? "Image")" />
+                break;
+            default:
+                @* Audio (and any other media kind) plays through the native audio control. *@
+                <audio controls class="ward-material-audio" src="@_mediaUrl"></audio>
+                break;
+        }
+    }
+</li>
+
+@code {
+    /// <summary>The media material to play — carries the id, kind, file name and content type the
+    /// fetch + render need.</summary>
+    [Parameter, EditorRequired] public InstructionReadDto Material { get; set; } = default!;
+
+    /// <summary>The student whose ward view authorises the fetch.</summary>
+    [Parameter, EditorRequired] public Guid StudentId { get; set; }
+
+    private string? _mediaUrl;
+    private string? _error;
+    private bool _loading = true;
+    private IJSObjectReference? _mediaModule;
+
+    /// <summary>Loads the media once, on first render. Failure is surfaced as a warning bar (a
+    /// missing/unreadable recording must not break the rest of the ward card).</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var bytes = await Api.GetInstructionMediaAsync(AssignmentId, StudentId, Material.Id);
+            if (bytes is null || bytes.Length == 0)
+            {
+                _error = "This recording is no longer available.";
+            }
+            else
+            {
+                _mediaModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/mediaPlayer.js");
+                _mediaUrl = await _mediaModule.InvokeAsync<string>(
+                    "createMediaUrl", bytes, Material.ContentType);
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit closed mid-load — nothing to render, nothing to surface.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Loading media for instruction {InstructionId} failed", Material.Id);
+            _error = "This recording could not be loaded.";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>The assignment the material belongs to — threaded from the page so the fetch path is
+    /// the authenticated <c>/assignments/{id}/students/{studentId}/materials/{instructionId}</c>.</summary>
+    [Parameter, EditorRequired] public Guid AssignmentId { get; set; }
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        if (_mediaUrl is not null && _mediaModule is not null)
+        {
+            try { await _mediaModule.InvokeVoidAsync("revokeMediaUrl", _mediaUrl); }
+            catch (JSDisconnectedException) { }
+        }
+        if (_mediaModule is not null)
+        {
+            try { await _mediaModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+    }
+}

@@ -2714,6 +2714,21 @@
             Icon = new Icons.Regular.Size16.ArrowUpload(),
             OnClick = OpenMaterialFilePickerAsync,
         },
+        // D2 (recording-materials): Record Audio / Record Video mirror the per-kind symmetry of the
+        // Text/Link actions — the kind is known up front, so the recorder requests exactly the right
+        // device constraints and its panel auto-expands on the freshly appended row.
+        new()
+        {
+            Label = "Record Audio",
+            Icon = new Icons.Regular.Size16.MusicNote2(),
+            OnClick = () => AddRecordedMaterialAsync(InstructionKindDto.Audio),
+        },
+        new()
+        {
+            Label = "Record Video",
+            Icon = new Icons.Regular.Size16.Video(),
+            OnClick = () => AddRecordedMaterialAsync(InstructionKindDto.Video),
+        },
     ];
 
     /// <summary>D3 (revised)/Q1-Q2: the Text and Link actions are captured in <see cref="MaterialEditDialog"/>
@@ -2745,6 +2760,21 @@
         row.Text = result.Body;
         row.Url = result.Url;
         StateHasChanged();
+    }
+
+    /// <summary>D2/D3 (recording-materials): "Record Audio"/"Record Video" append a row of the chosen
+    /// media kind and open its inline recorder in one step — no dialog (a dialog could not nest inside
+    /// the question surface anyway, and the recorder is inline by design). The list appends + focuses
+    /// the row and opens the recorder through its own seam, so it stays the single writer of its rows.</summary>
+    private async Task AddRecordedMaterialAsync(InstructionKindDto kind)
+    {
+        if (_instructionList is null)
+        {
+            return;
+        }
+
+        _materialRefusal = null;
+        await _instructionList.AddRowWithRecorderAsync(kind);
     }
 
     /// <summary>Q4(b)/AC-14: a Text/Link row is edited THROUGH the dialog — the row reads its values

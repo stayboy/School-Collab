@@ -15,7 +15,10 @@ using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
+using SchoolCollab.Assignments.Core.Data.Repositories;
+using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Features;
 
@@ -183,5 +186,103 @@ public class WardRoutesTests
 
         var response = await client.PostAsJsonAsync(SubmissionUrl, new { Content = "work", Answers = Array.Empty<SubmissionAnswerDto>() });
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    // ── Recording materials (spec recording-materials D4): stream one media instruction's file ──
+
+    private static string MaterialUrl(Guid instructionId) =>
+        $"/assignments/{AssignmentId}/students/{StudentId}/materials/{instructionId}";
+
+    private static (Assignment Assignment, Guid InstructionId) AssignmentWithVideoInstruction()
+    {
+        var assignment = Assignment.Create(
+            "Algebra", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, Guid.NewGuid());
+        assignment.AddInstructionItems(
+        [
+            (null, InstructionKind.Video, null, null, "lecture.webm", "video/webm", 1024, "staged/lecture.webm", "Intro lecture")
+        ]);
+        return (assignment, assignment.InstructionItems[0].Id);
+    }
+
+    private sealed class StubFileStore(string? content) : IFileStore
+    {
+        public Task<string> StoreAsync(Stream content, string fileName, string contentType, CancellationToken cancellationToken = default)
+            => Task.FromResult("stored");
+
+        public Task<Stream> OpenReadAsync(string storagePath, CancellationToken cancellationToken = default)
+        {
+            if (content is null)
+            {
+                throw new FileNotFoundException(storagePath);
+            }
+            Stream s = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            return Task.FromResult(s);
+        }
+
+        public Task DeleteAsync(string storagePath, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    [TestMethod]
+    public async Task Material_Returns200_WithStoredContentType_AndRangeProcessing()
+    {
+        // AC-8 (recording-materials D4): the media route streams the staged file with its stored content
+        // type and advertises Accept-Ranges (enableRangeProcessing) so <audio>/<video> are seekable.
+        var (assignment, instructionId) = AssignmentWithVideoInstruction();
+        var repo = new Mock<IAssignmentRepository>();
+        repo.Setup(r => r.GetAsync(AssignmentId, It.IsAny<CancellationToken>())).ReturnsAsync(assignment);
+
+        await using var app = await StartHostAsync(s =>
+        {
+            s.AddSingleton(repo.Object);
+            s.AddSingleton<IFileStore>(new StubFileStore("video-bytes"));
+        });
+        var client = CreateClient(app);
+
+        var response = await client.GetAsync(MaterialUrl(instructionId));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("video/webm",
+            "the response type is the instruction's stored content type");
+        response.Headers.TryGetValues("Accept-Ranges", out var ranges).Should().BeTrue(
+            "range processing is enabled so the player can seek");
+        ranges!.Should().Contain("bytes");
+    }
+
+    [TestMethod]
+    public async Task Material_Returns404_WhenInstructionMissing()
+    {
+        // An assignment with no matching media instruction → 404 (never a stream of the wrong file).
+        var (assignment, _) = AssignmentWithVideoInstruction();
+        var repo = new Mock<IAssignmentRepository>();
+        repo.Setup(r => r.GetAsync(AssignmentId, It.IsAny<CancellationToken>())).ReturnsAsync(assignment);
+
+        await using var app = await StartHostAsync(s =>
+        {
+            s.AddSingleton(repo.Object);
+            s.AddSingleton<IFileStore>(new StubFileStore("video-bytes"));
+        });
+        var client = CreateClient(app);
+
+        var response = await client.GetAsync(MaterialUrl(Guid.NewGuid()));
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [TestMethod]
+    public async Task Material_Returns404_WhenBackingFileGone()
+    {
+        // A stored reference whose backing file is missing → 404 (the certificate-route precedent).
+        var (assignment, instructionId) = AssignmentWithVideoInstruction();
+        var repo = new Mock<IAssignmentRepository>();
+        repo.Setup(r => r.GetAsync(AssignmentId, It.IsAny<CancellationToken>())).ReturnsAsync(assignment);
+
+        await using var app = await StartHostAsync(s =>
+        {
+            s.AddSingleton(repo.Object);
+            s.AddSingleton<IFileStore>(new StubFileStore(null));
+        });
+        var client = CreateClient(app);
+
+        var response = await client.GetAsync(MaterialUrl(instructionId));
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 }

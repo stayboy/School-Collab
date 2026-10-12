@@ -56,11 +56,28 @@
                     <ul class="ward-materials" id="ward-materials">
                         @foreach (var material in _view.Materials)
                         {
-                            <li class="ward-material" data-kind="@material.Kind">
-                                @* The label is the title, else the file name, else the url — a legacy
-                                   row with no title still renders something true, never an invented name. *@
-                                <span class="ward-material-label">@(material.Title ?? material.FileName ?? material.Url)</span>
-                            </li>
+                            @* Recording materials (spec recording-materials D5): a media kind (Audio/Video/
+                               Image) renders in a native player via <WardMaterialPlayer> (fetches the staged
+                               file through the authenticated client → a seekable Blob URL); Text/Url stay the
+                               label-only row they have always been. Teacher notes are never here. *@
+                            var isMedia = material.Kind is InstructionKindDto.Audio
+                                or InstructionKindDto.Video
+                                or InstructionKindDto.Image;
+                            if (isMedia)
+                            {
+                                <WardMaterialPlayer @key="material.Id"
+                                                    Material="material"
+                                                    AssignmentId="AssignmentId"
+                                                    StudentId="_studentId" />
+                            }
+                            else
+                            {
+                                <li class="ward-material" data-kind="@material.Kind">
+                                    @* The label is the title, else the file name, else the url — a legacy
+                                       row with no title still renders something true, never an invented name. *@
+                                    <span class="ward-material-label">@(material.Title ?? material.FileName ?? material.Url)</span>
+                                </li>
+                            }
                         }
                     </ul>
                 }

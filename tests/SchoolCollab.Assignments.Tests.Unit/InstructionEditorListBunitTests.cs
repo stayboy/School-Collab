@@ -394,6 +394,46 @@ public class InstructionEditorListBunitTests : BunitContext
         labels.Should().OnlyContain(l => l.Children.Length > 0, "…and the glyph itself renders");
     }
 
+    // ── Recording materials (spec recording-materials D2/D3/D10) ──────────────────────────────
 
+    [TestMethod]
+    public void EmptyMediaRow_WithAStagingSeam_ShowsTheRecordAffordance()
+    {
+        // AC-1/AC-6: the Record affordance sits in the media row's capture slot beside the upload control
+        // — a recording is a second input path to the same staged media row.
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        cut.Find("#instr-record-0").Should().NotBeNull(
+            "a media row with a staging seam offers Record alongside Upload From Device");
+    }
+
+    [TestMethod]
+    public void EmptyMediaRow_WithoutAStagingSeam_HidesTheRecordAffordance()
+    {
+        // The negative side of the same conditional (testing.md §"Assert the negative"): with no host
+        // seam, upload could never succeed, so Record is not offered either — never a control that fails.
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        var cut = Render(rows, stage: null);
+
+        cut.FindAll("#instr-record-0").Should().BeEmpty(
+            "without a staging seam the Record affordance is not rendered");
+    }
+
+    [TestMethod]
+    public void AddRowWithRecorder_OpensTheRecorderOnTheAppendedRow()
+    {
+        // AC-1/AC-6: the page's "Record Video" kebab appends a Video row and opens its inline recorder in
+        // one step. The recorder panel is inline (not a dialog) so it works inside the question surface too.
+        var rows = new List<InstructionEditorRow>();
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        cut.InvokeAsync(() => cut.Instance.AddRowWithRecorderAsync(InstructionKindDto.Video));
+
+        rows.Should().ContainSingle().Which.Kind.Should().Be(InstructionKindDto.Video);
+        cut.FindComponents<RecorderPanel>().Should().ContainSingle(
+            "the appended row's inline recorder is open");
+    }
 
 }
+

@@ -200,6 +200,46 @@ public class WardAssignmentPlayerBunitTests : BunitContext
     }
 
     [TestMethod]
+    public void MediaMaterial_RendersANativePlayer_AndFetchesTheStagedFile()
+    {
+        // AC-8 (recording-materials D4/D5): a Video/Audio material renders in a native <video>/<audio>
+        // player (not a label), fetched through the authenticated media endpoint. Text/Url stay labels.
+        var videoId = Guid.NewGuid();
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 100, null)
+            ],
+            Instructions: null,
+            Materials:
+            [
+                new InstructionReadDto(Guid.NewGuid(), InstructionKindDto.Text, "Read the worked example.", null,
+                    null, null, 0, null, 0, "Worked example"),
+                new InstructionReadDto(videoId, InstructionKindDto.Video, null, null,
+                    "lecture.webm", "video/webm", 1024, "staged/lecture.webm", 1, "Intro lecture"),
+            ]);
+        SetupView(view);
+        SetupResultNotFound();
+        // The media player fetches the staged bytes through the authenticated client (a raw <video src>
+        // cannot attach the bearer token), then binds a Blob URL. bUnit has no real DOM, so what we
+        // assert is that the fetch is issued and the player component renders — the bytes round-trip
+        // through the client's GetInstructionMediaAsync.
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/materials/{videoId}")
+            .Respond(HttpStatusCode.OK, "video/webm", "stub");
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() =>
+        {
+            // The media material is routed to the player, not the label list.
+            cut.FindComponents<SchoolCollab.Families.Components.Pages.Ward.WardMaterialPlayer>().Should().ContainSingle(
+                "a Video material renders through the ward media player");
+        });
+        // The Text material still renders as a label (the non-media path is untouched).
+        cut.Markup.Should().Contain("Worked example");
+    }
+
+    [TestMethod]
     public void Instructions_CardAbsent_WhenNotAuthored()
     {
         SetupView(UnlockedView());

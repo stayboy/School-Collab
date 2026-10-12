@@ -159,7 +159,7 @@ public class ResourcesSectionBunitTests : BunitContext
         var model = new AssignmentEditFormModel();
         var cut = RenderSection(model);
 
-        // 26 MiB - 1 byte over the 25 MiB cap.
+        // 1 byte over the per-file cap (raised to 100 MiB for recording-materials D7).
         var oversized = AttachmentUploadPolicy.MaxFileSizeBytes + 1;
         await cut.Instance.StageFileAsync(
             StreamOf("too big"), "big.pdf", "application/pdf", oversized);
@@ -167,7 +167,7 @@ public class ResourcesSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("exceeds the 25 MB limit",
+            cut.Markup.Should().Contain("exceeds the 100 MB limit",
                 "the client size cap surfaces a friendly message before any HTTP call");
         });
         model.Attachments.Should().BeEmpty();

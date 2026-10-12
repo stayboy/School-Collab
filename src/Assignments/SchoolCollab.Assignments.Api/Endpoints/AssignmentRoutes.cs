@@ -1493,6 +1493,60 @@ public static class AssignmentRoutes
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
+        // ── Recording materials (spec recording-materials D4/D5): stream one media instruction's
+        //    staged file so the ward player can play an Audio/Video/Image material. Same streaming
+        //    shape as the certificate route (IFileStore.OpenReadAsync → Results.Stream), but with
+        //    range processing ENABLED so <audio>/<video> are seekable, and the stored ContentType
+        //    drives the response type rather than a hard-coded application/pdf. Mounted beside the
+        //    ward modules route, so it inherits the same authenticated (Bearer) posture as the ward
+        //    data it serves — no separate ownership filter (mirrors how ward reads are reached).
+        //    404 when the assignment or instruction is missing, the instruction carries no staged
+        //    file, or the backing file is gone.
+        group.MapGet("/{id:guid}/students/{studentId:guid}/materials/{instructionId:guid}", async (
+            Guid id,
+            Guid studentId,
+            Guid instructionId,
+            [FromServices] IAssignmentRepository assignmentRepository,
+            [FromServices] IFileStore fileStore,
+            CancellationToken ct) =>
+        {
+            var assignment = await assignmentRepository.GetAsync(id, ct);
+            if (assignment is null)
+            {
+                return Results.NotFound();
+            }
+
+            var instruction = assignment.InstructionItems.FirstOrDefault(item => item.Id == instructionId);
+            if (instruction is null || !instruction.HasMedia || string.IsNullOrWhiteSpace(instruction.StoragePath))
+            {
+                return Results.NotFound();
+            }
+
+            Stream stream;
+            try
+            {
+                stream = await fileStore.OpenReadAsync(instruction.StoragePath, ct);
+            }
+            catch (FileNotFoundException)
+            {
+                // Stored reference present but the backing file is gone.
+                return Results.NotFound();
+            }
+
+            // enableRangeProcessing: true → the response advertises Accept-Ranges and honours the
+            // client's Range header (206 partial content), which is what makes <video>/<audio>
+            // seeking work. The stored content type is the media type the browser recorded/uploaded
+            // (audio/* or video/*); it falls back to octet-stream only for a legacy row that somehow
+            // carries none.
+            var contentType = string.IsNullOrWhiteSpace(instruction.ContentType)
+                ? "application/octet-stream"
+                : instruction.ContentType;
+
+            return Results.Stream(stream, contentType,
+                enableRangeProcessing: true,
+                fileDownloadName: instruction.FileName);
+        });
+
         return group;
     }
 
