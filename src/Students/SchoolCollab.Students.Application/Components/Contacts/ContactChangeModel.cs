@@ -1,6 +1,6 @@
 using SchoolCollab.Students.Core.Domain;
 
-namespace SchoolCollab.Admin.Shared.Components;
+namespace SchoolCollab.Students.Application.Components.Contacts;
 
 /// <summary>
 /// Dialog mode for <see cref="ContactChangeDialog"/>: edit an existing contact

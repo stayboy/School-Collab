@@ -1,5 +1,5 @@
 using System.ComponentModel.DataAnnotations;
-using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Students.Application.Components.Contacts;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
 using StudentGuardianViewDto = SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto;

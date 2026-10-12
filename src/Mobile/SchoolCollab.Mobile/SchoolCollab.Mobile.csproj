@@ -1,17 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
-        <!-- NOTE (round mobile-host-skeleton, 2026-10-09): the `net10.0-android` build currently
-             FAILS with NETSDK1082 — "There was no runtime pack for Microsoft.AspNetCore.App
-             available for the specified RuntimeIdentifier 'android-arm64'/'android-x64'".
-             Admin.Shared and ServiceDefaults each declare
-             <FrameworkReference Include="Microsoft.AspNetCore.App" />, which lands on this
-             project transitively, and a self-contained mobile app needs a runtime pack per
-             framework reference — Microsoft.AspNetCore.App has none for any android RID. The
-             closure restores and compiles fine; severing it is L2 work. Until then the mobile CI
-             job builds the Windows TFM (.github/workflows/ci.yml, job `mobile`). Do not "fix"
-             this by stripping the framework reference here: that compiles against ~24 assemblies
-             the app would not ship (24 MSB3277) and hides the severance. -->
         <TargetFrameworks>net10.0-android</TargetFrameworks>
         <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
         <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>

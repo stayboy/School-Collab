@@ -60,10 +60,10 @@ public class FormRowOrientationTests
         "SchoolCollab.Admin.Shared/Components/RowOrientation.cs");
 
     private static string ReadContactsEditorSource() => ReadSource(
-        "SchoolCollab.Admin.Shared/Components/ContactsEditor.razor");
+        "Students/SchoolCollab.Students.Application/Components/Contacts/ContactsEditor.razor");
 
     private static string ReadContactFormFieldsSource() => ReadSource(
-        "SchoolCollab.Admin.Shared/Components/ContactFormFields.razor");
+        "Students/SchoolCollab.Students.Application/Components/Contacts/ContactFormFields.razor");
 
     // ---- Enum exists with Horizontal + Vertical ----
 
