@@ -1140,14 +1140,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "UX-17: an inapplicable control is disabled, never hidden");
             var passScore = cut.Find("#scoringFieldsPassScore");
             passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox",
-                "D11: the inapplicable state is a checkbox whose LABEL explains the disabled state");
-            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the label IS the explanation (FluentCheckbox renders its Label as child content)");
+                "D11: the inapplicable state is a disabled checkbox");
+            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableShortLabel,
+                "owner 2026-10-11: the checkbox label stays SHORT (FluentCheckbox renders its Label as child content)");
             cut.FindAll(".scoring-fields-reason").Should().BeEmpty(
                 "D11: the standalone reason paragraph is gone");
             ScoringFieldDisabled(cut, "scoringFieldsMaxAttempts").Should().BeTrue();
-            cut.Markup.Should().Contain(ScoringFieldsSection.ScoringInapplicableReason,
-                "the label carries the reason the fields cannot be edited");
+            cut.FindAll(".form-row-cell-help").Select(h => h.GetAttribute("title"))
+                .Should().Contain(t => t != null && t.Contains(ScoringFieldsSection.ScoringInapplicableReason),
+                "owner 2026-10-11: the long reason travels as the pass score CELL's help-hint tooltip");
         });
     }
 
@@ -1518,8 +1519,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             var pairs = new (string Name, string[] Ids)[]
             {
-                ("type & grading format", ["authoring-basics-type", "authoring-basics-grading"]),
-                ("max score & max attempts", ["authoring-basics-max-score", "scoringFieldsMaxAttempts"]),
+                ("grading", ["authoring-basics-type", "authoring-basics-grading"]),
+                ("score", ["authoring-basics-max-score", "scoringFieldsMaxAttempts", "scoringFieldsPassScore"]),
                 ("status & available from", ["authoring-basics-status", "authoring-basics-available-from"])
             };
 
@@ -1541,8 +1542,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 // element children also carry FluentUI's own <style> elements, so the assertion
                 // counts the CONTROLS, never the cell's children.)
                 var cell = row.QuerySelector(".form-row-input")!;
-                cell.QuerySelectorAll("fluent-select, fluent-number-field, span.authoring-readonly-value")
-                    .Should().HaveCount(2, $"both {name} controls sit in the ONE input cell, so they sit inline");
+                cell.QuerySelectorAll("fluent-select, fluent-number-field, fluent-checkbox, span.authoring-readonly-value")
+                    .Should().HaveCount(ids.Length, $"all {name} controls sit in the ONE input cell, so they sit inline");
                 ids.Should().OnlyContain(id => cell.QuerySelector($"#{id}") != null,
                     $"both {name} controls belong to that one row");
 
@@ -1551,6 +1552,22 @@ public class AssignmentAuthoringBunitTests : BunitContext
                     cut.FindAll($"#{id}").Should().ContainSingle($"{id} renders exactly once");
                 }
             }
+
+            // Owner refinement (2026-10-11): each paired input carries its own FormRowCell caption
+            // UNDER it, while the row keeps the short group label — "Grading" and "Score".
+            var captions = basics.QuerySelectorAll(".form-row-cell-caption");
+            captions.Select(c => c.TextContent.Trim()).Should().Contain(new[]
+            {
+                "Assignment type", "Grading format", "Max score", "Max attempts", "Pass score",
+            });
+            foreach (var caption in captions)
+            {
+                var forId = caption.GetAttribute("for");
+                basics.QuerySelector($"#{forId}").Should().NotBeNull(
+                    $"the \"{caption.TextContent.Trim()}\" caption labels a real control");
+            }
+            basics.TextContent.Should().MatchRegex(@"Grading").And.MatchRegex(@"Score",
+                "the rows are named by their short group labels");
         });
     }
 
@@ -1665,28 +1682,38 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             var basics = cut.Find("#authoring-basics");
             basics.QuerySelector("#authoring-basics-max-score").Should().NotBeNull();
-            basics.InnerHtml.Should().Contain("Feedback mode:",
-                "D11: the feedback-mode narrative rides the (i) help icon on the grading row's label");
-            basics.InnerHtml.Should().Contain(ScoringFieldsSection.PassScoreHint,
-                "D11: the pass-threshold hint rides the Pass Score row's (i) help icon");
-            basics.InnerHtml.Should().Contain(
-                QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded),
-                "D11: the AI-availability text rides the same merged icon on the paired row");
-            basics.QuerySelectorAll(".form-row-help").Should().HaveCount(2,
-                "D11: exactly the type/grading row and the Pass Score row carry help icons "
+            basics.QuerySelectorAll(".form-row-help").Should().HaveCount(1,
+                "owner 2026-10-11: only the type/grading row keeps a ROW-level help icon — the "
+                + "pass-threshold hint moved to the Pass score CELL's caption icon "
                 + "(Guardian review's is conditional and its policy is unset here)");
+            basics.QuerySelectorAll(".form-row-cell-help").Select(h => h.GetAttribute("title"))
+                .Should().Contain(t => t == ScoringFieldsSection.PassScoreHint,
+                "owner 2026-10-11: the pass-threshold hint rides the Pass score cell's help icon");
 
-            // D14f: the FIRST help icon is the type/grading row's — its tooltip is three
-            // labelled lines (purpose / AI availability / feedback mode), and the purpose
-            // sentence is the documented causal chain (§3.3 immediate-vs-held; FR-220 gate).
-            var gradingRowHelp = basics.QuerySelectorAll(".form-row-help")[0]
-                .GetAttribute("title") ?? string.Empty;
-            gradingRowHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
-                "D14f: the row's (i) icon explains what type & grading DRIVE, not just what they are");
-            gradingRowHelp.Should().Contain(AssignmentTypeGradingRules.OnlineMeaning,
-                "D15: the row also states the SELECTED type's own meaning (Online in this fixture)");
-            gradingRowHelp.Split('\n').Should().HaveCount(4,
-                "D14f/D15: four labelled lines — purpose, the type's meaning, AI availability, feedback mode");
+            // Owner 2026-10-11: the merged row tooltip is SPLIT onto the two cells — each input's
+            // (i) icon carries only the lines that apply to it, and the row label keeps ONE
+            // minimal sentence.
+            string CellHelpTitle(string controlId) =>
+                basics.QuerySelector($".form-row-cell-caption[for='{controlId}'] .help-icon")
+                    ?.GetAttribute("title") ?? string.Empty;
+
+            basics.QuerySelectorAll(".form-row-help")[0].GetAttribute("title")
+                .Should().Be(Authoring.GradingGroupHint,
+                    "owner 2026-10-11: the Grading row label's hint stays MINIMAL");
+
+            var typeHelp = CellHelpTitle("authoring-basics-type");
+            typeHelp.Should().Contain(AssignmentTypeGradingRules.OnlineMeaning,
+                "D15: the SELECTED type's own meaning (Online in this fixture) rides the Assignment type cell");
+            typeHelp.Should().Contain(
+                QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded),
+                "FR-220: the AI-availability text rides the Assignment type cell");
+
+            var gradingFormatHelp = CellHelpTitle("authoring-basics-grading");
+            gradingFormatHelp.Should().Contain(Authoring.TypeGradingPurposeHint,
+                "D14f: what the grading format POWERS rides the Grading format cell");
+            gradingFormatHelp.Should().Contain("Feedback mode:",
+                "D11: the feedback-mode narrative rides the Grading format cell");
+
             basics.QuerySelector("#scoringFieldsPassScore").Should().NotBeNull();
             cut.FindAll("#authoring-submission").Should().BeEmpty(
                 "D1: the Submission & Sign-off compartment is retired");

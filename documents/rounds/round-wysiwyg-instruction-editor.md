@@ -194,6 +194,22 @@ underline is the tablist's shadow-DOM `.activeIndicator`, retired via its expose
 its first consumer and the only tab usage in the repo today. Structure pinned by
 `FluentTabStripBunitTests` (container, tabs, labels, panels, hidden-inactive behaviour).
 
+**FormRow family gains `FormRowCell` (owner, same day).** The paired-input pattern — short GROUP
+label in the row's gutter, each input carrying its OWN caption beneath it — is now the shared
+`FormRowCell` (`Caption` + `For` + optional `Help` tooltip + input), so any multi-input `FormRow`
+adopts it in one wrapper per input, no bespoke CSS. First consumers: the **Grading** row
+("Assignment type" / "Grading format") and the **Score** row ("Max score" / "Max attempts" /
+"Pass score"), replacing "Assignment type & grading format" / "Max score & max attempts" and
+retiring the standalone Pass Score row — the control (and its two states) moved into the Score
+row's third cell, with the disabled checkbox label shortened to "Not applicable" and the long
+UX-17 reason riding that cell's help-hint tooltip. Cells are content-sized (inputs keep intrinsic
+width) and the caption is deliberately subtext (0.72rem italic, muted). The Grading row's merged
+four-line tooltip was then SPLIT the same way: the Assignment type cell carries the type's meaning
++ AI-availability lines, the Grading format cell carries the scoring-fields story + feedback-mode
+line, and the row label keeps one minimal sentence (`GradingGroupHint`). Seams: `FormRowCellBunitTests`,
+`ScoringFieldsSectionBunitTests` (control-only shape) and the caption/tooltip assertions in
+`AssignmentAuthoringBunitTests`.
+
 Probe note: the `<fluent-dialog>` OUTER element measures 0×0 and never carries an `open` attribute
 in FluentUI Blazor 4.14.2 (visibility is the `hidden` binding) — a Playwright `state:'visible'` wait
 on it is a false negative; the dialog is visibly fine (screenshot pinned).
