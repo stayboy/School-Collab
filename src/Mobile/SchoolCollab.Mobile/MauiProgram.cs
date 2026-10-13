@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Mobile.Logic;
+using SchoolCollab.Mobile.Services;
 
 namespace SchoolCollab.Mobile;
 
@@ -13,6 +14,19 @@ public static class MauiProgram
     /// </summary>
     private const string AppSettingsResourceName = "SchoolCollab.Mobile.appsettings.json";
 
+    /// <summary>
+    /// The embedded <c>appsettings.Development.json</c> — the dev-only overlay (the dev IdP's
+    /// authority). Streamed in ONLY in the Development environment, so a non-dev build cannot
+    /// silently point at a development identity provider.
+    /// </summary>
+    private const string DevelopmentAppSettingsResourceName = "SchoolCollab.Mobile.appsettings.Development.json";
+
+    /// <summary>The environment variable MAUI/.NET uses to name the app environment.</summary>
+    private const string EnvironmentVariableName = "DOTNET_ENVIRONMENT";
+
+    /// <summary>The environment name that loads <see cref="DevelopmentAppSettingsResourceName"/>.</summary>
+    private const string DevelopmentEnvironmentName = "Development";
+
     public static MauiApp CreateMauiApp()
     {
         var builder = MauiApp.CreateBuilder();
@@ -24,7 +38,22 @@ public static class MauiProgram
             });
 
         AddAppSettings(builder);
-        builder.Services.AddSingleton(MobileApiOptions.FromConfiguration(builder.Configuration));
+
+        var apiOptions = MobileApiOptions.FromConfiguration(builder.Configuration);
+        var authOptions = MobileAuthOptions.FromConfiguration(builder.Configuration);
+
+        builder.Services.AddSingleton(apiOptions);
+        builder.Services.AddSingleton(authOptions);
+
+        // The two platform implementations of Mobile.Logic's auth seams. MAUI Essentials types
+        // (SecureStorage, WebAuthenticator) compile only in the head, which is exactly why the
+        // seams exist.
+        builder.Services.AddSingleton<ITokenStore, SecureStorageTokenStore>();
+        builder.Services.AddSingleton<ISystemBrowserAuthenticator, SystemBrowserAuthenticator>();
+
+        builder.Services
+            .AddMobileAuth(authOptions)
+            .AddMobileAdminClients(apiOptions);
 
         builder.Services.AddMauiBlazorWebView();
 
@@ -38,15 +67,34 @@ public static class MauiProgram
 
     /// <summary>
     /// Streams the head's embedded <c>appsettings.json</c> into
-    /// <paramref name="builder"/>'s configuration.
+    /// <paramref name="builder"/>'s configuration, plus the Development overlay when
+    /// <see cref="EnvironmentVariableName"/> names <see cref="DevelopmentEnvironmentName"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The embedded resource is missing from the assembly.</exception>
+    /// <remarks>
+    /// The environment is read from the process environment variable rather than from the
+    /// builder: <see cref="MauiAppBuilder"/> exposes <c>Configuration</c>, <c>Services</c> and
+    /// <c>Logging</c> and has NO <c>Environment</c> property, and resolving <c>IHostEnvironment</c>
+    /// from the built host would be too late to add a configuration source at all.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">An embedded resource is missing from the assembly.</exception>
     private static void AddAppSettings(MauiAppBuilder builder)
     {
+        AddJsonResource(builder, AppSettingsResourceName);
+
+        if (Environment.GetEnvironmentVariable(EnvironmentVariableName) == DevelopmentEnvironmentName)
+        {
+            AddJsonResource(builder, DevelopmentAppSettingsResourceName);
+        }
+    }
+
+    /// <summary>Streams one embedded JSON resource into <paramref name="builder"/>'s configuration.</summary>
+    /// <exception cref="InvalidOperationException">The embedded resource is missing from the assembly.</exception>
+    private static void AddJsonResource(MauiAppBuilder builder, string resourceName)
+    {
         var assembly = typeof(MauiProgram).Assembly;
-        using var stream = assembly.GetManifestResourceStream(AppSettingsResourceName)
+        using var stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException(
-                $"Embedded resource '{AppSettingsResourceName}' is missing — check the " +
+                $"Embedded resource '{resourceName}' is missing — check the " +
                 "EmbeddedResource item in SchoolCollab.Mobile.csproj.");
 
         builder.Configuration.AddJsonStream(stream);

@@ -15,6 +15,12 @@
     <PackageReference Include="MSTest" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <!-- The auth-path tests build real containers (ServiceCollection/BuildServiceProvider), the
+         Logic-owned `IHttpClientFactory` named-client seam, and NullLogger for the Admin.Shared
+         services they resolve. Versions are CPM (no Version attribute here). -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

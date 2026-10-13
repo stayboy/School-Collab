@@ -165,22 +165,7 @@ public class AppHostRealmImportArchitectureTests
         using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
         var client = FindClient(doc.RootElement, "school-collab-client");
 
-        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue(
-            "the guard must not pass vacuously over a missing protocolMappers block.");
-        var claimNames = new List<string>();
-        foreach (var mapper in mappers.EnumerateArray())
-        {
-            if (mapper.ValueKind != JsonValueKind.Object
-                || !mapper.TryGetProperty("config", out var config)
-                || config.ValueKind != JsonValueKind.Object
-                || !config.TryGetProperty("claim.name", out var name)
-                || name.ValueKind != JsonValueKind.String)
-            {
-                continue;
-            }
-
-            claimNames.Add(name.GetString()!);
-        }
+        var claimNames = ClaimNamesOf(client);
 
         // The five claim names ARE the ClaimSetFactory contract (D9) — the factory lives in the
         // auth service and cannot be referenced from this project, so the values are pinned here.
@@ -328,9 +313,16 @@ public class AppHostRealmImportArchitectureTests
         // exactly the design D16 removed. Asserting the EXACT client-id set makes the guard
         // discriminating: any added client fails, whatever it is named (a name-based check would
         // pass for a portal client spelled differently).
+        //
+        // DELIBERATE, OWNER-APPROVED WIDENING (round mobile-credential / L3, owner pin 2026-10-13):
+        // `school-collab-mobile-client` joins the set. A device cannot hold a client secret, so
+        // the public-client credential decision (spec §2 D5) makes a THIRD, public client
+        // mandatory; this guard pins the client set exactly, so the mobile client is named here
+        // rather than absorbed silently. The widening removes nothing: the two negative
+        // assertions below still scan EVERY client's redirectUris.
         clientIds.Should().BeEquivalentTo(
-            new[] { "school-collab-client", "school-collab-auth-admin" },
-            "the realm must declare exactly the app/Blazor client and the admin service-account client — D16 forbids a portal OIDC client (the portal holds no token and performs no code flow).");
+            new[] { "school-collab-client", "school-collab-mobile-client", "school-collab-auth-admin" },
+            "the realm must declare exactly the app/Blazor client, the device public client introduced by D5, and the admin service-account client — D16 forbids a portal OIDC client (the portal holds no token and performs no code flow).");
 
         var redirectUris = clients.EnumerateArray()
             .Where(c => c.ValueKind == JsonValueKind.Object
@@ -347,6 +339,111 @@ public class AppHostRealmImportArchitectureTests
             "no portal URL may be registered as a redirect URI anywhere in the realm (D16).");
         redirectUris.Should().NotContain(u => u.EndsWith("/bootstrap", StringComparison.OrdinalIgnoreCase),
             "the portal's bootstrap redemption route is a code-receiving URI but it is NOT an OIDC redirect URI: on the passkey path the code reaches the portal as a one-time bootstrap code, never as an authorization code (D16/AC12).");
+    }
+
+    [TestMethod]
+    public void RealmImportFile_MobileClient_IsAPublicClientWithTheAuthorizationCodeFlowOnly()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-mobile-client");
+
+        // D5: a device cannot hold a client secret, so the device credential is a PUBLIC client
+        // performing Authorization Code + PKCE through the system browser. The confidential
+        // `school-collab-client` is unusable off-server for exactly this reason.
+        client.GetProperty("publicClient").ValueKind.Should().Be(JsonValueKind.True,
+            "D5: the mobile credential is a public client (no client secret can be embedded on a device).");
+        client.GetProperty("standardFlowEnabled").ValueKind.Should().Be(JsonValueKind.True,
+            "the authorization-code flow must be enabled — that is the only flow the PKCE redirect acquires tokens with.");
+        client.GetProperty("directAccessGrantsEnabled").ValueKind.Should().Be(JsonValueKind.False,
+            "the device must never be able to send user credentials directly: the direct grant is disabled (contrast school-collab-client).");
+        client.TryGetProperty("secret", out _).Should().BeFalse(
+            "a public client carries NO secret — embedding one on the device is the vulnerability D5 exists to avoid.");
+    }
+
+    [TestMethod]
+    public void RealmImportFile_MobileClient_MappersEmitExactlyTheClaimSetFactoryClaimNames()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-mobile-client");
+
+        // Same parity contract the school-collab-client guard pins: the five claim names ARE the
+        // ClaimSetFactory contract (D9), and the gates read the raw realm spellings
+        // (VisibleTenantService reads `tenant_id` verbatim). Exact-set, so a rename/droppage of a
+        // mapper in the mobile client cannot silently break tenant/role gating on the device.
+        var claimNames = ClaimNamesOf(client);
+        claimNames.Should().BeEquivalentTo(
+            new[] { "tenant_id", "tenant_name", "tenant_type", "teacher_id", "roles" },
+            "school-collab-mobile-client's protocol mappers must emit EXACTLY the claim names ClaimSetFactory reads "
+            + "(tenant_id/tenant_name/tenant_type/teacher_id/roles).");
+    }
+
+    [TestMethod]
+    public void RealmImportFile_MobileClient_HasTheFourAttributeMappersOnBothTokenPaths()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-mobile-client");
+
+        // The verbatim copy of school-collab-client's attribute mappers — user.attribute == claim.name
+        // per pair, on both token paths (the bearer APIs read the ACCESS token, the ID token carries
+        // the same values for the client-side provider's parity).
+        foreach (var claimName in new[] { "tenant_id", "tenant_name", "tenant_type", "teacher_id" })
+        {
+            var mapper = FindMapper(client, "oidc-usermodel-attribute-mapper", claimName);
+            mapper.GetProperty("config").GetProperty("user.attribute").GetString().Should().Be(claimName,
+                $"the '{claimName}' mapper must read the user attribute of the same name.");
+            AssertBothTokenPathsAreEnabled(mapper, claimName);
+            mapper.GetProperty("config").TryGetProperty("userinfo.token.claim", out var uinfo).Should().BeTrue();
+            uinfo.ValueKind.Should().Be(JsonValueKind.True,
+                $"the '{claimName}' mapper is copied verbatim from school-collab-client, so userinfo.token.claim stays true.");
+        }
+    }
+
+    [TestMethod]
+    public void RealmImportFile_MobileClient_HasRolesMapperOnBothTokenPaths()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-mobile-client");
+
+        var rolesMapper = FindMapper(client, "oidc-usermodel-realm-role-mapper", "roles");
+        AssertBothTokenPathsAreEnabled(rolesMapper, "roles");
+        rolesMapper.GetProperty("config").GetProperty("multivalued").ValueKind.Should().Be(JsonValueKind.True,
+            "a user with several realm roles carries one `roles` claim per role (the client-side provider flattens the array).");
+    }
+
+    [TestMethod]
+    public void RealmImportFile_MobileClient_AudienceMapperEmitsTheApiValidatedSchoolCollabClientAudience()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-mobile-client");
+
+        // The APIs' AddJwtBearer validates options.Audience = Auth:Keycloak:ClientId, whose
+        // AppHost-fanned value is `school-collab-client` (Program.cs parameter). The audience the
+        // mobile token must therefore CARRY is the resource audience — NOT the mobile client's own
+        // clientId, which is only the OIDC authorization `client_id` in the request.
+        var audienceMapper = FindMapper(client, "oidc-audience-mapper", "audience-school-collab-client");
+        audienceMapper.GetProperty("config").GetProperty("included.client.audience").GetString()
+            .Should().Be("school-collab-client",
+                "the APIs validate aud against Auth:Keycloak:ClientId = school-collab-client; emitting any other audience makes every bearer call 401.");
+        AssertBothTokenPathsAreEnabled(audienceMapper, "audience-school-collab-client");
+    }
+
+    [TestMethod]
+    public void RealmImportFile_MobileClient_RegistersTheCustomSchemeRedirectUri()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(RealmFile));
+        var client = FindClient(doc.RootElement, "school-collab-mobile-client");
+
+        client.TryGetProperty("redirectUris", out var uris).Should().BeTrue();
+        var list = uris.EnumerateArray()
+            .Where(u => u.ValueKind == JsonValueKind.String)
+            .Select(u => u.GetString())
+            .Where(u => u is not null)
+            .Cast<string>()
+            .ToArray();
+
+        list.Should().Contain("schoolcollab://signin-oidc",
+            "Keycloak matches redirect URIs EXACTLY (the ##-separator lesson below), and this literal is the "
+            + "CallbackUrl the head hands to WebAuthenticator — a drifted spelling breaks sign-in at runtime only.");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
@@ -413,6 +510,81 @@ public class AppHostRealmImportArchitectureTests
         }
 
         throw new InvalidOperationException($"Realm file has no client with clientId '{clientId}'.");
+    }
+
+    /// <summary>The <c>claim.name</c> values a client's protocol mappers emit — the ClaimSetFactory
+    /// contract extraction shared by the school-collab-client and mobile-client guards. Mappers
+    /// without a <c>claim.name</c> (the audience mapper) are not claims and are skipped.</summary>
+    private static IReadOnlyList<string> ClaimNamesOf(JsonElement client)
+    {
+        client.TryGetProperty("protocolMappers", out var mappers).Should().BeTrue(
+            "the guard must not pass vacuously over a missing protocolMappers block.");
+        var claimNames = new List<string>();
+        foreach (var mapper in mappers.EnumerateArray())
+        {
+            if (mapper.ValueKind != JsonValueKind.Object
+                || !mapper.TryGetProperty("config", out var config)
+                || config.ValueKind != JsonValueKind.Object
+                || !config.TryGetProperty("claim.name", out var name)
+                || name.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            claimNames.Add(name.GetString()!);
+        }
+
+        return claimNames;
+    }
+
+    /// <summary>Resolves a mapper by <c>protocolMapper</c> type and (for claim mappers) its
+    /// <c>claim.name</c>; the audience mapper is keyed by its mapper name instead. THROWS when the
+    /// mapper is missing, so a dropped mapper cannot pass the assertions vacuously.</summary>
+    private static JsonElement FindMapper(JsonElement client, string protocolMapper, string key)
+    {
+        if (!client.TryGetProperty("protocolMappers", out var mappers) || mappers.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("Client has no 'protocolMappers' array.");
+        }
+
+        foreach (var mapper in mappers.EnumerateArray())
+        {
+            if (mapper.ValueKind != JsonValueKind.Object
+                || !mapper.TryGetProperty("protocolMapper", out var pm)
+                || pm.ValueKind != JsonValueKind.String
+                || pm.GetString() != protocolMapper)
+            {
+                continue;
+            }
+
+            var config = mapper.GetProperty("config");
+            var matchesClaim = config.TryGetProperty("claim.name", out var claimName)
+                && claimName.ValueKind == JsonValueKind.String
+                && claimName.GetString() == key;
+            var matchesName = mapper.TryGetProperty("name", out var mapperName)
+                && mapperName.ValueKind == JsonValueKind.String
+                && mapperName.GetString() == key;
+            if (matchesClaim || matchesName)
+            {
+                return mapper;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Client has no '{protocolMapper}' mapper identified by '{key}'.");
+    }
+
+    private static void AssertBothTokenPathsAreEnabled(JsonElement mapper, string label)
+    {
+        var config = mapper.GetProperty("config");
+        config.TryGetProperty("access.token.claim", out var access).Should().BeTrue(
+            $"the '{label}' mapper must state its access-token participation explicitly.");
+        access.ValueKind.Should().Be(JsonValueKind.True,
+            $"the bearer path reads '{label}' from the access token, so access.token.claim must be true.");
+        config.TryGetProperty("id.token.claim", out var id).Should().BeTrue(
+            $"the '{label}' mapper must state its ID-token participation explicitly.");
+        id.ValueKind.Should().Be(JsonValueKind.True,
+            $"the client-side provider reads '{label}' from the ID token, so id.token.claim must be true.");
     }
 
     /// <summary>Resolves the service-account USER entry for the named client (username convention

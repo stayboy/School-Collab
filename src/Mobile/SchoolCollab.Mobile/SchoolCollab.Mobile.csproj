@@ -58,6 +58,9 @@
              configuration sources of its own, so MauiProgram streams this embedded copy into
              builder.Configuration; MobileApiOptions binds the `MobileApi` section from it. -->
         <EmbeddedResource Include="appsettings.json" />
+        <!-- The dev-only overlay (the dev IdP's authority), streamed in ONLY when
+             DOTNET_ENVIRONMENT is Development — MauiProgram.AddAppSettings owns that gate. -->
+        <EmbeddedResource Include="appsettings.Development.json" />
     </ItemGroup>
 
     <ItemGroup>

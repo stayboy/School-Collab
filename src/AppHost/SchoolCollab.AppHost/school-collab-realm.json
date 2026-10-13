@@ -139,6 +139,96 @@
       ]
     },
     {
+      "clientId": "school-collab-mobile-client",
+      "name": "School Collab Mobile",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "schoolcollab://signin-oidc"
+      ],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_name",
+            "claim.name": "tenant_name",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-type",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_type",
+            "claim.name": "tenant_type",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "teacher-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "teacher_id",
+            "claim.name": "teacher_id",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience-school-collab-client",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "school-collab-client",
+            "access.token.claim": true,
+            "id.token.claim": true
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "access.token.claim": true,
+            "id.token.claim": true,
+            "userinfo.token.claim": true,
+            "multivalued": true
+          }
+        }
+      ]
+    },
+    {
       "clientId": "school-collab-auth-admin",
       "name": "School Collab Auth Admin (service account)",
       "enabled": true,
@@ -169,7 +259,8 @@
         "tenant_name": ["Dev School"],
         "tenant_type": ["School"],
         "teacher_id": ["00000000-0000-0000-0000-000000000003"]
-      }
+      },
+      "realmRoles": ["teacher"]
     },
     {
       "username": "service-account-school-collab-auth-admin",
