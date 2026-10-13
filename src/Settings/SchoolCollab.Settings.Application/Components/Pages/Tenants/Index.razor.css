@@ -1,0 +1,5 @@
+/* Placeholder cell for a tenant that is not the portal default. Rendered as a dash rather
+   than an empty cell so the column reads as "nothing here" instead of "missing data". */
+.tenants-muted {
+    opacity: 0.5;
+}

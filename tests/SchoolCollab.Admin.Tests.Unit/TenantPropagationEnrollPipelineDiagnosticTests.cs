@@ -35,6 +35,10 @@ public class TenantPropagationEnrollPipelineDiagnosticTests
         public Task<Guid?> GetSelectedTenantIdAsync(CancellationToken ct = default) =>
             Task.FromResult<Guid?>(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
+
+        // No portal-applied default: this fixture pins the explicit selection path.
+        public Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+        public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     /// <summary>Mirrors AddServiceDefaults' ConfigureHttpClientDefaults + the

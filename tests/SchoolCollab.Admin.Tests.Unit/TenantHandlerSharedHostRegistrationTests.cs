@@ -38,6 +38,8 @@ public class TenantPropagationSharedHostRegistrationTests
         public StubSelection(Guid? value) => _value = value;
         public Task<Guid?> GetSelectedTenantIdAsync(CancellationToken ct = default) => Task.FromResult(_value);
         public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+        public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     /// <summary>Builds the Admin host DI in Program.cs order: Settings first, then

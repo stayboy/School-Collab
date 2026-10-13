@@ -32,6 +32,11 @@ namespace SchoolCollab.Core.Auth;
 /// deep-link landing stamps the token's validated payload tenant), the handler leaves it
 /// untouched rather than overwriting it with the dev selection — an explicit tenant is
 /// authoritative.</para>
+/// <para><b>Header precedence mirrors <see cref="TestAuthHandler"/>:</b> an explicit
+/// switcher pick wins; with none, the handler forwards the default the admin portal
+/// applied on load (the operator's preference, else the platform default). Without that
+/// second slot the portal's "default set when the portal loads" would only reach the
+/// Admin host's own pages and never the API calls those pages make.</para>
 /// </remarks>
 public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
 {
@@ -50,10 +55,20 @@ public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Guid? selected = null;
+        Guid? appliedDefault = null;
 
         try
         {
             selected = await _devTenant.GetSelectedTenantIdAsync(cancellationToken);
+
+            // No explicit pick: the admin portal's applied default (its preference →
+            // platform-default chain) is what this host should speak for. Guid.Empty is a
+            // meaningful value on both slots (system / no-tenant), but it never travels as a
+            // header — the receiving TestAuthHandler re-derives it from the shared store.
+            if (selected is null)
+            {
+                appliedDefault = await _devTenant.GetAppliedDefaultTenantIdAsync(cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -68,11 +83,13 @@ public sealed class TenantPropagationDelegatingHandler : DelegatingHandler
             _logger?.LogWarning(ex,
                 "TenantPropagationDelegatingHandler: could not read the dev tenant selection; "
                 + "sending {Method} {Uri} without x-tenant-id (the receiver will fall back to "
-                + "its own IDevTenantSelection/default tenant)",
+                + "its own IDevTenantSelection/applied default/configured tenant)",
                 request.Method, request.RequestUri);
         }
 
-        if (selected is { } tenantId && tenantId != Guid.Empty && !request.Headers.Contains("x-tenant-id"))
+        var effectiveTenant = selected ?? appliedDefault;
+
+        if (effectiveTenant is { } tenantId && tenantId != Guid.Empty && !request.Headers.Contains("x-tenant-id"))
         {
             // Skip when the caller already set x-tenant-id explicitly (e.g. the deep-link
             // landing stamps the token's validated payload tenant) so that explicit tenant

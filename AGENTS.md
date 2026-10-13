@@ -67,6 +67,17 @@ quietly acts on. "I mentioned it in passing" is not a substitute for a round
 ordering, both raised as afterthoughts). The only exemption is a pure factual
 question, where a direct question is cheaper.
 
+**Round format, and how answers come back (owner, 2026-10-12).** A grill round is
+**prose, not a structured question prompt** — the owner cancelled a structured
+prompt in favour of it. So: map the **design tree**, ask the **whole frontier**
+in one message as numbered questions (`❓ **Q1** — **Title**: …` / `➡️ recommendation`),
+word each so a plain "yes" accepts the recommended answer, and **number questions
+continuously across rounds**. State what each round settled before opening the
+next, and recompute the frontier from the answers: a question whose prerequisite
+is still open belongs to a **later** round. The owner commonly answers "all as
+recommended", which settles the round and pushes the frontier outward — only then
+may you act on it. Skill source: `grill-me` (which forwards to `grilling`).
+
 
 ---
 

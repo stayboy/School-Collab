@@ -15,14 +15,29 @@ namespace SchoolCollab.Core.Auth;
 /// travel) and without touching OIDC.
 /// </summary>
 /// <remarks>
-/// <para>This is a <b>single dev-user</b> mechanism: one global selection. It is
+/// <para>
+/// This is a <b>single dev-user</b> mechanism: one global selection. It is
 /// only consulted by <see cref="TestAuthHandler"/>, which is registered solely
 /// when <c>FEATURE:DisableOIDCAuth</c> is enabled (development). In production
 /// (OIDC on) this service is never read for auth — the real tenant id arrives
-/// via the <c>tenant_id</c> claim from Keycloak.</para>
-/// <para>When no tenant is selected, <see cref="GetSelectedTenantIdAsync"/>
-/// returns <see langword="null"/> and <c>TestAuthHandler</c> falls back to its
-/// configured default (<see cref="TestAuthHandlerOptions.TenantId"/>).</para>
+/// via the <c>tenant_id</c> claim from Keycloak.
+/// </para>
+/// <para>
+/// <b>Two slots, two meanings.</b> The <i>selection</i> is an operator's explicit
+/// pick in the switcher, and <see langword="null"/> there means "nothing picked". The
+/// <i>applied default</i> is what the admin portal resolved on load from its
+/// preference → platform-default chain and pushed down so every host agrees; it is
+/// written by the portal, never by a user action. Keeping them apart is what lets a
+/// later change to the platform default take effect: had the portal written its
+/// resolved default into the selection slot, "no explicit pick" would have become
+/// indistinguishable from "the operator chose this tenant", and the fallback would
+/// never be recomputed.
+/// </para>
+/// <para>
+/// In both slots <see langword="null"/> means "not set" while <see cref="Guid.Empty"/>
+/// is a meaningful value — the system / no-tenant context that shared-blueprint
+/// coded-value editing requires.
+/// </para>
 /// </remarks>
 public interface IDevTenantSelection
 {
@@ -37,51 +52,80 @@ public interface IDevTenantSelection
     /// is <see langword="null"/>.
     /// </summary>
     Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the default tenant the admin portal resolved and applied on load, or
+    /// <see langword="null"/> when the portal has not resolved one yet. Consulted only
+    /// after <see cref="GetSelectedTenantIdAsync"/> has reported "no explicit pick".
+    /// </summary>
+    Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Publishes the default tenant the portal resolved, or clears it when
+    /// <paramref name="tenantId"/> is <see langword="null"/>.
+    /// </summary>
+    Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default);
 }
 
 /// <summary>
 /// <see cref="IDistributedCache"/>-backed implementation of
-/// <see cref="IDevTenantSelection"/>. The tenant id is stored as a UTF-8 GUID
-/// string under a single fixed cache key with no expiration (the selection
-/// persists for the dev session).
+/// <see cref="IDevTenantSelection"/>. Each slot is stored as a UTF-8 GUID string
+/// under its own fixed cache key with no expiration (the values persist for the dev
+/// session).
 /// </summary>
 internal sealed class DevTenantSelection(
     IDistributedCache cache,
     ILogger<DevTenantSelection> logger) : IDevTenantSelection
 {
-    private const string Key = "dev:tenant-selection";
+    /// <summary>Key holding the operator's explicit switcher pick.</summary>
+    private const string SelectionKey = "dev:tenant-selection";
 
-    public async Task<Guid?> GetSelectedTenantIdAsync(CancellationToken ct = default)
+    /// <summary>Key holding the default the admin portal resolved on load.</summary>
+    private const string AppliedDefaultKey = "dev:tenant-default";
+
+    public Task<Guid?> GetSelectedTenantIdAsync(CancellationToken ct = default)
+        => ReadAsync(SelectionKey, ct);
+
+    public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
+        => WriteAsync(SelectionKey, tenantId, ct);
+
+    public Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default)
+        => ReadAsync(AppliedDefaultKey, ct);
+
+    public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
+        => WriteAsync(AppliedDefaultKey, tenantId, ct);
+
+    private async Task<Guid?> ReadAsync(string key, CancellationToken ct)
     {
-        var bytes = await cache.GetAsync(Key, ct);
+        var bytes = await cache.GetAsync(key, ct);
         if (bytes is null || bytes.Length == 0)
         {
-            logger.LogDebug("DevTenantSelection.GetSelectedTenantIdAsync: No tenant stored in cache (key={Key})", Key);
+            logger.LogDebug("DevTenantSelection: No tenant stored in cache (key={Key})", key);
             return null;
         }
 
         var text = Encoding.UTF8.GetString(bytes);
         var result = Guid.TryParse(text, out var tenantId) ? tenantId : (Guid?)null;
-        
-        logger.LogDebug("DevTenantSelection.GetSelectedTenantIdAsync: Retrieved tenant {TenantId} from cache (key={Key})", 
-            result?.ToString() ?? "null", Key);
-        
+
+        logger.LogDebug("DevTenantSelection: Retrieved tenant {TenantId} from cache (key={Key})",
+            result?.ToString() ?? "null", key);
+
         return result;
     }
 
-    public async Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
+    private async Task WriteAsync(string key, Guid? tenantId, CancellationToken ct)
     {
         if (tenantId is null)
         {
-            await cache.RemoveAsync(Key, ct);
-            logger.LogDebug("DevTenantSelection.SetSelectedTenantIdAsync: Cleared tenant from cache (key={Key})", Key);
+            await cache.RemoveAsync(key, ct);
+            logger.LogDebug("DevTenantSelection: Cleared tenant from cache (key={Key})", key);
             return;
         }
 
         var bytes = Encoding.UTF8.GetBytes(tenantId.Value.ToString());
-        await cache.SetAsync(Key, bytes, ct);
-        logger.LogDebug("DevTenantSelection.SetSelectedTenantIdAsync: Stored tenant {TenantId} in cache (key={Key})", 
-            tenantId.Value, Key);
+        await cache.SetAsync(key, bytes, ct);
+        logger.LogDebug("DevTenantSelection: Stored tenant {TenantId} in cache (key={Key})",
+            tenantId.Value, key);
     }
 }
 
@@ -112,5 +156,11 @@ internal sealed class NullDevTenantSelection : IDevTenantSelection
         => Task.FromResult<Guid?>(null);
 
     public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default)
+        => Task.FromResult<Guid?>(null);
+
+    public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
         => Task.CompletedTask;
 }

@@ -130,4 +130,67 @@ public class DevTenantSelectionTests
         (await selection.GetSelectedTenantIdAsync()).Should().BeNull(
             "writes are discarded, not queued for a cache that does not exist.");
     }
+
+    // ── The portal-applied default slot ──────────────────────────────────────
+
+    [TestMethod]
+    public async Task AppliedDefault_StartsUnset()
+    {
+        var selection = Create();
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task AppliedDefault_AndSelection_AreIndependentSlots()
+    {
+        var selection = Create();
+        var selected = Guid.NewGuid();
+        var applied = Guid.NewGuid();
+
+        await selection.SetSelectedTenantIdAsync(selected);
+        await selection.SetAppliedDefaultTenantIdAsync(applied);
+
+        (await selection.GetSelectedTenantIdAsync()).Should().Be(selected);
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().Be(applied,
+            "the two slots must not alias — that separation is what lets a changed platform "
+            + "default still take effect while an explicit pick is in force");
+
+        // Clearing the selection must not disturb the applied default.
+        await selection.SetSelectedTenantIdAsync(null);
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().Be(applied);
+    }
+
+    [TestMethod]
+    public async Task AppliedDefault_DistinguishesGuidEmptyFromUnset()
+    {
+        var selection = Create();
+
+        await selection.SetAppliedDefaultTenantIdAsync(Guid.Empty);
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().Be(Guid.Empty,
+            "the portal resolving to the system context is a real applied state, not 'unset'");
+
+        await selection.SetAppliedDefaultTenantIdAsync(null);
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().BeNull();
+    }
+
+    /// <summary>
+    /// The no-cache half of the guard, extended to the second slot: a host without a
+    /// distributed cache must still lose only the switcher, never its ability to start, and the
+    /// applied default must read as "nothing applied" rather than throwing.
+    /// </summary>
+    [TestMethod]
+    public async Task WithoutADistributedCache_TheAppliedDefaultIsAlsoANoOp()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthAndTenancy(new ConfigurationBuilder().Build());
+        var sp = services.BuildServiceProvider();
+
+        var selection = sp.GetRequiredService<IDevTenantSelection>();
+
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().BeNull();
+
+        await selection.SetAppliedDefaultTenantIdAsync(Guid.NewGuid()); // must not throw
+        (await selection.GetAppliedDefaultTenantIdAsync()).Should().BeNull();
+    }
 }

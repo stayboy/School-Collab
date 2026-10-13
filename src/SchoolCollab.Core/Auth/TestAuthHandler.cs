@@ -19,10 +19,15 @@ public class TestAuthHandlerOptions : AuthenticationSchemeOptions
 {
     /// <summary>
     /// The tenant ID to use when no tenant is explicitly selected via the dev
-    /// tenant switcher. Defaults to <see cref="Guid.Empty"/> (no tenant) so that
-    /// the per-tenant UI is hidden until a real tenant is selected. Tests can
-    /// override this to simulate a specific tenant context.
+    /// tenant switcher and the admin portal has applied no default. Defaults to
+    /// <see cref="Guid.Empty"/> (no tenant) so that the per-tenant UI is hidden until
+    /// a real tenant is selected. Tests can override this to simulate a specific
+    /// tenant context.
     /// </summary>
+    /// <remarks>
+    /// Lowest priority of three: an explicit switcher pick beats it, and so does the
+    /// default the portal resolved on load (<see cref="IDevTenantSelection.GetAppliedDefaultTenantIdAsync"/>).
+    /// </remarks>
     public Guid TenantId { get; set; } = Guid.Empty;
 
     /// <summary>
@@ -77,10 +82,27 @@ public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptio
                     selected?.ToString() ?? "null", Options.TenantId);
 
                 if (selected.HasValue)
+                {
+                    // Explicit switcher pick — authoritative, including Guid.Empty (the
+                    // user cleared the selection to the system / no-tenant context).
                     tenantId = selected.Value;
-                // If selected is null, the user cleared the selection (selected
-                // "(default tenant)" in the switcher) → use Options.TenantId which
-                // defaults to Guid.Empty (no tenant).
+                }
+                else
+                {
+                    // No explicit pick: use the default the admin portal resolved and applied
+                    // on load (the operator's preference, else the platform default, else the
+                    // system context). Guid.Empty is meaningful here — it means the portal
+                    // resolved to no tenant. Only when the portal has applied nothing at all
+                    // does the configured Options.TenantId remain in force.
+                    var appliedDefault = await devSelection.GetAppliedDefaultTenantIdAsync(Context.RequestAborted);
+
+                    Logger.LogDebug(
+                        "TestAuthHandler: no explicit selection; portal-applied default = {AppliedDefault} (Options.TenantId={OptionsTenantId})",
+                        appliedDefault?.ToString() ?? "null", Options.TenantId);
+
+                    if (appliedDefault.HasValue)
+                        tenantId = appliedDefault.Value;
+                }
             }
             else
             {

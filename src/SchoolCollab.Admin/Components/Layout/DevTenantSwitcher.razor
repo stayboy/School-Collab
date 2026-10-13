@@ -1,11 +1,15 @@
 @using Microsoft.Extensions.Configuration
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Services
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Auth
 @using SchoolCollab.Core.Features
 @inject TenantsApiClient TenantsApi
+@inject AdminDefaultTenantResolver DefaultTenant
 @inject IDevTenantSelection DevTenant
+@inject VisibleTenantService VisibleTenant
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @inject ILogger<DevTenantSwitcher> Logger
@@ -49,6 +53,27 @@
                       OptionValue="@(o => o?.Value ?? string.Empty)"
                       AriaLabel="Switch the dev tenant (auth disabled)"
                       Width="180px" />
+
+        @* Self-service preference: pin (or release) the tenant this operator wants the
+           portal to open on. Only meaningful in dev, which is the only mode this whole
+           component renders in — under OIDC the tenant is claim-authoritative. *@
+        <FluentButton Appearance="Appearance.Stealth"
+                      IconStart="@FluentIcons.Star"
+                      class="dev-tenant-pref-button"
+                      Disabled="@(_busy || TargetTenantId is null)"
+                      OnClick="@SetAsMyDefaultAsync"
+                      Title="@SetDefaultTitle"
+                      aria-label="Make this my default tenant">Default</FluentButton>
+
+        @if (_preference is not null)
+        {
+            <FluentButton Appearance="Appearance.Stealth"
+                          class="dev-tenant-pref-button"
+                          Disabled="@_busy"
+                          OnClick="@ClearMyDefaultAsync"
+                          Title="Stop using a personal default; follow the platform default again"
+                          aria-label="Clear my default tenant">Clear</FluentButton>
+        }
     }
 </div>
 
@@ -64,12 +89,49 @@
     private TenantOption? _selectedOption;
     private string? _error;
 
+    /// <summary>The operator's explicit switcher pick. <c>null</c> = none; <see cref="Guid.Empty"/> = the system context.</summary>
+    private Guid? _explicitSelection;
+
+    /// <summary>The tenant the portal resolved for this load (preference → platform default), published to the shared store.</summary>
+    private Guid? _effective;
+
+    /// <summary>The operator's recorded preference, or null when none is recorded.</summary>
+    private Guid? _preference;
+
+    private bool _busy;
+
+    /// <summary>
+    /// Guards the one permitted reconciliation reload. Belt-and-braces: <see cref="AdminDefaultTenantResolver.NeedsReload"/> is
+    /// already a fixed point, so a second pass would not ask for a reload anyway.
+    /// </summary>
+    private bool _reloadRequested;
+
+    /// <summary>Sentinel for the explicit "system / no-tenant" entry — never parseable as a tenant id.</summary>
+    private const string SystemOptionValue = "system";
+
+    /// <summary>Value of the "(default …)" entry: clears the explicit pick so the resolved default applies.</summary>
+    private const string DefaultOptionValue = "";
+
     // Bound on the Settings API round-trip. Without this, a missing or
     // unreachable Settings API (e.g. the AppHost's infrastructure failed to
     // start, or the Admin is running standalone without the backend) leaves
     // the switcher stuck on "Loading tenants…" indefinitely and the user
     // can't tell whether the seed is missing or the backend is down.
     private static readonly TimeSpan TenantsLoadTimeout = TimeSpan.FromSeconds(8);
+
+    /// <summary>The tenant the "Default" button will pin — whatever this operator is currently looking at.</summary>
+    private Guid? TargetTenantId => _explicitSelection ?? _effective;
+
+    private string SetDefaultTitle
+    {
+        get
+        {
+            var name = TenantNameOf(TargetTenantId);
+            return name is null
+                ? "Pick a tenant first, then make it your default"
+                : $"Open this portal on {name} by default";
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -96,30 +158,127 @@
             _error = $"Settings API unreachable: {ex.Message}. Start the AppHost or the Settings API directly.";
         }
 
-        // The "(default tenant)" option (empty value) clears the selection so the
-        // dev user can return to TestAuthHandler's configured default tenant.
-        TenantOption[] defaults = [new TenantOption("(default tenant)", "")];
-        _options = defaults
-            .Concat(_tenants.Select(t => new TenantOption(t.Name, t.Id.ToString())))
-            .ToArray();
+        if (_tenants.Length > 0)
+        {
+            await ResolveDefaultsAsync();
+        }
 
-        var selectedId = await DevTenant.GetSelectedTenantIdAsync();
-        _selectedOption = selectedId.HasValue
-            ? _options.FirstOrDefault(o => o.Value == selectedId.Value.ToString())
-            : _options.FirstOrDefault(o => o.Value == "");
+        BuildOptions();
+    }
+
+    /// <summary>
+    /// Applies the freshly-resolved default to this circuit by reloading once when the claim and
+    /// the applied default disagree. Done here rather than in
+    /// <see cref="OnInitializedAsync"/> because navigation during the initial (synchronous)
+    /// render phase is not legal; after the first render it is.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_show || _reloadRequested)
+            return;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        var claimTenant = scope.IsRealTenant ? scope.TenantId!.Value : Guid.Empty;
+
+        if (!AdminDefaultTenantResolver.NeedsReload(_explicitSelection, _effective, claimTenant))
+            return;
+
+        _reloadRequested = true;
+        Logger.LogInformation(
+            "Admin portal default tenant {AppliedDefault} differs from this circuit's claim {ClaimTenant}; reloading once so tenant-scoped pages pick it up",
+            _effective, claimTenant);
+
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
+
+    /// <summary>
+    /// Resolves and publishes the portal's default (preference → platform default), then reads
+    /// the explicit pick so the dropdown reflects the truth for this load. Failures here are
+    /// non-fatal: a portal that cannot reach the Settings API still renders, showing the pick
+    /// state it can determine.
+    /// </summary>
+    private async Task ResolveDefaultsAsync()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TenantsLoadTimeout);
+            _effective = await DefaultTenant.ResolveAndApplyAsync(
+                AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), cts.Token);
+            _preference = await DefaultTenant.GetPreferenceAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogWarning("Default-tenant resolution timed out; the switcher will show no resolved default");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Default-tenant resolution failed; the switcher will show no resolved default");
+        }
+
+        _explicitSelection = await DevTenant.GetSelectedTenantIdAsync();
+    }
+
+    /// <summary>
+    /// Rebuilds the dropdown. Three states, in order: the explicit system / no-tenant context
+    /// (what shared-blueprint editing needs), the resolved default, then every real tenant.
+    /// </summary>
+    private void BuildOptions()
+    {
+        var defaultName = TenantNameOf(_effective);
+        var defaultLabel = defaultName is null ? "(default tenant)" : $"(default: {defaultName})";
+
+        _options =
+        [
+            new TenantOption("(system / no tenant)", SystemOptionValue),
+            new TenantOption(defaultLabel, DefaultOptionValue),
+            .. _tenants!.Select(t => new TenantOption(t.Name, t.Id.ToString())),
+        ];
+
+        _selectedOption = _explicitSelection switch
+        {
+            null => _options.First(o => o.Value == DefaultOptionValue),
+            { } id when id == Guid.Empty => _options.First(o => o.Value == SystemOptionValue),
+            { } id => _options.FirstOrDefault(o => o.Value == id.ToString())
+                       ?? _options.First(o => o.Value == DefaultOptionValue),
+        };
+    }
+
+    private string? TenantNameOf(Guid? tenantId)
+    {
+        if (tenantId is null)
+            return null;
+
+        if (tenantId.Value == Guid.Empty)
+            return "system / no tenant";
+
+        return _tenants?.FirstOrDefault(t => t.Id == tenantId.Value)?.Name;
     }
 
     private async Task OnSelectionChanged(TenantOption? option)
     {
         _selectedOption = option;
 
-        var tenantId = string.IsNullOrEmpty(option?.Value)
-            ? (Guid?)null
-            : Guid.Parse(option.Value);
+        var value = option?.Value;
+        var tenantId = value switch
+        {
+            // "(default …)" clears the explicit pick — the resolved default applies again.
+            DefaultOptionValue => (Guid?)null,
+            // Explicit system / no-tenant context (Guid.Empty is meaningful, not "cleared").
+            SystemOptionValue => Guid.Empty,
+            _ => Guid.TryParse(value, out var parsed) ? parsed : null,
+        };
 
         try
         {
             await DevTenant.SetSelectedTenantIdAsync(tenantId);
+
+            // Clearing back to the default re-publishes it, so this load's API calls carry the
+            // right tenant header rather than a stale one.
+            if (tenantId is null)
+            {
+                await DefaultTenant.ResolveAndApplyAsync(
+                    AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {
@@ -131,6 +290,56 @@
         // Each API's TestAuthHandler reads the new selection from the shared
         // distributed cache (Redis) on its next request.
         Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
+
+    /// <summary>Pins the tenant currently in force as this operator's recorded preference.</summary>
+    private async Task SetAsMyDefaultAsync()
+    {
+        if (TargetTenantId is not { } tenantId)
+            return;
+
+        _busy = true;
+        try
+        {
+            await TenantsApi.SetMyDefaultTenantAsync(tenantId);
+
+            // Re-publish so the rest of this load already speaks for the new default.
+            await DefaultTenant.ResolveAndApplyAsync(
+                AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), CancellationToken.None);
+
+            Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to record the default tenant preference");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Drops the recorded preference so the platform default applies again.</summary>
+    private async Task ClearMyDefaultAsync()
+    {
+        _busy = true;
+        try
+        {
+            await TenantsApi.SetMyDefaultTenantAsync(null);
+
+            await DefaultTenant.ResolveAndApplyAsync(
+                AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), CancellationToken.None);
+
+            Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to clear the default tenant preference");
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     /// <summary>Internal option type for the FluentSelect.</summary>

@@ -74,6 +74,11 @@ public class StudentsApiClientEndToEndEnrollmentTests
             () => Task.FromResult<Guid?>(null);
         public Task<Guid?> GetSelectedTenantIdAsync(CancellationToken ct = default) => ReadBehavior!();
         public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
+
+        // No portal-applied default in this fixture: the pipeline under test pins the explicit
+        // selection read (including its failure path), so the fallback slot must stay empty.
+        public Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+        public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static readonly StubDevTenantSelection DevSelection = new();
