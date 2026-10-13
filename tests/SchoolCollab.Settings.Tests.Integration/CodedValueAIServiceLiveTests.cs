@@ -28,6 +28,11 @@ namespace SchoolCollab.Settings.Tests.Integration;
 /// Purpose: verify that <c>ChatAsync</c> does not break with OpenRouter as the provider —
 /// both the plain streaming-text path and the multi-round function-calling path.
 ///
+/// Gating (owner grill round, 2026-10-12): the suite is OPT-IN — it runs only when
+/// <c>SCHOOLCOLLAB_RUN_LIVE_AI_TESTS=1</c> AND the OpenRouter key is configured; otherwise it
+/// self-skips as Inconclusive so a full local <c>dotnet test</c> stays at 0 failures (CI has no
+/// key and was already skipping).
+///
 /// Note: we deliberately avoid the OpenRouter <c>:free</c>-tagged aliases here. They are
 /// heavily rate-limited and intermittently return empty responses or non-rate-limit-formatted
 /// errors that the live-test Inconclusive gating does not match, which causes unrelated
@@ -77,6 +82,17 @@ public class CodedValueAIServiceLiveTests
         var model = config["Parameters:openrouter-default-model"]
             ?? throw new InvalidOperationException("Parameters:openrouter-default-model not configured (expected in appHost-appsettings.json).");
         var apiKey = config["Parameters:openrouter-api-key"];
+        // Owner grill round (2026-10-12): a configured key alone must no longer launch live
+        // calls on every full `dotnet test` — the repo's pre-flight rule demands 0 failures,
+        // and the pinned model currently fails the live path. Opt in deliberately with
+        // SCHOOLCOLLAB_RUN_LIVE_AI_TESTS=1. CI is unaffected: it has no key and still skips
+        // at the check below.
+        if (!string.Equals(Environment.GetEnvironmentVariable("SCHOOLCOLLAB_RUN_LIVE_AI_TESTS"), "1", StringComparison.Ordinal))
+        {
+            Assert.Inconclusive(
+                "Live OpenRouter calls are opt-in. Set SCHOOLCOLLAB_RUN_LIVE_AI_TESTS=1 (alongside the configured key) to run this suite.");
+            return null!; // unreachable; Assert.Inconclusive throws
+        }
         // The OpenRouter API key is a secret kept out of source control, so it
         // is only available where user secrets / the Parameters__openrouter_api_key
         // env var have been set. In environments where it is absent (notably
