@@ -98,8 +98,8 @@ public class TenantsApiTests
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
         (await DefaultCountAsync()).Should().Be(1);
 
-        var tenants = await _client.GetFromJsonAsync<TenantDto[]>("/api/tenants");
-        tenants!.Single(t => t.Id == _beta.Id).IsDefault.Should().BeTrue();
+        var tenants = await _client.GetFromJsonAsync<TenantDto[]>("/api/tenants") ?? [];
+        tenants.Single(t => t.Id == _beta.Id).IsDefault.Should().BeTrue();
         tenants.Single(t => t.Id == _alpha.Id).IsDefault.Should().BeFalse();
     }
 

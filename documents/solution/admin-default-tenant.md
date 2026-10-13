@@ -135,7 +135,7 @@ tenant were selected — the worst kind of half-working.
 | `SchoolCollab.Auth.Tests.Unit` | 224 passed |
 | `SchoolCollab.Families.Tests.Unit` | 47 passed |
 | `SchoolCollab.MigrationService.Tests.Unit` | 9 passed |
-| `SchoolCollab.Settings.Tests.Integration` | **deferred by the owner (2026-10-13).** Docker is not running in this environment, so every Testcontainers class in the project fails identically at `ClassInitialize` (`DockerUnavailableException`) — including pre-existing classes untouched by this work. `TenantsApiTests` is written and compiles but has **never executed**; it must run green before this change is treated as verified. |
+| `SchoolCollab.Settings.Tests.Integration` | **green on CI** (PR #341, run `38449717164`): the `Integration tests` step reports `total: 147, failed: 0, succeeded: 141, skipped: 6` — the 6 skips are the live OpenRouter/Ollama tests, which self-skip without a key. Locally this project **cannot** run: Docker is unavailable on the authoring machine and every Testcontainers class fails identically at `ClassInitialize` (`DockerUnavailableException`), including pre-existing classes untouched by this work. So `TenantsApiTests` is verified by CI only, not locally. |
 
 New coverage: `TenantDefaultDesignationTests` (14), `AdminDefaultTenantResolverTests` (12),
 `DevTenantSwitcherTests` (7), `TenantsApiTests` (9, integration), plus additions to
@@ -144,10 +144,12 @@ New coverage: `TenantDefaultDesignationTests` (14), `AdminDefaultTenantResolverT
 
 The integration class exists specifically because the in-memory provider does **not**
 enforce filtered unique indexes — the "at most one platform default" invariant is only
-truly proven against real PostgreSQL. Until it runs, the migration's index definition is
-reviewed-but-unexecuted: the generated SQL reads correctly (`filter: "is_default"`,
-`defaultValue: false`), and `SetDefaultTenantHandler`'s clear-then-set ordering is a
-response to that index, but neither has been exercised against a live server.
+truly proven against real PostgreSQL. It now is: the CI `Integration tests` step passed
+with `TenantsApiTests` in the run, so the generated index
+(`CREATE UNIQUE INDEX … WHERE is_default`, over a column created `DEFAULT false`) and
+`SetDefaultTenantHandler`'s clear-then-set ordering have both been exercised against a live
+PostgreSQL 16 server. The two-save transaction is therefore load-bearing behaviour that is
+covered, rather than a precaution that merely reads well.
 
 ## 5. Limits and follow-ups
 
