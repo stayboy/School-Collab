@@ -1,11 +1,20 @@
 .dev-tenant-switcher {
     display: inline-flex;
     align-items: center;
+    gap: 4px;
 }
 
 .dev-tenant-loading,
 .dev-tenant-empty {
     font-size: 0.8rem;
     opacity: 0.7;
+    white-space: nowrap;
+}
+
+/* The two preference actions live inside the 50px header beside a 180px select, so they
+   are deliberately compact text buttons rather than icon-only affordances: "Default" and
+   "Clear" name themselves, which an unlabelled star cannot do in a dev toolbar. */
+.dev-tenant-pref-button {
+    font-size: 0.75rem;
     white-space: nowrap;
 }

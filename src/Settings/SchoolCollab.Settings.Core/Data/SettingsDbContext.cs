@@ -22,6 +22,12 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     // ── Tenant registry (global — see TenantConfiguration) ──
     public DbSet<Tenant> Tenants => Set<Tenant>();
 
+    /// <summary>
+    /// Per-operator default-tenant preferences for the admin portal (global — the
+    /// row is keyed by OIDC subject and its tenant is a value, not a scope).
+    /// </summary>
+    public DbSet<AdminUserPreference> AdminUserPreferences => Set<AdminUserPreference>();
+
     // ── CodedValues aggregate ──
     public DbSet<CodedValue> CodedValues => Set<CodedValue>();
     public DbSet<TenantCodedValueOverride> TenantCodedValueOverrides => Set<TenantCodedValueOverride>();
@@ -56,6 +62,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     /// global-tenant-filter.md §3.2:
     /// <list type="bullet">
     /// <item><see cref="Tenant"/> — the tenant registry itself.</item>
+    /// <item><see cref="AdminUserPreference"/> — an operator's preferred default tenant;
+    ///   keyed by OIDC subject, and the tenant it names is a value rather than a scope
+    ///   (same reasoning as <see cref="Tenant"/>).</item>
     /// <item><see cref="User"/> — Keycloak-sourced identity lookup (cross-tenant).</item>
     /// <item><see cref="FeatureFlag"/>, <see cref="FlagAuditEntry"/> — admin-created
     ///   infrastructure; tenants toggle via <see cref="TenantFeatureFlagOverride"/>, they
@@ -70,6 +79,7 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     protected override Type[] GlobalEntityAllowList =>
     [
         typeof(Tenant),
+        typeof(AdminUserPreference),
         typeof(User),
         typeof(FeatureFlag),
         typeof(FlagAuditEntry),
@@ -82,6 +92,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
 
         // Tenant registry configuration (global — no query filter)
         modelBuilder.ApplyConfiguration(new TenantConfiguration());
+
+        // Per-operator portal preferences (global — no query filter)
+        modelBuilder.ApplyConfiguration(new AdminUserPreferenceConfiguration());
 
         // CodedValues configurations
         modelBuilder.ApplyConfiguration(new CodedValueConfiguration(() => CurrentTenantId));

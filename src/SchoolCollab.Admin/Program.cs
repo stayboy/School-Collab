@@ -1,4 +1,5 @@
 using Microsoft.FluentUI.AspNetCore.Components;
+using SchoolCollab.Admin;
 using SchoolCollab.Admin.Components;
 using SchoolCollab.Assignments.Application;
 using SchoolCollab.Settings.Application;
@@ -46,6 +47,10 @@ builder.Services.AddFluentUIComponents();
 builder.Services.AddSettingsModule();
 builder.Services.AddAssignmentsModule();
 builder.Services.AddStudentsModule();
+
+// The Blazor shell's own services (no owning module): the resolver that decides which
+// tenant the portal opens on and publishes it to the shared dev tenant store.
+builder.Services.AddAdminPortalTenancy();
 
 // B4 — the flag-ON portal handshake (spec §5.2 / D6): the typed redemption client against the
 // auth service, plus the host's /signin-handshake, /login and /logout routes. The base address is

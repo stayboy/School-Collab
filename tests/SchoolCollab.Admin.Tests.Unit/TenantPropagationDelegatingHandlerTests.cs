@@ -14,6 +14,10 @@ public class TenantPropagationDelegatingHandlerTests
     {
         private readonly Guid? _value;
         public Exception? Fault { get; set; }
+
+        /// <summary>The portal-applied default slot. Null = the portal has applied nothing.</summary>
+        public Guid? Applied { get; set; }
+
         public StubSelection(Guid? value) => _value = value;
 
         // Optional fault injection: when set, GetSelectedTenantIdAsync throws it.
@@ -21,6 +25,15 @@ public class TenantPropagationDelegatingHandlerTests
             => Fault is not null ? Task.FromException<Guid?>(Fault) : Task.FromResult(_value);
 
         public Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
+
+        // Deliberately NOT fault-injectable: the fault tests exercise the SELECTION read, and the
+        // handler only reaches this slot when that read reported "no explicit pick".
+        public Task<Guid?> GetAppliedDefaultTenantIdAsync(CancellationToken ct = default) => Task.FromResult(Applied);
+        public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
+        {
+            Applied = tenantId;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class CaptureHandler : DelegatingHandler
@@ -29,8 +42,8 @@ public class TenantPropagationDelegatingHandlerTests
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
     }
 
-    private static HttpClient BuildClient(Guid? selected) =>
-        new(new TenantPropagationDelegatingHandler(new StubSelection(selected))
+    private static HttpClient BuildClient(Guid? selected, Guid? applied = null) =>
+        new(new TenantPropagationDelegatingHandler(new StubSelection(selected) { Applied = applied })
         {
             InnerHandler = new CaptureHandler()
         });
@@ -68,6 +81,48 @@ public class TenantPropagationDelegatingHandlerTests
         await client.SendAsync(request, CancellationToken.None);
 
         request.Headers.Contains("x-tenant-id").Should().BeFalse("empty tenant -> no header");
+    }
+
+    // ── The portal-applied default slot ─────────────────────────────────────
+
+    [TestMethod]
+    public async Task NoSelectedTenant_ButAPortalAppliedDefault_StampsThatTenant()
+    {
+        var applied = Guid.NewGuid();
+        using var client = BuildClient(null, applied);
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "http://x/students");
+        await client.SendAsync(request, CancellationToken.None);
+
+        request.Headers.GetValues("x-tenant-id").Should().ContainSingle().Which.Should().Be(applied.ToString(),
+            "with no explicit pick, the default the portal applied on load is the tenant the API calls must speak for");
+    }
+
+    [TestMethod]
+    public async Task SelectedTenant_Wins_OverThePortalAppliedDefault()
+    {
+        var selected = Guid.NewGuid();
+        using var client = BuildClient(selected, applied: Guid.NewGuid());
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "http://x/students");
+        await client.SendAsync(request, CancellationToken.None);
+
+        request.Headers.GetValues("x-tenant-id").Should().ContainSingle().Which.Should().Be(selected.ToString(),
+            "an explicit pick outranks the applied default in both this handler and TestAuthHandler");
+    }
+
+    [TestMethod]
+    public async Task AppliedDefaultOfTheSystemContext_Omits_Header()
+    {
+        // The portal resolved to the system / no-tenant context. There is no tenant to stamp, and
+        // Guid.Empty must never travel: the receiving TestAuthHandler re-derives it from the
+        // shared store itself, so sending it would be a redundant, misleading header.
+        using var client = BuildClient(null, Guid.Empty);
+
+        var request = new HttpRequestMessage(HttpMethod.Get, "http://x/students");
+        await client.SendAsync(request, CancellationToken.None);
+
+        request.Headers.Contains("x-tenant-id").Should().BeFalse();
     }
 
     [TestMethod]

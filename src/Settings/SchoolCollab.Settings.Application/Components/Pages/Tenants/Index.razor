@@ -1,0 +1,113 @@
+@page "/tenants"
+@inject TenantsApiClient Api
+@inject ILogger<Index> Logger
+
+<PageTitle>Tenants</PageTitle>
+
+@* The tenant registry read-only list, plus the one write this surface exists for:
+   designating which tenant the admin portal opens on by default. The per-operator
+   preference is deliberately NOT here — it is self-service and lives on the dev tenant
+   switcher in the header, next to the thing it affects. *@
+
+<LandingPage TItem="TenantDto"
+             Title="Tenants"
+             EmptyMessage="No tenants registered yet. Run the migration service to seed them."
+             Items="@_items"
+             Error="@_error"
+             GridSettings="@_gridSettings"
+             SearchEnabled="false"
+             CreateEnabled="false"
+             RowActions="@RowActions"
+             RowActionsAriaLabel="Tenant actions">
+    <Columns>
+        <TemplateColumn TGridItem="TenantDto" Title="Name" Sortable="true" SortBy="@_sortByName">
+            @context.Name
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantDto" Title="Type" Sortable="true" SortBy="@_sortByType">
+            @context.Type
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantDto" Title="Portal default">
+            @if (context.IsDefault)
+            {
+                <FluentBadge Appearance="Appearance.Accent">Default</FluentBadge>
+            }
+            else
+            {
+                <span class="tenants-muted">—</span>
+            }
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
+
+@code {
+    private TenantDto[]? _items;
+    private string? _error;
+    private bool _disposed;
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(220px,2fr) 140px 140px"
+    };
+
+    private readonly GridSort<TenantDto> _sortByName = GridSort<TenantDto>.ByAscending(t => t.Name);
+    private readonly GridSort<TenantDto> _sortByType = GridSort<TenantDto>.ByAscending(t => t.Type);
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _items = await Api.ListTenantsAsync();
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load the tenant registry");
+            _items = [];
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// One action per row. The current default gets a disabled, self-explaining entry rather
+    /// than no action at all: a row with an empty action menu reads as a rendering bug, and
+    /// <see cref="RowAction.DisabledReason"/> exists for exactly this.
+    /// </summary>
+    private IReadOnlyList<RowAction> RowActions(TenantDto tenant) =>
+        tenant.IsDefault
+            ? [
+                RowAction.Callback(
+                    "Portal default",
+                    () => Task.CompletedTask,
+                    FluentIcons.Star,
+                    disabled: true,
+                    disabledReason: "This tenant already opens the admin portal by default.")
+            ]
+            : [
+                RowAction.Callback(
+                    "Make portal default",
+                    () => MakeDefaultAsync(tenant),
+                    FluentIcons.Star)
+            ];
+
+    private async Task MakeDefaultAsync(TenantDto tenant)
+    {
+        try
+        {
+            await Api.SetDefaultTenantAsync(tenant.Id);
+            await LoadAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // Surfaces on the LandingPage error strip; the list keeps the previous state so the
+            // operator can retry rather than losing the row they clicked.
+            Logger.LogError(ex, "Failed to designate tenant {TenantId} as the portal default", tenant.Id);
+            _error = ex.Message;
+        }
+    }
+
+    public void Dispose() => _disposed = true;
+}

@@ -12,6 +12,12 @@ namespace SchoolCollab.Settings.Core.Data.Configurations;
 /// so no global query filter is applied — every tenant row is visible to the dev
 /// switcher and the seeder regardless of the active tenant context. Unique on the
 /// natural key <see cref="Tenant.Name"/> to keep seeding idempotent by name.
+/// <para>
+/// <see cref="Tenant.IsDefault"/> carries a <b>partial</b> unique index so PostgreSQL
+/// — not application code — enforces "at most one platform default". The filter emits
+/// <c>WHERE is_default</c>, so any number of rows may sit at <c>false</c> while a second
+/// <c>true</c> is rejected at the database.
+/// </para>
 /// </summary>
 internal sealed class TenantConfiguration : EntityTypeConfigurationBase<Tenant>
 {
@@ -36,5 +42,19 @@ internal sealed class TenantConfiguration : EntityTypeConfigurationBase<Tenant>
         builder.HasIndex(x => x.Name)
             .IsUnique()
             .HasDatabaseName("ix_tenants_name_unique");
+
+        // Designated platform default for the admin portal (at most one row).
+        // Fail-closed base default: a publish never bakes a default in, so every
+        // existing row and every fresh insert starts at false until designated.
+        builder.Property(x => x.IsDefault)
+            .IsRequired()
+            .HasDefaultValue(false);
+
+        // Partial unique index: PostgreSQL enforces the "at most one default"
+        // invariant, so two concurrent designations cannot both win.
+        builder.HasIndex(x => x.IsDefault)
+            .IsUnique()
+            .HasFilter("is_default")
+            .HasDatabaseName("ix_tenants_is_default_unique");
     }
 }
