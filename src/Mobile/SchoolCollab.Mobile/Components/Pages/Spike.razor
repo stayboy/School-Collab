@@ -1,9 +1,18 @@
 @page "/"
+@using Microsoft.AspNetCore.Components.Authorization
+@inject OidcLoginService Login
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 @* Reuse spike (L1, round `mobile-host-skeleton`): one unmodified component from
    SchoolCollab.Admin.Shared rendered inside the Blazor Hybrid head. The values are
    hard-coded on purpose — this page proves the shared component layer crosses the host
    boundary, it does not load data. Styles live in Spike.razor.css (CSS isolation). *@
+
+@* Credential section (L3, round `mobile-credential`): the sign-in control plus a TenantGate
+   whose child shows the REAL claims of the token the sign-in acquired. The observable is the
+   flip: before sign-in the gate renders the head's own fallback banner (no tenant) — the shared
+   GateBase default names a dev tenant switcher this head does not have — after sign-in the tenant
+   branch with the realm's `tenant_name`/`teacher_id`. *@
 
 <PageTitle>Admin.Shared reuse spike</PageTitle>
 
@@ -25,10 +34,55 @@
                 </FluentStack>
             </FluentCard>
         </section>
+
+        <section class="spike spike__auth">
+            <h2 class="spike__title">Credential</h2>
+            <p class="spike__intro">
+                System-browser OIDC (Authorization Code + PKCE) against the realm's public mobile
+                client. The tenant gate below reads the token's own claims through the client-side
+                <code>AuthenticationStateProvider</code>.
+            </p>
+
+            <div class="spike__auth-actions">
+                @* aria-busy is the screen-reader half of the disabled state: `Disabled` alone is the
+                   only sign the click was accepted, and it says nothing to assistive technology. *@
+                <FluentButton Appearance="Appearance.Accent"
+                              Disabled="@_signingIn"
+                              aria-busy="@_signingIn"
+                              OnClick="SignInAsync">
+                    Sign in
+                </FluentButton>
+            </div>
+
+            @if (_errorMessage is not null)
+            {
+                <FluentMessageBar Intent="@_errorIntent" Title="@_errorTitle">
+                    @_errorMessage
+                </FluentMessageBar>
+            }
+
+            <TenantGate>
+                <ChildContent>
+                    <FluentStack Orientation="Orientation.Vertical" Gap="1rem">
+                        <FieldDisplay Label="Tenant">@_tenantName</FieldDisplay>
+                        <FieldDisplay Label="Teacher id">@_teacherId</FieldDisplay>
+                    </FluentStack>
+                </ChildContent>
+                @* This head has no dev tenant switcher — the shared GateBase default banner names one that
+                   does not exist here, which would be shown on every cold start. The head supplies its
+                   own copy instead of changing the shared gate. *@
+                <Fallback>
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        Sign in to see the tenant this session belongs to — the gate reads the token's
+                        own claims.
+                    </FluentMessageBar>
+                </Fallback>
+            </TenantGate>
+        </section>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">
-            The Admin.Shared component failed to render: @ex.Message
+            The reuse spike page failed to render: @ex.Message
         </FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
@@ -36,4 +90,76 @@
 @code {
     private const string StudentName = "Ada Lovelace";
     private const string ClassName = "Grade 5 Blue";
+
+    // A local in-flight flag, not the service's own SignInState: Blazor re-renders when the event
+    // handler's awaited task completes, so a control that must look disabled DURING the round-trip has
+    // to flip its flag synchronously and call StateHasChanged() itself (the repo's rule for methods a
+    // test or a parent calls directly applies here for the same re-render reason).
+    private bool _signingIn;
+    private string? _errorMessage;
+
+    // The message bar's intent and title follow the OUTCOME, not the fact that something was
+    // reported: a dismissal is not a failure, so it is never red. Both default to the error
+    // presentation and are reset to it on every attempt, so every genuine failure stays red.
+    private MessageIntent _errorIntent = MessageIntent.Error;
+    private string _errorTitle = "Sign-in failed";
+
+    private string? _tenantName;
+    private string? _teacherId;
+
+    protected override async Task OnInitializedAsync() => await RefreshClaimsAsync();
+
+    private async Task SignInAsync()
+    {
+        _signingIn = true;
+        _errorMessage = null;
+        _errorIntent = MessageIntent.Error;
+        _errorTitle = "Sign-in failed";
+        StateHasChanged();
+
+        try
+        {
+            await Login.SignInAsync();
+            await RefreshClaimsAsync();
+        }
+        catch (SignInCancelledException ex)
+        {
+            // The user dismissed the browser: that is an outcome to report, not an error. Same
+            // message text, a non-error intent and a title that matches it.
+            _errorIntent = MessageIntent.Info;
+            _errorTitle = "Sign-in cancelled";
+            _errorMessage = ex.Message;
+        }
+        catch (SignInFailedException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        catch (TokenStoreException ex)
+        {
+            // The device's keystore refused to persist the session: the credential was acquired but
+            // the session has already been discarded, so the app stays signed out. Show the typed
+            // message (it names the key and the platform failure, never a value) here — a storage
+            // failure is a sign-in outcome the page reports, not something the ErrorBoundary owns.
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _signingIn = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Reads the display values straight off the token's claims — the same spellings the realm's
+    /// mappers emit and the gates read (<c>tenant_name</c>, <c>teacher_id</c>). Nothing is loaded
+    /// from an API: this page proves the credential path, not a data path.
+    /// </summary>
+    private async Task RefreshClaimsAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+
+        _tenantName = user.FindFirst("tenant_name")?.Value;
+        _teacherId = user.FindFirst("teacher_id")?.Value;
+    }
 }

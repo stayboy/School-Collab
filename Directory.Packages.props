@@ -57,6 +57,15 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+    <!-- L3 (round mobile-credential): the auth-path tests in SchoolCollab.Mobile.Tests.Unit build
+         real containers (ServiceCollection/BuildServiceProvider). The version is aligned to the
+         Microsoft.Extensions.* family and to the graph that actually SHIPS — the mobile head's own
+         restored graph (src/Mobile/SchoolCollab.Mobile/obj/project.assets.json) resolves
+         Microsoft.Extensions.DependencyInjection 10.0.11 on every device TFM, as do 25 of the
+         repo's 29 restored projects (only the Blazor 10.0.8 closure sits lower), and the sibling
+         ...Abstractions entry below is 10.0.11 here too. A 10.0.8 pin would be a downgrade against
+         the head the moment a head-side project referenced this package directly. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
@@ -67,6 +76,13 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+    <!-- L3 (round mobile-credential): `AddHttpClient` for the mobile head's client-side
+         registration path. The version is the one the restored graph ALREADY resolves —
+         Microsoft.FluentUI.AspNetCore.Components 4.14.2 declares
+         `Microsoft.Extensions.Http >= 10.0.8` (verified in
+         src/SchoolCollab.Admin.Shared/obj/project.assets.json), so declaring 10.0.8 adds a
+         first-class dependency without moving a single resolved version. -->
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.6.0" />
   </ItemGroup>

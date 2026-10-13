@@ -22,3 +22,12 @@
     display: block;
     padding: 1rem;
 }
+
+.spike__auth {
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+}
+
+.spike__auth-actions {
+    display: flex;
+    gap: 0.5rem;
+}
