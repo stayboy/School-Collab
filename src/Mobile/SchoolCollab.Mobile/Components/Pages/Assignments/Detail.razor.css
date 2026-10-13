@@ -1,0 +1,154 @@
+/* Assignment detail — mobile-first.
+
+   Base layout = the phone form at ≤400 dp: one column, the lifecycle action bar anchored to the bottom
+   of the viewport, the recipients and submissions sections stacked. ONE widening block follows the base,
+   at the tablet breakpoint (min-width: 641px), where the sections sit in a two-column main/aside and the
+   action bar returns to the end of the content.
+
+   Every rule targets an element authored in Detail.razor — a rule naming a FluentUI component's class
+   would never match, because that component's root carries the component's own isolation scope. */
+
+.assignment {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    /* The 5rem foot reservation matches the action bar's own height, so it has to carry the inset the
+       bar carries — otherwise the last card scrolls under the taller bar on a device with a home
+       indicator. */
+    padding: 1rem 1rem calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.assignment__header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.assignment__title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.2;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.assignment__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.assignment__card {
+    background: var(--neutral-layer-1, transparent);
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border-radius: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+}
+
+.assignment__fields {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;
+}
+
+.assignment__section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.assignment__approval-state {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.assignment__approval-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.assignment__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.assignment__section {
+    min-width: 0;
+}
+
+.assignment__busy {
+    display: flex;
+    justify-content: center;
+    padding: 2rem 0;
+}
+
+.assignment__notice {
+    margin: 0;
+}
+
+/* A failed action, or a re-read that failed after an action was accepted: the bar (plus its recovery
+   control) sits above the assignment, which stays rendered. */
+.assignment__failure {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.assignment__sign-in {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.5rem 1rem;
+}
+
+.assignment__sign-in-text {
+    margin: 0;
+}
+
+/* Bottom-anchored on a phone: the lifecycle actions stay reachable under the thumb while the read-only
+   content above scrolls. The bar is viewport-fixed, so the layout root's safe-area padding does NOT
+   apply to it (`env()` resolves against the element's own inset origin) — it carries the bottom inset
+   itself, or the buttons land behind the home indicator. */
+.assignment__actions {
+    background: var(--neutral-layer-2, transparent);
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    bottom: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    left: 0;
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    position: fixed;
+    right: 0;
+}
+
+@media (min-width: 641px) {
+    .assignment {
+        padding: 1.5rem;
+    }
+
+    .assignment__fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .assignment__body {
+        align-items: start;
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    }
+
+    .assignment__actions {
+        background: none;
+        border-top: 0;
+        padding: 0;
+        position: static;
+    }
+}

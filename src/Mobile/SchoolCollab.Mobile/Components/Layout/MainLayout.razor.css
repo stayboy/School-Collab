@@ -1,0 +1,12 @@
+/* Layout root — the host's single safe-area owner.
+
+   maui-safe-area, Blazor Hybrid recipe: the page stays edge-to-edge (MainPage.xaml carries
+   SafeAreaEdges="None") and CSS env() handles the insets, so there is exactly one padding source and
+   never double-padding. Every page (the assignments list and detail included) renders inside
+   .layout-root, so each inherits the insets without repeating them.
+
+   The host document already provides the other half: viewport-fit=cover in wwwroot/index.html. */
+
+.layout-root {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}

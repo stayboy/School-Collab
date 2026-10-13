@@ -1,0 +1,166 @@
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Assignments.Contracts
+@inject IDialogService DialogService
+
+@* One assignment as a mobile card: the title links to the detail screen, the status badge follows the
+   shared appearance rule, and the action row mirrors the desktop grid's status branches minus the
+   excluded actions (Edit/Duplicate belong to the authoring slice, OD-3). Delete is confirm-gated — the
+   only destructive action this slice renders. Styles: AssignmentCard.razor.css.
+
+   The card root is a plain div, not a FluentCard: a scope rule authored here can only match an element
+   this file renders, and the card's own padding/border IS the styling this component owns. *@
+
+<div class="assignment-card">
+    <div class="assignment-card__header">
+        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{Item.Id}")">@Item.Title</FluentAnchor>
+        <FluentBadge Appearance="@StatusAppearance">@Item.Status</FluentBadge>
+    </div>
+
+    @if (Item.RequiresApproval)
+    {
+        <div class="assignment-card__approval">
+            <FluentBadge Appearance="@ApprovalAppearance">@ApprovalText</FluentBadge>
+        </div>
+    }
+
+    <div class="assignment-card__fields">
+        <FieldDisplay Label="Type">@AssignmentEnumDisplay.GetDescription(Item.AssignmentType)</FieldDisplay>
+        <FieldDisplay Label="Grading">@AssignmentEnumDisplay.GetDescription(Item.GradingFormat)</FieldDisplay>
+        <FieldDisplay Label="Audience">@AssignmentEnumDisplay.GetDescription(Item.TargetAudienceType)</FieldDisplay>
+        <FieldDisplay Label="Due">@DueDateText</FieldDisplay>
+        <FieldDisplay Label="Max score">@MaxScoreText</FieldDisplay>
+    </div>
+
+    @if (Actions.Count > 0)
+    {
+        @* Disabled follows THIS row's own action, never the screen-wide fetch flag: the search box's
+           keystroke flips that one, which greyed out every card's buttons while the user typed. *@
+        <div class="assignment-card__actions">
+            @foreach (var action in Actions)
+            {
+                <FluentButton Appearance="@(action.Primary ? Appearance.Accent : Appearance.Outline)"
+                              Disabled="@ActionPending"
+                              aria-busy="@ActionPending"
+                              OnClick="@action.Invoke">
+                    @action.Label
+                </FluentButton>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The assignment this card renders.</summary>
+    [Parameter, EditorRequired] public AssignmentSummaryDto Item { get; set; } = default!;
+
+    /// <summary>
+    /// The list screen's view model, passed in rather than injected: it is registered transient, so a
+    /// child component's own <c>@inject</c> would resolve a SECOND instance with its own state, and the
+    /// optimistic action would never reach the rendered list.
+    /// </summary>
+    [Parameter, EditorRequired] public AssignmentsListViewModel ViewModel { get; set; } = default!;
+
+    // WS-A2 deviation from decision (j), preserved: FluentBadge supports Accent / Neutral /
+    // Lightweight only, so Scheduled shares Accent with Published (both committed publishing states)
+    // and the badge text distinguishes them.
+    private Appearance StatusAppearance => Item.Status switch
+    {
+        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => Appearance.Accent,
+        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
+    private Appearance ApprovalAppearance => Item.ApprovalStatus switch
+    {
+        null => Appearance.Lightweight,
+        ApprovalStatusDto.Pending => Appearance.Neutral,
+        ApprovalStatusDto.Approved => Appearance.Accent,
+        ApprovalStatusDto.Rejected => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
+    private string ApprovalText => Item.ApprovalStatus switch
+    {
+        null => "Not submitted",
+        ApprovalStatusDto.Pending => "Pending",
+        ApprovalStatusDto.Approved => "Approved",
+        ApprovalStatusDto.Rejected => "Rejected",
+        _ => "—"
+    };
+
+    private string DueDateText => Item.DueDate?.ToLocalTime().ToString("g") ?? "—";
+
+    private string MaxScoreText => Item.MaxScore?.ToString("0.##") ?? "—";
+
+    /// <summary>Whether an action on <b>this</b> row is in flight (its buttons are disabled while it is).</summary>
+    private bool ActionPending => ViewModel.IsActionPending(Item.Id);
+
+    /// <summary>
+    /// The card's actions, status-branching exactly like the desktop grid's <c>BuildAssignmentActions</c>
+    /// minus the authoring navigations and Duplicate. A Draft whose approval is already granted keeps
+    /// Publish: re-submitting an approved draft would flip it back to pending.
+    /// </summary>
+    private IReadOnlyList<CardAction> Actions
+    {
+        get
+        {
+            var actions = new List<CardAction>();
+
+            switch (Item.Status)
+            {
+                case AssignmentStatusDto.Draft:
+                    if (Item.RequiresApproval && Item.ApprovalStatus != ApprovalStatusDto.Approved)
+                    {
+                        actions.Add(new CardAction(
+                            "Submit for approval",
+                            () => ViewModel.SubmitForApprovalAsync(Item.Id),
+                            Primary: true));
+                    }
+                    else
+                    {
+                        actions.Add(new CardAction("Publish", () => ViewModel.PublishAsync(Item.Id), Primary: true));
+                    }
+
+                    actions.Add(new CardAction("Delete", ConfirmDeleteAsync));
+                    break;
+
+                case AssignmentStatusDto.Published:
+                    actions.Add(new CardAction("Unpublish", () => ViewModel.UnpublishAsync(Item.Id)));
+                    actions.Add(new CardAction("Close", () => ViewModel.CloseAsync(Item.Id)));
+                    actions.Add(new CardAction("Delete", ConfirmDeleteAsync));
+                    break;
+
+                case AssignmentStatusDto.Scheduled:
+                    actions.Add(new CardAction("Publish now", () => ViewModel.PublishAsync(Item.Id), Primary: true));
+                    break;
+
+                case AssignmentStatusDto.Closed:
+                case AssignmentStatusDto.Archived:
+                    // Read-only retention: the desktop grid offers Review (a navigation) and Duplicate,
+                    // both outside this slice.
+                    break;
+            }
+
+            return actions;
+        }
+    }
+
+    /// <summary>
+    /// Confirms with the desktop's own wording before deleting: this screen has no undo and the list
+    /// action has no rollback path, so the confirmation is the only guard.
+    /// </summary>
+    private async Task ConfirmDeleteAsync()
+    {
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Delete assignment '{Item.Title}'? This cannot be undone.",
+            primaryText: "Delete");
+
+        if (confirmed)
+        {
+            await ViewModel.DeleteAsync(Item.Id);
+        }
+    }
+
+    /// <summary>One rendered card action: its label, its handler and whether it is the row's primary.</summary>
+    private sealed record CardAction(string Label, Func<Task> Invoke, bool Primary = false);
+}

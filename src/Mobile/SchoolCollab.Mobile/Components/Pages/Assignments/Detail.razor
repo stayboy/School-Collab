@@ -1,0 +1,359 @@
+@page "/assignments/{Id:guid}"
+@using Microsoft.AspNetCore.Components.Authorization
+@using SchoolCollab.Assignments.Contracts
+@inject AssignmentDetailViewModel ViewModel
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject OidcLoginService Login
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* The mobile assignment detail screen (L4's first slice): a read-only header, the lifecycle action bar,
+   the approval decision panel when the assignment is gated on approval, the read-only recipients and
+   submissions sections, and nothing else. The desktop's authoring overview, review/grade forms,
+   sign-off and notification tabs are out of slice scope (OD-2 and the round's scope list).
+
+   Every styling hook sits on a plain element authored HERE (a child component's rendered root carries
+   the CHILD's CSS-isolation scope, so a rule in this file would never match a FluentUI component);
+   Detail.razor.css widens the phone layout to a two-column one at the tablet breakpoint. *@
+
+<PageTitle>@(ViewModel.Item?.Title ?? "Assignment")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <AuthorizeView>
+            <Authorized>
+                <TenantGate>
+                    <ChildContent>
+                        @if (ViewModel.IsLoading)
+                        {
+                            <div class="assignment__busy" role="status" aria-label="Loading assignment">
+                                <FluentProgressRing />
+                            </div>
+                        }
+                        else if (ViewModel.Error is not null)
+                        {
+                            @* A load failure replaces the screen, so this branch owns its own way out:
+                               without it the only escape from a failed read was the phone's back gesture. *@
+                            <div class="assignment__failure">
+                                <FluentMessageBar Intent="MessageIntent.Error" Title="Could not load the assignment">
+                                    @ViewModel.Error
+                                </FluentMessageBar>
+                                <FluentButton Appearance="Appearance.Outline" OnClick="BackToListAsync">Back to list</FluentButton>
+                            </div>
+                        }
+                        else if (ViewModel.NotFound)
+                        {
+                            <div class="assignment__notice">
+                                <FluentMessageBar Intent="MessageIntent.Error">Assignment not found.</FluentMessageBar>
+                            </div>
+                            <FluentButton Appearance="Appearance.Outline" OnClick="BackToListAsync">Back to list</FluentButton>
+                        }
+                        else if (ViewModel.Item is { } item)
+                        {
+                            @* Both bars sit ABOVE the still-rendered assignment: neither a failed action
+                               nor a failed re-read may take the screen away from the user. *@
+                            @if (ViewModel.ActionError is not null)
+                            {
+                                <div class="assignment__failure">
+                                    <FluentMessageBar Intent="MessageIntent.Error" Title="@ViewModel.ActionErrorTitle">
+                                        @ViewModel.ActionError
+                                    </FluentMessageBar>
+                                </div>
+                            }
+
+                            @if (ViewModel.ReloadWarning is not null)
+                            {
+                                <div class="assignment__failure">
+                                    <FluentMessageBar Intent="MessageIntent.Warning" Title="Not refreshed">
+                                        @ViewModel.ReloadWarning
+                                    </FluentMessageBar>
+                                    <FluentButton Appearance="Appearance.Outline" OnClick="RefreshAsync">Refresh</FluentButton>
+                                </div>
+                            }
+
+                            <article class="assignment">
+                                <header class="assignment__header">
+                                    <h1 class="assignment__title">@item.Title</h1>
+                                    <div class="assignment__badges">
+                                        <FluentBadge Appearance="@StatusAppearance(item)">@item.Status</FluentBadge>
+                                        @if (item.MandatoryReview)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Lightweight"
+                                                         Title="Guardian review required before students submit">
+                                                Review required
+                                            </FluentBadge>
+                                        }
+                                    </div>
+                                </header>
+
+                                <div class="assignment__card">
+                                    <div class="assignment__fields">
+                                        <FieldDisplay Label="Type">@AssignmentEnumDisplay.GetDescription(item.AssignmentType)</FieldDisplay>
+                                        <FieldDisplay Label="Grading">@AssignmentEnumDisplay.GetDescription(item.GradingFormat)</FieldDisplay>
+                                        <FieldDisplay Label="Audience">@AssignmentEnumDisplay.GetDescription(item.TargetAudienceType)</FieldDisplay>
+                                        <FieldDisplay Label="Due">@DueDateText(item)</FieldDisplay>
+                                        <FieldDisplay Label="Max score">@(item.MaxScore?.ToString("0.##") ?? "—")</FieldDisplay>
+                                        <FieldDisplay Label="Description">@(item.Description ?? "—")</FieldDisplay>
+                                    </div>
+                                </div>
+
+                                @if (item.RequiresApproval)
+                                {
+                                    <div class="assignment__card">
+                                        <h2 class="assignment__section-title">Approval</h2>
+                                        <div class="assignment__approval-state">
+                                            <FluentBadge Appearance="@ApprovalAppearance(item)">@ApprovalText(item)</FluentBadge>
+                                        </div>
+
+                                        <div class="assignment__approval-actions">
+                                            @if (item.Status == AssignmentStatusDto.Draft && (item.ApprovalStatus is null || item.ApprovalStatus == ApprovalStatusDto.Rejected))
+                                            {
+                                                <FluentButton Appearance="Appearance.Accent"
+                                                              Disabled="@ViewModel.IsBusy"
+                                                              OnClick="@(() => ViewModel.SubmitForApprovalAsync())">
+                                                    Submit for approval
+                                                </FluentButton>
+                                            }
+                                            @* Gated on the session, not on the status alone: without a
+                                               teacher_id claim the decision would be attributed to
+                                               Guid.Empty and the server would reject it. *@
+                                            @if (item.ApprovalStatus == ApprovalStatusDto.Pending && ViewModel.CanDecideApproval)
+                                            {
+                                                <FluentButton Appearance="Appearance.Accent"
+                                                              Disabled="@ViewModel.IsBusy"
+                                                              OnClick="@(() => ViewModel.SubmitApprovalDecisionAsync(true))">
+                                                    Approve
+                                                </FluentButton>
+                                                <FluentButton Appearance="Appearance.Outline"
+                                                              Disabled="@ViewModel.IsBusy"
+                                                              OnClick="@(() => ViewModel.SubmitApprovalDecisionAsync(false))">
+                                                    Reject
+                                                </FluentButton>
+                                            }
+                                        </div>
+
+                                        @if (item.ApprovalStatus == ApprovalStatusDto.Pending && !ViewModel.CanDecideApproval)
+                                        {
+                                            <div class="assignment__notice">
+                                                <FluentMessageBar Intent="MessageIntent.Info" Title="Decision not available">
+                                                    This session has no teacher id to attribute the decision to,
+                                                    so Approve and Reject are not offered here. Ask the
+                                                    assignment's teacher to record it.
+                                                </FluentMessageBar>
+                                            </div>
+                                        }
+
+                                        @if (ViewModel.ApprovalError is not null)
+                                        {
+                                            <div class="assignment__notice">
+                                                <FluentMessageBar Intent="MessageIntent.Error">@ViewModel.ApprovalError</FluentMessageBar>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="assignment__body">
+                                    <div class="assignment__section">
+                                        <AssignmentRecipientsSection Recipients="ViewModel.Recipients" />
+                                    </div>
+                                    <div class="assignment__section">
+                                        <AssignmentSubmissionsSection Submissions="ViewModel.Submissions"
+                                                                      SelectedSubmission="ViewModel.SelectedSubmission"
+                                                                      Busy="@ViewModel.IsLoadingSubmission"
+                                                                      Error="@ViewModel.SubmissionError"
+                                                                      OnSelect="ViewModel.SelectSubmissionAsync"
+                                                                      OnBack="ViewModel.ClearSelectedSubmission" />
+                                    </div>
+                                </div>
+
+                                @* Bottom-anchored on a phone (Detail.razor.css widens it in place on a
+                                   tablet): the lifecycle actions this slice owns. Duplicate and the
+                                   Schedule/Archive transitions stay out (OD-3 and the scope list). *@
+                                <div class="assignment__actions">
+                                    <FluentButton Appearance="Appearance.Outline" OnClick="BackToListAsync">Back to list</FluentButton>
+                                    @if (item.Status == AssignmentStatusDto.Draft)
+                                    {
+                                        <FluentButton Appearance="Appearance.Accent"
+                                                      Disabled="@ViewModel.IsBusy"
+                                                      OnClick="@(() => ViewModel.PublishAsync())">
+                                            Publish
+                                        </FluentButton>
+                                    }
+                                    else if (item.Status == AssignmentStatusDto.Published)
+                                    {
+                                        <FluentButton Appearance="Appearance.Outline"
+                                                      Disabled="@ViewModel.IsBusy"
+                                                      OnClick="@(() => ViewModel.UnpublishAsync())">
+                                            Unpublish
+                                        </FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline"
+                                                      Disabled="@ViewModel.IsBusy"
+                                                      OnClick="@(() => ViewModel.CloseAsync())">
+                                            Close
+                                        </FluentButton>
+                                    }
+                                    else if (item.Status == AssignmentStatusDto.Scheduled)
+                                    {
+                                        <FluentButton Appearance="Appearance.Accent"
+                                                      Disabled="@ViewModel.IsBusy"
+                                                      OnClick="@(() => ViewModel.PublishAsync())">
+                                            Publish now
+                                        </FluentButton>
+                                    }
+                                </div>
+                            </article>
+                        }
+                    </ChildContent>
+                    <Fallback>
+                        @TenantMissingCallToAction
+                    </Fallback>
+                </TenantGate>
+            </Authorized>
+            <NotAuthorized>
+                @SignInCallToAction
+            </NotAuthorized>
+        </AuthorizeView>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    /// <summary>The assignment to show, from the route.</summary>
+    [Parameter] public Guid Id { get; set; }
+
+    private bool _signingIn;
+    private string? _signInError;
+
+    /// <summary>
+    /// The unauthenticated call to action — the <c>AuthorizeView</c> branch. A direct link to a detail
+    /// route is exactly where a signed-out visitor needs it most. Deliberately not the tenant gate's copy:
+    /// see <see cref="TenantMissingCallToAction"/>.
+    /// </summary>
+    private RenderFragment SignInCallToAction => CallToAction(
+        "Sign in to open this assignment.",
+        "Sign in");
+
+    /// <summary>
+    /// The tenant gate's fallback: signed in, but with no usable tenant claim — so "sign in" described the
+    /// wrong gate. The action re-acquires the session, the only recovery this head has (it ships no tenant
+    /// switcher).
+    /// </summary>
+    private RenderFragment TenantMissingCallToAction => CallToAction(
+        "This session is not linked to a school, so this assignment is not available in it. "
+            + "Sign in again with your school account.",
+        "Sign in again");
+
+    /// <summary>The gate fallbacks' shared body — one sign-in control, two honest copies.</summary>
+    private RenderFragment CallToAction(string message, string buttonLabel) => @<div class="assignment__sign-in">
+        <p class="assignment__sign-in-text">@message</p>
+        <FluentButton Appearance="Appearance.Accent"
+                      Disabled="@_signingIn"
+                      aria-busy="@_signingIn"
+                      OnClick="SignInAsync">
+            @buttonLabel
+        </FluentButton>
+        @if (_signInError is not null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" Title="Sign-in failed">
+                @_signInError
+            </FluentMessageBar>
+        }
+    </div>;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ViewModel.Changed += OnViewModelChanged;
+        await LoadIfSignedInAsync();
+    }
+
+    /// <summary>
+    /// Loads only for an authenticated session (a signed-out visitor sees the call to action), and
+    /// retries after a successful sign-in from it — the retry is what keeps the route usable when it
+    /// was opened cold and signed out.
+    /// </summary>
+    private async Task LoadIfSignedInAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            await ViewModel.LoadAsync(Id);
+        }
+    }
+
+    private async Task SignInAsync()
+    {
+        _signingIn = true;
+        _signInError = null;
+        StateHasChanged();
+
+        try
+        {
+            await Login.SignInAsync();
+            await ViewModel.LoadAsync(Id);
+        }
+        catch (SignInCancelledException)
+        {
+            // The user dismissed the system browser: the screen simply stays signed out.
+        }
+        catch (SignInFailedException ex)
+        {
+            _signInError = ex.Message;
+        }
+        catch (TokenStoreException ex)
+        {
+            // The device's keystore refused the session — the credential was acquired but discarded,
+            // so the app stays signed out and the typed message is what the user needs to see.
+            _signInError = ex.Message;
+        }
+        finally
+        {
+            _signingIn = false;
+            StateHasChanged();
+        }
+    }
+
+    private void BackToListAsync() => Nav.NavigateTo("/assignments");
+
+    private Task RefreshAsync() => ViewModel.ReloadAsync();
+
+    // WS-A2 deviation from decision (j), preserved: FluentBadge supports Accent / Neutral /
+    // Lightweight only, so Scheduled shares Accent with Published and Closed/Archived are Neutral —
+    // the badge text distinguishes them.
+    private static Appearance StatusAppearance(AssignmentSummaryDto item) => item.Status switch
+    {
+        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => Appearance.Accent,
+        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
+    private static Appearance ApprovalAppearance(AssignmentSummaryDto item) => item.ApprovalStatus switch
+    {
+        null => Appearance.Lightweight,
+        ApprovalStatusDto.Pending => Appearance.Neutral,
+        ApprovalStatusDto.Approved => Appearance.Accent,
+        ApprovalStatusDto.Rejected => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
+    private static string ApprovalText(AssignmentSummaryDto item) => item.ApprovalStatus switch
+    {
+        null => "Not submitted",
+        ApprovalStatusDto.Pending => "Pending",
+        ApprovalStatusDto.Approved => "Approved",
+        ApprovalStatusDto.Rejected => "Rejected",
+        _ => "—"
+    };
+
+    private static string DueDateText(AssignmentSummaryDto item) =>
+        item.DueDate?.ToLocalTime().ToString("g") ?? "—";
+
+    private void OnViewModelChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        ViewModel.Changed -= OnViewModelChanged;
+        ViewModel.Dispose();
+    }
+}

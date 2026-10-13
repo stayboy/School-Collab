@@ -1,0 +1,36 @@
+/* One assignment card (the list screen's row). Every rule targets an element authored in
+   AssignmentCard.razor — the card root is a plain div for exactly that reason. */
+
+.assignment-card {
+    background: var(--neutral-layer-1, transparent);
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border-radius: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+}
+
+.assignment-card__header {
+    align-items: flex-start;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+}
+
+.assignment-card__approval {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.assignment-card__fields {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;
+}
+
+.assignment-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}

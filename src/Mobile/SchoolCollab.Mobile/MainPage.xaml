@@ -3,7 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:local="clr-namespace:SchoolCollab.Mobile"
              xmlns:components="clr-namespace:SchoolCollab.Mobile.Components"
-             x:Class="SchoolCollab.Mobile.MainPage">
+             x:Class="SchoolCollab.Mobile.MainPage"
+             SafeAreaEdges="None">
 
     <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
         <BlazorWebView.RootComponents>

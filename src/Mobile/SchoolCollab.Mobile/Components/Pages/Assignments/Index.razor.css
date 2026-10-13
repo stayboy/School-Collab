@@ -1,0 +1,102 @@
+/* Assignments list — mobile-first.
+
+   Base layout = the phone form at ≤400 dp: one column, a stacked header, a wrapping chip row and one
+   card per assignment. ONE widening block follows the base, at the tablet breakpoint (min-width: 641px),
+   where the card list becomes a 2-up grid and the header becomes a single row.
+
+   Every rule targets an element authored in Index.razor — a rule naming a FluentUI component's class
+   would never match, because that component's root carries the component's own isolation scope. */
+
+.assignments {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+.assignments__header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.assignments__title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.2;
+    margin: 0;
+}
+
+.assignments__search {
+    min-width: 0;
+}
+
+.assignments__filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.assignments__cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.assignments__slot {
+    min-width: 0;
+}
+
+.assignments__busy {
+    display: flex;
+    justify-content: center;
+    padding: 2rem 0;
+}
+
+.assignments__notice {
+    margin: 0;
+}
+
+/* A failed fetch or a failed action: the bar plus the one control that recovers from it. The action
+   bar's buttons stay tappable behind it — this only ever adds to the screen. */
+.assignments__failure {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.assignments__sign-in {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.5rem 1rem;
+}
+
+.assignments__sign-in-text {
+    margin: 0;
+}
+
+@media (min-width: 641px) {
+    .assignments {
+        padding: 1.5rem;
+    }
+
+    .assignments__header {
+        align-items: center;
+        flex-direction: row;
+        justify-content: space-between;
+    }
+
+    .assignments__search {
+        min-width: 20rem;
+    }
+
+    .assignments__cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
