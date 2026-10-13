@@ -166,6 +166,20 @@ exactly how `grill-me` got polluted before its 2026-10-05 refresh from
 - Repo-authored skills under `.github/skills/` are ordinary repo content —
   change them via branch + PR like any other file.
 
+### Lessons learned → repo-owned skills
+
+After every round or defect pass, **fold the durable lessons into the repo's
+own skills and rules** — the files agents actually read before the mistake:
+`.github/skills/*` (repo-authored, editable), `.github/copilot/rules/*`,
+in-repo `.pi/skills/*`, and `documents/runbooks/*`. The owner decides which
+lessons are durable (a lessons grill round; "all as recommended" settles it).
+**Never patch installed/locked skills** (`~/.agents/skills`,
+`~/.pi/agent/skills`) with a lesson — they are vendored upstream copies
+(refresh rules above); a lesson that belongs there is filed upstream, or
+restated in a repo-owned file carrying the same trigger. Cite the incident
+date in one clause (evidence, not a changelog); the round doc holds the full
+story.
+
 ---
 
 ## Specialty instructions
@@ -311,6 +325,13 @@ section below.
   Playwright can re-assert without a restart. Full recipe, observed caveats and
   recovery: `documents/runbooks/dev-loop-hot-reload.md`. Hot reload accelerates
   observation; it never replaces the build/test gates below.
+- **Tests green but the preview "doesn't work" ⇒ stale circuit, not code.** Hot
+  reload cannot apply "rude edits" — a new component `[Parameter]`, a changed
+  record's shape, new `@implements`/`@inject`, or a **new static asset** (a
+  collocated `*.razor.js`, served from `_content/...` only after rebuild).
+  Restart the preview (full stop/start) before debugging the code; bUnit loose
+  mode masks the missing-asset 404 (observed 2026-10-12, recorder pill round —
+  the runbook's failure-modes list carries the full symptom set).
 - **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a running
   service — a plain `dotnet run` (AppHost, API, worker), an IDE-launched debugger
   session, or a detached `dotnet watch` — is still holding output binaries (an
@@ -398,6 +419,11 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
 - No MediatR — CQRS is implemented via `ICommandHandler<T>` / `IQueryHandler<T,R>` with
   Scrutor assembly scanning.
 - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
+- **Reuse before new infrastructure.** Before pricing an endpoint, schema, or new
+  module, inventory what the repo already ships (streaming routes, client-side
+  players, staging seams, JS modules) and name the reuse in the plan. Owner
+  precedent 2026-10-12: a pill-playback round initially priced as Tier-3 endpoint
+  work became a reuse of the recorder's own review player + a kept Blob URL.
 - **API Endpoint Grouping**: All API endpoints must be grouped using an extension method (e.g., `MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)`). Do not define routes inline in `Program.cs`. Authorization requirements on these groups should be conditional based on `IFeatureFlagService` (e.g., `FEATURE:DisableOIDCAuth`).
 - **Feature Flags**: there are **two kinds**, each with exactly one write-point — read `documents/solution/feature-flag-workflow.md` before adding one.
   - **Runtime, mutable, tenant-overridable flags** (e.g. `FEATURE:EnableCodedValuesAiChat`) are owned by the central **Config service** (`settings-api` + `config-db`, admin UI `/config-flags`, audited, tenant-overridable) — **not** the AppHost.

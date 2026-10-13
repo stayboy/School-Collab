@@ -107,6 +107,25 @@ export async function startCapture(previewElementId, wantVideo, autoStopBytes) {
 
     return options.mimeType || '';
 }
+// Hold verdict 2026-10-12 (finding 3): the reopened review branch renders only {Id}-preview-take, so
+// a retake started from it finds no {Id}-preview element in the DOM at startCapture time — the live
+// video preview bound by id at call time was silently skipped and the take recorded blind. The panel
+// flags this and calls bindPreview from OnAfterRenderAsync, once the recording branch has rendered.
+// Idempotent no-op without an active stream (start failed) or a preview element (audio rows render none).
+export function bindPreview(previewElementId, wantVideo) {
+    if (!activeStream) {
+        return;
+    }
+    const preview = previewElementId ? document.getElementById(previewElementId) : null;
+    if (preview) {
+        preview.srcObject = activeStream;
+        if (wantVideo && typeof preview.play === 'function') {
+            preview.play().catch(() => { /* autoplay can be blocked; the preview is cosmetic */ });
+        }
+    }
+}
+
+
 
 
 // Begins recording (timeslice 1s so chunks accumulate for the byte-stop check).
@@ -158,6 +177,25 @@ export function createPreviewUrl() {
         throw new Error('unsupported');
     }
     return URL.createObjectURL(lastBlob);
+}
+
+// Owner pill rework (2026-10-12): the take's duration in seconds for the row's play pill. Probed from
+// a throwaway media element loading the Blob URL; resolves null on error or after a short timeout so
+// a slow/broken metadata load never blocks the UI.
+export function mediaDuration(url) {
+    return new Promise((resolve) => {
+        if (!url) {
+            resolve(null);
+            return;
+        }
+        const el = document.createElement('video');
+        el.preload = 'metadata';
+        const done = (value) => { el.src = ''; resolve(value); };
+        const timer = setTimeout(() => done(null), 5000);
+        el.onloadedmetadata = () => { clearTimeout(timer); done(isFinite(el.duration) ? el.duration : null); };
+        el.onerror = () => { clearTimeout(timer); done(null); };
+        el.src = url;
+    });
 }
 
 // Delivery (D3): wrap the held Blob as a File and drop it into the target <input type=file>, then

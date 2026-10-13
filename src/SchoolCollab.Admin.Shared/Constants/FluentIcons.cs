@@ -84,4 +84,11 @@ public static class FluentIcons
 
     /// <summary>An Image material.</summary>
     public static readonly Icon Image = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Image();
+
+    // ── Recording affordances (round media-item pill polish, 2026-10-12) ──────────────────────────
+
+    /// <summary>The microphone glyph for AUDIO record affordances (the media row's Record button, the
+    /// recorder's Start button) — <see cref="MusicNote2"/> names a staged audio FILE; this one says
+    /// "speak into the mic now". Size20, like the other button glyphs.</summary>
+    public static readonly Icon Mic = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Mic();
 }

@@ -87,8 +87,58 @@
     min-width: 0;
 }
 
-/* The open recorder is its OWN list item beneath the row (never inside the row's flex line), so it
-   simply fills the list column. The list's gap already separates it from its row. */
+/* Owner polish (2026-10-12): the library's dropzone is a grid whose auto-placed (opacity-0) file
+   input adds a SECOND row — the "overly tall" dashed box the owner flagged. Keep the capture slot a
+   single-line strip: stack the input over the content in row 1, cap the height, tighten the default
+   hint. Specificity beats the library's scoped `.fluent-inputfile-container[b-…]` rule, and no
+   property here collides with it. */
+.cq-instruction-capture ::deep .fluent-inputfile-container {
+    grid-template-rows: auto;
+    max-height: 48px;
+    align-content: center;
+    overflow: hidden;
+}
+
+.cq-instruction-capture ::deep .fluent-inputfile-container > input[type='file'] {
+    grid-row: 1;
+    grid-column: 1;
+}
+
+.cq-instruction-capture ::deep .inputfile-content {
+    padding: 6px 8px;
+    font-size: 0.8rem;
+    line-height: 1.2;
+}
+
+/* The open recorder TAKES OVER the container (round-recorder-takeover, owner 2026-10-12): while it
+   is open this frame is the container's only child, and `flex: 1 1 auto` stretches it into the whole
+   column the rows + dropzone + add button occupied — the panel fills the component, never a cramped
+   sibling slot beneath its row. */
 .cq-instruction-recorder {
-    display: block;
+    display: flex;
+    flex: 1 1 auto;
+}
+
+/* Owner pill rework (2026-10-12): a staged media item's play pill — the kind icon (already rendered at
+   the row start) · play + duration · the row's trailing remove ×. A barely-filled rounded pill with a
+   hover lift, sized to the row's single-line rhythm. */
+.cq-media-play {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 999px;
+    background: var(--neutral-layer-1);
+    font-size: 0.85rem;
+    cursor: pointer;
+    min-width: 0;
+}
+
+.cq-media-play:hover {
+    background: var(--neutral-layer-2);
+}
+
+.cq-media-pill-text {
+    line-height: 1;
 }

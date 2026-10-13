@@ -57,7 +57,7 @@ and dispose on teardown — the precedents are `AssignmentAuthoring.razor.js` an
 |---|---|
 | **D1** | **A recording is an Audio/Video instruction row, produced by a second input path.** It reuses `InstructionEditorRow`, the `POST /attachments/stage` endpoint, `IFileStore`, the (raised) per-file cap (D7), and the existing allow-list. **No new enum, DTO field, endpoint, or store.** |
 | **D2** | **Two kebab items: "Record Audio" and "Record Video"** (mirrors the per-kind symmetry of Add Text Content / Add Link). The kind is known before capture, so the recorder requests exactly the right device constraints. |
-| **D3** | **The recorder is a single INLINE presentational panel, not a dialog** *(revised from "dedicated dialog" — see D12).* Rendered by `InstructionEditorList` in the media row's capture slot (where the `FluentInputFile` lives today). Permission prompt → live preview → record / stop → preview → **retake** → commit, committing through the existing `StageMediaAsync` seam. On the page, the kebab appends the row and auto-expands its recorder; in the question dialog the author records from that inline slot. |
+| **D3** | **The recorder is a single INLINE presentational panel, not a dialog** *(revised from "dedicated dialog" — see D12; UX-revised 2026-10-12 — see the takeover note below).* Rendered by `InstructionEditorList`. Permission prompt → live preview → record / stop → preview → **retake** → commit, committing through the existing `StageMediaAsync` seam. **Takeover layout (owner 2026-10-12, `round-recorder-takeover.md`):** while a recorder is open, the list hides its whole body (rows, upload dropzone, add affordance) and the panel fills the container; the panel's own header bar carries the title and a **labeled Cancel** (stops capture, discards the take, restores the list, and drops the still-empty row the Record action itself appended — a toggled-open pre-existing row is never touched; owner rework 2026-10-12) — the earlier sibling-`<li>`-beneath-the-row layout and its toggle-only dismissal are superseded. On the page, the kebab appends the row and opens its recorder; in the question dialog the author records from the same takeover (D12's no-nesting rule unchanged). |
 | **D4** | **Student playback is in scope.** A minimal `GET` serving endpoint streams the recording's `StoragePath` with its stored `ContentType` (the certificate-route pattern), with **HTTP range processing enabled** so `<audio>`/`<video>` are seekable. |
 | **D5** | **Ward render is native inline players.** `<audio controls>` / `<video controls>` for Audio/Video rows bound to the serving URL; `<img>` for Image; Text/Url stay labels. |
 | **D6** | **Recordings are instruction-only, never AI-reference** — consistent with the settled instruction-vs-resource split (instructional-materials D10 / INS-3). |
@@ -87,7 +87,7 @@ and dispose on teardown — the precedents are `AssignmentAuthoring.razor.js` an
 
 ## 5. Acceptance criteria
 
-- **AC-1** — On the page, "Record Audio"/"Record Video" append an Audio/Video row and open its inline recorder.
+- **AC-1** — On the page, "Record Audio"/"Record Video" append an Audio/Video row and open the recorder as a **full-container takeover** (the list body hides; owner 2026-10-12 revision).
 - **AC-2** — The recorder requests mic-only vs mic+camera per the chosen kind; a live preview renders before recording.
 - **AC-3** — Record → stop → preview → **retake** loops without leaving the panel; commit stages through the same endpoint an upload uses, and the row shows the recorded file name + size.
 - **AC-4** — A **5-minute 720p** video (~94 MB) and a 10-minute audio note both record, stage, and save **without** hitting any limit (D7's raised 100 MiB per-file / 300 MiB total caps).
@@ -146,8 +146,7 @@ never runs the JS. Refactored so **no bytes cross interop**:
   per-call cap by design.
 - The host seam `OnRecorded(Stream, …)` is unchanged, so `InstructionEditorList` needed no change.
 
-**Layout decision:** the `RecorderPanel` renders as its **own `<li>`** beneath the row, not inside the
-row's non-wrapping flex line — otherwise the row's edit/remove actions would strand below the panel.
+**Layout decision (amended 2026-10-12, `round-recorder-takeover.md`):** the `RecorderPanel` is no longer a sibling `<li>` beneath the media row — while open it takes over the **whole `InstructionEditorList` container** (rows, dropzone and add affordance hidden), with a header bar carrying the title and a labeled Cancel. The original sibling-`<li>` rationale below is retained for history: it motivated why the panel is not inside the row's non-wrapping flex line.
 
 **Disposal race (browser-only):** staging success unmounts the panel *while* its commit is still awaiting
 `OnRecorded`; the component now guards `StateHasChanged` + every JS call behind `_disposed`/null-module
