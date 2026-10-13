@@ -284,6 +284,32 @@ record: `documents/rounds/round-mobile-severance.md` (+ `diffs-mobile-severance.
 5. `AuthenticationStateProvider` yields an authenticated principal and `TenantGate` renders its
    tenant branch instead of the fallback.
 
+**L3 — outcome (criteria 1, 2, 4, 5 MET; criterion 3 carried OPEN — device-bound; round
+`mobile-credential`, 2026-10-13).** The head acquires and uses a real credential. Delivered:
+
+- **Realm**: a third client `school-collab-mobile-client` — public, standard flow, no secret,
+  `schoolcollab://signin-oidc` redirect, the five claim mappers plus an audience mapper emitting the
+  API-validated `school-collab-client`. `AppHostRealmImportArchitectureTests`' exact-client-set
+  assertion was widened (owner-approved) and gained six mobile-client tests; the seeded `dev-teacher`
+  now holds the `teacher` realm role, so `roles` is actually present in its token.
+- **`Mobile.Logic`**: `MobileAuthOptions`; `ITokenStore` and keys; `JwtPayloadReader`; `TokenSession`
+  (refresh with rotation, memory-first sign-out, typed best-effort store failures);
+  `ISystemBrowserAuthenticator`; `OidcLoginService` (**Authorization Code + PKCE S256** with state);
+  `BearerTokenDelegatingHandler` (attaches the bearer to the API clients only, and degrades on session,
+  transport or client-timeout failure — never on caller cancellation); `MobileAuthenticationStateProvider`;
+  and the client-side registration of the eight clients against one configured base address.
+- **Head**: `SecureStorage` token store; `WebAuthenticator`; the Android `[IntentFilter]`; the
+  iOS/MacCatalyst `Info.plist` URL scheme.
+
+Criterion 3 — one authenticated call reaching an API from a device/emulator with a proving server-side
+log line — is **carried OPEN** and was never marked met: it needs a device run, and the procedure is
+written. Evidence for the rest: `dotnet build -f net10.0-android` **0 errors / 0 warnings**; root
+solution 0 errors; Mobile 123, ArchitectureTests 111, Core 126, Admin 651, Students 624, Assignments
+1118 — 0 failures — plus a **real Keycloak container** run proving realm import, a full PKCE (S256)
+sign-in, a token carrying `aud="school-collab-client"` / `tenant_id` / `teacher_id` / `roles`, and
+refresh rotation. Full record: `documents/rounds/round-mobile-credential.md`
+(+ `diffs-mobile-credential.patch`).
+
 **L4 — first vertical slice**
 1. The slice's screens are mobile-first at ≤ 400 dp and widened for tablet, using the repo's
    CSS-isolation conventions (`.razor.css` per component; no inline `style`).
@@ -292,6 +318,26 @@ record: `documents/rounds/round-mobile-severance.md` (+ `diffs-mobile-severance.
 4. The slice's own severance-or-copy decision for `Assignments.Application` →
    `Students.Application` → `Students.Core` (OD1's second-pass addition) is planned in its own
    round.
+
+**L4 — outcome (criteria 1, 3, 4 MET; criterion 2 carried OPEN — device-bound; round
+`mobile-assignments-slice`, 2026-10-13).** The first teacher-facing slice: the assignments list and the
+detail view it opens into. Delivered: a slice-scoped 12-method `MobileAssignmentsApiClient`;
+`AssignmentsListViewModel` and `AssignmentDetailViewModel` (optimistic row updates with rollback,
+separate fetch and action failure surfaces, filter-aware display, per-row pending state); a copied
+17-line `AssignmentEnumDisplay`; and five pages (list, card, detail, recipients, submissions) each with
+isolated scoped CSS and safe-area handling.
+
+Criterion 4's severance-or-copy decision landed as **copy/scoped client, not reuse**: `src/Assignments/**`
+is untouched, because reusing `AssignmentsApiClient` would drag in `EffectiveAssignmentPolicy`, which
+stays in the framework-reference-carrying `Core` by the L2 pin.
+
+Criterion 2 — `maui-safe-area` on both form factors — is **carried OPEN**; it is device-bound and was
+never marked met. The round also recorded two low-severity UI residuals (a stale `ReloadWarning` that
+can sit beside a fresh action-error bar, and the detail action bar lacking the list's retry control) and
+an **iOS double top-inset risk** (`MainLayout.razor.css` padding vs the template's `wwwroot/app.css`
+spacer) that no test on this machine could settle. Evidence: mobile unit suite **141/0** (123 after L3),
+ArchitectureTests 111, android 0 errors. Full record: `documents/rounds/round-mobile-assignments-slice.md`
+(+ `diffs-mobile-assignments-slice.patch`).
 
 ## 9. Open decisions for the plan stage
 
@@ -310,6 +356,12 @@ component subset already free of the closure, deferring severance indefinitely (
 *This subsumes the earlier OD1 (which vertical slice) until it is settled, since the slice's shape
 depends on which components are reachable.*
 
+**Resolution (2026-10-13): (b) spike-first, chosen before L1.** The head was built and one
+`Admin.Shared` reference attempted under `net10.0-android`, which produced the exact breakage
+inventory; L2 then discharged the blocker — and its plan gate found one carrier the spike could not
+see (`Core` delivered `Microsoft.AspNetCore.App` through its packages, not through its own csproj).
+Closed.
+
 **OD1 — Which vertical slice L3 delivers.** Recommend **assignments list → detail** (teacher-facing):
 it exercises the richest reusable layer (44 dialogs, the authoring sections) and the most
 representative API surface. Cost: the assignment pages are the largest of the 37; a narrower
@@ -319,27 +371,49 @@ explicitly — this is where it lands.* **Second-pass addition:** the assignment
 closure even after L2 — so L4 opens with its own severance-or-local-copy decision, planned then,
 not now.
 
+**Resolution (2026-10-13): assignments list → detail (teacher-facing), delivered as L4.** The
+second-pass severance-or-copy decision landed as **copy**, not reuse. Closed.
+
 **OD2 — Token refresh policy.** Recommend **silent refresh via the refresh token, falling back to
 interactive `WebAuthenticator` re-auth when Keycloak rejects it**, with the refresh token in
 `SecureStorage`. Cost: silent-refresh failures must be indistinguishable from session end to the
 user (the auth service already models `session_ended` as a distinct 410 — mobile should map the
 same way).
 
+**Outcome (2026-10-13): PARTIALLY RESOLVED.** L3 shipped silent refresh via the refresh token with
+rotation, holding the token in `SecureStorage`. Two halves did **not** ship and remain open: the
+**401 → refresh → retry resend**, and the mapping of Keycloak's `session_ended` (410) onto a distinct
+mobile session-end state. Carry these forward; do not read this decision as discharged.
+
 **OD3 — How much of the Logic split is enforced.** Recommend **route all view models and API
 clients through `SchoolCollab.Mobile.Logic`** so they are CI-testable, leaving only host wiring and
 layout in the head. Cost: slightly more ceremony per screen; the alternative (logic in the head) is
 invisible to CI.
 
+**Outcome (2026-10-13): MET — and followed, not just decided.** L4 put both view models *and* the API
+client in `SchoolCollab.Mobile.Logic`, leaving only host wiring and layout in the head, which is
+exactly why the mobile unit suite runs on ubuntu. Enforcement is by review, not a guard. Closed.
+
 **OD4 — Dev-loop base URL.** Recommend **a `appsettings.Development.json` value pointing at the
 AppHost's published API endpoints** (Android emulator via `10.0.2.2`, physical device via LAN),
 never a literal. Cost: the dev cert must be trusted on the device or the endpoints used over http.
+
+**Outcome (2026-10-13): MET.** `appsettings.Development.json` holds the dev-loop values
+(`MobileAuth.Authority`) and no C# literal exists under `src/`. The concrete emulator/LAN values are
+deliberately **developer-local** rather than committed — a LAN IP is machine-specific, and committing
+`10.0.2.2` would break the Windows dev loop — and the emulator case is documented at
+`MobileApiOptions.cs:11` as the dev-loop posture rather than baked into a committed file. Closed.
 
 ## 10. Follow-ups (not this train)
 
 - Offline capability and push, if the app later needs them (would reopen D1).
 - Whether the mobile head ever becomes an AppHost resource (`Aspire.Hosting.Maui` is preview-only
   at this SDK line).
-- Extending `CrossModuleWiringTests` to cover a mobile host's wiring, or recording the mobile head
-  as permanently outside its model.
-- Carried over: `use-js-interop`'s upstream sample reverted verbatim;
-  `%TEMP%\hermes-blazor-quarantine\` still holds nine superseded skill copies.
+- **Wiring guards (G5) — DECIDED 2026-10-13: the mobile head is excluded** from
+  `CrossModuleWiringTests`' `AddProject`/`WithReference`-derived half. The guard's literal-base-address
+  half already scans `src/**/*.cs`, which includes the head, so the load-bearing protection is in
+  place; the host-model half is structurally inapplicable to a head that is not an AppHost resource,
+  and the Aspire prerequisite (`Aspire.Hosting.Maui`) is preview-only at this SDK line. Revisit only
+  if the head becomes an AppHost resource.
+- Carried over: `use-js-interop`'s upstream sample closed as accepted (2026-10-09);
+  `%TEMP%\hermes-blazor-quarantine\` deleted (2026-10-13).

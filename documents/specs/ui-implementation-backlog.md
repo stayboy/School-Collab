@@ -332,9 +332,10 @@
 
 Tracked outside the sprint count below (it is not part of the period/activity-group arc).
 
-L1 — the Hybrid head, the `Admin.Shared` reuse spike and the mobile CI job — is **merged** (`#326`,
-`fab7dd5e`, CI 5/5). The layers are sequential: **L2 blocked L3/L4** because no device TFM built until
-severance landed — and it has landed, so device TFMs now build.
+**All four layers are merged** — L1 `#326` (`fab7dd5e`, CI 5/5), L2 `#338` (`d2b2e98d`), L3 `#343`
+(`4fccd8a3`), L4 `#344` (`a8e38fb8`) — so the train is **complete as specified**: §8 defines L1–L4 and
+there is no L5. The layers were sequential: **L2 blocked L3/L4** because no device TFM built until
+severance landed. What remains is device-bound verification (below), not construction.
 
 - [x] **P0** **L2 — severance — DONE** (round `mobile-severance`; re-verified on `ea7b2df1`,
   2026-10-12). Delivered: `Admin.Shared`'s `Microsoft.AspNetCore.App` `FrameworkReference` became
@@ -345,24 +346,45 @@ severance landed — and it has landed, so device TFMs now build.
   `Core` was *itself* a carrier, because its `JwtBearer`/`OpenIdConnect` packages declare the
   framework reference; the 12-file contacts/guardian family moved to `Students.Application`; and
   `Students.Core` / `Students.Contracts` dropped their unused `ServiceDefaults` references.
-  Verified: `-f net10.0-android` **0 errors**; root solution 0 errors; ArchitectureTests 105, Admin 651,
+  Verified at L2 (2026-10-12; these are the L2-day numbers — later layers moved them):
+  `-f net10.0-android` **0 errors**; root solution 0 errors; ArchitectureTests 105, Admin 651,
   Core 126, Students 624, Assignments 1109, Mobile 8 — 0 failures. The mobile CI job asserts
   `-f net10.0-android` but is still skipped behind `ENABLE_MAUI_CI`. *Source:* `mobile-hybrid-app.md`
   §8 L2; `documents/rounds/round-mobile-severance.md`.
-- [ ] **P0** **L3 — credential + registration path.** New public Keycloak client (PKCE via
-  `WebAuthenticator`), mapper parity plus an audience mapper emitting `school-collab-client`, a bearer
-  `DelegatingHandler`, tokens in `SecureStorage` (never `sessionStorage`/`localStorage`), the
-  client-side `AuthenticationStateProvider` bridge, and the client-side registration of the module
-  clients (replacing ~22 registrations / ~204 lines of `ModuleServices.cs`). *Source:* §8 L3.
-- [ ] **P2** **L4 — first vertical slice** (assignments list → detail): mobile-first layouts built from
-  the 94-component layer; opens with its own severance-or-copy decision, because
-  `Assignments.Application` → `Students.Application` → `Students.Core` re-imports the closure L2
-  removes. *Source:* §8 L4, §9 OD1.
-- [ ] **P2** **Open decisions the spec still carries:** OD2 (token refresh policy), OD3 (how much of
-  the Logic split is enforced), OD4 (dev-loop base URL). *Source:* §9.
-- [ ] **P2** **G5 — wiring guards:** decide whether `CrossModuleWiringTests` is extended to the mobile
-  head or the head is recorded as permanently outside its `AddProject`-derived host model.
-  *Source:* `maui-agent-skills-readiness.md` §4 G5.
+- [x] **P0** **L3 — credential + registration path — DONE** (round `mobile-credential`; merged `#343`,
+  squash `4fccd8a3`, 2026-10-13). Delivered the public PKCE client `school-collab-mobile-client` with
+  mapper parity plus an audience mapper emitting `school-collab-client` (the realm guard's
+  exact-client-set assertion widened, owner-approved, + six mobile-client tests), and in `Mobile.Logic`:
+  auth options, token store + keys, JWT payload reader, `TokenSession` (refresh with rotation,
+  memory-first sign-out), system-browser authenticator, `OidcLoginService` (Authorization Code + PKCE
+  S256), the bearer `DelegatingHandler`, the `AuthenticationStateProvider` bridge, and the client-side
+  registration of the eight clients (tokens in `SecureStorage`, never `sessionStorage`/`localStorage`).
+  Verified: android **0 errors**; root solution 0 errors; Mobile 123, ArchitectureTests 111, Core 126,
+  Admin 651, Students 624, Assignments 1118 — 0 failures; plus a **real Keycloak container** run proving
+  realm import, PKCE (S256) sign-in, a token carrying `aud`/`tenant_id`/`teacher_id`/`roles`, and
+  refresh rotation. **§8 criterion 3 (device 200-OK) carried OPEN — owner-run.** *Source:* §8 L3;
+  `documents/rounds/round-mobile-credential.md`.
+- [x] **P2** **L4 — first vertical slice — DONE** (round `mobile-assignments-slice`; merged `#344`,
+  squash `a8e38fb8`, 2026-10-13). Delivered the assignments list → detail slice: a slice-scoped
+  12-method `MobileAssignmentsApiClient`, `AssignmentsListViewModel` + `AssignmentDetailViewModel`,
+  a copied 17-line `AssignmentEnumDisplay`, five pages with isolated scoped CSS and safe-area handling,
+  and the mobile suite at **141/0** (123 → 141). The severance-or-copy decision landed as **copy, not
+  reuse** — `src/Assignments/**` untouched — because reusing `AssignmentsApiClient` would drag
+  `EffectiveAssignmentPolicy` out of the framework-carrying `Core` that L2 pinned. **§8 criterion 2
+  (safe area on both form factors) carried OPEN** (device-bound), with two low-severity UI residuals
+  and an iOS double-inset risk recorded. *Source:* §8 L4, §9 OD1;
+  `documents/rounds/round-mobile-assignments-slice.md`.
+- [ ] **P2** **The one open decision the spec still carries: OD2 (token refresh policy) — PARTIAL.**
+  L3 shipped silent refresh with rotation; the **401 → refresh → retry resend** and the
+  `session_ended`/410 mapping did **not** ship. OD3 (Logic split) closed as MET — L4 followed it, with
+  both view models and the client in `Mobile.Logic`; OD4 (dev-loop base URL) closed as MET, with the
+  emulator/LAN values deliberately developer-local. See `mobile-hybrid-app.md` §9. *Source:* §9.
+- [x] **P2** **G5 — wiring guards — DECIDED (2026-10-13): the mobile head is excluded** from
+  `CrossModuleWiringTests`' `AddProject`/`WithReference`-derived half. The literal-base-address half
+  already scans `src/**/*.cs`, which includes the head, so the load-bearing protection is in place;
+  the host-model half is structurally inapplicable to a head that is not an AppHost resource, and
+  `Aspire.Hosting.Maui` is preview-only. Revisit only if the head becomes an AppHost resource.
+  *Source:* `maui-agent-skills-readiness.md` §4 G5; `mobile-hybrid-app.md` §10.
 
 ---
 
