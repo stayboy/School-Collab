@@ -96,5 +96,24 @@ public sealed class DevIdentitySeeder(
             logger.LogInformation("Seeded dev teacher 'Dev Teacher' ({Id})", DevTeacherId);
         else
             logger.LogDebug("Dev teacher 'Dev Teacher' already exists; skipping");
+
+        // Designate 'Dev School' as the admin portal's default tenant, so a fresh dev boot
+        // opens on a real tenant instead of the system / no-tenant context. The
+        // NOT EXISTS guard is the whole point: this fills the "nothing designated yet" state
+        // and never overwrites a designation an operator made in the /tenants surface — which
+        // also keeps it clear of the partial unique index (ix_tenants_is_default_unique),
+        // since the guard is exactly the index's own predicate.
+        var designatedDefault = await settingsDb.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE tenants
+               SET is_default = true, updated_at = now()
+             WHERE id = {0}
+               AND NOT EXISTS (SELECT 1 FROM tenants WHERE is_default)
+            """,
+            new object[] { DevSchoolTenantId }, ct);
+        if (designatedDefault > 0)
+            logger.LogInformation("Designated 'Dev School' ({Id}) as the admin portal default tenant", DevSchoolTenantId);
+        else
+            logger.LogDebug("An admin portal default tenant is already designated; leaving it alone");
     }
 }

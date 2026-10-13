@@ -106,6 +106,40 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.ToTable("outbox_messages", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.AdminUserPreference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("DefaultTenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("default_tenant_id");
+
+                    b.Property<string>("SubjectId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("subject_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_admin_user_preferences");
+
+                    b.HasIndex("SubjectId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_admin_user_preferences_subject_id_unique");
+
+                    b.ToTable("admin_user_preferences", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.CodedValue", b =>
                 {
                     b.Property<Guid>("Id")
@@ -435,6 +469,12 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_default");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -455,6 +495,11 @@ namespace SchoolCollab.Settings.Core.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_tenants");
+
+                    b.HasIndex("IsDefault")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenants_is_default_unique")
+                        .HasFilter("is_default");
 
                     b.HasIndex("Name")
                         .IsUnique()

@@ -15,6 +15,11 @@
             Description: "Manage categories, subjects, grades, and other reference data.",
             Icon: new Icons.Regular.Size24.Tag()),
 
+        new(Href: "/tenants",
+            Title: "Tenants",
+            Description: "Review the tenant registry and choose which tenant the admin portal opens on by default.",
+            Icon: new Icons.Regular.Size24.Building()),
+
         new(Href: "/entity-code-rules",
             Title: "Generation Rules",
             Description: "Auto-generated codes for students, staff, and assignments.",
@@ -36,7 +41,7 @@
             Icon: new Icons.Regular.Size24.Sparkle()),
     ];
 
-    @* Future settings (tenants, integrations, audit retention, …) will land
-       here as additional DashboardItem entries. Keeping the surface area
-       small until a real consumer needs the entry avoids dead navigation. *@
+    @* Future settings (integrations, audit retention, …) will land here as additional
+       DashboardItem entries. Keeping the surface area small until a real consumer needs
+       the entry avoids dead navigation. *@
 }
