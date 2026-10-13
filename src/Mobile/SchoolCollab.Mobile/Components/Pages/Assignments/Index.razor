@@ -1,0 +1,228 @@
+@page "/assignments"
+@using Microsoft.AspNetCore.Components.Authorization
+@using SchoolCollab.Assignments.Contracts
+@inject AssignmentsListViewModel ViewModel
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject OidcLoginService Login
+@implements IDisposable
+
+@* The mobile assignments list (L4's first slice). The desktop page it replaces renders a data grid and
+   a full toolbar; this screen is phone-first — a status chip row, a search box and one card per
+   assignment — widened to a two-column grid on a tablet by Index.razor.css. The view model owns every
+   API call and is shared with the cards, so no child component fetches anything.
+
+   Every styling hook sits on a plain element authored HERE: a child component's rendered root takes the
+   CHILD's CSS-isolation scope, so a rule in this file would silently never match a FluentUI component. *@
+
+<PageTitle>Assignments</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        @* The shared tenant gate: a signed-in session without a real tenant sees the same sign-in
+           call to action rather than a list it cannot load. *@
+        <TenantGate>
+            <ChildContent>
+                <section class="assignments">
+                    <header class="assignments__header">
+                        <h1 class="assignments__title">Assignments</h1>
+                        <div class="assignments__search">
+                            <FluentSearch Placeholder="Search assignments…"
+                                          AriaLabel="Search assignments"
+                                          Immediate="true"
+                                          @bind-Value="_searchText"
+                                          @bind-Value:after="OnSearchChangedAsync" />
+                        </div>
+                    </header>
+
+                    <div class="assignments__filters" role="group" aria-label="Filter by status">
+                        @foreach (var filter in StatusFilterOptions)
+                        {
+                            <FluentButton Appearance="@(ViewModel.StatusFilter == filter.Value ? Appearance.Accent : Appearance.Outline)"
+                                          aria-pressed="@(ViewModel.StatusFilter == filter.Value)"
+                                          OnClick="@(() => SelectStatusAsync(filter.Value))">
+                                @filter.Label
+                            </FluentButton>
+                        }
+                    </div>
+
+                    @if (ViewModel.IsLoading)
+                    {
+                        <div class="assignments__busy" role="status" aria-label="Loading assignments">
+                            <FluentProgressRing />
+                        </div>
+                    }
+                    else if (ViewModel.Error is not null)
+                    {
+                        @* Only a LOAD failure owns this branch: it is the state that replaces the list.
+                           A failed action renders below instead, over the rows it acted on. *@
+                        <div class="assignments__failure">
+                            <FluentMessageBar Intent="MessageIntent.Error" Title="@ViewModel.ErrorTitle">
+                                @ViewModel.Error
+                            </FluentMessageBar>
+                            <FluentButton Appearance="Appearance.Outline" OnClick="RetryLoadAsync">Retry</FluentButton>
+                        </div>
+                    }
+                    else
+                    {
+                        @if (ViewModel.ActionError is not null)
+                        {
+                            @* An action failure must never take the list away from the user: the rows,
+                               and with them the button that failed, stay tappable — which is what makes
+                               "Try again" a recovery rather than the only way back. *@
+                            <div class="assignments__failure">
+                                <FluentMessageBar Intent="MessageIntent.Error" Title="@ViewModel.ActionErrorTitle">
+                                    @ViewModel.ActionError
+                                </FluentMessageBar>
+                                <FluentButton Appearance="Appearance.Outline" OnClick="RetryActionAsync">Try again</FluentButton>
+                            </div>
+                        }
+
+                        @if (ViewModel.DisplayItems is { Length: > 0 } assignments)
+                        {
+                            <ul class="assignments__cards">
+                                @foreach (var assignment in assignments)
+                                {
+                                    <li class="assignments__slot">
+                                        <AssignmentCard Item="assignment" ViewModel="ViewModel" />
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <div class="assignments__notice">
+                                <FluentMessageBar Intent="MessageIntent.Info">@ViewModel.EmptyMessage</FluentMessageBar>
+                            </div>
+                        }
+                    }
+                </section>
+            </ChildContent>
+            <Fallback>
+                @TenantMissingCallToAction
+            </Fallback>
+        </TenantGate>
+    </Authorized>
+    <NotAuthorized>
+        @SignInCallToAction
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private static readonly (AssignmentStatusDto? Value, string Label)[] StatusFilterOptions =
+    [
+        (null, "All"),
+        (AssignmentStatusDto.Draft, "Draft"),
+        (AssignmentStatusDto.Published, "Published"),
+        (AssignmentStatusDto.Closed, "Closed"),
+        (AssignmentStatusDto.Scheduled, "Scheduled"),
+        (AssignmentStatusDto.Archived, "Archived"),
+    ];
+
+    private string? _searchText;
+    private bool _signingIn;
+    private string? _signInError;
+
+    /// <summary>
+    /// The unauthenticated call to action — the <c>AuthorizeView</c> branch. Deliberately not the tenant
+    /// gate's: a signed-in session with no tenant must not be told to sign in (see
+    /// <see cref="TenantMissingCallToAction"/>).
+    /// </summary>
+    private RenderFragment SignInCallToAction => CallToAction(
+        "Sign in to see the assignments for your school.",
+        "Sign in");
+
+    /// <summary>
+    /// The tenant gate's fallback: this session IS signed in, it just carries no usable tenant claim, so
+    /// "sign in" described the wrong gate. The action re-acquires the session — the only recovery this
+    /// head has, since it ships no tenant switcher.
+    /// </summary>
+    private RenderFragment TenantMissingCallToAction => CallToAction(
+        "This session is not linked to a school, so it has no assignments to show. "
+            + "Sign in again with your school account.",
+        "Sign in again");
+
+    /// <summary>The gate fallbacks' shared body — one sign-in control, two honest copies.</summary>
+    private RenderFragment CallToAction(string message, string buttonLabel) => @<div class="assignments__sign-in">
+        <p class="assignments__sign-in-text">@message</p>
+        <FluentButton Appearance="Appearance.Accent"
+                      Disabled="@_signingIn"
+                      aria-busy="@_signingIn"
+                      OnClick="SignInAsync">
+            @buttonLabel
+        </FluentButton>
+        @if (_signInError is not null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" Title="Sign-in failed">
+                @_signInError
+            </FluentMessageBar>
+        }
+    </div>;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ViewModel.Changed += OnViewModelChanged;
+        await LoadIfSignedInAsync();
+    }
+
+    /// <summary>
+    /// Loads only for an authenticated session: a signed-out visitor sees the call to action, and the
+    /// load is retried the moment the sign-in succeeds (<see cref="SignInAsync"/>), so the screen is
+    /// never left empty after the gate flips.
+    /// </summary>
+    private async Task LoadIfSignedInAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            await ViewModel.LoadAsync();
+        }
+    }
+
+    private async Task SignInAsync()
+    {
+        _signingIn = true;
+        _signInError = null;
+        StateHasChanged();
+
+        try
+        {
+            await Login.SignInAsync();
+            await ViewModel.LoadAsync();
+        }
+        catch (SignInCancelledException)
+        {
+            // The user dismissed the system browser: the screen simply stays signed out.
+        }
+        catch (SignInFailedException ex)
+        {
+            _signInError = ex.Message;
+        }
+        catch (TokenStoreException ex)
+        {
+            // The device's keystore refused the session — the credential was acquired but discarded,
+            // so the app stays signed out and the typed message is what the user needs to see.
+            _signInError = ex.Message;
+        }
+        finally
+        {
+            _signingIn = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task SelectStatusAsync(AssignmentStatusDto? filter) => ViewModel.SetStatusFilterAsync(filter);
+
+    private Task OnSearchChangedAsync() => ViewModel.SearchAsync(_searchText);
+
+    private Task RetryLoadAsync() => ViewModel.LoadAsync();
+
+    private Task RetryActionAsync() => ViewModel.RetryActionAsync();
+
+    private void OnViewModelChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        ViewModel.Changed -= OnViewModelChanged;
+        ViewModel.Dispose();
+    }
+}

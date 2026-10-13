@@ -26,8 +26,15 @@ public class MobileClientRegistrationTests
 {
     private const int SettingsApiPort = 7460;
 
+    private const int AssignmentsApiPort = 7199;
+
     private static readonly string SettingsBaseAddress =
         new UriBuilder(Uri.UriSchemeHttps, "settings.example", SettingsApiPort).Uri.ToString();
+
+    /// <summary>The assignments base address, deliberately on a DIFFERENT host and port from the
+    /// Settings one: a registration that resolved the wrong API name would otherwise pass unnoticed.</summary>
+    private static readonly string AssignmentsBaseAddress =
+        new UriBuilder(Uri.UriSchemeHttps, "assignments.example", AssignmentsApiPort).Uri.ToString();
 
     private static readonly Type[] AdminSharedClients =
     [
@@ -156,10 +163,51 @@ public class MobileClientRegistrationTests
     }
 
     /// <summary>
+    /// The assignments slice's registration: the client binds to the configured ASSIGNMENTS address
+    /// (never the Settings one) and carries the session's bearer token, and — because the mobile screens
+    /// <c>@inject</c> them — both view models resolve. A missing view-model registration compiles
+    /// perfectly and throws only when the screen renders, which is exactly what this test exists for.
+    /// </summary>
+    [TestMethod]
+    public async Task AddMobileAssignmentsApiClient_BindsTheAssignmentsClient_AndRegistersTheScreenViewModels()
+    {
+        var assignmentsHandler = new RecordingHandler();
+        var apiOptions = MobileApiOptions.FromConfiguration(BuildConfiguration(
+            ("MobileApi:AssignmentsApi", AssignmentsBaseAddress)));
+
+        using var provider = BuildProvider(apiOptions, assignmentsHandler: assignmentsHandler);
+        await provider.GetRequiredService<ITokenStore>().WriteAsync(TokenKeys.AccessToken, "session-access-token");
+        await provider.GetRequiredService<ITokenStore>().WriteAsync(
+            TokenKeys.ExpiresAt,
+            DateTimeOffset.UtcNow.AddMinutes(5).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+
+        await provider.GetRequiredService<MobileAssignmentsApiClient>().ListAsync();
+
+        var request = assignmentsHandler.Requests.Should().ContainSingle().Subject;
+        request.RequestUri!.Host.Should().Be("assignments.example",
+            "the client resolves MobileApi.AssignmentsApi — not the Settings address L3's group uses.");
+        request.RequestUri!.Port.Should().Be(AssignmentsApiPort);
+        request.RequestUri!.AbsolutePath.Should().Be("/assignments");
+        assignmentsHandler.AuthorizationHeaders.Should().ContainSingle()
+            .Which.Should().Be("Bearer session-access-token",
+                "the bearer handler is in the registered client's pipeline.");
+
+        var list = provider.GetRequiredService<AssignmentsListViewModel>();
+        var detail = provider.GetRequiredService<AssignmentDetailViewModel>();
+        list.Should().NotBeNull();
+        detail.Should().NotBeNull();
+        provider.GetRequiredService<AssignmentsListViewModel>().Should().NotBeSameAs(list,
+            "the view models are transient, so one screen's optimistic row state can never leak into another's.");
+    }
+
+    /// <summary>
     /// The head's real composition, minus the two platform implementations (they are head-only types):
     /// the auth path, the client registrations, and the logging/token seams the container needs.
     /// </summary>
-    private static ServiceProvider BuildProvider(MobileApiOptions apiOptions, RecordingHandler? primaryHandler = null)
+    private static ServiceProvider BuildProvider(
+        MobileApiOptions apiOptions,
+        RecordingHandler? primaryHandler = null,
+        RecordingHandler? assignmentsHandler = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -174,6 +222,7 @@ public class MobileClientRegistrationTests
 
         services.AddMobileAuth(authOptions);
         services.AddMobileAdminClients(apiOptions);
+        services.AddMobileAssignmentsApiClient(apiOptions);
 
         if (primaryHandler is not null)
         {
@@ -181,6 +230,12 @@ public class MobileClientRegistrationTests
             // test sees exactly the request the registered pipeline produces.
             services.AddHttpClient<CodedValuesApiClient>()
                 .ConfigurePrimaryHttpMessageHandler(() => primaryHandler);
+        }
+
+        if (assignmentsHandler is not null)
+        {
+            services.AddHttpClient<MobileAssignmentsApiClient>()
+                .ConfigurePrimaryHttpMessageHandler(() => assignmentsHandler);
         }
 
         return services.BuildServiceProvider();

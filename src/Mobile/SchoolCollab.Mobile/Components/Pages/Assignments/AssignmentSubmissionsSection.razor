@@ -1,0 +1,126 @@
+@using SchoolCollab.Assignments.Contracts
+
+@* The detail screen's read-only submissions section: the submission list, and the per-student view
+   (version history + review result) the user opens from it. It renders what the view model loaded and
+   reports its two intents back — it performs no fetch of its own. The review/grade FORMS are out of
+   slice scope (OD-2), so the per-student view is read-only. Styles: AssignmentSubmissionsSection.razor.css. *@
+
+<section class="submissions">
+    <h2 class="submissions__title">Submissions</h2>
+
+    @if (Busy)
+    {
+        <div class="submissions__busy" role="status" aria-label="Loading submission">
+            <FluentProgressRing />
+        </div>
+    }
+    else if (SelectedSubmission is { } submission)
+    {
+        <div class="submissions__detail">
+            <FluentButton Appearance="Appearance.Outline" OnClick="@OnBack">← All submissions</FluentButton>
+
+            <h3 class="submissions__student">Student @submission.StudentId</h3>
+            <p class="submissions__meta">
+                Current version @submission.CurrentVersionNumber ·
+                Review: @AssignmentEnumDisplay.GetDescription(submission.ReviewState)
+            </p>
+
+            <h4 class="submissions__subtitle">Version history</h4>
+            <ul class="submissions__versions">
+                @foreach (var version in submission.Versions)
+                {
+                    <li class="submissions__version">
+                        <div class="submissions__version-header">
+                            <span class="submissions__version-number">Version @version.VersionNumber</span>
+                            <span class="submissions__version-source">@AssignmentEnumDisplay.GetDescription(version.Source)</span>
+                        </div>
+                        <div class="submissions__version-fields">
+                            <FieldDisplay Label="Submitted">@version.SubmittedAt.ToLocalTime().ToString("g")</FieldDisplay>
+                            <FieldDisplay Label="Score">@(version.Score?.ToString("0.##") ?? "—")</FieldDisplay>
+                            <FieldDisplay Label="Passed">@PassedText(version)</FieldDisplay>
+                            <FieldDisplay Label="Content">@(version.Content ?? "—")</FieldDisplay>
+                        </div>
+                    </li>
+                }
+            </ul>
+
+            @if (submission.Review is { } review)
+            {
+                <div class="submissions__notice">
+                    <FluentMessageBar Intent="MessageIntent.Success" Title="Reviewed">
+                        @ReviewText(review)
+                    </FluentMessageBar>
+                </div>
+            }
+        </div>
+    }
+    else if (Submissions is null || Submissions.Length == 0)
+    {
+        <div class="submissions__notice">
+            <FluentMessageBar Intent="MessageIntent.Info">No submissions yet.</FluentMessageBar>
+        </div>
+    }
+    else
+    {
+        <ul class="submissions__list">
+            @foreach (var entry in Submissions)
+            {
+                <li class="submissions__card">
+                    <div class="submissions__header">
+                        <span class="submissions__student">Student @entry.StudentId</span>
+                        <FluentBadge Appearance="Appearance.Neutral">Version @entry.CurrentVersionNumber</FluentBadge>
+                    </div>
+                    <div class="submissions__fields">
+                        <FieldDisplay Label="Review">@AssignmentEnumDisplay.GetDescription(entry.ReviewState)</FieldDisplay>
+                        <FieldDisplay Label="Last submitted">@entry.LastSubmittedAt.ToLocalTime().ToString("g")</FieldDisplay>
+                    </div>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OnSelect.InvokeAsync(entry.StudentId))">
+                        View
+                    </FluentButton>
+                </li>
+            }
+        </ul>
+    }
+
+    @if (Error is not null)
+    {
+        <div class="submissions__notice">
+            <FluentMessageBar Intent="MessageIntent.Error">@Error</FluentMessageBar>
+        </div>
+    }
+</section>
+
+@code {
+    /// <summary>The loaded submissions; <see langword="null"/> or empty renders the empty state.</summary>
+    [Parameter] public SubmissionForReviewDto[]? Submissions { get; set; }
+
+    /// <summary>The per-student submission the user opened, if any.</summary>
+    [Parameter] public SubmissionDetailDto? SelectedSubmission { get; set; }
+
+    /// <summary>Whether the per-student read is in flight.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>The per-student read's failure message, if any.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>Raised with a student id when the user opens that student's submission.</summary>
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+
+    /// <summary>Raised when the user returns from the per-student view to the list.</summary>
+    [Parameter] public EventCallback OnBack { get; set; }
+
+    private static string PassedText(SubmissionVersionDto version) => version.Passed switch
+    {
+        null => "—",
+        true => "Passed",
+        false => "Failed"
+    };
+
+    private static string ReviewText(SubmissionReviewDto review)
+    {
+        var score = review.Score?.ToString("0.##") ?? "—";
+        var grade = string.IsNullOrWhiteSpace(review.Grade) ? string.Empty : $" {review.Grade}";
+        var comments = string.IsNullOrWhiteSpace(review.Comments) ? string.Empty : $" — {review.Comments}";
+        return $"{score}{grade}{comments}";
+    }
+}

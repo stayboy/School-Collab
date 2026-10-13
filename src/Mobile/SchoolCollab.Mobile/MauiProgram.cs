@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Mobile.Logic;
 using SchoolCollab.Mobile.Services;
 
@@ -53,7 +54,19 @@ public static class MauiProgram
 
         builder.Services
             .AddMobileAuth(authOptions)
-            .AddMobileAdminClients(apiOptions);
+            .AddMobileAdminClients(apiOptions)
+            .AddMobileAssignmentsApiClient(apiOptions);
+
+        // The FluentUI services the screens resolve (IDialogService backs the confirm-gated delete; the
+        // provider it renders into is in MainLayout) and the authorization services <AuthorizeView>
+        // needs. BOTH authorization registrations are required and neither adds a package: they live in
+        // Microsoft.AspNetCore.Components.Authorization, which Mobile.Logic already references.
+        // AddAuthorizationCore supplies IAuthorizationService/IAuthorizationPolicyProvider;
+        // AddCascadingAuthenticationState supplies the cascading Task<AuthenticationState> that
+        // AuthorizeViewCore resolves or throws on (verified against the 10.0.8 assembly).
+        builder.Services.AddFluentUIComponents();
+        builder.Services.AddAuthorizationCore();
+        builder.Services.AddCascadingAuthenticationState();
 
         builder.Services.AddMauiBlazorWebView();
 

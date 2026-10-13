@@ -1,0 +1,47 @@
+@using SchoolCollab.Assignments.Contracts
+
+@* The detail screen's read-only recipients section. It renders the array the view model already
+   loaded — it performs no fetch of its own, so a thin or failing recipients endpoint can never
+   change when or whether the detail screen loads. Styles: AssignmentRecipientsSection.razor.css. *@
+
+<section class="recipients">
+    <h2 class="recipients__title">Recipients</h2>
+
+    @if (Recipients is null || Recipients.Length == 0)
+    {
+        <div class="recipients__notice">
+            <FluentMessageBar Intent="MessageIntent.Info">
+                No recipients yet. Publish the assignment to notify subscribed student/guardian contacts.
+            </FluentMessageBar>
+        </div>
+    }
+    else
+    {
+        <ul class="recipients__list">
+            @foreach (var recipient in Recipients)
+            {
+                <li class="recipients__card">
+                    <div class="recipients__header">
+                        <span class="recipients__owner">@AssignmentEnumDisplay.GetDescription(recipient.OwnerType)</span>
+                        <FluentBadge Appearance="@(recipient.SubscriptionActive ? Appearance.Accent : Appearance.Neutral)">
+                            @(recipient.SubscriptionActive ? "Active" : "Inactive")
+                        </FluentBadge>
+                    </div>
+                    <div class="recipients__fields">
+                        <FieldDisplay Label="Channel">@AssignmentEnumDisplay.GetDescription(recipient.Channel)</FieldDisplay>
+                        <FieldDisplay Label="Role">@RoleText(recipient)</FieldDisplay>
+                        <FieldDisplay Label="Broadcast">@(recipient.NotifyOnBroadcast ? "Yes" : "No")</FieldDisplay>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    /// <summary>The loaded recipients; <see langword="null"/> renders the empty state.</summary>
+    [Parameter] public AssignmentRecipientDto[]? Recipients { get; set; }
+
+    private static string RoleText(AssignmentRecipientDto recipient) =>
+        recipient.Role is { } role ? AssignmentEnumDisplay.GetDescription(role) : "—";
+}

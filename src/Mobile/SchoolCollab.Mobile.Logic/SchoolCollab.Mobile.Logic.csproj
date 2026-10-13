@@ -25,6 +25,11 @@
     <!-- The Admin.Shared design-system RCL: the clients (and VisibleTenantService) this project
          registers client-side. The same edge the server-side module Application projects carry. -->
     <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
+    <!-- The assignments slice's DTOs. Contracts only, never Assignments.Application: that project's
+         closure carries a Microsoft.AspNetCore.App FrameworkReference (through Students.Application),
+         which is the carrier that broke the head's net10.0-android build before L2 removed it. This
+         project is net10.0 with no packages and no framework references. -->
+    <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
   </ItemGroup>
 
 </Project>
