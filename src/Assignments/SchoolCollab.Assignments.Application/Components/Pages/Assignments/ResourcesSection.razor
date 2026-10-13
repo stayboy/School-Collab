@@ -20,6 +20,12 @@
            CR-10…CR-12 and every X-6 string stay in force. *@
     </div>
 
+    @* Owner pill rework (2026-10-12): while the authoring page's recorder takeover shows, the upload
+       tile hides with it (a drop target must not compete with a live capture surface) — the section's
+       existing attachments list stays visible. The parameter is the seam; the page drives it from its
+       RecorderStateChanged flag. *@
+    @if (!SuppressUploadTile)
+    {
     @* CR-2/CR-3: the tile IS the drop zone — FluentInputFile keeps its own drag-drop
        surface and its own "Upload files" trigger (no JS, no hidden-element click),
        wrapped in the reference's barely-filled inner tile. *@
@@ -50,6 +56,7 @@
             <p class="cq-tile-empty">No resources attached yet.</p>
         }
     </div>
+    }
 
     @if (!string.IsNullOrEmpty(_error))
     {
@@ -160,6 +167,11 @@
     /// <summary>R3 (D3): the assignment whose persisted attachments can be re-extracted, or null on a
     /// Create surface (nothing is stored yet).</summary>
     [Parameter] public Guid? AssignmentId { get; set; }
+
+    /// <summary>Owner pill rework (2026-10-12): hides the upload tile while the page's recorder
+    /// takeover shows (a drop target must not compete with a live capture surface); the section's
+    /// existing attachments list stays visible.</summary>
+    [Parameter] public bool SuppressUploadTile { get; set; }
 
     private string? _error;
     private bool _staging;

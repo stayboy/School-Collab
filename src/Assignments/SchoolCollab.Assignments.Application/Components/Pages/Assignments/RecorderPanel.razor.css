@@ -1,19 +1,34 @@
-/* Scoped styles for the inline recorder (spec recording-materials D3). The panel sits inside a
-   media row's capture slot, so it stays compact and breaks onto its own lines — the row above it
-   keeps its single-line layout, and the panel never squashes the upload control. */
+/* Scoped styles for the inline recorder (spec recording-materials D3; round-recorder-takeover). The
+   panel is now a full-container TAKEOVER: while it is open the host list hides its rows/dropzone/add
+   button and the panel fills the whole component container, so sizing is fluid (preview at container
+   width, height-capped) rather than the old 320px hug of a media row's capture slot. */
 
 .recorder-panel {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    /* Fills the list column — the panel is its own list item beneath the row, never a flex child of
-       the row's single-line layout. */
+    /* Fills the takeover frame — the panel's column layout (header · preview · controls · delivery)
+       keeps every element on its own line and stretches into the space the list body occupied. */
     width: 100%;
     min-width: 240px;
-    padding: 10px;
+    min-height: 160px;
+    padding: 16px;
     border: 1px solid var(--neutral-stroke-rest);
     border-radius: var(--border-radius, 4px);
     background: var(--neutral-layer-1);
+}
+
+/* The header bar (Q3): title left, labeled Cancel right — rendered in every state, so the close
+   affordance is never unreachable. */
+.recorder-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.recorder-title {
+    font-weight: 600;
 }
 
 .recorder-unsupported {
@@ -22,16 +37,32 @@
     color: var(--neutral-foreground-hint);
 }
 
-/* The live camera preview: bounded so a 720p stream never blows the panel (and a collapsed video
-   element would otherwise render at its intrinsic size before a stream binds). */
+/* The live camera preview (Q4 fluid sizing): full container width, 16:9, height-capped so a 720p
+   stream never blows the viewport (and a collapsed video element would otherwise render at its
+   intrinsic size before a stream binds). object-fit: contain — the whole frame stays visible. */
 .recorder-preview {
     display: block;
     width: 100%;
-    max-width: 320px;
     aspect-ratio: 16 / 9;
+    max-height: min(50vh, 480px);
     background: var(--neutral-fill-secondary);
     border-radius: var(--border-radius, 4px);
-    object-fit: cover;
+    object-fit: contain;
+}
+
+/* Owner rework (2026-10-12): the display rule above would otherwise beat the UA [hidden] rule, so the
+   live preview's hidden state (Review — the frozen frame must not sit beside the take's player) needs
+   its own kill-switch. The element stays in the DOM for RetakeAsync's startCapture re-bind by id. */
+.recorder-preview[hidden] {
+    display: none;
+}
+
+/* The review-state <audio> (was unstyled): full width up to a spoken-word cap — now a standalone
+   block, no longer squeezed into the controls row (owner rework, 2026-10-12). */
+.recorder-audio {
+    display: block;
+    width: 100%;
+    max-width: 560px;
 }
 
 .recorder-controls {

@@ -494,24 +494,31 @@
                                                        EditRowRequested="OnMaterialEditRequestedAsync"
                                                        StageMediaAsync="StageInstructionMediaAsync"
                                                        Changed="OnModelChanged"
+                                                       RecorderStateChanged="OnMaterialRecorderStateChangedAsync"
                                                        ReadOnly="@IsReadOnly" />
 
-                                <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
-                                    <FluentInputFile Mode="InputFileMode.Stream"
-                                                     MaximumFileCount="1"
-                                                     MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
-                                                     Accept="@AttachmentUploadPolicy.AcceptExtensions"
-                                                     OnCompleted="@OnMaterialDroppedAsync"
-                                                     DragDropZoneVisible="true">
-                                        Drop files here — images, audio or video become materials; PDFs and documents become references
-                                    </FluentInputFile>
-                                </div>
-                                @if (_materialRefusal is not null)
+                                @* Owner rework (2026-10-12): the dropzone (and its refusal bar) hide while
+                                   the recorder takeover shows in the list above — a live capture surface
+                                   must not compete with a drop target (RecorderStateChanged signal). *@
+                                @if (!_materialRecorderOpen)
                                 {
-                                    @* D5: the refusal is surfaced, named and actionable — a
-                                       FluentMessageBar, the shape every other error here takes. *@
-                                    <FluentMessageBar Id="authoring-materials-refusal"
-                                                      Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
+                                    <div class="authoring-materials-dropzone" id="authoring-materials-dropzone">
+                                        <FluentInputFile Mode="InputFileMode.Stream"
+                                                         MaximumFileCount="1"
+                                                         MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                                                         Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                                                         OnCompleted="@OnMaterialDroppedAsync"
+                                                         DragDropZoneVisible="true">
+                                            Drop files here — images, audio or video become materials; PDFs and documents become references
+                                        </FluentInputFile>
+                                    </div>
+                                    @if (_materialRefusal is not null)
+                                    {
+                                        @* D5: the refusal is surfaced, named and actionable — a
+                                           FluentMessageBar, the shape every other error here takes. *@
+                                        <FluentMessageBar Id="authoring-materials-refusal"
+                                                          Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
+                                    }
                                 }
                                     </ChildContent>
                                 </PanelSection>
@@ -672,7 +679,7 @@
                                (title + count + the + that reveals the link input), so the page
                                renders no duplicate heading here — X-1 still holds because the
                                h3 is a descendant of #authoring-content. *@
-                            <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" />
+                            <ResourcesSection Model="_model" Changed="OnModelChanged" AssignmentId="_item?.Id" SuppressUploadTile="@_materialRecorderOpen" />
                         }
                     </section>
                     }
@@ -2673,6 +2680,17 @@
     /// (round grill Q1): the section supplies the add affordance, so the list renders no button of its
     /// own here.</summary>
     private InstructionEditorList? _instructionList;
+
+    /// <summary>Owner rework (2026-10-12): true while the materials recorder takeover shows — the
+    /// section's own dropzone (and its refusal bar) hide with it; a live capture surface must not
+    /// compete with a drop target.</summary>
+    private bool _materialRecorderOpen;
+
+    private Task OnMaterialRecorderStateChangedAsync(bool isOpen)
+    {
+        _materialRecorderOpen = isOpen;
+        return Task.CompletedTask;
+    }
 
     /// <summary>The Student guidance rich editor (round <c>wysiwyg-instruction-editor</c>). The wrapper
     /// has no change callback (G6), so the page reads its HTML when it saves — see <c>SaveAsync</c> — and

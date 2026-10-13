@@ -3,8 +3,10 @@ using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
+using Microsoft.JSInterop;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+using SchoolCollab.Assignments.Application.Helpers;
 using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
@@ -94,8 +96,11 @@ public class InstructionEditorListBunitTests : BunitContext
         cut.Markup.Should().Contain("https://", "a link row takes a URL, not free text");
     }
 
+    /// <summary>Owner pill rework (2026-10-12): a staged media item WITHOUT a session take (uploaded, or
+    /// reloaded later) reads as kind icon + size text — no raw-filename dump, and the clear-file × is
+    /// retired; the row's trailing remove × is the single close.</summary>
     [TestMethod]
-    public void StagedMedia_RendersTheFileNameAndItsClearAction()
+    public void StagedMedia_RendersTheSizeText_WithNoClearAction()
     {
         var cut = Render(
         [
@@ -109,8 +114,12 @@ public class InstructionEditorListBunitTests : BunitContext
             },
         ]);
 
-        cut.Markup.Should().Contain("how-to.mp3");
-        cut.Find("#instr-clear-media-0").Should().NotBeNull();
+        cut.Markup.Should().Contain(AttachmentUploadPolicy.FormatFileSize(2048),
+            "the size reads instead of the raw filename");
+        cut.FindAll("#instr-clear-media-0").Should().BeEmpty(
+            "the clear-file × is retired — one close per row (owner, 2026-10-12)");
+        cut.Find("#instr-remove-0").Should().NotBeNull(
+            "the row's remove × is that single close");
     }
 
     [TestMethod]
@@ -318,7 +327,9 @@ public class InstructionEditorListBunitTests : BunitContext
     }
 
     /// <summary>Grill Q3: media rows are staged, not formed — the file IS the value, so Dialog mode
-    /// leaves them on the stage/clear flow.</summary>
+    /// leaves them on the staged-file flow (owner pill rework, 2026-10-12: the flow now reads as the
+    /// compact size-text pill; the clear-file × is retired and the row's remove × is the single close).
+    ///</summary>
     [TestMethod]
     public void DialogMode_LeavesMediaRowsOnTheStagedFileFlow()
     {
@@ -339,8 +350,11 @@ public class InstructionEditorListBunitTests : BunitContext
             .Add(c => c.EditingMode, RowEditingMode.Dialog));
 
         cut.FindAll("#instr-edit-0").Should().BeEmpty("a staged file is not seeded into a form");
-        cut.Markup.Should().Contain("clip.mp3");
-        cut.Find("#instr-clear-media-0").Should().NotBeNull("the staged-file flow is untouched");
+        cut.FindAll(".cq-instruction-file").Should().ContainSingle(
+            "the staged file still reads in the row (size text, title tooltip)");
+        cut.FindAll("#instr-clear-media-0").Should().BeEmpty(
+            "the clear-file × is retired — the row's remove × is the single close");
+        cut.Find("#instr-remove-0").Should().NotBeNull("…and the staged-file flow keeps its exit");
     }
 
     /// <summary>AC-14 (write-back half): the applied result lands on the row through the LIST — it stays
@@ -433,6 +447,221 @@ public class InstructionEditorListBunitTests : BunitContext
         rows.Should().ContainSingle().Which.Kind.Should().Be(InstructionKindDto.Video);
         cut.FindComponents<RecorderPanel>().Should().ContainSingle(
             "the appended row's inline recorder is open");
+    }
+
+    /// <summary>Round-recorder-takeover AC-1/AC-2: while a recorder is open the list body — rows,
+    /// dropzone, add button, row Record affordances — is NOT rendered; the takeover frame + panel
+    /// fill the container instead, and the container carries the recording marker class.</summary>
+    [TestMethod]
+    public void OpenRecorder_TakesOverTheWholeContainer()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        cut.Find("#instr-record-0").Click();
+
+        cut.FindAll("#instr-rows").Should().BeEmpty("the row list is suppressed during the takeover");
+        cut.FindAll("fluent-input-file").Should().BeEmpty("…as is the upload dropzone");
+        cut.FindAll("#instr-add").Should().BeEmpty("…and the add affordance");
+        cut.FindAll("#instr-record-0").Should().BeEmpty("row Record buttons go with the rows");
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull(
+            "the takeover frame replaces the list body");
+        cut.Find("#instr-recorder-0").Should().NotBeNull(
+            "the panel renders inside it, id'd at its row's index");
+        cut.Find(".cq-instructions").ClassList.Should().Contain("cq-instructions-recording",
+            "the container class marks the recording posture for styling");
+    }
+
+    /// <summary>AC-3 (Q5): the panel's Cancel restores the list — rows, add button, the row's Record
+    /// affordance — drops the takeover and the container class; cancel discards the take. A row the
+    /// author toggled the recorder OPEN on pre-exists the record action, so it is never dropped
+    /// (owner rework 2026-10-12 — contrast CancelRecorder_RemovesTheRowTheRecordActionAppended).</summary>
+    [TestMethod]
+    public void CancelRecorder_RestoresTheListAndKeepsTheToggledRow()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        cut.Find("#instr-record-0").Click();
+        cut.Find("#instr-recorder-0-cancel").Click();
+
+        cut.FindAll("#instr-recorder-takeover").Should().BeEmpty("Cancel closes the takeover");
+        cut.Find("#instr-rows").Should().NotBeNull("the list body comes back");
+        cut.Find("#instr-add").Should().NotBeNull("…and so does the add affordance");
+        cut.Find("#instr-record-0").Should().NotBeNull(
+            "the row keeps its Record affordance");
+        cut.Find(".cq-instructions").ClassList.Should().NotContain("cq-instructions-recording",
+            "…and the container is out of its recording posture");
+        rows.Should().ContainSingle(
+            "a toggled-open row pre-exists the record action — cancel discards the take, not the row");
+    }
+
+    /// <summary>Owner rework (2026-10-12): Cancel after the kebab's Record action must not leave
+    /// recording residue — the placeholder row the action itself appended is dropped together with
+    /// the takeover, and the empty state returns.</summary>
+    [TestMethod]
+    public async Task CancelRecorder_RemovesTheRowTheRecordActionAppended()
+    {
+        var rows = new List<InstructionEditorRow>();
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        await cut.InvokeAsync(() => cut.Instance.AddRowWithRecorderAsync(InstructionKindDto.Video));
+        cut.Find("#instr-recorder-0-cancel").Click();
+
+        rows.Should().BeEmpty("the record action's own placeholder is residue — Cancel drops it");
+        cut.FindAll("#instr-recorder-takeover").Should().BeEmpty("the takeover is closed");
+        cut.Find(".cq-instructions-empty").Should().NotBeNull(
+            "the empty state returns with the list");
+    }
+
+    /// <summary>One-recorder invariant (one camera/mic, Q5) + owner rework (2026-10-12): a second
+    /// AddRowWithRecorderAsync MOVES the takeover to the newly appended row — never a second panel —
+    /// and the first record-action placeholder (still unstaged) is dropped, so no ghost row remains.</summary>
+    [TestMethod]
+    public async Task SecondAddRowWithRecorder_MovesTheTakeover_AndDropsTheFirstPlaceholder()
+    {
+        var rows = new List<InstructionEditorRow>();
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        await cut.InvokeAsync(() => cut.Instance.AddRowWithRecorderAsync(InstructionKindDto.Audio));
+        await cut.InvokeAsync(() => cut.Instance.AddRowWithRecorderAsync(InstructionKindDto.Video));
+
+        rows.Should().ContainSingle("the first placeholder is residue and must not survive the switch")
+            .Which.Kind.Should().Be(InstructionKindDto.Video);
+        cut.FindComponents<RecorderPanel>().Should().ContainSingle(
+            "one camera/mic — a second recorder must never coexist with the first");
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the takeover MOVES with the recorder");
+        cut.Find("#instr-recorder-0").Should().NotBeNull(
+            "the panel id follows the appended row's (now sole) index");
+    }
+
+    /// <summary>Owner rework (2026-10-12): the host must learn when a recorder opens/closes — the
+    /// authoring page's materials dropzone sits outside this component and hides on the open signal.</summary>
+    [TestMethod]
+    public async Task RecorderState_Changes_AreSignalledToTheHost()
+    {
+        var rows = new List<InstructionEditorRow>();
+        var states = new List<bool>();
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.StageMediaAsync, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")))
+            .Add(c => c.RecorderStateChanged, (bool open) => states.Add(open)));
+
+        await cut.InvokeAsync(() => cut.Instance.AddRowWithRecorderAsync(InstructionKindDto.Video));
+        cut.Find("#instr-recorder-0-cancel").Click();
+
+        states.Should().Equal(new[] { true, false }, "open signalled by the kebab action, closed by Cancel");
+    }
+
+    /// <summary>Owner pill rework (2026-10-12): a committed take's session Blob URL + duration ride the
+    /// commit seam into the row's play pill — play + "m:ss" — and the pill reopens the SAME review
+    /// panel (player + Record again, no commit button). Closing keeps the entry; the row survives.</summary>
+    [TestMethod]
+    public async Task RecordedRow_Pill_ShowsDuration_AndReopensTheReviewPlayer()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Video },
+        };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:test-take", 64)));
+
+        rows[0].StoragePath.Should().Be("p", "the take staged through the same seam an upload takes");
+        cut.Find("#instr-play-0").TextContent.Should().Contain("1:04",
+            "the pill carries the take's probed duration");
+        cut.FindAll("#instr-clear-media-0").Should().BeEmpty("no clear-file × (retired)");
+
+        cut.Find("#instr-play-0").Click();
+
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the pill reopens the review takeover");
+        cut.Find("#instr-recorder-0-preview-take").Should().NotBeNull("the SAME player renders");
+        cut.Find("#instr-recorder-0-retake").Should().NotBeNull(
+            "Record again lives on the review panel, never on the listed item");
+        cut.FindAll("#instr-recorder-0-commit").Should().BeEmpty(
+            "a reopened take has nothing new to commit — it is already staged");
+
+        cut.Find("#instr-recorder-0-cancel").Click();
+
+        cut.FindAll("#instr-recorder-takeover").Should().BeEmpty("closing restores the list");
+        cut.Find("#instr-play-0").Should().NotBeNull(
+            "the session entry survives a close — the pill can reopen it");
+    }
+
+    /// <summary>Owner defect fix (2026-10-12): removing a row whose session URL cannot be revoked (the
+    /// media module is missing or its call fails — e.g. a session predating the new asset) must NEVER
+    /// blow up — revocation is best-effort, guarded as ONE try around import + call; the row removal
+    /// is what matters.</summary>
+    [TestMethod]
+    public async Task RemoveRow_WhenTheMediaModuleFails_StillRemovesTheRow()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            new() { Kind = InstructionKindDto.Video },
+        };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:doomed", 5)));
+
+        // Simulate the failing module: the revoke call throws (the same one-line guard covers a failing
+        // import — the stale-session 404 the owner hit).
+        var module = JSInterop.SetupModule(
+            "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js");
+        module.SetupVoid("revokeMediaUrl", _ => { throw new JSException("module call failed"); });
+
+        await cut.InvokeAsync(() => cut.Instance.RemoveAsync(rows[0]));
+
+        rows.Should().BeEmpty("the row is removed even though its URL could not be revoked");
+        cut.FindAll("#instr-rows").Should().BeEmpty("…and the list re-rendered empty");
+    }
+
+    /// <summary>Hold verdict 2026-10-12 (finding 2): the kebab record action opening while a pill
+    /// review is taken over must start a FRESH panel — both halves of the fix: the stale seed is
+    /// cleared AND @key forces a new instance (clearing the seed alone left the reused instance's
+    /// reopened-Review state; the key alone would have applied the stale seed).</summary>
+    [TestMethod]
+    public async Task KebabRecorder_AfterAnOpenPillReview_IsAFreshPanel()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:test-take", 64)));
+        cut.Find("#instr-play-0").Click();
+        cut.Find("#instr-recorder-0-preview-take").Should().NotBeNull(
+            "the pill reopens the seeded review takeover (the precondition of the defect)");
+
+        await cut.InvokeAsync(() => cut.Instance.AddRowWithRecorderAsync(InstructionKindDto.Video));
+
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull(
+            "the kebab action still owns the takeover");
+        cut.Markup.Should().NotContain("-preview-take",
+            "the fresh recorder must not reopen the previous take's player (stale seed + reused instance was the defect)");
+        cut.Markup.Should().NotContain("blob:test-take",
+            "the stale take's URL left the markup with the discarded panel instance");
+        // Loose mode probes to "unsupported" — the fresh panel reached its own capability branch.
+        cut.WaitForAssertion(() => cut.Find("#instr-recorder-1-unsupported").Should().NotBeNull());
+    }
+
+    /// <summary>Hold verdict 2026-10-12 (finding 4): teardown (dialog close / in-page navigation)
+    /// revokes the session-held take URL — the list previously disposed only the JS module and leaked
+    /// every pill URL.</summary>
+    [TestMethod]
+    public async Task Dispose_RevokesEverySessionHeldTakeUrl()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")));
+        var module = JSInterop.SetupModule(
+            "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js");
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:leaked", 5)));
+
+        await cut.InvokeAsync(async () => await cut.Instance.DisposeAsync());
+
+        module.VerifyInvoke("revokeMediaUrl");
     }
 
 }

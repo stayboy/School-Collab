@@ -3923,4 +3923,50 @@ public class AssignmentAuthoringBunitTests : BunitContext
         row.Text.Should().Be("Read pages 4-6.");
     }
 
+    /// <summary>Owner rework (2026-10-12): the section's own dropzone hides while the recorder
+    /// takeover shows and returns when it closes — a drop target must not compete with the live
+    /// capture surface.</summary>
+    [TestMethod]
+    public async Task RecorderTakeover_HidesTheMaterialsDropzone_UntilItCloses()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll("#authoring-materials-dropzone").Should().ContainSingle(),
+            TimeSpan.FromSeconds(5));
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowWithRecorderAsync(InstructionKindDto.Video));
+
+        cut.FindAll("#authoring-materials-dropzone").Should().BeEmpty(
+            "the page dropzone hides while the recording container shows");
+        cut.Find("#authoring-instruction-items-recorder-0-cancel").Click();
+        cut.FindAll("#authoring-materials-dropzone").Should().ContainSingle(
+            "…and returns when the recorder is cancelled");
+    }
+
+    /// <summary>Owner pill rework (2026-10-12): the ResourcesSection upload tile hides with the takeover
+    /// too — with the AUDIO panel's short height the tile used to stay on screen (the exact "audio
+    /// doesn't hide the dropzone" defect the owner hit; the tall video panel had pushed it off-view).</summary>
+    [TestMethod]
+    public async Task RecorderTakeover_HidesTheResourcesUploadTile()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft),
+            children: MakeChildren(questions: [], attachments: [],
+                targets: [new AssignmentTargetDto(TargetKindDto.Stream, Guid.NewGuid(), 0)]));
+
+        cut.WaitForAssertion(() => cut.FindAll(".cq-tile").Should().NotBeEmpty(),
+            TimeSpan.FromSeconds(5));
+        var editor = cut.FindComponent<InstructionEditorList>();
+
+        await cut.InvokeAsync(() => editor.Instance.AddRowWithRecorderAsync(InstructionKindDto.Audio));
+
+        cut.FindAll(".cq-tile").Should().BeEmpty(
+            "the resources upload tile hides while the recording container shows");
+        cut.Find("#authoring-instruction-items-recorder-0-cancel").Click();
+        cut.FindAll(".cq-tile").Should().NotBeEmpty(
+            "…and returns when the recorder closes");
+    }
+
 }

@@ -1,12 +1,38 @@
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.JSInterop
 @using SchoolCollab.Assignments.Application.Helpers
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 @* QR-5 (spec §5.2/§5.6, owner 2026-10-09): the shared INSTRUCTION editor — one shape, two owners
    (the assignment's own blocks and each question's). Inline by construction: the dialog-ui rule
    forbids a nested dialog, so this is a plain presentational panel, and it holds no API client — the
    host supplies staging as StageMediaAsync, exactly as the attachments flow stages at selection. *@
-<div class="cq-instructions" id="@Id">
+<div class="cq-instructions@(_recordingRow is not null ? " cq-instructions-recording" : string.Empty)" id="@Id">
+    @if (_recordingRow is not null)
+    {
+        @* Round-recorder-takeover (owner 2026-10-12, grill Q2/Q3/Q5): while a recorder is open it
+           takes over the WHOLE container — the rows, dropzone, add button and error line are
+           suppressed and the panel's own header carries the close affordance (labeled Cancel). The
+           placeholder row stays in Rows untouched: cancel discards the take, never the row. *@
+        <div class="cq-instruction-recorder" id="@($"{Id}-recorder-takeover")">
+            @* Hold verdict 2026-10-12 (finding 2): @key on the recording row — without it, replacing an
+               open pill review with a new recorder REUSES this panel instance, whose reopened-Review
+               state (old take's player + Record again) survives even after the seed is cleared. The
+               key gives the "a new instance reopens" semantics the Seed contract already assumed (see
+               RecorderPanel.OnParametersSet); the discarded instance's seeded URL is safe from its
+               teardown revoke by the panel's own ownership guard. *@
+            <RecorderPanel @key="_recordingRow"
+                           Id="@($"{Id}-recorder-{Rows.IndexOf(_recordingRow)}")"
+                           IsVideo="@(_recordingRow.Kind == InstructionKindDto.Video)"
+                           Seed="@_reviewSeed"
+                           OnRecorded="@(media => OnRecordedAsync(_recordingRow!, media))"
+                           OnClose="CloseRecorder" />
+        </div>
+    }
+    else
+    {
     @if (Rows.Count == 0)
     {
         <p class="cq-instructions-empty" id="@($"{Id}-empty")">No instructions yet.</p>
@@ -98,7 +124,7 @@
                                     {
                                         <FluentButton Appearance="Appearance.Neutral"
                                                       Id="@($"{Id}-record-{index}")"
-                                                      IconStart="@(new Icons.Regular.Size20.Video())"
+                                                      IconStart="@(row.Kind == InstructionKindDto.Audio ? FluentIcons.Mic : new Icons.Regular.Size20.Video())"
                                                       OnClick="@(() => ToggleRecorderAsync(row))">
                                             Record
                                         </FluentButton>
@@ -107,15 +133,28 @@
                             }
                             else
                             {
-                                <span class="cq-instruction-file" title="@row.FileName">
-                                    @row.FileName (@AttachmentUploadPolicy.FormatFileSize(row.FileSize))
-                                </span>
-                                @if (!ReadOnly)
+                                @* Owner pill rework (2026-10-12): the staged item reads as a compact
+                                   pill — play + duration when THIS SESSION holds the take (the kept
+                                   Blob URL), else the size as plain text (uploaded rows and post-reload
+                                   rows have no session entry — served playback is the named follow-up).
+                                   The row's trailing remove × is the single close; the clear-file × is
+                                   retired, and Record again lives on the review panel, never here. *@
+                                @if (_sessionMedia.TryGetValue(row, out var session))
                                 {
                                     <FluentButton Appearance="Appearance.Stealth"
-                                                  Id="@($"{Id}-clear-media-{index}")"
-                                                  OnClick="@(() => ClearMediaAsync(row))"
-                                                  aria-label="Remove the attached file">×</FluentButton>
+                                                  Class="cq-media-play"
+                                                  Id="@($"{Id}-play-{index}")"
+                                                  Title="@row.FileName"
+                                                  OnClick="@(() => ToggleReviewAsync(row))">
+                                        <FluentIcon Value="@(new Icons.Regular.Size20.Play())" />
+                                        <span class="cq-media-pill-text">@FormatDuration(session.DurationSeconds)</span>
+                                    </FluentButton>
+                                }
+                                else
+                                {
+                                    <span class="cq-instruction-file" title="@row.FileName">
+                                        @AttachmentUploadPolicy.FormatFileSize(row.FileSize)
+                                    </span>
                                 }
                             }
                             break;
@@ -142,19 +181,10 @@
                                       aria-label="Remove instruction">×</FluentButton>
                     }
                 </li>
-                @* D3 (recording-materials): the open recorder renders as its OWN list item beneath the
-                   row — the row is a non-wrapping flex line (kind · payload · actions), so nesting the
-                   panel inside it would either overflow or strand the row's actions below the panel.
-                   Gated on the row still being unstaged so a file arriving mid-recording closes the
-                   panel rather than showing it beside a file readout it no longer owns. *@
-                @if (_recordingRow == row && string.IsNullOrWhiteSpace(row.StoragePath))
-                {
-                    <li class="cq-instruction-recorder" @key="@($"{row}-recorder")">
-                        <RecorderPanel Id="@($"{Id}-recorder-{index}")"
-                                       IsVideo="@(row.Kind == InstructionKindDto.Video)"
-                                       OnRecorded="@(media => OnRecordedAsync(row, media))" />
-                    </li>
-                }
+                @* The recorder no longer renders beside its row (round-recorder-takeover, owner
+                   2026-10-12): an open recorder TAKES OVER the whole container — see the branch at
+                   the top of .cq-instructions — and carries its close affordance in its own header.
+                   The cramped sibling-<li> slot this replaces was the defect being fixed. *@
             }
         </ul>
     }
@@ -170,6 +200,13 @@
             </FluentButton>
         </div>
     }
+
+    @if (_error is not null)
+    {
+        <p class="cq-instruction-error" id="@($"{Id}-error")">@_error</p>
+    }
+    }
+</div>
 
 @code {
     /// <summary>The container id, and the stem every inner id is built from — the bUnit/page seam.</summary>
@@ -213,6 +250,11 @@
     /// remains the single writer of its rows.</summary>
     [Parameter] public EventCallback<InstructionEditorRow> EditRowRequested { get; set; }
 
+    /// <summary>Owner rework (2026-10-12): raised whenever a recorder opens or closes, carrying the
+    /// open state — the page's own materials dropzone sits OUTSIDE this component and must hide while
+    /// the takeover shows. No-op when unwired (the question dialog has no such sibling surface).</summary>
+    [Parameter] public EventCallback<bool> RecorderStateChanged { get; set; }
+
     private bool _staging;
     private string? _error;
 
@@ -220,6 +262,40 @@
     /// null when none is. Only one recorder is ever open at a time (one camera/mic), so toggling a new
     /// row's recorder closes the previous one.</summary>
     private InstructionEditorRow? _recordingRow;
+
+    /// <summary>Owner rework (2026-10-12, round-recorder-takeover): the row the RECORD ACTION itself
+    /// appended (kebab "Record Audio"/"Record Video") — null when the open recorder was toggled onto a
+    /// pre-existing row. Cancel drops this row while it is still unstaged so no recording residue is
+    /// left behind; a committed take stages it first, so a surviving row is never lost.</summary>
+    private InstructionEditorRow? _recorderCreatedRow;
+
+    /// <summary>Owner pill rework (2026-10-12): per-row session media — the Blob URL of the take this
+    /// circuit recorded (never persisted; the served-playback endpoint is the named follow-up) plus
+    /// its probed duration. Uploaded rows and post-reload rows have no entry, so no play affordance.</summary>
+    private readonly Dictionary<InstructionEditorRow, SessionMedia> _sessionMedia = new();
+
+    private sealed record SessionMedia(string Url, double? DurationSeconds);
+
+    /// <summary>The seed handed to the panel when the play pill reopens a take's preview player.</summary>
+    private RecorderPanel.ReviewSeed? _reviewSeed;
+
+    /// <summary>The list's tiny media module (revoke only) — owned and disposed here (use-js-interop).</summary>
+    private const string ModulePath =
+        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js";
+
+    private IJSObjectReference? _mediaModule;
+
+    /// <summary>The pill's text: the take's duration when known, else a plain "Play" label.</summary>
+    private static string FormatDuration(double? seconds)
+    {
+        if (seconds is null or < 0)
+        {
+            return "Play";
+        }
+
+        var s = (int)Math.Round(seconds.Value);
+        return $"{s / 60}:{s % 60:D2}";
+    }
 
     /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
     /// after an append this points at the new row's first field (AC-2's focus target).</summary>
@@ -242,9 +318,19 @@
     /// <see cref="AddRowAsync"/> to append + focus, then opens the recorder on that just-added row.</summary>
     public async Task AddRowWithRecorderAsync(InstructionKindDto kind)
     {
+        // Owner rework (2026-10-12): moving the recorder off an earlier record-action placeholder
+        // drops that placeholder (still unstaged) — switching kebab actions must not accumulate
+        // ghost rows. AddRowAsync fires Changed, which also covers the removal to the host.
+        DropOrphanedRecorderRow();
+        // Hold verdict 2026-10-12 (finding 2): this opens a FRESH recorder — a pill review left open
+        // must not seed it. Every recorder-open path clears the seed (CloseRecorder/OnRecordedAsync
+        // already did); without this, the kebab panel reopened into the previous take's player.
+        _reviewSeed = null;
         await AddRowAsync(kind);
         _recordingRow = Rows.Count > 0 ? Rows[^1] : null;
+        _recorderCreatedRow = _recordingRow;
         StateHasChanged();
+        await NotifyRecorderStateAsync();
     }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
@@ -292,6 +378,7 @@
 
     public async Task RemoveAsync(InstructionEditorRow row)
     {
+        await RevokeSessionMediaAsync(row);
         if (Rows.Remove(row))
         {
             StateHasChanged();
@@ -303,6 +390,9 @@
     /// another file (or switch the kind) without losing the intent.</summary>
     public async Task ClearMediaAsync(InstructionEditorRow row)
     {
+        // The button that reaches this seam is retired (owner pill rework, 2026-10-12 — one close per
+        // row), but the seam stays and now also drops the row's session media entry.
+        await RevokeSessionMediaAsync(row);
         row.FileName = null;
         row.ContentType = null;
         row.FileSize = 0;
@@ -391,16 +481,131 @@
     private Task ToggleRecorderAsync(InstructionEditorRow row)
     {
         _recordingRow = _recordingRow == row ? null : row;
+        // Toggling targets the author's own row — never the record action's placeholder — so Cancel
+        // must keep it (owner rework, 2026-10-12).
+        _recorderCreatedRow = null;
+        // Hold verdict 2026-10-12 (finding 2): same invariant as AddRowWithRecorderAsync — an open
+        // recorder is never a seeded review. Unreachable with a stale seed today (rows are hidden
+        // during the takeover), but the open path owns the clear, not the render graph.
+        _reviewSeed = null;
         _error = null;
         StateHasChanged();
-        return Task.CompletedTask;
+        return NotifyRecorderStateAsync();
+    }
+
+    /// <summary>Round-recorder-takeover Q5 + owner rework (2026-10-12): the panel's Cancel — the
+    /// takeover closes and the list body (rows, dropzone, add button) is restored. The row the record
+    /// action itself appended is dropped while still unstaged (no recording residue in the list); a
+    /// toggled-open pre-existing row and any staged row survive. The discarded take never reaches
+    /// staging.</summary>
+    private async Task CloseRecorder()
+    {
+        _recordingRow = null;
+        _reviewSeed = null;
+        var removed = DropOrphanedRecorderRow();
+        _error = null;
+        StateHasChanged();
+        if (removed)
+        {
+            await Changed.InvokeAsync();
+        }
+
+        await NotifyRecorderStateAsync();
+    }
+
+    /// <summary>Owner rework (2026-10-12): removes the record action's own placeholder row while it is
+    /// still unstaged. Never touches a pre-existing row (toggled open, not appended) and never a
+    /// committed take's row (staged before Cancel can reach it). True when a row was removed.</summary>
+    private bool DropOrphanedRecorderRow()
+    {
+        if (_recorderCreatedRow is not null && string.IsNullOrWhiteSpace(_recorderCreatedRow.StoragePath))
+        {
+            Rows.Remove(_recorderCreatedRow);
+            _recorderCreatedRow = null;
+            return true;
+        }
+
+        _recorderCreatedRow = null;
+        return false;
+    }
+
+    /// <summary>Signals <see cref="RecorderStateChanged"/> with the current open state (owner rework,
+    /// 2026-10-12 — the host hides its own competing surfaces, e.g. the page's materials dropzone).</summary>
+    private Task NotifyRecorderStateAsync() => RecorderStateChanged.InvokeAsync(_recordingRow is not null);
+
+    /// <summary>Owner pill rework (2026-10-12): the play pill reopens the staged take's session Blob in
+    /// the SAME review panel (player + Record again) — one takeover at a time, like the recorder.
+    /// Closing keeps the session entry, so the pill can reopen it; only removal revokes the URL.</summary>
+    private async Task ToggleReviewAsync(InstructionEditorRow row)
+    {
+        if (_recordingRow == row)
+        {
+            await CloseRecorder();
+            return;
+        }
+
+        if (_sessionMedia.TryGetValue(row, out var session))
+        {
+            _recordingRow = row;
+            _reviewSeed = new RecorderPanel.ReviewSeed(session.Url, row.FileName ?? "recording", row.FileSize);
+            _error = null;
+            StateHasChanged();
+            await NotifyRecorderStateAsync();
+        }
+    }
+
+    /// <summary>Owner pill rework (2026-10-12): the list's tiny media module (revoke only). The import
+    /// is INSIDE the guard — a missing/404 module (e.g. a stale session that predates this asset) must
+    /// never blow up the row operation the revoke serves; the browser purges Blob URLs on teardown.</summary>
+    private async Task RevokeMediaUrlAsync(string url)
+    {
+        try
+        {
+            _mediaModule ??= await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            await _mediaModule.InvokeVoidAsync("revokeMediaUrl", url);
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+    /// <summary>Drops a row's session media entry and revokes its Blob URL — a discarded take must not
+    /// leak memory. No-op for rows without an entry (uploaded / post-reload).</summary>
+    private async Task RevokeSessionMediaAsync(InstructionEditorRow row)
+    {
+        if (_sessionMedia.Remove(row, out var session))
+        {
+            await RevokeMediaUrlAsync(session.Url);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        // Hold verdict 2026-10-12 (finding 4): the session-held Blob URLs are this list's to revoke on
+        // teardown too — dialog close / in-page navigation previously leaked every recorded take's URL
+        // (RemoveAsync/ClearMediaAsync revoke only their own row's entry). Best-effort (RevokeMediaUrlAsync
+        // guards import + call as one), and BEFORE the module goes away.
+        foreach (var session in _sessionMedia.Values)
+        {
+            await RevokeMediaUrlAsync(session.Url);
+        }
+
+        _sessionMedia.Clear();
+        if (_mediaModule is not null)
+        {
+            try { await _mediaModule.DisposeAsync(); } catch (JSDisconnectedException) { } catch (ObjectDisposedException) { }
+            _mediaModule = null;
+        }
     }
 
     /// <summary>D3 (recording-materials): the recorder's commit seam. The recorded take (delivered as a
     /// Stream via the panel's hidden InputFile) stages through the SAME <see cref="StageMediaFileAsync"/>
     /// path an uploaded media file takes, so the row is filled identically and the list stays the single
-    /// writer of its rows. The recorder then closes.</summary>
-    private async Task OnRecordedAsync(InstructionEditorRow row, RecorderPanel.RecordedMedia media)
+    /// writer of its rows. The recorder then closes. Public by the owner pill rework (2026-10-12) as the
+    /// seam bUnit drives directly (the <c>StageMediaFileAsync</c> precedent) — and it now keeps the
+    /// take's session Blob URL + duration for the row's play pill.</summary>
+    public async Task OnRecordedAsync(InstructionEditorRow row, RecorderPanel.RecordedMedia media)
     {
         if (StageMediaAsync is null)
         {
@@ -409,6 +614,20 @@
         }
 
         _recordingRow = null;
+        _reviewSeed = null;
+        // The committed take's row is staged now — it survives as a real row (owner rework, 2026-10-12).
+        _recorderCreatedRow = null;
+        if (media.PreviewUrl is not null)
+        {
+            if (_sessionMedia.TryGetValue(row, out var previous))
+            {
+                await RevokeMediaUrlAsync(previous.Url);
+            }
+
+            _sessionMedia[row] = new SessionMedia(media.PreviewUrl, media.DurationSeconds);
+        }
+
+        await NotifyRecorderStateAsync();
         await StageMediaFileAsync(row, media.Content, media.FileName, media.ContentType, media.FileSize);
     }
 
@@ -421,10 +640,4 @@
         StateHasChanged();
     }
 }
-
-    @if (_error is not null)
-    {
-        <p class="cq-instruction-error" id="@($"{Id}-error")">@_error</p>
-    }
-</div>
 

@@ -59,6 +59,14 @@ AppHost's dashboard output (`watch.log`).
   clear the lock holder, start watch again. Worst case is *today's legacy loop* — the
   watcher never makes things slower than before.
 - A rude edit (needs restart) prompts on the console; same recovery applies.
+- **"Rude edits" and NEW static assets are not hot-reloadable** (observed
+  2026-10-12, recorder pill round): a new component `[Parameter]`, a changed
+  record's shape, a new `@implements`/`@inject`, or a freshly added collocated
+  `*.razor.js` (a new `_content/...` static web asset) require a full restart —
+  delta apply silently keeps the old circuit running. Symptom set: bUnit pins
+  the behaviour green yet the preview misbehaves (that round: no play pill after
+  commit, AND a row-removal crash from the 404'd new module). Restart before
+  debugging the code — the code was correct both times.
 - The legacy kill→build→run loop remains correct for: full-solution builds/tests
   (PR pre-flight), NuGet changes, migrations, and AppHost resource-graph changes.
 

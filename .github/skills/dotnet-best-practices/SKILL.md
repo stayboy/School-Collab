@@ -295,6 +295,12 @@ Apply these rules whenever you touch C# in School-Collab.
 - **Disposal**: every `HttpClient`, `HttpResponseMessage`, `IJSObjectReference`,
   `IDbContextTransaction`, `Stream` lives in a `using` block or is
   disposed via `IAsyncDisposable`.
+- **JS module `import` lives INSIDE the interop try/catch** — never on its own
+  line outside the guard. A missing/404 module (a new static asset, or a stale
+  preview session predating it) must degrade, not blow up the parent operation;
+  cleanup calls (revoke, dispose) are best-effort by design (observed 2026-10-12:
+  an unguarded `import` made row-removal crash when the module was not yet
+  served).
 
 ## Cross-cutting
 
