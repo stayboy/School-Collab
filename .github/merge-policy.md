@@ -97,6 +97,21 @@ Use merge or rebase only when the user explicitly requests it, or when a PR genu
 multi-commit history on `main`. Even then the source branch is still deleted unless the user says
 otherwise.
 
+**`--delete-branch` silently no-ops when `main` is checked out in another worktree** — which is the
+normal case here, where agents work in `School-Collab-*` worktrees while the user's checkout holds
+`main`. `gh` switches the local worktree to the base branch first and aborts with
+`fatal: 'main' is already used by worktree at '<path>'` — **after** the merge has completed. The merge
+succeeds and the branch survives. So verify, and delete by hand if it did:
+
+```bash
+gh pr merge <pr-number> --squash --delete-branch
+# then:
+git ls-remote --heads origin <branch-name>   # any output means the branch survived
+SCHOOLCOLLAB_ALLOW_PUSH=1 git push origin --delete <branch-name>
+```
+
+Never read a successful `gh pr merge` as proof that the branch is gone.
+
 ## Local push hold
 
 The local `pre-push` hook in `.githooks/pre-push` holds all local pushes by default until the user explicitly allows the push.
