@@ -234,9 +234,11 @@ public class WardAssignmentPlayerBunitTests : BunitContext
             // The media material is routed to the player, not the label list.
             cut.FindComponents<SchoolCollab.Families.Components.Pages.Ward.WardMaterialPlayer>().Should().ContainSingle(
                 "a Video material renders through the ward media player");
+            // The Text material still renders as a label (the non-media path is untouched). Read the
+            // markup INSIDE the wait: the label list lands on a later cascade than the player, and an
+            // unwait-ed read here is what failed CI on a docs-only PR (2026-10-14).
+            cut.Markup.Should().Contain("Worked example");
         });
-        // The Text material still renders as a label (the non-media path is untouched).
-        cut.Markup.Should().Contain("Worked example");
     }
 
     [TestMethod]

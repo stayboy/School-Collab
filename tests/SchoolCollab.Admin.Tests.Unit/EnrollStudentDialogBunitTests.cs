@@ -664,30 +664,31 @@ public class EnrollStudentDialogBunitTests : BunitContext
         // FluentSelect renders its child options as FluentOption<string>
         // components — the static "No stream" sentinel (empty value) plus one per
         // bridge row. Wait for the bridge list to populate, then read the values.
+        // Every read of the rendered option set happens INSIDE the wait. The picker rebuilds its
+        // Items as a fresh array on a late cascade, so a read taken after the wait has settled can
+        // observe a different (or partially rebuilt) set than the one the wait proved. Leaving no
+        // interleaving window is the fix — the same mechanism as
+        // `fix-flaky-bunit-fluentui-after-cascade`'s cases 2 and 3.
         cut.WaitForAssertion(() =>
         {
-            var optionValues = streamSelect.FindComponents<FluentOption<string>>()
+            var options = streamSelect.FindComponents<FluentOption<string>>()
                 .Select(o => o.Instance.Value)
                 .ToList();
+
             // 3 real streams + the "No stream" clear-to-null sentinel.
-            optionValues.Count.Should().Be(4, "the stream picker must render No stream + the three Grade 5 streams");
+            options.Count.Should().Be(4, "the stream picker must render No stream + the three Grade 5 streams");
+
+            // Clear-to-null affordance: the first option is the sentinel "No stream" entry (empty
+            // string), which OnStreamSelectionChanged maps to a null StreamCodedValueId when picked.
+            options.Should().Contain(v => string.IsNullOrEmpty(v),
+                "the stream picker must prepend the 'No stream' clear option");
+
+            // The remaining option values are exactly the three Grade 5 stream ids, every one usable
+            // — never null/empty.
+            var ids = options.Where(v => !string.IsNullOrEmpty(v)).Select(v => Guid.Parse(v!)).ToList();
+            ids.Should().OnlyContain(id => id != Guid.Empty, "no stream option may carry an empty (sentinel) id");
+            ids.Should().BeEquivalentTo(new[] { Stream5AId, Stream5BId, Stream5CId });
         }, timeout: TimeSpan.FromSeconds(5));
-
-        var options = streamSelect.FindComponents<FluentOption<string>>()
-            .Select(o => o.Instance.Value)
-            .ToList();
-
-        // Clear-to-null affordance: the first option is the sentinel "No stream"
-        // entry (empty string), which OnStreamSelectionChanged maps to a null
-        // StreamCodedValueId when picked.
-        var emptyOption = options.SingleOrDefault(v => string.IsNullOrEmpty(v));
-        emptyOption.Should().NotBeNull("the stream picker must prepend the 'No stream' clear option");
-
-        // The remaining option values are exactly the three Grade 5 stream ids,
-        // every one usable — never null/empty.
-        var ids = options.Where(v => !string.IsNullOrEmpty(v)).Select(v => Guid.Parse(v!)).ToList();
-        ids.Should().OnlyContain(id => id != Guid.Empty, "no stream option may carry an empty (sentinel) id");
-        ids.Should().BeEquivalentTo(new[] { Stream5AId, Stream5BId, Stream5CId });
 
         // Selection round-trip: picking a real stream binds its id back onto
         // the form model via OnStreamSelectionChanged.
