@@ -86,7 +86,8 @@ public sealed class UpdateAssignmentCommandHandler(
                     ContentType: existing.ContentType,
                     FileSize: existing.FileSize,
                     StoragePath: existing.StoragePath,
-                    Title: existing.Title))
+                    Title: existing.Title,
+                    DurationSeconds: existing.DurationSeconds))
                 : command.InstructionItems.Select(item => (
                     QuestionId: (Guid?)null,
                     Kind: (InstructionKind)(int)item.Kind,
@@ -96,7 +97,8 @@ public sealed class UpdateAssignmentCommandHandler(
                     ContentType: item.ContentType,
                     FileSize: item.FileSize,
                     StoragePath: item.StoragePath,
-                    Title: item.Title)))
+                    Title: item.Title,
+                    DurationSeconds: item.DurationSeconds)))
             .ToList();
 
         assignment.Update(
@@ -163,7 +165,7 @@ public sealed class UpdateAssignmentCommandHandler(
             // QR-5 (§5.2): the instruction rows the re-minted questions are about to need.
             var questionInstructionItems = new List<(Guid? QuestionId, InstructionKind Kind, string? Text,
                 string? Url, string? FileName, string? ContentType, long FileSize, string? StoragePath,
-                string? Title)>();
+                string? Title, int? DurationSeconds)>();
 
             for (var i = 0; i < command.Questions.Count; i++)
             {
@@ -198,7 +200,8 @@ public sealed class UpdateAssignmentCommandHandler(
                     ContentType: item.ContentType,
                     FileSize: item.FileSize,
                     StoragePath: item.StoragePath,
-                    Title: item.Title)));
+                    Title: item.Title,
+                    DurationSeconds: item.DurationSeconds)));
             }
 
             if (command.InstructionItems is not null)

@@ -241,6 +241,9 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             // validator, an optional label for a Link, unused by the media kinds. Nullable because
             // rows written before this column carry none and nothing invents one for them.
             i.Property(i => i.Title).HasMaxLength(200);
+            // Round media-pill-listing (Q7): the media's whole-second duration. Nullable and unbounded —
+            // a legacy row carries none and nothing invents one for it (no backfill).
+            i.Property(i => i.DurationSeconds);
             i.Property(i => i.DisplayOrder).IsRequired();
             i.HasIndex(i => i.QuestionId).HasDatabaseName("ix_assignment_instructions_question_id");
         });

@@ -493,6 +493,7 @@
                                                        EditingMode="@RowEditingMode.Dialog"
                                                        EditRowRequested="OnMaterialEditRequestedAsync"
                                                        StageMediaAsync="StageInstructionMediaAsync"
+                                                       LoadInstructionMediaAsync="LoadInstructionMediaAsync"
                                                        Changed="OnModelChanged"
                                                        RecorderStateChanged="OnMaterialRecorderStateChangedAsync"
                                                        ReadOnly="@IsReadOnly" />
@@ -719,7 +720,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" LoadInstructionMediaAsync="LoadInstructionMediaAsync" />
                         }
                         else
                         {
@@ -733,7 +734,7 @@
                                                        PromptLocked="_aiPromptLocked"
                                                        AssignmentId="_item?.Id"
                                                        OnQuestionsChanged="OnModelChanged" />
-                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" />
+                            <QuestionEditorSection Model="_model" Changed="OnModelChanged" GradingFormat="@SelectedGradingFormat" StageInstructionMediaAsync="StageInstructionMediaAsync" LoadInstructionMediaAsync="LoadInstructionMediaAsync" />
                             @if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
                             {
                                 <QuestionsDraftSection AssignmentId="_item.Id"
@@ -2675,6 +2676,37 @@
         }
     }
 
+    /// <summary>Round <c>media-pill-listing</c> (Q2/Q9): the served-playback seam — the list is
+    /// presentational and holds no API client, so the page fetches a reloaded/uploaded media row's
+    /// bytes through the teacher-authed range-enabled route and streams them back. A row with no
+    /// persisted id (staged in this session) has nothing to serve; the list falls back on its own path.</summary>
+    private Task<Stream?> LoadInstructionMediaAsync(InstructionEditorRow row) =>
+        row.Id is Guid instructionId && Id is Guid assignmentId
+            ? Api.GetInstructionMediaStreamAsync(assignmentId, instructionId)
+            : Task.FromResult<Stream?>(null);
+
+    /// <summary>Round <c>media-pill-listing</c> (Q7, E.7): best-effort duration probe for a material
+    /// DROPPED on the page's own dropzone — the list's per-row capture selector does not exist for a
+    /// dropped row, so its input lives under the dropzone. Any failure leaves the readout on `—:—`.</summary>
+    private async Task ProbeDroppedMaterialDurationAsync(InstructionEditorRow row)
+    {
+        try
+        {
+            _instructionMediaModule ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", InstructionMediaModulePath);
+            var seconds = await _instructionMediaModule.InvokeAsync<double?>(
+                "probeDurationFromInput", "#authoring-materials-dropzone input[type=file]");
+            if (seconds is double probed && !double.IsNaN(probed) && probed >= 0)
+            {
+                row.DurationSeconds = (int)Math.Round(probed);
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
 
     /// <summary>The shared materials editor, reached through <c>@ref</c> by the compartment's kebab
     /// (round grill Q1): the section supplies the add affordance, so the list renders no button of its
@@ -2707,6 +2739,14 @@
     /// <summary>The page's collocated JS module, imported lazily — used here for the file-picker pop
     /// (the unsaved-changes guard imports the same file for its own export).</summary>
     private IJSObjectReference? _materialsModule;
+
+    /// <summary>Round <c>media-pill-listing</c> (Q7): the shared list's media module, imported here for
+    /// its `probeDurationFromInput` export (the dropped-material duration probe) — one implementation,
+    /// imported from the list rather than duplicated on the page.</summary>
+    private IJSObjectReference? _instructionMediaModule;
+
+    private const string InstructionMediaModulePath =
+        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js";
 
     /// <summary>D2/AC-1 (revised D3, owner 2026-10-10): the compartment's one kebab. Text and Link are
     /// captured in MaterialEditDialog and appended from its result (Q1/Q2); Upload From Device pops the
@@ -2804,7 +2844,14 @@
     {
         var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             MaterialEditFormModel.FromRow(row),
-            row.Kind == InstructionKindDto.Text ? "Edit Text Content" : "Edit Link",
+            row.Kind switch
+            {
+                InstructionKindDto.Text => "Edit Text Content",
+                InstructionKindDto.Url => "Edit Link",
+                // Round media-pill-listing (C2): the readout click opens the same dialog seeded with
+                // the media row's optional title/description.
+                _ => "Edit Material",
+            },
             DialogSize.Medium);
 
         if (result is null)
@@ -2849,6 +2896,7 @@
                     };
                     _model.InstructionItems.Add(row);
                     await _instructionList!.StageMediaFileAsync(row, file.Stream, file.Name, file.ContentType, file.Size);
+                    await ProbeDroppedMaterialDurationAsync(row);
                     break;
 
                 case MaterialDropDestination.Resource:

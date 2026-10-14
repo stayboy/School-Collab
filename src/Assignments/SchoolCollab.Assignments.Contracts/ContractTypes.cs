@@ -141,7 +141,11 @@ public record NewInstructionDto(
     /// optional for <see cref="InstructionKindDto.Url"/> (a label), ignored by the media kinds. The
     /// column is nullable so rows that predate it keep loading: the validator enforces presence, never
     /// the column, and no title is ever invented.</summary>
-    string? Title = null);
+    string? Title = null,
+    /// <summary>Recording materials (round <c>media-pill-listing</c>, Q7/Q10): the media's duration in
+    /// whole seconds, probed client-side at record/upload time. Null for Text/Url rows and for media
+    /// rows written before the column — the readout renders <c>—:—</c> and nothing backfills it.</summary>
+    int? DurationSeconds = null);
 
 /// <summary>One persisted instruction item, either owner (spec §5.6).</summary>
 public record InstructionReadDto(
@@ -156,7 +160,10 @@ public record InstructionReadDto(
     int DisplayOrder = 0,
     /// <summary>See <see cref="NewInstructionDto.Title"/> — null on rows that predate the column, and
     /// on media rows.</summary>
-    string? Title = null);
+    string? Title = null,
+    /// <summary>See <see cref="NewInstructionDto.DurationSeconds"/> — null on any row written before
+    /// the column (no backfill) and on Text/Url rows.</summary>
+    int? DurationSeconds = null);
 
 /// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Services.AttachmentExtractionStatus</c>
 /// (R3 / D4). The status of the one text-extraction attempt made against a staged upload;

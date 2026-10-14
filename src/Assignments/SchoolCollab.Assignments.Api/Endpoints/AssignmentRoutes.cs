@@ -1547,6 +1547,54 @@ public static class AssignmentRoutes
                 fileDownloadName: instruction.FileName);
         });
 
+        // ── Recording materials (round media-pill-listing Q2/Q9): the TEACHER-side twin of the ward
+        //    media route above — same streaming shape minus the studentId, so a staged Audio/Video row
+        //    uploaded or reloaded (no session Blob) can still play in the authoring/editor surfaces.
+        //    Mounted on the /assignments group, so it inherits the group's authenticated (Bearer) +
+        //    resolved-tenant posture and deliberately adds no reader-role policy — the same
+        //    role-less-bearer reachability as the ward route it mirrors. Tenancy comes from the
+        //    assignment row the tenant query filter already scopes, never from a user-supplied path.
+        //    404 when the assignment or instruction is missing, the instruction carries no staged
+        //    file, or the backing file is gone.
+        group.MapGet("/{id:guid}/materials/{instructionId:guid}", async (
+            Guid id,
+            Guid instructionId,
+            [FromServices] IAssignmentRepository assignmentRepository,
+            [FromServices] IFileStore fileStore,
+            CancellationToken ct) =>
+        {
+            var assignment = await assignmentRepository.GetAsync(id, ct);
+            if (assignment is null)
+            {
+                return Results.NotFound();
+            }
+
+            var instruction = assignment.InstructionItems.FirstOrDefault(item => item.Id == instructionId);
+            if (instruction is null || !instruction.HasMedia || string.IsNullOrWhiteSpace(instruction.StoragePath))
+            {
+                return Results.NotFound();
+            }
+
+            Stream stream;
+            try
+            {
+                stream = await fileStore.OpenReadAsync(instruction.StoragePath, ct);
+            }
+            catch (FileNotFoundException)
+            {
+                // Stored reference present but the backing file is gone.
+                return Results.NotFound();
+            }
+
+            var contentType = string.IsNullOrWhiteSpace(instruction.ContentType)
+                ? "application/octet-stream"
+                : instruction.ContentType;
+
+            return Results.Stream(stream, contentType,
+                enableRangeProcessing: true,
+                fileDownloadName: instruction.FileName);
+        });
+
         return group;
     }
 

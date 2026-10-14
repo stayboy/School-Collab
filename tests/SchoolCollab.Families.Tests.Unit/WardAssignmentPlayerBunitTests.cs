@@ -254,6 +254,47 @@ public class WardAssignmentPlayerBunitTests : BunitContext
             "an assignment without instructions renders no empty instructions card");
     }
 
+    /// <summary>C3/Q11 (round media-pill-listing): the ward media player renders the material's BODY
+    /// (the DTO's <c>Text</c>) under the player/label — one render, one conditional — and a material
+    /// without a body renders nothing extra. Pre-fix the body was never rendered on the ward surface.</summary>
+    [TestMethod]
+    public void WardPlayerBodyRender_RendersTheMaterialBody_AndNothingWhenAbsent()
+    {
+        var videoWithBody = Guid.NewGuid();
+        var videoWithoutBody = Guid.NewGuid();
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 100, null)
+            ],
+            Instructions: null,
+            Materials:
+            [
+                new InstructionReadDto(videoWithBody, InstructionKindDto.Video, "Watch this before the quiz.", null,
+                    "lecture.webm", "video/webm", 1024, "staged/lecture.webm", 0, "Intro lecture"),
+                new InstructionReadDto(videoWithoutBody, InstructionKindDto.Video, null, null,
+                    "bare.webm", "video/webm", 1024, "staged/bare.webm", 1, "Bare lecture"),
+            ]);
+        SetupView(view);
+        SetupResultNotFound();
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/materials/{videoWithBody}")
+            .Respond(HttpStatusCode.OK, "video/webm", "stub");
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/materials/{videoWithoutBody}")
+            .Respond(HttpStatusCode.OK, "video/webm", "stub");
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindComponents<SchoolCollab.Families.Components.Pages.Ward.WardMaterialPlayer>()
+                .Should().HaveCount(2, "both media materials render through the ward media player");
+            cut.Find(".ward-material-body").TextContent.Should().Be("Watch this before the quiz.",
+                "C3: the material's body renders under its label");
+            cut.FindAll(".ward-material-body").Should().ContainSingle(
+                "…and only the material that HAS a body renders one — nothing extra for the other");
+        });
+    }
+
     [TestMethod]
     public async Task Submit_Triggers_ClientCall()
     {

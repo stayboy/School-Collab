@@ -29,6 +29,17 @@
                            Seed="@_reviewSeed"
                            OnRecorded="@(media => OnRecordedAsync(_recordingRow!, media))"
                            OnClose="CloseRecorder" />
+            @* Round media-pill-listing (C2/Q6): on a SEEDED review (a served/preview play), a
+               link-styled control opens the same metadata dialog the readout click opens — rendered
+               ONLY when a title/description exists, so a bare preview shows nothing extra. *@
+            @if (_reviewSeed is not null && HasMetadata(_recordingRow))
+            {
+                <FluentButton Appearance="Appearance.Stealth"
+                              Id="@($"{Id}-review-edit")"
+                              OnClick="@(() => OnReviewMetadataAsync(_recordingRow!))">
+                    Edit title/description
+                </FluentButton>
+            }
         </div>
     }
     else
@@ -114,7 +125,7 @@
                                    to the same staged media row. Toggling it expands the inline RecorderPanel;
                                    its OnRecorded stages through the same StageMediaFileAsync seam an upload
                                    uses, so the list stays the single writer of its rows. *@
-                                <div class="cq-instruction-capture">
+                                <div class="cq-instruction-capture" id="@($"{Id}-capture-{index}")">
                                     <FluentInputFile Mode="InputFileMode.Stream"
                                                      MaximumFileCount="1"
                                                      Accept="@AttachmentUploadPolicy.AcceptExtensions"
@@ -133,28 +144,30 @@
                             }
                             else
                             {
-                                @* Owner pill rework (2026-10-12): the staged item reads as a compact
-                                   pill — play + duration when THIS SESSION holds the take (the kept
-                                   Blob URL), else the size as plain text (uploaded rows and post-reload
-                                   rows have no session entry — served playback is the named follow-up).
-                                   The row's trailing remove × is the single close; the clear-file × is
-                                   retired, and Record again lives on the review panel, never here. *@
-                                @if (_sessionMedia.TryGetValue(row, out var session))
+                                @* Round media-pill-listing (C1/Q3 + C2/Q10/Q13): the staged item reads
+                                   exactly like a Text row — glyph · READOUT · action · trailing ×. The
+                                   readout is the EDIT affordance (click opens the metadata dialog on the
+                                   Dialog host; the Inline host expands the fields on the row below); the
+                                   play button holds the action slot; the pill and its size text are gone.
+                                   The native `title` tooltip carries the file name. *@
+                                <span class="cq-instruction-readout cq-media-readout"
+                                      id="@($"{Id}-title-{index}")"
+                                      title="@row.FileName"
+                                      @onclick="@(() => OnReadoutClickedAsync(row))">@MediaReadout(row)</span>
+
+                                @if (EditingMode == RowEditingMode.Inline && ReferenceEquals(_inlineMediaRow, row))
                                 {
-                                    <FluentButton Appearance="Appearance.Stealth"
-                                                  Class="cq-media-play"
-                                                  Id="@($"{Id}-play-{index}")"
-                                                  Title="@row.FileName"
-                                                  OnClick="@(() => ToggleReviewAsync(row))">
-                                        <FluentIcon Value="@(new Icons.Regular.Size20.Play())" />
-                                        <span class="cq-media-pill-text">@FormatDuration(session.DurationSeconds)</span>
-                                    </FluentButton>
-                                }
-                                else
-                                {
-                                    <span class="cq-instruction-file" title="@row.FileName">
-                                        @AttachmentUploadPolicy.FormatFileSize(row.FileSize)
-                                    </span>
+                                    @* Q12 (owner-pinned): the question dialog host cannot nest a dialog, so
+                                       there the same optional Title + Description pair edits INLINE on the row
+                                       (the pattern Text/Link rows already use in this mode). *@
+                                    <FluentTextField @bind-Value="row.Title"
+                                                     ReadOnly="@ReadOnly"
+                                                     Placeholder="Title (optional)"
+                                                     class="cq-instruction-title" />
+                                    <FluentTextField @bind-Value="row.Text"
+                                                     ReadOnly="@ReadOnly"
+                                                     Placeholder="Description (optional)"
+                                                     class="cq-instruction-payload" />
                                 }
                             }
                             break;
@@ -164,8 +177,8 @@
                     {
                         @* Q4(b)/AC-14: Text and Link rows are edited THROUGH the dialog, so the affordance
                            that opens it lives here and the decision to open one stays with the host (the
-                           component holds no dialog). Media rows keep the stage/clear flow instead — the
-                           file IS their value, so there is nothing a form could seed (grill Q3). *@
+                           component holds no dialog). Media rows reach the same dialog through their
+                           READOUT instead (round media-pill-listing C2), never through a pencil. *@
                         @if (EditingMode == RowEditingMode.Dialog && !row.HasMedia)
                         {
                             <FluentButton Appearance="Appearance.Stealth"
@@ -173,6 +186,20 @@
                                           OnClick="@(() => EditRowRequested.InvokeAsync(row))"
                                           IconStart="@FluentIcons.Edit"
                                           aria-label="Edit this material" />
+                        }
+
+                        @* Round media-pill-listing (C1/Q3): a staged Audio/Video row holds PLAY in the
+                           action slot where Text/Link hold their pencil — play is purely PREVIEW (it
+                           never opens the metadata dialog; the readout does). Image rows keep their
+                           standard shape (Q4/Q13). *@
+                        @if (row.HasMedia && row.Kind != InstructionKindDto.Image && !string.IsNullOrWhiteSpace(row.StoragePath))
+                        {
+                            <FluentButton Appearance="Appearance.Stealth"
+                                          Id="@($"{Id}-play-{index}")"
+                                          IconStart="@(new Icons.Regular.Size20.Play())"
+                                          aria-label="Play"
+                                          Title="@row.FileName"
+                                          OnClick="@(() => PlayMediaAsync(row))" />
                         }
 
                         <FluentButton Appearance="Appearance.Stealth"
@@ -220,6 +247,12 @@
     /// when it refused). Null here means the host offers no uploads in this context — the media kinds
     /// then report that instead of rendering a file input that could never succeed.</summary>
     [Parameter] public StageInstructionMediaAsync? StageMediaAsync { get; set; }
+
+    /// <summary>Round <c>media-pill-listing</c> (Q2/Q9): the host's served-playback call — fetches a
+    /// staged media row's bytes through the teacher-authed range-enabled route, so an uploaded or
+    /// reloaded row (no session Blob) can still play. Null here means the host cannot fetch (the row
+    /// then names that rather than offering a dead play button). The list stays client-free.</summary>
+    [Parameter] public LoadInstructionMediaAsync? LoadInstructionMediaAsync { get; set; }
 
     /// <summary>Raised after any mutation, so the host can re-render counts and its submit gate.</summary>
     [Parameter] public EventCallback Changed { get; set; }
@@ -269,33 +302,91 @@
     /// left behind; a committed take stages it first, so a surviving row is never lost.</summary>
     private InstructionEditorRow? _recorderCreatedRow;
 
-    /// <summary>Owner pill rework (2026-10-12): per-row session media — the Blob URL of the take this
-    /// circuit recorded (never persisted; the served-playback endpoint is the named follow-up) plus
-    /// its probed duration. Uploaded rows and post-reload rows have no entry, so no play affordance.</summary>
+    /// <summary>Round <c>media-pill-listing</c> (Q12, owner-pinned): the staged media row whose
+    /// optional Title/Description pair is expanded INLINE on the row — the Inline-mode host (the
+    /// question dialog) cannot nest the metadata dialog, so its readout click expands the fields here.
+    /// Null when no row is being edited inline.</summary>
+    private InstructionEditorRow? _inlineMediaRow;
+
+    /// <summary>Round <c>media-pill-listing</c> (C2/Q12): a recorded take handed over by the panel on
+    /// the Dialog-mode host — the host's own reference to it while its metadata dialog is open, staged
+    /// only when the confirmed <see cref="MaterialEditResult"/> comes back through
+    /// <see cref="ApplyEditAsync"/>. A cancelled dialog keeps it (AC-4): the take stays uncommitted
+    /// with the review, and this is the one place that revokes its Blob URL when the review is
+    /// discarded — <see cref="DiscardPendingRecordingAsync"/> on close or teardown.</summary>
+    private PendingRecording? _pendingRecording;
+
+    private sealed record PendingRecording(InstructionEditorRow Row, RecorderPanel.RecordedMedia Media);
+
+    /// <summary>Recording materials (round <c>media-pill-listing</c>, C1/Q8): per-row session media
+    /// — the Blob URL of the take this circuit recorded (never persisted) or of the bytes just served
+    /// through the teacher route, plus the take's probed duration. The list owns every URL it enters
+    /// here and revokes it exactly once (row remove / re-commit / DisposeAsync).</summary>
     private readonly Dictionary<InstructionEditorRow, SessionMedia> _sessionMedia = new();
 
     private sealed record SessionMedia(string Url, double? DurationSeconds);
 
-    /// <summary>The seed handed to the panel when the play pill reopens a take's preview player.</summary>
+    /// <summary>The seed handed to the panel when a play (session take or served bytes) reopens a
+    /// row's preview player.</summary>
     private RecorderPanel.ReviewSeed? _reviewSeed;
 
-    /// <summary>The list's tiny media module (revoke only) — owned and disposed here (use-js-interop).</summary>
+    /// <summary>The list's tiny media module (revoke + stream→Blob-URL + upload probe) — owned and
+    /// disposed here (use-js-interop).</summary>
     private const string ModulePath =
         "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js";
 
     private IJSObjectReference? _mediaModule;
 
-    /// <summary>The pill's text: the take's duration when known, else a plain "Play" label.</summary>
-    private static string FormatDuration(double? seconds)
+    /// <summary>Round <c>media-pill-listing</c> (C1/Q7): the media readout — the duration `m:ss`, or
+    /// `—:—` when unknown, prefixed by `[Title]` when the row is titled. An Image row reads `[Title]`
+    /// when titled and today's size text when not (Q13). The row's persisted duration wins; a
+    /// session-only probe (a served fetch's display-only re-probe) is the fallback.</summary>
+    private string MediaReadout(InstructionEditorRow row)
+    {
+        if (row.Kind == InstructionKindDto.Image)
+        {
+            return string.IsNullOrWhiteSpace(row.Title)
+                ? AttachmentUploadPolicy.FormatFileSize(row.FileSize)
+                : $"[{row.Title}]";
+        }
+
+        var duration = FormatReadoutDuration(ReadoutDuration(row));
+        return string.IsNullOrWhiteSpace(row.Title) ? duration : $"{duration} [{row.Title}]";
+    }
+
+    /// <summary>The readout's duration: the persisted column first, else a session probe's value.</summary>
+    private int? ReadoutDuration(InstructionEditorRow row)
+    {
+        if (row.DurationSeconds is int persisted)
+        {
+            return persisted;
+        }
+
+        return _sessionMedia.TryGetValue(row, out var session) && session.DurationSeconds is double probed
+            ? ToWholeSeconds(probed)
+            : null;
+    }
+
+    /// <summary>`m:ss`, or the `—:—` fallback when the duration is unknown (a legacy row, a failed or
+    /// impossible probe) — never a guess.</summary>
+    private static string FormatReadoutDuration(int? seconds)
     {
         if (seconds is null or < 0)
         {
-            return "Play";
+            return "—:—";
         }
 
-        var s = (int)Math.Round(seconds.Value);
-        return $"{s / 60}:{s % 60:D2}";
+        return $"{seconds.Value / 60}:{seconds.Value % 60:D2}";
     }
+
+    /// <summary>A probed duration rounded to whole seconds; null for absent/invalid values.</summary>
+    private static int? ToWholeSeconds(double? seconds) =>
+        seconds is double d && !double.IsNaN(d) && d >= 0 ? (int)Math.Round(d) : null;
+
+    /// <summary>Whether the row carries any media metadata — the seeded review's edit control is
+    /// rendered ONLY when it does (C2).</summary>
+    private static bool HasMetadata(InstructionEditorRow? row) =>
+        row is not null && (!string.IsNullOrWhiteSpace(row.Title) || !string.IsNullOrWhiteSpace(row.Text));
 
     /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
     /// after an append this points at the new row's first field (AC-2's focus target).</summary>
@@ -358,6 +449,17 @@
         row.Title = result.Title;
         row.Text = result.Body;
         row.Url = result.Url;
+
+        // Round media-pill-listing (C2/Q12): a confirmed metadata dialog on the recorder-commit path
+        // also commits the stashed take — stage it exactly as a direct commit does, with the row's
+        // fresh title/body (StageRecordedTakeAsync raises Changed and re-renders itself).
+        if (_pendingRecording is { } pending && ReferenceEquals(pending.Row, row))
+        {
+            _pendingRecording = null;
+            await StageRecordedTakeAsync(row, pending.Media);
+            return;
+        }
+
         StateHasChanged();
         await Changed.InvokeAsync();
     }
@@ -378,6 +480,11 @@
 
     public async Task RemoveAsync(InstructionEditorRow row)
     {
+        if (ReferenceEquals(_inlineMediaRow, row))
+        {
+            _inlineMediaRow = null;
+        }
+
         await RevokeSessionMediaAsync(row);
         if (Rows.Remove(row))
         {
@@ -468,6 +575,12 @@
             _error = null;
             StateHasChanged();
             await Changed.InvokeAsync();
+
+            // Round media-pill-listing (Q7, E.7): best-effort duration probe after a successful
+            // stage — the File may still sit on the row's own <input type=file>. Fire-and-forget on
+            // purpose: a probe that cannot read the input, or times out, must never delay or fail the
+            // staging that already succeeded (the readout then falls back to "—:—").
+            _ = ProbeUploadDurationAsync(row);
         }
         finally
         {
@@ -502,6 +615,9 @@
     {
         _recordingRow = null;
         _reviewSeed = null;
+        // AC-4: a take handed off by the panel and never committed dies with the review — its Blob URL
+        // is the host's (it never entered _sessionMedia), so this is its single revocation.
+        await DiscardPendingRecordingAsync();
         var removed = DropOrphanedRecorderRow();
         _error = null;
         StateHasChanged();
@@ -529,14 +645,75 @@
         return false;
     }
 
+    /// <summary>Drops the handed-off take that was never committed and revokes its Blob URL exactly
+    /// once — an uncommitted take lives only here (the panel owns nothing once it has handed over), so
+    /// no row path can revoke it a second time.</summary>
+    private async Task DiscardPendingRecordingAsync()
+    {
+        if (_pendingRecording is { } pending)
+        {
+            _pendingRecording = null;
+            if (pending.Media.PreviewUrl is not null)
+            {
+                await RevokeMediaUrlAsync(pending.Media.PreviewUrl);
+            }
+        }
+    }
+
     /// <summary>Signals <see cref="RecorderStateChanged"/> with the current open state (owner rework,
     /// 2026-10-12 — the host hides its own competing surfaces, e.g. the page's materials dropzone).</summary>
     private Task NotifyRecorderStateAsync() => RecorderStateChanged.InvokeAsync(_recordingRow is not null);
 
-    /// <summary>Owner pill rework (2026-10-12): the play pill reopens the staged take's session Blob in
-    /// the SAME review panel (player + Record again) — one takeover at a time, like the recorder.
-    /// Closing keeps the session entry, so the pill can reopen it; only removal revokes the URL.</summary>
-    private async Task ToggleReviewAsync(InstructionEditorRow row)
+    /// <summary>Round media-pill-listing (C2, E.3): the readout is the edit affordance. On the
+    /// Dialog-mode host it raises <see cref="EditRowRequested"/> — the host owns the dialog, exactly as
+    /// for a Text/Link pencil. On the Inline-mode host (the question dialog, which cannot nest a
+    /// dialog — dialog-ui §4) it expands the optional Title/Description pair ON the row (Q12).</summary>
+    private async Task OnReadoutClickedAsync(InstructionEditorRow row)
+    {
+        if (ReadOnly)
+        {
+            return;
+        }
+
+        if (EditingMode == RowEditingMode.Dialog)
+        {
+            await EditRowRequested.InvokeAsync(row);
+            return;
+        }
+
+        _inlineMediaRow = ReferenceEquals(_inlineMediaRow, row) ? null : row;
+        StateHasChanged();
+    }
+
+    /// <summary>Round media-pill-listing (C2, E.6): the seeded review's link-styled metadata control —
+    /// the same destination the readout click reaches (the host dialog on the Dialog host, the inline
+    /// expansion on the Inline host).
+    /// <para>On the Inline host the link must take effect IN THE SAME CLICK (P2, UI tester 2026-10-12):
+    /// the takeover hides the rows, so toggling the inline expansion behind the open review panel had
+    /// no visible effect until Cancel. It closes the review first and expands the row on the row that
+    /// the close has just restored — nothing else moves, the row is staged and never the record
+    /// action's placeholder, so <see cref="CloseRecorder"/> drops only the takeover.</para></summary>
+    private async Task OnReviewMetadataAsync(InstructionEditorRow row)
+    {
+        if (ReadOnly
+            || EditingMode != RowEditingMode.Inline
+            || !ReferenceEquals(_recordingRow, row))
+        {
+            await OnReadoutClickedAsync(row);
+            return;
+        }
+
+        await CloseRecorder();
+        _inlineMediaRow = row;
+        StateHasChanged();
+    }
+
+    /// <summary>Round media-pill-listing (C1/Q6): the play button. A session take replays from its kept
+    /// Blob URL; any other staged row (uploaded / post-reload) fetches its bytes through the host's
+    /// served route and wraps them in a Blob URL via <c>DotNetStreamReference</c>. Either way the SAME
+    /// review panel reopens — playback only (no commit button on a seeded review). A missing seam or a
+    /// failed/404 fetch surfaces a named error rather than a dead affordance (AC-10).</summary>
+    private async Task PlayMediaAsync(InstructionEditorRow row)
     {
         if (_recordingRow == row)
         {
@@ -546,12 +723,108 @@
 
         if (_sessionMedia.TryGetValue(row, out var session))
         {
-            _recordingRow = row;
-            _reviewSeed = new RecorderPanel.ReviewSeed(session.Url, row.FileName ?? "recording", row.FileSize);
-            _error = null;
-            StateHasChanged();
+            SeedReview(row, session.Url);
             await NotifyRecorderStateAsync();
+            return;
         }
+
+        if (LoadInstructionMediaAsync is null)
+        {
+            Fail("Playing this recording is not available here.");
+            return;
+        }
+
+        try
+        {
+            var stream = await LoadInstructionMediaAsync(row);
+            if (stream is null)
+            {
+                Fail("This recording is no longer available.");
+                return;
+            }
+
+            var url = await CreateMediaUrlFromStreamAsync(stream, row.ContentType);
+            _sessionMedia[row] = new SessionMedia(url, null);
+            SeedReview(row, url);
+            await NotifyRecorderStateAsync();
+
+            // Display-only probe (E.5): a row whose persisted duration is null can still read its
+            // duration from the fetched bytes — but the value is never written back to the row, so it
+            // is never persisted (that would need a PATCH endpoint — a named non-goal).
+            await ProbeServedDurationAsync(row, url);
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex) when (ex is JSException or HttpRequestException or InvalidOperationException)
+        {
+            Fail("This recording could not be loaded.");
+        }
+    }
+
+    /// <summary>Opens the review panel on <paramref name="row"/> seeded with a Blob URL — the one
+    /// playback surface (player + Record again; a reopened review never renders the commit button).</summary>
+    private void SeedReview(InstructionEditorRow row, string url)
+    {
+        _recordingRow = row;
+        _reviewSeed = new RecorderPanel.ReviewSeed(url, row.FileName ?? "recording", row.FileSize);
+        _error = null;
+        StateHasChanged();
+    }
+
+    /// <summary>Round media-pill-listing (Q8): the served bytes cross .NET→JS as a
+    /// <c>DotNetStreamReference</c> — never a byte[] (an oversized interop number array in Blazor
+    /// Server), and the JS side reads the stream before building the Blob URL.</summary>
+    private async Task<string> CreateMediaUrlFromStreamAsync(Stream stream, string? contentType)
+    {
+        _mediaModule ??= await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+        using var streamRef = new DotNetStreamReference(stream);
+        return await _mediaModule.InvokeAsync<string>("createMediaUrlFromStream", streamRef, contentType);
+    }
+
+    /// <summary>Display-only duration probe for a served/preview play — reuses the recorder module's
+    /// single <c>mediaDuration</c> implementation, imported by this module. Best-effort: any failure
+    /// leaves the readout on its `—:—` fallback.</summary>
+    private async Task ProbeServedDurationAsync(InstructionEditorRow row, string url)
+    {
+        try
+        {
+            var seconds = await _mediaModule!.InvokeAsync<double?>("mediaDuration", url);
+            if (ToWholeSeconds(seconds) is int whole && _sessionMedia.ContainsKey(row))
+            {
+                _sessionMedia[row] = new SessionMedia(url, whole);
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+    /// <summary>Best-effort duration probe for a just-staged upload (E.7): reads the File still
+    /// attached to the row's capture-slot input. Every failure path is swallowed — staging already
+    /// succeeded, and the readout falls back to `—:—`.</summary>
+    private async Task ProbeUploadDurationAsync(InstructionEditorRow row)
+    {
+        try
+        {
+            var index = Rows.IndexOf(row);
+            if (index < 0)
+            {
+                return;
+            }
+
+            _mediaModule ??= await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            var seconds = await _mediaModule.InvokeAsync<double?>(
+                "probeDurationFromInput", $"#{Id}-capture-{index} input[type=file]");
+            if (ToWholeSeconds(seconds) is int whole)
+            {
+                row.DurationSeconds = whole;
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
     }
 
     /// <summary>Owner pill rework (2026-10-12): the list's tiny media module (revoke only). The import
@@ -591,6 +864,10 @@
             await RevokeMediaUrlAsync(session.Url);
         }
 
+        // AC-4: a take the host still holds at teardown (the review was never closed) is revoked too —
+        // it never entered _sessionMedia, so this is its single revocation.
+        await DiscardPendingRecordingAsync();
+
         _sessionMedia.Clear();
         if (_mediaModule is not null)
         {
@@ -602,9 +879,16 @@
     /// <summary>D3 (recording-materials): the recorder's commit seam. The recorded take (delivered as a
     /// Stream via the panel's hidden InputFile) stages through the SAME <see cref="StageMediaFileAsync"/>
     /// path an uploaded media file takes, so the row is filled identically and the list stays the single
-    /// writer of its rows. The recorder then closes. Public by the owner pill rework (2026-10-12) as the
-    /// seam bUnit drives directly (the <c>StageMediaFileAsync</c> precedent) — and it now keeps the
-    /// take's session Blob URL + duration for the row's play pill.</summary>
+    /// writer of its rows. Public by the owner pill rework (2026-10-12) as the seam bUnit drives directly
+    /// (the <c>StageMediaFileAsync</c> precedent) — and it now keeps the take's session Blob URL +
+    /// duration for the row's play button.
+    /// <para>Round media-pill-listing (C2/Q12): on the Dialog-mode host the take stages NOTHING here —
+    /// the metadata dialog pops first (through the host's own <see cref="EditRowRequested"/> seam) and
+    /// the stashed take is committed by <see cref="ApplyEditAsync"/> when the dialog confirms. A
+    /// CANCELLED dialog leaves the stashed take with the review (AC-4): the panel keeps its own take
+    /// open, the review is re-seeded on it, and nothing was staged. On the Inline-mode host (the
+    /// question dialog — no nested dialogs) the take stages directly, exactly as before, and the
+    /// freshly staged row's metadata is edited from its readout click.</para></summary>
     public async Task OnRecordedAsync(InstructionEditorRow row, RecorderPanel.RecordedMedia media)
     {
         if (StageMediaAsync is null)
@@ -613,8 +897,50 @@
             return;
         }
 
+        if (EditingMode == RowEditingMode.Dialog)
+        {
+            // A take handed off earlier and still uncommitted is superseded by this one — a retake
+            // after a cancelled metadata dialog. The panel handed its URL over and owns nothing, so
+            // that URL is this host's to revoke here or it is orphaned. The SAME take arriving again
+            // (the held review's second "Use this recording") is no supersede: same URL, still ours.
+            if (_pendingRecording is { } superseded
+                && superseded.Media.PreviewUrl is not null
+                && !string.Equals(superseded.Media.PreviewUrl, media.PreviewUrl, StringComparison.Ordinal))
+            {
+                await RevokeMediaUrlAsync(superseded.Media.PreviewUrl);
+            }
+
+            // Stash the take and pop the metadata dialog — staging happens only once the host hands
+            // the confirmed result back through ApplyEditAsync.
+            _pendingRecording = new PendingRecording(row, media);
+            _error = null;
+            await EditRowRequested.InvokeAsync(row);
+
+            // A confirm cleared _pendingRecording and staged through ApplyEditAsync, so a take still
+            // stashed here was CANCELLED: it stays uncommitted with the review (AC-4). The re-seed is
+            // the review's own record of that take — the panel keeps its in-session take, and this is
+            // what reopens the review on the same take for any render that no longer has it (the
+            // list-level seam the cancel path is pinned through).
+            if (_pendingRecording is { Media.PreviewUrl: not null } held)
+            {
+                _reviewSeed = new RecorderPanel.ReviewSeed(
+                    held.Media.PreviewUrl, held.Media.FileName, held.Media.FileSize);
+                StateHasChanged();
+            }
+
+            return;
+        }
+
+        await StageRecordedTakeAsync(row, media);
+    }
+
+    /// <summary>Commits a recorded take: stores its session Blob URL + probed duration on the row (the
+    /// duration PERSISTS — Q7/AC-9), closes the review, then stages through the shared upload path.</summary>
+    private async Task StageRecordedTakeAsync(InstructionEditorRow row, RecorderPanel.RecordedMedia media)
+    {
         _recordingRow = null;
         _reviewSeed = null;
+        _pendingRecording = null;
         // The committed take's row is staged now — it survives as a real row (owner rework, 2026-10-12).
         _recorderCreatedRow = null;
         if (media.PreviewUrl is not null)
@@ -626,6 +952,9 @@
 
             _sessionMedia[row] = new SessionMedia(media.PreviewUrl, media.DurationSeconds);
         }
+
+        // Round media-pill-listing (Q7): the probed duration rides the row (and so the save payload).
+        row.DurationSeconds = ToWholeSeconds(media.DurationSeconds);
 
         await NotifyRecorderStateAsync();
         await StageMediaFileAsync(row, media.Content, media.FileName, media.ContentType, media.FileSize);

@@ -124,5 +124,7 @@ public sealed class GetAssignmentAuthoringChildrenQueryHandler(
             item.StoragePath,
             item.DisplayOrder,
             // D7: the material's name — the authoring surface reads it back for edit-in-place.
-            item.Title);
+            item.Title,
+            // Q7 (media-pill-listing): the media's persisted duration — null on legacy rows.
+            item.DurationSeconds);
 }

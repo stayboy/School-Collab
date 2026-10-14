@@ -15,6 +15,14 @@
 <li class="ward-material ward-material--media" data-kind="@Material.Kind">
     <span class="ward-material-label">@(Material.Title ?? Material.FileName ?? "Recording")</span>
 
+    @* Round media-pill-listing (C3/Q11): the material's body renders under the player/label — the
+       DTO already carries it and the ward surface previously dropped it. One static render, one
+       conditional: nothing renders when the body is empty. *@
+    @if (!string.IsNullOrWhiteSpace(Material.Text))
+    {
+        <p class="ward-material-body">@Material.Text</p>
+    }
+
     @if (_loading)
     {
         <FluentProgressRing />

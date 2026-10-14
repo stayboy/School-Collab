@@ -170,8 +170,8 @@ public class DuplicateAssignmentCommandHandlerTests
         var sourceQuestionId = source.Questions.OrderBy(q => q.DisplayOrder).First().Id;
         source.SetInstructionItems(
         [
-            (null, InstructionKind.Text, "Read the brief.", null, null, null, 0, null, "The brief"),
-            (sourceQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null, "Help page"),
+            (null, InstructionKind.Text, "Read the brief.", null, null, null, 0, null, "The brief", null),
+            (sourceQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null, "Help page", null),
         ]);
         db.SaveChanges();
 

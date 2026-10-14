@@ -200,7 +200,7 @@ public class WardRoutesTests
             TargetAudienceType.AllStudents, Guid.NewGuid(), null, null, Guid.NewGuid());
         assignment.AddInstructionItems(
         [
-            (null, InstructionKind.Video, null, null, "lecture.webm", "video/webm", 1024, "staged/lecture.webm", "Intro lecture")
+            (null, InstructionKind.Video, null, null, "lecture.webm", "video/webm", 1024, "staged/lecture.webm", "Intro lecture", null)
         ]);
         return (assignment, assignment.InstructionItems[0].Id);
     }

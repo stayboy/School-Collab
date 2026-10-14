@@ -217,20 +217,30 @@
     public sealed record ReviewSeed(string PreviewUrl, string FileName, long FileSize);
 
     /// <summary>Applies the host's seed once per instance (reference-guarded), entering Review with the
-    /// URL-owned-by-host posture; state changes after that (retake) are the panel's own.</summary>
+    /// URL-owned-by-host posture; state changes after that (retake) are the panel's own. The seed is
+    /// CONSUMED when it arrives, whether or not it applies: it OPENS a review and never replaces the
+    /// take the panel is already reviewing — the author's own handed-off take (AC-4) or a commit in
+    /// flight — so a later render cannot re-open it under a retake that has moved on.</summary>
     protected override void OnParametersSet()
     {
-        if (Seed is not null && !ReferenceEquals(Seed, _appliedSeed) && !_committing)
+        if (Seed is null || ReferenceEquals(Seed, _appliedSeed))
         {
-            _appliedSeed = Seed;
-            _reopened = true;
-            _ownsPreviewUrl = false;
-            _previewUrl = Seed.PreviewUrl;
-            _recordedFileName = Seed.FileName;
-            _recordedSize = Seed.FileSize;
-            _durationSeconds = null;
-            _state = RecorderState.Review;
+            return;
         }
+
+        _appliedSeed = Seed;
+        if (_committing || _state == RecorderState.Review)
+        {
+            return;
+        }
+
+        _reopened = true;
+        _ownsPreviewUrl = false;
+        _previewUrl = Seed.PreviewUrl;
+        _recordedFileName = Seed.FileName;
+        _recordedSize = Seed.FileSize;
+        _durationSeconds = null;
+        _state = RecorderState.Review;
     }
     private string _elapsed = "0:00";
     private System.Timers.Timer? _ticker;
@@ -399,14 +409,19 @@
             // Hold verdict 2026-10-12 (P1): the host stores the preview URL in its session map (the
             // pill replays from it) and unmounts this panel BEFORE its staging call returns — the
             // after-await ownership flip never ran on the mainline commit path, and the panel's
-            // DisposeAsync then revoked the very URL the row's pill points at. Flip ownership and drop
-            // the field BEFORE the await, carrying the URL to the host in a local.
+            // DisposeAsync then revoked the very URL the row's pill points at. Flip ownership BEFORE
+            // the await, carrying the URL to the host in a local.
             var previewUrl = _previewUrl;
             _ownsPreviewUrl = false;
-            _previewUrl = null;
             await OnRecorded.InvokeAsync(
                 new RecordedMedia(stream, file.Name, contentType, file.Size, previewUrl, _durationSeconds));
-            Reset();
+            // Round media-pill-listing (AC-4): the host either COMMITTED the take — unmounting this
+            // panel the moment staging succeeded (the P1 invariant above) — or it HELD it, because its
+            // metadata dialog was cancelled. A held take stays with the review: the player, "Record
+            // again", and a second "Use this recording" (the module keeps the Blob for exactly that
+            // retry). So nothing resets here — resetting a held take is what dropped it, and a
+            // committed take's panel is torn down regardless. The URL is no longer ours to revoke
+            // (ownership flipped above): the host's pending take owns it.
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or JSException)
         {

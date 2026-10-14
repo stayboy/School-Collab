@@ -46,7 +46,8 @@
             <span class="cq-qedit-sublabel">Instructions</span>
             <InstructionEditorList Id="cq-qedit-instructions-list"
                                    Rows="Model.Row.Instructions"
-                                   StageMediaAsync="Model.StageMediaAsync" />
+                                   StageMediaAsync="Model.StageMediaAsync"
+                                   LoadInstructionMediaAsync="Model.LoadMediaAsync" />
         </div>
 
         @switch (Model.Row.Type)
