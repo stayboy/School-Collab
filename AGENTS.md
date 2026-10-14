@@ -511,10 +511,9 @@ user instruction):
    one ordered sequence). With no related PR open, a plain PR from `main`
    is correct.
 6. Wait for the GitHub Actions `Build & Test` check to pass.
-7. Merge with squash merge by default only after the user asks to merge:
-   ```bash
-   gh pr merge <pr-number> --squash --delete-branch
-   ```
+7. Merge only after the user asks to merge — **squash merge, source branch deleted**. The command and
+   the retention rule are canonical in `.github/merge-policy.md` § Merge strategy; do not restate them
+   here.
 8. Switch to `main` and pull the merged result:
    ```bash
    git checkout main

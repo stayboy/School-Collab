@@ -32,7 +32,9 @@ not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
    - `dotnet build`
    - `dotnet test`
 7. Wait for GitHub Actions CI to pass on the PR.
-8. Merge with a squash merge by default:
+8. Merge with a squash merge, deleting the source branch. The command and the
+   retention rule are canonical in **Merge strategy** below — do not restate them
+   elsewhere:
    ```bash
    gh pr merge <pr-number> --squash --delete-branch
    ```
@@ -82,9 +84,18 @@ A red `main` is an **incident**:
 
 ## Merge strategy
 
-Use squash merge by default for feature and bug-fix PRs. This keeps `main` focused on shipped changes while preserving detailed history on the source branch.
+**Squash merge, and delete the source branch** — owner decision **2026-10-14**, which **reverses**
+the 2026-09-14 decision to retain merged branches. This section is the single canonical statement of
+the retention rule: `AGENTS.md` and `.github/copilot/preflight-pr.prompt.md` point here rather than
+restating the command, so the three copies cannot drift apart again.
 
-Use merge or rebase only when the user explicitly requests it or when the PR requires preserving a multi-commit history.
+Use squash merge by default for feature and bug-fix PRs. This keeps `main` focused on shipped
+changes. Nothing is lost by deleting the branch — a squash-merged PR keeps its full commit list on
+GitHub after the branch is removed.
+
+Use merge or rebase only when the user explicitly requests it, or when a PR genuinely needs its
+multi-commit history on `main`. Even then the source branch is still deleted unless the user says
+otherwise.
 
 ## Local push hold
 
