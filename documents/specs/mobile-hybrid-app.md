@@ -380,10 +380,16 @@ interactive `WebAuthenticator` re-auth when Keycloak rejects it**, with the refr
 user (the auth service already models `session_ended` as a distinct 410 — mobile should map the
 same way).
 
-**Outcome (2026-10-13): PARTIALLY RESOLVED.** L3 shipped silent refresh via the refresh token with
-rotation, holding the token in `SecureStorage`. Two halves did **not** ship and remain open: the
-**401 → refresh → retry resend**, and the mapping of Keycloak's `session_ended` (410) onto a distinct
-mobile session-end state. Carry these forward; do not read this decision as discharged.
+**Outcome (2026-10-13): MET, with one deliberate deviation and one open sub-item.** L3 shipped silent
+refresh on the request path — `TokenSession` returns the cached token while it is usable and refreshes
+it when it is not — holds the refresh token in `SecureStorage`, and falls back to interactive sign-in.
+That is the recommendation's core. The recommended 401-resend was **deliberately not implemented**, and
+`BearerTokenDelegatingHandler` documents the reason: *"a resend loop on a rejected credential is how a
+401 storm starts"* — the handler sends the 401'd request unauthenticated and lets the server's 401 be
+the truth. A considered deviation, not an omission.
+
+Still open: the recommendation's cost note — mapping Keycloak's `session_ended` (410) onto a distinct
+mobile session-end state. No `410`/`session_ended` handling exists under `src/Mobile` today (verified).
 
 **OD3 — How much of the Logic split is enforced.** Recommend **route all view models and API
 clients through `SchoolCollab.Mobile.Logic`** so they are CI-testable, leaving only host wiring and
