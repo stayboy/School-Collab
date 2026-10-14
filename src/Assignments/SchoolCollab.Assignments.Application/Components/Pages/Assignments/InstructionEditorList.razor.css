@@ -57,15 +57,6 @@
     flex: 1 1 auto;
 }
 
-.cq-instruction-file {
-    flex: 1 1 auto;
-    font-size: 0.85rem;
-    color: var(--neutral-foreground-hint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .cq-instruction-error {
     margin: 0;
     font-size: 0.85rem;
@@ -119,26 +110,16 @@
     flex: 1 1 auto;
 }
 
-/* Owner pill rework (2026-10-12): a staged media item's play pill — the kind icon (already rendered at
-   the row start) · play + duration · the row's trailing remove ×. A barely-filled rounded pill with a
-   hover lift, sized to the row's single-line rhythm. */
-.cq-media-play {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 10px;
-    border: 1px solid var(--neutral-stroke-rest);
-    border-radius: 999px;
-    background: var(--neutral-layer-1);
+/* Round media-pill-listing (C1/Q3): the staged media READOUT — `2:34 [Title]` / `2:34` / `—:—` /
+   Image `[Title]` or size text. Same flex weight and ellipsis truncation as the Dialog-mode readout
+   it mirrors, so a long title truncates rather than pushing the play/remove actions off the row. The
+   `.cq-media-play` rounded pill (and its text span) is RETIRED — no pill, no border (C1). */
+.cq-media-readout {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
     cursor: pointer;
-    min-width: 0;
-}
-
-.cq-media-play:hover {
-    background: var(--neutral-layer-2);
-}
-
-.cq-media-pill-text {
-    line-height: 1;
 }

@@ -1322,6 +1322,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                                 .HasColumnType("integer")
                                 .HasColumnName("display_order");
 
+                            b1.Property<int?>("DurationSeconds")
+                                .HasColumnType("integer")
+                                .HasColumnName("duration_seconds");
+
                             b1.Property<string>("FileName")
                                 .HasMaxLength(255)
                                 .HasColumnType("character varying(255)")

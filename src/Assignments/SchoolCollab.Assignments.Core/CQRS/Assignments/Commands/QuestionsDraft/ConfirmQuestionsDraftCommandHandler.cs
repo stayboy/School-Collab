@@ -66,7 +66,7 @@ public sealed class ConfirmQuestionsDraftCommandHandler(
         // The assignment's OWN rows are untouched by a questions confirm, so these are appended.
         var questionInstructionItems = new List<(Guid? QuestionId, Domain.InstructionKind Kind, string? Text,
             string? Url, string? FileName, string? ContentType, long FileSize, string? StoragePath,
-            string? Title)>();
+            string? Title, int? DurationSeconds)>();
 
         for (var i = 0; i < drafted.Count; i++)
         {
@@ -99,7 +99,8 @@ public sealed class ConfirmQuestionsDraftCommandHandler(
                 ContentType: item.ContentType,
                 FileSize: item.FileSize,
                 StoragePath: item.StoragePath,
-                Title: item.Title)));
+                Title: item.Title,
+                DurationSeconds: item.DurationSeconds)));
         }
 
         if (questionInstructionItems.Count > 0)

@@ -96,9 +96,10 @@ public class InstructionEditorListBunitTests : BunitContext
         cut.Markup.Should().Contain("https://", "a link row takes a URL, not free text");
     }
 
-    /// <summary>Owner pill rework (2026-10-12): a staged media item WITHOUT a session take (uploaded, or
-    /// reloaded later) reads as kind icon + size text — no raw-filename dump, and the clear-file × is
-    /// retired; the row's trailing remove × is the single close.</summary>
+    /// <summary>Round media-pill-listing (C1/Q13 — THIRD repin, Audio→Image): an UNTITLED Image row
+    /// keeps today's size-text readout (Q13), so this pin stays meaningful where the Audio size text was
+    /// retired into the duration readout. No clear-file × — the row's trailing remove × is the single
+    /// close.</summary>
     [TestMethod]
     public void StagedMedia_RendersTheSizeText_WithNoClearAction()
     {
@@ -106,16 +107,16 @@ public class InstructionEditorListBunitTests : BunitContext
         [
             new InstructionEditorRow
             {
-                Kind = InstructionKindDto.Audio,
-                FileName = "how-to.mp3",
-                ContentType = "audio/mpeg",
+                Kind = InstructionKindDto.Image,
+                FileName = "diagram.png",
+                ContentType = "image/png",
                 FileSize = 2048,
-                StoragePath = "tenants/t/staging/g/how-to.mp3",
+                StoragePath = "tenants/t/staging/g/diagram.png",
             },
         ]);
 
         cut.Markup.Should().Contain(AttachmentUploadPolicy.FormatFileSize(2048),
-            "the size reads instead of the raw filename");
+            "an untitled Image keeps the size-text readout (Q13)");
         cut.FindAll("#instr-clear-media-0").Should().BeEmpty(
             "the clear-file × is retired — one close per row (owner, 2026-10-12)");
         cut.Find("#instr-remove-0").Should().NotBeNull(
@@ -326,10 +327,9 @@ public class InstructionEditorListBunitTests : BunitContext
         cut.FindAll("fluent-text-field").Should().NotBeEmpty("…it still edits inline");
     }
 
-    /// <summary>Grill Q3: media rows are staged, not formed — the file IS the value, so Dialog mode
-    /// leaves them on the staged-file flow (owner pill rework, 2026-10-12: the flow now reads as the
-    /// compact size-text pill; the clear-file × is retired and the row's remove × is the single close).
-    ///</summary>
+    /// <summary>Grill Q3 as reworked by round media-pill-listing (C2 — SECOND repin): media rows now
+    /// edit THROUGH the readout-opened dialog, so the row carries the readout (the edit affordance) and
+    /// no pencil — the file fields are still not inline-editable and never appear in the dialog.</summary>
     [TestMethod]
     public void DialogMode_LeavesMediaRowsOnTheStagedFileFlow()
     {
@@ -349,9 +349,11 @@ public class InstructionEditorListBunitTests : BunitContext
             .Add(c => c.Rows, rows)
             .Add(c => c.EditingMode, RowEditingMode.Dialog));
 
-        cut.FindAll("#instr-edit-0").Should().BeEmpty("a staged file is not seeded into a form");
-        cut.FindAll(".cq-instruction-file").Should().ContainSingle(
-            "the staged file still reads in the row (size text, title tooltip)");
+        cut.FindAll("#instr-edit-0").Should().BeEmpty("the pencil never appears on a media row (C1)");
+        cut.FindAll(".cq-media-readout").Should().ContainSingle(
+            "the readout IS the media row's edit affordance — clicking it opens the host's dialog (C2)");
+        cut.FindAll(".cq-instruction-file").Should().BeEmpty(
+            "the old size-text span is retired into the readout");
         cut.FindAll("#instr-clear-media-0").Should().BeEmpty(
             "the clear-file × is retired — the row's remove × is the single close");
         cut.Find("#instr-remove-0").Should().NotBeNull("…and the staged-file flow keeps its exit");
@@ -554,9 +556,10 @@ public class InstructionEditorListBunitTests : BunitContext
         states.Should().Equal(new[] { true, false }, "open signalled by the kebab action, closed by Cancel");
     }
 
-    /// <summary>Owner pill rework (2026-10-12): a committed take's session Blob URL + duration ride the
-    /// commit seam into the row's play pill — play + "m:ss" — and the pill reopens the SAME review
-    /// panel (player + Record again, no commit button). Closing keeps the entry; the row survives.</summary>
+    /// <summary>Owner pill rework (2026-10-12), as REPINNED by round media-pill-listing (C1 — repin 1):
+    /// a committed take's session Blob URL + duration ride the commit seam into the row's READOUT —
+    /// `2:34` — and the PLAY button reopens the SAME review panel (player + Record again, no commit
+    /// button). Closing keeps the entry; the row survives.</summary>
     [TestMethod]
     public async Task RecordedRow_Pill_ShowsDuration_AndReopensTheReviewPlayer()
     {
@@ -570,8 +573,8 @@ public class InstructionEditorListBunitTests : BunitContext
             new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:test-take", 64)));
 
         rows[0].StoragePath.Should().Be("p", "the take staged through the same seam an upload takes");
-        cut.Find("#instr-play-0").TextContent.Should().Contain("1:04",
-            "the pill carries the take's probed duration");
+        cut.Find("#instr-title-0").TextContent.Should().Contain("1:04",
+            "the readout carries the take's probed duration (C1 — the pill is retired)");
         cut.FindAll("#instr-clear-media-0").Should().BeEmpty("no clear-file × (retired)");
 
         cut.Find("#instr-play-0").Click();
@@ -662,6 +665,383 @@ public class InstructionEditorListBunitTests : BunitContext
         await cut.InvokeAsync(async () => await cut.Instance.DisposeAsync());
 
         module.VerifyInvoke("revokeMediaUrl");
+    }
+
+    // ── Round media-pill-listing (C1/C2, Slice F): the Text-row shape, the readout, served playback ──
+
+    private const string MediaModulePath =
+        "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js";
+
+    private static InstructionEditorRow StagedMediaRow(
+        InstructionKindDto kind = InstructionKindDto.Video, string fileName = "clip.webm",
+        string contentType = "video/webm", string? title = null, int? durationSeconds = null) => new()
+        {
+            Id = Guid.NewGuid(),
+            Kind = kind,
+            FileName = fileName,
+            ContentType = contentType,
+            FileSize = 1024,
+            StoragePath = "staged/clip.webm",
+            Title = title,
+            DurationSeconds = durationSeconds,
+        };
+
+    /// <summary>C1 (AC-1): a staged Audio/Video row with NO session entry renders the Text-row shape —
+    /// the standard kind glyph AND the trailing remove × are kept, the action slot holds the PLAY icon
+    /// button, and the size text is gone. Clicking play invokes the host's served-play seam and reopens
+    /// the SAME review panel (player + Record again — never the commit button). Pre-fix: size text, no
+    /// play button, no served fetch at all.</summary>
+    [TestMethod]
+    public async Task ServedRow_PlayButton_RendersWithoutASessionEntry_AndInvokesTheLoadSeam()
+    {
+        var rows = new List<InstructionEditorRow> { StagedMediaRow() };
+        InstructionEditorRow? loaded = null;
+        var module = JSInterop.SetupModule(MediaModulePath);
+        module.Setup<string>("createMediaUrlFromStream", _ => true).SetResult("blob:served");
+        module.Setup<double?>("mediaDuration", _ => true).SetResult(null);
+
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.LoadInstructionMediaAsync, (InstructionEditorRow row) =>
+            {
+                loaded = row;
+                return Task.FromResult<Stream?>(new MemoryStream([1, 2, 3]));
+            }));
+
+        var play = cut.Find("#instr-play-0");
+        play.GetAttribute("aria-label").Should().Be("Play");
+        cut.FindAll(".cq-instruction-kind").Should().ContainSingle(
+            "the standard leading kind glyph is kept (C1)");
+        cut.Find("#instr-remove-0").Should().NotBeNull("…and so is the standard trailing remove ×");
+        cut.FindAll(".cq-instruction-file").Should().BeEmpty(
+            "the retired size text is gone from an Audio/Video row (C1)");
+        cut.FindAll(".cq-media-play").Should().BeEmpty("no pill survives (C1/AC-1)");
+
+        play.Click();
+
+        loaded.Should().BeSameAs(rows[0], "play fetches through the host's served-play seam");
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the review reopens");
+        cut.Find("#instr-recorder-0-preview-take").Should().NotBeNull("…with the served take's player");
+        cut.FindAll("#instr-recorder-0-commit").Should().BeEmpty(
+            "a served play has nothing new to commit — playback only");
+    }
+
+    /// <summary><b>REGRESSION pin, not discriminating</b> (Slice F): the staged Audio row's kind glyph,
+    /// trailing remove × and file-name tooltip render today and must keep rendering — the pin exists so
+    /// the retired pill shape cannot come back, not because pre-fix code failed it.</summary>
+    [TestMethod]
+    public void MediaRow_KeepsTheKindGlyphAndTheRemove_WithTheNameTooltip()
+    {
+        var cut = Render([StagedMediaRow(kind: InstructionKindDto.Audio, "how-to.mp3", "audio/mpeg")]);
+
+        cut.Find(".cq-instruction-kind").GetAttribute("aria-label").Should().Be("Audio",
+            "the kind glyph is unchanged (continuity, not discrimination)");
+        cut.Find("#instr-remove-0").GetAttribute("aria-label").Should().Be("Remove instruction");
+        cut.Find(".cq-media-readout").GetAttribute("title").Should().Be("how-to.mp3",
+            "the file name rides the native title tooltip");
+    }
+
+    /// <summary>C2/Q13 (AC-2): the readout reads `2:34 [Title]` (ellipsis-truncated) when titled,
+    /// `2:34` untitled with a known duration, `—:—` when the duration is unknown, a titled Image
+    /// `[Title]` with no duration, and an untitled Image today's size text. Pre-fix: no readout at all.</summary>
+    [TestMethod]
+    public void MediaRow_Readout_ShowsTitleDurationEllipsis_OrTheDashFallback()
+    {
+        var cut = Render(
+        [
+            StagedMediaRow(kind: InstructionKindDto.Audio, "a.mp3", "audio/mpeg", title: "Week 1 intro", durationSeconds: 154),
+            StagedMediaRow(kind: InstructionKindDto.Video, "b.webm", "video/webm", durationSeconds: 154),
+            StagedMediaRow(kind: InstructionKindDto.Audio, "c.mp3", "audio/mpeg"),
+            StagedMediaRow(kind: InstructionKindDto.Image, "d.png", "image/png", title: "Diagram"),
+            StagedMediaRow(kind: InstructionKindDto.Image, "e.png", "image/png"),
+        ]);
+
+        cut.Find("#instr-title-0").TextContent.Should().Be("2:34 [Week 1 intro]",
+            "a titled media row reads duration + bracketed title");
+        cut.Find("#instr-title-1").TextContent.Should().Be("2:34", "untitled reads the duration alone");
+        cut.Find("#instr-title-2").TextContent.Should().Be("—:—",
+            "an unknown duration (a legacy row / failed probe) reads the dash fallback, never a guess");
+        cut.Find("#instr-title-3").TextContent.Should().Be("[Diagram]",
+            "a titled Image reads its title with NO duration (Q13)");
+        cut.Find("#instr-title-4").TextContent.Should().Be(AttachmentUploadPolicy.FormatFileSize(1024),
+            "an untitled Image keeps today's size-text readout (Q13)");
+        cut.Find("#instr-title-0").ClassList.Should().Contain("cq-instruction-readout",
+            "the readout carries the ellipsis-truncation rule");
+    }
+
+    /// <summary>C2 (AC-3): the READOUT is the edit affordance — clicking it raises
+    /// <see cref="InstructionEditorList.EditRowRequested"/> with its own row (the host opens the
+    /// metadata dialog), while the PLAY button is purely preview and never opens it.</summary>
+    [TestMethod]
+    public void MediaRow_Readout_ClickRequestsTheEdit()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            StagedMediaRow(durationSeconds: 154, title: "Intro"),
+            StagedMediaRow(fileName: "other.webm"),
+        };
+        InstructionEditorRow? requested = null;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        cut.Find("#instr-title-1").Click();
+
+        requested.Should().BeSameAs(rows[1], "the readout carries its OWN row into the host's dialog");
+
+        requested = null;
+        cut.Find("#instr-play-1").Click();
+
+        requested.Should().BeNull("the play button is purely preview — it never opens the metadata dialog");
+    }
+
+    /// <summary>C2/Q12 (AC-4): the Dialog-mode recorder commit pops the metadata dialog BEFORE any
+    /// staging. Cancel leaves the take uncommitted and the review open; confirm stages the take through
+    /// the host's own write-back seam, carrying the dialog's Title/Text.
+    /// <para>The dialog's own render/validation for a media kind is pinned in
+    /// <c>MaterialEditDialogBunitTests</c>; here the pop is the host seam the list raises.</para></summary>
+    [TestMethod]
+    public async Task RecordingCommit_MetadataDialog_Pops_BeforeTheTakeStages()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        InstructionEditorRow? requested = null;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.StageMediaAsync, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")))
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        cut.Find("#instr-record-0").Click();
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the premise: the recorder is open");
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:take", 64)));
+
+        requested.Should().BeSameAs(rows[0],
+            "the metadata dialog pops through the host's EditRowRequested seam BEFORE any staging");
+        rows[0].StoragePath.Should().BeNull("the take is stashed, not staged, until the dialog confirms");
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull(
+            "a cancelled dialog never reaches the commit path — the review stays open");
+
+        // The seed the host builds for that pop is the media kind, so the dialog renders the media fields.
+        MaterialEditFormModel.FromRow(rows[0]).Kind.Should().Be(InstructionKindDto.Video);
+
+        await cut.InvokeAsync(() => cut.Instance.ApplyEditAsync(
+            rows[0], new MaterialEditResult(InstructionKindDto.Video, "Intro", "Week 1", null)));
+
+        rows[0].StoragePath.Should().Be("p", "confirming the dialog commits the stashed take");
+        rows[0].Title.Should().Be("Intro");
+        rows[0].Text.Should().Be("Week 1");
+        rows[0].DurationSeconds.Should().Be(64, "the probed duration rides the committed row (AC-9)");
+        cut.FindAll("#instr-recorder-takeover").Should().BeEmpty("…and the review closes");
+    }
+
+    /// <summary>AC-4 (cancel path, C2/Q12): a CANCELLED metadata dialog leaves the take uncommitted with
+    /// the review STILL open on it — the panel keeps the take it handed over (its player, Record again,
+    /// and another "Use this recording"; the module keeps the Blob for exactly that retry), and only the
+    /// confirm stages. Pre-fix: the panel reset to Idle the moment the commit callback returned, so the
+    /// take and the review were gone and nothing could be committed by the second try.</summary>
+    [TestMethod]
+    public async Task CancelledMetadataDialog_KeepsTheTakeAndTheReview_AndTheSecondTryStages()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        InstructionEditorRow? requested = null;
+        var stagingCalls = 0;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.StageMediaAsync, Returning(
+                new StagedAttachmentDto("v.webm", "video/webm", 10, "p"), () => stagingCalls++))
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        cut.Find("#instr-record-0").Click();
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the premise: the recorder is open");
+
+        // The cancel: the metadata dialog pops and returns without a confirmed result.
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:held", 64)));
+
+        requested.Should().BeSameAs(rows[0], "the metadata dialog popped before any staging");
+        stagingCalls.Should().Be(0, "a cancelled dialog stages nothing");
+        rows[0].StoragePath.Should().BeNull("…so the row carries no staging residue");
+
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the review stays open (AC-4)");
+        cut.Find("#instr-recorder-0-preview-take").Should().NotBeNull(
+            "…on the take that was handed over — the preview player still works");
+        cut.Find("#instr-recorder-0-retake").Should().NotBeNull("…and Record again is still offered");
+
+        // The second try: the same take is committed by the dialog's confirm.
+        await cut.InvokeAsync(() => cut.Instance.ApplyEditAsync(
+            rows[0], new MaterialEditResult(InstructionKindDto.Video, "Intro", "Week 1", null)));
+
+        stagingCalls.Should().Be(1, "the held take stages on the second try, never on the cancel");
+        rows[0].StoragePath.Should().Be("p", "…and the row is staged then");
+        rows[0].Title.Should().Be("Intro");
+        rows[0].DurationSeconds.Should().Be(64, "the held take keeps its probed duration (AC-9)");
+        cut.FindAll("#instr-recorder-takeover").Should().BeEmpty("…and the review closes on the commit");
+    }
+
+    /// <summary>AC-4 (ownership, C1/Q8): the URL handed over at commit belongs to the host's pending
+    /// take — the panel flipped ownership and owns nothing after it. A review discarded without a commit
+    /// must therefore revoke it EXACTLY once: never an orphan, never a second revoke (the panel's own
+    /// teardown skips it).</summary>
+    [TestMethod]
+    public async Task CancelledMetadataDialog_ClosingTheReview_RevokesThePendingTakeUrlOnce()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video } };
+        JSInterop.SetupModule(MediaModulePath);
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.StageMediaAsync, Returning(new StagedAttachmentDto("v.webm", "video/webm", 10, "p")))
+            .Add(c => c.EditRowRequested, (InstructionEditorRow _) => { }));
+
+        cut.Find("#instr-record-0").Click();
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "v.webm", "video/webm", 10, "blob:held", 64)));
+
+        cut.Find("#instr-recorder-0-cancel").Click();
+
+        JSInterop.Invocations.Count(i => i.Identifier == "revokeMediaUrl").Should().Be(1,
+            "the discarded take's URL is revoked exactly once — no orphan, no double revoke");
+        rows[0].StoragePath.Should().BeNull("and discarding the review stages nothing");
+    }
+
+    /// <summary>Q7/AC-9: a recorded take's probed duration is PERSISTED on the row, so it rides
+    /// <c>NewInstructionDto.DurationSeconds</c> on the host's next save. Pre-fix: the field does not
+    /// exist and the duration is dropped at the row → payload hop.</summary>
+    [TestMethod]
+    public async Task RecordingCommit_PersistedDuration_RidesTheSavePayload()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Audio } };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("take.webm", "video/webm", 10, "p")));
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "take.webm", "video/webm", 10, "blob:take", 64)));
+
+        rows[0].DurationSeconds.Should().Be(64, "the probed duration lands on the row");
+        rows[0].ToDto().DurationSeconds.Should().Be(64,
+            "…and rides the NewInstructionDto the host saves");
+        cut.Find("#instr-title-0").TextContent.Should().Contain("1:04");
+    }
+
+    /// <summary>C2 (AC-5): the seeded review's link-styled metadata control renders ONLY when a
+    /// title/description exists — a bare preview shows nothing extra.</summary>
+    [TestMethod]
+    public async Task SeededReview_TitleEditLink_RendersOnlyWhenTitleOrBodyExists()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            StagedMediaRow(title: "Intro"),
+            StagedMediaRow(fileName: "bare.webm"),
+        };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("clip.webm", "video/webm", 10, "p")));
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "clip.webm", "video/webm", 10, "blob:titled", 5)));
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[1],
+            new RecorderPanel.RecordedMedia(Stream.Null, "bare.webm", "video/webm", 10, "blob:bare", 5)));
+
+        cut.Find("#instr-play-0").Click();
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the titled row's seeded review opens");
+        cut.Find("#instr-review-edit").Should().NotBeNull(
+            "a titled row's seeded review offers the metadata control");
+
+        cut.Find("#instr-recorder-0-cancel").Click();
+        cut.Find("#instr-play-1").Click();
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the untitled row's seeded review opens");
+        cut.FindAll("#instr-review-edit").Should().BeEmpty(
+            "…and it shows nothing extra — no title/description to edit");
+    }
+
+    /// <summary>C2/Q12 (the Inline host's review-metadata link): the question dialog cannot nest the
+    /// metadata dialog, so its link expands the optional Title/Description pair ON the row — and it
+    /// must take effect IN THE SAME CLICK. The seeded review takes over the whole container (the rows
+    /// are suppressed), so the expansion is only reachable once that takeover is closed: the link
+    /// closes the review and expands the row together. Pre-fix the link toggled the inline pair behind
+    /// the open panel, where nothing renders it — the click had no visible effect until Cancel, and
+    /// the fields below were absent.</summary>
+    [TestMethod]
+    public async Task SeededReview_MetadataLink_OnTheInlineHost_ClosesTheTakeover_AndExpandsTheRowFields()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video, Title = "Intro" } };
+        InstructionEditorRow? requested = null;
+        // Inline is the default — the question-dialog host.
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.StageMediaAsync, Returning(new StagedAttachmentDto("clip.webm", "video/webm", 1024, "p")))
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        // Stage a take on the row (the Inline host stages directly) and reopen it as a seeded review.
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "clip.webm", "video/webm", 1024, "blob:take", 5)));
+        cut.Find("#instr-play-0").Click();
+
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the premise: the seeded review is open");
+        cut.Find("#instr-review-edit").Should().NotBeNull(
+            "…and the row carries metadata, so the link renders");
+
+        cut.Find("#instr-review-edit").Click();
+
+        cut.FindAll("#instr-recorder-takeover").Should().BeEmpty(
+            "the takeover closes on the click — the link takes effect immediately, not on Cancel");
+        cut.Find("#instr-rows").Should().NotBeNull("…so the row renders again");
+        cut.Find("#instr-title-0").TextContent.Should().Contain("Intro", "…its own readout with it");
+
+        var fields = cut.FindComponents<FluentTextField>();
+        fields.Should().HaveCount(2, "the row's inline Title/Description pair is expanded in place");
+        fields.Select(f => f.Instance.Placeholder).Should().Equal("Title (optional)", "Description (optional)");
+        fields[0].Instance.Value.Should().Be("Intro", "the Title field is bound to the row's own title");
+        requested.Should().BeNull("the Inline host has no dialog to open (Q12) — the expansion is the whole effect");
+    }
+
+    /// <summary>C2/E.6 (the Dialog host, UNCHANGED): there the link keeps opening the host's metadata
+    /// dialog through <see cref="InstructionEditorList.EditRowRequested"/> — the review stays open
+    /// behind it, and no inline pair appears on the row.</summary>
+    [TestMethod]
+    public async Task SeededReview_MetadataLink_OnTheDialogHost_StillRequestsTheHostsDialog()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Video, Title = "Intro" } };
+        InstructionEditorRow? requested = null;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.StageMediaAsync, Returning(new StagedAttachmentDto("clip.webm", "video/webm", 1024, "p")))
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        cut.Find("#instr-record-0").Click();
+        // A cancelled dialog leaves the review open on the held take (AC-4) — the seeded review here.
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(Stream.Null, "clip.webm", "video/webm", 1024, "blob:held", 5)));
+        requested = null;
+
+        cut.Find("#instr-review-edit").Should().NotBeNull(
+            "the row carries metadata, so the link renders on the held review too");
+        cut.Find("#instr-review-edit").Click();
+
+        requested.Should().BeSameAs(rows[0], "the Dialog host's dialog is what the link opens");
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("…and the review stays open behind it");
+        cut.FindAll(".cq-instruction-title").Should().BeEmpty("…never the Inline expansion");
+    }
+
+    /// <summary>AC-10: a play with no host served-play seam names the failure inline — never a silent
+    /// dead button and never an exception.</summary>
+    [TestMethod]
+    public void ServedRow_WithoutALoadSeam_ClickNamesTheFailure()
+    {
+        var cut = Render([StagedMediaRow()]);
+
+        cut.Find("#instr-play-0").Click();
+
+        cut.Find("#instr-error").TextContent.Should().Contain("not available here");
     }
 
 }

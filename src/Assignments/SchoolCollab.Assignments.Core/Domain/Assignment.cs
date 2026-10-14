@@ -409,7 +409,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public void AddInstructionItems(
         IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
             string? FileName, string? ContentType, long FileSize, string? StoragePath,
-            string? Title)> items)
+            string? Title, int? DurationSeconds)> items)
     {
         foreach (var owner in items.GroupBy(item => item.QuestionId))
         {
@@ -427,7 +427,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                     item.FileSize,
                     item.StoragePath,
                     order++,
-                    title: item.Title));
+                    title: item.Title,
+                    durationSeconds: item.DurationSeconds));
             }
         }
     }
@@ -439,7 +440,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public void SetAssignmentInstructionItems(
         IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
             string? FileName, string? ContentType, long FileSize, string? StoragePath,
-            string? Title)> items)
+            string? Title, int? DurationSeconds)> items)
     {
         _instructionItems.RemoveAll(item => item.QuestionId is null);
         var order = 0;
@@ -456,14 +457,15 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                 item.FileSize,
                 item.StoragePath,
                 order++,
-                title: item.Title));
+                title: item.Title,
+                durationSeconds: item.DurationSeconds));
         }
     }
 
     public void SetInstructionItems(
         IReadOnlyList<(Guid? QuestionId, InstructionKind Kind, string? Text, string? Url,
             string? FileName, string? ContentType, long FileSize, string? StoragePath,
-            string? Title)>? items)
+            string? Title, int? DurationSeconds)>? items)
     {
         if (items is null)
         {
@@ -488,7 +490,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
                     item.FileSize,
                     item.StoragePath,
                     order++,
-                    title: item.Title));
+                    title: item.Title,
+                    durationSeconds: item.DurationSeconds));
             }
         }
     }

@@ -26,6 +26,12 @@ public sealed class InstructionEditorRow
     /// <summary>The instruction kind: text · audio · video · url · image.</summary>
     public InstructionKindDto Kind { get; set; }
 
+    /// <summary>Round <c>media-pill-listing</c> (Q2/Q9): the PERSISTED instruction id when this row was
+    /// loaded from the server (null for a row staged in this session). Needed only to address the
+    /// served-playback route for a row with no session Blob — it deliberately does NOT ride the save
+    /// payload, because the save re-mints the rows (the attachments' own <c>Id</c> precedent).</summary>
+    public Guid? Id { get; set; }
+
     /// <summary>The prose, for <see cref="InstructionKindDto.Text"/>.</summary>
     public string? Text { get; set; }
 
@@ -49,6 +55,11 @@ public sealed class InstructionEditorRow
     /// column — the validator enforces presence on write, and nothing invents a title for old data.</summary>
     public string? Title { get; set; }
 
+    /// <summary>Recording materials (round <c>media-pill-listing</c>, Q7): the media's whole-second
+    /// duration, written by the record commit (probed by the recorder), by the upload probe, and by
+    /// read-back. Null on rows that predate the column — the readout renders <c>—:—</c>.</summary>
+    public int? DurationSeconds { get; set; }
+
     /// <summary>Whether this row carries a staged media file rather than text or a link — the single
     /// source the UI reads for that question, mirroring the domain row's own discriminator.</summary>
     public bool HasMedia =>
@@ -63,8 +74,17 @@ public sealed class InstructionEditorRow
         ContentType: ContentType,
         FileSize: FileSize,
         StoragePath: StoragePath,
-        Title: Title);
+        Title: Title,
+        DurationSeconds: DurationSeconds);
 }
+
+/// <summary>Recording materials (round <c>media-pill-listing</c>, Q2/Q9): fetches one staged media
+/// instruction's bytes through the teacher-authed range-enabled route, so a row uploaded or reloaded
+/// (no session Blob) can still play. The shared instruction editor is presentational — it never holds
+/// an API client — so every host (the page, the question dialog) supplies this one seam, mirroring
+/// <see cref="StageInstructionMediaAsync"/>.</summary>
+/// <returns>The response stream, or null when the route 404'd (missing row/file).</returns>
+public delegate Task<Stream?> LoadInstructionMediaAsync(InstructionEditorRow row);
 
 /// <summary>QR-5/§5.6 (U5): stages one instruction media file on the host's behalf. The shared
 /// instruction editor is presentational — it never holds an API client — so every host (the page,

@@ -75,7 +75,8 @@ public sealed class GetWardAssignmentViewHandler(
                     item.FileSize,
                     item.StoragePath,
                     item.DisplayOrder,
-                    item.Title))
+                    item.Title,
+                    item.DurationSeconds))
                 .ToList());
     }
 

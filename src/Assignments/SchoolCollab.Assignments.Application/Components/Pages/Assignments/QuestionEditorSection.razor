@@ -72,6 +72,10 @@
     /// dialog's model. Null means this host offers no instruction uploads.</summary>
     [Parameter] public StageInstructionMediaAsync? StageInstructionMediaAsync { get; set; }
 
+    /// <summary>Round <c>media-pill-listing</c> (Q2/Q9): the host's served-playback seam, threaded into
+    /// the question dialog's model exactly as <see cref="StageInstructionMediaAsync"/> is.</summary>
+    [Parameter] public LoadInstructionMediaAsync? LoadInstructionMediaAsync { get; set; }
+
     /// <summary>Raised when the model was mutated (add / remove / dialog-confirmed edit) so the page
     /// can re-render review counts and the submit gate.</summary>
     [Parameter] public EventCallback Changed { get; set; }
@@ -116,7 +120,7 @@
     public async Task OpenEditAsync(int index, QuestionEditorRow row)
     {
         var result = await DialogService.ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>(
-            QuestionEditModel.ForEdit(index, row, GradingFormat, StageInstructionMediaAsync),
+            QuestionEditModel.ForEdit(index, row, GradingFormat, StageInstructionMediaAsync, LoadInstructionMediaAsync),
             title: "Edit question",
             size: DialogSize.Medium);
 

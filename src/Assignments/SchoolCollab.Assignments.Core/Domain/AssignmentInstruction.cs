@@ -35,7 +35,13 @@ public sealed class AssignmentInstruction
         /// Trailing and defaulted deliberately (Q2, 2026-10-10): the three aggregate constructions keep
         /// compiling while the setters are threaded one batch at a time, and the per-path round-trip
         /// tests — not the compiler — are the gate against a site that silently persists null.</summary>
-        string? title = null)
+        string? title = null,
+        /// <summary>Recording materials (round <c>media-pill-listing</c>, Q7): the take's/upload's
+        /// whole-second duration — <c>null</c> for anything else and for rows written before the
+        /// column, which the readout renders as <c>—:—</c>. Trailing and defaulted for the same reason
+        /// as <paramref name="title"/>: the three aggregate constructions keep compiling and the
+        /// per-path round-trip tests are the gate against a site that silently persists null.</summary>
+        int? durationSeconds = null)
     {
         Id = Guid.NewGuid();
         AssignmentId = assignmentId;
@@ -49,6 +55,7 @@ public sealed class AssignmentInstruction
         StoragePath = storagePath;
         DisplayOrder = displayOrder;
         Title = title;
+        DurationSeconds = durationSeconds;
     }
 
     public Guid Id { get; private set; }
@@ -78,6 +85,12 @@ public sealed class AssignmentInstruction
     /// row, an optional label for a Link, unused by the media kinds. Nullable because rows written
     /// before the column carry none, and nothing invents one for them.</summary>
     public string? Title { get; private set; }
+
+    /// <summary>Recording materials (round <c>media-pill-listing</c>, Q7): the media's duration in
+    /// whole seconds, probed client-side at record/upload time. Null for Text/Url rows, and for any
+    /// media row written before the column — the readout falls back to <c>—:—</c> and nothing backfills
+    /// it (a server-side probe would need a media parser the repo does not have).</summary>
+    public int? DurationSeconds { get; private set; }
 
     /// <summary>The author's order within its owner (re-indexed 0..n-1 on every write).</summary>
     public int DisplayOrder { get; private set; }

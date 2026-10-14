@@ -327,6 +327,9 @@ public sealed class AssignmentEditFormModel
     /// are deliberately dropped — the save re-mints the rows, the questions precedent.</summary>
     private static InstructionEditorRow FromRead(InstructionReadDto item) => new()
     {
+        // Q2/Q9 (media-pill-listing): the persisted id IS kept (unlike the save-minted metadata below)
+        // so a reloaded media row can address the served-playback route. It never rides the payload.
+        Id = item.Id,
         Kind = item.Kind,
         Text = item.Text,
         Url = item.Url,
@@ -337,6 +340,9 @@ public sealed class AssignmentEditFormModel
         // D7: the material's name rides the round-trip too — dropping it here would silently
         // null the column on the author's next save.
         Title = item.Title,
+        // Q7 (media-pill-listing): same rule for the media's duration — dropped here, it would be
+        // stripped from every reloaded row by the author's next save.
+        DurationSeconds = item.DurationSeconds,
     };
 
     /// <summary>QR-5: the assignment's own blocks as the wire shape — null when the load never

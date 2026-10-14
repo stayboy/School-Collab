@@ -126,8 +126,8 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
     {
         assignment.SetInstructionItems(
         [
-            (null, InstructionKind.Text, "Read the question twice.", null, null, null, 0, null, "Read first"),
-            (firstQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null, null),
+            (null, InstructionKind.Text, "Read the question twice.", null, null, null, 0, null, "Read first", null),
+            (firstQuestionId, InstructionKind.Url, null, "https://example.com/help", null, null, 0, null, null, null),
         ]);
     }
 

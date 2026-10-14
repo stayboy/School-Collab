@@ -1,8 +1,13 @@
 @* Round content-materials-redesign (owner 2026-10-10, Q1-Q5): the kebab's Text and Link actions are
    captured in THIS dialog — one dialog whose fields switch on the kind — and the page appends the row
    from the result (Q2). Built on DialogShellBase per the dialog-ui skill: never hand-rolled chrome,
-   the footer's Error bound (never a literal), actions at the dialog's bottom. Media never comes
-   through here — Upload From Device pops the file picker directly (Q3).
+   the footer's Error bound (never a literal), actions at the dialog's bottom. Upload From Device still
+   pops the file picker directly (Q3).
+
+   Round media-pill-listing (owner 2026-10-14, C2/Q10): the Audio/Video/Image kinds come through here
+   too now — the same dialog, opened from the row's readout (Dialog-mode host) and from the recorder's
+   commit — carrying the media's OPTIONAL, independent Title + Description. The staged FILE never
+   passes through this dialog; only its metadata does.
 
    Round wysiwyg-instruction-editor, grill extension (owner 2026-10-11): a Text material's BODY is the
    shared RICH editor — read at submit and sanitised on the way out (Q11's write half). The Enter guard
@@ -27,11 +32,22 @@
                                    Value="@Model.Body"
                                    Placeholder="What this material covers…" />
         }
-        else
+        else if (Model.Kind == InstructionKindDto.Url)
         {
             <p class="dialog-hint">A link needs an absolute http(s) URL. Its label is optional.</p>
             <FluentTextField Label="URL" @bind-Value="Model.Url" Placeholder="https://…" class="full-width mb-3" />
             <FluentTextField Label="Label (optional)" @bind-Value="Model.Title" class="full-width" />
+        }
+        else
+        {
+            @* Round media-pill-listing (C2/Q10): Audio/Video/Image now edit their OPTIONAL metadata
+               here — a title and a plain-prose description, both independent and both optional. The
+               file itself is untouched (the dialog never carries the staged file fields). This dialog
+               is opened from the row's READOUT (Dialog-mode host) and from the recorder's commit; the
+               Inline-mode host (question dialog) expands the same pair on the row instead (Q12). *@
+            <p class="dialog-hint">Both fields are optional: name this material and/or describe what it covers.</p>
+            <FluentTextField Label="Title (optional)" @bind-Value="Model.Title" class="full-width mb-3" />
+            <FluentTextField Label="Description (optional)" @bind-Value="Model.Body" class="full-width" />
         }
 
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="@SubmitText" OnCancel="HandleCancelAsync" />
@@ -48,8 +64,10 @@
     private RichInstructionEditor? _bodyEditor;
 
     protected override string SubmitText =>
-        Model.IsEdit ? "Save"
-            : Model.Kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link";
+        Model.Kind is InstructionKindDto.Audio or InstructionKindDto.Video or InstructionKindDto.Image
+            ? "Save"
+            : Model.IsEdit ? "Save"
+                : Model.Kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link";
 
     protected override string SavingText => Model.IsEdit ? "Saving…" : "Adding…";
 
@@ -86,6 +104,17 @@
             return new MaterialEditResult(
                 model.Kind,
                 model.Title!.Trim(),
+                string.IsNullOrWhiteSpace(model.Body) ? null : model.Body!.Trim(),
+                null);
+        }
+
+        if (model.Kind is InstructionKindDto.Audio or InstructionKindDto.Video or InstructionKindDto.Image)
+        {
+            // C2/Q10: a media row's title and body are BOTH optional and independent — nothing is
+            // required, nothing is forbidden, and the file fields are never touched here.
+            return new MaterialEditResult(
+                model.Kind,
+                string.IsNullOrWhiteSpace(model.Title) ? null : model.Title!.Trim(),
                 string.IsNullOrWhiteSpace(model.Body) ? null : model.Body!.Trim(),
                 null);
         }

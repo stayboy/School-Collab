@@ -23,15 +23,22 @@ public sealed record QuestionEditModel(int Position, bool IsNew, QuestionEditorR
     /// dead file input (the same threading the grading format takes).</summary>
     public StageInstructionMediaAsync? StageMediaAsync { get; init; }
 
+    /// <summary>Round <c>media-pill-listing</c> (Q2/Q9): the host's served-playback seam, threaded to
+    /// the shared editor exactly as <see cref="StageMediaAsync"/> is. Null means this context cannot
+    /// fetch staged bytes — the editor names that rather than offering a dead play button.</summary>
+    public LoadInstructionMediaAsync? LoadMediaAsync { get; init; }
+
     /// <summary>A fresh MultipleChoice row (two blank options), matching the hand-add default.</summary>
     public static QuestionEditModel ForCreate(
         int position,
         GradingFormatDto gradingFormat = GradingFormatDto.TeacherGraded,
-        StageInstructionMediaAsync? stageMediaAsync = null) =>
+        StageInstructionMediaAsync? stageMediaAsync = null,
+        LoadInstructionMediaAsync? loadMediaAsync = null) =>
         new(position, true, QuestionEditorRow.NewMultipleChoice())
         {
             GradingFormat = gradingFormat,
             StageMediaAsync = stageMediaAsync,
+            LoadMediaAsync = loadMediaAsync,
         };
 
     /// <summary>An edit over a detached copy of <paramref name="row"/>.</summary>
@@ -39,11 +46,13 @@ public sealed record QuestionEditModel(int Position, bool IsNew, QuestionEditorR
         int position,
         QuestionEditorRow row,
         GradingFormatDto gradingFormat = GradingFormatDto.TeacherGraded,
-        StageInstructionMediaAsync? stageMediaAsync = null) =>
+        StageInstructionMediaAsync? stageMediaAsync = null,
+        LoadInstructionMediaAsync? loadMediaAsync = null) =>
         new(position, false, CopyRow(row))
         {
             GradingFormat = gradingFormat,
             StageMediaAsync = stageMediaAsync,
+            LoadMediaAsync = loadMediaAsync,
         };
 
     /// <summary>Deep copy — the dialog must never mutate the live row, or Cancel would already
@@ -72,6 +81,10 @@ public sealed record QuestionEditModel(int Position, bool IsNew, QuestionEditorR
         {
             copy.Instructions.Add(new InstructionEditorRow
             {
+                // Q2/Q9: the persisted id rides the copy too — the question host addresses the
+                // served-playback route with it, and a copy that dropped it would make every
+                // question-owned media row unplayable.
+                Id = instruction.Id,
                 Kind = instruction.Kind,
                 Text = instruction.Text,
                 Url = instruction.Url,
@@ -79,6 +92,11 @@ public sealed record QuestionEditModel(int Position, bool IsNew, QuestionEditorR
                 ContentType = instruction.ContentType,
                 FileSize = instruction.FileSize,
                 StoragePath = instruction.StoragePath,
+                // D7 + Q7 (media-pill-listing): the material's name and its media duration ARE part
+                // of the row — the dialog owns the working copy and the confirmed row replaces the
+                // live one, so a copy that dropped them would wipe both on the next confirm.
+                Title = instruction.Title,
+                DurationSeconds = instruction.DurationSeconds,
             });
         }
 

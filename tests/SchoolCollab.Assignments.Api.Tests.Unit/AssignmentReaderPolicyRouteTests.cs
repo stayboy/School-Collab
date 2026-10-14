@@ -92,6 +92,7 @@ public class AssignmentReaderPolicyRouteTests
         ("GET", "assignments/{id:guid}/students/{studentId:guid}/sign-off"),
         ("GET", "assignments/{id:guid}/gates/student/{studentId:guid}"),
         ("GET", "assignments/{id:guid}/authoring"),
+        ("GET", "assignments/{id:guid}/materials/{instructionId:guid}"),
         ("GET", "assignments/{id:guid}/questions-draft"),
         ("GET", "assignments/{id:guid}/recipients"),
         ("GET", "assignments/signature-consent-text"),

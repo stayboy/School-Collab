@@ -162,4 +162,34 @@ re-run, unrelated to this work).
 and untestable under bUnit/CI — it is UI-tester/manual scope, as the spec's §6 stance on JS pipelines
 already sets. No UI-tester round has run against this change yet.
 
+## 8. Media listing & metadata round (Tier 3, 2026-10-14 — `round-media-pill-listing.md`)
+
+**The listing shape is NOT a "pill".** The owner corrected the solo `round-media-item-pill` invention: a
+staged Audio/Video row follows the Text-row shape of `instructional-materials.md` **AC-14** —
+`[kind glyph] [readout] [action] [×]` — with the row's standard leading kind glyph and trailing `×` **kept**,
+the **readout** showing the duration, and the **action slot** holding a **play** icon button exactly where
+Text/Link render their edit pencil. The `.cq-media-play` rounded-pill CSS is retired.
+
+| # | Decision |
+|---|---|
+| M1 | **Readout.** `2:34 [Title]` (ellipsis-truncated) when titled; `2:34` untitled with a known duration; `—:—` when the duration is unknown; Image → `[Title]` when titled, else today's size-text readout. The file name rides the native `title` tooltip. |
+| M2 | **Media metadata — optional Title + optional Body/Description for Audio/Video AND Image.** `Title`/`Text` **already existed** on `AssignmentInstruction`, both DTOs and the ward DTO, and the validator's media branch never forbade them ⇒ **no migration and no contract widening for the metadata**. Title and body are independent and both optional. |
+| M3 | **Editing surface.** `MaterialEditDialog` extended to the media kinds, opened from the row's **readout** click on the Dialog host; the Inline host (question dialog — no nested dialogs) edits the same pair **inline on the row**. Recorder commit ("Use this recording") **pops that dialog before staging** on the Dialog host; the Inline host stages directly. The seeded review carries a link-styled "Edit title/description" control **only when metadata exists**, effective immediately on both hosts. |
+| M4 | **Saved playback.** New teacher-authed, range-enabled route `GET /assignments/{id}/materials/{instructionId}` (mirrors the ward media route minus `studentId`; role-less bearer, tenant-scoped by the assignment row). `AssignmentsApiClient.GetInstructionMediaStreamAsync` + **`DotNetStreamReference`** stream .NET→JS (never a `byte[]` interop array) into a Blob URL; the play button reopens the `RecorderPanel` seeded review (playback only). |
+| M5 | **Duration persistence.** Nullable `duration_seconds` on `assignment_instructions` (`AddAssignmentInstructionDurationSeconds`, additive, **no backfill** — pre-migration rows read `null` and render `—:—`). The record-time probe is reused; uploads are probed client-side (best-effort, `—:—` fallback). Threaded through **eight** instruction-tuple projection sites — Create ×2, Update ×3, Duplicate ×2, QuestionsDraft ×1; the **duplicate and draft-confirm** sites are the silent-null traps (a trailing-defaulted ctor param compiles unchanged). |
+| M6 | **Ward body render.** `WardMaterialPlayer` renders the media body (`Material.Text`) under the player/label. |
+
+**Gates (parent-authoritative):** `dotnet build SchoolCollab.slnx` 0 errors; Assignments.Unit **1151/0**,
+Assignments.Api.Unit **172/0**, Families.Unit **48/0**, ArchitectureTests **111/0**, Assignments.Integration
+**26/0** (real-Postgres migration pin ran). Plan ACCEPT; diff PASS (one P1 fixed — the AC-4 metadata-dialog
+cancel path); UI tester PASS.
+
+**Accepted residuals (owner, 2026-10-14):** the post-cancel `_reviewSeed` re-seed is defensive and not
+separately discriminated by its pin; the upload-duration probe depends on `input.files` surviving
+`FluentInputFile`'s completion (falls back to `—:—`; recordings unaffected); a served play on a
+create/unsaved row returns the named inline error (nothing server-side to serve yet).
+
+**Still open / deferred (unchanged from §6):** Python portal playback, transcription/AI grounding, and the
+Azure Blob `IFileStore` migration.
+
 

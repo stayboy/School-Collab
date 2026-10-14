@@ -249,4 +249,65 @@ public class MaterialEditDialogBunitTests : BunitContext
 
         cut.FindComponents<RichInstructionEditor>().Should().BeEmpty("a Link has no body");
     }
+
+    /// <summary>Round media-pill-listing (C2/Q10, Slice F): the dialog accepts a MEDIA row — it renders
+    /// the optional Title + Description pair (never a rich body, never the file fields), and BOTH being
+    /// blank PASSES validation (the fields are independent and optional). A filled pair returns in the
+    /// <see cref="MaterialEditResult"/> for the row's host to apply. Pre-fix: a media kind fell into the
+    /// Link branch and never seeded/yielded media metadata.</summary>
+    [TestMethod]
+    public async Task MediaKindDialog_AcceptsAMediaRow_OptionalTitleAndBody_SubmitsThem()
+    {
+        var row = new InstructionEditorRow
+        {
+            Id = Guid.NewGuid(),
+            Kind = InstructionKindDto.Audio,
+            FileName = "clip.mp3",
+            ContentType = "audio/mpeg",
+            FileSize = 2048,
+            StoragePath = "tenants/t/staging/g/clip.mp3",
+        };
+
+        // ── Both blank: independent and optional, so nothing refuses it. ──
+        var blankCut = RenderProvider();
+        var blankTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            MaterialEditFormModel.FromRow(row), "Edit Material", DialogSize.Medium);
+
+        blankCut.WaitForAssertion(() => blankCut.Find("form").Should().NotBeNull());
+        blankCut.FindAll("form fluent-text-field").Should().HaveCount(2,
+            "a media row renders its optional Title + Description pair");
+        blankCut.Markup.Should().Contain("Title (optional)").And.Contain("Description (optional)");
+        blankCut.Find("form").Submit();
+
+        var blankResult = await blankTask;
+        blankResult.Should().NotBeNull("both fields are optional — nothing to fix, nothing refused");
+        blankResult!.Kind.Should().Be(InstructionKindDto.Audio);
+        blankResult.Title.Should().BeNull();
+        blankResult.Body.Should().BeNull();
+
+        // ── A filled pair returns in the result the host writes back onto the row. ──
+        var filledCut = RenderProvider();
+        var filledTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            MaterialEditFormModel.FromRow(new InstructionEditorRow
+            {
+                Kind = InstructionKindDto.Image,
+                FileName = "diagram.png",
+                ContentType = "image/png",
+                FileSize = 2048,
+                StoragePath = "tenants/t/staging/g/diagram.png",
+                Title = "Diagram",
+                Text = "Label the parts.",
+            }),
+            "Edit Material", DialogSize.Medium);
+
+        filledCut.WaitForAssertion(() => filledCut.Find("form").Should().NotBeNull());
+        filledCut.Find("form").Submit();
+
+        var filledResult = await filledTask;
+        filledResult.Should().NotBeNull();
+        filledResult!.Kind.Should().Be(InstructionKindDto.Image);
+        filledResult.Title.Should().Be("Diagram", "the seeded title round-trips (C2)");
+        filledResult.Body.Should().Be("Label the parts.", "…and so does the seeded body");
+        filledResult.Url.Should().BeNull("a media result carries no url");
+    }
 }

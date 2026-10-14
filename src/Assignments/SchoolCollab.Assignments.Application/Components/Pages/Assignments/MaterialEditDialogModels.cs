@@ -6,15 +6,19 @@ namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 /// the shape the DialogShellBase contract wants: a mutable <c>class</c>.</summary>
 public sealed class MaterialEditFormModel
 {
-    /// <summary>Text or Link — the two kinds this dialog captures. Media never comes through here:
-    /// an upload pops the picker directly (Q3).</summary>
+    /// <summary>Text, Link or a media kind (Audio/Video/Image). The dialog's field switch renders one
+    /// shape per kind: Text/Link edit their target/label as before, and a media kind edits the optional
+    /// Title + Description (round <c>media-pill-listing</c> C2 — the staged FILE never comes through
+    /// here; only its metadata does).</summary>
     public InstructionKindDto Kind { get; set; } = InstructionKindDto.Text;
 
-    /// <summary>The Text material's NAME (required — D6/D7) and the Link's optional LABEL, one field
-    /// per kind so the dialog can render one input and the handler can read one value.</summary>
+    /// <summary>The Text material's NAME (required — D6/D7), the Link's optional LABEL and a media
+    /// kind's optional TITLE — one field per kind so the dialog can render one input and the handler
+    /// can read one value.</summary>
     public string? Title { get; set; }
 
-    /// <summary>The Text material's optional body.</summary>
+    /// <summary>The Text material's optional body, or a media kind's optional plain-prose description
+    /// (round <c>media-pill-listing</c> C2 — both optional and independent).</summary>
     public string? Body { get; set; }
 
     /// <summary>The Link's target — required, absolute http(s) (mirrors the validator).</summary>

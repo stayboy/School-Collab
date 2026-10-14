@@ -149,6 +149,28 @@ public sealed class AssignmentsApiClient
         return await response.Content.ReadFromJsonAsync<AssignmentAuthoringChildrenDto>(_jsonOptions, ct);
     }
 
+    /// <summary>Round <c>media-pill-listing</c> (Q2/Q9/Q8) — fetch one staged media instruction's
+    /// bytes from the teacher-authed range-enabled route, so a row uploaded or reloaded (no session
+    /// Blob URL) can still play. <c>ResponseHeadersRead</c> + <c>ReadAsStreamAsync</c> on purpose:
+    /// the content is handed to JS as a stream, never materialised here as a whole byte[] (a
+    /// .NET→JS byte[] interop array would be an oversized number array — the ward route's byte[]
+    /// fetch is the transport this round deliberately does NOT copy). Returns null on 404 (missing
+    /// assignment/instruction/file); a non-success, non-404 status throws for the UI to surface.</summary>
+    public async Task<Stream?> GetInstructionMediaStreamAsync(
+        Guid assignmentId, Guid instructionId, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync(
+            $"/assignments/{assignmentId}/materials/{instructionId}",
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStreamAsync(ct);
+    }
+
     /// <summary>
     /// Resolves the live recipient preview for a constraint set (assignment-authoring-compartments
     /// §7.5 TGT-16 / D-4). The counts are advisory — a failed read returns null and the caller
