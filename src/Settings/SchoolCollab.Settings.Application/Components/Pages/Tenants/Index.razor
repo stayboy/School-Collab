@@ -4,18 +4,19 @@
 @inject IDevTenantSelection DevTenant
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
+@inject IDialogService DialogService
 
 <PageTitle>Tenants</PageTitle>
 
 @* The tenant registry read-only list, plus the writes this surface owns: designating the platform
-   default (a row action), releasing the signed-in operator's own default-tenant preference (the
-   banner), and releasing the dev session's explicit tenant pick (the session-pin line). The
-   preference is SET from the dev tenant switcher in the header, next to the thing it affects; this
-   page only surfaces it and clears it.
+   default (a row action), recording the signed-in operator's own default-tenant preference (a row
+   action, confirm-gated — the dev tenant switcher in the header sets the same preference next to
+   the thing it affects), releasing that preference (the banner), and releasing the dev session's
+   explicit tenant pick (the session-pin line).
 
    The grid carries BOTH tenancy defaults as separate columns, because they are easy to confuse:
    "Platform default" is the single designation the whole portal shares (Tenant.IsDefault), while
-   "Your default" is the signed-in operator's own recorded preference. Each column header
+   "User default" is the signed-in operator's own recorded preference. Each column header
    explains itself on hover. FluentUI emits a header tooltip only when the column's `Tooltip`
    switch is ALSO set (it defaults false and gates `HeaderTooltip`), so both columns carry
    `Tooltip="true"` beside `HeaderTooltip`. *@
@@ -95,12 +96,12 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="TenantDto"
-                        Title="Your default"
+                        Title="User default"
                         Tooltip="true"
-                        HeaderTooltip="The tenant YOU have chosen as your default. It wins over the platform default. Set it from the tenant switcher in the header; release it with Clear.">
+                        HeaderTooltip="The tenant YOU have chosen as your default — set it with the row action 'Set as my default', or from the tenant switcher in the header. It wins over the platform default; release it with Clear.">
             @if (_preference == context.Id)
             {
-                <FluentBadge Appearance="Appearance.Lightweight">Yours</FluentBadge>
+                <FluentBadge Appearance="Appearance.Lightweight">Yes</FluentBadge>
             }
             else
             {
@@ -117,7 +118,8 @@
 
     /// <summary>
     /// The signed-in operator's recorded default-tenant preference, or null when none is
-    /// recorded. Only decides whether the clear banner renders (FR-7).
+    /// recorded. Decides whether the clear banner renders and whether a row's `Set as my default`
+    /// entry is disabled (FR-7).
     /// </summary>
     private Guid? _preference;
 
@@ -250,26 +252,74 @@
     }
 
     /// <summary>
-    /// One action per row. The current default gets a disabled, self-explaining entry rather
-    /// than no action at all: a row with an empty action menu reads as a rendering bug, and
-    /// <see cref="RowAction.DisabledReason"/> exists for exactly this.
+    /// Exactly two actions per row, both defaults: the platform designation first (FR-7), then the
+    /// signed-in operator's own preference. The row that already holds one of them gets a disabled,
+    /// self-explaining entry rather than no action at all: a row with an empty action menu reads as
+    /// a rendering bug, and <see cref="RowAction.DisabledReason"/> exists for exactly this. Two
+    /// actions on every row means the shared menu renders the kebab for all of them.
     /// </summary>
     private IReadOnlyList<RowAction> RowActions(TenantDto tenant) =>
+    [
         tenant.IsDefault
-            ? [
-                RowAction.Callback(
-                    "Portal default",
-                    () => Task.CompletedTask,
-                    FluentIcons.Star,
-                    disabled: true,
-                    disabledReason: "This tenant already opens the admin portal by default.")
-            ]
-            : [
-                RowAction.Callback(
-                    "Make portal default",
-                    () => MakeDefaultAsync(tenant),
-                    FluentIcons.Star)
-            ];
+            ? RowAction.Callback(
+                "Portal default",
+                () => Task.CompletedTask,
+                FluentIcons.Star,
+                disabled: true,
+                disabledReason: "This tenant already opens the admin portal by default.")
+            : RowAction.Callback(
+                "Make portal default",
+                () => MakeDefaultAsync(tenant),
+                FluentIcons.Star),
+        _preference == tenant.Id
+            ? RowAction.Callback(
+                "Set as my default",
+                () => Task.CompletedTask,
+                FluentIcons.Person,
+                disabled: true,
+                disabledReason: "This tenant is already your default.")
+            : RowAction.Callback(
+                "Set as my default",
+                () => SetMyDefaultAsync(tenant),
+                FluentIcons.Person),
+    ];
+
+    /// <summary>
+    /// Records the signed-in operator's own default-tenant preference for <paramref name="tenant"/>
+    /// (FR-7). Confirm-gated with the header switcher's exact wording; cancel and dismissal write
+    /// nothing and reload nothing. The forced reload is what applies the new preference — the admin
+    /// host re-resolves it on the next load, and this RCL cannot call the host's
+    /// <c>AdminDefaultTenantResolver</c>. The dev session's explicit pick (the selection slot) is
+    /// deliberately never written here: it is a separate layer with its own release in the pin line
+    /// above. A failure surfaces on the LandingPage error strip and does not reload.
+    /// </summary>
+    private async Task SetMyDefaultAsync(TenantDto tenant)
+    {
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Open the admin portal on '{tenant.Name}' by default from now on?",
+            primaryText: "Set as default",
+            title: "Set default tenant");
+
+        if (!confirmed)
+            return;
+
+        try
+        {
+            await Api.SetMyDefaultTenantAsync(tenant.Id);
+            _preference = tenant.Id;
+            Nav.Refresh(forceReload: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to record the default tenant preference for tenant {TenantId}", tenant.Id);
+            _error = ex.Message;
+
+            // The row action runs from the menu's own event handler, so Blazor re-renders only that
+            // menu — without this the strip would not appear until something else re-rendered the
+            // page (the same reason MakeDefaultAsync re-renders explicitly on its success path).
+            StateHasChanged();
+        }
+    }
 
     private async Task MakeDefaultAsync(TenantDto tenant)
     {

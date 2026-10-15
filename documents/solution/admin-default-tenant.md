@@ -132,9 +132,13 @@ tenant were selected — the worst kind of half-working.
   `Follow the portal default` action that clears the *selection* slot and reloads), which renders
   independently of the banner — a pick can exist with no preference recorded. The registry grid
   names the two defaults in their own columns — `Platform default` (the shared designation,
-  badged `Default`) and `Your default` (the operator's own preference, badged `Yours`) — with
+  badged `Default`) and `User default` (the operator's own preference, badged `Yes`) — with
   header tooltips explaining the difference, and shows a muted note above the grid when no
-  platform default is designated. Linked from
+  platform default is designated. Each row's action menu carries both defaults: the platform
+  action (`Make portal default` / disabled `Portal default`) and the personal one
+  (`Set as my default`, which confirms exactly as the header dropdown does, writes
+  `PUT /api/tenants/me/default` and hard-reloads; disabled with its reason on the row that
+  already holds the preference). Linked from
   `/settings`.
 - `DevIdentitySeeder` designates `Dev School`, guarded by
   `AND NOT EXISTS (SELECT 1 FROM tenants WHERE is_default)` so it fills the empty state and
@@ -188,8 +192,8 @@ covered, rather than a precaution that merely reads well.
 - **Clearing a preference is still required** to make the platform default the resolved one
   again; the release action lives on the `/tenants` page banner. A *pick* is a separate layer,
   released by the session-pin line on the same page (`Follow the portal default`) — the header
-  dropdown only ever sets. Both releases take effect through the same hard document reload
-  (`Refresh(forceReload: true)`, §3.3). Under OIDC neither a pick nor a preference exists, so both
-  lines are dev-only surfaces.
+  dropdown and the page's row action only ever set. Both releases take effect through the same hard
+  document reload (`Refresh(forceReload: true)`, §3.3). Under OIDC neither a pick nor a preference
+  exists, so both lines are dev-only surfaces.
 - The AuthPortal does not surface the preference; that would reopen the mediated-claim seam
   and is deliberately out of scope.

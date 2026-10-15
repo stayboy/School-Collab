@@ -171,8 +171,8 @@ leave the action entry rendered as the selection — the exact state this FR for
   same as `MakeDefaultAsync`.
 - No auth-mode gating: under OIDC no preference exists, so the banner never renders.
 - Update the page's header comment: the "preference is deliberately NOT here" rationale
-  becomes "platform default here; the personal preference is set in the header dropdown
-  and released here".
+  becomes "platform default and the personal preference are both set here; the header dropdown
+  sets the same preference".
 
 **Dev session-pin line** (added by round `tenant-default-selection`). The banner cannot
 carry the release for the header switcher's explicit pick: a pick can exist with **no**
@@ -204,6 +204,33 @@ renders one muted line above the grid — *"No platform default is designated ye
 of leaving a column of bare dashes that reads as a rendering bug. The session-pin line's label
 and its button also carry explanatory tooltips.
 
+**`User default` column, and the `Set as my default` row action** (round `tenant-user-default`,
+owner grill 2026-10-15). The personal column is titled **`User default`** (was `Your default`) and
+badges the preferred row **`Yes`** (was `Yours`); the platform column keeps `Platform default` /
+`Default`. The `Tooltip="true"` switch and the two header tooltips stay — only the personal
+column's tooltip wording moves to the new vocabulary and names the row action.
+
+The operator's preference is now settable from this page as well as from the header dropdown:
+the dropdown is where the tenant in view is, the page is where the registry is. Every row's action
+menu carries exactly **two** entries — the platform designation first, the personal one second
+(both on every row, so the shared menu renders its kebab for all of them):
+
+| Row | Platform entry | Personal entry |
+|---|---|---|
+| `tenant.IsDefault` | disabled `Portal default` — *This tenant already opens the admin portal by default.* | `Set as my default` |
+| `_preference == tenant.Id` | `Make portal default` | disabled `Set as my default` — *This tenant is already your default.* |
+| neither | `Make portal default` | `Set as my default` |
+
+`Set as my default` confirms with the switcher's **exact** wording (FR-4's table: title
+`Set default tenant`, message `Open the admin portal on '<name>' by default from now on?`, primary
+`Set as default`), then writes through `PUT /api/tenants/me/default` and ends with one
+`Nav.Refresh(forceReload: true)` — the same write and the same hard reload as the dropdown's
+action, because this RCL cannot re-publish the host's `AdminDefaultTenantResolver`. Cancel and
+dismissal write nothing and reload nothing; a failed write logs, sets the page's `_error` (the
+shared `LandingPage` error strip — re-rendered explicitly, because a row action runs from the menu's
+own event handler) and does **not** reload. The dev session pick (`IDevTenantSelection`) is never
+written here: the explicit pick is a separate layer with its own release in the pin line above.
+
 ## 4. Surface states (reference)
 
 ### 4.1 Dev tenant switcher
@@ -228,8 +255,9 @@ A no-pick render selects the resolved default's row but never writes the selecti
 | Alpha | Beta | pin line + banner |
 
 Independently of the two lines, the registry grid names both defaults in their own columns
-(`Platform default`, `Your default`) and, when nothing is designated, shows the empty-state note
-above the grid.
+(`Platform default`, `User default`) and, when nothing is designated, shows the empty-state note
+above the grid. The personal default is also **settable** from the grid: the preferred row's
+`Set as my default` entry is disabled with its reason, every other row's is enabled.
 
 ## 5. Tests
 
@@ -265,7 +293,12 @@ above the grid.
   sees it.
 
 `tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs` covers the `/tenants`
-surfaces; the harness registers a stub `IDevTenantSelection` (the page injects it):
+surfaces; the harness registers a stub `IDevTenantSelection` (the page injects it), a mocked
+`IDialogService` (the confirm dialog, pinned at a fixed outcome and capturing the content it was
+handed) and a `<FluentMenuProvider />` root (every row now renders the kebab, whose menu needs the
+provider the layout supplies). Row actions are asserted through the public
+`LandingPage<TenantDto>.RowActions` delegate — `FluentMenu` does not materialise its items while
+closed, so menu markup would test nothing.
 
 - **Banner (FR-7, unchanged):** hidden without a preference; shown with the tenant name;
   system-preference label; raw-id fallback; Clear PUTs `null` and hides the banner; a failed
@@ -279,11 +312,20 @@ surfaces; the harness registers a stub `IDevTenantSelection` (the page injects i
   `FollowThePortalDefault_RequestsAForcedReload_OfTheCurrentUri` — the reload is a forced document
   load of the current URI (the recorded `NavigationOptions.ForceLoad`), not a merged HTML refresh;
   `FailedFollowThePortalDefault_SurfacesTheError_AndKeepsThePin`.
-- **Two default columns (Q10):** `Grid_NamesBothDefaultColumns`;
+- **Two default columns (Q10):** `Grid_NamesBothDefaultColumns` (the personal column reads
+  `User default`, and no header reads `Your default`);
   `Grid_HeaderTooltips_ExplainTheTwoDefaults` (the tooltips actually render — the
   `Tooltip`/`HeaderTooltip` gate); `Grid_BadgesTheDesignatedPlatformDefault_AndOmitsTheEmptyStateNote`;
-  `Grid_NotesTheEmptyPlatformDefault_WhenNoneIsDesignated`; `Grid_BadgesTheOperatorsOwnDefault`;
-  `Grid_ShowsNoYoursBadge_WhenNoPreferenceIsRecorded`.
+  `Grid_NotesTheEmptyPlatformDefault_WhenNoneIsDesignated`; `Grid_BadgesTheOperatorsOwnDefault`
+  (the badge reads `Yes`); `Grid_ShowsNoYesBadge_WhenNoPreferenceIsRecorded`.
+- **`Set as my default` row action:** `RowActions_OfferSetAsMyDefault_ForANonPreferredTenant`
+  (exactly two entries, platform first, personal enabled);
+  `RowActions_DisableSetAsMyDefault_ForThePreferredRow` (disabled, with its reason, on the row
+  that already holds the preference); `SetAsMyDefault_Confirmed_WritesThePreference_AndReloads`
+  (exactly one PUT naming the row's tenant, exactly one forced reload, and the confirm content is
+  pinned to the switcher's wording); `SetAsMyDefault_Cancelled_WritesNothing_AndDoesNotReload`;
+  `FailedSetAsMyDefault_SurfacesTheError` (the strip is set, nothing reloads);
+  `SetAsMyDefault_DoesNotTouchTheSessionPick` (a pick in force survives the write).
 
 ## 6. Documentation updates (same PR)
 
@@ -297,13 +339,18 @@ surfaces; the harness registers a stub `IDevTenantSelection` (the page injects i
 - Q10 clarity pass (2026-10-15): this spec's FR-7/§4.2 and
   `documents/solution/admin-default-tenant.md` §3.4 record the two default columns, their
   tooltips, and the empty-platform-default note.
+- Round `tenant-user-default` (owner grill 2026-10-15): FR-7/§4.2/§5 and
+  `documents/solution/admin-default-tenant.md` §3.4 record the `User default` / `Yes` rename and the
+  `Set as my default` row action.
 
 ## 7. Out of scope / rejected
 
-- Per-row `Make my default` on `/tenants` — duplicates the dropdown action; rejected
-  2026-10-14 (the brief scopes set-default to the dropdown, clear to the page banner).
-- A `Clear` entry in the dropdown — rejected 2026-10-14; overwrite-by-new-set plus the
-  `/tenants` banner cover the lifecycle.
+- Per-row `Set as my default` on `/tenants` — proposed 2026-10-14 as a duplicate of the dropdown
+  action and rejected then; **re-adopted 2026-10-15** (owner grill, round `tenant-user-default`):
+  the two surfaces answer different questions — the dropdown sets the tenant in view, the page sets
+  a row of the registry — so the page now offers it alongside the platform-default action. A
+  `Clear` entry in the dropdown stays rejected; overwrite-by-new-set plus the `/tenants` banner
+  cover the lifecycle.
 - Any Settings API / resolver / `IDevTenantSelection` / migration change.
 - AuthPortal preference UI (unchanged stance from the parent feature).
 - Confirmation for Clear, success toasts (see FR-5 / FR-7).

@@ -9,6 +9,9 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Components.Landing;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
@@ -17,13 +20,15 @@ using TenantsIndex = SchoolCollab.Settings.Application.Components.Pages.Tenants.
 namespace SchoolCollab.Settings.Tests.Unit.Tenants;
 
 /// <summary>
-/// bUnit tests for the <c>/tenants</c> page's default-tenant surfaces: the clear banner for the
-/// operator's recorded preference (spec <c>documents/specs/tenant-default-dropdown-action.md</c>,
-/// FR-7) and the dev session-pin line for the header switcher's explicit pick (B7).
+/// bUnit tests for the <c>/tenants</c> page's default-tenant surfaces: the row action that RECORDS
+/// the operator's preference, the clear banner that RELEASES it (spec
+/// <c>documents/specs/tenant-default-dropdown-action.md</c>, FR-7), and the dev session-pin line
+/// for the header switcher's explicit pick (B7).
 /// </summary>
 /// <remarks>
-/// This is the page's first component-level coverage. The banner RELEASES the operator's personal
-/// default-tenant preference; the pin line releases the dev session's explicit pick.
+/// This is the page's first component-level coverage. The "Set as my default" row action and the
+/// banner together own the operator's personal default-tenant preference; the pin line releases
+/// the dev session's explicit pick.
 /// <para>
 /// The preference read is deliberately non-fatal — a preference the portal cannot read must never
 /// stop the registry list from rendering — so most of these tests are about degradation, not the
@@ -155,26 +160,58 @@ public class TenantsIndexTests : BunitContext
     /// <summary>The navigation spy registered for the current <see cref="Render"/> and its assertions.</summary>
     private RecordingNavigationManager Nav = null!;
 
+    /// <summary>
+    /// Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves to
+    /// <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at a fixed outcome, and
+    /// records the content it was handed so a test can pin the wording the operator reads.
+    /// Registered AFTER <c>AddFluentUIComponents()</c>, so it wins resolution.
+    /// </summary>
+    private void RegisterConfirmDialog(bool confirm, List<ConfirmDialogContent>? captured = null)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
+            confirm ? DialogResult.Ok<object?>(null) : DialogResult.Cancel()));
+
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
+                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
+            .Callback<ConfirmDialogContent, DialogParameters>((content, _) => captured?.Add(content))
+            .ReturnsAsync(dialogRef.Object);
+
+        Services.AddSingleton(dialogMock.Object);
+    }
+
     private (IRenderedComponent<TenantsIndex> Cut, ScriptedHandler Handler) Render(
         string? preferenceJson = null,
         HttpStatusCode preferenceStatus = HttpStatusCode.OK,
-        HttpStatusCode clearStatus = HttpStatusCode.NoContent,
+        HttpStatusCode preferenceWriteStatus = HttpStatusCode.NoContent,
         Guid? pick = null,
         bool failPickWrite = false,
-        string? tenantsJson = null)
+        string? tenantsJson = null,
+        bool confirm = true,
+        List<ConfirmDialogContent>? confirmCaptured = null)
     {
         var handler = new ScriptedHandler()
             .Map("GET", "/api/tenants", HttpStatusCode.OK, tenantsJson ?? TenantsJson)
             .Map("GET", "/api/tenants/me/default", preferenceStatus, preferenceJson ?? NoPreferenceJson)
-            .Map("PUT", "/api/tenants/me/default", clearStatus, string.Empty);
+            .Map("PUT", "/api/tenants/me/default", preferenceWriteStatus, string.Empty);
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://settings-api") };
         Services.AddSingleton(new TenantsApiClient(http));
         Services.AddSingleton<IDevTenantSelection>(new StubSelection { Selected = pick, FailWrites = failPickWrite });
 
+        // The page injects IDialogService for its confirm-gated row action; every render needs one.
+        RegisterConfirmDialog(confirm, confirmCaptured);
+
         // Registered last, so the page's injected NavigationManager is this recording spy.
         Nav = new RecordingNavigationManager();
         Services.AddSingleton<NavigationManager>(Nav);
+
+        // The row action menu is rendered through the menu service (the production default), so the
+        // harness needs the provider the layout supplies — exactly as DevTenantSwitcherTests does
+        // for the dialog provider.
+        Render<FluentMenuProvider>();
 
         return (Render<TenantsIndex>(), handler);
     }
@@ -192,8 +229,30 @@ public class TenantsIndexTests : BunitContext
     private static void ClickFollowPortalDefault(IRenderedComponent<TenantsIndex> cut)
         => cut.FindAll("fluent-button").First(b => b.TextContent.Trim() == "Follow the portal default").Click();
 
-    private static IEnumerable<(string Method, string Url, string? Body)> ClearCalls(ScriptedHandler handler)
+    private static IEnumerable<(string Method, string Url, string? Body)> PreferenceWrites(ScriptedHandler handler)
         => handler.Calls.Where(c => c.Method == "PUT" && c.Url == "/api/tenants/me/default");
+
+    /// <summary>
+    /// The row's action list, read from the page's own delegate. <c>FluentMenu</c> does NOT
+    /// materialise its items while closed, so asserting on the kebab's markup would test nothing;
+    /// <c>LandingPage.RowActions</c> is public for exactly this.
+    /// </summary>
+    private static IReadOnlyList<RowAction> RowActions(IRenderedComponent<TenantsIndex> cut, Guid tenantId)
+    {
+        var landing = Landing(cut);
+        landing.RowActions.Should().NotBeNull("the page supplies a per-row action builder");
+        return landing.RowActions!(landing.Items!.Single(t => t.Id == tenantId));
+    }
+
+    /// <summary>Invokes one enabled row action through that same delegate.</summary>
+    private static async Task InvokeRowActionAsync(
+        IRenderedComponent<TenantsIndex> cut, Guid tenantId, string label)
+    {
+        var action = RowActions(cut, tenantId).Single(a => a.Label == label);
+        action.Disabled.Should().BeFalse("this helper drives an enabled action");
+
+        await cut.InvokeAsync(async () => await action.OnClick!());
+    }
 
     [TestMethod]
     public void Banner_IsHidden_WhenNoPreferenceIsRecorded()
@@ -248,8 +307,8 @@ public class TenantsIndexTests : BunitContext
 
         ClickClear(cut);
 
-        ClearCalls(handler).Should().ContainSingle();
-        ClearCalls(handler).Single().Body.Should().Contain(
+        PreferenceWrites(handler).Should().ContainSingle();
+        PreferenceWrites(handler).Single().Body.Should().Contain(
             "\"tenantId\":null", "clearing releases the preference; it must not set a new one");
 
         cut.Markup.Should().NotContain("Your default tenant", "the banner disappears once the preference is gone");
@@ -276,7 +335,7 @@ public class TenantsIndexTests : BunitContext
     public void FailedClear_SurfacesTheError_AndKeepsTheBanner()
     {
         var (cut, _) = Render(
-            $$"""{"defaultTenantId":"{{Alpha}}"}""", clearStatus: HttpStatusCode.InternalServerError);
+            $$"""{"defaultTenantId":"{{Alpha}}"}""", preferenceWriteStatus: HttpStatusCode.InternalServerError);
 
         ClickClear(cut);
 
@@ -335,7 +394,7 @@ public class TenantsIndexTests : BunitContext
         ClickFollowPortalDefault(cut);
 
         selection.Selected.Should().BeNull("the pick is released, so the portal follows its resolved default again");
-        ClearCalls(handler).Should().BeEmpty("releasing the pick must not release the recorded preference");
+        PreferenceWrites(handler).Should().BeEmpty("releasing the pick must not release the recorded preference");
         Nav.ForcedReloads.Should().ContainSingle("the released pick has to take effect in this circuit");
         cut.Markup.Should().NotContain("Pinned this session", "the pin line disappears with the pick");
     }
@@ -375,8 +434,8 @@ public class TenantsIndexTests : BunitContext
 
     /// <summary>
     /// The two defaults are different concepts, so each gets a column: the one shared
-    /// designation, and the operator's own recorded preference. The old "Portal default" header
-    /// named neither clearly and is gone.
+    /// designation, and the operator's own recorded preference. Neither column is named "Your",
+    /// which read as the page's own instead of the signed-in operator's.
     /// </summary>
     [TestMethod]
     public void Grid_NamesBothDefaultColumns()
@@ -386,7 +445,8 @@ public class TenantsIndexTests : BunitContext
         var headers = cut.FindAll("th").Select(h => h.TextContent.Trim()).ToArray();
 
         headers.Should().Contain("Platform default");
-        headers.Should().Contain("Your default");
+        headers.Should().Contain("User default");
+        headers.Should().NotContain("Your default");
         headers.Should().NotContain("Portal default");
     }
 
@@ -435,15 +495,113 @@ public class TenantsIndexTests : BunitContext
     {
         var (cut, _) = Render($$"""{"defaultTenantId":"{{Alpha}}"}""");
 
-        cut.FindAll("fluent-badge").Should().Contain(b => b.TextContent.Trim() == "Yours",
+        cut.FindAll("fluent-badge").Should().Contain(b => b.TextContent.Trim() == "Yes",
             "the recorded preference is named in the operator's own column");
     }
 
     [TestMethod]
-    public void Grid_ShowsNoYoursBadge_WhenNoPreferenceIsRecorded()
+    public void Grid_ShowsNoYesBadge_WhenNoPreferenceIsRecorded()
     {
         var (cut, _) = Render();
 
-        cut.FindAll("fluent-badge").Should().NotContain(b => b.TextContent.Trim() == "Yours");
+        cut.FindAll("fluent-badge").Should().NotContain(b => b.TextContent.Trim() == "Yes");
+    }
+
+    // ── FR-7: the "Set as my default" row action ─────────────────────────
+
+    /// <summary>
+    /// Every row carries exactly two actions — the platform designation first, then the operator's
+    /// own preference — so the shared menu renders the kebab for all of them. On a row that is not
+    /// the recorded preference the personal entry is enabled.
+    /// </summary>
+    [TestMethod]
+    public void RowActions_OfferSetAsMyDefault_ForANonPreferredTenant()
+    {
+        var (cut, _) = Render();
+
+        var actions = RowActions(cut, Beta);
+
+        actions.Should().HaveCount(2, "the two defaults, and nothing else");
+        actions.Select(a => a.Label).Should().ContainInOrder("Make portal default", "Set as my default");
+        actions.Single(a => a.Label == "Set as my default").Disabled.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The already-preferred row mirrors the platform default's disabled entry: the action is
+    /// greyed out and explains itself rather than disappearing.
+    /// </summary>
+    [TestMethod]
+    public void RowActions_DisableSetAsMyDefault_ForThePreferredRow()
+    {
+        var (cut, _) = Render($$"""{"defaultTenantId":"{{Beta}}"}""");
+
+        var preferred = RowActions(cut, Beta).Single(a => a.Label == "Set as my default");
+        var other = RowActions(cut, Alpha).Single(a => a.Label == "Set as my default");
+
+        preferred.Disabled.Should().BeTrue("the row that already holds the preference cannot re-set it");
+        preferred.DisabledReason.Should().Be("This tenant is already your default.");
+        other.Disabled.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SetAsMyDefault_Confirmed_WritesThePreference_AndReloads()
+    {
+        var captured = new List<ConfirmDialogContent>();
+        var (cut, handler) = Render(confirmCaptured: captured);
+
+        await InvokeRowActionAsync(cut, Beta, "Set as my default");
+
+        PreferenceWrites(handler).Should().ContainSingle("confirming records exactly one preference");
+        PreferenceWrites(handler).Single().Body.Should().Contain(
+            Beta.ToString(), "the body must name the row's tenant, not the platform default's");
+        Nav.ForcedReloads.Should().ContainSingle(
+            "the admin host re-resolves the preference on the next load, and only a forced load re-reads this circuit");
+
+        captured.Should().ContainSingle();
+        captured[0].Should().Be(new ConfirmDialogContent(
+            "Open the admin portal on 'Beta' by default from now on?",
+            "Set as default",
+            "Cancel",
+            "Set default tenant"),
+            "the page reuses the header switcher's exact wording for the same decision");
+    }
+
+    [TestMethod]
+    public async Task SetAsMyDefault_Cancelled_WritesNothing_AndDoesNotReload()
+    {
+        var (cut, handler) = Render(confirm: false);
+
+        await InvokeRowActionAsync(cut, Beta, "Set as my default");
+
+        PreferenceWrites(handler).Should().BeEmpty("cancel writes nothing");
+        Nav.ForcedReloads.Should().BeEmpty("and there is nothing to apply, so it reloads nothing");
+    }
+
+    [TestMethod]
+    public async Task FailedSetAsMyDefault_SurfacesTheError()
+    {
+        var (cut, handler) = Render(preferenceWriteStatus: HttpStatusCode.InternalServerError);
+
+        await InvokeRowActionAsync(cut, Beta, "Set as my default");
+
+        PreferenceWrites(handler).Should().ContainSingle("the attempt was made exactly once");
+        Landing(cut).Error.Should().NotBeNullOrEmpty("a failed write surfaces on the shared error strip");
+        Nav.ForcedReloads.Should().BeEmpty("the preference was not recorded, so there is nothing to apply");
+    }
+
+    /// <summary>
+    /// The explicit pick and the recorded preference are separate layers: setting the preference
+    /// writes only the preference, so a pick in force survives the write untouched.
+    /// </summary>
+    [TestMethod]
+    public async Task SetAsMyDefault_DoesNotTouchTheSessionPick()
+    {
+        var (cut, handler) = Render(pick: Alpha);
+        var selection = Selection();
+
+        await InvokeRowActionAsync(cut, Beta, "Set as my default");
+
+        PreferenceWrites(handler).Should().ContainSingle();
+        selection.Selected.Should().Be(Alpha, "setting the preference neither writes nor releases the pick");
     }
 }
