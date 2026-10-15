@@ -24,7 +24,16 @@
        title + labeled Cancel — IS the close affordance. Rendered UNCONDITIONALLY, before the probe
        branches, so Cancel stays reachable in the unsupported and pre-probe states too. *@
     <div class="recorder-header">
-        <span class="recorder-title" id="@($"{Id}-title")">@(IsVideo ? "Recording video" : "Recording audio")</span>
+        @* Owner request 2026-10-15 (grill Q10): the title and the host's optional action share a
+           leading group, so the action reads as BESIDE the title rather than floating between it and
+           Cancel. The panel owns this layout; the action itself is the host's. *@
+        <div class="recorder-header-leading">
+            <span class="recorder-title" id="@($"{Id}-title")">@(IsVideo ? "Recording video" : "Recording audio")</span>
+            @if (HeaderAction is not null)
+            {
+                @HeaderAction
+            }
+        </div>
         <FluentButton Appearance="Appearance.Neutral"
                       Id="@($"{Id}-cancel")"
                       IconStart="@FluentIcons.Dismiss"
@@ -166,6 +175,11 @@
     private const string ModulePath =
         "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor.js";
 
+    /// <summary>Owner request 2026-10-15 (grill Q10): an optional action rendered beside the header
+    /// title. The panel owns the header's LAYOUT, the host owns the action — the seeded review's
+    /// "Edit Note" link lives in the list, which owns the metadata dialog.</summary>
+    [Parameter] public RenderFragment? HeaderAction { get; set; }
+
     /// <summary>Audio or Video — drives the device constraints and the preview element.</summary>
     [Parameter, EditorRequired] public bool IsVideo { get; set; }
 
@@ -209,6 +223,12 @@
     private bool _reopened;
     private ReviewSeed? _appliedSeed;
 
+    /// <summary>Owner request 2026-10-15 (grill Q15): a SEEDED review (the list's play click) opens
+    /// already playing, so the author clicks play once rather than twice. Armed when the seed is
+    /// applied and spent by the first render that can reach the module — never on a post-record review
+    /// or a retake, which keep their manual player (the author is checking their own fresh take).</summary>
+    private bool _needAutoPlay;
+
     /// <summary>Owner pill rework (2026-10-12): the host's seed for REOPENING this panel as the staged
     /// take's preview player (the list's play pill). A new instance reopens; null closes the reopen.</summary>
     [Parameter] public ReviewSeed? Seed { get; set; }
@@ -235,6 +255,8 @@
         }
 
         _reopened = true;
+        // Grill Q15: this is the ONLY entry that auto-plays — a seed means the list's play click.
+        _needAutoPlay = true;
         _ownsPreviewUrl = false;
         _previewUrl = Seed.PreviewUrl;
         _recordedFileName = Seed.FileName;
@@ -261,6 +283,23 @@
             try
             {
                 await _module.InvokeVoidAsync("bindPreview", $"{Id}-preview", IsVideo);
+            }
+            catch (JSException) { }
+            catch (JSDisconnectedException) { }
+            catch (ObjectDisposedException) { }
+        }
+
+        // Grill Q15 (owner 2026-10-15): a SEEDED review auto-plays once it is switched in, so the
+        // list's play click is one click rather than two. Guarded on _reopened so the post-record
+        // review and the retake keep their manual player, and cleared only when the call actually runs
+        // — the first render lands BEFORE the module import below, so the flag must survive it (the
+        // _needPreviewBind rule above, for the same reason).
+        if (_needAutoPlay && _reopened && _state == RecorderState.Review && _module is not null)
+        {
+            _needAutoPlay = false;
+            try
+            {
+                await _module.InvokeVoidAsync("playPreview", $"{Id}-preview-take");
             }
             catch (JSException) { }
             catch (JSDisconnectedException) { }
@@ -423,10 +462,12 @@
             // committed take's panel is torn down regardless. The URL is no longer ours to revoke
             // (ownership flipped above): the host's pending take owns it.
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or JSException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or JSException or TimeoutException)
         {
             // A refusal (too large, stream failed) is surfaced, never swallowed — the panel stays in
-            // Review so the author can retake or use Upload From Device.
+            // Review so the author can retake or use Upload From Device. A TimeoutException is the
+            // stalled/failed stream (the Blazor Server data stream gave up): surfaced on this same
+            // line, never left to terminate the circuit.
             _error = ex is IOException
                 ? "That recording is too large to add. Try a shorter take, or use Upload From Device."
                 : CaptureErrorMessage(ex.Message);

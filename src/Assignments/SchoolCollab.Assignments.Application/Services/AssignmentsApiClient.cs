@@ -634,7 +634,21 @@ public sealed class AssignmentsApiClient
 
         using var form = new MultipartFormDataContent();
         var fileContent = new StreamContent(content);
-        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        // A browser-reported MIME type may carry PARAMETERS — 'audio/mp4;codecs=opus' is what a
+        // MediaRecorder hands us for a take. Parameters are legal in a MIME type but the
+        // MediaTypeHeaderValue CONSTRUCTOR accepts a BARE type only, so assigning the raw value
+        // threw FormatException before the request was ever sent; that exception escaped the
+        // recorder's JS callback and the take was dropped with nothing shown to the author
+        // (live defect 2026-10-15). The stored value is a bare media type by design — the
+        // served-media route hands it straight to Results.Stream, and InstructionKindInference
+        // prefix-matches it — so parse, keep the media type and drop the parameters. Input that
+        // will not parse degrades to octet-stream rather than throwing: a MIME type the browser
+        // invented must never be able to break staging.
+        var mediaType = System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(contentType, out var parsed)
+            && !string.IsNullOrWhiteSpace(parsed.MediaType)
+                ? parsed.MediaType
+                : "application/octet-stream";
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
         form.Add(fileContent, "file", fileName);
 
         _logger.LogInformation(

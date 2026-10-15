@@ -862,6 +862,53 @@ public class InstructionEditorListBunitTests : BunitContext
         cut.FindAll("#instr-recorder-takeover").Should().BeEmpty("…and the review closes");
     }
 
+    /// <summary>Hand-off regression (live defect 2026-10-14): the panel hands over the LIVE stream its
+    /// hidden InputFile is still feeding and disposes it the moment <c>OnRecordedAsync</c> returns (its
+    /// own <c>await using</c>). A take stashed live across the metadata dialog is what wedges the
+    /// circuit — the pending JS data stream times out, the dialog renders inert (its rich-text editor
+    /// never mounts) and the take's bytes are unreadable when the confirm stages them. So the Dialog
+    /// hand-off must materialise the take BEFORE the dialog pops and stage its own buffer afterwards.
+    /// Pre-fix: the stashed take IS that disposed stream, and staging it throws
+    /// <see cref="ObjectDisposedException"/>.</summary>
+    [TestMethod]
+    public async Task DialogHandOff_BuffersTheTake_BeforeTheMetadataDialogOpens()
+    {
+        var rows = new List<InstructionEditorRow> { new() { Kind = InstructionKindDto.Audio } };
+        var take = new MemoryStream(new byte[] { 1, 2, 3, 4 });
+        byte[]? stagedBytes = null;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.StageMediaAsync, (_, content, _, _, _) =>
+            {
+                using var copy = new MemoryStream();
+                content.CopyTo(copy);
+                stagedBytes = copy.ToArray();
+                return Task.FromResult<StagedAttachmentDto?>(
+                    new StagedAttachmentDto("take.webm", "audio/webm", 4, "p"));
+            })
+            .Add(c => c.EditRowRequested, (InstructionEditorRow _) => { }));
+
+        cut.Find("#instr-record-0").Click();
+
+        await cut.InvokeAsync(() => cut.Instance.OnRecordedAsync(rows[0],
+            new RecorderPanel.RecordedMedia(take, "take.webm", "audio/webm", 4, "blob:take", 5)));
+
+        // The panel's `await using` — the hand-off is over and the live stream is gone. This dialog was
+        // cancelled, so the take is held uncommitted and the review stays open on it (AC-4).
+        await take.DisposeAsync();
+        cut.Find("#instr-recorder-takeover").Should().NotBeNull("the premise: the held take keeps the review");
+
+        await cut.InvokeAsync(() => cut.Instance.ApplyEditAsync(
+            rows[0], new MaterialEditResult(InstructionKindDto.Audio, "Intro", null, null)));
+
+        rows[0].StoragePath.Should().Be("p", "the take still stages on the confirm");
+        stagedBytes.Should().NotBeNull("the host is handed bytes, never the panel's dead stream");
+        stagedBytes.Should().Equal(new byte[] { 1, 2, 3, 4 },
+            "the list staged its OWN buffer, holding the take's bytes verbatim");
+    }
+
     /// <summary>AC-4 (cancel path, C2/Q12): a CANCELLED metadata dialog leaves the take uncommitted with
     /// the review STILL open on it — the panel keeps the take it handed over (its player, Record again,
     /// and another "Use this recording"; the module keeps the Blob for exactly that retry), and only the
@@ -955,8 +1002,15 @@ public class InstructionEditorListBunitTests : BunitContext
 
     /// <summary>C2 (AC-5): the seeded review's link-styled metadata control renders ONLY when a
     /// title/description exists — a bare preview shows nothing extra.</summary>
+    /// <summary>Owner request 2026-10-15 (grill Q11, repin of <c>…RendersOnlyWhenTitleOrBodyExists</c>):
+    /// the review's metadata link renders on EVERY seeded review, bare or not. The old gate
+    /// (<c>HasMetadata</c>) hid it when the take had no title/description — but the takeover suppresses
+    /// the rows, so the readout is unreachable and a bare take had NO way to gain a note at all.
+    /// <para>Q10/Q12 are pinned here too: it is a hypertext FluentAnchor (a native-looking link, not
+    /// the stealth button that used to float below the panel) and it reads "Edit Note" (Q12's original
+    /// per-medium wording was simplified by the owner — see the image-row test for the rationale).</para></summary>
     [TestMethod]
-    public async Task SeededReview_TitleEditLink_RendersOnlyWhenTitleOrBodyExists()
+    public async Task SeededReview_MetadataLink_AlwaysRendersAsAHypertextAnchor()
     {
         var rows = new List<InstructionEditorRow>
         {
@@ -972,14 +1026,18 @@ public class InstructionEditorListBunitTests : BunitContext
 
         cut.Find("#instr-play-0").Click();
         cut.Find("#instr-recorder-takeover").Should().NotBeNull("the titled row's seeded review opens");
-        cut.Find("#instr-review-edit").Should().NotBeNull(
-            "a titled row's seeded review offers the metadata control");
+        var link = cut.Find("#instr-review-edit");
+        link.TextContent.Trim().Should().Be("Edit Note",
+            "one label for every medium — the medium is already on the readout beside it (Q12 as amended)");
+        cut.FindComponents<FluentAnchor>()
+            .Should().Contain(a => a.Instance.Appearance == Appearance.Hypertext,
+                "it reads as the admin UI's native hyperlink, not a button (Q10)");
 
         cut.Find("#instr-recorder-0-cancel").Click();
         cut.Find("#instr-play-1").Click();
         cut.Find("#instr-recorder-takeover").Should().NotBeNull("the untitled row's seeded review opens");
-        cut.FindAll("#instr-review-edit").Should().BeEmpty(
-            "…and it shows nothing extra — no title/description to edit");
+        cut.Find("#instr-review-edit").Should().NotBeNull(
+            "a BARE take's review offers the link too — otherwise it has no route to a note at all (Q11)");
     }
 
     /// <summary>C2/Q12 (the Inline host's review-metadata link): the question dialog cannot nest the
@@ -1008,7 +1066,7 @@ public class InstructionEditorListBunitTests : BunitContext
 
         cut.Find("#instr-recorder-takeover").Should().NotBeNull("the premise: the seeded review is open");
         cut.Find("#instr-review-edit").Should().NotBeNull(
-            "…and the row carries metadata, so the link renders");
+            "…and the seeded review carries the metadata link (grill Q11: it renders on every review)");
 
         cut.Find("#instr-review-edit").Click();
 
@@ -1046,7 +1104,7 @@ public class InstructionEditorListBunitTests : BunitContext
         requested = null;
 
         cut.Find("#instr-review-edit").Should().NotBeNull(
-            "the row carries metadata, so the link renders on the held review too");
+            "the link renders on the held review too (grill Q11: it renders on every review)");
         cut.Find("#instr-review-edit").Click();
 
         requested.Should().BeSameAs(rows[0], "the Dialog host's dialog is what the link opens");
@@ -1065,6 +1123,56 @@ public class InstructionEditorListBunitTests : BunitContext
 
         cut.Find("#instr-error").TextContent.Should().Contain("not available here");
     }
+
+    /// <summary>Owner request 2026-10-15 (grill Q13a): an IMAGE row gets the same metadata affordance as
+    /// the review's header link — a hypertext anchor reading "Edit Note" — because an image has no
+    /// recorder and no review (play is Audio/Video only). The READOUT stays data; the anchor is the
+    /// action, and it opens the same dialog the readout click does.
+    /// <para><b>Discriminating:</b> pre-fix no such control exists on any row.</para></summary>
+    [TestMethod]
+    public void StagedImageRow_CarriesTheEditNoteHypertextAnchor_AndOpensTheMetadataDialog()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            StagedMediaRow(InstructionKindDto.Image, "photo.png", "image/png", title: "Diagram"),
+        };
+        InstructionEditorRow? requested = null;
+        var cut = Render<InstructionEditorList>(p => p
+            .Add(c => c.Id, "instr")
+            .Add(c => c.Rows, rows)
+            .Add(c => c.EditingMode, RowEditingMode.Dialog)
+            .Add(c => c.EditRowRequested, (InstructionEditorRow row) => requested = row));
+
+        var link = cut.Find("#instr-edit-note-0");
+        link.TextContent.Trim().Should().Be("Edit Note", "one label for every medium (Q12 as amended)");
+        cut.FindComponents<FluentAnchor>()
+            .Should().Contain(a => a.Instance.Appearance == Appearance.Hypertext,
+                "it reads as the admin UI's native hyperlink (Q10)");
+        cut.Find("#instr-title-0").TextContent.Should().Contain("Diagram",
+            "the readout stays DATA — the anchor beside it is the action");
+
+        link.Click();
+
+        requested.Should().BeSameAs(rows[0], "the anchor opens the same metadata dialog the readout does");
+    }
+
+    /// <summary>An AUDIO/VIDEO row does NOT get the row-level anchor: its readout is the edit affordance
+    /// (round media-pill-listing C2), and its labelled link lives in the seeded review's header instead
+    /// (Q10). Pinned so the image treatment is not copied onto rows that already have a route.</summary>
+    [TestMethod]
+    public void StagedAudioVideoRows_DoNotCarryTheRowLevelEditNoteAnchor()
+    {
+        var rows = new List<InstructionEditorRow>
+        {
+            StagedMediaRow(InstructionKindDto.Video, "clip.webm", "video/webm"),
+            StagedMediaRow(InstructionKindDto.Audio, "take.webm", "audio/webm"),
+        };
+        var cut = Render(rows, Returning(new StagedAttachmentDto("clip.webm", "video/webm", 10, "p")));
+
+        cut.FindAll("#instr-edit-note-0").Should().BeEmpty("a video row keeps its readout as the affordance");
+        cut.FindAll("#instr-edit-note-1").Should().BeEmpty("an audio row keeps its readout as the affordance");
+    }
+
 
 }
 
