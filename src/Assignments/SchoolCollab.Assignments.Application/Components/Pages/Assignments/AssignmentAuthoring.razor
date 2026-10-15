@@ -2842,8 +2842,18 @@
     /// rows exactly as it is on the create path. Cancelling (a null result) changes nothing — AC-15.</summary>
     private async Task OnMaterialEditRequestedAsync(InstructionEditorRow row)
     {
+        var model = MaterialEditFormModel.FromRow(row);
+
+        // Post-close rework (owner 2026-10-14): the media kinds' preview seam. The LIST owns the
+        // session Blob URLs and the served-fetch mechanism, so the lazy loader is its method; a null
+        // result (unsaved row with nothing staged, or no serve seam) simply hides the dialog's toggle.
+        if (row.HasMedia)
+        {
+            model.PreviewLoader = _instructionList?.GetPreviewLoader(row);
+        }
+
         var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
-            MaterialEditFormModel.FromRow(row),
+            model,
             row.Kind switch
             {
                 InstructionKindDto.Text => "Edit Text Content",

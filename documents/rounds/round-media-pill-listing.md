@@ -657,3 +657,36 @@ Out-of-round observations: none
 Assignments.Unit **1151/0**, Assignments.Api.Unit **172/0**, Families.Unit **48/0**, ArchitectureTests **111/0**,
 Assignments.Integration **26/0**. Durable outcomes folded into `documents/specs/recording-materials.md` §8.
 Nothing committed, pushed, or PR'd — the owner's commit gate.
+
+---
+
+## Post-close rework + correction (owner 2026-10-14, landed after this round as PR #350)
+
+Two owner-directed changes followed the verdict; both are recorded in
+`documents/specs/recording-materials.md` M3, which stays the durable source of truth.
+
+1. **Media preview toggle.** The metadata dialog's description slot doubles as the media preview: an
+   eye-icon toggle (rendered only when a preview can resolve) swaps the Description for the native
+   `<video>/<audio>/<img>` element in the same slot. The Blob URL resolves LAZILY through a list-owned
+   seam — `InstructionEditorList.GetPreviewLoader` → `ResolvePreviewUrlAsync` (a pending take or a
+   session entry is instant; a persisted row streams through the teacher route and caches in the session
+   map) — so opening the dialog never streams a file. The dialog never revokes; a null/failed resolve
+   renders a named "Preview unavailable" state.
+2. **Correction — the media Description IS the shared rich editor.** Q10's letter ("mirroring its Text
+   branch's Title + rich Body") had been shipped as a plain text field; the owner re-opened it and the
+   correction landed: the same `RichInstructionEditor` a Text body uses, read at submit and sanitised,
+   with Quill's empty payload stored as null — both fields still optional, no validator or contract
+   change. Because the preview toggle UNMOUNTS the editor, the dialog captures the editor's HTML on the
+   way into the preview and sanitises the captured value when submit happens from the preview path, so
+   both orders submit the edit. The ward now prints the media body through `RichInstruction` (the tree's
+   one sanitiser-fed render component) instead of encoding it as text; the Inline host's pair stays plain.
+
+**Findings owned in the follow-up pass.** Two stale preview-test assertions (the description was still
+counted as a `fluent-text-field`), and one guard trip: `NoMarkupString_InSource` caught a COMMENT using
+the banned token — reworded, the guard's allow-list untouched. The dialog-open site's `PreviewLoader`
+wiring is pinned by the new source-scan guard `MaterialPreviewWiringArchitectureTests` (the authoring
+page's bUnit suite does not open the material dialog, and a page harness for three lines was judged
+disproportionate).
+
+**Follow-up verification (parent-run, authoritative).** Build 0 errors; Assignments.Unit **1158/0**,
+Families.Unit **49/0**, ArchitectureTests **112/0**.

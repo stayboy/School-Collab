@@ -69,6 +69,14 @@ AppHost's dashboard output (`watch.log`).
   debugging the code — the code was correct both times.
 - The legacy kill→build→run loop remains correct for: full-solution builds/tests
   (PR pre-flight), NuGet changes, migrations, and AppHost resource-graph changes.
+- **A `dotnet watch` AppHost can come up with a dead proxy route (observed 2026-10-15).** The
+  resource proxy kept its listener but never forwarded: `https://localhost:7300` timed out on both
+  schemes (`curl (28)`) while the admin itself answered **200** on its own endpoint
+  (`https://127.0.0.1:<admin-port>/`, discoverable from the `SchoolCollab.Admin` process's listening
+  ports). Symptom to the user is "the app is broken / the page hangs" while every service is healthy.
+  Workaround: drive the admin's own endpoint instead of the proxy port; if the proxy route is wanted
+  back, restart the AppHost (the mapping is regenerated). Do not debug application code for this — check
+  the direct endpoint first.
 
 ## Boundaries
 

@@ -761,6 +761,71 @@
         }
     }
 
+    /// <summary>Post-close rework (owner 2026-10-14, grill Q11): the metadata dialog's Preview ⇄
+    /// Description seam. The dialog resolves a media row's preview Blob URL LAZILY through this
+    /// delegate — a pending take or a session entry returns its kept URL instantly, while a
+    /// persisted row streams its bytes through the host's served route on the FIRST press, so
+    /// opening the dialog never blocks on a large file. Null = nothing can resolve here, and the
+    /// dialog renders no toggle at all (never a dead button). The dialog never revokes: every URL
+    /// entering <see cref="_sessionMedia"/> stays this list's to revoke exactly as before.</summary>
+    public Func<Task<string?>>? GetPreviewLoader(InstructionEditorRow row) =>
+        row.HasMedia && IsPreviewResolvable(row) ? () => ResolvePreviewUrlAsync(row) : null;
+
+    /// <summary>Whether a media row's preview bytes can resolve right now: the pending take's
+    /// handed-over URL, an already-resolved session entry, or a persisted row with the host's
+    /// served-fetch seam.</summary>
+    private bool IsPreviewResolvable(InstructionEditorRow row) =>
+        (_pendingRecording is { } pending && ReferenceEquals(pending.Row, row) && pending.Media.PreviewUrl is not null)
+        || _sessionMedia.ContainsKey(row)
+        || (row.Id is not null && LoadInstructionMediaAsync is not null);
+
+    /// <summary>Resolves (and, for a served fetch, caches) the preview Blob URL — the serve half
+    /// mirrors <see cref="PlayMediaAsync"/> guard-for-guard; any failure resolves null and never
+    /// throws (the dialog renders its named "unavailable" state). No duration probe here: the
+    /// preview is the metadata dialog's eye, not a play.</summary>
+    private async Task<string?> ResolvePreviewUrlAsync(InstructionEditorRow row)
+    {
+        if (_pendingRecording is { } pending && ReferenceEquals(pending.Row, row))
+        {
+            return pending.Media.PreviewUrl;
+        }
+
+        if (_sessionMedia.TryGetValue(row, out var session))
+        {
+            return session.Url;
+        }
+
+        if (row.Id is null || LoadInstructionMediaAsync is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var stream = await LoadInstructionMediaAsync(row);
+            if (stream is null)
+            {
+                return null;
+            }
+
+            var url = await CreateMediaUrlFromStreamAsync(stream, row.ContentType);
+            _sessionMedia[row] = new SessionMedia(url, null);
+            return url;
+        }
+        catch (JSDisconnectedException)
+        {
+            return null;
+        }
+        catch (ObjectDisposedException)
+        {
+            return null;
+        }
+        catch (Exception ex) when (ex is JSException or HttpRequestException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Opens the review panel on <paramref name="row"/> seeded with a Blob URL — the one
     /// playback surface (player + Record again; a reopened review never renders the commit button).</summary>
     private void SeedReview(InstructionEditorRow row, string url)

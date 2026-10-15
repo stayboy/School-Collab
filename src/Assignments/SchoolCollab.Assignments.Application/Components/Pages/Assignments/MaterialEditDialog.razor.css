@@ -6,3 +6,33 @@
     font-weight: 600;
     margin-bottom: 4px;
 }
+
+/* Post-close rework (owner 2026-10-14): the media preview ⇄ description swap. The toggle sits
+   right-aligned above the shared slot; the preview is height-capped so a tall video or image
+   cannot push the dialog footer out of view (the dialog is a fixed-height box). */
+.media-preview-toggle {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.media-preview {
+    margin-bottom: 8px;
+}
+
+.media-preview-video,
+.media-preview-image {
+    display: block;
+    max-width: 100%;
+    max-height: 240px;
+    border-radius: 4px;
+}
+
+.media-preview-audio {
+    width: 100%;
+}
+
+.media-preview-missing {
+    margin: 0;
+    font-size: 0.8rem;
+    opacity: 0.7;
+}

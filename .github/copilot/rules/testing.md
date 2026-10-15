@@ -20,6 +20,25 @@ All test projects must be MTP-compatible:
 
 ---
 
+## UI rounds need one live pass (bUnit cannot see the browser)
+
+bUnit renders the component tree with loose JS interop: it cannot prove what the real browser does.
+Blazor-side logic can be fully green while the shipped UI is broken — the media metadata dialog
+(2026-10-14) is the worked example: bUnit pinned the rich editor, the preview swap, submit and cancel,
+yet four user-visible failures (dead Cancel/Submit, inert preview toggle, no editor) appeared only in a
+live session, where the cause turned out to be a stale hot-reload circuit rather than code
+(`documents/runbooks/dev-loop-hot-reload.md` §Failure modes).
+
+- A round whose changed-file list contains `.razor`, `.razor.css`, `.css`, `.js`, `wwwroot/`, or an
+  ApiClient / Blazor client project gets **one live pass** before it is called accepted: load the real
+  surface, drive the changed interaction, and watch the browser console. Automated Playwright asserts are
+  preferred; a hand-driven pass with the console open is the floor.
+- The live pass is an observation gate, not a replacement for bUnit — both run.
+- When a live failure and green tests disagree, suspect the session before the code: rebuild, restart,
+  re-observe (the runbook's rude-edit rules) before touching source.
+
+---
+
 ## Bug-fix regression tests
 
 Every bug fix must include a regression test that proves the reported bug is fixed. Do

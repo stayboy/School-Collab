@@ -9,6 +9,11 @@
    commit — carrying the media's OPTIONAL, independent Title + Description. The staged FILE never
    passes through this dialog; only its metadata does.
 
+   Post-close rework (owner 2026-10-14, grill Q9-Q12): the description slot doubles as the media
+   PREVIEW. An eye-icon toggle (rendered only when the model carries a PreviewLoader) swaps the
+   Description field for the native player/image in the same slot; the Blob URL resolves lazily on
+   the first press through the host-supplied seam, so opening the dialog never streams a file.
+
    Round wysiwyg-instruction-editor, grill extension (owner 2026-10-11): a Text material's BODY is the
    shared RICH editor — read at submit and sanitised on the way out (Q11's write half). The Enter guard
    retired WITH the textarea it existed for: Quill's contenteditable never submits a form on Enter, and
@@ -47,7 +52,57 @@
                Inline-mode host (question dialog) expands the same pair on the row instead (Q12). *@
             <p class="dialog-hint">Both fields are optional: name this material and/or describe what it covers.</p>
             <FluentTextField Label="Title (optional)" @bind-Value="Model.Title" class="full-width mb-3" />
-            <FluentTextField Label="Description (optional)" @bind-Value="Model.Body" class="full-width" />
+
+            @* Post-close rework (owner 2026-10-14): the Preview ⇄ Description swap. The toggle
+               renders only when a preview can resolve (the loader seam is present) — never a dead
+               button — and both views never show at once: they own the SAME slot, description by
+               default (the dialog's job is metadata), preview on demand. *@
+            @if (Model.PreviewLoader is not null)
+            {
+                <div class="media-preview-toggle">
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  IconStart="@FluentIcons.Eye"
+                                  Disabled="@_previewLoading"
+                                  OnClick="@TogglePreviewAsync"
+                                  aria-label="@( _showPreview ? "Hide the media preview" : "Preview the media file" )">
+                        @(_showPreview ? "Hide preview" : "Preview")
+                    </FluentButton>
+                </div>
+            }
+
+            @if (_showPreview)
+            {
+                <div class="media-preview">
+                    @if (_previewUrl is null)
+                    {
+                        <p class="media-preview-missing">Preview unavailable for this file.</p>
+                    }
+                    else if (Model.Kind == InstructionKindDto.Video)
+                    {
+                        <video controls src="@_previewUrl" class="media-preview-video"></video>
+                    }
+                    else if (Model.Kind == InstructionKindDto.Audio)
+                    {
+                        <audio controls src="@_previewUrl" class="media-preview-audio"></audio>
+                    }
+                    else
+                    {
+                        <img src="@_previewUrl" alt="@(Model.Title ?? "Media preview")" class="media-preview-image" />
+                    }
+                </div>
+            }
+            else
+            {
+                @* Post-close correction (owner 2026-10-14): the media DESCRIPTION is the SAME shared
+                   rich editor as a Text material's body — Q10's letter ("mirroring its Text branch's
+                   Title + rich Body"). Read at submit and sanitised there (no binding exists); the
+                   label element replaces the FluentTextField's own Label, exactly as in the Text branch. *@
+                <label class="material-body-label" for="@BodyFieldId">Description (optional)</label>
+                <RichInstructionEditor @ref="_bodyEditor"
+                                       Id="@BodyFieldId"
+                                       Value="@Model.Body"
+                                       Placeholder="What this material covers…" />
+            }
         }
 
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="@SubmitText" OnCancel="HandleCancelAsync" />
@@ -70,6 +125,56 @@
                 : Model.Kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link";
 
     protected override string SavingText => Model.IsEdit ? "Saving…" : "Adding…";
+
+    /// <summary>Post-close rework (owner 2026-10-14): whether the media branch currently shows the
+    /// preview instead of the description (they share one slot; description is the default view).</summary>
+    private bool _showPreview;
+
+    /// <summary>True while the seam is resolving, so the toggle reads as busy rather than dead.</summary>
+    private bool _previewLoading;
+
+    /// <summary>The resolved preview Blob URL — fetched ONCE per dialog (the host-side seam caches),
+    /// kept across toggles. Null while unresolved or when the seam yielded nothing.</summary>
+    private string? _previewUrl;
+
+    /// <summary>Swaps the description slot for the media preview and back. The URL resolves lazily on
+    /// the FIRST press only; a seam failure or a null result renders the named "unavailable" state
+    /// (never a blank box, never a thrown dialog) — the AC-10 rule applied to the preview.</summary>
+    private async Task TogglePreviewAsync()
+    {
+        if (_showPreview)
+        {
+            _showPreview = false;
+            return;
+        }
+
+        // The preview takes the description's slot, so the rich editor UNMOUNTS: capture its HTML
+        // into the model first, or the author's unsaved edits would die with the editor and submit
+        // would see the stale seeded value. The model then re-seeds the editor on hide.
+        if (_bodyEditor is not null)
+        {
+            var bodyHtml = await _bodyEditor.GetHtmlAsync();
+            if (bodyHtml is not null)
+            {
+                Model.Body = bodyHtml;
+            }
+        }
+
+        _previewLoading = true;
+        try
+        {
+            _previewUrl ??= await (Model.PreviewLoader?.Invoke() ?? Task.FromResult<string?>(null));
+        }
+        catch (Exception)
+        {
+            _previewUrl = null;
+        }
+        finally
+        {
+            _previewLoading = false;
+            _showPreview = true;
+        }
+    }
 
     /// <summary>Mirrors <c>InstructionDtoValidator</c> so the author is told before the save, not after
     /// (D6/D7, AC-4): a Text row must be NAMED (body optional); a Link row must carry an absolute
@@ -110,8 +215,30 @@
 
         if (model.Kind is InstructionKindDto.Audio or InstructionKindDto.Video or InstructionKindDto.Image)
         {
-            // C2/Q10: a media row's title and body are BOTH optional and independent — nothing is
-            // required, nothing is forbidden, and the file fields are never touched here.
+            // C2/Q10 + post-close correction (owner 2026-10-14): a media row's description IS the shared
+            // rich editor — the Text branch's body half exactly: read at submit (no binding exists) and
+            // sanitised on the way out; the Quill empty payload is stored as null, never as junk markup.
+            // Title and description stay independent and both optional; the file fields are never touched.
+            if (_bodyEditor is not null)
+            {
+                var bodyHtml = await _bodyEditor.GetHtmlAsync();
+                if (bodyHtml is not null)
+                {
+                    model.Body = RichInstructionSanitizer.Sanitize(bodyHtml);
+                }
+            }
+            else if (model.Body is not null)
+            {
+                // The preview was showing at submit, so the editor is unmounted: the model carries the
+                // HTML captured on the way into the preview — sanitise it here rather than trusting it.
+                model.Body = RichInstructionSanitizer.Sanitize(model.Body);
+            }
+
+            if (model.Body is not null && string.IsNullOrWhiteSpace(RichInstructionSanitizer.ToPlainText(model.Body)))
+            {
+                model.Body = null;
+            }
+
             return new MaterialEditResult(
                 model.Kind,
                 string.IsNullOrWhiteSpace(model.Title) ? null : model.Title!.Trim(),
