@@ -1,13 +1,69 @@
 @page "/tenants"
+@using SchoolCollab.Core.Auth
 @inject TenantsApiClient Api
+@inject IDevTenantSelection DevTenant
+@inject NavigationManager Nav
 @inject ILogger<Index> Logger
+@inject IDialogService DialogService
 
 <PageTitle>Tenants</PageTitle>
 
-@* The tenant registry read-only list, plus the one write this surface exists for:
-   designating which tenant the admin portal opens on by default. The per-operator
-   preference is deliberately NOT here — it is self-service and lives on the dev tenant
-   switcher in the header, next to the thing it affects. *@
+@* The tenant registry read-only list, plus the writes this surface owns: designating the platform
+   default (a row action), recording the signed-in operator's own default-tenant preference (a row
+   action, confirm-gated — the dev tenant switcher in the header sets the same preference next to
+   the thing it affects), releasing that preference (the banner), and releasing the dev session's
+   explicit tenant pick (the session-pin line).
+
+   The grid carries BOTH tenancy defaults as separate columns, because they are easy to confuse:
+   "Platform default" is the single designation the whole portal shares (Tenant.IsDefault), while
+   "User default" is the signed-in operator's own recorded preference. Each column header
+   explains itself on hover. FluentUI emits a header tooltip only when the column's `Tooltip`
+   switch is ALSO set (it defaults false and gates `HeaderTooltip`), so both columns carry
+   `Tooltip="true"` beside `HeaderTooltip`. *@
+
+@if (_pick is { } pinnedTenantId)
+{
+    @* B7: the dev tenant switcher's explicit pick, and the release for it. The header dropdown
+       shows the tenant the portal is operating under and writes an explicit pick when the
+       operator chooses a row, so releasing that pick needs its own affordance. It renders
+       independently of the preference banner: a pick can exist with no preference recorded, which
+       is exactly when the banner below is absent. Dev-only in practice — under OIDC no pick is
+       ever recorded. *@
+    <div class="tenants-session-pin">
+        <span title="A tenant you picked in the header switcher. While a session pin is in force it overrides both your default and the platform default.">
+            Pinned this session: @TenantDisplayName(pinnedTenantId)
+        </span>
+        <FluentButton Appearance="Appearance.Outline"
+                      Title="Release the pin and follow your default — then the platform default — again."
+                      OnClick="@FollowPortalDefaultAsync">Follow the portal default</FluentButton>
+    </div>
+}
+
+@if (_preference is { } preferredTenantId)
+{
+    @* FR-7: no confirmation (clearing is not destructive — the repo confirms destructive
+       actions only) and no forced reload (nothing tenant-scoped changes until the next portal
+       load). A failed clear surfaces on the LandingPage error strip, same as MakeDefaultAsync. *@
+    <div class="tenants-default-banner">
+        <FluentMessageBar Intent="MessageIntent.Info" AllowDismiss="false">
+            <span class="tenants-default-banner-body">
+                Your default tenant: @TenantDisplayName(preferredTenantId)
+                <FluentButton Appearance="Appearance.Outline"
+                              OnClick="@ClearPreferenceAsync">Clear</FluentButton>
+            </span>
+        </FluentMessageBar>
+    </div>
+}
+
+@if (_items is { Length: > 0 } registry && !registry.Any(t => t.IsDefault))
+{
+    @* Q10: nothing is designated, so the "Platform default" column is a dash on every row. Say it
+       once, rather than leaving a column of dashes that reads as a rendering bug. *@
+    <p class="tenants-grid-note">
+        No platform default is designated yet — until one is set, the portal opens on your default,
+        or on the system context when you have none.
+    </p>
+}
 
 <LandingPage TItem="TenantDto"
              Title="Tenants"
@@ -26,10 +82,26 @@
         <TemplateColumn TGridItem="TenantDto" Title="Type" Sortable="true" SortBy="@_sortByType">
             @context.Type
         </TemplateColumn>
-        <TemplateColumn TGridItem="TenantDto" Title="Portal default">
+        <TemplateColumn TGridItem="TenantDto"
+                        Title="Platform default"
+                        Tooltip="true"
+                        HeaderTooltip="The tenant the admin portal opens on when the operator has no personal default. One tenant at a time — everyone shares it.">
             @if (context.IsDefault)
             {
                 <FluentBadge Appearance="Appearance.Accent">Default</FluentBadge>
+            }
+            else
+            {
+                <span class="tenants-muted">—</span>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantDto"
+                        Title="User default"
+                        Tooltip="true"
+                        HeaderTooltip="The tenant YOU have chosen as your default — set it with the row action 'Set as my default', or from the tenant switcher in the header. It wins over the platform default; release it with Clear.">
+            @if (_preference == context.Id)
+            {
+                <FluentBadge Appearance="Appearance.Lightweight">Yes</FluentBadge>
             }
             else
             {
@@ -44,9 +116,23 @@
     private string? _error;
     private bool _disposed;
 
+    /// <summary>
+    /// The signed-in operator's recorded default-tenant preference, or null when none is
+    /// recorded. Decides whether the clear banner renders and whether a row's `Set as my default`
+    /// entry is disabled (FR-7).
+    /// </summary>
+    private Guid? _preference;
+
+    /// <summary>
+    /// The dev tenant switcher's explicit pick for this session, or null when none is in force.
+    /// Read only to decide whether the session-pin line renders (B7); the page clears it through
+    /// the switcher's own store, never by re-picking a tenant for the operator.
+    /// </summary>
+    private Guid? _pick;
+
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(220px,2fr) 140px 140px"
+        GridTemplateColumns = "minmax(220px,2fr) 140px 140px 140px"
     };
 
     private readonly GridSort<TenantDto> _sortByName = GridSort<TenantDto>.ByAscending(t => t.Name);
@@ -58,7 +144,15 @@
     {
         try
         {
-            _items = await Api.ListTenantsAsync();
+            // The preference and the session pick are read in parallel with the registry: each only
+            // decides whether a line renders, so a slow or failed read must neither hold up nor
+            // break the list.
+            var listTask = Api.ListTenantsAsync();
+            var preferenceTask = LoadPreferenceAsync();
+            var pickTask = LoadPickAsync();
+            await Task.WhenAll(listTask, preferenceTask, pickTask);
+
+            _items = await listTask;
             _error = null;
         }
         catch (Exception ex)
@@ -71,26 +165,161 @@
     }
 
     /// <summary>
-    /// One action per row. The current default gets a disabled, self-explaining entry rather
-    /// than no action at all: a row with an empty action menu reads as a rendering bug, and
-    /// <see cref="RowAction.DisabledReason"/> exists for exactly this.
+    /// Reads the operator's recorded preference. A failed read is non-fatal: it degrades to "no
+    /// preference recorded", so the banner simply does not render (FR-7).
+    /// </summary>
+    private async Task LoadPreferenceAsync()
+    {
+        try
+        {
+            _preference = (await Api.GetMyDefaultTenantAsync()).DefaultTenantId;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read the default tenant preference; the clear banner will not render");
+            _preference = null;
+        }
+    }
+
+    /// <summary>
+    /// Releases the operator's recorded preference (FR-7). The banner disappears; the registry
+    /// grid is untouched. A failure leaves the banner in place so the operator can retry.
+    /// </summary>
+    private async Task ClearPreferenceAsync()
+    {
+        try
+        {
+            await Api.SetMyDefaultTenantAsync(null);
+            _preference = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to clear the default tenant preference");
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Reads the dev tenant switcher's explicit pick. A failed read is non-fatal: it degrades to
+    /// "no pick", so the session-pin line simply does not render (B7).
+    /// </summary>
+    private async Task LoadPickAsync()
+    {
+        try
+        {
+            _pick = await DevTenant.GetSelectedTenantIdAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read the dev tenant selection; the session-pin line will not render");
+            _pick = null;
+        }
+    }
+
+    /// <summary>
+    /// Releases the dev session's explicit pick so the portal follows its resolved default again
+    /// (B7). This writes the SELECTION slot — the one the header dropdown's row click writes — and
+    /// deliberately not the preference, which has its own release in the banner above. The forced
+    /// reload makes the change take effect in this circuit, exactly as a row click does. A failure
+    /// leaves the line in place so the operator can retry.
+    /// </summary>
+    private async Task FollowPortalDefaultAsync()
+    {
+        try
+        {
+            await DevTenant.SetSelectedTenantIdAsync(null);
+            _pick = null;
+            Nav.Refresh(forceReload: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to release the dev tenant selection");
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Display name of a tenant id: its registry name, "system / no tenant" for
+    /// <see cref="Guid.Empty"/>, or the raw id when it is not in the loaded registry (FR-7). Used
+    /// for both the preference banner and the session-pin line, so the two cannot disagree.
+    /// </summary>
+    private string TenantDisplayName(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            return "system / no tenant";
+
+        return _items?.FirstOrDefault(t => t.Id == tenantId)?.Name ?? tenantId.ToString();
+    }
+
+    /// <summary>
+    /// Exactly two actions per row, both defaults: the platform designation first (FR-7), then the
+    /// signed-in operator's own preference. The row that already holds one of them gets a disabled,
+    /// self-explaining entry rather than no action at all: a row with an empty action menu reads as
+    /// a rendering bug, and <see cref="RowAction.DisabledReason"/> exists for exactly this. Two
+    /// actions on every row means the shared menu renders the kebab for all of them.
     /// </summary>
     private IReadOnlyList<RowAction> RowActions(TenantDto tenant) =>
+    [
         tenant.IsDefault
-            ? [
-                RowAction.Callback(
-                    "Portal default",
-                    () => Task.CompletedTask,
-                    FluentIcons.Star,
-                    disabled: true,
-                    disabledReason: "This tenant already opens the admin portal by default.")
-            ]
-            : [
-                RowAction.Callback(
-                    "Make portal default",
-                    () => MakeDefaultAsync(tenant),
-                    FluentIcons.Star)
-            ];
+            ? RowAction.Callback(
+                "Portal default",
+                () => Task.CompletedTask,
+                FluentIcons.Star,
+                disabled: true,
+                disabledReason: "This tenant already opens the admin portal by default.")
+            : RowAction.Callback(
+                "Make portal default",
+                () => MakeDefaultAsync(tenant),
+                FluentIcons.Star),
+        _preference == tenant.Id
+            ? RowAction.Callback(
+                "Set as my default",
+                () => Task.CompletedTask,
+                FluentIcons.Person,
+                disabled: true,
+                disabledReason: "This tenant is already your default.")
+            : RowAction.Callback(
+                "Set as my default",
+                () => SetMyDefaultAsync(tenant),
+                FluentIcons.Person),
+    ];
+
+    /// <summary>
+    /// Records the signed-in operator's own default-tenant preference for <paramref name="tenant"/>
+    /// (FR-7). Confirm-gated with the header switcher's exact wording; cancel and dismissal write
+    /// nothing and reload nothing. The forced reload is what applies the new preference — the admin
+    /// host re-resolves it on the next load, and this RCL cannot call the host's
+    /// <c>AdminDefaultTenantResolver</c>. The dev session's explicit pick (the selection slot) is
+    /// deliberately never written here: it is a separate layer with its own release in the pin line
+    /// above. A failure surfaces on the LandingPage error strip and does not reload.
+    /// </summary>
+    private async Task SetMyDefaultAsync(TenantDto tenant)
+    {
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Open the admin portal on '{tenant.Name}' by default from now on?",
+            primaryText: "Set as default",
+            title: "Set default tenant");
+
+        if (!confirmed)
+            return;
+
+        try
+        {
+            await Api.SetMyDefaultTenantAsync(tenant.Id);
+            _preference = tenant.Id;
+            Nav.Refresh(forceReload: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to record the default tenant preference for tenant {TenantId}", tenant.Id);
+            _error = ex.Message;
+
+            // The row action runs from the menu's own event handler, so Blazor re-renders only that
+            // menu — without this the strip would not appear until something else re-rendered the
+            // page (the same reason MakeDefaultAsync re-renders explicitly on its success path).
+            StateHasChanged();
+        }
+    }
 
     private async Task MakeDefaultAsync(TenantDto tenant)
     {

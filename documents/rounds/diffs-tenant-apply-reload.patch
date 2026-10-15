@@ -1,0 +1,254 @@
+diff --git a/documents/solution/admin-default-tenant.md b/documents/solution/admin-default-tenant.md
+index e569264e..ad1bcc17 100644
+--- a/documents/solution/admin-default-tenant.md
++++ b/documents/solution/admin-default-tenant.md
+@@ -116,6 +116,12 @@ tenant were selected — the worst kind of half-working.
+   buttons beside the select), and reconciles the circuit in
+   `OnAfterRenderAsync(firstRender: true)` — after the render phase, where navigation is legal.
+   Releasing the pick is not here either: it lives on the `/tenants` session-pin line.
++- **The apply is a hard document reload.** Every site that changes the tenant context — the
++  switcher's reconciliation, its pick, and the `/tenants` session-pin release — calls
++  `NavigationManager.Refresh(forceReload: true)`. The flag is load-bearing: without it the reload
++  merges the server HTML into the live document instead of loading it, so the circuit keeps the
++  `tenant_id` claim it read at circuit start and the dropdown and the tenant-scoped pages
++  disagree until a manual F5 (round `tenant-apply-reload`, fixing exactly that symptom).
+ 
+ ### 3.4 Surfaces
+ 
+@@ -178,7 +184,8 @@ covered, rather than a precaution that merely reads well.
+ - **Clearing a preference is still required** to make the platform default the resolved one
+   again; the release action lives on the `/tenants` page banner. A *pick* is a separate layer,
+   released by the session-pin line on the same page (`Follow the portal default`) — the header
+-  dropdown only ever sets. Under OIDC neither a pick nor a preference exists, so both lines are
+-  dev-only surfaces.
++  dropdown only ever sets. Both releases take effect through the same hard document reload
++  (`Refresh(forceReload: true)`, §3.3). Under OIDC neither a pick nor a preference exists, so both
++  lines are dev-only surfaces.
+ - The AuthPortal does not surface the preference; that would reopen the mediated-claim seam
+   and is deliberately out of scope.
+diff --git a/documents/specs/tenant-default-dropdown-action.md b/documents/specs/tenant-default-dropdown-action.md
+index 6587e756..ede4d2a8 100644
+--- a/documents/specs/tenant-default-dropdown-action.md
++++ b/documents/specs/tenant-default-dropdown-action.md
+@@ -132,7 +132,10 @@ On confirm, in order:
+    overwritten — this is how "selecting another preferred clears the old default");
+ 2. `AdminDefaultTenantResolver.ResolveAndApplyAsync(PlatformDefaultOf(_tenants))` —
+    re-publishes so the rest of this load speaks for the new default;
+-3. one `Nav.NavigateTo(Nav.Uri, forceLoad: true)`.
++3. one `Nav.Refresh(forceReload: true)` — a real document load, so the circuit re-enters through
++   a new request and recomputes its `tenant_id` claim. The flag is load-bearing:
++   `Refresh(forceReload: false)` merges the server HTML into the live document instead of loading
++   it, which leaves the claim stale.
+ 
+ The selection slot (`IDevTenantSelection`) is **not** touched — the explicit pick stays
+ in force and the dropdown comes back showing the same tenant (FR-6). No success toast:
+@@ -182,8 +185,8 @@ above the `LandingPage`:
+   `system / no tenant` for `Guid.Empty`; raw id when the registry does not list it).
+ - `Follow the portal default` → `DevTenant.SetSelectedTenantIdAsync(null)` — the
+   **selection** slot the header dropdown's row click writes, never
+-  `SetMyDefaultTenantAsync` — and then one `Nav.NavigateTo(Nav.Uri, forceLoad: true)` so the
+-  change takes effect in this circuit, exactly as a row click does.
++  `SetMyDefaultTenantAsync` — and then one `Nav.Refresh(forceReload: true)` so the change takes
++  effect in this circuit, exactly as a row click does.
+ - A failed pick read is non-fatal (log, treat as no pick); a failed write surfaces on the
+   existing `_error` strip and the line stays.
+ 
+@@ -238,6 +241,12 @@ A no-pick render selects the resolved default's row but never writes the selecti
+   no success toast. Harness: the real `IDialogService` + `FluentDialogProvider` on the cancel
+   path, a mocked dialog outcome plus a scripted `HttpMessageHandler` for the write-back
+   assertions, per `.github/copilot/rules/testing.md`.
++- **Circuit reconciliation:** `ReconciliationReload_IsRequested_OnAnInitialRender_WhoseClaimIsEmpty`
++  — a first render whose claim is empty while a default has resolved asks for exactly one reload
++  (the path the feature exists to repair). The navigation spy must override
++  `NavigateToCore(string uri, NavigationOptions options)`: the reload reaches navigation as a
++  forced replacement navigation, so a spy on the `NavigateToCore(string, bool)` overload never
++  sees it.
+ 
+ `tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs` covers the `/tenants`
+ surfaces; the harness registers a stub `IDevTenantSelection` (the page injects it):
+@@ -251,10 +260,14 @@ surfaces; the harness registers a stub `IDevTenantSelection` (the page injects i
+   `Pin_IsShown_EvenWithNoPreferenceRecorded` (the reachability case that motivated the move);
+   `FollowThePortalDefault_ClearsThePick_AndReloads` — asserts the **selection** slot is cleared,
+   that the preference endpoint was not touched, and that the circuit reloads once;
++  `FollowThePortalDefault_RequestsAForcedReload_OfTheCurrentUri` — the reload is a forced document
++  load of the current URI (the recorded `NavigationOptions.ForceLoad`), not a merged HTML refresh;
+   `FailedFollowThePortalDefault_SurfacesTheError_AndKeepsThePin`.
+ 
+ ## 6. Documentation updates (same PR)
+ 
++- Round `tenant-apply-reload`: `documents/solution/admin-default-tenant.md` §3.3/§5 now name
++  `Refresh(forceReload: true)` as the apply mechanism.
+ - `documents/solution/admin-default-tenant.md`: §3.4 `DevTenantSwitcher` bullet
+   ("offers … Default and Clear") → dropdown action + `/tenants` banner; §5 limit bullet
+   ("Clearing a preference is required … Hence the 'Clear' action") → points at the
+diff --git a/src/SchoolCollab.Admin/Components/Layout/DevTenantSwitcher.razor b/src/SchoolCollab.Admin/Components/Layout/DevTenantSwitcher.razor
+index 9f813356..0a0c3e29 100644
+--- a/src/SchoolCollab.Admin/Components/Layout/DevTenantSwitcher.razor
++++ b/src/SchoolCollab.Admin/Components/Layout/DevTenantSwitcher.razor
+@@ -175,7 +175,7 @@
+             "Admin portal default tenant {AppliedDefault} differs from this circuit's claim {ClaimTenant}; reloading once so tenant-scoped pages pick it up",
+             _effective, claimTenant);
+ 
+-        Nav.NavigateTo(Nav.Uri, forceLoad: true);
++        Nav.Refresh(forceReload: true);
+     }
+ 
+     /// <summary>
+@@ -326,10 +326,11 @@
+             return;
+         }
+ 
+-        // Force a full reload so every page re-fetches data under the new tenant.
+-        // Each API's TestAuthHandler reads the new selection from the shared
+-        // distributed cache (Redis) on its next request.
+-        Nav.NavigateTo(Nav.Uri, forceLoad: true);
++        // Force a full reload so every page re-fetches data under the new tenant: each API's
++        // TestAuthHandler reads the new selection from the shared distributed cache (Redis) on its
++        // next request. Refresh(forceReload: true) is a real document load — a forceLoad navigation
++        // is not, so the circuit would keep the tenant claim it read at circuit start.
++        Nav.Refresh(forceReload: true);
+     }
+ 
+     /// <summary>
+@@ -372,7 +373,7 @@
+             await DefaultTenant.ResolveAndApplyAsync(
+                 AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), CancellationToken.None);
+ 
+-            Nav.NavigateTo(Nav.Uri, forceLoad: true);
++            Nav.Refresh(forceReload: true);
+         }
+         catch (Exception ex)
+         {
+diff --git a/src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor b/src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor
+index 1530e676..e2f25617 100644
+--- a/src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor
++++ b/src/Settings/SchoolCollab.Settings.Application/Components/Pages/Tenants/Index.razor
+@@ -191,7 +191,7 @@
+         {
+             await DevTenant.SetSelectedTenantIdAsync(null);
+             _pick = null;
+-            Nav.NavigateTo(Nav.Uri, forceLoad: true);
++            Nav.Refresh(forceReload: true);
+         }
+         catch (Exception ex)
+         {
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/DevTenantSwitcherTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/DevTenantSwitcherTests.cs
+index ed4ecae4..458eb97a 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/DevTenantSwitcherTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/DevTenantSwitcherTests.cs
+@@ -133,15 +133,21 @@ public class DevTenantSwitcherTests : BunitContext
+     /// (so <c>Uri</c> itself never changes), which is why the reload needs an explicit spy rather
+     /// than a URI assertion.
+     /// </summary>
++    /// <remarks>
++    /// The overridden seam is the <see cref="NavigationOptions"/> overload on purpose:
++    /// <see cref="NavigationManager.Refresh(bool)"/> routes through
++    /// <c>NavigateToCore(Uri, new NavigationOptions { ForceLoad = true, ReplaceHistoryEntry = true })</c>,
++    /// which a spy overriding only <c>NavigateToCore(string, bool)</c> would never see.
++    /// </remarks>
+     private sealed class RecordingNavigationManager : NavigationManager
+     {
+         public List<string> ForcedReloads { get; } = [];
+ 
+         public RecordingNavigationManager() => Initialize("http://localhost/", "http://localhost/");
+ 
+-        protected override void NavigateToCore(string uri, bool forceLoad)
++        protected override void NavigateToCore(string uri, NavigationOptions options)
+         {
+-            if (forceLoad)
++            if (options.ForceLoad)
+             {
+                 ForcedReloads.Add(uri);
+             }
+@@ -518,6 +524,23 @@ public class DevTenantSwitcherTests : BunitContext
+         toastMock.VerifyNoOtherCalls();
+     }
+ 
++    // ── the circuit reconciliation reload ────────────────────────────────────
++
++    /// <summary>
++    /// The path this round exists to repair: a first render whose circuit claim is empty while the
++    /// portal has resolved a default. The switcher has to ask for one hard reload so the claim is
++    /// recomputed from the store — the navigation it used to ask for never produced the document
++    /// load, so the claim stayed empty until a manual F5.
++    /// </summary>
++    [TestMethod]
++    public void ReconciliationReload_IsRequested_OnAnInitialRender_WhoseClaimIsEmpty()
++    {
++        var (cut, _, _, _) = Render(selected: null, preference: null, claimTenant: null);
++
++        cut.WaitForAssertion(() => Nav.ForcedReloads.Should().ContainSingle(
++            "the resolved default differs from this circuit's empty claim, so the circuit reloads once"));
++    }
++
+     // ── FR-2 / FR-6: the separator is inert ──────────────────────────────────
+ 
+     [TestMethod]
+diff --git a/tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs b/tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs
+index 09fdce0d..6d39f7c6 100644
+--- a/tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs
++++ b/tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs
+@@ -114,19 +114,31 @@ public class TenantsIndexTests : BunitContext
+     }
+ 
+     /// <summary>
+-    /// Records the forced reload the page asks for after releasing the pick. The page reloads the
+-    /// current URI (so <c>Uri</c> itself never changes), which is why the reload needs an explicit
+-    /// spy rather than a URI assertion.
++    /// Records what the page asked the navigation manager for. The page reloads the current URI
++    /// (so <c>Uri</c> itself never changes), which is why the reload needs an explicit spy rather
++    /// than a URI assertion.
+     /// </summary>
++    /// <remarks>
++    /// The overridden seam is the <see cref="NavigationOptions"/> overload on purpose:
++    /// <see cref="NavigationManager.Refresh(bool)"/> routes through
++    /// <c>NavigateToCore(Uri, new NavigationOptions { ForceLoad = true, ReplaceHistoryEntry = true })</c>,
++    /// which a spy overriding only <c>NavigateToCore(string, bool)</c> would never see.
++    /// </remarks>
+     private sealed class RecordingNavigationManager : NavigationManager
+     {
++        /// <summary>Every navigation the page requested, with the forced-reload flag it carried.</summary>
++        public List<(string Uri, bool ForceLoad)> Requests { get; } = [];
++
++        /// <summary>The URIs of the requests that asked for a hard document load.</summary>
+         public List<string> ForcedReloads { get; } = [];
+ 
+         public RecordingNavigationManager() => Initialize("http://localhost/tenants", "http://localhost/tenants");
+ 
+-        protected override void NavigateToCore(string uri, bool forceLoad)
++        protected override void NavigateToCore(string uri, NavigationOptions options)
+         {
+-            if (forceLoad)
++            Requests.Add((uri, options.ForceLoad));
++
++            if (options.ForceLoad)
+             {
+                 ForcedReloads.Add(uri);
+             }
+@@ -320,6 +332,26 @@ public class TenantsIndexTests : BunitContext
+         cut.Markup.Should().NotContain("Pinned this session", "the pin line disappears with the pick");
+     }
+ 
++    /// <summary>
++    /// The release is applied by a hard document reload, so the circuit's claim is recomputed from
++    /// the store. A merged HTML refresh (<c>Refresh(forceReload: false)</c>) would leave the claim
++    /// stale — exactly the defect the forced reload exists to fix.
++    /// </summary>
++    [TestMethod]
++    public void FollowThePortalDefault_RequestsAForcedReload_OfTheCurrentUri()
++    {
++        var (cut, _) = Render(pick: Alpha);
++
++        ClickFollowPortalDefault(cut);
++
++        Nav.Requests.Should().ContainSingle("the release is applied by exactly one request");
++
++        var (uri, forceLoad) = Nav.Requests[0];
++        uri.Should().Be(Nav.Uri, "the current URI is reloaded, not somewhere else");
++        forceLoad.Should().BeTrue(
++            "a merged HTML refresh — Refresh(forceReload: false) — would leave this circuit's tenant claim stale");
++    }
++
+     [TestMethod]
+     public void FailedFollowThePortalDefault_SurfacesTheError_AndKeepsThePin()
+     {
