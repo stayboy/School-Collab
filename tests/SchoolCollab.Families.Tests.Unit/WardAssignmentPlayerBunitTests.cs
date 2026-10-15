@@ -295,6 +295,42 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         });
     }
 
+    /// <summary>Post-close correction (owner 2026-10-14): the media body is authored in the SAME rich
+    /// editor a Text material uses, so the ward prints it through RichInstruction — the tree's one
+    /// sanitiser-fed render component. Markup survives (the point of a rich description) and a stored
+    /// script never executes here, whatever reached storage.</summary>
+    [TestMethod]
+    public void WardPlayerBody_WithAuthoredHtml_RendersSanitised_NeverAScript()
+    {
+        var videoId = Guid.NewGuid();
+        var view = new WardAssignmentViewDto(AssignmentId, "Algebra", null, QuestionsUnlocked: false,
+            Modules:
+            [
+                new WardModuleViewDto(Module1, ModuleTypeDto.Guide, "Guide 1", "https://example.com/g1", 1, 100, true, 100, null)
+            ],
+            Instructions: null,
+            Materials:
+            [
+                new InstructionReadDto(videoId, InstructionKindDto.Video,
+                    "<p>Read <strong>chapter 5</strong>.</p><script>alert('x')</script>", null,
+                    "lecture.webm", "video/webm", 1024, "staged/lecture.webm", 0, "Intro lecture"),
+            ]);
+        SetupView(view);
+        SetupResultNotFound();
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{AssignmentId}/students/{StudentId}/materials/{videoId}")
+            .Respond(HttpStatusCode.OK, "video/webm", "stub");
+
+        var cut = RenderAssignment();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find(".ward-material-body").InnerHtml.Should().Contain("<strong>chapter 5</strong>",
+                "authored emphasis prints as markup on the ward — that is what the rich editor is for");
+            cut.FindAll("script").Should().NotContain(s => s.TextContent.Contains("alert"),
+                "the media body prints through the one sanitiser-fed component; a stored script never executes");
+        });
+    }
+
     [TestMethod]
     public async Task Submit_Triggers_ClientCall()
     {

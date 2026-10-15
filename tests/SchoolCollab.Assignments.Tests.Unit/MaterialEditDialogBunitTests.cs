@@ -274,9 +274,12 @@ public class MaterialEditDialogBunitTests : BunitContext
             MaterialEditFormModel.FromRow(row), "Edit Material", DialogSize.Medium);
 
         blankCut.WaitForAssertion(() => blankCut.Find("form").Should().NotBeNull());
-        blankCut.FindAll("form fluent-text-field").Should().HaveCount(2,
-            "a media row renders its optional Title + Description pair");
+        blankCut.FindAll("form fluent-text-field").Should().HaveCount(1,
+            "a media row renders its optional Title field; the Description is the shared rich editor");
         blankCut.Markup.Should().Contain("Title (optional)").And.Contain("Description (optional)");
+        blankCut.FindComponents<RichInstructionEditor>().Should().ContainSingle(
+            e => e.Instance.Id == MaterialEditDialog.BodyFieldId,
+            "the media Description IS the same rich editor a Text material's body uses (Q10's letter)");
         blankCut.Find("form").Submit();
 
         var blankResult = await blankTask;
@@ -309,5 +312,202 @@ public class MaterialEditDialogBunitTests : BunitContext
         filledResult.Title.Should().Be("Diagram", "the seeded title round-trips (C2)");
         filledResult.Body.Should().Be("Label the parts.", "…and so does the seeded body");
         filledResult.Url.Should().BeNull("a media result carries no url");
+    }
+
+    // ── Post-close rework (owner 2026-10-14, grill Q9-Q12): the Preview ⇄ Description toggle ──────
+
+    private static Func<Task<string?>> LoaderReturning(string? url, Action? onCall = null) =>
+        () =>
+        {
+            onCall?.Invoke();
+            return Task.FromResult(url);
+        };
+
+    /// <summary>The toggle is a lazy SEAM, not a fixture: with no loader the media dialog renders the
+    /// classic Title + Description pair and NO toggle — never a dead button (the owner rule).</summary>
+    [TestMethod]
+    public async Task MediaDialog_WithoutAPreviewLoader_RendersNoToggle()
+    {
+        var cut = RenderProvider();
+        _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            MaterialEditFormModel.FromRow(new InstructionEditorRow
+            {
+                Kind = InstructionKindDto.Video,
+                FileName = "clip.mp4",
+                ContentType = "video/mp4",
+            }),
+            "Edit Material", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        cut.FindAll("form fluent-text-field").Should().HaveCount(1,
+            "the Title field renders; the Description is the shared rich editor");
+        cut.FindComponents<RichInstructionEditor>().Should().ContainSingle(
+            e => e.Instance.Id == MaterialEditDialog.BodyFieldId,
+            "…and the Description slot holds the same rich editor a Text material's body uses");
+        cut.FindAll("fluent-button").Should().NotContain(b => b.TextContent.Trim() == "Preview");
+    }
+
+    /// <summary>The swap itself: pressing Preview resolves the URL ONCE through the seam, replaces the
+    /// description field with the native player in the SAME slot (the title stays), and Hide preview
+    /// brings the description back. Re-showing resolves nothing new — the URL is cached per dialog.</summary>
+    [TestMethod]
+    public async Task MediaDialog_PreviewToggle_SwapsTheDescriptionSlotForThePlayer()
+    {
+        var calls = 0;
+        var cut = RenderProvider();
+        _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel
+            {
+                Kind = InstructionKindDto.Video,
+                PreviewLoader = LoaderReturning("blob:http://localhost/abc", () => calls++),
+            },
+            "Edit Material", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+
+        var show = cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await cut.InvokeAsync(() => show.Click());
+
+        cut.WaitForAssertion(() => cut.Find("video").GetAttribute("src").Should().Be("blob:http://localhost/abc"));
+        cut.FindAll("form fluent-text-field").Should().HaveCount(1,
+            "the description slot is occupied by the preview; the title stays");
+        cut.FindComponents<RichInstructionEditor>().Should().BeEmpty(
+            "the preview OWNS the slot — the editor is unmounted, not merely hidden");
+
+        var hide = cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Hide preview");
+        await cut.InvokeAsync(() => hide.Click());
+        cut.FindAll("video").Should().BeEmpty("the preview leaves the slot when hidden");
+        cut.FindComponents<RichInstructionEditor>().Should().ContainSingle(
+            "the description editor returns to the slot when the preview is hidden");
+
+        var showAgain = cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await cut.InvokeAsync(() => showAgain.Click());
+        cut.WaitForAssertion(() => cut.Find("video").Should().NotBeNull());
+        calls.Should().Be(1, "the URL resolves once per dialog, not once per toggle");
+    }
+
+    /// <summary>A seam that cannot produce bytes surfaces the NAMED state — not a blank box, not a
+    /// crash (the AC-10 "named error rather than dead affordance" rule, applied to the preview).</summary>
+    [TestMethod]
+    public async Task MediaDialog_PreviewLoaderReturnsNull_ShowsTheUnavailableState()
+    {
+        var cut = RenderProvider();
+        _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel { Kind = InstructionKindDto.Image, PreviewLoader = LoaderReturning(null) },
+            "Edit Material", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        var show = cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await cut.InvokeAsync(() => show.Click());
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Preview unavailable for this file."));
+        cut.FindAll("img").Should().BeEmpty();
+    }
+
+    /// <summary>Kind-faithful rendering: Image previews as the native img, Audio as the audio player —
+    /// the same elements the ward surface uses, so the preview never lies about the media.</summary>
+    [TestMethod]
+    public async Task MediaDialog_PreviewRendersTheKindNativeElement()
+    {
+        var imageCut = RenderProvider();
+        _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel { Kind = InstructionKindDto.Image, PreviewLoader = LoaderReturning("blob:http://localhost/img") },
+            "Edit Material", DialogSize.Medium);
+
+        imageCut.WaitForAssertion(() => imageCut.Find("form").Should().NotBeNull());
+        var showImage = imageCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await imageCut.InvokeAsync(() => showImage.Click());
+        imageCut.WaitForAssertion(() => imageCut.Find("img").GetAttribute("src").Should().Be("blob:http://localhost/img"));
+        imageCut.FindAll("video").Should().BeEmpty();
+
+        var audioCut = RenderProvider();
+        _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel { Kind = InstructionKindDto.Audio, PreviewLoader = LoaderReturning("blob:http://localhost/aud") },
+            "Edit Material", DialogSize.Medium);
+
+        audioCut.WaitForAssertion(() => audioCut.Find("form").Should().NotBeNull());
+        var showAudio = audioCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await audioCut.InvokeAsync(() => showAudio.Click());
+        audioCut.WaitForAssertion(() => audioCut.Find("audio").GetAttribute("src").Should().Be("blob:http://localhost/aud"));
+        audioCut.FindAll("video").Should().BeEmpty();
+    }
+
+    /// <summary>Post-close correction (owner 2026-10-14): a media description is authored in the shared
+    /// rich editor, so the submit path is the Text branch's body half — read from the editor at submit
+    /// and sanitised on the way out. A stored script can never ride along in a media payload either.</summary>
+    [TestMethod]
+    public async Task Media_DescriptionHtml_IsReadAtSubmit_AndSanitisedOnWrite()
+    {
+        JSInterop.Setup<string>("QuillFunctions.getQuillHTML", _ => true)
+            .SetResult("<p>Label <strong>the parts</strong>.</p><script>alert('x')</script>");
+        var cut = RenderProvider();
+        var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            MaterialEditFormModel.FromRow(new InstructionEditorRow
+            {
+                Kind = InstructionKindDto.Image,
+                FileName = "diagram.png",
+                ContentType = "image/png",
+                Title = "Diagram",
+                Text = "stale seeded body",
+            }),
+            "Edit Material", DialogSize.Medium);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        cut.Find("form").Submit();
+
+        var result = await task;
+        result.Should().NotBeNull("a media row's metadata is always optional — nothing can refuse it");
+        result!.Title.Should().Be("Diagram");
+        result.Body.Should().Contain("<strong>the parts</strong>",
+            "the description is read from the editor at submit, exactly like a Text body");
+        result.Body.Should().NotContain("<script",
+            "…and sanitised on the way out, exactly like a Text body");
+    }
+
+    /// <summary>The interaction the preview toggle creates: the editor UNMOUNTS while the preview owns
+    /// the slot, so the dialog captures the author's HTML on the way in. Both orders must submit the
+    /// EDIT — hiding the preview first, or submitting while the preview still shows.</summary>
+    [TestMethod]
+    public async Task Media_EditedDescription_SurvivesThePreviewToggle_AndSubmitsEitherWay()
+    {
+        JSInterop.Setup<string>("QuillFunctions.getQuillHTML", _ => true)
+            .SetResult("<p>Edited after toggling.</p>");
+
+        // ── Order 1: edit → preview → hide → submit. ──
+        var hideCut = RenderProvider();
+        var hideTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel { Kind = InstructionKindDto.Audio, PreviewLoader = LoaderReturning("blob:http://localhost/a") },
+            "Edit Material", DialogSize.Medium);
+
+        hideCut.WaitForAssertion(() => hideCut.Find("form").Should().NotBeNull());
+        var toPreview = hideCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await hideCut.InvokeAsync(() => toPreview.Click());
+        hideCut.WaitForAssertion(() => hideCut.Find("audio").Should().NotBeNull());
+        var toDescription = hideCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Hide preview");
+        await hideCut.InvokeAsync(() => toDescription.Click());
+        hideCut.WaitForAssertion(() => hideCut.FindComponents<RichInstructionEditor>().Should().ContainSingle());
+        hideCut.Find("form").Submit();
+
+        var hidden = await hideTask;
+        hidden.Should().NotBeNull();
+        hidden!.Body.Should().Be("<p>Edited after toggling.</p>",
+            "the description captured on the way into the preview comes back for the submit");
+
+        // ── Order 2: edit → preview → submit while the preview still shows. ──
+        var showCut = RenderProvider();
+        var showTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
+            new MaterialEditFormModel { Kind = InstructionKindDto.Video, PreviewLoader = LoaderReturning("blob:http://localhost/v") },
+            "Edit Material", DialogSize.Medium);
+
+        showCut.WaitForAssertion(() => showCut.Find("form").Should().NotBeNull());
+        var preview = showCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        await showCut.InvokeAsync(() => preview.Click());
+        showCut.WaitForAssertion(() => showCut.Find("video").Should().NotBeNull());
+        showCut.Find("form").Submit();
+
+        var shown = await showTask;
+        shown.Should().NotBeNull();
+        shown!.Body.Should().Be("<p>Edited after toggling.</p>",
+            "submitting from the preview path sanitises the captured HTML instead of dropping the edit");
     }
 }

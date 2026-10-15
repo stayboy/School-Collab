@@ -17,10 +17,18 @@
 
     @* Round media-pill-listing (C3/Q11): the material's body renders under the player/label — the
        DTO already carries it and the ward surface previously dropped it. One static render, one
-       conditional: nothing renders when the body is empty. *@
+       conditional: nothing renders when the body is empty.
+       Post-close correction (owner 2026-10-14): the body is now authored in the RICH editor (the same
+       one Text materials use), so it prints through RichInstruction — the tree's ONE sanitiser-fed
+       render component, and the only place a sanitised value may become markup — instead of being
+       encoded as plain text. A stored payload carrying a script is neutralised here as well as on
+       write (the defence-in-depth rule the ward's Instructions already follow). The wrapper keeps the
+       existing .ward-material-body seam and its styling. *@
     @if (!string.IsNullOrWhiteSpace(Material.Text))
     {
-        <p class="ward-material-body">@Material.Text</p>
+        <div class="ward-material-body">
+            <RichInstruction Value="@Material.Text" />
+        </div>
     }
 
     @if (_loading)

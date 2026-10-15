@@ -21,6 +21,14 @@ public sealed class MaterialEditFormModel
     /// (round <c>media-pill-listing</c> C2 — both optional and independent).</summary>
     public string? Body { get; set; }
 
+    /// <summary>Post-close rework (owner 2026-10-14): the media kinds' preview seam — resolves the
+    /// row's preview Blob URL LAZILY on the first toggle press (a pending take or session entry
+    /// returns its kept URL instantly; a persisted row streams its bytes through the host's served
+    /// route on demand, so opening the dialog never blocks on a large file). The seam caches
+    /// list-side, and the dialog never revokes. Null = no preview can resolve here — the dialog then
+    /// renders no toggle at all, never a dead button.</summary>
+    public Func<Task<string?>>? PreviewLoader { get; set; }
+
     /// <summary>The Link's target — required, absolute http(s) (mirrors the validator).</summary>
     public string? Url { get; set; }
 

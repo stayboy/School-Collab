@@ -91,4 +91,9 @@ public static class FluentIcons
     /// recorder's Start button) — <see cref="MusicNote2"/> names a staged audio FILE; this one says
     /// "speak into the mic now". Size20, like the other button glyphs.</summary>
     public static readonly Icon Mic = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Mic();
+
+    /// <summary>The eye glyph for the media-preview toggle in the material metadata dialog — "show me
+    /// the file" (round <c>media-pill-listing</c> post-close rework, owner 2026-10-14). Size20, like
+    /// the other button glyphs.</summary>
+    public static readonly Icon Eye = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Eye();
 }

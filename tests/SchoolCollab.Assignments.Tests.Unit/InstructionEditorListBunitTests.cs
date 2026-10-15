@@ -26,11 +26,13 @@ public class InstructionEditorListBunitTests : BunitContext
     }
 
     private IRenderedComponent<InstructionEditorList> Render(
-        List<InstructionEditorRow> rows, StageInstructionMediaAsync? stage = null) =>
+        List<InstructionEditorRow> rows, StageInstructionMediaAsync? stage = null,
+        LoadInstructionMediaAsync? load = null) =>
         Render<InstructionEditorList>(p => p
             .Add(c => c.Id, "instr")
             .Add(c => c.Rows, rows)
-            .Add(c => c.StageMediaAsync, stage));
+            .Add(c => c.StageMediaAsync, stage)
+            .Add(c => c.LoadInstructionMediaAsync, load));
 
     private static StageInstructionMediaAsync Returning(StagedAttachmentDto? staged, Action? onCall = null) =>
         (row, content, name, type, size) =>
@@ -38,6 +40,26 @@ public class InstructionEditorListBunitTests : BunitContext
             onCall?.Invoke();
             return Task.FromResult(staged);
         };
+
+    /// <summary>Post-close rework (owner 2026-10-14, grill Q11): the dialog-preview seam. The loader
+    /// exists ONLY when bytes can actually resolve — a persisted row with the host's served-fetch
+    /// seam gets one (lazy: streams on the first press); an unsaved row with nothing staged, or with
+    /// no seam, gets NONE, so the dialog renders no toggle rather than a dead one.</summary>
+    [TestMethod]
+    public void GetPreviewLoader_OnlyExistsWhenBytesCanResolve()
+    {
+        var saved = new InstructionEditorRow { Id = Guid.NewGuid(), Kind = InstructionKindDto.Video, ContentType = "video/mp4" };
+        var unsaved = new InstructionEditorRow { Kind = InstructionKindDto.Audio };
+        var rows = new List<InstructionEditorRow> { saved, unsaved };
+
+        var withoutSeam = Render(rows);
+        withoutSeam.Instance.GetPreviewLoader(saved).Should().BeNull("an unsaved row has no bytes to preview, and no seam to fetch them");
+        withoutSeam.Instance.GetPreviewLoader(unsaved).Should().BeNull();
+
+        var withSeam = Render(rows, load: _ => Task.FromResult<Stream?>(new MemoryStream()));
+        withSeam.Instance.GetPreviewLoader(saved).Should().NotBeNull("a persisted row can stream its bytes on demand");
+        withSeam.Instance.GetPreviewLoader(unsaved).Should().BeNull("still nothing staged and nothing to serve for the unsaved row");
+    }
 
     [TestMethod]
     public void ReadOnly_RendersTheBlocksWithoutAffordances()
