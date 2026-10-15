@@ -114,8 +114,14 @@ tenant were selected — the worst kind of half-working.
   writes the selection slot, so a later change to the platform default still takes effect. It
   offers `Set as default` as an entry INSIDE the dropdown (confirm-gated; the header carries no
   buttons beside the select), and reconciles the circuit in
-  `OnAfterRenderAsync(firstRender: true)` — after the render phase, where navigation is legal.
-  Releasing the pick is not here either: it lives on the `/tenants` session-pin line.
+  `OnAfterRenderAsync` once the default has resolved — after a render, where navigation is legal.
+  The check is **not** gated on `firstRender`: `_effective` is populated by an async Settings API
+  round-trip, and Blazor renders the loading state before `OnInitializedAsync` completes, so a
+  first-render-only check always read `_effective == null` and never requested the reload in
+  production (it passed in bUnit only because the scripted handler completed synchronously). The
+  symptom was the header switcher showing the resolved tenant while the active-term toolbar still
+  read the circuit's empty `tenant_id` claim and showed no period until a manual F5. Releasing the
+  pick is not here either: it lives on the `/tenants` session-pin line.
 - **The apply is a hard document reload.** Every site that changes the tenant context — the
   switcher's reconciliation, its pick, and the `/tenants` session-pin release — calls
   `NavigationManager.Refresh(forceReload: true)`. The flag is load-bearing: without it the reload
