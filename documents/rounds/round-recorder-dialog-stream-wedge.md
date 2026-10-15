@@ -1,6 +1,6 @@
 # Round: recorder → metadata-dialog stream wedge
 
-**Status:** CLOSED (2026-10-15 — delivered on `fix/recorder-dialog-stream-wedge`).
+**Status:** CLOSED (2026-10-15 — delivered on `fix/recorder-dialog-stream-wedge`, **PR #354**).
 **Mode:** Solo (owner Q16, 2026-10-15 — supersedes the Q14 light-round recommendation) · **attended**.
 **Base:** `7425984c68c27eca0c20f3109d850e1d4c742f8f` (main) · **Branch:** `fix/recorder-dialog-stream-wedge`.
 **Review caveat:** the Tier-2 static review was performed by the **parent, not an independent reviewer** —
