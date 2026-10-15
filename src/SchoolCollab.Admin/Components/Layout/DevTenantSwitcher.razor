@@ -104,6 +104,15 @@
     /// </summary>
     private bool _reloadRequested;
 
+    /// <summary>
+    /// True once the portal has finished resolving its default tenant (the async
+    /// preference → platform-default chain). The reconciliation in <see cref="OnAfterRenderAsync"/>
+    /// waits for this: it must not read <c>_effective</c> while the resolve is still in flight.
+    /// Stays false when the tenant registry could not be loaded, so a failed load never triggers a
+    /// reload loop against a stale claim.
+    /// </summary>
+    private bool _defaultsResolved;
+
     /// <summary>Sentinel for the explicit "system / no-tenant" entry — never parseable as a tenant id.</summary>
     private const string SystemOptionValue = "system";
 
@@ -147,7 +156,7 @@
 
         if (_tenants.Length > 0)
         {
-            await ResolveDefaultsAsync();
+            _defaultsResolved = await ResolveDefaultsAsync();
         }
 
         BuildOptions();
@@ -157,11 +166,19 @@
     /// Applies the freshly-resolved default to this circuit by reloading once when the claim and
     /// the applied default disagree. Done here rather than in
     /// <see cref="OnInitializedAsync"/> because navigation during the initial (synchronous)
-    /// render phase is not legal; after the first render it is.
+    /// render phase is not legal; after a render it is.
     /// </summary>
+    /// <remarks>
+    /// The check runs on <em>every</em> render once <see cref="_defaultsResolved"/> is set, not only
+    /// on the first. <c>_effective</c> is populated by an async Settings API round-trip, and Blazor
+    /// renders the loading state before <see cref="OnInitializedAsync"/> completes — so a
+    /// <c>firstRender</c>-only check always reads <c>_effective == null</c> in production and never
+    /// requests the reload (it passed in bUnit only because the scripted handler completed
+    /// synchronously). <see cref="_reloadRequested"/> still caps this at one reload per circuit.
+    /// </remarks>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || !_show || _reloadRequested)
+        if (!_defaultsResolved || !_show || _reloadRequested)
             return;
 
         var scope = await VisibleTenant.GetScopeAsync();
@@ -184,14 +201,21 @@
     /// non-fatal: a portal that cannot reach the Settings API still renders, showing the pick
     /// state it can determine.
     /// </summary>
-    private async Task ResolveDefaultsAsync()
+    /// <returns>
+    /// <see langword="true"/> when the resolve+apply chain completed (so the caller may reconcile
+    /// the circuit's claim against <see cref="_effective"/>); <see langword="false"/> when it timed
+    /// out or failed, so the caller must not reconcile against a value that was never applied.
+    /// </returns>
+    private async Task<bool> ResolveDefaultsAsync()
     {
+        var resolved = false;
         try
         {
             using var cts = new CancellationTokenSource(TenantsLoadTimeout);
             _effective = await DefaultTenant.ResolveAndApplyAsync(
                 AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), cts.Token);
             _preference = await DefaultTenant.GetPreferenceAsync(cts.Token);
+            resolved = true;
         }
         catch (OperationCanceledException)
         {
@@ -203,6 +227,7 @@
         }
 
         _explicitSelection = await DevTenant.GetSelectedTenantIdAsync();
+        return resolved;
     }
 
     /// <summary>
