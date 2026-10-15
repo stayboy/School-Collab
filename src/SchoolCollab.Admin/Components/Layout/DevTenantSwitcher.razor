@@ -107,9 +107,6 @@
     /// <summary>Sentinel for the explicit "system / no-tenant" entry — never parseable as a tenant id.</summary>
     private const string SystemOptionValue = "system";
 
-    /// <summary>Value of the "(default …)" entry: clears the explicit pick so the resolved default applies.</summary>
-    private const string DefaultOptionValue = "";
-
     /// <summary>Sentinel for the decorative separator that opens the action zone — never selectable.</summary>
     private const string SetDefaultSeparatorValue = "__set-default-separator__";
 
@@ -178,7 +175,7 @@
             "Admin portal default tenant {AppliedDefault} differs from this circuit's claim {ClaimTenant}; reloading once so tenant-scoped pages pick it up",
             _effective, claimTenant);
 
-        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        Nav.Refresh(forceReload: true);
     }
 
     /// <summary>
@@ -209,36 +206,25 @@
     }
 
     /// <summary>
-    /// Rebuilds the dropdown. Three states, in order: the explicit system / no-tenant context
-    /// (what shared-blueprint editing needs), the resolved default, then every real tenant.
-    /// The action zone — a decorative disabled separator plus the <c>Set as default</c> entry —
-    /// is appended only for a real-tenant selection that is not already the recorded preference
-    /// (FR-2/FR-3).
+    /// Rebuilds the dropdown: the system / no-tenant context (what shared-blueprint editing
+    /// needs), then every real tenant. The action zone — a decorative disabled separator plus the
+    /// <c>Set as default</c> entry — is appended only for a real-tenant selection that is not
+    /// already the recorded preference (FR-2/FR-3).
     /// </summary>
     private void BuildOptions()
     {
-        var defaultName = TenantNameOf(_effective);
-        var defaultLabel = defaultName is null ? "(default tenant)" : $"(default: {defaultName})";
-
         var options = new List<TenantOption>
         {
             new("(system / no tenant)", SystemOptionValue),
-            new(defaultLabel, DefaultOptionValue),
         };
         options.AddRange(_tenants!.Select(t => new TenantOption(t.Name, t.Id.ToString())));
 
-        var selected = _explicitSelection switch
-        {
-            null => options.First(o => o.Value == DefaultOptionValue),
-            { } id when id == Guid.Empty => options.First(o => o.Value == SystemOptionValue),
-            { } id => options.FirstOrDefault(o => o.Value == id.ToString())
-                       ?? options.First(o => o.Value == DefaultOptionValue),
-        };
+        var selected = ResolveSelectedRow(options);
 
-        // FR-3: only a real tenant (neither the system context nor the "(default …)" entry,
-        // which are both unparseable as a tenant id) that differs from the recorded preference
-        // gets the action zone. A null preference means "none recorded", so any real tenant
-        // qualifies; an explicit Guid.Empty preference is a real value every tenant differs from.
+        // FR-3: only a real tenant (not the system context, which is unparseable as a tenant id)
+        // that differs from the recorded preference gets the action zone. A null preference means
+        // "none recorded", so any real tenant qualifies; an explicit Guid.Empty preference is a
+        // real value every tenant differs from.
         if (Guid.TryParse(selected.Value, out var selectedTenantId)
             && selectedTenantId != _preference)
         {
@@ -248,6 +234,39 @@
 
         _options = [.. options];
         _selectedOption = selected;
+    }
+
+    /// <summary>
+    /// The row the select shows as selected. Its selected value IS the tenant the portal is
+    /// operating under: the explicit pick's row when there is one, otherwise the row of the
+    /// resolved default (<see cref="_effective"/>). Never <see langword="null"/> — a null
+    /// <c>SelectedOption</c> leaves the select blank.
+    /// </summary>
+    /// <remarks>
+    /// Display-only: this method never writes the selection slot. Showing the resolved default as
+    /// the selection must not turn "nothing picked" into "the operator picked this tenant" — the
+    /// distinction the resolver's separate applied-default slot exists to preserve.
+    /// </remarks>
+    private TenantOption ResolveSelectedRow(List<TenantOption> options)
+    {
+        var systemRow = options.First(o => o.Value == SystemOptionValue);
+
+        if (_explicitSelection == Guid.Empty)
+            return systemRow;
+
+        if (_explicitSelection is { } pick
+            && options.FirstOrDefault(o => o.Value == pick.ToString()) is { } picked)
+        {
+            return picked;
+        }
+
+        if (_effective is { } effective && effective != Guid.Empty
+            && options.FirstOrDefault(o => o.Value == effective.ToString()) is { } resolved)
+        {
+            return resolved;
+        }
+
+        return systemRow;
     }
 
     private string? TenantNameOf(Guid? tenantId)
@@ -284,10 +303,8 @@
         var value = option?.Value;
         var tenantId = value switch
         {
-            // "(default …)" clears the explicit pick — the resolved default applies again.
-            DefaultOptionValue => (Guid?)null,
             // Explicit system / no-tenant context (Guid.Empty is meaningful, not "cleared").
-            SystemOptionValue => Guid.Empty,
+            SystemOptionValue => (Guid?)Guid.Empty,
             _ => Guid.TryParse(value, out var parsed) ? parsed : null,
         };
 
@@ -295,8 +312,8 @@
         {
             await DevTenant.SetSelectedTenantIdAsync(tenantId);
 
-            // Clearing back to the default re-publishes it, so this load's API calls carry the
-            // right tenant header rather than a stale one.
+            // No pick in force: re-publish the resolved default, so this load's API calls carry
+            // the right tenant header rather than a stale one.
             if (tenantId is null)
             {
                 await DefaultTenant.ResolveAndApplyAsync(
@@ -309,10 +326,11 @@
             return;
         }
 
-        // Force a full reload so every page re-fetches data under the new tenant.
-        // Each API's TestAuthHandler reads the new selection from the shared
-        // distributed cache (Redis) on its next request.
-        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        // Force a full reload so every page re-fetches data under the new tenant: each API's
+        // TestAuthHandler reads the new selection from the shared distributed cache (Redis) on its
+        // next request. Refresh(forceReload: true) is a real document load — a forceLoad navigation
+        // is not, so the circuit would keep the tenant claim it read at circuit start.
+        Nav.Refresh(forceReload: true);
     }
 
     /// <summary>
@@ -355,7 +373,7 @@
             await DefaultTenant.ResolveAndApplyAsync(
                 AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), CancellationToken.None);
 
-            Nav.NavigateTo(Nav.Uri, forceLoad: true);
+            Nav.Refresh(forceReload: true);
         }
         catch (Exception ex)
         {
@@ -366,7 +384,7 @@
     /// <summary>
     /// Internal option type for the FluentSelect. The action zone's entries carry
     /// <paramref name="IsSeparator"/> / <paramref name="IsAction"/>; their values are sentinels
-    /// that are never guid-parseable and differ from the empty and "system" option values.
+    /// that are never guid-parseable and differ from the "system" option value.
     /// </summary>
     /// <param name="Label">Text shown in the dropdown.</param>
     /// <param name="Value">Stable option value used for the FluentSelect binding.</param>

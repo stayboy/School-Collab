@@ -16,3 +16,20 @@
     align-items: center;
     gap: 0.75rem;
 }
+
+/* B7: the dev session-pin line above the registry list. Unlike the banner above, its row is this
+   component's own markup (no FluentMessageBar in between), so it needs no ::deep. */
+.tenants-session-pin {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+/* Q10: one page-level line instead of a column of bare dashes when no platform default is
+   designated. Muted, so it reads as context rather than as an error. */
+.tenants-grid-note {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    opacity: 0.7;
+}

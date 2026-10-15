@@ -108,16 +108,34 @@ tenant were selected — the worst kind of half-working.
 - `TestAuthHandler` and `TenantPropagationDelegatingHandler` consult
   selection → applied default → configured options, testing `HasValue` and not
   `!= Guid.Empty` so an explicit system-context pick survives.
-- `DevTenantSwitcher` renders the three states, offers `Set as default` as an entry INSIDE the
-  dropdown (confirm-gated; the header carries no buttons beside the select), and reconciles the
-  circuit in `OnAfterRenderAsync(firstRender: true)` — after the render phase, where navigation
-  is legal. Releasing the preference is not here: it lives on the `/tenants` banner.
+- `DevTenantSwitcher` renders the system / no-tenant context plus one entry per tenant, and its
+  selection is the tenant the portal is operating under: an explicit pick's own row, or — with no
+  pick — the resolved default's own row. That resolution is **display-only**; only a user pick
+  writes the selection slot, so a later change to the platform default still takes effect. It
+  offers `Set as default` as an entry INSIDE the dropdown (confirm-gated; the header carries no
+  buttons beside the select), and reconciles the circuit in
+  `OnAfterRenderAsync(firstRender: true)` — after the render phase, where navigation is legal.
+  Releasing the pick is not here either: it lives on the `/tenants` session-pin line.
+- **The apply is a hard document reload.** Every site that changes the tenant context — the
+  switcher's reconciliation, its pick, and the `/tenants` session-pin release — calls
+  `NavigationManager.Refresh(forceReload: true)`. The flag is load-bearing: without it the reload
+  merges the server HTML into the live document instead of loading it, so the circuit keeps the
+  `tenant_id` claim it read at circuit start and the dropdown and the tenant-scoped pages
+  disagree until a manual F5 (round `tenant-apply-reload`, fixing exactly that symptom).
 
 ### 3.4 Surfaces
 
 - `/tenants` (`Settings.Application` RCL) lists the registry, designates the platform default,
   and surfaces the operator's own preference in a clear banner (`Your default tenant: <name>` +
-  a `Clear` button, shown only when a preference is recorded); linked from `/settings`.
+  a `Clear` button, shown only when a preference is recorded). In dev mode it also surfaces the
+  header switcher's explicit pick in a session-pin line (`Pinned this session: <name>` + a
+  `Follow the portal default` action that clears the *selection* slot and reloads), which renders
+  independently of the banner — a pick can exist with no preference recorded. The registry grid
+  names the two defaults in their own columns — `Platform default` (the shared designation,
+  badged `Default`) and `Your default` (the operator's own preference, badged `Yours`) — with
+  header tooltips explaining the difference, and shows a muted note above the grid when no
+  platform default is designated. Linked from
+  `/settings`.
 - `DevIdentitySeeder` designates `Dev School`, guarded by
   `AND NOT EXISTS (SELECT 1 FROM tenants WHERE is_default)` so it fills the empty state and
   never overwrites an operator's choice.
@@ -137,6 +155,13 @@ tenant were selected — the worst kind of half-working.
 | `SchoolCollab.Families.Tests.Unit` | 47 passed |
 | `SchoolCollab.MigrationService.Tests.Unit` | 9 passed |
 | `SchoolCollab.Settings.Tests.Integration` | **green on CI** (PR #341, run `38449717164`): the `Integration tests` step reports `total: 147, failed: 0, succeeded: 141, skipped: 6` — the 6 skips are the live OpenRouter/Ollama tests, which self-skip without a key. Locally this project **cannot** run: Docker is unavailable on the authoring machine and every Testcontainers class fails identically at `ClassInitialize` (`DockerUnavailableException`), including pre-existing classes untouched by this work. So `TenantsApiTests` is verified by CI only, not locally. |
+
+**Reshaped afterwards** (round `tenant-default-selection`): the dropdown no longer carries a
+`(default …)` pseudo-entry — it selects the resolved default's own row — and the `/tenants` page
+gained the dev session-pin line that releases an explicit pick. The table above is this feature
+round's own record; the reshape is verified by re-running the same gates (full-solution build,
+`SchoolCollab.ArchitectureTests.Unit`, `SchoolCollab.Admin.Tests.Unit`,
+`SchoolCollab.Settings.Tests.Unit`).
 
 New coverage: `TenantDefaultDesignationTests` (14), `AdminDefaultTenantResolverTests` (12),
 `DevTenantSwitcherTests` (7), `TenantsApiTests` (9, integration), plus additions to
@@ -160,8 +185,11 @@ covered, rather than a precaution that merely reads well.
 - **Effectively single-operator in dev**, because `TestAuthHandler` emits one synthetic
   subject (`test-user-id`). The per-operator model is real (unique key, `/me` routes) but only
   becomes multi-user in production.
-- **Clearing a preference is required** to see the platform default again — with a preference
-  recorded, the "(default …)" entry resolves to the preference. The release action lives on the
-  `/tenants` page banner; the header dropdown only sets the preference.
+- **Clearing a preference is still required** to make the platform default the resolved one
+  again; the release action lives on the `/tenants` page banner. A *pick* is a separate layer,
+  released by the session-pin line on the same page (`Follow the portal default`) — the header
+  dropdown only ever sets. Both releases take effect through the same hard document reload
+  (`Refresh(forceReload: true)`, §3.3). Under OIDC neither a pick nor a preference exists, so both
+  lines are dev-only surfaces.
 - The AuthPortal does not surface the preference; that would reopen the mediated-claim seam
   and is deliberately out of scope.

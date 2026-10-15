@@ -1,13 +1,42 @@
 @page "/tenants"
+@using SchoolCollab.Core.Auth
 @inject TenantsApiClient Api
+@inject IDevTenantSelection DevTenant
+@inject NavigationManager Nav
 @inject ILogger<Index> Logger
 
 <PageTitle>Tenants</PageTitle>
 
-@* The tenant registry read-only list, plus the two writes this surface owns: designating the
-   platform default (a row action), and releasing the signed-in operator's own default-tenant
-   preference (the banner above). The preference is SET from the dev tenant switcher in the
-   header, next to the thing it affects; this page only surfaces it and clears it. *@
+@* The tenant registry read-only list, plus the writes this surface owns: designating the platform
+   default (a row action), releasing the signed-in operator's own default-tenant preference (the
+   banner), and releasing the dev session's explicit tenant pick (the session-pin line). The
+   preference is SET from the dev tenant switcher in the header, next to the thing it affects; this
+   page only surfaces it and clears it.
+
+   The grid carries BOTH tenancy defaults as separate columns, because they are easy to confuse:
+   "Platform default" is the single designation the whole portal shares (Tenant.IsDefault), while
+   "Your default" is the signed-in operator's own recorded preference. Each column header
+   explains itself on hover. FluentUI emits a header tooltip only when the column's `Tooltip`
+   switch is ALSO set (it defaults false and gates `HeaderTooltip`), so both columns carry
+   `Tooltip="true"` beside `HeaderTooltip`. *@
+
+@if (_pick is { } pinnedTenantId)
+{
+    @* B7: the dev tenant switcher's explicit pick, and the release for it. The header dropdown
+       shows the tenant the portal is operating under and writes an explicit pick when the
+       operator chooses a row, so releasing that pick needs its own affordance. It renders
+       independently of the preference banner: a pick can exist with no preference recorded, which
+       is exactly when the banner below is absent. Dev-only in practice — under OIDC no pick is
+       ever recorded. *@
+    <div class="tenants-session-pin">
+        <span title="A tenant you picked in the header switcher. While a session pin is in force it overrides both your default and the platform default.">
+            Pinned this session: @TenantDisplayName(pinnedTenantId)
+        </span>
+        <FluentButton Appearance="Appearance.Outline"
+                      Title="Release the pin and follow your default — then the platform default — again."
+                      OnClick="@FollowPortalDefaultAsync">Follow the portal default</FluentButton>
+    </div>
+}
 
 @if (_preference is { } preferredTenantId)
 {
@@ -17,12 +46,22 @@
     <div class="tenants-default-banner">
         <FluentMessageBar Intent="MessageIntent.Info" AllowDismiss="false">
             <span class="tenants-default-banner-body">
-                Your default tenant: @PreferenceDisplayName(preferredTenantId)
+                Your default tenant: @TenantDisplayName(preferredTenantId)
                 <FluentButton Appearance="Appearance.Outline"
                               OnClick="@ClearPreferenceAsync">Clear</FluentButton>
             </span>
         </FluentMessageBar>
     </div>
+}
+
+@if (_items is { Length: > 0 } registry && !registry.Any(t => t.IsDefault))
+{
+    @* Q10: nothing is designated, so the "Platform default" column is a dash on every row. Say it
+       once, rather than leaving a column of dashes that reads as a rendering bug. *@
+    <p class="tenants-grid-note">
+        No platform default is designated yet — until one is set, the portal opens on your default,
+        or on the system context when you have none.
+    </p>
 }
 
 <LandingPage TItem="TenantDto"
@@ -42,10 +81,26 @@
         <TemplateColumn TGridItem="TenantDto" Title="Type" Sortable="true" SortBy="@_sortByType">
             @context.Type
         </TemplateColumn>
-        <TemplateColumn TGridItem="TenantDto" Title="Portal default">
+        <TemplateColumn TGridItem="TenantDto"
+                        Title="Platform default"
+                        Tooltip="true"
+                        HeaderTooltip="The tenant the admin portal opens on when the operator has no personal default. One tenant at a time — everyone shares it.">
             @if (context.IsDefault)
             {
                 <FluentBadge Appearance="Appearance.Accent">Default</FluentBadge>
+            }
+            else
+            {
+                <span class="tenants-muted">—</span>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantDto"
+                        Title="Your default"
+                        Tooltip="true"
+                        HeaderTooltip="The tenant YOU have chosen as your default. It wins over the platform default. Set it from the tenant switcher in the header; release it with Clear.">
+            @if (_preference == context.Id)
+            {
+                <FluentBadge Appearance="Appearance.Lightweight">Yours</FluentBadge>
             }
             else
             {
@@ -66,9 +121,16 @@
     /// </summary>
     private Guid? _preference;
 
+    /// <summary>
+    /// The dev tenant switcher's explicit pick for this session, or null when none is in force.
+    /// Read only to decide whether the session-pin line renders (B7); the page clears it through
+    /// the switcher's own store, never by re-picking a tenant for the operator.
+    /// </summary>
+    private Guid? _pick;
+
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(220px,2fr) 140px 140px"
+        GridTemplateColumns = "minmax(220px,2fr) 140px 140px 140px"
     };
 
     private readonly GridSort<TenantDto> _sortByName = GridSort<TenantDto>.ByAscending(t => t.Name);
@@ -80,11 +142,13 @@
     {
         try
         {
-            // The preference is read in parallel with the registry: it only decides whether the
-            // banner renders, so a slow or failed read must neither hold up nor break the list.
+            // The preference and the session pick are read in parallel with the registry: each only
+            // decides whether a line renders, so a slow or failed read must neither hold up nor
+            // break the list.
             var listTask = Api.ListTenantsAsync();
             var preferenceTask = LoadPreferenceAsync();
-            await Task.WhenAll(listTask, preferenceTask);
+            var pickTask = LoadPickAsync();
+            await Task.WhenAll(listTask, preferenceTask, pickTask);
 
             _items = await listTask;
             _error = null;
@@ -134,10 +198,50 @@
     }
 
     /// <summary>
-    /// Display name of the preferred tenant: its registry name, "system / no tenant" for
-    /// <see cref="Guid.Empty"/>, or the raw id when it is not in the loaded registry (FR-7).
+    /// Reads the dev tenant switcher's explicit pick. A failed read is non-fatal: it degrades to
+    /// "no pick", so the session-pin line simply does not render (B7).
     /// </summary>
-    private string PreferenceDisplayName(Guid tenantId)
+    private async Task LoadPickAsync()
+    {
+        try
+        {
+            _pick = await DevTenant.GetSelectedTenantIdAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read the dev tenant selection; the session-pin line will not render");
+            _pick = null;
+        }
+    }
+
+    /// <summary>
+    /// Releases the dev session's explicit pick so the portal follows its resolved default again
+    /// (B7). This writes the SELECTION slot — the one the header dropdown's row click writes — and
+    /// deliberately not the preference, which has its own release in the banner above. The forced
+    /// reload makes the change take effect in this circuit, exactly as a row click does. A failure
+    /// leaves the line in place so the operator can retry.
+    /// </summary>
+    private async Task FollowPortalDefaultAsync()
+    {
+        try
+        {
+            await DevTenant.SetSelectedTenantIdAsync(null);
+            _pick = null;
+            Nav.Refresh(forceReload: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to release the dev tenant selection");
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Display name of a tenant id: its registry name, "system / no tenant" for
+    /// <see cref="Guid.Empty"/>, or the raw id when it is not in the loaded registry (FR-7). Used
+    /// for both the preference banner and the session-pin line, so the two cannot disagree.
+    /// </summary>
+    private string TenantDisplayName(Guid tenantId)
     {
         if (tenantId == Guid.Empty)
             return "system / no tenant";

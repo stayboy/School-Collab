@@ -29,10 +29,12 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The states are the part that is easy to get subtly wrong: "cleared back to the default" and
-/// "explicitly chose the system / no-tenant context" must be distinguishable, because the second
-/// is what shared-blueprint coded-value editing needs. Each state therefore gets a test that
-/// asserts the <em>resolved selection</em>, not just the rendered labels.
+/// The state that is easy to get subtly wrong is "nothing picked": the select then shows the row
+/// of the tenant the portal resolved and is operating under, but that is display-only — it must
+/// never be written to the selection slot, or "no explicit pick" and "the operator chose this
+/// tenant" would collapse into one state. Each state therefore gets a test that asserts the
+/// <em>resolved selection</em>, not just the rendered labels, plus one that asserts the selection
+/// slot is still empty after a no-pick load.
 /// </para>
 /// <para>
 /// The self-service action (spec <c>documents/specs/tenant-default-dropdown-action.md</c>) lives
@@ -54,6 +56,13 @@ public class DevTenantSwitcherTests : BunitContext
     private const string TenantsJson =
         """
         [{"id":"11111111-1111-1111-1111-111111111111","name":"Alpha","type":"School","isDefault":true},
+         {"id":"22222222-2222-2222-2222-222222222222","name":"Beta","type":"School","isDefault":false}]
+        """;
+
+    /// <summary>The same registry with no tenant designated as the platform default.</summary>
+    private const string NoDefaultTenantsJson =
+        """
+        [{"id":"11111111-1111-1111-1111-111111111111","name":"Alpha","type":"School","isDefault":false},
          {"id":"22222222-2222-2222-2222-222222222222","name":"Beta","type":"School","isDefault":false}]
         """;
 
@@ -124,15 +133,21 @@ public class DevTenantSwitcherTests : BunitContext
     /// (so <c>Uri</c> itself never changes), which is why the reload needs an explicit spy rather
     /// than a URI assertion.
     /// </summary>
+    /// <remarks>
+    /// The overridden seam is the <see cref="NavigationOptions"/> overload on purpose:
+    /// <see cref="NavigationManager.Refresh(bool)"/> routes through
+    /// <c>NavigateToCore(Uri, new NavigationOptions { ForceLoad = true, ReplaceHistoryEntry = true })</c>,
+    /// which a spy overriding only <c>NavigateToCore(string, bool)</c> would never see.
+    /// </remarks>
     private sealed class RecordingNavigationManager : NavigationManager
     {
         public List<string> ForcedReloads { get; } = [];
 
         public RecordingNavigationManager() => Initialize("http://localhost/", "http://localhost/");
 
-        protected override void NavigateToCore(string uri, bool forceLoad)
+        protected override void NavigateToCore(string uri, NavigationOptions options)
         {
-            if (forceLoad)
+            if (options.ForceLoad)
             {
                 ForcedReloads.Add(uri);
             }
@@ -186,14 +201,15 @@ public class DevTenantSwitcherTests : BunitContext
         Guid? preference = null,
         Guid? claimTenant = null,
         HttpStatusCode putStatus = HttpStatusCode.NoContent,
-        bool? confirmDialog = null)
+        bool? confirmDialog = null,
+        string? tenantsJson = null)
     {
         var preferenceJson = preference is null
             ? """{"defaultTenantId":null}"""
             : $$"""{"defaultTenantId":"{{preference}}"}""";
 
         var handler = new ScriptedHandler()
-            .Map("GET", "/api/tenants", HttpStatusCode.OK, TenantsJson)
+            .Map("GET", "/api/tenants", HttpStatusCode.OK, tenantsJson ?? TenantsJson)
             .Map("GET", "/api/tenants/me/default", HttpStatusCode.OK, preferenceJson)
             .Map("PUT", "/api/tenants/me/default", putStatus, string.Empty);
 
@@ -256,25 +272,31 @@ public class DevTenantSwitcherTests : BunitContext
         => handler.Calls.Where(c => c.Method == "PUT" && c.Url == "/api/tenants/me/default");
 
     [TestMethod]
-    public void RendersSystemDefaultAndEveryTenant()
+    public void RendersSystemAndEveryTenant_WithNoDefaultPseudoEntry()
     {
-        var (cut, _, _, _) = Render(selected: null);
+        // The preference is pinned to the resolved default so the action zone (B5) stays hidden:
+        // this test is about the option list itself, not about the zone's entries.
+        var (cut, _, _, _) = Render(selected: null, preference: Alpha);
 
         var labels = LabelsOf(cut);
 
-        labels.Should().HaveCount(4);
+        labels.Should().HaveCount(3);
         labels[0].Should().Be("(system / no tenant)");
-        labels[1].Should().Be("(default: Alpha)", "the platform default is named, so the entry says where 'default' points");
-        labels.Should().Contain("Alpha").And.Contain("Beta");
+        labels[1].Should().Be("Alpha", "the resolved default is shown as its own row, not as a pseudo-entry of its own");
+        labels[2].Should().Be("Beta");
+        labels.Should().NotContain(label => label.Contains("default"),
+            "the pseudo-entry that named the resolved default is gone — the default's own row is selected instead");
     }
 
     [TestMethod]
-    public void WithNoExplicitPick_SelectsTheResolvedDefaultEntry()
+    public void WithNoExplicitPick_SelectsTheResolvedDefaultTenantsRow()
     {
-        var (cut, _, _, _) = Render(selected: null);
+        var (cut, _, selection, _) = Render(selected: null);
 
         SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(
-            string.Empty, "no explicit pick means the '(default …)' entry, not the system context");
+            Alpha.ToString(), "the control's selected value is the tenant the portal resolved and is operating under");
+        selection.Selected.Should().BeNull(
+            "showing the resolved default is display-only — only a pick by the operator writes the selection slot");
     }
 
     /// <summary>
@@ -299,26 +321,60 @@ public class DevTenantSwitcherTests : BunitContext
     }
 
     /// <summary>
-    /// With a recorded preference the default entry must name the PREFERENCE, not the platform
-    /// default — the whole point of the second link in the chain.
+    /// With a recorded preference the resolved default is the PREFERENCE, not the platform
+    /// default — the whole point of the second link in the chain — so the select shows the
+    /// preferred tenant's own row.
     /// </summary>
     [TestMethod]
-    public void WithAPreference_TheDefaultEntryNamesThePreference()
+    public void WithAPreference_SelectsThePreferredTenantsRow()
     {
         var (cut, _, _, _) = Render(selected: null, preference: Beta);
 
-        LabelsOf(cut)[1].Should().Be("(default: Beta)");
+        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Beta.ToString());
+    }
+
+    /// <summary>
+    /// Nothing designated anywhere: the select falls back to the system / no-tenant row rather
+    /// than leaving its selection blank (B2).
+    /// </summary>
+    [TestMethod]
+    public void WithNoDefaultDesignated_SelectsTheSystemRow()
+    {
+        var (cut, _, _, _) = Render(selected: null, tenantsJson: NoDefaultTenantsJson);
+
+        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be("system");
+    }
+
+    /// <summary>
+    /// A resolved default the registry no longer lists has no row to select: the select falls back
+    /// to the system row instead of leaving <c>SelectedOption</c> null (B2).
+    /// </summary>
+    [TestMethod]
+    public void WithAResolvedDefaultNotInTheRegistry_SelectsTheSystemRow()
+    {
+        var (cut, _, _, _) = Render(
+            selected: null,
+            preference: Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            tenantsJson: NoDefaultTenantsJson);
+
+        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be("system");
     }
 
     // ── FR-2 / FR-3: the action zone ─────────────────────────────────────────
 
+    /// <summary>
+    /// The intended consequence of selecting the resolved default's own row: on a no-pick load the
+    /// selection is a real tenant, so <c>Set as default</c> is reachable without re-picking the
+    /// tenant first (B5).
+    /// </summary>
     [TestMethod]
-    public void ActionZone_IsHidden_WhenTheDefaultEntryIsSelected()
+    public void ActionZone_IsShown_OnANoPickLoad_WhenTheResolvedDefaultDiffersFromThePreference()
     {
-        var (cut, _, _, _) = Render(selected: null);
+        var (cut, _, _, _) = Render(selected: null, preference: null);
 
-        HasActionZone(cut).Should().BeFalse("the '(default …)' entry is not a real tenant");
-        LabelsOf(cut).Should().NotContain(SeparatorLabel);
+        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Alpha.ToString());
+        HasActionZone(cut).Should().BeTrue();
+        LabelsOf(cut).Should().Contain(SeparatorLabel);
     }
 
     [TestMethod]
@@ -466,6 +522,23 @@ public class DevTenantSwitcherTests : BunitContext
         await cut.InvokeAsync(() => OptionOf(cut, ActionLabel).Click());
 
         toastMock.VerifyNoOtherCalls();
+    }
+
+    // ── the circuit reconciliation reload ────────────────────────────────────
+
+    /// <summary>
+    /// The path this round exists to repair: a first render whose circuit claim is empty while the
+    /// portal has resolved a default. The switcher has to ask for one hard reload so the claim is
+    /// recomputed from the store — the navigation it used to ask for never produced the document
+    /// load, so the claim stayed empty until a manual F5.
+    /// </summary>
+    [TestMethod]
+    public void ReconciliationReload_IsRequested_OnAnInitialRender_WhoseClaimIsEmpty()
+    {
+        var (cut, _, _, _) = Render(selected: null, preference: null, claimTenant: null);
+
+        cut.WaitForAssertion(() => Nav.ForcedReloads.Should().ContainSingle(
+            "the resolved default differs from this circuit's empty claim, so the circuit reloads once"));
     }
 
     // ── FR-2 / FR-6: the separator is inert ──────────────────────────────────

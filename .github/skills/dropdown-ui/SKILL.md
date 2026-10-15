@@ -95,3 +95,10 @@ class. Keep pixel values in sync with the `w-1`…`w-9` classes in
   clear because it has no async load window. Don't add async loading to
   `DropdownComponent` without porting those guards (see
   `StreamDropdownDoubleFireDiagnosticTests`).
+- **A never-selectable action entry needs a `@key` epoch.** When a select's option list carries an
+  entry that must not become the selection — a decorative separator, or an action row such as the dev
+  tenant switcher's "Set as default" — rejecting it is not enough: `FluentSelect` does not re-read an
+  unchanged `SelectedOption` parameter, so restoring the previous selection against an otherwise
+  identical list leaves the action entry rendered as selected. Handle the click, restore the selection,
+  and bump a `@key` epoch on the select so it re-creates with the restored value (round
+  `default-tenant-dropdown-action`, owner 2026-10-14 — the epoch is load-bearing, not cosmetic).
