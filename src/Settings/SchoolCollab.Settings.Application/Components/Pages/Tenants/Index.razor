@@ -4,10 +4,26 @@
 
 <PageTitle>Tenants</PageTitle>
 
-@* The tenant registry read-only list, plus the one write this surface exists for:
-   designating which tenant the admin portal opens on by default. The per-operator
-   preference is deliberately NOT here — it is self-service and lives on the dev tenant
-   switcher in the header, next to the thing it affects. *@
+@* The tenant registry read-only list, plus the two writes this surface owns: designating the
+   platform default (a row action), and releasing the signed-in operator's own default-tenant
+   preference (the banner above). The preference is SET from the dev tenant switcher in the
+   header, next to the thing it affects; this page only surfaces it and clears it. *@
+
+@if (_preference is { } preferredTenantId)
+{
+    @* FR-7: no confirmation (clearing is not destructive — the repo confirms destructive
+       actions only) and no forced reload (nothing tenant-scoped changes until the next portal
+       load). A failed clear surfaces on the LandingPage error strip, same as MakeDefaultAsync. *@
+    <div class="tenants-default-banner">
+        <FluentMessageBar Intent="MessageIntent.Info" AllowDismiss="false">
+            <span class="tenants-default-banner-body">
+                Your default tenant: @PreferenceDisplayName(preferredTenantId)
+                <FluentButton Appearance="Appearance.Outline"
+                              OnClick="@ClearPreferenceAsync">Clear</FluentButton>
+            </span>
+        </FluentMessageBar>
+    </div>
+}
 
 <LandingPage TItem="TenantDto"
              Title="Tenants"
@@ -44,6 +60,12 @@
     private string? _error;
     private bool _disposed;
 
+    /// <summary>
+    /// The signed-in operator's recorded default-tenant preference, or null when none is
+    /// recorded. Only decides whether the clear banner renders (FR-7).
+    /// </summary>
+    private Guid? _preference;
+
     private static readonly LandingGridSettings _gridSettings = new()
     {
         GridTemplateColumns = "minmax(220px,2fr) 140px 140px"
@@ -58,7 +80,13 @@
     {
         try
         {
-            _items = await Api.ListTenantsAsync();
+            // The preference is read in parallel with the registry: it only decides whether the
+            // banner renders, so a slow or failed read must neither hold up nor break the list.
+            var listTask = Api.ListTenantsAsync();
+            var preferenceTask = LoadPreferenceAsync();
+            await Task.WhenAll(listTask, preferenceTask);
+
+            _items = await listTask;
             _error = null;
         }
         catch (Exception ex)
@@ -68,6 +96,53 @@
             _items = [];
             _error = ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Reads the operator's recorded preference. A failed read is non-fatal: it degrades to "no
+    /// preference recorded", so the banner simply does not render (FR-7).
+    /// </summary>
+    private async Task LoadPreferenceAsync()
+    {
+        try
+        {
+            _preference = (await Api.GetMyDefaultTenantAsync()).DefaultTenantId;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read the default tenant preference; the clear banner will not render");
+            _preference = null;
+        }
+    }
+
+    /// <summary>
+    /// Releases the operator's recorded preference (FR-7). The banner disappears; the registry
+    /// grid is untouched. A failure leaves the banner in place so the operator can retry.
+    /// </summary>
+    private async Task ClearPreferenceAsync()
+    {
+        try
+        {
+            await Api.SetMyDefaultTenantAsync(null);
+            _preference = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to clear the default tenant preference");
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Display name of the preferred tenant: its registry name, "system / no tenant" for
+    /// <see cref="Guid.Empty"/>, or the raw id when it is not in the loaded registry (FR-7).
+    /// </summary>
+    private string PreferenceDisplayName(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            return "system / no tenant";
+
+        return _items?.FirstOrDefault(t => t.Id == tenantId)?.Name ?? tenantId.ToString();
     }
 
     /// <summary>

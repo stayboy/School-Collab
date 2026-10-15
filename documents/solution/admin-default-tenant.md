@@ -108,15 +108,16 @@ tenant were selected — the worst kind of half-working.
 - `TestAuthHandler` and `TenantPropagationDelegatingHandler` consult
   selection → applied default → configured options, testing `HasValue` and not
   `!= Guid.Empty` so an explicit system-context pick survives.
-- `DevTenantSwitcher` renders the three states, offers "Default" (pin the tenant in view)
-  and "Clear" (release the preference), and reconciles the circuit in
-  `OnAfterRenderAsync(firstRender: true)` — after the render phase, where navigation is
-  legal.
+- `DevTenantSwitcher` renders the three states, offers `Set as default` as an entry INSIDE the
+  dropdown (confirm-gated; the header carries no buttons beside the select), and reconciles the
+  circuit in `OnAfterRenderAsync(firstRender: true)` — after the render phase, where navigation
+  is legal. Releasing the preference is not here: it lives on the `/tenants` banner.
 
 ### 3.4 Surfaces
 
-- `/tenants` (`Settings.Application` RCL) lists the registry and designates the platform
-  default; linked from `/settings`.
+- `/tenants` (`Settings.Application` RCL) lists the registry, designates the platform default,
+  and surfaces the operator's own preference in a clear banner (`Your default tenant: <name>` +
+  a `Clear` button, shown only when a preference is recorded); linked from `/settings`.
 - `DevIdentitySeeder` designates `Dev School`, guarded by
   `AND NOT EXISTS (SELECT 1 FROM tenants WHERE is_default)` so it fills the empty state and
   never overwrites an operator's choice.
@@ -160,6 +161,7 @@ covered, rather than a precaution that merely reads well.
   subject (`test-user-id`). The per-operator model is real (unique key, `/me` routes) but only
   becomes multi-user in production.
 - **Clearing a preference is required** to see the platform default again — with a preference
-  recorded, the "(default …)" entry resolves to the preference. Hence the "Clear" action.
+  recorded, the "(default …)" entry resolves to the preference. The release action lives on the
+  `/tenants` page banner; the header dropdown only sets the preference.
 - The AuthPortal does not surface the preference; that would reopen the mediated-claim seam
   and is deliberately out of scope.

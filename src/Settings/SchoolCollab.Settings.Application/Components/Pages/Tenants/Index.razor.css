@@ -3,3 +3,16 @@
 .tenants-muted {
     opacity: 0.5;
 }
+
+/* FR-7: the personal-preference banner above the registry list. It is the page's own element,
+   but the row inside it is rendered by FluentMessageBar (a child component), so the row rule
+   needs ::deep to escape this stylesheet's CSS isolation. */
+.tenants-default-banner {
+    margin-bottom: 1rem;
+}
+
+.tenants-default-banner ::deep .tenants-default-banner-body {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+}

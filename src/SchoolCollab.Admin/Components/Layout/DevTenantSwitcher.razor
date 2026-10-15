@@ -2,6 +2,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Services
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Auth
@@ -12,6 +13,7 @@
 @inject VisibleTenantService VisibleTenant
 @inject NavigationManager Nav
 @inject IConfiguration Config
+@inject IDialogService DialogService
 @inject ILogger<DevTenantSwitcher> Logger
 
 @if (!_show)
@@ -45,35 +47,26 @@
     }
     else
     {
-        <FluentSelect TOption="TenantOption"
+        @* A raw FluentSelect rather than a shared key-value dropdown wrapper: this is the
+           header's three-state tenant switcher and its self-service action lives INSIDE the
+           option list (a decorative disabled separator plus a never-selectable "Set as default"
+           entry), which the wrappers cannot express. See
+           documents/specs/tenant-default-dropdown-action.md (FR-1…FR-6).
+
+           @key re-creates the select after an action-zone entry is rejected: FluentSelect
+           records the clicked entry as its own internal selection and only re-reads
+           SelectedOption when that parameter's value actually changes, so the entry the
+           operator clicked has to be reset away from by identity, not by value. *@
+        <FluentSelect @key="_selectionEpoch"
+                      TOption="TenantOption"
                       Items="@_options"
                       SelectedOption="@_selectedOption"
                       SelectedOptionChanged="@OnSelectionChanged"
                       OptionText="@(o => o?.Label ?? string.Empty)"
                       OptionValue="@(o => o?.Value ?? string.Empty)"
+                      OptionDisabled="@(o => o?.IsSeparator ?? false)"
                       AriaLabel="Switch the dev tenant (auth disabled)"
                       Width="180px" />
-
-        @* Self-service preference: pin (or release) the tenant this operator wants the
-           portal to open on. Only meaningful in dev, which is the only mode this whole
-           component renders in — under OIDC the tenant is claim-authoritative. *@
-        <FluentButton Appearance="Appearance.Stealth"
-                      IconStart="@FluentIcons.Star"
-                      class="dev-tenant-pref-button"
-                      Disabled="@(_busy || TargetTenantId is null)"
-                      OnClick="@SetAsMyDefaultAsync"
-                      Title="@SetDefaultTitle"
-                      aria-label="Make this my default tenant">Default</FluentButton>
-
-        @if (_preference is not null)
-        {
-            <FluentButton Appearance="Appearance.Stealth"
-                          class="dev-tenant-pref-button"
-                          Disabled="@_busy"
-                          OnClick="@ClearMyDefaultAsync"
-                          Title="Stop using a personal default; follow the platform default again"
-                          aria-label="Clear my default tenant">Clear</FluentButton>
-        }
     }
 </div>
 
@@ -98,7 +91,12 @@
     /// <summary>The operator's recorded preference, or null when none is recorded.</summary>
     private Guid? _preference;
 
-    private bool _busy;
+    /// <summary>
+    /// Identity epoch for the <c>@key</c> on the select. Bumped when an action-zone entry is
+    /// rejected so the select is re-created and re-applies the still-current tenant selection
+    /// (FR-6) — FluentSelect does not re-read an unchanged <c>SelectedOption</c> parameter.
+    /// </summary>
+    private int _selectionEpoch;
 
     /// <summary>
     /// Guards the one permitted reconciliation reload. Belt-and-braces: <see cref="AdminDefaultTenantResolver.NeedsReload"/> is
@@ -112,26 +110,18 @@
     /// <summary>Value of the "(default …)" entry: clears the explicit pick so the resolved default applies.</summary>
     private const string DefaultOptionValue = "";
 
+    /// <summary>Sentinel for the decorative separator that opens the action zone — never selectable.</summary>
+    private const string SetDefaultSeparatorValue = "__set-default-separator__";
+
+    /// <summary>Sentinel for the "Set as default" action entry — never parseable as a tenant id.</summary>
+    private const string SetDefaultActionValue = "__set-default-action__";
+
     // Bound on the Settings API round-trip. Without this, a missing or
     // unreachable Settings API (e.g. the AppHost's infrastructure failed to
     // start, or the Admin is running standalone without the backend) leaves
     // the switcher stuck on "Loading tenants…" indefinitely and the user
     // can't tell whether the seed is missing or the backend is down.
     private static readonly TimeSpan TenantsLoadTimeout = TimeSpan.FromSeconds(8);
-
-    /// <summary>The tenant the "Default" button will pin — whatever this operator is currently looking at.</summary>
-    private Guid? TargetTenantId => _explicitSelection ?? _effective;
-
-    private string SetDefaultTitle
-    {
-        get
-        {
-            var name = TenantNameOf(TargetTenantId);
-            return name is null
-                ? "Pick a tenant first, then make it your default"
-                : $"Open this portal on {name} by default";
-        }
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -221,26 +211,43 @@
     /// <summary>
     /// Rebuilds the dropdown. Three states, in order: the explicit system / no-tenant context
     /// (what shared-blueprint editing needs), the resolved default, then every real tenant.
+    /// The action zone — a decorative disabled separator plus the <c>Set as default</c> entry —
+    /// is appended only for a real-tenant selection that is not already the recorded preference
+    /// (FR-2/FR-3).
     /// </summary>
     private void BuildOptions()
     {
         var defaultName = TenantNameOf(_effective);
         var defaultLabel = defaultName is null ? "(default tenant)" : $"(default: {defaultName})";
 
-        _options =
-        [
-            new TenantOption("(system / no tenant)", SystemOptionValue),
-            new TenantOption(defaultLabel, DefaultOptionValue),
-            .. _tenants!.Select(t => new TenantOption(t.Name, t.Id.ToString())),
-        ];
-
-        _selectedOption = _explicitSelection switch
+        var options = new List<TenantOption>
         {
-            null => _options.First(o => o.Value == DefaultOptionValue),
-            { } id when id == Guid.Empty => _options.First(o => o.Value == SystemOptionValue),
-            { } id => _options.FirstOrDefault(o => o.Value == id.ToString())
-                       ?? _options.First(o => o.Value == DefaultOptionValue),
+            new("(system / no tenant)", SystemOptionValue),
+            new(defaultLabel, DefaultOptionValue),
         };
+        options.AddRange(_tenants!.Select(t => new TenantOption(t.Name, t.Id.ToString())));
+
+        var selected = _explicitSelection switch
+        {
+            null => options.First(o => o.Value == DefaultOptionValue),
+            { } id when id == Guid.Empty => options.First(o => o.Value == SystemOptionValue),
+            { } id => options.FirstOrDefault(o => o.Value == id.ToString())
+                       ?? options.First(o => o.Value == DefaultOptionValue),
+        };
+
+        // FR-3: only a real tenant (neither the system context nor the "(default …)" entry,
+        // which are both unparseable as a tenant id) that differs from the recorded preference
+        // gets the action zone. A null preference means "none recorded", so any real tenant
+        // qualifies; an explicit Guid.Empty preference is a real value every tenant differs from.
+        if (Guid.TryParse(selected.Value, out var selectedTenantId)
+            && selectedTenantId != _preference)
+        {
+            options.Add(new TenantOption("──── my default ────", SetDefaultSeparatorValue, IsSeparator: true));
+            options.Add(new TenantOption("Set as default", SetDefaultActionValue, IsAction: true));
+        }
+
+        _options = [.. options];
+        _selectedOption = selected;
     }
 
     private string? TenantNameOf(Guid? tenantId)
@@ -256,6 +263,22 @@
 
     private async Task OnSelectionChanged(TenantOption? option)
     {
+        // FR-4/FR-6: an action-zone entry is never the bound selection. Restore the tenant entry
+        // synchronously — before any await — then (for the action entry only) run the confirm
+        // flow. The separator cannot normally arrive here: it renders disabled, and FluentOption
+        // short-circuits a disabled option's click handler.
+        if (option is { IsSeparator: true } or { IsAction: true })
+        {
+            RestoreTenantSelection();
+
+            if (option is { IsAction: true })
+            {
+                await SetSelectedTenantAsDefaultAsync();
+            }
+
+            return;
+        }
+
         _selectedOption = option;
 
         var value = option?.Value;
@@ -292,13 +315,38 @@
         Nav.NavigateTo(Nav.Uri, forceLoad: true);
     }
 
-    /// <summary>Pins the tenant currently in force as this operator's recorded preference.</summary>
-    private async Task SetAsMyDefaultAsync()
+    /// <summary>
+    /// Re-applies the tenant entry the operator still has selected after clicking an action-zone
+    /// entry (FR-6). Bumping the <c>@key</c> epoch re-creates the FluentSelect, which is the only
+    /// way to make it re-read its <c>SelectedOption</c>: the bound value never changed, so the
+    /// normal parameter diff would leave the select pointing at the entry just rejected.
+    /// </summary>
+    private void RestoreTenantSelection()
     {
-        if (TargetTenantId is not { } tenantId)
+        _selectionEpoch++;
+        BuildOptions();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Asks the operator to confirm, then records the selected tenant as their preference
+    /// (FR-4/FR-5). Cancel and dismissal write nothing and leave the selection untouched; a
+    /// failed write is logged and non-fatal — the dropdown keeps its state. No success toast:
+    /// the forced reload supersedes it, matching the removed button's behaviour.
+    /// </summary>
+    private async Task SetSelectedTenantAsDefaultAsync()
+    {
+        if (_selectedOption is not { } selected || !Guid.TryParse(selected.Value, out var tenantId))
             return;
 
-        _busy = true;
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Open the admin portal on '{TenantNameOf(tenantId)}' by default from now on?",
+            primaryText: "Set as default",
+            title: "Set default tenant");
+
+        if (!confirmed)
+            return;
+
         try
         {
             await TenantsApi.SetMyDefaultTenantAsync(tenantId);
@@ -313,35 +361,20 @@
         {
             Logger.LogError(ex, "Failed to record the default tenant preference");
         }
-        finally
-        {
-            _busy = false;
-        }
     }
 
-    /// <summary>Drops the recorded preference so the platform default applies again.</summary>
-    private async Task ClearMyDefaultAsync()
-    {
-        _busy = true;
-        try
-        {
-            await TenantsApi.SetMyDefaultTenantAsync(null);
-
-            await DefaultTenant.ResolveAndApplyAsync(
-                AdminDefaultTenantResolver.PlatformDefaultOf(_tenants!), CancellationToken.None);
-
-            Nav.NavigateTo(Nav.Uri, forceLoad: true);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to clear the default tenant preference");
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    /// <summary>Internal option type for the FluentSelect.</summary>
-    public sealed record TenantOption(string Label, string Value);
+    /// <summary>
+    /// Internal option type for the FluentSelect. The action zone's entries carry
+    /// <paramref name="IsSeparator"/> / <paramref name="IsAction"/>; their values are sentinels
+    /// that are never guid-parseable and differ from the empty and "system" option values.
+    /// </summary>
+    /// <param name="Label">Text shown in the dropdown.</param>
+    /// <param name="Value">Stable option value used for the FluentSelect binding.</param>
+    /// <param name="IsSeparator">True for the decorative, disabled separator entry.</param>
+    /// <param name="IsAction">True for the enabled "Set as default" action entry.</param>
+    public sealed record TenantOption(
+        string Label,
+        string Value,
+        bool IsSeparator = false,
+        bool IsAction = false);
 }
