@@ -77,6 +77,14 @@ public class DevTenantSwitcherTests : BunitContext
     {
         public readonly List<(string Method, string Url, string? Body)> Calls = new();
         private readonly Dictionary<string, (HttpStatusCode Status, string Body)> _responses = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Task? _gate;
+
+        /// <param name="gate">
+        /// When supplied, every request waits on it before answering. Lets a test hold the load
+        /// open so it can observe the component's pre-resolution render — the production timing
+        /// where <c>_effective</c> is still null on the first render.
+        /// </param>
+        public ScriptedHandler(Task? gate = null) => _gate = gate;
 
         public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
         {
@@ -86,6 +94,11 @@ public class DevTenantSwitcherTests : BunitContext
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (_gate is not null)
+            {
+                await _gate.WaitAsync(cancellationToken);
+            }
+
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             Calls.Add((request.Method.Method, request.RequestUri!.PathAndQuery, body));
 
@@ -202,13 +215,14 @@ public class DevTenantSwitcherTests : BunitContext
         Guid? claimTenant = null,
         HttpStatusCode putStatus = HttpStatusCode.NoContent,
         bool? confirmDialog = null,
-        string? tenantsJson = null)
+        string? tenantsJson = null,
+        Task? gate = null)
     {
         var preferenceJson = preference is null
             ? """{"defaultTenantId":null}"""
             : $$"""{"defaultTenantId":"{{preference}}"}""";
 
-        var handler = new ScriptedHandler()
+        var handler = new ScriptedHandler(gate)
             .Map("GET", "/api/tenants", HttpStatusCode.OK, tenantsJson ?? TenantsJson)
             .Map("GET", "/api/tenants/me/default", HttpStatusCode.OK, preferenceJson)
             .Map("PUT", "/api/tenants/me/default", putStatus, string.Empty);
@@ -539,6 +553,37 @@ public class DevTenantSwitcherTests : BunitContext
 
         cut.WaitForAssertion(() => Nav.ForcedReloads.Should().ContainSingle(
             "the resolved default differs from this circuit's empty claim, so the circuit reloads once"));
+    }
+
+    /// <summary>
+    /// The production timing the first-render-only check missed: the Settings API answers
+    /// asynchronously, so the component's first render is the loading state and <c>_effective</c>
+    /// is still null when <c>OnAfterRenderAsync(firstRender: true)</c> fires. The reconciliation
+    /// must run on the render that can see the resolved default, or the circuit keeps its empty
+    /// claim and the active-term toolbar shows no period until a manual refresh.
+    /// </summary>
+    [TestMethod]
+    public void ReconciliationReload_IsRequested_WhenTheDefaultResolvesAfterTheFirstRender()
+    {
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var (cut, _, _, _) = Render(selected: null, preference: null, claimTenant: null, gate: gate.Task);
+
+        // The load is still in flight, so there is nothing to reconcile yet — and a first-render-only
+        // check would have consumed its one opportunity here, before the default existed.
+        Nav.ForcedReloads.Should().BeEmpty("the default has not resolved yet");
+
+        gate.SetResult(true);
+
+        cut.WaitForAssertion(() => LabelsOf(cut).Should().Contain("Alpha"), TimeSpan.FromSeconds(5));
+
+        // The reconciliation is requested from OnAfterRenderAsync, which the bUnit wait helper can
+        // observe before or after its own render callback. Force one more render cycle so the
+        // assertion sees the reload deterministically; _reloadRequested caps it at one either way.
+        cut.Render();
+
+        Nav.ForcedReloads.Should().ContainSingle(
+            "the reconciliation must run once the async default resolution completes, not only on the first render");
     }
 
     // ── FR-2 / FR-6: the separator is inert ──────────────────────────────────

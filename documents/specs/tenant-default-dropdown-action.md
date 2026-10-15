@@ -290,7 +290,11 @@ above the grid. The personal default is also **settable** from the grid: the pre
   (the path the feature exists to repair). The navigation spy must override
   `NavigateToCore(string uri, NavigationOptions options)`: the reload reaches navigation as a
   forced replacement navigation, so a spy on the `NavigateToCore(string, bool)` overload never
-  sees it.
+  sees it. `ReconciliationReload_IsRequested_WhenTheDefaultResolvesAfterTheFirstRender` pins the
+  production timing the first-render-only check missed: the Settings API is held open by a gated
+  scripted handler, so the first render happens while `_effective` is still null, and the reload
+  must still be requested once the async resolution completes. The check is gated on a
+  `_defaultsResolved` flag (set after the resolve attempt), not on `firstRender`.
 
 `tests/SchoolCollab.Settings.Tests.Unit/Tenants/TenantsIndexTests.cs` covers the `/tenants`
 surfaces; the harness registers a stub `IDevTenantSelection` (the page injects it), a mocked
