@@ -77,6 +77,14 @@ AppHost's dashboard output (`watch.log`).
   Workaround: drive the admin's own endpoint instead of the proxy port; if the proxy route is wanted
   back, restart the AppHost (the mapping is regenerated). Do not debug application code for this — check
   the direct endpoint first.
+- **A dialog opened while a JS data stream is still pending renders but is INERT** (observed
+  2026-10-14, recorder → metadata dialog on `/assignments/create`): no further event is dispatched
+  (Cancel / Close / Preview / Save all dead), the rich-text editor stays stuck on its loading
+  placeholder, and the circuit later dies with `System.TimeoutException: Did not receive any data in
+  the allotted time.` — **consume the stream before opening the dialog** (the live
+  `BrowserFileStream` handed over by `RecorderPanel` is buffered by `InstructionEditorList` for
+  exactly this reason). Nothing about the session is stale here: this one is a code defect, not a
+  restart-me symptom.
 
 ## Boundaries
 

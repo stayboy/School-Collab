@@ -203,4 +203,49 @@ public class RecorderPanelBunitTests : BunitContext
         JSInterop.Invocations.Count(i => i.Identifier == "bindPreview").Should().Be(1,
             "the flag must be spent by the bind — a second render must not re-bind the element");
     }
+
+    /// <summary>Owner request 2026-10-15 (grill Q15): the list's play click SEEDS this panel, and the
+    /// review must open ALREADY playing — the author clicked play once, not twice.
+    /// <para><b>Discriminating:</b> pre-fix no such interop exists, so the assertion cannot pass. The
+    /// element id is the review player's, which is the same shape for audio and video.</para>
+    /// <para><b>Honest gap (browser-scope, the DisposeAsync precedent above):</b> whether the browser's
+    /// autoplay policy actually permits playback is not observable under bUnit — the module is a
+    /// scripted stand-in. What is pinned here is the panel ASKING, exactly once, for the right element;
+    /// the policy outcome is covered by the live pass (and is deliberately fail-soft: a refusal leaves
+    /// the player with its own controls).</para></summary>
+    [TestMethod]
+    public void SeededReview_AutoPlaysThePlayerOnce_WhenTheSeedSwitchesTheReviewIn()
+    {
+        var module = JSInterop.SetupModule(
+            "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor.js");
+        var cut = Render<RecorderPanel>(p => p
+            .Add(c => c.Id, "rec")
+            .Add(c => c.IsVideo, false)
+            .Add(c => c.Seed, new RecorderPanel.ReviewSeed("blob:staged", "r.webm", 10)));
+
+        cut.Find("#rec-preview-take").Should().NotBeNull("the seeded review renders the take's player");
+
+        cut.WaitForAssertion(() => module.VerifyInvoke("playPreview"),
+            TimeSpan.FromSeconds(5));
+
+        var autoPlays = JSInterop.Invocations.Where(i => i.Identifier == "playPreview").ToList();
+        autoPlays.Should().ContainSingle("the flag is spent by the call — a later render must not replay");
+        autoPlays[0].Arguments[0].Should().Be("rec-preview-take",
+            "the review player is the element that plays (one id shape for audio and video)");
+    }
+
+    /// <summary>The scope half of Q15: auto-play belongs to the list's play click ONLY. A panel opened
+    /// without a seed — the post-record review and the retake — keeps its manual player, so the author
+    /// is never surprised by their own fresh take starting to play.</summary>
+    [TestMethod]
+    public void UnseededPanel_NeverAutoPlays()
+    {
+        var module = JSInterop.SetupModule(
+            "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/RecorderPanel.razor.js");
+        Render<RecorderPanel>(p => p
+            .Add(c => c.Id, "rec")
+            .Add(c => c.IsVideo, false));
+
+        module.VerifyNotInvoke("playPreview");
+    }
 }

@@ -28,18 +28,28 @@
                            IsVideo="@(_recordingRow.Kind == InstructionKindDto.Video)"
                            Seed="@_reviewSeed"
                            OnRecorded="@(media => OnRecordedAsync(_recordingRow!, media))"
-                           OnClose="CloseRecorder" />
-            @* Round media-pill-listing (C2/Q6): on a SEEDED review (a served/preview play), a
-               link-styled control opens the same metadata dialog the readout click opens — rendered
-               ONLY when a title/description exists, so a bare preview shows nothing extra. *@
-            @if (_reviewSeed is not null && HasMetadata(_recordingRow))
-            {
-                <FluentButton Appearance="Appearance.Stealth"
-                              Id="@($"{Id}-review-edit")"
-                              OnClick="@(() => OnReviewMetadataAsync(_recordingRow!))">
-                    Edit title/description
-                </FluentButton>
-            }
+                           OnClose="CloseRecorder">
+                @* Owner request 2026-10-15 (grill Q10-Q12): on a SEEDED review the metadata control
+                   sits BESIDE the recorder title and reads as a native hyperlink — the previous
+                   stealth button floated below the panel, outside the header, and did not look like
+                   the admin UI's links. It renders UNCONDITIONALLY on a seeded review (Q11): the
+                   takeover suppresses the rows, so the readout — the only other route to the dialog —
+                   is unreachable, and a take with no note would otherwise have no way to gain one.
+                   The condition lives INSIDE the fragment: Razor only recognizes a named child
+                   element as a direct child, so an @if around it is rejected (RZ9996). *@
+                <HeaderAction>
+                    @if (_reviewSeed is not null)
+                    {
+                        <FluentAnchor Appearance="Appearance.Hypertext"
+                                      Href="#"
+                                      Id="@($"{Id}-review-edit")"
+                                      Class="cq-review-edit"
+                                      OnClick="@(() => OnReviewMetadataAsync(_recordingRow!))">
+                            @EditNoteLabel
+                        </FluentAnchor>
+                    }
+                </HeaderAction>
+            </RecorderPanel>
         </div>
     }
     else
@@ -202,6 +212,21 @@
                                           OnClick="@(() => PlayMediaAsync(row))" />
                         }
 
+                        @* Owner request 2026-10-15 (grill Q13a): an IMAGE row has no recorder and no
+                           review (play is Audio/Video only), so its metadata control is the row-level
+                           mirror of the review's header link — same hypertext look, same label. The
+                           READOUT stays data; this is the action. *@
+                        @if (row.HasMedia && row.Kind == InstructionKindDto.Image && !string.IsNullOrWhiteSpace(row.StoragePath))
+                        {
+                            <FluentAnchor Appearance="Appearance.Hypertext"
+                                          Href="#"
+                                          Id="@($"{Id}-edit-note-{index}")"
+                                          Class="cq-instruction-edit-note"
+                                          OnClick="@(() => OnReadoutClickedAsync(row))">
+                                @EditNoteLabel
+                            </FluentAnchor>
+                        }
+
                         <FluentButton Appearance="Appearance.Stealth"
                                       Id="@($"{Id}-remove-{index}")"
                                       OnClick="@(() => RemoveAsync(row))"
@@ -313,7 +338,11 @@
     /// only when the confirmed <see cref="MaterialEditResult"/> comes back through
     /// <see cref="ApplyEditAsync"/>. A cancelled dialog keeps it (AC-4): the take stays uncommitted
     /// with the review, and this is the one place that revokes its Blob URL when the review is
-    /// discarded — <see cref="DiscardPendingRecordingAsync"/> on close or teardown.</summary>
+    /// discarded — <see cref="DiscardPendingRecordingAsync"/> on close or teardown. Its
+    /// <c>Content</c> is this list's OWN buffer, materialised by <see cref="OnRecordedAsync"/> before
+    /// the dialog popped (the panel hands over a LIVE browser-file stream, and a pending JS data
+    /// stream left across that round-trip wedges the circuit) — so the list, and only the list,
+    /// disposes it.</summary>
     private PendingRecording? _pendingRecording;
 
     private sealed record PendingRecording(InstructionEditorRow Row, RecorderPanel.RecordedMedia Media);
@@ -383,10 +412,14 @@
     private static int? ToWholeSeconds(double? seconds) =>
         seconds is double d && !double.IsNaN(d) && d >= 0 ? (int)Math.Round(d) : null;
 
-    /// <summary>Whether the row carries any media metadata — the seeded review's edit control is
-    /// rendered ONLY when it does (C2).</summary>
-    private static bool HasMetadata(InstructionEditorRow? row) =>
-        row is not null && (!string.IsNullOrWhiteSpace(row.Title) || !string.IsNullOrWhiteSpace(row.Text));
+    /// <summary>Owner request 2026-10-15 (grill Q12/Q13; label SIMPLIFIED by the owner the same day):
+    /// the media's metadata affordance reads "Edit Note". The first wording repeated the medium —
+    /// "Recorded Audio (edit note)", "Image (edit note)", "Recorded Video (edit note)" — but the anchor
+    /// already sits beside that medium's own readout, so the medium was noise; "Edit Note" says only what
+    /// the control does. "Note" is the author's word for the optional Title + Description pair the shared
+    /// dialog carries. One label serves both call sites: the review's header link (audio/video) and the
+    /// row-level link an image row uses (Q13a — an image has no recorder and no review).</summary>
+    private const string EditNoteLabel = "Edit Note";
 
     /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
     /// after an append this points at the new row's first field (AC-2's focus target).</summary>
@@ -452,10 +485,10 @@
 
         // Round media-pill-listing (C2/Q12): a confirmed metadata dialog on the recorder-commit path
         // also commits the stashed take — stage it exactly as a direct commit does, with the row's
-        // fresh title/body (StageRecordedTakeAsync raises Changed and re-renders itself).
+        // fresh title/body (StageRecordedTakeAsync raises Changed and re-renders itself, and clears —
+        // and releases — the pending take itself).
         if (_pendingRecording is { } pending && ReferenceEquals(pending.Row, row))
         {
-            _pendingRecording = null;
             await StageRecordedTakeAsync(row, pending.Media);
             return;
         }
@@ -647,12 +680,14 @@
 
     /// <summary>Drops the handed-off take that was never committed and revokes its Blob URL exactly
     /// once — an uncommitted take lives only here (the panel owns nothing once it has handed over), so
-    /// no row path can revoke it a second time.</summary>
+    /// no row path can revoke it a second time. Its buffered stream goes with it: that buffer is this
+    /// list's own (materialised before the metadata dialog popped).</summary>
     private async Task DiscardPendingRecordingAsync()
     {
         if (_pendingRecording is { } pending)
         {
             _pendingRecording = null;
+            await pending.Media.Content.DisposeAsync();
             if (pending.Media.PreviewUrl is not null)
             {
                 await RevokeMediaUrlAsync(pending.Media.PreviewUrl);
@@ -975,9 +1010,41 @@
                 await RevokeMediaUrlAsync(superseded.Media.PreviewUrl);
             }
 
-            // Stash the take and pop the metadata dialog — staging happens only once the host hands
-            // the confirmed result back through ApplyEditAsync.
-            _pendingRecording = new PendingRecording(row, media);
+            // Materialise the take BEFORE the dialog round-trip. The panel hands over the LIVE stream
+            // its hidden InputFile is still feeding and disposes it as soon as this handler returns
+            // (its own `await using`), so a take stashed live would leave that JS data stream pending
+            // across the dialog: the rich-text editor's interop never completes, the dialog renders
+            // inert (no further event is dispatched) and the circuit later dies with a
+            // TimeoutException — and the take's bytes are unreadable when the confirm stages them.
+            // Copying here, inside the handler that RECEIVED the stream, consumes it; the buffer is
+            // this list's own and is released with the pending take.
+            var buffer = new MemoryStream();
+            try
+            {
+                await media.Content.CopyToAsync(buffer);
+                buffer.Position = 0;
+            }
+            catch
+            {
+                // A copy that failed leaves the PREVIOUS take untouched (nothing is superseded until
+                // this one is in hand) and must not strand a half-filled buffer.
+                await buffer.DisposeAsync();
+                throw;
+            }
+
+            // The take this one replaces was buffered by this list too (the hand-off above): its
+            // stream is ours to release, and the fresh take supersedes it whether or not it is the
+            // same take arriving a second time. A host re-delivering the very same instance is not
+            // disposed here — that stream is the one just copied. Disposing only AFTER the copy
+            // succeeded is what keeps a failed retake from leaving the pending take disposed.
+            if (_pendingRecording is { } replaced && !ReferenceEquals(replaced.Media.Content, media.Content))
+            {
+                await replaced.Media.Content.DisposeAsync();
+            }
+
+            // Stash the buffered take and pop the metadata dialog — staging happens only once the host
+            // hands the confirmed result back through ApplyEditAsync.
+            _pendingRecording = new PendingRecording(row, media with { Content = buffer });
             _error = null;
             await EditRowRequested.InvokeAsync(row);
 
@@ -1000,11 +1067,15 @@
     }
 
     /// <summary>Commits a recorded take: stores its session Blob URL + probed duration on the row (the
-    /// duration PERSISTS — Q7/AC-9), closes the review, then stages through the shared upload path.</summary>
+    /// duration PERSISTS — Q7/AC-9), closes the review, then stages through the shared upload path.
+    /// A Dialog-host take arrives as the list's own BUFFER (see <see cref="OnRecordedAsync"/>) — it is
+    /// released here, after staging, with the pending take it came from. On the Inline path nothing is
+    /// pending and the panel's live stream stays the panel's to dispose.</summary>
     private async Task StageRecordedTakeAsync(InstructionEditorRow row, RecorderPanel.RecordedMedia media)
     {
         _recordingRow = null;
         _reviewSeed = null;
+        var buffered = _pendingRecording;
         _pendingRecording = null;
         // The committed take's row is staged now — it survives as a real row (owner rework, 2026-10-12).
         _recorderCreatedRow = null;
@@ -1022,7 +1093,22 @@
         row.DurationSeconds = ToWholeSeconds(media.DurationSeconds);
 
         await NotifyRecorderStateAsync();
-        await StageMediaFileAsync(row, media.Content, media.FileName, media.ContentType, media.FileSize);
+        try
+        {
+            await StageMediaFileAsync(row, media.Content, media.FileName, media.ContentType, media.FileSize);
+        }
+        finally
+        {
+            // The buffered pending take is consumed — release the buffer the list itself created (never
+            // a stream the list did not create: the Inline path has nothing pending here). The release
+            // sits in a `finally` because staging has NON-throwing failure paths of its own (the
+            // in-flight guard, the allow-list pre-check, the document refusal all `Fail` and return),
+            // and a refused or faulted stage must not strand the take's bytes.
+            if (buffered is not null)
+            {
+                await buffered.Media.Content.DisposeAsync();
+            }
+        }
     }
 
     /// <summary>Sets the failure line and re-renders. A method invoked directly (bUnit, a test seam)

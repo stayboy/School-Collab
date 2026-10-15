@@ -57,6 +57,26 @@
     flex: 1 1 auto;
 }
 
+/* Owner request 2026-10-15 (grill Q13a): the IMAGE row's metadata link. Hypertext appearance gives it
+   the admin UI's native link colour; `flex: 0 0 auto` keeps it out of the readout's ellipsis fight and
+   `white-space: nowrap` keeps the two-word "Edit Note" label on one line (the label was per-medium
+   until the owner simplified it the same day). FluentAnchor renders its clickable text in a
+   shadow part, so the label is styled through ::part(control) — the QuestionEditorSection precedent. */
+.cq-instruction-edit-note {
+    flex: 0 0 auto;
+    font-size: 0.85rem;
+}
+
+.cq-instruction-edit-note::part(control) {
+    white-space: nowrap;
+}
+
+/* The seeded review's metadata link (grill Q10/Q12): rendered in the recorder header beside the title,
+   so it inherits the header's font size and only needs to stay on one line. */
+.cq-review-edit::part(control) {
+    white-space: nowrap;
+}
+
 .cq-instruction-error {
     margin: 0;
     font-size: 0.85rem;

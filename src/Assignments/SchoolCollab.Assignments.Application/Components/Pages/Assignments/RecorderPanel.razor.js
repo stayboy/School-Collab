@@ -198,6 +198,22 @@ export function mediaDuration(url) {
     });
 }
 
+// Owner request 2026-10-15 (grill Q15): the list's play click opens the review ALREADY playing, so the
+// author clicks play once rather than twice — the panel asks for this the moment a SEED arrives (a
+// reopened review), never on a post-record review or a retake.
+//
+// The gesture is one circuit round-trip old by the time this runs, and the browser's autoplay policy
+// decides on its own (Chrome/Edge allow unmuted playback after any interaction with the page;
+// Firefox/Safari are stricter). A refusal is therefore SWALLOWED, exactly as the live preview already
+// does at startCapture/bindPreview: the player renders with its own controls, so a blocked autoplay
+// costs the author one click and never an unhandled rejection in the console.
+export function playPreview(previewElementId) {
+    const preview = previewElementId ? document.getElementById(previewElementId) : null;
+    if (preview && typeof preview.play === 'function') {
+        preview.play().catch(() => { /* autoplay can be blocked; the controls are the fallback */ });
+    }
+}
+
 // Delivery (D3): wrap the held Blob as a File and drop it into the target <input type=file>, then
 // dispatch change — the EXACT technique FluentInputFile's own initializeFileDropZone uses. .NET's
 // InputFile OnChange fires and streams the content through IBrowserFile.OpenReadStream (bounded

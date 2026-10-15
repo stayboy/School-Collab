@@ -31,6 +31,16 @@
     font-weight: 600;
 }
 
+/* The title + the host's optional header action (grill Q10): one leading group, so the action sits
+   beside the title instead of floating in the header's space-between gap. min-width:0 lets a long
+   title truncate rather than push Cancel out. */
+.recorder-header-leading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
 .recorder-unsupported {
     margin: 0;
     font-size: 0.85rem;
