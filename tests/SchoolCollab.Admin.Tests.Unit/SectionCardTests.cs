@@ -30,7 +30,7 @@ public class SectionCardTests : BunitContext
     public SectionCardTests()
     {
         // bUnit needs the FluentUI services registered (JSRuntime + DI for
-        // FluentCard / FluentLink / FluentButton / FluentProgressRing).
+        // FluentCard / FluentLink / FluentButton / FluentSpinner).
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
     }

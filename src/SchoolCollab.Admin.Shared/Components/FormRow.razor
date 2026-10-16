@@ -72,14 +72,14 @@
     Usage (in a form component):
         <EditForm ...>
             <FormRow Label="Student number" Required For="studentFormNumber">
-                <FluentTextField Id="studentFormNumber" @bind-Value="..." />
+                <FluentTextInput Id="studentFormNumber" @bind-Value="..." />
             </FormRow>
             <FormRow Label="Dates" AlignTop For="periodStart">
                 <FluentDatePicker Id="periodStart" @bind-Value="..." />
                 <FluentDatePicker Id="periodEnd"   @bind-Value="..." />
             </FormRow>
             <FormRow Label="Email" Orientation="Vertical" Required>
-                <FluentTextField ... />
+                <FluentTextInput ... />
             </FormRow>
             <FormRow Label="Term" LabelPosition="RowLabelPosition.Below">
                 <FluentSelect ... />

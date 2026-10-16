@@ -85,13 +85,13 @@
                             @if (ActiveToolCalls is { Count: > 0 })
                             {
                                 <div class="tool-call-summary tool-call-progress">
-                                    <FluentProgressRing class="progress-ring-small" />
+                                    <FluentSpinner class="progress-ring-small" />
                                     <span>Working…</span>
                                 </div>
                             }
                             @if (string.IsNullOrEmpty(StreamingText) && (ActiveToolCalls is null || ActiveToolCalls.Count == 0))
                             {
-                                <FluentProgressRing class="progress-ring-small" />
+                                <FluentSpinner class="progress-ring-small" />
                             }
                         </div>
                     }

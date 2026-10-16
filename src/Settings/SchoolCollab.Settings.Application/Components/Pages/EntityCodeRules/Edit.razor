@@ -21,7 +21,7 @@
     <ChildContent>
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (_rule is not null)
         {
@@ -32,7 +32,7 @@
                 <div class="edit-layout">
                     <div class="edit-layout-left">
                         <FormRow Label="Code" For="field-code" LabelTip="Immutable rule identifier">
-                            <FluentTextField Id="field-code"
+                            <FluentTextInput Id="field-code"
                                              Value="@_rule.Code"
                                              Disabled="true"
                                              class="full-width" />

@@ -14,7 +14,7 @@
 <div class="transfer-dialog">
     @if (_loading)
     {
-        <FluentProgressRing />
+        <FluentSpinner />
     }
     else if (_error is not null)
     {
@@ -36,7 +36,7 @@
     {
         <EditForm Model="_model" OnValidSubmit="HandleSubmitAsync">
             <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-                <FluentTextField Value="@_currentGradeName" Label="Current grade" ReadOnly="true" />
+                <FluentTextInput Value="@_currentGradeName" Label="Current grade" ReadOnly="true" />
 
                 @if (DirectionHint is { } hint)
                 {

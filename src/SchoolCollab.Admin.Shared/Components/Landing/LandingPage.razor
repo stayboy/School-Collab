@@ -26,7 +26,7 @@
                 <div class="spacer"></div>
                 @if (SearchEnabled)
                 {
-                    <FluentTextField Placeholder="@(SearchPlaceholder ?? "Search…")"
+                    <FluentTextInput Placeholder="@(SearchPlaceholder ?? "Search…")"
                                      class="search-box"
                                      Immediate="true"
                                      ImmediateDelay="300"
@@ -40,7 +40,7 @@
         @if (Loading || Items is null)
         {
             <div class="spinner-container">
-                <FluentProgressRing />
+                <FluentSpinner />
             </div>
         }
         else if (Items.Length == 0)
@@ -228,7 +228,7 @@
     public string SearchText { get; set; } = string.Empty;
 
     /// <summary>
-    /// Fired (debounced by the <c>FluentTextField</c>'s <c>Immediate</c> +
+    /// Fired (debounced by the <c>FluentTextInput</c>'s <c>Immediate</c> +
     /// <c>ImmediateDelay</c>) when the search box value changes. The page owns
     /// the strategy: a server fetch with cancellation, a client-side filter,
     /// or a bind-and-reload.

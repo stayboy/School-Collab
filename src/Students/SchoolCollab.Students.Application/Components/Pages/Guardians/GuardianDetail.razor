@@ -23,7 +23,7 @@
             <ChildContent>
                 @if (_guardian is null)
                 {
-                    <div class="spinner-container"><FluentProgressRing /></div>
+                    <div class="spinner-container"><FluentSpinner /></div>
                 }
                 else
                 {
@@ -107,7 +107,7 @@
                         <h3>Wards</h3>
                         @if (_wards is null)
                         {
-                            <div class="spinner-container"><FluentProgressRing /></div>
+                            <div class="spinner-container"><FluentSpinner /></div>
                         }
                         else if (_wards.Length == 0)
                         {
@@ -150,7 +150,7 @@
                         <h3>Name history</h3>
                         @if (_history is null)
                         {
-                            <div class="spinner-container"><FluentProgressRing /></div>
+                            <div class="spinner-container"><FluentSpinner /></div>
                         }
                         else if (_history.Length == 0)
                         {

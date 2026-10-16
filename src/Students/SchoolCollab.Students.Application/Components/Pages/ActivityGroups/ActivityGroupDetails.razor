@@ -47,7 +47,7 @@
 
     @if (_loading && _group is null)
     {
-        <div class="spinner-container"><FluentProgressRing /></div>
+        <div class="spinner-container"><FluentSpinner /></div>
     }
     else if (_group is null)
     {
@@ -79,7 +79,7 @@
 
         @if (_members is null)
         {
-            <div class="spinner-container"><FluentProgressRing /></div>
+            <div class="spinner-container"><FluentSpinner /></div>
         }
         else if (_members.Length == 0)
         {

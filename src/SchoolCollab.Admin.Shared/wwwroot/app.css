@@ -50,9 +50,13 @@ fluent-field > fluent-date-picker {
     width: inherit;
 }
 
-fluent-nav-menu,
-fluent-nav-link,
-fluent-nav-group {
+/* v5 replaced the nav menu components (`FluentNavMenu`/`FluentNavLink`/`FluentNavGroup`) with
+   `FluentNav`/`FluentNavItem`/`FluentNavCategory`, which render Blazor-owned markup — not custom
+   elements — so the nav entries are matched by the class names those components put on their
+   `div`s. */
+.fluent-navitem,
+.fluent-navsubitem,
+.fluent-navcategoryitem {
     color: var(--neutral-foreground-1, inherit);
 }
 

@@ -263,6 +263,17 @@
     padding: 2px 4px;
 }
 
+/* v5 ships no breadcrumb component, so the trail is authored in the markup; these two
+   rules are the separator spacing and current-page colour that the removed pair rendered. */
+.authoring-crumb-separator {
+    padding: 0 6px;
+    color: var(--neutral-foreground-3, inherit);
+}
+
+.authoring-crumb-current {
+    color: var(--neutral-foreground-1, inherit);
+}
+
 /* ── Summary card (D1/D2, assignment-create-edit-redesign) ─────────────── */
 
 .authoring-summary {

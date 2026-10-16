@@ -458,7 +458,7 @@ public class AssignmentCreateBunitTests : BunitContext
             cut.Markup.Should().Contain("Require guardian review before student submits"),
             TimeSpan.FromSeconds(5));
 
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "the page must not be left spinning by the absent optional fetch");
     }
 

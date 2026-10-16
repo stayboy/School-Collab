@@ -36,9 +36,13 @@ The API statements in this skill are updated for v5. The v4 dialog types are **g
 `FluentDialogInstance` (dialog body base) + the cascading `IDialogInstance`, `DialogOptions`
 (`Header.Title`, `Footer.*Action`, `Width`/`Height`/`Modal`/`PreventDismissOnEscape`), and
 `IDialogInstance.CloseAsync/CancelAsync`. Full mapping: `documents/solution/fluentui-v5-upgrade-path.md` §7
-and the v5 migration pages (`MigrationFluentDialog.md`). Component *renames* the tree has not yet
-performed (`FluentAnchor`→`FluentLink`, `FluentTextField`→`FluentTextInput`, the Nav family) are
-deliberately left as written until their rename round.
+and the v5 migration pages (`MigrationFluentDialog.md`). The component *renames* have since landed
+across the tree — `FluentAnchor`→`FluentLink`, `FluentTextField`→`FluentTextInput`,
+`FluentProgressRing`→`FluentSpinner` (deprecation hygiene: it renders the same `fluent-spinner`),
+and the Nav family (`FluentNavMenu`/`FluentNavLink`/`FluentNavGroup`→
+`FluentNav`/`FluentNavItem`/`FluentNavCategory`). `FluentBreadcrumb`/`FluentBreadcrumbItem` have
+**no** v5 replacement: a trail is authored in markup (linked crumbs as `FluentLink`, the trailing
+crumb as a non-link span — see `AssignmentAuthoring.razor`).
 
 ---
 

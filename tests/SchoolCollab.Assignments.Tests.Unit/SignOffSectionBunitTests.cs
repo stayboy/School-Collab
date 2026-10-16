@@ -269,7 +269,7 @@ public class SignOffSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("500", "the failure surfaces as the error bar");
-            cut.FindAll("fluent-progress-ring").Should().BeEmpty("_busy must reset in finally");
+            cut.FindAll("fluent-spinner").Should().BeEmpty("_busy must reset in finally");
         });
     }
 }

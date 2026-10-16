@@ -28,7 +28,7 @@
 <div class="teacher-dialog">
     @if (_loading)
     {
-        <div class="spinner-container"><FluentProgressRing /></div>
+        <div class="spinner-container"><FluentSpinner /></div>
     }
     else
     {
@@ -70,7 +70,7 @@
                 <FormRow Label="Qualifications" AlignTop>
                     @if (_allQualifications is null)
                     {
-                        <FluentProgressRing />
+                        <FluentSpinner />
                     }
                     else if (_allQualifications.Length == 0)
                     {

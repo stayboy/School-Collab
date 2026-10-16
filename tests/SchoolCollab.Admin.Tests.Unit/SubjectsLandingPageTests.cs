@@ -336,7 +336,7 @@ public class SubjectsLandingPageTests : BunitContext
         markup.Should().Contain("Mathematics", "topics must load regardless of the activity-groups flag");
 
         // Not stuck loading, and no error surfaced for a normal, expected state.
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "the page must not spin forever when an optional feature is dark-launched");
         cut.FindComponents<FluentMessageBar>().Should().BeEmpty(
             "an off flag is a normal state, not an error to report to the user");
@@ -397,7 +397,7 @@ public class SubjectsLandingPageTests : BunitContext
             "an enabled flag must actually load the groups");
 
         cut.Markup.Should().Contain("Mathematics", "topics still load alongside the groups");
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty();
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty();
     }
 
     /// <summary>
@@ -421,7 +421,7 @@ public class SubjectsLandingPageTests : BunitContext
 
         cut.Markup.Should().Contain("Mathematics",
             "a failing optional filter must not prevent topics from rendering");
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "the page must not be left spinning by a failed optional fetch");
     }
 
@@ -441,7 +441,7 @@ public class SubjectsLandingPageTests : BunitContext
             topicsStatus: HttpStatusCode.InternalServerError);
 
         var cut = harness.Cut;
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "_items must be reset so Loading is no longer true after a failure");
 
         var messageBars = cut.FindComponents<FluentMessageBar>();

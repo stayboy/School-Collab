@@ -768,7 +768,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
             cut.Find("#authoring-summary-edit").Should().NotBeNull(
                 "the pencil (top right) is the only entry to the input fields");
             cut.Find("#authoring-summary").QuerySelectorAll(
-                    "input, textarea, fluent-dropdown, fluent-text-field, fluent-date-picker, fluent-number-field")
+                    "input, textarea, fluent-dropdown, fluent-text-input, fluent-date-picker, fluent-number-field")
                 .Should().BeEmpty("the owner's rule: no input fields on the summary unless requested");
             cut.Find("#authoring-fact-status").TextContent.Trim().Should().Be("Draft");
             cut.Find("#authoring-fact-instructions").TextContent.Trim().Should().Be("Do the thing");
@@ -901,7 +901,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     /// <summary>D8: the breadcrumb trail on each route — three crumbs on Edit (the title crumb
-    /// links to the assignment's Detail page), two on Create.</summary>
+    /// links to the assignment's Detail page), two on Create. v5 removed
+    /// FluentBreadcrumb/FluentBreadcrumbItem with no replacement, so the trail is authored in
+    /// markup (FluentLinks for the linked crumbs, a span for the current page); these assertions
+    /// pin that STRUCTURE — crumb counts, order and hrefs — because the crumb text alone is not
+    /// discriminating: "Assignments" and the title also render elsewhere on the page, so a
+    /// text-only check would pass with the whole trail deleted.</summary>
     [TestMethod]
     public void Breadcrumb_RendersTheTrailOnEveryRoute()
     {
@@ -909,21 +914,39 @@ public class AssignmentAuthoringBunitTests : BunitContext
         var editCut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, enterEditFields: false);
         editCut.WaitForAssertion(() =>
         {
-            // Round B: FluentBreadcrumbItem was removed in v5 with NO direct replacement
-            // (MigrationFluentBreadcrumb.md, Q25a) — the crumb STRUCTURE assertions (counts and
-            // per-crumb Href/ChildContent) return with the re-implementation. Until then, pin what
-            // the app actually renders.
-            editCut.Find("#authoring-breadcrumb").TextContent.Should().Contain("Math HW");
+            var links = editCut.FindAll("#authoring-breadcrumb fluent-link");
+            links.Should().HaveCount(2,
+                "Edit's trail is Assignments › title › Edit — the trailing crumb is the current page, not a link");
+            links[0].GetAttribute("href").Should().Be("/assignments");
+            links[0].TextContent.Trim().Should().Be("Assignments");
+            links[1].GetAttribute("href").Should().Be($"/assignments/{dto.Id}",
+                "the title crumb links to the assignment's Detail page");
+            links[1].TextContent.Trim().Should().Be(dto.Title);
+
+            var current = editCut.FindAll("#authoring-breadcrumb .authoring-crumb-current");
+            current.Should().ContainSingle();
+            current[0].TextContent.Trim().Should().Be("Edit");
+            current[0].GetAttribute("aria-current").Should().Be("page");
+
+            editCut.FindAll("#authoring-breadcrumb .authoring-crumb-separator").Should().HaveCount(2,
+                "three crumbs means two separators between them");
         }, TimeSpan.FromSeconds(5));
 
         var createCut = RenderAuthoring(AssignmentAuthoringMode.Create);
         createCut.WaitForAssertion(() =>
         {
-            // Round B: FluentBreadcrumbItem was removed in v5 with NO direct replacement
-            // (MigrationFluentBreadcrumb.md, Q25a) — the crumb STRUCTURE assertions (counts and
-            // per-crumb Href/ChildContent) return with the re-implementation. Until then, pin what
-            // the app actually renders.
-            createCut.Find("#authoring-breadcrumb").TextContent.Should().Contain("New assignment");
+            var links = createCut.FindAll("#authoring-breadcrumb fluent-link");
+            links.Should().ContainSingle(
+                "Create's trail is Assignments › New assignment — only the landed crumb links");
+            links[0].GetAttribute("href").Should().Be("/assignments");
+            links[0].TextContent.Trim().Should().Be("Assignments");
+
+            var current = createCut.FindAll("#authoring-breadcrumb .authoring-crumb-current");
+            current.Should().ContainSingle();
+            current[0].TextContent.Trim().Should().Be("New assignment");
+            current[0].GetAttribute("aria-current").Should().Be("page");
+
+            createCut.FindAll("#authoring-breadcrumb .authoring-crumb-separator").Should().ContainSingle();
         });
     }
 
@@ -1305,11 +1328,11 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             foreach (var row in rows)
             {
-                row.QuerySelectorAll("input, fluent-text-field, fluent-number-field, fluent-dropdown, fluent-checkbox, fluent-date-picker, fluent-listbox, fluent-text-area")
+                row.QuerySelectorAll("input, fluent-text-input, fluent-number-field, fluent-dropdown, fluent-checkbox, fluent-date-picker, fluent-listbox, fluent-text-area")
                     .Should().BeEmpty("UX-13/D2: a policy-derived value is never an editable control");
             }
 
-            rules.QuerySelectorAll("fluent-number-field, fluent-date-picker, fluent-checkbox, fluent-text-field")
+            rules.QuerySelectorAll("fluent-number-field, fluent-date-picker, fluent-checkbox, fluent-text-input")
                 .Should().BeEmpty("D2/AC8: no author-editable input remains inside Rules");
         });
     }
@@ -3058,7 +3081,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Math HW", "F13: the loaded form is on screen");
-            cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+            cut.FindComponents<FluentSpinner>().Should().BeEmpty(
                 "F13: and the loading ring is gone without the clock having moved");
         }, TimeSpan.FromSeconds(5));
 
@@ -3859,7 +3882,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-label-0").Should().ContainSingle());
 
         // Q4(b): the row reads out — the page's list is no longer a form.
-        cut.FindAll("#authoring-instruction-items fluent-text-field").Should().BeEmpty(
+        cut.FindAll("#authoring-instruction-items fluent-text-input").Should().BeEmpty(
             "the page edits its materials in the dialog, so no row renders a field");
 
         cut.Find("#authoring-instruction-items-edit-0").Click();

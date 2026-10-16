@@ -28,7 +28,7 @@
                     @if (_student is null)
                     {
                         <div class="spinner-container">
-                            <FluentProgressRing />
+                            <FluentSpinner />
                         </div>
                     }
                     else
@@ -85,7 +85,7 @@
                         @if (_enrollments is null)
                         {
                             <div class="spinner-container">
-                                <FluentProgressRing />
+                                <FluentSpinner />
                             </div>
                         }
                         else if (_enrollments.Length == 0)
@@ -193,7 +193,7 @@
                             @if (_studentGroups is null)
                             {
                                 <div class="spinner-container">
-                                    <FluentProgressRing />
+                                    <FluentSpinner />
                                 </div>
                             }
                             else if (_studentGroups.Length == 0)
@@ -269,7 +269,7 @@
                         </div>
                         @if (_contactHistoryLoading)
                         {
-                            <div class="spinner-container"><FluentProgressRing /></div>
+                            <div class="spinner-container"><FluentSpinner /></div>
                         }
                         else if (!string.IsNullOrEmpty(_contactHistoryError))
                         {

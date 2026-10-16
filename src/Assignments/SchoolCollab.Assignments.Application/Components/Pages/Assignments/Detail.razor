@@ -16,7 +16,7 @@
     <ChildContent>
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (_item is null)
         {
@@ -125,7 +125,7 @@
                     <FluentTab Header="Recipients" IconStart="@FluentIcons.People">
                         @if (_loadingRecipients)
                         {
-                            <FluentProgressRing />
+                            <FluentSpinner />
                         }
                         else if (_recipients is null || _recipients.Length == 0)
                         {
@@ -168,7 +168,7 @@
                     <FluentTab Header="Submissions" IconStart="@FluentIcons.TextBulletList">
                         @if (_loadingSubmissions)
                         {
-                            <FluentProgressRing />
+                            <FluentSpinner />
                         }
                         else if (_selectedSubmission is not null)
                         {
