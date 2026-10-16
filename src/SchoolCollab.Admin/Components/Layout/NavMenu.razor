@@ -7,7 +7,7 @@
 @inject IFeatureFlagService FeatureFlags
 
 <FluentNav Width="250"
-               Title="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
+               aria-label="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
 
     <FluentNavItem Href="/"
                  IconRest="@FluentIcons.Home"
