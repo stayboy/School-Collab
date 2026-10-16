@@ -2,10 +2,15 @@
 @using SchoolCollab.Assignments.Application
 @using SchoolCollab.Students.Application
 
-<Router AppAssembly="typeof(global::Program).Assembly"
-        AdditionalAssemblies="new[] { typeof(SchoolCollab.Settings.Application.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Application.Components._Imports).Assembly, typeof(SchoolCollab.Students.Application.Components._Imports).Assembly }">
-    <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
-    </Found>
-</Router>
+@* v5 requires this cascade at the app root: it supplies LibraryConfiguration to every
+   FluentUI component in the tree (layouts, pages, providers). Wrapping the Router covers both
+   the routed content and Router's NotFoundPage path; the App.razor <HeadOutlet> stays outside. *@
+<FluentProviders>
+    <Router AppAssembly="typeof(global::Program).Assembly"
+            AdditionalAssemblies="new[] { typeof(SchoolCollab.Settings.Application.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Application.Components._Imports).Assembly, typeof(SchoolCollab.Students.Application.Components._Imports).Assembly }">
+        <Found Context="routeData">
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+    </Router>
+</FluentProviders>

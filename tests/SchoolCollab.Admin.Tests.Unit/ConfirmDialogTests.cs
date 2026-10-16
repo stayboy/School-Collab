@@ -31,12 +31,13 @@ public class ConfirmDialogTests : BunitContext
         var task = DialogService.ShowConfirmDialogAsync("Are you sure?", "Remove", "Cancel", "Remove");
 
         // The dialog must render as modal (dark overlay obscures the page behind).
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("modal=\"true\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("type=\"modal\""));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Are you sure"));
 
-        // The ConfirmDialog's Primary (accent) and Secondary (outline) buttons render.
+        // The ConfirmDialog's Primary and Secondary (outline) buttons render.
         cut.WaitForAssertion(() =>
-            cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+            cut.FindAll(".confirm-dialog fluent-button[appearance='primary']").Should().NotBeEmpty(
+                "the ConfirmDialog's Primary button must render"));
         cut.FindAll(".confirm-dialog fluent-button[appearance='outline']").Should().NotBeEmpty(
             "the Cancel (secondary) button must render");
 
@@ -62,11 +63,12 @@ public class ConfirmDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowConfirmDialogAsync("Are you sure?", "Remove", "Cancel", "Remove");
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("modal=\"true\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("type=\"modal\""));
         cut.WaitForAssertion(() =>
-            cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+            cut.FindAll(".confirm-dialog fluent-button[appearance='primary']").Should().NotBeEmpty(
+                "the ConfirmDialog's Primary button must render"));
 
-        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.Find(".confirm-dialog fluent-button[appearance='primary']").Click();
 
         (await task).Should().BeTrue();
     }
@@ -77,16 +79,16 @@ public class ConfirmDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowConfirmDialogAsync("Are you sure?", "Remove", "Cancel", "Remove");
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("modal=\"true\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("type=\"modal\""));
         cut.WaitForAssertion(() => cut.FindAll("fluent-dialog").Any());
 
         // The dialog must render a modal overlay (dark background) AND be
         // dismissible by clicking the overlay (outside the dialog).
         var dialog = cut.FindComponents<FluentDialog>().First();
-        dialog.Instance.Instance.Parameters.Modal.Should().BeTrue(
-            "the dialog must render a modal overlay");
-        dialog.Instance.Instance.Parameters.PreventDismissOnOverlayClick.Should().BeFalse(
-            "clicking the overlay (outside the dialog) must dismiss it");
+        dialog.Instance.Instance.Options.Modal.Should().BeFalse(
+            "v5: type=modal keeps the modal backdrop while staying dismissible");
+        dialog.Instance.Instance.Options.PreventDismissOnEscape.Should().BeFalse(
+            "ESC must dismiss it too (v4's PreventDismissOnOverlayClick = false has no v5 parameter)");
 
         // Dismiss via the Cancel button so the awaited task completes.
         cut.Find(".confirm-dialog fluent-button[appearance='outline']").Click();

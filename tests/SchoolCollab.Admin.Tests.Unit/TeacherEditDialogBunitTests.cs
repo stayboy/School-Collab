@@ -233,7 +233,7 @@ public class TeacherEditDialogBunitTests : BunitContext
         TeacherEditDialog.TeacherFormModel model,
         string title = "New Teacher")
         => DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
-            model, title, DialogSize.Large);
+            model, title, DialogWidth.Large);
 
     private static void Cancel(IRenderedComponent<FluentDialogProvider> cut)
         // The dialog footer's Cancel is the last "Cancel" button (row-level Cancel

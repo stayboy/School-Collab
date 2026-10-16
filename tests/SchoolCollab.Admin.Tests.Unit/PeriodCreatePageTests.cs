@@ -101,7 +101,7 @@ public class PeriodCreatePageTests : BunitContext
         cut.FindAll("fluent-button")
             .Any(b => b.TextContent.Contains("Create period")).Should().BeFalse(
             "no Create submit button renders — the editable form is gated on !_parentBlocked");
-        cut.FindAll("fluent-select").Any(s => s.TextContent.Contains("Terms")).Should().BeFalse(
+        cut.FindAll("fluent-dropdown").Any(s => s.TextContent.Contains("Terms")).Should().BeFalse(
             "no Division selector renders — the form fields block is gated on !_parentBlocked");
     }
 }

@@ -23,15 +23,15 @@
 }
 else if (!string.IsNullOrEmpty(_error))
 {
-    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
 }
 else
 {
     <FluentDataGrid Items="_rows.AsQueryable()" TGridItem="FieldRow" Class="policy-grid">
         <TemplateColumn Title="Setting">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="setting-label"
+            <FluentLink Appearance="LinkAppearance.Default" Href="#" Class="setting-label"
                           Title="@($"Edit {context.Def.Label}")"
-                          OnClick="() => EditAsync(context)">@context.Def.Label</FluentAnchor>
+                          OnClick="() => EditAsync(context)">@context.Def.Label</FluentLink>
         </TemplateColumn>
         <TemplateColumn Title="Global settings">
             <span class="global-value">@context.GlobalDisplay</span>
@@ -43,7 +43,7 @@ else
             }
             else
             {
-                <FluentBadge Appearance="Appearance.Lightweight" Class="inherit-badge">Inherit global</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Ghost" Class="inherit-badge">Inherit global</FluentBadge>
             }
         </TemplateColumn>
         <TemplateColumn Title="Actions">
@@ -131,7 +131,7 @@ else
                 row.Def.Key, row.Def.Label, row.Def.Kind, GradeLevelId, _tenantDefault, _gradeOverride);
             var result = await DialogService.ShowShellDialogAsync<AssignmentPolicyFieldEditDialog,
                 AssignmentPolicyFieldEditDialog.EditModel,
-                AssignmentPolicyFieldEditDialog.EditResult>(model, $"Edit {row.Def.Label}", DialogSize.Large);
+                AssignmentPolicyFieldEditDialog.EditResult>(model, $"Edit {row.Def.Label}", DialogWidth.Large);
             if (result is not null)
             {
                 await LoadAsync();

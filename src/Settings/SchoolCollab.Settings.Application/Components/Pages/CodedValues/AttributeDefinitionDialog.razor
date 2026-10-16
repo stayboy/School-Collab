@@ -8,6 +8,7 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -15,33 +16,33 @@
         <ul class="form-list">
             <li class="form-row">
                 <label class="form-label form-label-required" for="def-key">Key *</label>
-                <FluentTextField id="def-key" @bind-Value="Model.Key"
+                <FluentTextInput id="def-key" @bind-Value="Model.Key"
                                  Placeholder="e.g. color"
                                  Required
                                  class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label form-label-required" for="def-displayname">Display Name *</label>
-                <FluentTextField id="def-displayname" @bind-Value="Model.DisplayName"
+                <FluentTextInput id="def-displayname" @bind-Value="Model.DisplayName"
                                  Placeholder="e.g. Color"
                                  class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label form-label-required" for="def-datatype">Data Type *</label>
-                <FluentSelect id="def-datatype" TOption="DataTypeOption"
+                <FluentSelect id="def-datatype" TOption="DataTypeOption" TValue="DataTypeOption"
                               Items="_dataTypes"
                               OptionText="@(dt => dt.Label)"
-                              OptionValue="@(dt => ((int)dt.Value).ToString())"
-                              @bind-SelectedOption="_selectedDataType"
+                              OptionValueToString="@(dt => ((int)dt.Value).ToString())"
+                              @bind-Value="_selectedDataType"
                               class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-sourcecode">Source Code</label>
-                <FluentSelect id="def-sourcecode" TOption="ParentCodedValueOption"
+                <FluentSelect id="def-sourcecode" TOption="ParentCodedValueOption" TValue="ParentCodedValueOption"
                               Items="_parentCodedValues"
                               OptionText="@(cv => cv.Code + " -- " + cv.Name)"
-                              OptionValue="@(cv => cv.Code)"
-                              @bind-SelectedOption="_selectedSourceCode"
+                              OptionValueToString="@(cv => cv.Code)"
+                              @bind-Value="_selectedSourceCode"
                               Placeholder="(none)"
                               class="form-field" />
             </li>
@@ -55,15 +56,15 @@
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-minlen">Min Length</label>
-                <FluentNumberField id="def-minlen" @bind-Value="Model.MinLength" class="form-field" />
+                <FluentNumberInput id="def-minlen" @bind-Value="Model.MinLength" class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-maxlen">Max Length</label>
-                <FluentNumberField id="def-maxlen" @bind-Value="Model.MaxLength" class="form-field" />
+                <FluentNumberInput id="def-maxlen" @bind-Value="Model.MaxLength" class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-regex">Regex Pattern</label>
-                <FluentTextField id="def-regex" @bind-Value="Model.RegexPattern" class="form-field" />
+                <FluentTextInput id="def-regex" @bind-Value="Model.RegexPattern" class="form-field" />
             </li>
         </ul>
 
@@ -73,6 +74,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     protected override string SubmitText => "Save Definition";

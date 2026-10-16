@@ -29,15 +29,19 @@ public class SectionListDialogReorderTests : BunitContext
 
     private static readonly Row[] ThreeRows = [new("Alpha"), new("Beta"), new("Gamma")];
 
-    private static DialogParameters BaseContent() => new()
+    /// <summary>The dialog's inputs, seeded onto the typed <c>[Parameter]</c>s FluentUI 5.x
+    /// spreads <c>DialogOptions.Parameters</c> onto by name (the dialog's key constants are
+    /// <c>nameof(&lt;Parameter&gt;)</c>).</summary>
+    private static void SeedBase(ComponentParameterCollectionBuilder<SectionListDialog<Row>> parameters)
     {
-        { SectionListDialog<Row>.ItemsKey, ThreeRows },
-        { SectionListDialog<Row>.TextSelectorKey, new Func<Row, string?>(r => r.Name) },
-        { SectionListDialog<Row>.EmptyMessageKey, "No items yet." },
-    };
+        parameters.Add(p => p.Items, ThreeRows);
+        parameters.Add(p => p.TextSelector, new Func<Row, string?>(r => r.Name));
+        parameters.Add(p => p.EmptyMessage, "No items yet.");
+    }
 
-    private IRenderedComponent<SectionListDialog<Row>> RenderDialog(DialogParameters content) =>
-        Render<SectionListDialog<Row>>(p => p.Add(x => x.Content, content));
+    private IRenderedComponent<SectionListDialog<Row>> RenderDialog(
+        Action<ComponentParameterCollectionBuilder<SectionListDialog<Row>>> seed) =>
+        Render<SectionListDialog<Row>>(seed);
 
     private static IReadOnlyList<IElement> Buttons(
         IRenderedComponent<SectionListDialog<Row>> cut, string title) =>
@@ -46,12 +50,15 @@ public class SectionListDialogReorderTests : BunitContext
     private static string[] RenderedNames(IRenderedComponent<SectionListDialog<Row>> cut) =>
         [.. cut.FindAll(".section-list-dialog__name").Select(e => e.TextContent)];
 
-    private static DialogParameters ReorderContent(Action<Row> moved)
+    private static void SeedReorder(
+        ComponentParameterCollectionBuilder<SectionListDialog<Row>> parameters,
+        Action<Row> moved,
+        Func<Task>? onChanged = null)
     {
-        var content = BaseContent();
-        content[SectionListDialog<Row>.MoveUpKey] = new Func<Row, Task>(r => { moved(r); return Task.CompletedTask; });
-        content[SectionListDialog<Row>.MoveDownKey] = new Func<Row, Task>(r => { moved(r); return Task.CompletedTask; });
-        return content;
+        SeedBase(parameters);
+        parameters.Add(p => p.MoveUp, new Func<Row, Task>(r => { moved(r); return Task.CompletedTask; }));
+        parameters.Add(p => p.MoveDown, new Func<Row, Task>(r => { moved(r); return Task.CompletedTask; }));
+        if (onChanged is not null) parameters.Add(p => p.OnChanged, onChanged);
     }
 
     // ── AC11 ────────────────────────────────────────────────────────────────
@@ -59,7 +66,7 @@ public class SectionListDialogReorderTests : BunitContext
     [TestMethod]
     public void WithMoveCallbacks_RendersIconOnlyMoveButtonsAtTheStartOfEachRow()
     {
-        var cut = RenderDialog(ReorderContent(_ => { }));
+        var cut = RenderDialog(p => SeedReorder(p, _ => { }));
 
         var orderColumns = cut.FindAll(".section-list-dialog__order");
         orderColumns.Should().HaveCount(3, "each row leads with its reorder controls");
@@ -79,7 +86,7 @@ public class SectionListDialogReorderTests : BunitContext
     public void MoveDown_InvokesTheCallbackWithTheRow_AndSwapsTheRenderedOrder()
     {
         Row? moved = null;
-        var cut = RenderDialog(ReorderContent(r => moved = r));
+        var cut = RenderDialog(p => SeedReorder(p, r => moved = r));
 
         // Row 1 (Alpha) moves down: the callback owns the API call, the dialog
         // swaps the two neighbours so the list reflects the move immediately.
@@ -94,7 +101,7 @@ public class SectionListDialogReorderTests : BunitContext
     public void MoveUp_InvokesTheCallbackWithTheRow_AndSwapsTheRenderedOrder()
     {
         Row? moved = null;
-        var cut = RenderDialog(ReorderContent(r => moved = r));
+        var cut = RenderDialog(p => SeedReorder(p, r => moved = r));
 
         Buttons(cut, "Move up")[2].Click();
 
@@ -105,7 +112,7 @@ public class SectionListDialogReorderTests : BunitContext
     [TestMethod]
     public void MoveButtonsAtTheEnds_AreDisabled()
     {
-        var cut = RenderDialog(ReorderContent(_ => { }));
+        var cut = RenderDialog(p => SeedReorder(p, _ => { }));
 
         Buttons(cut, "Move up")[0].HasAttribute("disabled").Should().BeTrue(
             "the first row cannot move up");
@@ -119,10 +126,8 @@ public class SectionListDialogReorderTests : BunitContext
     public void OnChanged_RunsAfterASuccessfulMove()
     {
         var changed = 0;
-        var content = ReorderContent(_ => { });
-        content[SectionListDialog<Row>.OnChangedKey] = new Func<Task>(() => { changed++; return Task.CompletedTask; });
-
-        var cut = RenderDialog(content);
+        var cut = RenderDialog(p => SeedReorder(p, _ => { },
+            onChanged: () => { changed++; return Task.CompletedTask; }));
         Buttons(cut, "Move down")[0].Click();
 
         changed.Should().Be(1, "the card behind the dialog refreshes to the new order");
@@ -133,7 +138,7 @@ public class SectionListDialogReorderTests : BunitContext
     [TestMethod]
     public void WithoutMoveCallbacks_RendersExactlyAsBefore_NoReorderControls()
     {
-        var cut = RenderDialog(BaseContent());
+        var cut = RenderDialog(SeedBase);
 
         cut.FindAll(".section-list-dialog__order").Should().BeEmpty("no reorder keys — no order column at all");
         Regex.IsMatch(cut.Find(".section-list-dialog").TextContent, @"\d+ of \d+").Should().BeFalse();
@@ -147,7 +152,7 @@ public class SectionListDialogReorderTests : BunitContext
     [TestMethod]
     public void Dialog_ComposesTheSharedReadOnlyShell()
     {
-        var cut = RenderDialog(BaseContent());
+        var cut = RenderDialog(SeedBase);
 
         cut.FindAll(".readonly-dialog").Should().ContainSingle(
             "the View-all's height, its single scroll region and the pinned Close row come from the shared shell");

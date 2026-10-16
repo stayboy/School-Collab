@@ -69,7 +69,7 @@
             </FluentDataGrid>
             @if (Items.Length == 0 && !string.IsNullOrWhiteSpace(EmptyMessage))
             {
-                <FluentMessageBar Intent="MessageIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
             }
             @if (ShowPager)
             {
@@ -80,7 +80,7 @@
 
     @if (!string.IsNullOrEmpty(Error))
     {
-        <FluentMessageBar Intent="MessageIntent.Error" class="entity-grid-error">@Error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" class="entity-grid-error">@Error</FluentMessageBar>
     }
 </div>
 

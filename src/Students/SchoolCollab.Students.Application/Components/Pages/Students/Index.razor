@@ -12,7 +12,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="StudentDto"
@@ -62,12 +62,12 @@
                 <span class="grid-header-wrap" title="Student">Student</span>
             </HeaderCellTitleTemplate>
             <ChildContent>
-                <FluentAnchor Appearance="Appearance.Lightweight"
+                <FluentLink Appearance="LinkAppearance.Subtle"
                               Href="@($"/students/{context.Id}")"
                               Class="student-full-name">
                     <span class="student-full-name__name">@context.FirstName @context.LastName</span>
                     <span class="student-full-name__demographics">(@GetDemographics(context))</span>
-                </FluentAnchor>
+                </FluentLink>
             </ChildContent>
         </TemplateColumn>
         <TemplateColumn TGridItem="StudentDto" Title="Date of Birth">
@@ -76,11 +76,11 @@
         <TemplateColumn TGridItem="StudentDto" Title="Status">
             @if (context.IsDeleted)
             {
-                <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Deleted</FluentBadge>
             }
             else
             {
-                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="StudentDto" Title="Grade (Stream)" Class="student-current-grade-col">
@@ -105,11 +105,11 @@
             <ChildContent>
                 @if (context.GuardianCount is > 0)
                 {
-                    <FluentAnchor Appearance="Appearance.Lightweight"
+                    <FluentLink Appearance="LinkAppearance.Subtle"
                                   Href="@($"/students/guardians?studentId={context.Id}")"
                                   Class="student-guardians-link">
                         @context.GuardianCount guardians
-                    </FluentAnchor>
+                    </FluentLink>
                 }
                 else
                 {
@@ -424,12 +424,10 @@
     private async Task OnDeleteAsync(Guid id, string studentNumber)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete student '{studentNumber}'? This will soft-delete the student.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         if (_items is null) return;
         var previous = _items;
@@ -440,7 +438,6 @@
         {
             await Api.DeleteStudentAsync(id);
             if (_disposed) return;
-            Toast.ShowSuccess($"Student '{studentNumber}' deleted.");
 
             if (_showDeleted)
             {
@@ -448,6 +445,7 @@
                 if (_disposed) return;
                 StateHasChanged();
             }
+            await NotificationService.ShowSuccessToastAsync($"Student '{studentNumber}' deleted.");
         }
         catch (Exception ex)
         {
@@ -462,12 +460,10 @@
     private async Task OnRecoverAsync(Guid id, string studentNumber)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Recover student '{studentNumber}'? This will restore the student to the active list.",
-            "Recover",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Recover");
+        if (!confirmed) return;
 
         try
         {
@@ -491,7 +487,7 @@
     {
         if (_disposed) return;
         var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
-            new StudentTransferModel(studentId), "Transfer student", DialogSize.Medium);
+            new StudentTransferModel(studentId), "Transfer student", DialogWidth.Medium);
         if (result is not { Success: true }) return;
 
         // Reload the current view (respecting the active grade filter, if any).

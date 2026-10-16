@@ -26,26 +26,26 @@
                         <FluentTextField Value="@_item.Code" Disabled="true" Label="Code" class="full-width" />
                     </div>
                     <div class="form-field required-field">
-                        <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width" />
+                        <FluentTextInput @bind-Value="_model.Name" Label="Name *" class="full-width" />
                     </div>
                     <div class="form-field">
-                        <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" class="full-width" />
+                        <FluentTextArea @bind-Value="_model.Description" Label="Description" class="full-width" />
                     </div>
                     <div class="form-field">
-                        <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="narrow-field" />
+                        <FluentNumberInput @bind-Value="_model.DisplayOrder" Label="Display Order" class="narrow-field" />
                     </div>
                 </div>
 
                 @if (!string.IsNullOrEmpty(_error))
                 {
-                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-3">@_error</FluentMessageBar>
                 }
 
                 <div>
-                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                    <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary" Disabled="@_saving">
                         @(_saving ? "Saving…" : "Save")
                     </FluentButton>
-                    <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="ms-2">Cancel</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" @onclick="Cancel" class="ms-2">Cancel</FluentButton>
                 </div>
             </EditForm>
 
@@ -54,7 +54,7 @@
                 <hr class="my-4" />
                 <div class="section-header">
                     <h5 class="section-title">Attribute Definitions</h5>
-                    <FluentButton Appearance="Appearance.Accent" OnClick="OpenAddDefinitionDialog">
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="OpenAddDefinitionDialog">
                         + Add Definition
                     </FluentButton>
                 </div>
@@ -80,14 +80,14 @@
                             @context.SourceCode
                         </TemplateColumn>
                         <TemplateColumn Title="">
-                            <FluentAnchor Href="#" OnClick="@(() => EditDefinitionDialog(context))">Edit</FluentAnchor>
-                            <FluentAnchor Href="#" OnClick="@(() => RemoveDefinitionAsync(context.Key))" class="ms-2">Remove</FluentAnchor>
+                            <FluentLink Href="#" OnClick="@(() => EditDefinitionDialog(context))">Edit</FluentLink>
+                            <FluentLink Href="#" OnClick="@(() => RemoveDefinitionAsync(context.Key))" class="ms-2">Remove</FluentLink>
                         </TemplateColumn>
                     </FluentDataGrid>
                 }
                 else
                 {
-                    <FluentMessageBar Intent="MessageIntent.Info" class="mt-2">No attribute definitions yet. Click "+ Add Definition" to create one.</FluentMessageBar>
+                    <FluentMessageBar Intent="MessageBarIntent.Info" class="mt-2">No attribute definitions yet. Click "+ Add Definition" to create one.</FluentMessageBar>
                 }
             }
 
@@ -105,12 +105,12 @@
                         <TemplateColumn Title="">
                             @if (_editingAttrKey == context.Key)
                             {
-                                <FluentAnchor Href="#" OnClick="CancelAttributeEdit">Cancel</FluentAnchor>
+                                <FluentLink Href="#" OnClick="CancelAttributeEdit">Cancel</FluentLink>
                             }
                             else
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => StartEditAttribute(context))">Edit</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="ms-2">Remove</FluentAnchor>
+                                <FluentLink Href="#" OnClick="@(() => StartEditAttribute(context))">Edit</FluentLink>
+                                <FluentLink Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="ms-2">Remove</FluentLink>
                             }
                         </TemplateColumn>
                     </FluentDataGrid>
@@ -125,8 +125,9 @@
                             @if (editDef?.DataType == AttributeDataType.Boolean)
                             {
                                 <FluentSelect TOption="string"
+                                              TValue="string"
                                               Items="@_boolOptions"
-                                              @bind-SelectedOption="_editAttrValue"
+                                              @bind-Value="_editAttrValue"
                                               OptionText="@(v => v)"
                                               OptionValue="@(v => v)"
                                               class="flex-field"
@@ -134,9 +135,9 @@
                             }
                             else
                             {
-                                <FluentTextField @bind-Value="_editAttrValue" class="flex-field" aria-label="Attribute value" />
+                                <FluentTextInput @bind-Value="_editAttrValue" class="flex-field" aria-label="Attribute value" />
                             }
-                            <FluentButton Appearance="Appearance.Accent" OnClick="SaveAttributeEditAsync" Disabled="@_savingAttr">Save</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SaveAttributeEditAsync" Disabled="@_savingAttr">Save</FluentButton>
                         </div>
                     </div>
                 }
@@ -146,18 +147,20 @@
                     <div class="attr-form-narrow">
                         <div class="attr-row">
                             <FluentSelect TOption="CodedValueAttributeDefinitionDto"
+                                         TValue="CodedValueAttributeDefinitionDto"
                                          Items="@AvailableDefinitions"
-                                         @bind-SelectedOption="_selectedAttrDef"
+                                         @bind-Value="_selectedAttrDef"
                                          OptionText="@(d => $"{d.Key} ({d.DisplayName ?? d.Key}: {FormatDataType(d.DataType)})")"
-                                         OptionValue="@(d => d.Key)"
+                                         OptionValueToString="@(d => d.Key)"
                                          Placeholder="Select attribute…"
                                          class="flex-field"
                                          aria-label="Attribute key" />
                             @if (_selectedAttrDef?.DataType == AttributeDataType.Boolean)
                             {
                                 <FluentSelect TOption="string"
+                                              TValue="string"
                                               Items="@_boolOptions"
-                                              @bind-SelectedOption="_attrValue"
+                                              @bind-Value="_attrValue"
                                               OptionText="@(v => v)"
                                               OptionValue="@(v => v)"
                                               Placeholder="Value"
@@ -166,21 +169,21 @@
                             }
                             else
                             {
-                                <FluentTextField @bind-Value="_attrValue" Placeholder="Value" class="flex-field" aria-label="Attribute value" />
+                                <FluentTextInput @bind-Value="_attrValue" Placeholder="Value" class="flex-field" aria-label="Attribute value" />
                             }
-                            <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" Disabled="@(_selectedAttrDef is null)">Add</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" OnClick="AddAttributeAsync" Disabled="@(_selectedAttrDef is null)">Add</FluentButton>
                         </div>
                     </div>
                 }
                 else if (_parent is not null && AvailableDefinitions.Count == 0)
                 {
-                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-2">
+                    <FluentMessageBar Intent="MessageBarIntent.Success" class="mt-2">
                         All attribute definitions from @_parent.Code have been set.
                     </FluentMessageBar>
                 }
                 else if (_parent is not null)
                 {
-                    <FluentMessageBar Intent="MessageIntent.Info" class="mt-2">
+                    <FluentMessageBar Intent="MessageBarIntent.Info" class="mt-2">
                         No attribute definitions on parent. Define attributes on @_parent.Code first.
                     </FluentMessageBar>
                 }
@@ -188,7 +191,7 @@
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -220,7 +223,7 @@
         var defResult = await DialogService.ShowShellDialogAsync<AttributeDefinitionDialog, AttributeDefinitionFormModel, AttributeDefinitionResult>(
             AttributeDefinitionFormModel.ForCreate(parentValues.Where(p => p.Id != _item.Id).ToArray()),
             title: "Add Attribute Definition",
-            size: DialogSize.Medium);
+            size: DialogWidth.Medium);
 
         if (defResult is not null)
         {
@@ -236,7 +239,7 @@
         var defResult = await DialogService.ShowShellDialogAsync<AttributeDefinitionDialog, AttributeDefinitionFormModel, AttributeDefinitionResult>(
             AttributeDefinitionFormModel.ForEdit(existing, parentValues.Where(p => p.Id != _item.Id).ToArray()),
             title: "Edit Attribute Definition",
-            size: DialogSize.Medium);
+            size: DialogWidth.Medium);
 
         if (defResult is not null)
         {

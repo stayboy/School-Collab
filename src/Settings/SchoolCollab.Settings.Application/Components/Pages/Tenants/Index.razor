@@ -33,7 +33,7 @@
         <span title="A tenant you picked in the header switcher. While a session pin is in force it overrides both your default and the platform default.">
             Pinned this session: @TenantDisplayName(pinnedTenantId)
         </span>
-        <FluentButton Appearance="Appearance.Outline"
+        <FluentButton Appearance="ButtonAppearance.Outline"
                       Title="Release the pin and follow your default — then the platform default — again."
                       OnClick="@FollowPortalDefaultAsync">Follow the portal default</FluentButton>
     </div>
@@ -45,10 +45,10 @@
        actions only) and no forced reload (nothing tenant-scoped changes until the next portal
        load). A failed clear surfaces on the LandingPage error strip, same as MakeDefaultAsync. *@
     <div class="tenants-default-banner">
-        <FluentMessageBar Intent="MessageIntent.Info" AllowDismiss="false">
+        <FluentMessageBar Intent="MessageBarIntent.Info" AllowDismiss="false">
             <span class="tenants-default-banner-body">
                 Your default tenant: @TenantDisplayName(preferredTenantId)
-                <FluentButton Appearance="Appearance.Outline"
+                <FluentButton Appearance="ButtonAppearance.Outline"
                               OnClick="@ClearPreferenceAsync">Clear</FluentButton>
             </span>
         </FluentMessageBar>
@@ -88,7 +88,7 @@
                         HeaderTooltip="The tenant the admin portal opens on when the operator has no personal default. One tenant at a time — everyone shares it.">
             @if (context.IsDefault)
             {
-                <FluentBadge Appearance="Appearance.Accent">Default</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Default</FluentBadge>
             }
             else
             {
@@ -101,7 +101,7 @@
                         HeaderTooltip="The tenant YOU have chosen as your default — set it with the row action 'Set as my default', or from the tenant switcher in the header. It wins over the platform default; release it with Clear.">
             @if (_preference == context.Id)
             {
-                <FluentBadge Appearance="Appearance.Lightweight">Yes</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Ghost">Yes</FluentBadge>
             }
             else
             {

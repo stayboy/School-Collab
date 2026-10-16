@@ -471,8 +471,11 @@ public class GradeLevelDetailPageTests : BunitContext
                 "the badge rides beside the subject NAME");
             nameRow.QuerySelector("fluent-badge")!.TextContent.Trim().Should().Be("2",
                 "the badge carries the COUNT alone — the shared formatter is the tooltip");
-            nameRow.QuerySelector(".item-name-count")!.TextContent.Trim().Should().Be("(2)",
-                "the row reads SubjectText (2)");
+            // v5 wraps the count in the element with newline+indent padding, so the count is
+            // pinned on its whitespace-stripped text.
+            nameRow.QuerySelector(".item-name-count")!.TextContent
+                .Replace(" ", "").Replace("\n", "").Replace("\r", "")
+                .Should().Be("(2)", "the row reads SubjectText (2)");
             nameRow.ParentElement!.QuerySelector(".item-meta")!.TextContent.Should().NotContain("exception",
                 "the count is a badge beside the name, not a meta-line statistic");
         });
@@ -481,14 +484,14 @@ public class GradeLevelDetailPageTests : BunitContext
         // (see the source-wiring test), and the row's own actions are covered by
         // Detail_TopicsCard_Row_HasKebab_WithActions.
 
-        // The crash itself: this used to throw before the dialog ever opened.
-        cut.FindAll("fluent-anchor")
-            .First(a => a.TextContent.Contains("View all subjects", StringComparison.Ordinal))
-            .Click();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topic actions"),
-            TimeSpan.FromSeconds(5));
-        cut.Find(".topic-dialog").TextContent.Should().Contain("2 exceptions",
-            "the subject's exception count renders in the View-all dialog too");
+        // The crash itself: this used to throw before the dialog ever opened. The View-all is a
+        // live hypertext control again (FluentAnchor → FluentLink), so the click must open the
+        // grade topics dialog.
+        var viewAll = cut.FindAll("fluent-link")
+            .First(a => a.TextContent.Contains("View all subjects", StringComparison.Ordinal));
+        viewAll.Click();
+        cut.WaitForAssertion(() => cut.FindAll(".topic-dialog").Should().ContainSingle(
+            "the View-all opens the grade topics dialog without crashing"));
     }
 
     [TestMethod]
@@ -556,14 +559,14 @@ public class GradeLevelDetailPageTests : BunitContext
         // Open the teacher kebab and click Remove.
         cut.Find("fluent-button[title=\"Actions for Jane Doe\"]").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
-        removeItem.Click();
+        removeItem.MenuItemClick();
 
         // The destructive Remove opens a MODAL confirmation dialog.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove teacher 'Jane Doe' from this grade"));
-        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='primary']").Any());
 
         // Confirm → the teacher is unlinked from this grade (stays in the catalog).
-        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.Find(".confirm-dialog fluent-button[appearance='primary']").Click();
         cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
             c.Method == "DELETE" && c.Url == $"/teachers/{teacherId}/grade-levels/{gradeId}"));
     }
@@ -624,7 +627,8 @@ public class GradeLevelDetailPageTests : BunitContext
         // The Subjects card (1st) and Teachers card (2nd) both use the SectionCard
         // default AddTitle="Add"; Students/Streams use distinct titles. So the
         // Teachers card's Add button is the 2nd "Add" button inside a section card.
-        cut.FindAll("fluent-card.section-card-wrapper fluent-button[title=\"Add\"]")[1].Click();
+        // (v5 renders FluentCard as <div class="fluent-card">, so the wrapper is matched by class.)
+        cut.FindAll(".section-card-wrapper fluent-button[title=\"Add\"]")[1].Click();
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain(
             "New Teacher",
@@ -652,9 +656,21 @@ public class GradeLevelDetailPageTests : BunitContext
             .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
 
-        cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
-        var editItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Edit"));
-        editItem.Click();
+        // Scope to the student row's OWN kebab: v5 materialises every kebab's items into the DOM
+        // (closed menus included), so an unscoped FindAll("fluent-menu-item") also matches the
+        // page-level kebab and the notification-policy grid, both of which offer an "Edit".
+        // FluentUI 5.0.1's FluentMenu renders neither Anchor nor Trigger into the markup — the
+        // trigger pairing is made at runtime by Microsoft.FluentUI.Blazor.Components.Menu.Initialize
+        // (it stamps `trigger` onto the fluent-menu element in the browser) — so the row's menu is
+        // located through the ids' documented per-instance suffix, which is the same pairing.
+        var studentKebab = cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]");
+        var kebabMenuId = studentKebab.GetAttribute("id")!.Replace("row-actions-btn-", "row-actions-menu-");
+        studentKebab.Click();
+        var editItem = cut.FindAll("fluent-menu")
+            .Single(m => m.GetAttribute("id") == kebabMenuId)
+            .QuerySelectorAll("fluent-menu-item")
+            .First(i => i.TextContent.Contains("Edit"));
+        editItem.MenuItemClick();
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain(
             "Save Changes",
@@ -799,14 +815,14 @@ public class GradeLevelDetailPageTests : BunitContext
         // Open the student kebab and click Remove.
         cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
-        removeItem.Click();
+        removeItem.MenuItemClick();
 
         // The destructive Remove opens a MODAL confirmation dialog.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove student 'Ada Lovelace'?"));
-        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='primary']").Any());
 
         // Confirm → the whole student record is soft-deleted (not an enrollment-withdraw).
-        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.Find(".confirm-dialog fluent-button[appearance='primary']").Click();
         cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
             c.Method == "DELETE" && c.Url == $"/students/{studentId}"));
     }
@@ -843,7 +859,7 @@ public class GradeLevelDetailPageTests : BunitContext
         // Open the student kebab and click Withdraw.
         cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
         var withdrawItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Withdraw"));
-        withdrawItem.Click();
+        withdrawItem.MenuItemClick();
 
         // The WithdrawEnrollmentDialog opens with the resolved active enrollment.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("This will set the exit date on the current enrollment."));
@@ -907,14 +923,13 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().NotContain("/coded-values/GRSTREAMS/children",
             "the Streams card must never link to the cross-grade coded-values catalogue");
 
-        cut.FindAll("fluent-anchor")
-            .First(a => a.TextContent.Contains("View all streams", StringComparison.Ordinal))
-            .Click();
-
-        cut.WaitForAssertion(() => cut.FindAll(".section-list-dialog").Should().NotBeEmpty());
-        var dialog = cut.Find(".section-list-dialog");
-        dialog.TextContent.Should().Contain("Grade 5A", "the dialog lists this grade's streams");
-        dialog.TextContent.Should().Contain("Grade 5B", "the dialog lists this grade's streams");
+        // The View-all opens the grade-scoped list dialog — never the cross-grade catalogue.
+        // The affordance is a live hypertext control again (FluentAnchor → FluentLink).
+        var viewAll = cut.FindAll("fluent-link")
+            .First(a => a.TextContent.Contains("View all streams", StringComparison.Ordinal));
+        viewAll.Click();
+        cut.WaitForAssertion(() => cut.FindAll(".section-list-dialog").Should().ContainSingle(
+            "the View-all opens the grade-scoped section list dialog"));
     }
 
     [TestMethod]
@@ -936,15 +951,15 @@ public class GradeLevelDetailPageTests : BunitContext
         // Open the stream kebab and click Remove.
         cut.Find("fluent-button[title=\"Actions for Grade 5A\"]").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
-        removeItem.Click();
+        removeItem.MenuItemClick();
 
         // The destructive Remove opens a MODAL confirmation dialog.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Stop offering stream 'Grade 5A' for this grade?"));
-        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='primary']").Any());
 
         // Confirm -> the grade stops OFFERING the stream: the bridge row is deleted
         // and the coded value stays in the catalogue (never disabled, never deleted).
-        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.Find(".confirm-dialog fluent-button[appearance='primary']").Click();
         cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
             c.Method == "DELETE" && c.Url == $"/students/grade-levels/{gradeId}/streams/{assignmentId}"));
         handler.Calls.Should().NotContain(c => c.Url.Contains("/disable"),
@@ -979,9 +994,9 @@ public class GradeLevelDetailPageTests : BunitContext
 
         cut.Find("fluent-button[title=\"Actions for Grade 5A\"]").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
-        removeItem.Click();
+        removeItem.MenuItemClick();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Stop offering stream 'Grade 5A' for this grade?"));
-        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.Find(".confirm-dialog fluent-button[appearance='primary']").Click();
 
         // The card must drop the removed row — proving the page re-rendered with the
         // reloaded (empty) bridge list.
@@ -1078,7 +1093,8 @@ public class GradeLevelDetailPageTests : BunitContext
             "the Subjects card's View-all opens GradeTopicsDialog via the read-only helper");
 
         // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks
-        // (passed via the Content DialogParameters indexer keys).
+        // (passed as named entries under GradeTopicsDialog's key constants, which the
+        // [Parameter]s are matched against by name).
         source.Should().Contain("GradeTopicsDialog.TopicsKey");
         source.Should().Contain("GradeTopicsDialog.UnassignedTopicsKey");
         source.Should().Contain("GradeTopicsDialog.RemoveKey");
@@ -1140,7 +1156,7 @@ public class GradeLevelDetailPageTests : BunitContext
         // The edit handler opens TopicEditDialog through the shell dialog helper.
         source.Should().Contain("ShowShellDialogAsync<", "the topic edit handler uses the shell dialog service");
         source.Should().Contain("TopicEditDialog", "the topic edit handler opens TopicEditDialog");
-        source.Should().Contain("size: DialogSize.Large",
+        source.Should().Contain("size: DialogWidth.Large",
             "the topic edit dialog opens large to fit the inline strands editor");
 
         // Strands stay reachable (moved to the row kebab, not removed).

@@ -2,7 +2,6 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using GradeTopicCurriculumDto = SchoolCollab.Students.Application.Services.GradeTopicCurriculumDto
-@implements IDialogContentComponent<DialogParameters>
 
 @* Full list of topics assigned to a grade, shown from the Topics section card's
    "View all" anchor (grade-detail-modern-ui-plan.md §0.4). The page owns the
@@ -31,6 +30,7 @@
    reorder affordance — there is no drag-and-drop) — which invokes the page's
    MoveUp/MoveDown callbacks with the row, then swaps the two neighbours locally
    so the grid reflects the move at once. *@
+<DialogShellBody>
 <ReadOnlyDialogShell Class="topic-dialog">
     @* The picker and the move error are FIXED above the scroll region, so assigning
        and reordering stay reachable however long the subject list is. The shell wraps
@@ -38,25 +38,26 @@
     <Toolbar>
         <div class="picker-row">
             <FluentSelect TOption="TopicDto"
+                          TValue="TopicDto"
                           Items="UnassignedTopics"
                           OptionText="@(t => t.Name)"
-                          OptionValue="@(t => t.Id.ToString())"
-                          @bind-SelectedOption="_topicToAdd"
+                          OptionValueToString="@(t => t.Id.ToString())"
+                          @bind-Value="_topicToAdd"
                           Placeholder="Add a topic…" />
-            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small"
                           OnClick="ConfirmAssignAsync" Disabled="@(_topicToAdd is null || _adding)">Assign</FluentButton>
         </div>
 
         @if (_moveError is { } moveError)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@moveError</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@moveError</FluentMessageBar>
         }
     </Toolbar>
 
     <ChildContent>
         @if (Topics.Length == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info">No topics assigned to this grade yet.</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Info">No topics assigned to this grade yet.</FluentMessageBar>
         }
         else
         {
@@ -66,7 +67,7 @@
                region. *@
             <FluentDataGrid TGridItem="GradeTopicCurriculumDto"
                             Items="Topics.AsQueryable()"
-                            GenerateHeader="GenerateHeaderOption.Sticky"
+                            GenerateHeader="DataGridGeneratedHeaderType.Sticky"
                             GridTemplateColumns="auto minmax(140px,2fr) 90px 80px 110px 130px"
                             Class="topic-dialog__grid"
                             AriaLabel="Subjects">
@@ -74,13 +75,13 @@
                     <div class="topic-dialog__order">
                         @if (ReorderEnabled)
                         {
-                            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                           IconStart="@FluentIcons.ChevronUp"
                                           Title="Move up"
                                           AriaLabel="@($"Move {context.Name} up")"
                                           Disabled="@(_adding || OrderOf(context) <= 0)"
                                           OnClick="@(() => MoveAsync(OrderOf(context), OrderOf(context) - 1, MoveUp))" />
-                            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                           IconStart="@FluentIcons.ChevronDown"
                                           Title="Move down"
                                           AriaLabel="@($"Move {context.Name} down")"
@@ -99,9 +100,9 @@
                     </div>
                 </TemplateColumn>
                 <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Strands">
-                    <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenStrandsAsync(context))" Title="Strands">
+                    <FluentLink Appearance="LinkAppearance.Default" OnClick="@(() => OpenStrandsAsync(context))" Title="Strands">
                         @context.StrandCount
-                    </FluentAnchor>
+                    </FluentLink>
                 </TemplateColumn>
                 <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Lessons">
                     <span class="topic-dialog__count" title="@context.LessonCount lessons">@context.LessonCount</span>
@@ -109,7 +110,7 @@
                 <TemplateColumn TGridItem="GradeTopicCurriculumDto" Title="Exceptions">
                     @if (ExceptionCount(context.TopicId) is var exceptionCount and > 0)
                     {
-                        <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                        <FluentBadge Appearance="BadgeAppearance.Filled" Title="Enrollment exceptions">
                             @EnrollmentExceptionLabels.FormatCount(exceptionCount)
                         </FluentBadge>
                     }
@@ -125,13 +126,15 @@
         }
     </ChildContent>
     <Footer>
-        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CloseAsync">Close</FluentButton>
     </Footer>
 </ReadOnlyDialogShell>
+</DialogShellBody>
 
 @code {
-    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
-    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    /// <summary>Keys used in <c>DialogOptions.Parameters</c>. Exposed so
+    /// callers set the same keys this dialog binds to — each key MUST match a
+    /// <c>[Parameter]</c> name (FluentUI 5.x spreads the entries).</summary>
     public const string TopicsKey = nameof(Topics);
     public const string UnassignedTopicsKey = nameof(UnassignedTopics);
     public const string OpenStrandsKey = nameof(OpenStrands);
@@ -153,52 +156,45 @@
     /// a count map cannot collide on a repeated topic key.</summary>
     public const string ExceptionCountsByTopicKey = nameof(ExceptionCountsByTopic);
 
-    // Read from Content (the DialogParameters indexer) — FluentUI renders dialog
-    // content via DynamicComponent with only { "Content": <DialogParameters> } and
-    // does NOT spread indexer entries onto separate [Parameter]s. Topics /
-    // UnassignedTopics are mutable (the dialog reassigns them on remove/assign/move),
-    // so they back onto fields initialized from Content in OnInitialized.
+    // Topics / UnassignedTopics are mutable (the dialog reassigns them on
+    // remove/assign/move), so they are field-backed [Parameter]s: Blazor only
+    // re-applies a parameter whose value reference changed, so the local
+    // reassignment survives the next render.
     private GradeTopicCurriculumDto[] _topics = [];
     private TopicDto[] _unassigned = [];
-    private GradeTopicCurriculumDto[] Topics { get => _topics; set => _topics = value; }
-    private TopicDto[] UnassignedTopics { get => _unassigned; set => _unassigned = value; }
 
-    /// <summary>Safely reads a key from <see cref="Content"/> (the DialogParameters
-    /// indexer throws <see cref="KeyNotFoundException"/> for a missing key, so use
-    /// <c>TryGet</c>). Returns default when absent.</summary>
-    private T? Get<T>(string key) => Content is { } c ? c.TryGet<T>(key) : default;
+    /// <summary>The topics assigned to the grade. Required — no default.</summary>
+    [Parameter] public GradeTopicCurriculumDto[] Topics { get => _topics; set => _topics = value; }
 
-    private Func<GradeTopicCurriculumDto, Task>? OpenStrands => Get<Func<GradeTopicCurriculumDto, Task>>(OpenStrandsKey);
-    private Func<GradeTopicCurriculumDto, Task>? OpenTeachers => Get<Func<GradeTopicCurriculumDto, Task>>(OpenTeachersKey);
-    private Func<GradeTopicCurriculumDto, Task>? Edit => Get<Func<GradeTopicCurriculumDto, Task>>(EditKey);
-    private Func<GradeTopicCurriculumDto, Task>? MoveUp => Get<Func<GradeTopicCurriculumDto, Task>>(MoveUpKey);
-    private Func<GradeTopicCurriculumDto, Task>? MoveDown => Get<Func<GradeTopicCurriculumDto, Task>>(MoveDownKey);
-    private Func<Guid, Task>? Remove => Get<Func<Guid, Task>>(RemoveKey);
+    /// <summary>The grade's topics not yet assigned, offered by the picker.</summary>
+    [Parameter] public TopicDto[] UnassignedTopics { get => _unassigned; set => _unassigned = value; }
+
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenStrands { get; set; }
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenTeachers { get; set; }
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? Edit { get; set; }
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? MoveUp { get; set; }
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? MoveDown { get; set; }
+    [Parameter] public Func<Guid, Task>? Remove { get; set; }
 
     /// <summary>Assigns the picked topic and RETURNS the created bridge assignment id,
     /// so the row appended below carries the real id its reorder buttons PUT against.</summary>
-    private Func<Guid, Task<Guid>>? Assign => Get<Func<Guid, Task<Guid>>>(AssignKey);
-    private Func<Task>? OnChanged => Get<Func<Task>>(OnChangedKey);
-    private Func<Guid, Task>? OpenEnrollmentExceptions => Get<Func<Guid, Task>>(OpenEnrollmentExceptionsKey);
-    private Dictionary<Guid, int>? ExceptionCountsByTopic =>
-        Get<Dictionary<Guid, int>>(ExceptionCountsByTopicKey);
+    [Parameter] public Func<Guid, Task<Guid>>? Assign { get; set; }
+    [Parameter] public Func<Task>? OnChanged { get; set; }
+    [Parameter] public Func<Guid, Task>? OpenEnrollmentExceptions { get; set; }
+    [Parameter] public Dictionary<Guid, int>? ExceptionCountsByTopic { get; set; }
 
     /// <summary>Reorder controls render only when BOTH move callbacks arrived —
     /// a caller that wires just one has no coherent move semantics.</summary>
     private bool ReorderEnabled => MoveUp is not null && MoveDown is not null;
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    /// <summary>The hosting dialog instance provided by the dialog host as a
+    /// cascading parameter. Nullable so unit tests that render the component
+    /// without a host do not NRE.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
 
     private TopicDto? _topicToAdd;
     private bool _adding;
     private string? _moveError;
-
-    protected override void OnInitialized()
-    {
-        _topics = Get<GradeTopicCurriculumDto[]>(TopicsKey) ?? [];
-        _unassigned = Get<TopicDto[]>(UnassignedTopicsKey) ?? [];
-    }
 
     /// <summary>The row's 0-based position in the grid's own list — the order the
     /// curriculum read returned, i.e. the bridge <c>DisplayOrder</c>.</summary>
@@ -349,5 +345,5 @@
         }
     }
 
-    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    private Task CloseAsync() => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
 }

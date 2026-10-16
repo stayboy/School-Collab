@@ -18,6 +18,29 @@ for the full rationale (async-load pitfalls, double-fire diagnostics).
 
 ---
 
+## 0. FluentUI v5 status (Round A, 2026-10-15)
+
+The list components were re-based in `Microsoft.FluentUI.AspNetCore.Components` 5.0.1. The wrappers in
+this repo are already migrated; if you write **raw** `FluentSelect`/`FluentCombobox`/`FluentAutocomplete`
+markup or tests, use the v5 API:
+
+| v4 | v5 |
+|---|---|
+| `SelectedOption` / `SelectedOptionChanged` | `Value` / `ValueChanged` (`@bind-Value`) |
+| `SelectedOptions` / `SelectedOptionsChanged` | `SelectedItems` / `SelectedItemsChanged` (still exists) |
+| no `TValue` | `TValue` is **required** (`FluentSelect<TValue>`) |
+| `OptionValue` (string lambda) | `OptionValueToString` (HTML `option value` attribute) |
+| `OptionComparer` | `OptionSelectedComparer` (the old name still compiles but is silently ignored) |
+| `<FluentOption>` | `<FluentOptionString>` for string-valued lists (`FluentOption<TValue>` is generic) |
+| DOM `<fluent-select>` / `<fluent-combobox>` | DOM `<fluent-dropdown type="dropdown\|combobox">` + `<fluent-listbox>` |
+| `ComboboxAutocomplete.List` | removed (no v5 replacement) |
+
+Two consequences that bite:
+- **CSS and tests must target `fluent-dropdown`** — 5.0.1 ships no `fluent-select`/`fluent-combobox` rules, so
+  selectors and `Find("fluent-select")` calls silently stop matching (the repo's were renamed in Round A).
+- **`current-value` is no longer rendered** by the select; to assert the resolved selection, find the option
+  element carrying the `selected` attribute (`FindAll("fluent-option")` + `HasAttribute("selected")`).
+
 ## 1. Pick the right wrapper — don't hand-roll a raw `FluentSelect`
 
 | Situation | Use | Notes |
@@ -70,11 +93,21 @@ remove and misses the shared `FieldWidth` sizing contract.
 Set the strongly-typed `Width` parameter (`FieldWidth.W1`–`W9`) on the
 wrappers instead of inline `Style="width: …"`. `FieldWidth.W9` is the
 "fill the FormRow input cell" value (`width:100%; min-width:0; flex:1 1 0`)
-and is the default choice for fields inside a `<FormRow>`. The wrappers emit
-an inline style on the underlying `FluentSelect` so the width wins over their
-scoped CSS — see `FieldWidth.cs` for why this is inline-style, not a CSS
-class. Keep pixel values in sync with the `w-1`…`w-9` classes in
-`src/SchoolCollab.Admin/wwwroot/css/app.css`.
+and is the default choice for fields inside a `<FormRow>`. The wrappers pass
+that inline style to `FluentSelect.Style`, which **v5 puts on the
+`fluent-field` host** — it renders as
+`<fluent-field class="…" style="width:80px"><fluent-dropdown slot="input">`,
+and the control carries no style of its own. The control is sized from that
+host by the global rule
+`fluent-field > fluent-dropdown { width: inherit; }` in
+`src/SchoolCollab.Admin.Shared/wwwroot/app.css` (owner pin Q28(a), 2026-10-16)
+— remove either half and the ladder sizes only the invisible wrapper; see
+`FieldWidth.cs` for why the width is inline-style, not a CSS class. Two v5
+gotchas: a `.razor.css` rule aimed at the control must name `fluent-dropdown`
+(+ `<fluent-listbox>` for its list), and the control's own shadow CSS can still
+clamp a step — `fluent-dropdown`'s inner `.control` carries `min-width: 160px`,
+so W1/W2 currently render at 160px on the select. Keep pixel values in sync
+with the `w-1`…`w-9` classes in `src/SchoolCollab.Admin/wwwroot/css/app.css`.
 
 ## 4. Refresh & lookups
 
@@ -90,15 +123,15 @@ class. Keep pixel values in sync with the `w-1`…`w-9` classes in
   do not bypass `CodedValueDropdown`'s load-key contract with a hand-rolled
   async `FluentSelect`.
 - **Double-fire on async reload:** a cleared/missing option can fire a spurious
-  `SelectedOptionChanged(null)`. `CodedValueDropdown` guards this with
-  `ComputeLoadKey`/`ResolveSelection`; `DropdownComponent` settles after one
+  `ValueChanged(null)` (v4 spelling: `SelectedOptionChanged(null)`). `CodedValueDropdown` guards this
+  with `ComputeLoadKey`/`ResolveSelection`; `DropdownComponent` settles after one
   clear because it has no async load window. Don't add async loading to
   `DropdownComponent` without porting those guards (see
   `StreamDropdownDoubleFireDiagnosticTests`).
 - **A never-selectable action entry needs a `@key` epoch.** When a select's option list carries an
   entry that must not become the selection — a decorative separator, or an action row such as the dev
   tenant switcher's "Set as default" — rejecting it is not enough: `FluentSelect` does not re-read an
-  unchanged `SelectedOption` parameter, so restoring the previous selection against an otherwise
+  unchanged `Value` parameter (v4: `SelectedOption`), so restoring the previous selection against an otherwise
   identical list leaves the action entry rendered as selected. Handle the click, restore the selection,
   and bump a `@key` epoch on the select so it re-creates with the restored value (round
   `default-tenant-dropdown-action`, owner 2026-10-14 — the epoch is load-bearing, not cosmetic).

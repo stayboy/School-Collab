@@ -18,6 +18,7 @@
 
 @using SchoolCollab.Admin.Shared.Services
 
+<DialogShellBody>
 <div class="segment-edit-dialog">
     <p class="segment-edit-dialog-hint">
         Editing segment <strong>#@Model.OriginalIndex</strong>. Use the
@@ -29,8 +30,9 @@
 
         <div class="segment-edit-grid">
             <FluentSelect TOption="string"
+                          TValue="string"
                           Items="@_roleOptions"
-                          @bind-SelectedOption="Model.Segment.Role"
+                          @bind-Value="Model.Segment.Role"
                           OptionText="@(r => r)"
                           OptionValue="@(r => r)"
                           Label="Role"
@@ -38,16 +40,17 @@
                           class="seg-role" />
 
             <FluentSelect TOption="SegmentTypeDto"
+                          TValue="SegmentTypeDto"
                           Items="@_segmentTypeOptions"
-                          @bind-SelectedOption="Model.Segment.Type"
+                          @bind-Value="Model.Segment.Type"
                           OptionText="@(t => t.ToString())"
-                          OptionValue="@(t => t.ToString())"
+                          OptionValueToString="@(t => t.ToString())"
                           Label="Type"
                           class="seg-type" />
 
             @if (showFixedFields)
             {
-                <FluentTextField @bind-Value="Model.Segment.FixedText"
+                <FluentTextInput @bind-Value="Model.Segment.FixedText"
                                  Label="@(Model.Segment.Role == "stamp" ? "Stamp text *" : "FixedText *")"
                                  Placeholder="@(Model.Segment.Role == "stamp" ? "STU, STF, ASG, …" : "e.g. STU")"
                                  Required="true"
@@ -55,7 +58,7 @@
             }
             else
             {
-                <FluentTextField @bind-Value="Model.Segment.FixedText"
+                <FluentTextInput @bind-Value="Model.Segment.FixedText"
                                  Label="FixedText (unused)"
                                  Disabled="true"
                                  class="seg-fixedtext" />
@@ -63,12 +66,12 @@
 
             @if (!showFixedFields)
             {
-                <FluentTextField @bind-Value="Model.Segment.Prefix"
+                <FluentTextInput @bind-Value="Model.Segment.Prefix"
                                  Label="@FixedTextLabel()"
                                  Placeholder="@FixedTextPlaceholder()"
                                  Required="@(Model.Segment.Type == SegmentTypeDto.AlphanumericSequence)"
                                  class="seg-prefix" />
-                <FluentNumberField @bind-Value="Model.Segment.MinWidth"
+                <FluentNumberInput @bind-Value="Model.Segment.MinWidth"
                                    Label="MinWidth"
                                    Min="1"
                                    Disabled="@(!showNumericFields)"
@@ -80,30 +83,31 @@
                 <FluentTextField Value="" Label="MinWidth (unused)" Disabled="true" class="seg-minwidth" />
             }
 
-            <FluentTextField @bind-Value="Model.Segment.Suffix"
+            <FluentTextInput @bind-Value="Model.Segment.Suffix"
                              Label="Suffix"
                              Placeholder=""
                              class="seg-suffix" />
 
             <FluentSelect TOption="ResetPeriodDto"
+                          TValue="ResetPeriodDto"
                           Items="@_resetPeriodOptions"
-                          @bind-SelectedOption="Model.Segment.ResetPeriod"
+                          @bind-Value="Model.Segment.ResetPeriod"
                           OptionText="@(r => r.ToString())"
-                          OptionValue="@(r => r.ToString())"
+                          OptionValueToString="@(r => r.ToString())"
                           Label="Reset"
                           Disabled="showFixedFields"
                           class="seg-reset" />
 
             @if (showAlphaFields)
             {
-                <FluentTextField @bind-Value="Model.Segment.UpperLimit"
+                <FluentTextInput @bind-Value="Model.Segment.UpperLimit"
                                  Label="UpperLimit"
                                  Placeholder="Z"
                                  class="seg-upperlimit" />
             }
             else
             {
-                <FluentTextField @bind-Value="Model.Segment.UpperLimit"
+                <FluentTextInput @bind-Value="Model.Segment.UpperLimit"
                                  Label="UpperLimit"
                                  Placeholder="(numeric)"
                                  Disabled="@(!showNumericFields)"
@@ -118,6 +122,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private static readonly string[] _roleOptions = ["(none)", "prefix", "stamp", "suffix"];

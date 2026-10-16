@@ -9,51 +9,65 @@ namespace SchoolCollab.Admin.Shared.Components.Dialogs;
 public static class DialogServiceExtensions
 {
     /// <summary>
-    /// Builds the <see cref="DialogParameters"/> every shell dialog uses:
-    /// the caller's <paramref name="title"/> and a width derived from
-    /// <paramref name="size"/> plus the four constant fields
-    /// (<c>PrimaryAction = null</c>, <c>SecondaryAction = null</c>,
-    /// <c>PreventDismissOnOverlayClick = true</c>) that match what every
-    /// existing call site passes today — the dialogs render their own
-    /// in-body Cancel/Save buttons via <see cref="DialogShellFooter"/> and
-    /// do not want FluentUI's built-in primary/secondary actions.
+    /// Builds the <see cref="DialogOptions"/> every shell dialog uses: the
+    /// caller's <paramref name="title"/> and a width derived from
+    /// <paramref name="size"/>, plus the dismissal posture every existing call
+    /// site had in v4 (<c>Modal = true</c> &rarr; v5 renders
+    /// <c>type="alert"</c>, which blocks a stray backdrop click; and
+    /// <c>PreventDismissOnEscape = true</c>, which blocks ESC) — an accidental
+    /// overlay click or ESC key must never discard in-progress form state.
     ///
-    /// <para>Exposed publicly so callers that need the <see cref="IDialogReference"/>
-    /// directly (or tests) can build the same parameters without going through
-    /// <see cref="ShowShellDialogAsync"/>.</para>
+    /// <para>FluentUI's built-in footer actions are suppressed by leaving both
+    /// labels unset — <see cref="DialogOptionsFooterAction.ToDisplay"/> is
+    /// false for an action without a label, so no OK/Cancel row renders. The
+    /// dialogs own their in-body Cancel/Save row via
+    /// <see cref="DialogShellFooter"/>. (v5's
+    /// <c>FluentDialogInstance.OnInitializedAsync</c> would otherwise fill
+    /// those labels — <see cref="DialogShellBase{TModel, TResult}"/> clears
+    /// them again.)</para>
     ///
-    /// <para><note type="note">FluentUI's <see cref="DialogParameters"/> stores its
-    /// <c>Title</c>/<c>Width</c>/<c>PrimaryAction</c>/<c>SecondaryAction</c>/
-    /// <c>PreventDismissOnOverlayClick</c> as ordinary settable properties (the
-    /// dialog reads <c>Instance.Parameters.&lt;Property&gt;</c>, not the
-    /// dictionary indexer), so this helper sets the properties directly via
-    /// object-initializer syntax — the same pattern every existing call site
-    /// uses.</note></para>
+    /// <para>The header close (X) is switched ON here:
+    /// <see cref="DialogOptionsHeaderAction.Visible"/> defaults to
+    /// <c>false</c>, so without this line the X never renders even once a
+    /// dialog renders <see cref="DialogShellBody"/>. Its click is already wired
+    /// by <c>FluentDialogInstance.OnInitializedAsync</c> (a
+    /// <see cref="DialogShellBase{TModel, TResult}"/> maps it onto
+    /// <c>HandleCancelAsync</c>; any other dialog closes as cancelled), so no
+    /// per-dialog plumbing is added.</para>
+    ///
+    /// <para>The X also gets a <see cref="DialogOptionsHeaderAction.Title"/>:
+    /// <c>FluentDialogBody</c> renders the header action as an icon-only
+    /// <c>FluentButton</c> and the button binds its <c>aria-label</c> attribute
+    /// to <c>Title</c> (there is no built-in localised default). Without a
+    /// title the X renders unnamed — invisible to screen readers and
+    /// unaddressable by an accessible-name selector.</para>
+    ///
+    /// <para>Exposed publicly so callers that need the
+    /// <see cref="DialogOptions"/> directly (or tests) can build the same
+    /// options without going through <see cref="ShowShellDialogAsync"/>.</para>
     /// </summary>
     /// <param name="title">Dialog title.</param>
-    /// <param name="size">One of the four fixed <see cref="DialogSize"/> widths. Default: <see cref="DialogSize.Small"/> (420px).</param>
+    /// <param name="size">One of the four fixed <see cref="DialogWidth"/> widths. Default: <see cref="DialogWidth.Small"/> (420px).</param>
     /// <param name="height">Optional explicit dialog height (CSS value, e.g. <c>"72vh"</c>).
-    /// Forwarded to <see cref="DialogParameters.Height"/> which FluentUI applies as
-    /// <c>--dialog-height</c>, overriding the 480px host default on
-    /// <c>::part(control)</c> (§3.1 of docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md).
-    /// Use this when the dialog body hosts an absolutely-positioned panel (e.g. the shared
-    /// <c>DialogDrawer</c>) that needs more vertical area than the 480px default allows —
-    /// the dialog is a fixed-height box so content height alone does not grow it. Pass
-    /// <c>null</c> (default) to keep the 480px default. The floor for short viewports is
-    /// the caller's responsibility (fold <c>min-height</c> into the value, e.g.
-    /// <c>"max(72vh, 480px)"</c>, since <see cref="DialogParameters"/> has no
-    /// <c>MinHeight</c>).</param>
-    public static DialogParameters BuildShellParameters(string title, DialogSize size = DialogSize.Small, string? height = null)
+    /// Forwarded to <see cref="DialogOptions.Height"/>, which FluentUI 5.x applies to the
+    /// dialog's own <c>::part(dialog)</c> element (v4 set a <c>--dialog-height</c> CSS var;
+    /// v5 writes the style directly). Prefer a definite height on the dialog's
+    /// <em>content root</em> (the <see cref="ReadOnlyDialogShell"/> pattern) — a box height
+    /// alone does not grow the body, so the action row can be left stranded mid-dialog.
+    /// Pass <c>null</c> (default) to keep FluentUI's own default.</param>
+    public static DialogOptions BuildShellOptions(string title, DialogWidth size = DialogWidth.Small, string? height = null)
     {
-        return new DialogParameters
+        var options = new DialogOptions
         {
-            Title = title,
             Width = size.ToCssWidth(),
             Height = height,
-            PrimaryAction = null,
-            SecondaryAction = null,
-            PreventDismissOnOverlayClick = true,
+            Modal = true,
+            PreventDismissOnEscape = true,
         };
+        options.Header.Title = title;
+        options.Header.CloseAction.Visible = true;
+        options.Header.CloseAction.Title = "Close";
+        return options;
     }
 
     /// <summary>
@@ -63,88 +77,77 @@ public static class DialogServiceExtensions
     /// <c>ShowDialogAsync / await dialog.Result / result.Data is XxxDialogResult</c>
     /// pattern duplicated across every call site today.
     /// </summary>
-    /// <typeparam name="TComponent">The derived dialog component type. Must inherit <see cref="DialogShellBase{TModel, TResult}"/> (which implements <c>IDialogContentComponent&lt;DialogShellData&lt;TModel&gt;&gt;</c>).</typeparam>
+    /// <typeparam name="TComponent">The derived dialog component type. Must inherit <see cref="DialogShellBase{TModel, TResult}"/>.</typeparam>
     /// <typeparam name="TModel">The dialog's form-state type.</typeparam>
     /// <typeparam name="TResult">The success-payload type.</typeparam>
-    /// <param name="model">The form model passed into the dialog via <see cref="DialogShellData{TModel}"/>.</param>
+    /// <param name="model">The form model passed into the dialog via <see cref="DialogShellData{TModel}"/>, under the <c>Content</c> parameter.</param>
     /// <param name="title">Dialog title.</param>
-    /// <param name="size">One of the four fixed <see cref="DialogSize"/> widths. Default: <see cref="DialogSize.Small"/> (420px).</param>
+    /// <param name="size">One of the four fixed <see cref="DialogWidth"/> widths. Default: <see cref="DialogWidth.Small"/> (420px).</param>
     /// <returns>The typed result on success; <c>null</c> if cancelled or if the result data is not a <see cref="DialogShellResult{TResult}"/>.</returns>
     public static async Task<TResult?> ShowShellDialogAsync<TComponent, TModel, TResult>(
         this IDialogService dialogService,
         TModel model,
         string title,
-        DialogSize size = DialogSize.Small)
-        where TComponent : ComponentBase, IDialogContentComponent<DialogShellData<TModel>>
+        DialogWidth size = DialogWidth.Small)
+        where TComponent : ComponentBase
         where TModel : class
         where TResult : class
     {
-        var parameters = BuildShellParameters(title, size);
+        var options = BuildShellOptions(title, size);
+        options.Parameters[nameof(DialogShellBase<TModel, TResult>.Content)] = new DialogShellData<TModel>(model);
 
-        var dialog = await dialogService.ShowDialogAsync<TComponent, DialogShellData<TModel>>(
-            new DialogShellData<TModel>(model), parameters);
-        var result = await dialog.Result;
+        var result = await dialogService.ShowDialogAsync(typeof(TComponent), options);
         if (result.Cancelled) return null;
-        return result.Data is DialogShellResult<TResult> r ? r.Value : null;
+        return result.Value is DialogShellResult<TResult> r ? r.Value : null;
     }
 
     /// <summary>
     /// Shows a read-only dialog (a plain <see cref="ComponentBase"/> that is
     /// NOT a <see cref="DialogShellBase{TModel, TResult}"/>) with the same
     /// shell chrome every shell dialog uses (title + width + no
-    /// PrimaryAction/SecondaryAction + PreventDismissOnOverlayClick = true).
+    /// built-in footer actions + blocked overlay/ESC dismissal).
     /// Used to open presentational components that have no model, no OK/Cancel
     /// result, and dismiss themselves via the cascading
-    /// <c>FluentDialog</c> reference (e.g. <c>GuardianContactsDialog</c> in
-    /// the student view's "View all (N) contacts" anchor flow).
+    /// <see cref="IDialogInstance"/> reference (e.g. <c>GuardianContactsDialog</c>
+    /// in the student view's "View all (N) contacts" anchor flow).
     /// </summary>
     /// <typeparam name="TComponent">The dialog content type. Must be a
-    /// <see cref="ComponentBase"/> AND implement
-    /// <c>IDialogContentComponent&lt;DialogParameters&gt;</c>. FluentUI renders the
-    /// content via <c>DynamicComponent</c> with only
-    /// <c>Parameters = { "Content": &lt;DialogParameters&gt; }</c> — it does NOT spread
-    /// <c>DialogParameters</c> indexer entries onto the component's <c>[Parameter]</c>
-    /// properties. So the component must read its inputs from
-    /// <c>Content.TryGet&lt;T&gt;(XxxKey)</c>, not from separate <c>[Parameter]</c>s.
-    /// See <c>documents/solution/dialog-parameter-binding.md</c>.
+    /// <see cref="ComponentBase"/>. FluentUI 5.x spreads
+    /// <paramref name="parameters"/> onto the component's typed
+    /// <c>[Parameter]</c> properties, so every key MUST match a
+    /// <c>[Parameter]</c> property name (the dialogs declare their keys as
+    /// <c>const string XxxKey = nameof(Xxx)</c> to keep that true by
+    /// construction). See <c>documents/solution/dialog-parameter-binding.md</c>.
     /// </typeparam>
-    /// <param name="title">Dialog title (rendered in the FluentDialog header).</param>
-    /// <param name="parameters">Content entries (key/value) added to the
-    /// <see cref="DialogParameters"/> indexer. Pass the dialog's published key
+    /// <param name="title">Dialog title (rendered in the dialog header).</param>
+    /// <param name="parameters">Content entries (name/value) spread onto the
+    /// dialog's <c>[Parameter]</c> properties. Pass the dialog's published key
     /// constants (e.g. <c>StudentEditDialog.StudentIdKey</c>), NOT
     /// <c>nameof</c> — the constant is declared on the dialog, so a property rename
     /// updates the key and all callers follow; a bare <c>nameof</c> in the caller
-    /// would silently stop matching. The dialog reads these back via
-    /// <c>Content.TryGet&lt;T&gt;(key)</c> (FluentUI does NOT spread indexer entries
-    /// to <c>[Parameter]</c>s).</param>
-    /// <param name="size">One of the four fixed <see cref="DialogSize"/>
-    /// widths. Default <see cref="DialogSize.Medium"/> (640px) — read-only
+    /// would silently stop matching.</param>
+    /// <param name="size">One of the four fixed <see cref="DialogWidth"/>
+    /// widths. Default <see cref="DialogWidth.Medium"/> (560px) — read-only
     /// dialogs typically carry more body than a 3-field form.</param>
     /// <param name="height">Optional explicit dialog height (CSS value). See
-    /// <see cref="BuildShellParameters"/> for details.</param>
-    /// <returns>The <see cref="IDialogReference"/>. Callers may ignore it
-    /// (the dialog dismisses itself) or await <c>dialog.Result</c>.</returns>
-    public static async Task<IDialogReference> ShowReadonlyDialogAsync<TComponent>(
+    /// <see cref="BuildShellOptions"/> for details.</param>
+    /// <returns>The dialog's <see cref="DialogResult"/>, i.e. a task that
+    /// completes when the dialog closes. Callers that do not care about the
+    /// result can discard it (the dialog dismisses itself).</returns>
+    public static async Task<DialogResult> ShowReadonlyDialogAsync<TComponent>(
         this IDialogService dialogService,
         string title,
         IDictionary<string, object?> parameters,
-        DialogSize size = DialogSize.Medium,
+        DialogWidth size = DialogWidth.Medium,
         string? height = null)
-        where TComponent : ComponentBase, IDialogContentComponent<DialogParameters>
+        where TComponent : ComponentBase
     {
-        // Build a single DialogParameters carrying both the shell chrome
-        // (Title/Width/Height/etc.) and the content parameter entries. The same instance
-        // is passed as both the TData content (IDialogContentComponent.Content)
-        // and the DialogParameters argument — FluentUI only sets Content from the
-        // TData; indexer entries are NOT spread to [Parameter] properties. The
-        // dialog must read its inputs from Content.TryGet<T>(key), not from
-        // separate [Parameter]s. See dialog-parameter-binding.md.
-        var dialogParams = BuildShellParameters(title, size, height);
+        var options = BuildShellOptions(title, size, height);
         foreach (var kvp in parameters)
         {
-            dialogParams[kvp.Key] = kvp.Value;
+            options.Parameters[kvp.Key] = kvp.Value;
         }
-        return await dialogService.ShowDialogAsync<TComponent, DialogParameters>(dialogParams, dialogParams);
+        return await dialogService.ShowDialogAsync(typeof(TComponent), options);
     }
 
     /// <summary>
@@ -153,9 +156,15 @@ public static class DialogServiceExtensions
     ///
     /// <para>Unlike FluentUI's <c>ShowConfirmationAsync</c>/<c>ShowMessageBoxAsync</c>
     /// (which hide the dark overlay whenever a secondary action is defined), this
-    /// always renders the modal overlay (<c>Modal = true</c>) while still offering
-    /// a Cancel button. <c>PreventDismissOnOverlayClick = false</c> (the default)
-    /// lets the user dismiss by clicking the overlay or pressing ESC.</para>
+    /// always renders the modal overlay while still offering a Cancel button.
+    /// In v5 the overlay-and-dismissibility pair is expressed by the modal
+    /// <em>type</em>: <c>Modal = false</c> renders <c>type="modal"</c>, which
+    /// keeps the native modal backdrop (inert background) <em>and</em> lets the
+    /// user dismiss by clicking the overlay or pressing ESC — exactly the v4
+    /// <c>Modal = true</c> + <c>PreventDismissOnOverlayClick = false</c>
+    /// combination this method used to pass. (<c>Modal = true</c> would render
+    /// <c>type="alert"</c>, whose backdrop click is swallowed — the posture the
+    /// shell-form dialogs want, not a confirmation prompt.)</para>
     /// </summary>
     /// <param name="message">The confirmation message to display.</param>
     /// <param name="primaryText">Label for the confirm (primary) button.</param>
@@ -170,21 +179,17 @@ public static class DialogServiceExtensions
         string secondaryText = "Cancel",
         string? title = null)
     {
-        var dialog = await dialogService.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-            new ConfirmDialogContent(message, primaryText, secondaryText, title),
-            new DialogParameters
-            {
-                Title = title ?? primaryText,
-                // Null the default footer actions so FluentUI does NOT render its
-                // own OK/Cancel buttons — the ConfirmDialog renders its own
-                // Primary (Remove) / Secondary (Cancel) buttons.
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Modal = true,
-                PreventDismissOnOverlayClick = false,
-                Width = "420px",
-            });
-        var result = await dialog.Result;
+        var options = new DialogOptions
+        {
+            Width = "420px",
+            Modal = false,
+            PreventDismissOnEscape = false,
+        };
+        options.Header.Title = title ?? primaryText;
+        options.Parameters[nameof(ConfirmDialog.Content)] =
+            new ConfirmDialogContent(message, primaryText, secondaryText, title);
+
+        var result = await dialogService.ShowDialogAsync(typeof(ConfirmDialog), options);
         return !result.Cancelled;
     }
 }

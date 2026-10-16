@@ -72,6 +72,32 @@ public class RowActionsMenuTests : BunitContext
         cut.Markup.Should().Contain("row-actions-btn", "2+ actions render the kebab trigger");
     }
 
+    /// <summary>Activating a kebab item runs its action — the v5 event path
+    /// (<c>onmenuitemchange</c>), not the v4 DOM <c>click</c>.
+    /// <para>Discriminating: v4 wired the item's <c>OnClick</c> to <c>@onclick</c>; v5 wires it to
+    /// <c>@onmenuitemchange</c> only. A test that drives the item with bUnit's <c>Click()</c> — or
+    /// that only asserts the item rendered — passes whether or not the action still runs, which is
+    /// how the migration slipped through. See <see cref="FluentMenuItemTestEvent"/>.</para></summary>
+    [TestMethod]
+    public void KebabItem_InvokesItsAction()
+    {
+        var invoked = false;
+        var cut = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[]
+            {
+                RowAction.Callback("Edit", () => invoked = true, FluentIcons.Edit),
+                Delete(),
+            })
+            .Add(x => x.UseMenuService, false));
+
+        cut.Find("fluent-button[title='More actions']").Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item").Should().HaveCount(2));
+
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Edit").MenuItemClick();
+
+        invoked.Should().BeTrue("activating a kebab item runs its action through the v5 menu-item event");
+    }
+
     /// <summary>A disabled action that names its reason renders that reason as its accessible
     /// description — on the single-action labeled button AND on the kebab item — so a greyed-out
     /// action explains itself instead of being a dead end (F7).

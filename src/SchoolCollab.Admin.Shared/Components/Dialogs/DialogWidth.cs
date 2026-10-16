@@ -17,7 +17,7 @@ namespace SchoolCollab.Admin.Shared.Components.Dialogs;
 ///   <item><term><see cref="ExtraLarge"/></term><description>960px — wide dialogs. Matches the <c>FluentWizard</c> width already used by the grade-level and assignment wizards, so a wide dialog and a wizard occupy the same footprint.</description></item>
 /// </list>
 /// </remarks>
-public enum DialogSize
+public enum DialogWidth
 {
     /// <summary>420px — small forms (3–4 fields). The default dialog size.</summary>
     Small,
@@ -33,20 +33,20 @@ public enum DialogSize
 }
 
 /// <summary>
-/// <see cref="DialogSize"/> → CSS width string. Used by
-/// <see cref="DialogServiceExtensions.BuildShellParameters"/>; exposed for
-/// tests and any caller that needs the raw <see cref="DialogParameters.Width"/>.
+/// <see cref="DialogWidth"/> → CSS width string. Used by
+/// <see cref="DialogServiceExtensions.BuildShellOptions"/>; exposed for
+/// tests and any caller that needs the raw <see cref="DialogOptions.Width"/>.
 /// </summary>
-public static class DialogSizeExtensions
+public static class DialogWidthExtensions
 {
     /// <summary>Returns the CSS width string for <paramref name="size"/> (e.g. <c>"420px"</c>).</summary>
-    /// <exception cref="System.ArgumentOutOfRangeException"><paramref name="size"/> is not a defined <see cref="DialogSize"/> value.</exception>
-    public static string ToCssWidth(this DialogSize size) => size switch
+    /// <exception cref="System.ArgumentOutOfRangeException"><paramref name="size"/> is not a defined <see cref="DialogWidth"/> value.</exception>
+    public static string ToCssWidth(this DialogWidth size) => size switch
     {
-        DialogSize.Small => "420px",
-        DialogSize.Medium => "560px",
-        DialogSize.Large => "720px",
-        DialogSize.ExtraLarge => "960px",
-        _ => throw new System.ArgumentOutOfRangeException(nameof(size), size, $"Unknown {nameof(DialogSize)} value."),
+        DialogWidth.Small => "420px",
+        DialogWidth.Medium => "560px",
+        DialogWidth.Large => "720px",
+        DialogWidth.ExtraLarge => "960px",
+        _ => throw new System.ArgumentOutOfRangeException(nameof(size), size, $"Unknown {nameof(DialogWidth)} value."),
     };
 }

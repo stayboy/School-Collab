@@ -20,6 +20,7 @@
 @inject StudentsApiClient StudentsApi
 @inject ILogger<StudentPickerDialog> _logger
 
+<DialogShellBody>
 <div class="picker-dialog">
     @if (_view == PickerView.Browse)
     {
@@ -52,7 +53,7 @@
                     </Columns>
                 </EntityGrid>
 
-                <FluentButton Appearance="Appearance.Neutral"
+                <FluentButton Appearance="ButtonAppearance.Default"
                               IconStart="@FluentIcons.PersonAdd"
                               Type="ButtonType.Button"
                               OnClick="OnStartCreate">
@@ -80,6 +81,7 @@
                            OnCancel="OnCancelCreate" />
     }
 </div>
+</DialogShellBody>
 
 @code {
     private enum PickerView { Browse, Create }

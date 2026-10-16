@@ -45,7 +45,7 @@
                                     Current: <strong>@(CurrentGradeName ?? "—")</strong>
                                 </p>
                             </div>
-                            <FluentButton Appearance="Appearance.Outline"
+                            <FluentButton Appearance="ButtonAppearance.Outline"
                                           OnClick='() => Nav.NavigateTo($"/students/{Id}/edit")'>
                                 Edit
                             </FluentButton>
@@ -74,7 +74,7 @@
                            not having the Actions cell. *@
                         <div class="section-header">
                             <h3>Enrollments</h3>
-                            <FluentButton Appearance="Appearance.Accent"
+                            <FluentButton Appearance="ButtonAppearance.Primary"
                                           OnClick="OnEnrollAsync"
                                           Disabled="@(_enrollments is null || _savingEnrollment)"
                                           Title="@(_enrollments is null ? "Loading enrollments…" : "Enroll this student in a grade level for the active period")">
@@ -90,7 +90,7 @@
                         }
                         else if (_enrollments.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info">
+                            <FluentMessageBar Intent="MessageBarIntent.Info">
                                 No enrollments yet — use Enroll to add the first one.
                             </FluentMessageBar>
                         }
@@ -135,11 +135,11 @@
                                     @{ var isActive = IsActiveEnrollment(context); }
                                     @if (isActive)
                                     {
-                                        <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                        <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
                                     }
                                     else
                                     {
-                                        <FluentBadge Appearance="Appearance.Neutral">@context.Status</FluentBadge>
+                                        <FluentBadge Appearance="BadgeAppearance.Filled">@context.Status</FluentBadge>
                                     }
                                 </TemplateColumn>
                                 <TemplateColumn Title="Actions" Class="enrollment-actions-col">
@@ -147,7 +147,7 @@
                                     @if (rowActive)
                                     {
                                         <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
-                                            <FluentButton Appearance="Appearance.Lightweight"
+                                            <FluentButton Appearance="ButtonAppearance.Transparent"
                                                           Size="ButtonSize.Small"
                                                           OnClick="OnTransferAsync"
                                                           Title="Transfer to a different grade level"
@@ -155,7 +155,7 @@
                                                 <FluentIcon Icon="@(Icons.Regular.Size16.ArrowSwap)" />
                                                 Transfer
                                             </FluentButton>
-                                            <FluentButton Appearance="Appearance.Lightweight"
+                                            <FluentButton Appearance="ButtonAppearance.Transparent"
                                                           Size="ButtonSize.Small"
                                                           OnClick="OnWithdrawAsync"
                                                           Title="Set an exit date on this enrollment"
@@ -179,7 +179,7 @@
                         <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
                             <div class="section-header">
                                 <h3>Activity Groups</h3>
-                                <FluentButton Appearance="Appearance.Accent"
+                                <FluentButton Appearance="ButtonAppearance.Primary"
                                               Size="ButtonSize.Small"
                                               IconStart="@FluentIcons.PersonAdd"
                                               OnClick="OnJoinGroupAsync">
@@ -188,7 +188,7 @@
                             </div>
                             @if (!string.IsNullOrEmpty(_activityGroupsError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error">@_activityGroupsError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error">@_activityGroupsError</FluentMessageBar>
                             }
                             @if (_studentGroups is null)
                             {
@@ -198,7 +198,7 @@
                             }
                             else if (_studentGroups.Length == 0)
                             {
-                                <FluentMessageBar Intent="MessageIntent.Info">
+                                <FluentMessageBar Intent="MessageBarIntent.Info">
                                     Not a member of any activity groups yet — use Join Group to add one.
                                 </FluentMessageBar>
                             }
@@ -212,11 +212,11 @@
                                     </TemplateColumn>
                                     <TemplateColumn Title="Category">@(context.Category ?? "—")</TemplateColumn>
                                     <TemplateColumn Title="Status">
-                                        <FluentBadge Appearance="@(context.IsActive ? Appearance.Accent : Appearance.Neutral)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
+                                        <FluentBadge Appearance="@BadgeAppearance.Filled" Color="@(context.IsActive ? BadgeColor.Success : BadgeColor.Subtle)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
                                     </TemplateColumn>
                                     <TemplateColumn Title="Members">@context.ActiveMemberCount</TemplateColumn>
                                     <TemplateColumn Title="Actions" Class="activity-group-actions-col">
-                                        <FluentButton Appearance="Appearance.Lightweight"
+                                        <FluentButton Appearance="ButtonAppearance.Transparent"
                                                       Size="ButtonSize.Small"
                                                       Disabled="@_savingGroupAction"
                                                       OnClick="@(() => OnLeaveGroupAsync(context.Id))">
@@ -241,7 +241,7 @@
                            dialog opens) and is shared with Edit.razor. *@
                         <div class="section-header">
                             <h3>Guardians</h3>
-                            <FluentButton Appearance="Appearance.Accent"
+                            <FluentButton Appearance="ButtonAppearance.Primary"
                                           Size="ButtonSize.Small"
                                           IconStart="@FluentIcons.PersonAdd"
                                           OnClick="OnManageGuardiansAsync">
@@ -250,7 +250,7 @@
                         </div>
                         @if (!string.IsNullOrEmpty(_guardianError))
                         {
-                            <FluentMessageBar Intent="MessageIntent.Error">@_guardianError</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Error">@_guardianError</FluentMessageBar>
                         }
                         <StudentGuardiansList Items="_links.ToArray()"
                                                RelationshipNameLookup="ResolveRelName"
@@ -265,7 +265,7 @@
                            rendered as a compact timeline. Empty state is shown
                            when no changes have been recorded yet. *@
                         <div class="section-header">
-                            <h3>Contact history <FluentBadge Appearance="Appearance.Neutral">@_contactHistory.Length</FluentBadge></h3>
+                            <h3>Contact history <FluentBadge Appearance="BadgeAppearance.Filled">@_contactHistory.Length</FluentBadge></h3>
                         </div>
                         @if (_contactHistoryLoading)
                         {
@@ -273,11 +273,11 @@
                         }
                         else if (!string.IsNullOrEmpty(_contactHistoryError))
                         {
-                            <FluentMessageBar Intent="MessageIntent.Error">@_contactHistoryError</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Error">@_contactHistoryError</FluentMessageBar>
                         }
                         else if (_contactHistory.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info">
+                            <FluentMessageBar Intent="MessageBarIntent.Info">
                                 No contact changes recorded yet.
                             </FluentMessageBar>
                         }
@@ -292,7 +292,7 @@
                                             <span class="muted">· @entry.OccurredAt.ToLocalTime().ToString("g")</span>
                                         </div>
                                         <div class="student-contact-history__change">
-                                            <FluentBadge Appearance="@ChangeKindBadgeAppearance(entry.ChangeKind)">@entry.ChangeKind</FluentBadge>
+                                            <FluentBadge Appearance="@ChangeKindBadgeAppearance(entry.ChangeKind)" Color="@ChangeKindBadgeColor(entry.ChangeKind)">@entry.ChangeKind</FluentBadge>
                                             <span class="student-contact-history__value-line">
                                                 @FormatHistoryValue(entry.PreviousChannel, entry.PreviousValue, entry.PreviousCountryCode)
                                                 @if (entry.ChangeKind == "Updated")
@@ -313,24 +313,24 @@
                     }
                 </ChildContent>
                 <Fallback>
-                    <FluentMessageBar Intent="MessageIntent.Warning">
+                    <FluentMessageBar Intent="MessageBarIntent.Warning">
                         You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
                     </FluentMessageBar>
                 </Fallback>
             </TenantGate>
 
             <div class="action-bar">
-                <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back to Students</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back to Students</FluentButton>
             </div>
 
             @if (!string.IsNullOrEmpty(_error))
             {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
             }
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -436,12 +436,12 @@
         if (_student is null) return;
         if (_student.IsDeleted)
         {
-            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled">Deleted</FluentBadge>
             ;
         }
         else
         {
-            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
             ;
         }
     };
@@ -559,7 +559,7 @@
         // enroll submit UPDATES that row in place (server-side), so "Update
         // enrollment" is the accurate label; without one it's a genuine enroll.
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
-            model, ActiveEnrollment is null ? "Enroll student" : "Update enrollment", DialogSize.Medium);
+            model, ActiveEnrollment is null ? "Enroll student" : "Update enrollment", DialogWidth.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();
@@ -570,7 +570,7 @@
     {
         if (_disposed) return;
         var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
-            new StudentTransferModel(Id), "Transfer student", DialogSize.Medium);
+            new StudentTransferModel(Id), "Transfer student", DialogWidth.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();
@@ -587,7 +587,7 @@
                 GradeName: _gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : null,
                 DefaultExitDate: DateOnly.FromDateTime(DateTime.UtcNow)),
             "Withdraw student",
-            DialogSize.Medium);
+            DialogWidth.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();
@@ -671,7 +671,7 @@
         try
         {
             var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
-                new GuardianPickerModel(Id), "Manage guardians", DialogSize.Large);
+                new GuardianPickerModel(Id), "Manage guardians", DialogWidth.Large);
             if (results is null) return;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;
@@ -768,7 +768,7 @@
                 ContactValue: null,
                 TitleCodedValueId: link.TitleCodedValueId);
             var result = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
-                GuardianAssignmentModel.ForEdit(draft), "Edit guardian", DialogSize.Large);
+                GuardianAssignmentModel.ForEdit(draft), "Edit guardian", DialogWidth.Large);
             if (result is null) return;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;
@@ -846,7 +846,7 @@
         };
 
         await DialogService.ShowReadonlyDialogAsync<GuardianContactsDialog>(
-            titleText, parameters, DialogSize.Medium);
+            titleText, parameters, DialogWidth.Medium);
     }
 
     private async Task LoadGuardiansAsync(CancellationToken ct)
@@ -925,8 +925,16 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private static Appearance ChangeKindBadgeAppearance(string changeKind)
-        => changeKind == "Deleted" ? Appearance.Accent : Appearance.Neutral;
+    // v5 FluentBadge carries colour outside Appearance (MigrationFluentBadge.md):
+    // Accent and Neutral both map to BadgeAppearance.Filled.
+    private static BadgeAppearance ChangeKindBadgeAppearance(string changeKind)
+        => changeKind == "Deleted" ? BadgeAppearance.Filled : BadgeAppearance.Filled;
+
+    // v4 highlighted the Deleted entry (Accent) against the ordinary Updated one
+    // (Neutral); v5 carries that in BadgeColor, so a removal reads as the destructive
+    // event it is and stays distinct from an update.
+    private static BadgeColor ChangeKindBadgeColor(string changeKind)
+        => changeKind == "Deleted" ? BadgeColor.Danger : BadgeColor.Subtle;
 
     private static string FormatHistoryValue(string? channel, string? value, string? countryCode)
     {
@@ -974,7 +982,7 @@
                 JoinGroupsDialog.JoinGroupsResult>(
                 new JoinGroupsDialog.JoinGroupsModel { StudentId = Id },
                 "Join group",
-                DialogSize.Medium);
+                DialogWidth.Medium);
 
             if (result is null || _disposed) return;
             await LoadStudentGroupsAsync(_loadCts?.Token ?? CancellationToken.None);

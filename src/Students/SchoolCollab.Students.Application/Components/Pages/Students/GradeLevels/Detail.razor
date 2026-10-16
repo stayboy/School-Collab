@@ -13,7 +13,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
 @inject VisibleTenantService VisibleTenant
@@ -32,16 +32,16 @@
                     }
                     else if (!string.IsNullOrEmpty(_error))
                     {
-                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                        <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
                         <div class="mt-3">
-                            <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to grade levels</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Default" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to grade levels</FluentButton>
                         </div>
                     }
                     else if (_grade is null)
                     {
-                        <FluentMessageBar Intent="MessageIntent.Warning">Grade level not found.</FluentMessageBar>
+                        <FluentMessageBar Intent="MessageBarIntent.Warning">Grade level not found.</FluentMessageBar>
                         <div class="mt-3">
-                            <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to grade levels</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Default" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to grade levels</FluentButton>
                         </div>
                     }
                     else
@@ -63,7 +63,7 @@
                                 <FieldDisplay Label="Age range">@FormatAgeRange(_grade.MinAge, _grade.MaxAge)</FieldDisplay>
                                 <FieldDisplay Label="Gender">@(_genderName ?? "—")</FieldDisplay>
                                 <FieldDisplay Label="Enrollment">
-                                    <FluentBadge Appearance="@(_grade.IsBlockedFromEnrollment ? Appearance.Neutral : Appearance.Accent)">
+                                    <FluentBadge Appearance="@BadgeAppearance.Filled">
                                         @(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")
                                     </FluentBadge>
                                 </FieldDisplay>
@@ -79,7 +79,7 @@
                             <FluentGridItem xs="12" sm="6" lg="3">
                             @if (!string.IsNullOrEmpty(_topicsError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_topicsError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-2">@_topicsError</FluentMessageBar>
                             }
                             <SectionCard TItem="GradeTopicCurriculumDto" Title="Subjects"
                                          Icon="@FluentIcons.Book"
@@ -111,7 +111,7 @@
                                            no whitespace text node may land between the pieces.
                                            Red (Color.Red) is the danger signal: an exception is the
                                            subject NOT being offered, i.e. a restriction, not a highlight. *@
-                                        <span class="item-name-count">(<FluentBadge Color="Color.Red" Title="@EnrollmentExceptionLabels.FormatCount(exceptionCount)">@exceptionCount</FluentBadge>)</span>
+                                        <span class="item-name-count">(<FluentBadge Color="BadgeColor.Danger" Title="@EnrollmentExceptionLabels.FormatCount(exceptionCount)">@exceptionCount</FluentBadge>)</span>
                                     }
                                 </ItemNameSuffix>
                                 <ItemActions Context="t">
@@ -126,7 +126,7 @@
                             <FluentGridItem xs="12" sm="6" lg="3">
                             @if (!string.IsNullOrEmpty(_teachersError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_teachersError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-2">@_teachersError</FluentMessageBar>
                             }
                             <SectionCard TItem="TeacherWithRoleDto" Title="Teachers"
                                          Icon="@FluentIcons.People"
@@ -151,7 +151,7 @@
                             <FluentGridItem xs="12" sm="6" lg="3">
                             @if (!string.IsNullOrEmpty(_studentsError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_studentsError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-2">@_studentsError</FluentMessageBar>
                             }
                             <SectionCard TItem="StudentDto" Title="Students"
                                          Icon="@FluentIcons.Person"
@@ -182,7 +182,7 @@
                             <FluentGridItem xs="12" sm="6" lg="3">
                             @if (!string.IsNullOrEmpty(_streamsError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_streamsError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-2">@_streamsError</FluentMessageBar>
                             }
                             <SectionCard TItem="GradeStreamDto" Title="Streams"
                                          Icon="@FluentIcons.TextBulletList"
@@ -231,24 +231,24 @@
                     }
                 </ChildContent>
                 <Fallback>
-                    <FluentMessageBar Intent="MessageIntent.Warning">
+                    <FluentMessageBar Intent="MessageBarIntent.Warning">
                         You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
                     </FluentMessageBar>
                 </Fallback>
             </TenantGate>
 
             <div class="action-bar">
-                <FluentButton Appearance="Appearance.Outline" OnClick="Back">Back to Grade Levels</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="Back">Back to Grade Levels</FluentButton>
             </div>
 
             @if (!string.IsNullOrEmpty(_error))
             {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
             }
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -340,7 +340,7 @@
                 TopicName = topic.Name,
             },
             title: $"Enrollment exceptions — {topic.Name}",
-            size: DialogSize.Large);
+            size: DialogWidth.Large);
 
         if (_disposed) return;
         await ReloadExceptionsAsync();
@@ -572,7 +572,7 @@
                 GradeStreamDto>(
                 model,
                 title: $"Add stream · {_grade.Name}",
-                size: DialogSize.Large);
+                size: DialogWidth.Large);
 
             if (created is not null && !_disposed)
             {
@@ -634,7 +634,7 @@
                 // the card behind it so the preview matches the new order on close.
                 { SectionListDialog<GradeStreamDto>.OnChangedKey, new Func<Task>(() => ReloadStreamsAsync()) },
             },
-            DialogSize.Medium);
+            DialogWidth.Medium);
 
     private Task MoveStreamUpAsync(GradeStreamDto stream) => MoveStreamAsync(stream, -1);
 
@@ -679,7 +679,7 @@
             CodedValueDto>(
             CodedValueFormModel.ForOverride(codedValue, codedValue.IsOverridden),
             title: $"Edit stream · {stream.Name}",
-            size: DialogSize.Medium);
+            size: DialogWidth.Medium);
         if (updated is not null && !_disposed)
         {
             await ReloadStreamsAsync();
@@ -719,7 +719,7 @@
             await Api.RemoveGradeStreamAsync(Id, stream.AssignmentId);
             if (_disposed) return;
             await ReloadStreamsAsync();
-            Toast.ShowSuccess($"Stream '{stream.Name}' removed from this grade.");
+            await NotificationService.ShowSuccessToastAsync($"Stream '{stream.Name}' removed from this grade.");
         }
         catch (Exception ex)
         {
@@ -805,7 +805,7 @@
                 TopicDto>(
                 model,
                 $"Add subject · {_grade.Name}",
-                DialogSize.Large);
+                DialogWidth.Large);
             if (created is not null && !_disposed)
             {
                 await ReloadAssignedTopicsAsync();
@@ -891,7 +891,7 @@
             // taller leaves the Close row stranded mid-dialog — the CONTENT ROOT owns
             // the height instead (GradeTopicsDialog.razor.css, §"Dialog height" in
             // .github/skills/dialog-ui/SKILL.md).
-            DialogSize.ExtraLarge);
+            DialogWidth.ExtraLarge);
         if (_disposed) return;
         await ReloadAssignedTopicsAsync();
     }
@@ -930,7 +930,7 @@
             await Api.RemoveTopicAssignmentAsync(assignment.AssignmentId);
             if (_disposed) return;
             await ReloadAssignedTopicsAsync();
-            Toast.ShowSuccess($"Subject '{assignment.Name}' removed from grade.");
+            await NotificationService.ShowSuccessToastAsync($"Subject '{assignment.Name}' removed from grade.");
         }
         catch (Exception ex)
         {
@@ -974,7 +974,7 @@
         // The unified Strands editor shows root strands AND their lessons (lessons
         // are parented strands — strand-lesson-unification-plan.md), so this dialog
         // is the single place to manage a topic's curriculum.
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
+        await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
             $"Strands · {topic.Name}",
             new Dictionary<string, object?>
             {
@@ -983,9 +983,7 @@
                 // The editor mutates strands/lessons; refresh the card once it closes.
                 { TopicStrandsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
             },
-            DialogSize.Medium);
-        if (_disposed) return;
-        await dialog.Result;
+            DialogWidth.Medium);
     }
 
     // Open the topic edit dialog (rename / display order + the topic's strands).
@@ -1002,7 +1000,7 @@
                 Name = topic.Name,
             },
             title: $"Edit topic · {topic.Name}",
-            size: DialogSize.Large);
+            size: DialogWidth.Large);
         if (!_disposed)
         {
             await ReloadAssignedTopicsAsync();
@@ -1064,7 +1062,7 @@
                 ContextGradeLevelName = _grade.Name,
             },
             "New Teacher",
-            DialogSize.Large);
+            DialogWidth.Large);
         if (_disposed || saved is null) return;
         await ReloadTeachersAsync();
     }
@@ -1084,7 +1082,7 @@
                 ContextGradeLevelName = _grade?.Name,
             },
             $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
-            DialogSize.Large);
+            DialogWidth.Large);
         if (_disposed || saved is null) return;
         await ReloadTeachersAsync();
     }
@@ -1096,18 +1094,16 @@
     private async Task OpenTeacherRoleAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherRoleDialog>(
+        await DialogService.ShowReadonlyDialogAsync<TeacherRoleDialog>(
             $"Role · {teacher.FirstName} {teacher.LastName}",
             new Dictionary<string, object?>
             {
                 { TeacherRoleDialog.CurrentRoleIdKey, teacher.TeacherRoleCodedValueId },
                 { TeacherRoleDialog.SaveKey, new Func<Guid?, Task>(roleId => OnRoleChangedAsync(teacher, roleId)) },
             },
-            DialogSize.Small);
-        if (_disposed) return;
+            DialogWidth.Small);
         // The Save callback (OnRoleChangedAsync) already reloads the card; nothing
         // to do here once the dialog closes.
-        await dialog.Result;
     }
 
     /// <summary>
@@ -1140,7 +1136,7 @@
             await Api.UnlinkTeacherGradeLevelAsync(teacher.Id, Id);
             if (_disposed) return;
             await ReloadTeachersAsync();
-            Toast.ShowSuccess($"Teacher '{teacher.FirstName} {teacher.LastName}' removed from grade.");
+            await NotificationService.ShowSuccessToastAsync($"Teacher '{teacher.FirstName} {teacher.LastName}' removed from grade.");
         }
         catch (Exception ex)
         {
@@ -1223,13 +1219,11 @@
         else
             _studentsError = "No active academic year is open — the new student will be created without enrolling them to this grade.";
 
-        var dialog = await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
+        var result = await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
             "New Student",
             parameters,
-            DialogSize.ExtraLarge);
-        if (_disposed) return;
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled || result.Data is not Guid) return;
+            DialogWidth.ExtraLarge);
+        if (_disposed || result.Cancelled || result.Value is not Guid) return;
         await ReloadStudentsAsync();
     }
 
@@ -1263,15 +1257,13 @@
             return;
         }
 
-        var dialog = await DialogService.ShowReadonlyDialogAsync<StudentEditDialog>(
+        var result = await DialogService.ShowReadonlyDialogAsync<StudentEditDialog>(
             $"Edit Student · {student.FirstName} {student.LastName}",
             new Dictionary<string, object?>
             {
                 { StudentEditDialog.StudentIdKey, student.Id },
             },
-            DialogSize.ExtraLarge);
-        if (_disposed) return;
-        var result = await dialog.Result;
+            DialogWidth.ExtraLarge);
         if (_disposed || result.Cancelled) return;
         await ReloadStudentsAsync();
     }
@@ -1287,7 +1279,7 @@
         var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
             new StudentTransferModel(student.Id),
             "Transfer student",
-            DialogSize.Medium);
+            DialogWidth.Medium);
         if (result is { Success: true } && !_disposed)
         {
             await ReloadStudentsAsync();
@@ -1321,7 +1313,7 @@
                     StudentName: $"{student.FirstName} {student.LastName}".Trim(),
                     DefaultExitDate: DateOnly.FromDateTime(DateTime.UtcNow)),
                 "Withdraw student",
-                DialogSize.Medium);
+                DialogWidth.Medium);
             if (result is { Success: true } && !_disposed)
             {
                 await ReloadStudentsAsync();
@@ -1347,7 +1339,7 @@
             await Api.DeleteStudentAsync(student.Id);
             if (_disposed) return;
             await ReloadStudentsAsync();
-            Toast.ShowSuccess($"Student '{student.FirstName} {student.LastName}' removed.");
+            await NotificationService.ShowSuccessToastAsync($"Student '{student.FirstName} {student.LastName}' removed.");
         }
         catch (Exception ex)
         {

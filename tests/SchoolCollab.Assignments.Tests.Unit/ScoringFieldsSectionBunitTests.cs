@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
 using SchoolCollab.Assignments.Contracts;
+using System.Globalization;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
@@ -43,7 +44,7 @@ public class ScoringFieldsSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-number-field",
+            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-text-input",
                 "AutoGraded must show the Pass Score number field");
             cut.Markup.Should().NotContain("Max Attempts",
                 "OD1: the attempt cap is the authoring page's Basics row, not this section's");
@@ -57,7 +58,7 @@ public class ScoringFieldsSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-number-field");
+            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-text-input");
             cut.Markup.Should().NotContain("Max Attempts");
         });
     }
@@ -79,9 +80,14 @@ public class ScoringFieldsSectionBunitTests : BunitContext
             passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox");
             passScore.HasAttribute("disabled").Should().BeTrue(
                 "TeacherGraded disables the control");
-            passScore.TextContent.Trim().Should().Be(ScoringFieldsSection.ScoringInapplicableShortLabel,
-                "owner 2026-10-11: the label is SHORT — the long wording is the cell's tooltip "
-                + "(FluentCheckbox renders its Label as child content)");
+            // v5 renders FluentCheckbox's Label as a <label slot="label"> SIBLING of the control,
+            // inside the fluent-field wrapper the checkbox now renders in — so the label text is
+            // NOT the checkbox element's own child text (probe-verified against 5.0.1).
+            var passScoreLabel = passScore.ParentElement.QuerySelector("label[slot='label']");
+            passScoreLabel.Should().NotBeNull(
+                "v5 puts the checkbox's Label in the fluent-field wrapper's label slot");
+            passScoreLabel!.TextContent.Trim().Should().Be(ScoringFieldsSection.ScoringInapplicableShortLabel,
+                "owner 2026-10-11: the label is SHORT — the long wording is the cell's tooltip");
             cut.Markup.Should().NotContain(ScoringFieldsSection.ScoringInapplicableReason,
                 "the section renders the control only; the long reason lives at the page level");
         });
@@ -107,11 +113,11 @@ public class ScoringFieldsSectionBunitTests : BunitContext
         // The fields bind both ways: the model's values are reflected in
         // the RENDERED inputs (not just left intact on the model), and a
         // user edit writes back into the form model.
-        var fields = cut.FindAll("fluent-number-field");
+        var fields = cut.FindAll("fluent-text-input");
         fields.Should().ContainSingle("AutoGraded renders the Pass Score number field");
 
-        cut.WaitForAssertion(() => fields[0].GetAttribute("value").Should().Be("75",
-            "the Pass Score input must render the model's value (decimal)"));
+        cut.WaitForAssertion(() => fields[0].GetAttribute("value").Should().Be(75m.ToString("N", CultureInfo.CurrentCulture),
+            "v5's FluentNumberInput formats a decimal with {0:N} (two decimal digits), so the old '75' now renders '75.00' — the same 75 the model holds"));
 
         // Interaction write-back: edit the Pass Score and assert the model follows.
         fields[0].Change("88");

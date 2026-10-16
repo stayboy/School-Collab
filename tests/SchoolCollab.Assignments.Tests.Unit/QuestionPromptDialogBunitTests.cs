@@ -57,7 +57,7 @@ public class QuestionPromptDialogBunitTests : BunitContext
     {
         var provider = Render<FluentDialogProvider>();
         var closed = DialogService.ShowShellDialogAsync<QuestionPromptDialog, QuestionPromptModel, QuestionPromptResult>(
-            model, title: "Configure questions", size: DialogSize.Medium);
+            model, title: "Configure questions", size: DialogWidth.Medium);
         provider.WaitForAssertion(() => provider.Find("form"));
         return (provider, closed);
     }
@@ -98,8 +98,10 @@ public class QuestionPromptDialogBunitTests : BunitContext
 
         provider.Find("#cq-prompt-count").GetAttribute("value").Should().Be("7",
             "PB-6(i): the dialog opens from the values the caller seeded");
-        provider.Find("#cq-prompt-count").GetAttribute("min").Should().Be("1",
-            "EC-10: the count's min=1 guard moved here with the field");
+        provider.FindComponents<FluentNumberInput<int>>()
+            .Single(c => c.Instance.Id == "cq-prompt-count")
+            .Instance.Min.Should().Be(1,
+                "EC-10: the count's min=1 guard moved here with the field — v5 applies Min through JS to the inner input, so it lives on the parameter, not as markup");
         provider.Find("#cq-prompt-easy").GetAttribute("value").Should().Be("4");
         provider.Find("#cq-prompt-hard").GetAttribute("value").Should().Be("2");
     }

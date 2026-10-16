@@ -242,7 +242,7 @@ public class GradeLevelEditDialogTests : BunitContext
             GradeLevelEditDialog,
             GradeLevelEditDialog.GradeLevelEditModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Edit grade - Grade 5", DialogSize.Medium);
+            model, "Edit grade - Grade 5", DialogWidth.Medium);
 
         // Wait for the EditForm to mount inside the provider.
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
@@ -283,7 +283,7 @@ public class GradeLevelEditDialogTests : BunitContext
             GradeLevelEditDialog,
             GradeLevelEditDialog.GradeLevelEditModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Edit grade", DialogSize.Medium);
+            model, "Edit grade", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -338,22 +338,24 @@ public class GradeLevelEditDialogTests : BunitContext
             GradeLevelEditDialog,
             GradeLevelEditDialog.GradeLevelEditModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Edit grade", DialogSize.Medium);
+            model, "Edit grade", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
 
         cut.Markup.Should().NotContain("selectedvalues",
             "the dead SelectedValues binding must not leak into the DOM");
-        cut.FindAll("fluent-listbox").Should().BeEmpty(
+        cut.FindAll("div.fluent-listbox").Should().BeEmpty(
+            "v5's FluentListbox renders a div.fluent-listbox host, while the multi-select FluentSelect renders a fluent-dropdown host — so the bare listbox is what this guard is after");
+        cut.FindAll("fluent-dropdown[multiple]").Should().NotBeEmpty(
             "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
 
         model.TopicIds.Should().BeEquivalentTo(new[] { topicA },
             "the loaded assignments are the picker's single source of truth");
         cut.Markup.Should().Contain("Topics (1)");
 
-        var picker = cut.FindComponent<FluentSelect<TopicDto>>().Instance;
+        var picker = cut.FindComponent<FluentSelect<TopicDto, string>>().Instance;
         picker.Multiple.Should().BeTrue();
-        picker.SelectedOptions.Should().ContainSingle(o => o.Id == topicA);
+        picker.SelectedItems.Should().ContainSingle(o => o.Id == topicA);
         cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
             .HasAttribute("selected").Should().BeTrue("the loaded assignment renders as selected");
         cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
@@ -404,12 +406,14 @@ public class GradeLevelEditDialogTests : BunitContext
             GradeLevelEditDialog,
             GradeLevelEditDialog.GradeLevelEditModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Edit grade", DialogSize.Medium);
+            model, "Edit grade", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
 
-        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
-        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+        // v5's FluentListBase<TOption, TValue>: the picker binds TValue="string" (the option's
+        // id text) while SelectedItems stays over TOption, so the second type argument is string.
+        var picker = cut.FindComponent<FluentSelect<TopicDto, string>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedItemsChanged.InvokeAsync(
             picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
 
         model.TopicIds.Should().BeEquivalentTo(new[] { topicB },

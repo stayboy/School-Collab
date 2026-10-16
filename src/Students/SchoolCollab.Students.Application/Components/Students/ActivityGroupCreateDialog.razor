@@ -9,19 +9,20 @@
 @using SchoolCollab.Students.Application.Services
 @inject StudentsApiClient Api
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
         <FormRow Label="Name" For="ag-create-name" Required="true">
-            <FluentTextField @bind-Value="Model.Name"
+            <FluentTextInput @bind-Value="Model.Name"
                              Id="ag-create-name"
                              MaxLength="200"
                              Placeholder="e.g. Chess Club" />
         </FormRow>
 
         <FormRow Label="Category" For="ag-create-category">
-            <FluentTextField @bind-Value="Model.Category"
+            <FluentTextInput @bind-Value="Model.Category"
                              Id="ag-create-category"
                              MaxLength="100"
                              Placeholder="e.g. Games / Sports / Academic" />
@@ -36,12 +37,12 @@
         </FormRow>
 
         <FormRow Label="Enrollment span" For="ag-create-span" Required="true">
-            <FluentSelect TOption="string" @bind-Value="Model.Span" Id="ag-create-span" Style="flex:1; min-width:0">
-                <FluentOption Value="OpenEnded">Open-ended</FluentOption>
-                <FluentOption Value="WholeAcademicYear">Whole academic year</FluentOption>
-                <FluentOption Value="Termly">Termly</FluentOption>
-                <FluentOption Value="Semester">Semester</FluentOption>
-                <FluentOption Value="DateRange">Date range</FluentOption>
+            <FluentSelect TOption="string" TValue="string" @bind-Value="Model.Span" Id="ag-create-span" Style="flex:1; min-width:0">
+                <FluentOptionString Value="OpenEnded">Open-ended</FluentOptionString>
+                <FluentOptionString Value="WholeAcademicYear">Whole academic year</FluentOptionString>
+                <FluentOptionString Value="Termly">Termly</FluentOptionString>
+                <FluentOptionString Value="Semester">Semester</FluentOptionString>
+                <FluentOptionString Value="DateRange">Date range</FluentOptionString>
             </FluentSelect>
         </FormRow>
 
@@ -82,7 +83,7 @@
         </FormRow>
 
         <FormRow Label="Capacity" For="ag-create-capacity">
-            <FluentNumberField @bind-Value="Model.Capacity"
+            <FluentNumberInput @bind-Value="Model.Capacity"
                                Id="ag-create-capacity"
                                Min="1"
                                Placeholder="Unlimited"
@@ -92,6 +93,7 @@
         <DialogShellFooter Error="@Error" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private GradeLevelLandingDto[] _gradeLevels = [];

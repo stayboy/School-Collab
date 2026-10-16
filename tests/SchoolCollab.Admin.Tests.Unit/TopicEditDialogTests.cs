@@ -112,7 +112,7 @@ public class TopicEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicEditDialog, TopicEditDialog.TopicEditModel, TopicDto>(
             new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
-            "Edit topic", DialogSize.Small);
+            "Edit topic", DialogWidth.Small);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         // The dialog loads the topic name/code asynchronously on mount; wait for
@@ -133,7 +133,7 @@ public class TopicEditDialogTests : BunitContext
         editButton.Click();
         // Edit mode renders the editable Name input (id=topic-form-name) and the
         // submit becomes the LOCAL "Update Fields" action (not a server submit).
-        cut.FindAll("fluent-text-field").Should().NotBeEmpty("edit mode renders editable inputs");
+        cut.FindAll("fluent-text-input").Should().NotBeEmpty("edit mode renders editable inputs");
         cut.Markup.Should().Contain("Update Fields", "edit mode shows the local Update Fields action");
         cut.Markup.Should().NotContain("Save", "edit mode replaces the server Save with Update Fields");
 
@@ -141,7 +141,7 @@ public class TopicEditDialogTests : BunitContext
         // changes (the editable inputs disappear).
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();
-        cut.FindAll("fluent-text-field").Should().BeEmpty("cancelling edit mode reverts to display mode");
+        cut.FindAll("fluent-text-input").Should().BeEmpty("cancelling edit mode reverts to display mode");
 
         // Cancel in display mode closes the dialog.
         cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
@@ -162,7 +162,7 @@ public class TopicEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicEditDialog, TopicEditDialog.TopicEditModel, TopicDto>(
             new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
-            "Edit topic", DialogSize.Small);
+            "Edit topic", DialogWidth.Small);
 
         cut.WaitForAssertion(
             () => cut.Markup.Should().Contain("MATH", "the dialog loads the current topic code"),
@@ -210,7 +210,7 @@ public class TopicEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicEditDialog, TopicEditDialog.TopicEditModel, TopicDto>(
             new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
-            "Edit topic", DialogSize.Small);
+            "Edit topic", DialogWidth.Small);
 
         // Wait on the resolved CodedValue code (not just the form) because the
         // async load does two sequential HTTP calls (topic, then CodedValue). Give
@@ -241,7 +241,7 @@ public class TopicEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicEditDialog, TopicEditDialog.TopicEditModel, TopicDto>(
             new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
-            "Edit topic", DialogSize.Large);
+            "Edit topic", DialogWidth.Large);
 
         // The strands section + add affordance render on mount (deterministic),
         // independent of the async strand-load result. The StrandsEditor's own

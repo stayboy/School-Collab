@@ -16,21 +16,21 @@
         <code>@context.StudentNumber</code>
     </TemplateColumn>
     <TemplateColumn Title="Name">
-        <FluentAnchor Appearance="Appearance.Lightweight"
+        <FluentLink Appearance="LinkAppearance.Subtle"
                       Href="@($"/students/{context.Id}")"
                       Class="student-full-name">
             <span class="student-full-name__name">@context.FirstName @context.LastName</span>
             <span class="student-full-name__demographics">(@GetDemographics(context))</span>
-        </FluentAnchor>
+        </FluentLink>
     </TemplateColumn>
     <TemplateColumn Title="Status">
         @if (context.IsDeleted)
         {
-            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled">Deleted</FluentBadge>
         }
         else
         {
-            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
         }
     </TemplateColumn>
 </FluentDataGrid>

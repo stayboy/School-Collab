@@ -280,7 +280,7 @@ call" rule from
 
 ## 5. Layout and interaction
 
-Dialog size stays `DialogSize.Large` (720px) — it already hosts the field
+Dialog size stays `DialogWidth.Large` (720px) — it already hosts the field
 section, the strands editor, and now the period rows. Sections are separated by
 a CSS `border-top` per the `dialog-ui` skill §2, with scoped CSS in
 `TopicEditDialog.razor.css`; no inline `<style>`.
@@ -447,7 +447,7 @@ model changes. The strands block is listed here only so a reviewer can confirm
 it was considered and deliberately excluded, not overlooked.
 
 Also unchanged: `TopicFormFields` (Name / Code / Description / DisplayOrder and
-the display ⇄ edit toggle), the dialog's `DialogSize.Large`, the
+the display ⇄ edit toggle), the dialog's `DialogWidth.Large`, the
 `DialogShellBase` footer behaviour, `TopicCodedValueSaver` / `TopicEditRouter`,
 every period endpoint, and the `GradeTopicAssignment` model.
 

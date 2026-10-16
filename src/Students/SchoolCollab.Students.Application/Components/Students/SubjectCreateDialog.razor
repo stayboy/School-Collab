@@ -19,6 +19,7 @@
 @inject CodedValuesApiClient CodedValuesApi
 @inject StudentsApiClient Api
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -34,7 +35,7 @@
         }
         else
         {
-            <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+            <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-3">
                 No grade level selected. Pick a grade level first on the Subjects landing - the new subject will then be assignable to it from the Grade Levels landing's Edit dialog.
             </FluentMessageBar>
         }
@@ -46,6 +47,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 
 @code {

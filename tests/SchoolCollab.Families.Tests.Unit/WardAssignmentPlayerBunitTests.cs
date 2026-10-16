@@ -421,7 +421,7 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         // The failure surfaces the client's error message and the loading spinner is
         // not left spinning forever (an error bar replaces it rather than a perpetual ring).
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Internal Server Error"));
-        cut.Markup.Should().NotContain("fluent-progress-ring");
+        cut.Markup.Should().NotContain("fluent-spinner", "the ring was renamed to <fluent-spinner> in v5");
     }
 
     [TestMethod]
@@ -451,7 +451,7 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         // page must surface a user-visible error instead of a perpetual spinner.
         var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Assignment>();
         cut.Markup.Should().Contain("Missing assignment or ward identifier");
-        cut.Markup.Should().NotContain("fluent-progress-ring");
+        cut.Markup.Should().NotContain("fluent-spinner", "the ring was renamed to <fluent-spinner> in v5");
     }
 
     [TestMethod]
@@ -464,7 +464,7 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         var cut = RenderAssignment();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Video 1"));
 
-        cut.FindAll("fluent-anchor")
+        cut.FindAll("fluent-link")
             .Any(a => a.GetAttribute("href") == $"/ward/{StudentId}")
             .Should().BeTrue("the player must render a back link targeting the ward list");
     }

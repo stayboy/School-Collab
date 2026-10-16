@@ -91,21 +91,20 @@ public class GradeDialogsBunitTests : BunitContext
     private static TopicDto CatalogTopic(Guid id, string name, string code) =>
         new(id, null, code, name, null, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
 
-    /// <summary>Builds the <see cref="DialogParameters"/> content FluentUI passes
-    /// to <see cref="GradeTopicsDialog"/> (its inputs live in the indexer, not
-    /// separate [Parameter]s).</summary>
-    private static DialogParameters TopicsContent(
+    /// <summary>Seeds the inputs <see cref="GradeTopicsDialog"/> takes as typed
+    /// <c>[Parameter]</c>s (FluentUI 5.x spreads <c>DialogOptions.Parameters</c> onto the
+    /// matching <c>[Parameter]</c>s by name; a bUnit render seeds them directly).</summary>
+    private static void SeedTopics(
+        ComponentParameterCollectionBuilder<GradeTopicsDialog> parameters,
         GradeTopicCurriculumDto[]? topics = null,
         TopicDto[]? unassigned = null,
         Func<Guid, Task>? remove = null,
         Func<Guid, Task<Guid>>? assign = null)
     {
-        var c = new DialogParameters();
-        if (topics is not null) c[GradeTopicsDialog.TopicsKey] = topics;
-        if (unassigned is not null) c[GradeTopicsDialog.UnassignedTopicsKey] = unassigned;
-        if (remove is not null) c[GradeTopicsDialog.RemoveKey] = remove;
-        if (assign is not null) c[GradeTopicsDialog.AssignKey] = assign;
-        return c;
+        if (topics is not null) parameters.Add(p => p.Topics, topics);
+        if (unassigned is not null) parameters.Add(p => p.UnassignedTopics, unassigned);
+        if (remove is not null) parameters.Add(p => p.Remove, remove);
+        if (assign is not null) parameters.Add(p => p.Assign, assign);
     }
 
     // ── GradeTopicsDialog ───────────────────────────────────────────────────
@@ -114,17 +113,17 @@ public class GradeDialogsBunitTests : BunitContext
     public void TopicsDialog_ListsAssignedTopics_WithCounts()
     {
         var topicId = Guid.NewGuid();
-        var cut = Render<GradeTopicsDialog>(p => p.Add(x => x.Content, TopicsContent(topics: new[]
+        var cut = Render<GradeTopicsDialog>(p => SeedTopics(p, topics: new[]
         {
             Topic(topicId, "Mathematics", "MATH", 2, 3),
-        })));
+        }));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics"));
         cut.Markup.Should().Contain("MATH", "topic code renders");
         // The View-all is a FluentDataGrid now: the strand count is the Strands
         // cell's own text (that cell is the link into the strands dialog), and the
         // lesson count keeps its "<n> lessons" tooltip.
-        var strandsCell = cut.FindAll("fluent-anchor[title='Strands']").Should().ContainSingle().Subject;
+        var strandsCell = cut.FindAll("fluent-link[title='Strands']").Should().ContainSingle().Subject;
         strandsCell.TextContent.Trim().Should().Be("2", "the strands column shows the topic's strand count");
         cut.Markup.Should().Contain("3 lessons", "the lessons column keeps its count tooltip");
         cut.Markup.Should().Contain("Close");
@@ -133,7 +132,7 @@ public class GradeDialogsBunitTests : BunitContext
     [TestMethod]
     public void TopicsDialog_EmptyState_WhenNoTopics()
     {
-        var cut = Render<GradeTopicsDialog>(p => p.Add(x => x.Content, TopicsContent(topics: Array.Empty<GradeTopicCurriculumDto>())));
+        var cut = Render<GradeTopicsDialog>(p => SeedTopics(p, topics: Array.Empty<GradeTopicCurriculumDto>()));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("No topics assigned to this grade yet."));
     }
 
@@ -145,22 +144,21 @@ public class GradeDialogsBunitTests : BunitContext
         // The destructive Remove action is gated by a confirmation prompt that
         // renders in a FluentDialogProvider, so host the dialog under one.
         var cut = Render<DialogHost>(p => p
-            .AddChildContent<GradeTopicsDialog>(child => child
-                .Add(x => x.Content, TopicsContent(
-                    topics: new[] { Topic(topicId, "Mathematics", "MATH", 2, 3) },
-                    remove: new System.Func<Guid, Task>(id => { removed.Add(id); return Task.CompletedTask; })))));
+            .AddChildContent<GradeTopicsDialog>(child => SeedTopics(child,
+                topics: new[] { Topic(topicId, "Mathematics", "MATH", 2, 3) },
+                remove: new System.Func<Guid, Task>(id => { removed.Add(id); return Task.CompletedTask; }))));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics"));
         cut.Find("fluent-button[title='Topic actions']").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
-        removeItem.Click();
+        removeItem.MenuItemClick();
 
         // The destructive Remove action opens a MODAL confirmation dialog
         // (dark overlay) with a warning message and Primary/Secondary buttons.
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("modal=\"true\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("type=\"modal\""));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove subject 'Mathematics' from this grade"));
         cut.WaitForAssertion(() =>
-            cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+            cut.FindAll(".confirm-dialog fluent-button[appearance='primary']").Any());
         cut.WaitForAssertion(() =>
             cut.FindAll(".confirm-dialog fluent-button[appearance='outline']").Should().NotBeEmpty(
                 "the Cancel (secondary) button must render"));
@@ -170,10 +168,10 @@ public class GradeDialogsBunitTests : BunitContext
     public void TopicsDialog_AssignButton_Revealed_WithUnassignedCatalog()
     {
         var topicId = Guid.NewGuid();
-        var cut = Render<GradeTopicsDialog>(p => p
-            .Add(x => x.Content, TopicsContent(
+        var cut = Render<GradeTopicsDialog>(p =>
+            SeedTopics(p,
                 topics: Array.Empty<GradeTopicCurriculumDto>(),
-                unassigned: new[] { CatalogTopic(topicId, "Science", "SCI") })));
+                unassigned: new[] { CatalogTopic(topicId, "Science", "SCI") }));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Add a topic…"));
         cut.Markup.Should().Contain("Science", "unassigned catalog feeds the add-topic picker");
@@ -185,14 +183,14 @@ public class GradeDialogsBunitTests : BunitContext
         var topicId = Guid.NewGuid();
         var assignmentId = Guid.NewGuid();
         var assigned = new System.Collections.Generic.List<Guid>();
-        var cut = Render<GradeTopicsDialog>(p => p
-            .Add(x => x.Content, TopicsContent(
+        var cut = Render<GradeTopicsDialog>(p =>
+            SeedTopics(p,
                 topics: Array.Empty<GradeTopicCurriculumDto>(),
                 unassigned: new[] { CatalogTopic(topicId, "Science", "SCI") },
                 // The Assign callback returns the new bridge (assignment) id: the
                 // dialog appends nothing for an empty id, so the stub must return a
                 // real one for the row to reach the assigned list.
-                assign: new System.Func<Guid, Task<Guid>>(id => { assigned.Add(id); return Task.FromResult(assignmentId); }))));
+                assign: new System.Func<Guid, Task<Guid>>(id => { assigned.Add(id); return Task.FromResult(assignmentId); })));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science"));
 

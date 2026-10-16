@@ -22,14 +22,14 @@
         <FieldDisplay Label="Name">@_grade.Name</FieldDisplay>
 
         <FieldDisplay Label="Status" Orientation="FieldDisplayOrientation.Horizontal">
-            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Success">Active</FluentBadge>
         </FieldDisplay>
 
     The value is supplied via ChildContent so it can contain plain text or
     arbitrary markup (badges, anchors, icons, etc).
 
     For a link value, pass <see cref="Href"/> and FieldDisplay renders the
-    value as a hypertext FluentAnchor to that URL (with the anchor's internal
+    value as a hypertext FluentLink to that URL (with the anchor's internal
     left/right control padding stripped so the text left-aligns with the label
     in the vertical layout) — callers don't wrap the value in an anchor
     themselves.
@@ -41,7 +41,7 @@
     <span class="field-display__value">
         @if (Href is { } href)
         {
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@href">@ChildContent</FluentAnchor>
+            <FluentLink Appearance="LinkAppearance.Default" Href="@href">@ChildContent</FluentLink>
         }
         else
         {
@@ -68,7 +68,7 @@
 
     /// <summary>
     /// Optional navigation URL. When set, the value renders as a hypertext
-    /// <c>FluentAnchor</c> link to this URL (with the anchor's internal
+    /// <c>FluentLink</c> link to this URL (with the anchor's internal
     /// left/right control padding removed so the text left-aligns with the
     /// label in the vertical layout).
     /// </summary>

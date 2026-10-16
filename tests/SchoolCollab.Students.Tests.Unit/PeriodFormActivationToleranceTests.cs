@@ -51,8 +51,9 @@ public class PeriodFormActivationToleranceTests : BunitContext
 
         // The FormRow label is rendered as plain text.
         cut.Markup.Should().Contain("Activation tolerance (days)");
-        // The numeric input renders as a FluentUI custom element.
-        cut.FindAll("fluent-number-field").Should().NotBeEmpty();
+        // The numeric input renders as a FluentUI custom element (v5 renders
+        // FluentNumberInput as a fluent-text-input with a numeric inputmode).
+        cut.FindAll("fluent-text-input").Should().NotBeEmpty();
     }
 
     [TestMethod]
@@ -73,6 +74,6 @@ public class PeriodFormActivationToleranceTests : BunitContext
             .Add(x => x.Model, new TestModel { ActivationToleranceDays = null }));
 
         // Blank (null) ⇒ inherit the global default; the input renders empty.
-        cut.FindAll("fluent-number-field").Should().NotBeEmpty();
+        cut.FindAll("fluent-text-input").Should().NotBeEmpty();
     }
 }

@@ -47,27 +47,28 @@ public class GradeTopicsDialogGridTests : BunitContext
         new(EngAssignmentId, EngTopicId, "English", "ENG", 1, 0),
     ];
 
-    private static DialogParameters Content(
+    /// <summary>The dialog's inputs, as a bUnit parameter-seeding action. FluentUI 5.x
+    /// spreads <c>DialogOptions.Parameters</c> onto the matching typed <c>[Parameter]</c>s by
+    /// name (the dialog's key constants are <c>nameof(&lt;Parameter&gt;)</c>), so a render seeds
+    /// those properties directly.</summary>
+    private static Action<ComponentParameterCollectionBuilder<GradeTopicsDialog>> Content(
         Func<GradeTopicCurriculumDto, Task>? moveUp = null,
         Func<GradeTopicCurriculumDto, Task>? moveDown = null,
         Func<GradeTopicCurriculumDto, Task>? edit = null,
-        Func<Guid, Task>? remove = null)
+        Func<Guid, Task>? remove = null) => parameters =>
     {
-        var content = new DialogParameters
-        {
-            { GradeTopicsDialog.TopicsKey, TwoSubjects() },
-            { GradeTopicsDialog.UnassignedTopicsKey, Array.Empty<TopicDto>() },
-            { GradeTopicsDialog.ExceptionCountsByTopicKey, new Dictionary<Guid, int> { [MathTopicId] = 2 } },
-        };
-        if (moveUp is not null) content[GradeTopicsDialog.MoveUpKey] = moveUp;
-        if (moveDown is not null) content[GradeTopicsDialog.MoveDownKey] = moveDown;
-        if (edit is not null) content[GradeTopicsDialog.EditKey] = edit;
-        if (remove is not null) content[GradeTopicsDialog.RemoveKey] = remove;
-        return content;
-    }
+        parameters.Add(p => p.Topics, TwoSubjects());
+        parameters.Add(p => p.UnassignedTopics, Array.Empty<TopicDto>());
+        parameters.Add(p => p.ExceptionCountsByTopic, new Dictionary<Guid, int> { [MathTopicId] = 2 });
+        if (moveUp is not null) parameters.Add(p => p.MoveUp, moveUp);
+        if (moveDown is not null) parameters.Add(p => p.MoveDown, moveDown);
+        if (edit is not null) parameters.Add(p => p.Edit, edit);
+        if (remove is not null) parameters.Add(p => p.Remove, remove);
+    };
 
-    private IRenderedComponent<GradeTopicsDialog> RenderDialog(DialogParameters content) =>
-        Render<GradeTopicsDialog>(p => p.Add(x => x.Content, content));
+    private IRenderedComponent<GradeTopicsDialog> RenderDialog(
+        Action<ComponentParameterCollectionBuilder<GradeTopicsDialog>> seed) =>
+        Render<GradeTopicsDialog>(seed);
 
     /// <summary>The body cell holding each row's <c>.topic-dialog__order</c> controls.
     /// The header row has no <c>td</c>, so every element here belongs to a subject row.</summary>
@@ -123,20 +124,19 @@ public class GradeTopicsDialogGridTests : BunitContext
     /// <paramref name="confirmed"/>. Returns the mock so the test can assert the
     /// prompt came from the SHARED <c>RowActionsMenu</c> path (it is the menu, not
     /// this dialog, that asks the question).</summary>
-    private Mock<IDialogService> RegisterConfirmation(bool confirmed)
+    private Mock<DialogService> RegisterConfirmation(bool confirmed)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(
-            Task.FromResult(confirmed ? DialogResult.Ok<object>(null!) : DialogResult.Cancel()));
-
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(confirmed ? DialogResult.Ok<object>(null!) : DialogResult.Cancel());
         return dialogMock;
     }
+
+    /// <summary>Reads the <see cref="ConfirmDialogContent"/> a mocked confirm open was handed:
+    /// FluentUI 5.x spreads content through <c>DialogOptions.Parameters[“Content”]</c>.</summary>
+    private static ConfirmDialogContent ConfirmContent(DialogOptions options)
+        => (ConfirmDialogContent)options.Parameters[nameof(ConfirmDialog.Content)]!;
 
     // ── AC13 ────────────────────────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ public class GradeTopicsDialogGridTests : BunitContext
         var cut = RenderDialog(Content(edit: t => { edited = t; return Task.CompletedTask; }));
 
         var item = KebabItem(cut, row: 0, "Edit");
-        item.Click();
+        item.MenuItemClick();
 
         edited.Should().NotBeNull();
         edited!.TopicId.Should().Be(MathTopicId, "the kebab Edit reuses the page's existing edit flow");
@@ -189,13 +189,13 @@ public class GradeTopicsDialogGridTests : BunitContext
         Guid? removed = null;
         var cut = RenderDialog(Content(remove: id => { removed = id; return Task.CompletedTask; }));
 
-        KebabItem(cut, row: 0, "Remove").Click();
+        KebabItem(cut, row: 0, "Remove").MenuItemClick();
 
-        confirm.Verify(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.Is<ConfirmDialogContent>(c =>
-                    c.Message.Contains("Remove subject 'Mathematics' from this grade")
-                    && c.PrimaryText == "Remove"),
-                It.IsAny<DialogParameters>()),
+        confirm.Verify(d => d.ShowDialogAsync(
+                typeof(ConfirmDialog),
+                It.Is<DialogOptions>(o =>
+                    ConfirmContent(o).Message.Contains("Remove subject 'Mathematics' from this grade")
+                    && ConfirmContent(o).PrimaryText == "Remove")),
             Times.Once,
             "the destructive Remove is confirmed ONCE by the shared RowActionsMenu, not by dialog-local code");
         removed.Should().Be(MathTopicId, "the kebab Remove is destructive, so it is confirmed first");
@@ -211,11 +211,10 @@ public class GradeTopicsDialogGridTests : BunitContext
         Guid? removed = null;
         var cut = RenderDialog(Content(remove: id => { removed = id; return Task.CompletedTask; }));
 
-        KebabItem(cut, row: 0, "Remove").Click();
+        KebabItem(cut, row: 0, "Remove").MenuItemClick();
 
         removed.Should().BeNull("a cancelled confirmation must not remove the subject");
-        confirm.Verify(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+        confirm.Verify(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
             Times.Once);
         cut.WaitForAssertion(() =>
             cut.FindAll("tr.fluent-data-grid-row").Where(r => r.TextContent.Contains("Mathematics"))
@@ -312,9 +311,9 @@ public class GradeTopicsDialogGridTests : BunitContext
         var end = source.IndexOf("/// <summary>", start, StringComparison.Ordinal);
         var body = source[start..end];
 
-        body.Should().Contain("DialogSize.ExtraLarge",
+        body.Should().Contain("DialogWidth.ExtraLarge",
             "the six-column grid needs ExtraLarge's 960px shell (Medium is 560px)");
-        body.Should().NotContain("DialogSize.Medium",
+        body.Should().NotContain("DialogWidth.Medium",
             "the Subjects grid must not fall back to the 560px Medium shell");
 
         // A pinned `height:` only grows the FIXED dialog box; its body is

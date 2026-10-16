@@ -303,7 +303,7 @@ public class SubjectsLandingPageTests : BunitContext
     /// <summary>
     /// The kebab actions for the single rendered row, read from the page's own
     /// delegate. <c>FluentMenu</c> does NOT materialise its items while closed —
-    /// the same trap as <c>FluentSelect</c>'s option children — so asserting on
+    /// the same trap as <c>FluentSelect</c, /c>'s option children — so asserting on
     /// menu markup would test nothing. <c>LandingPage.RowActions</c> is public.
     /// </summary>
     private static IReadOnlyList<RowAction> SingleRowActions(IRenderedComponent<Subjects> cut)
@@ -371,8 +371,11 @@ public class SubjectsLandingPageTests : BunitContext
         // GradeLevelDetailPageTests covers markup-invisible wiring.
         var source = ReadSubjectsSource();
 
+        // The v5 spelling of a literal option is FluentOptionString, not
+        // FluentOption (which is the option-item type FluentSelect now generates
+        // itself) — the pinned text tracks the guard as written today.
         source.Should().MatchRegex(
-            @"@if \(_activityGroupsEnabled\)\s*\{\s*<FluentOption Value=""ActivityGroup"">",
+            @"@if \(_activityGroupsEnabled\)\s*\{\s*<FluentOptionString Value=""ActivityGroup"">",
             "the Activity Group owner option must be gated on the feature flag");
     }
 

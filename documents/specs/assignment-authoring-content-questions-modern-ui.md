@@ -244,7 +244,7 @@ Composer hero (prompt + Configure + Generate) → question list → Draft previe
 
 | # | Contract |
 |---|---|
-| **PB-1** | New `QuestionPromptDialog.razor` + `.razor.css` + `QuestionPromptModel` / `QuestionPromptResult` (Assignments.Application, siblings of `QuestionEditDialog`), `@inherits DialogShellBase<QuestionPromptModel, QuestionPromptResult>`, **`DialogSize.Medium`**, opened from the composer's Configure (QA-4) and from the draft panel (D20). |
+| **PB-1** | New `QuestionPromptDialog.razor` + `.razor.css` + `QuestionPromptModel` / `QuestionPromptResult` (Assignments.Application, siblings of `QuestionEditDialog`), `@inherits DialogShellBase<QuestionPromptModel, QuestionPromptResult>`, **`DialogWidth.Medium`**, opened from the composer's Configure (QA-4) and from the draft panel (D20). |
 | **PB-2** | **Editable fields:** Number of questions (1–30); Easy / Medium / Hard counts (0–30, the existing three — D16); the **type-mix chips** (shared `Chip`, selectable mode — CH-1). The "all off" state keeps today's meaning (`types = null` → the server's balanced default) and shows the existing helper line. |
 | **PB-3** | **Read-only context block:** `Subject: {TopicName}` (or the disabled reason when none), `Grade level: Grade 1, Grade 2` from `GradeLevel.Level` sorted ascending (`Grade level: Grades 1–4` when contiguous and more than two; `Grade level: —` when the assignment targets no grade), and `Grounding: {file/link names} (N)` when resources exist (D18). The label spelling **matches the narrative line** (PB-4). The block is a preview of what the composition will use — it is never editable here. |
 | **PB-4** | **Composition — normative skeleton (the predicate's source of truth).** A deterministic, line-shaped narrative built from the knobs + context:
@@ -277,7 +277,7 @@ The summary line (QA-3) and this narrative are **two renderings of the same part
 | **QA-8** | **List header** — the **existing string** `N question(s)` + the always-available **Add question** button (`#cq-add-question`, outline + `IconStart="@FluentIcons.Add"`) in every gate state. |
 | **QA-9** | **Rows, not cards** (`#cq-question-list`, `#cq-qrow-{i}`) — a single-line, hairline-separated list: `#N` (muted, tabular) · question text as the **open target** (`#cq-qrow-{i}-open`, a `FluentAnchor Appearance="Hypertext" Href="#" OnClick` — the `SectionCard` item pattern) with a one-line clamp and `title` · trailing `FluentBadge` with `EnumHelper.GetDescription(row.Type)` · a `RowActionsMenu` kebab (`#cq-qrow-{i}-actions`, `UseMenuService="false"`). No accordion, no inline fields (D4). |
 | **QA-10** | **Kebab actions** — **Edit** (opens the dialog, QA-11) and **Remove** (`RowAction.Callback(..., destructive: true)`, so the repo's shared confirmation prompt fires). |
-| **QA-11** | **Editing is a dialog** (D4 / grill 1a). `QuestionEditDialog` is opened with `ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>` at **`DialogSize.Medium` (560px)**, and holds the existing per-type fields **verbatim** — MC option rows with the correct-option radio group and add/remove option, T/F radios, the Short-answer model-answer textarea, and the Type dropdown whose change still runs `QuestionEditorRow.ApplyTypeChange`. The dialog edits a **working copy**; on Save the result is applied to the row, on Cancel nothing changes. Only one dialog at a time; no nested dialogs (`dialog-ui`). |
+| **QA-11** | **Editing is a dialog** (D4 / grill 1a). `QuestionEditDialog` is opened with `ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>` at **`DialogWidth.Medium` (560px)**, and holds the existing per-type fields **verbatim** — MC option rows with the correct-option radio group and add/remove option, T/F radios, the Short-answer model-answer textarea, and the Type dropdown whose change still runs `QuestionEditorRow.ApplyTypeChange`. The dialog edits a **working copy**; on Save the result is applied to the row, on Cancel nothing changes. Only one dialog at a time; no nested dialogs (`dialog-ui`). |
 | **QA-12** | **Row text / kebab Edit / double-click-free**: both the text anchor and the kebab's Edit open the same dialog with that row's values. (The row itself is not a button — a nested button inside a clickable row is invalid.) |
 | **QA-13** | **Add** appends a blank row and opens the dialog for it; Cancel leaves the blank row, which is exactly the state Add produced before this change (the submit gate already rejects it). |
 | **QA-14** | **Pagination retained** (`FluentPaginator`, `AssignmentEditFormModel.QuestionPageSize = 5`) using `GetQuestionPage` / `QuestionPageCount` unchanged. |
@@ -479,7 +479,7 @@ and is delivered as a stack layer on top of R1 if R1's PR is still open.
 | **G7** | Contracts & View parity | Preserve ids, strings, component types; View gets read-only chrome | detail tests gain a dialog/read-only harness |
 | **G8** | Spec home + slicing | `documents/specs/assignment-authoring-content-questions-modern-ui.md`, R1/R2 light | none |
 | **G9** | Row interaction (re-asked) | Single-line rows + kebab; **no accordion** | `QuestionEditorSectionBunitTests` restructured |
-| **G10** | Editing surface (1a) | **Dialog** via `DialogShellBase` / `ShowShellDialogAsync`, `DialogSize.Medium` | modal interrupts list scanning |
+| **G10** | Editing surface (1a) | **Dialog** via `DialogShellBase` / `ShowShellDialogAsync`, `DialogWidth.Medium` | modal interrupts list scanning |
 | **G11** | Kebab visibility (1b) | Always in DOM; revealed on hover **+** `focus-within` | none |
 | **G12** | Type-mix chip (re-asked) | **Extend the shared `Chip`** with an opt-in selectable mode (`<button aria-pressed>`) | `Chip` gains a second rendering mode |
 | **G13** | Rail width | Share row 1's `320px–460px` track | rail 40px wider than first drafted |
@@ -548,7 +548,7 @@ The round doc's `## Pinned decisions` carries the orchestrator's original ration
 - Behaviour contract: `documents/specs/assignment-authoring-compartments.md` (§3 rows 5/6, §4 UX-8, §5 UX-21, §6 UX-12, §12 UX-17/UX-19).
 - Spec/anatomy precedent: `documents/specs/grade-detail-modern-ui-plan.md`.
 - In-page modernization precedent: `documents/solution/student-view-page-modernization.md`.
-- Dialog pattern: `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogShellBase.cs`, `DialogServiceExtensions.ShowShellDialogAsync`, `DialogSize`.
+- Dialog pattern: `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogShellBase.cs`, `DialogServiceExtensions.ShowShellDialogAsync`, `DialogWidth`.
 - Shared pill: `src/SchoolCollab.Admin.Shared/Components/Chip.razor`.
 - Rules: `.github/copilot/rules/blazor-components.md` ("Blazor CSS isolation and styling"), `.github/copilot/rules/section-card.md`.
 - Skills: `blazor-css-isolation`, `dialog-ui`, `fluentui-dialog-shell`, `input-width-scale`, `flex-row-input-alignment`, `fluentui-icons-in-school-collab`, `test-dialog-opener-components`.

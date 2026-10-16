@@ -182,8 +182,10 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
         generateButton.HasAttribute("disabled").Should().BeTrue(
             "EC-3: the Generate button must be disabled when the gate is closed");
-        cut.Markup.Should().Contain(QuestionGenerationGate.DisabledTooltip,
-            "the DisabledTooltip text is rendered for the user");
+        cut.FindComponents<FluentButton>()
+            .Count(c => c.Instance.Tooltip == QuestionGenerationGate.DisabledTooltip)
+            .Should().Be(1,
+                "the DisabledTooltip rides the trigger's Tooltip parameter — v5 registers tooltips out-of-band through FluentTooltipProvider, so the text never reaches the button's markup");
 
         // Click is a no-op when disabled — the button is a fluent web component,
         // and bUnit click on a disabled button does not dispatch the event. Even
@@ -663,8 +665,8 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         var area = cut.FindComponent<FluentTextArea>();
         area.Instance.Disabled.Should().BeTrue(
             "when the tenant locks the org prompt, the guidance textarea is disabled");
-        cut.Markup.Should().Contain("Your organization has locked the AI prompt.",
-            "the locked tooltip explains why the guidance is disabled");
+        area.Instance.Tooltip.Should().Be("Your organization has locked the AI prompt.",
+            "the locked tooltip explains why the guidance is disabled — v5 registers it out-of-band (FluentTooltipProvider), so the Tooltip parameter carries it, not the markup");
     }
 
     [TestMethod]

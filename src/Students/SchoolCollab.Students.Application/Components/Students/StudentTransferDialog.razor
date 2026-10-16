@@ -10,6 +10,7 @@
 @inject StudentsApiClient Api
 @inject ILogger<StudentTransferDialog> Logger
 
+<DialogShellBody>
 <div class="transfer-dialog">
     @if (_loading)
     {
@@ -17,17 +18,17 @@
     }
     else if (_error is not null)
     {
-        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
     }
     else if (_enrollment is null)
     {
-        <FluentMessageBar Intent="MessageIntent.Warning">
+        <FluentMessageBar Intent="MessageBarIntent.Warning">
             This student has no active enrollment to transfer.
         </FluentMessageBar>
     }
     else if (_gradeOptions.Count == 0)
     {
-        <FluentMessageBar Intent="MessageIntent.Warning">
+        <FluentMessageBar Intent="MessageBarIntent.Warning">
             There are no other grade levels to transfer @(_currentGradeName) students to.
         </FluentMessageBar>
     }
@@ -39,7 +40,7 @@
 
                 @if (DirectionHint is { } hint)
                 {
-                    <FluentMessageBar Intent="MessageIntent.Info">@hint</FluentMessageBar>
+                    <FluentMessageBar Intent="MessageBarIntent.Info">@hint</FluentMessageBar>
                 }
 
                 <DropdownComponent TItem="GradeLevelDto" TValue="Guid?"
@@ -54,14 +55,15 @@
                    (GET /students/grade-levels/{id}/streams) — not an attribute
                    filter, which the new add flow no longer feeds. *@
                 <FluentSelect TOption="string"
+                              TValue="string"
                               @bind-Value="_selectedStreamText"
                               @bind-Value:after="OnStreamSelectionChanged"
                               Label="Transfer to stream"
                               Style="flex:1; min-width:0">
-                    <FluentOption Value="">No stream</FluentOption>
+                    <FluentOptionString Value="">No stream</FluentOptionString>
                     @foreach (var stream in _streamOptions)
                     {
-                        <FluentOption Value="@stream.StreamCodedValueId.ToString()">@stream.Name</FluentOption>
+                        <FluentOptionString Value="@stream.StreamCodedValueId.ToString()">@stream.Name</FluentOptionString>
                     }
                 </FluentSelect>
 
@@ -76,6 +78,7 @@
         </EditForm>
     }
 </div>
+</DialogShellBody>
 
 @code {
     private sealed class TransferModel

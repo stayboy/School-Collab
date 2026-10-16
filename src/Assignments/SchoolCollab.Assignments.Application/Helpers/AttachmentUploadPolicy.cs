@@ -28,9 +28,10 @@ public static class AttachmentUploadPolicy
     /// <summary>Maximum number of files in a single selection batch.
     /// Matches the configured <c>FluentInputFile.MaximumFileCount</c> and is
     /// the source of truth for the user-facing count-cap message — the
-    /// FluentUI <c>OnFileCountExceeded</c> callback parameter carries the
-    /// attempted file count, not this cap, so the message must reference
-    /// this constant rather than the callback parameter.</summary>
+    /// FluentUI error callback reports the attempted file count (the
+    /// <c>FileCount</c> of <c>FluentInputFileErrorEventArgs</c>; the 4.14.2
+    /// <c>OnFileCountExceeded</c> parameter before it), not this cap, so the
+    /// message must reference this constant rather than the callback's value.</summary>
     public const int MaximumFileCount = 10;
 
     /// <summary>Allowed file extensions (case-insensitive). Matches the

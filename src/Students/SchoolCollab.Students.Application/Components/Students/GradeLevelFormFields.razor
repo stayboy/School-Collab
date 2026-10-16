@@ -50,7 +50,7 @@
         </FormRow>
 
         <FormRow Label="Name" For="grade-level-name" Required="true">
-            <FluentTextField @bind-Value="Model.Name"
+            <FluentTextInput @bind-Value="Model.Name"
                              Id="grade-level-name"
                              Required="true"
                              Placeholder="Display name for this grade"
@@ -58,7 +58,7 @@
         </FormRow>
 
         <FormRow Label="Level" For="grade-level-level">
-            <FluentNumberField @bind-Value="Model.Level"
+            <FluentNumberInput @bind-Value="Model.Level"
                                Id="grade-level-level"
                                ReadOnly="true"
                                Style="width: 100%;"
@@ -66,7 +66,7 @@
         </FormRow>
 
         <FormRow Label="Display Order" For="grade-level-display-order">
-            <FluentNumberField @bind-Value="Model.DisplayOrder"
+            <FluentNumberInput @bind-Value="Model.DisplayOrder"
                                Id="grade-level-display-order"
                                ReadOnly="true"
                                Style="width: 100%;"
@@ -82,7 +82,7 @@
            is on (default off); the domain (GradeLevel.Create/Update) also
            rejects MinAge > MaxAge. *@
         <FormRow Label="Age range" AlignTop>
-            <FluentNumberField @bind-Value="Model.MinAge"
+            <FluentNumberInput @bind-Value="Model.MinAge"
                                Id="grade-level-min-age"
                                Min="0"
                                Max="150"
@@ -90,7 +90,7 @@
                                Style="flex:1; min-width:0"
                                Title="Minimum age (inclusive) for enrolling in this grade. Leave blank for no minimum." />
             <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">–</span>
-            <FluentNumberField @bind-Value="Model.MaxAge"
+            <FluentNumberInput @bind-Value="Model.MaxAge"
                                Id="grade-level-max-age"
                                Min="0"
                                Max="150"
@@ -117,19 +117,19 @@
 
     @if (!string.IsNullOrEmpty(ErrorMessage))
     {
-        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@ErrorMessage</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@ErrorMessage</FluentMessageBar>
     }
 
     <div class="form-actions">
         <FluentButton Type="ButtonType.Submit"
-                      Appearance="Appearance.Accent"
+                      Appearance="ButtonAppearance.Primary"
                       Disabled="@Submitting"
                       IconStart="@FluentIcons.Save">
             @(Submitting ? (SubmittingLabel ?? "Saving…") : (SubmitLabel ?? "Save"))
         </FluentButton>
         @if (ShowCancel)
         {
-            <FluentButton Appearance="Appearance.Outline"
+            <FluentButton Appearance="ButtonAppearance.Outline"
                           OnClick="OnCancel"
                           Disabled="@Submitting"
                           class="ms-2">

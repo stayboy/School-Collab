@@ -23,7 +23,7 @@
 }
 
 .segment-edit-grid ::deep fluent-text-field,
-.segment-edit-grid ::deep fluent-select {
+.segment-edit-grid ::deep fluent-dropdown {
     min-width: 0;
     width: 100%;
 }

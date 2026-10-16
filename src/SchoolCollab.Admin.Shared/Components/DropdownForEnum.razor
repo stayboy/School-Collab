@@ -30,11 +30,12 @@
      wrapper. *@
 
 <FluentSelect TOption="TEnum"
+              TValue="TEnum"
               Items="@_items"
-              SelectedOption="@_selectedOption"
-              SelectedOptionChanged="@OnSelectedOptionChanged"
+              Value="@_selectedOption"
+              ValueChanged="@OnSelectedOptionChanged"
               OptionText="@(e => e.ToString())"
-              OptionValue="@(e => e.ToString())"
+              OptionValue="@(e => e)"
               Label="@Label"
               Placeholder="@(Placeholder ?? "Select…")"
               Disabled="@Disabled"

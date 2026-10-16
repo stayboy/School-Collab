@@ -41,22 +41,22 @@
          design-system RCL (and the mobile head that references it) build for a device TFM.
          Versions resolved from the mobile head's restored obj/project.assets.json —
          WebView.Maui 10.0.110 unifies the Components family at 10.0.8. -->
-    <PackageVersion Include="Microsoft.AspNetCore.Components" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components" Version="10.0.12" />
     <PackageVersion Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.8" />
-    <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.12" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.8" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
     <PackageVersion Include="Microsoft.OpenApi" Version="2.9.0" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.1.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
     <!-- L1 (round mobile-host-skeleton): the mobile head loads its embedded appsettings.json
          through AddJsonStream — MAUI brings Microsoft.Extensions.Configuration itself but not
          the JSON provider, so the provider is referenced explicitly. -->
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
     <PackageVersion Include="HtmlAgilityPack" Version="1.11.72" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
     <!-- L3 (round mobile-credential): the auth-path tests in SchoolCollab.Mobile.Tests.Unit build
          real containers (ServiceCollection/BuildServiceProvider). The version is aligned to the
          Microsoft.Extensions.* family and to the graph that actually SHIPS — the mobile head's own
@@ -65,30 +65,30 @@
          repo's 29 restored projects (only the Blazor 10.0.8 closure sits lower), and the sibling
          ...Abstractions entry below is 10.0.11 here too. A 10.0.8 pin would be a downgrade against
          the head the moment a head-side project referenced this package directly. -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12" />
     <!-- L1 (round mobile-host-skeleton): the MAUI template's `builder.Logging.AddDebug()`
          provider; MAUI brings Logging but not the Debug provider. -->
-    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
     <!-- L3 (round mobile-credential): `AddHttpClient` for the mobile head's client-side
          registration path. The version is the one the restored graph ALREADY resolves —
          Microsoft.FluentUI.AspNetCore.Components 4.14.2 declares
-         `Microsoft.Extensions.Http >= 10.0.8` (verified in
-         src/SchoolCollab.Admin.Shared/obj/project.assets.json), so declaring 10.0.8 adds a
-         first-class dependency without moving a single resolved version. -->
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
+         `Microsoft.Extensions.Http >= 10.0.8`, hence 10.0.8. Updated (round fluentui-v5):
+         FluentUI 5.0.1's net10.0 target declares `Microsoft.Extensions.Http 10.0.12`, so the
+         pin moved to 10.0.12, again matching what the graph already resolves. -->
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.6.0" />
   </ItemGroup>
   <ItemGroup Label="Fluent UI">
-    <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.2" />
-    <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.2" />
+    <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="5.0.1" />
+    <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="5.0.1" />
   </ItemGroup>
   <ItemGroup Label="MAUI">
     <!-- L1 (round mobile-host-skeleton): the Blazor Hybrid head. These two are the head's

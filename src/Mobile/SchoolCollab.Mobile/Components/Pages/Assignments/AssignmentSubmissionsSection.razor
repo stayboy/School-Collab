@@ -11,13 +11,13 @@
     @if (Busy)
     {
         <div class="submissions__busy" role="status" aria-label="Loading submission">
-            <FluentProgressRing />
+            <FluentSpinner />
         </div>
     }
     else if (SelectedSubmission is { } submission)
     {
         <div class="submissions__detail">
-            <FluentButton Appearance="Appearance.Outline" OnClick="@OnBack">← All submissions</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Outline" OnClick="@OnBack">← All submissions</FluentButton>
 
             <h3 class="submissions__student">Student @submission.StudentId</h3>
             <p class="submissions__meta">
@@ -47,7 +47,7 @@
             @if (submission.Review is { } review)
             {
                 <div class="submissions__notice">
-                    <FluentMessageBar Intent="MessageIntent.Success" Title="Reviewed">
+                    <FluentMessageBar Intent="MessageBarIntent.Success" Title="Reviewed">
                         @ReviewText(review)
                     </FluentMessageBar>
                 </div>
@@ -57,7 +57,7 @@
     else if (Submissions is null || Submissions.Length == 0)
     {
         <div class="submissions__notice">
-            <FluentMessageBar Intent="MessageIntent.Info">No submissions yet.</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Info">No submissions yet.</FluentMessageBar>
         </div>
     }
     else
@@ -68,13 +68,13 @@
                 <li class="submissions__card">
                     <div class="submissions__header">
                         <span class="submissions__student">Student @entry.StudentId</span>
-                        <FluentBadge Appearance="Appearance.Neutral">Version @entry.CurrentVersionNumber</FluentBadge>
+                        <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Subtle">Version @entry.CurrentVersionNumber</FluentBadge>
                     </div>
                     <div class="submissions__fields">
                         <FieldDisplay Label="Review">@AssignmentEnumDisplay.GetDescription(entry.ReviewState)</FieldDisplay>
                         <FieldDisplay Label="Last submitted">@entry.LastSubmittedAt.ToLocalTime().ToString("g")</FieldDisplay>
                     </div>
-                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OnSelect.InvokeAsync(entry.StudentId))">
+                    <FluentButton Appearance="ButtonAppearance.Outline" OnClick="@(() => OnSelect.InvokeAsync(entry.StudentId))">
                         View
                     </FluentButton>
                 </li>
@@ -85,7 +85,7 @@
     @if (Error is not null)
     {
         <div class="submissions__notice">
-            <FluentMessageBar Intent="MessageIntent.Error">@Error</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@Error</FluentMessageBar>
         </div>
     }
 </section>

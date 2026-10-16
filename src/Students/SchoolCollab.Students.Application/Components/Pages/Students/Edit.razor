@@ -84,7 +84,7 @@
                                            RenderActions="false" />
                         @if (!string.IsNullOrEmpty(_guardianError))
                         {
-                            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
                         }
 
                         @* ── Direct contact (email / SMS / WhatsApp).
@@ -99,7 +99,10 @@
                            students don't subscribe to their own
                            contact info (that's a guardian/teacher
                            feature). *@
-                        <FluentDivider class="student-edit-divider" Role="DividerRole.Presentation" />
+                        @* FluentUI 5.0.1 removed FluentDivider.Role (and the DividerRole enum),
+                           so the presentational intent rides the native role attribute that the
+                           web component's own `role` property reflects. *@
+                        <FluentDivider class="student-edit-divider" Role="presentation" />
                         <div class="student-edit-direct-contact">
                             <h3 class="student-edit-section-title">Direct contact</h3>
                             <ContactsEditor OwnerType="ContactOwnerType.Student"
@@ -121,12 +124,12 @@
                            Transferred / Withdrawn) or add a brand-new
                            enrollment via Enroll (which becomes the new
                            primary active enrollment). *@
-                        <FluentDivider class="student-edit-divider" Role="DividerRole.Presentation" />
+                        <FluentDivider class="student-edit-divider" Role="presentation" />
                         <div class="student-edit-enrollment">
                             <div class="section-header">
                                 <h3 class="student-edit-section-title">Active enrollment</h3>
                                 <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
-                                    <FluentButton Appearance="Appearance.Accent"
+                                    <FluentButton Appearance="ButtonAppearance.Primary"
                                                   Size="ButtonSize.Small"
                                                   OnClick="OnEnrollAsync"
                                                   Disabled="@(_enrollments is null || _savingEnrollment)"
@@ -136,7 +139,7 @@
                                     </FluentButton>
                                     @if (PrimaryActiveEnrollment is not null)
                                     {
-                                        <FluentButton Appearance="Appearance.Outline"
+                                        <FluentButton Appearance="ButtonAppearance.Outline"
                                                       Size="ButtonSize.Small"
                                                       OnClick="OnTransferAsync"
                                                       Disabled="@_savingEnrollment"
@@ -144,7 +147,7 @@
                                             <FluentIcon Icon="@(Icons.Regular.Size16.ArrowSwap)" Slot="start" />
                                             Transfer
                                         </FluentButton>
-                                        <FluentButton Appearance="Appearance.Outline"
+                                        <FluentButton Appearance="ButtonAppearance.Outline"
                                                       Size="ButtonSize.Small"
                                                       OnClick="OnWithdrawAsync"
                                                       Disabled="@_savingEnrollment"
@@ -164,13 +167,15 @@
                             }
                             else if (PrimaryActiveEnrollment is { } active)
                             {
-                                <FluentCard class="enrollment-display-card" AreaRestricted="false">
+                                @* FluentUI 5.0.1 removed FluentCard.AreaRestricted together with the
+                                   content-visibility/contain restriction it existed to lift. *@
+                                <FluentCard class="enrollment-display-card">
                                     <FluentStack Orientation="Orientation.Vertical" Spacing="6">
                                         <FluentStack Orientation="Orientation.Horizontal"
                                                      HorizontalAlignment="HorizontalAlignment.Start"
                                                      VerticalAlignment="VerticalAlignment.Center"
                                                      HorizontalGap="12">
-                                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                            <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
                                             <span class="enrollment-display-grade">
                                                 <strong>Grade:</strong>
                                                 @(_gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : active.GradeLevelId.ToString()[..8])
@@ -189,7 +194,7 @@
                             }
                             else
                             {
-                                <FluentMessageBar Intent="MessageIntent.Info">
+                                <FluentMessageBar Intent="MessageBarIntent.Info">
                                     This student has no active enrollment. Use <strong>Enroll</strong> to add one.
                                 </FluentMessageBar>
                             }
@@ -201,13 +206,13 @@
                                      HorizontalAlignment="HorizontalAlignment.Stretch"
                                      Spacing="8"
                                      class="student-edit-action-stack">
-                            <FluentButton Appearance="Appearance.Accent"
+                            <FluentButton Appearance="ButtonAppearance.Primary"
                                           Disabled="@_saving"
                                           OnClick="OnSidebarSaveAsync"
                                           class="student-edit-action-stack__button">
                                 @(_saving ? "Saving…" : "Save")
                             </FluentButton>
-                            <FluentButton Appearance="Appearance.Outline"
+                            <FluentButton Appearance="ButtonAppearance.Outline"
                                           Disabled="@_saving"
                                           OnClick='@(() => Nav.NavigateTo($"/students/{Id}"))'
                                           class="student-edit-action-stack__button">
@@ -219,7 +224,7 @@
             }
                 </ChildContent>
                 <Fallback>
-                    <FluentMessageBar Intent="MessageIntent.Warning">
+                    <FluentMessageBar Intent="MessageBarIntent.Warning">
                         You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
                     </FluentMessageBar>
                 </Fallback>
@@ -227,7 +232,7 @@
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -425,7 +430,7 @@
         // Title reflects the upsert semantics (same as Detail.razor): an active
         // enrollment means the submit updates that row in place server-side.
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
-            model, PrimaryActiveEnrollment is null ? "Enroll student" : "Update enrollment", DialogSize.Medium);
+            model, PrimaryActiveEnrollment is null ? "Enroll student" : "Update enrollment", DialogWidth.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();
@@ -436,7 +441,7 @@
     {
         if (_disposed) return;
         var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
-            new StudentTransferModel(Id), "Transfer student", DialogSize.Medium);
+            new StudentTransferModel(Id), "Transfer student", DialogWidth.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();
@@ -453,7 +458,7 @@
                 GradeName: _gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : null,
                 DefaultExitDate: DateOnly.FromDateTime(DateTime.UtcNow)),
             "Withdraw student",
-            DialogSize.Medium);
+            DialogWidth.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();
@@ -532,7 +537,7 @@
         try
         {
             var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
-                new GuardianPickerModel(Id), "Manage guardians", DialogSize.Large);
+                new GuardianPickerModel(Id), "Manage guardians", DialogWidth.Large);
             if (results is null) return;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;

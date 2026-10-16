@@ -32,29 +32,32 @@
                             <h1 class="page-title">@_guardian.FirstName @_guardian.LastName</h1>
                             @if (!_editing)
                             {
-                                <FluentButton Appearance="Appearance.Outline" OnClick="StartEdit">Edit</FluentButton>
+                                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="StartEdit">Edit</FluentButton>
                             }
                         </div>
 
                         @* ── Profile (view / edit) ── *@
                         @if (_editing)
                         {
-                            <FluentCard class="detail-card" AreaRestricted="false">
+                            @* FluentUI 5.0.1 removed FluentCard.AreaRestricted together with the
+                               content-visibility/contain restriction it existed to lift, so the card
+                               needs no equivalent parameter here. *@
+                            <FluentCard class="detail-card">
                                 <FluentStack Orientation="Orientation.Vertical" Spacing="3">
                                     <FormRow Label="Title">
                                         <CodedValueDropdown Parent="CodedValueParent.Salutations" @bind-SelectedId="_editTitleId" />
                                     </FormRow>
                                     <FormRow Label="First name" Required>
-                                        <FluentTextField @bind-Value="_editFirstName" Required />
+                                        <FluentTextInput @bind-Value="_editFirstName" Required />
                                     </FormRow>
                                     <FormRow Label="Last name" Required>
-                                        <FluentTextField @bind-Value="_editLastName" Required />
+                                        <FluentTextInput @bind-Value="_editLastName" Required />
                                     </FormRow>
                                     <FormRow Label="Display name">
-                                        <FluentTextField @bind-Value="_editDisplayName" />
+                                        <FluentTextInput @bind-Value="_editDisplayName" />
                                     </FormRow>
                                     <FormRow Label="Date of birth">
-                                        <FluentDatePicker Id="guardianEditDob"
+                                        <FluentDatePicker TValue="DateTime?" Id="guardianEditDob"
                                                           Value="@EditDateOfBirthAsDateTime"
                                                           ValueChanged="@OnEditDateOfBirthChanged"
                                                           Placeholder="Select date" />
@@ -65,7 +68,7 @@
                                                             Placeholder="Select gender" />
                                     </FormRow>
                                     <FormRow Label="Address">
-                                        <FluentTextField @bind-Value="_editAddress" />
+                                        <FluentTextInput @bind-Value="_editAddress" />
                                     </FormRow>
                                     <FormRow Label="Community">
                                         <CodedValueDropdown Parent="CodedValueParent.Communities" @bind-SelectedId="_editCommunityId" />
@@ -73,13 +76,13 @@
                                 </FluentStack>
                                 <div class="form-actions">
                                     <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
-                                        <FluentButton Appearance="Appearance.Accent" OnClick="SaveEdit" Disabled="@_saving">@(_saving ? "Saving…" : "Save")</FluentButton>
-                                        <FluentButton Appearance="Appearance.Outline" OnClick="CancelEdit">Cancel</FluentButton>
+                                        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SaveEdit" Disabled="@_saving">@(_saving ? "Saving…" : "Save")</FluentButton>
+                                        <FluentButton Appearance="ButtonAppearance.Outline" OnClick="CancelEdit">Cancel</FluentButton>
                                     </FluentStack>
                                 </div>
                                 @if (!string.IsNullOrEmpty(_error))
                                 {
-                                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
                                 }
                             </FluentCard>
                         }
@@ -108,7 +111,7 @@
                         }
                         else if (_wards.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info">No wards linked yet.</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Info">No wards linked yet.</FluentMessageBar>
                         }
                         else
                         {
@@ -117,13 +120,15 @@
                                 {
                                     <li>
                                         <span><strong>@w.StudentNumber</strong> — @w.FirstName @w.LastName</span>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => UnlinkAsync(w.Id))">Unlink</FluentButton>
+                                        <FluentButton Appearance="ButtonAppearance.Transparent" OnClick="@(() => UnlinkAsync(w.Id))">Unlink</FluentButton>
                                     </li>
                                 }
                             </ul>
                         }
 
-                        <FluentCard class="detail-card" AreaRestricted="false">
+                        @* FluentUI 5.0.1 removed FluentCard.AreaRestricted together with the
+                           content-visibility/contain restriction it existed to lift. *@
+                        <FluentCard class="detail-card">
                             <div class="wizard-section-header">
                                 <div>
                                     <h4>Link a ward</h4>
@@ -131,13 +136,13 @@
                                 </div>
                             </div>
                             <div class="link-ward-row">
-                                <FluentSelect TOption="SchoolCollab.Students.Application.Services.StudentDto" Items="_availableStudents" @bind-SelectedOption="_newWard" OptionText="@(s => $"{s.StudentNumber} — {s.FirstName} {s.LastName}")" OptionValue="@(s => s.Id.ToString())" Placeholder="Student" class="link-ward-student" />
+                                <FluentSelect TOption="SchoolCollab.Students.Application.Services.StudentDto" TValue="SchoolCollab.Students.Application.Services.StudentDto" Items="_availableStudents" @bind-Value="_newWard" OptionText="@(s => $"{s.StudentNumber} — {s.FirstName} {s.LastName}")" OptionValueToString="@(s => s.Id.ToString())" Placeholder="Student" class="link-ward-student" />
                                 <DropdownForEnum TEnum="GuardianRole"
                                                   @bind-SelectedValue="_newWardRole"
                                                   Placeholder="Role"
                                                   Class="link-ward-role" />
                                 <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newWardRelationship" Placeholder="Relationship" class="link-ward-rel" />
-                                <FluentButton Appearance="Appearance.Accent" OnClick="AddLinkAsync" Disabled="@(_newWard is null || _saving)">Link</FluentButton>
+                                <FluentButton Appearance="ButtonAppearance.Primary" OnClick="AddLinkAsync" Disabled="@(_newWard is null || _saving)">Link</FluentButton>
                             </div>
                         </FluentCard>
 
@@ -149,7 +154,7 @@
                         }
                         else if (_history.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info">No name changes recorded.</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Info">No name changes recorded.</FluentMessageBar>
                         }
                         else
                         {
@@ -166,20 +171,20 @@
                         }
 
                         <div class="action-bar">
-                            <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students/guardians")'>Back to Guardians</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" OnClick='() => Nav.NavigateTo("/students/guardians")'>Back to Guardians</FluentButton>
                         </div>
                     </FluentStack>
                 }
             </ChildContent>
             <Fallback>
-                <FluentMessageBar Intent="MessageIntent.Warning">
+                <FluentMessageBar Intent="MessageBarIntent.Warning">
                     You have no tenant assigned. Guardian records are tenant-scoped — pick a tenant to continue.
                 </FluentMessageBar>
             </Fallback>
         </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 

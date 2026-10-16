@@ -27,7 +27,7 @@
 
     @if (Segments.Count == 0)
     {
-        <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+        <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-3">
             A rule must have at least one segment. Click <strong>Add segment</strong> in the sidebar to start.
         </FluentMessageBar>
     }
@@ -59,21 +59,21 @@
                         </td>
                         <td class="col-reset">@seg.ResetPeriod.ToString()</td>
                         <td class="col-actions">
-                            <FluentButton Appearance="Appearance.Neutral"
+                            <FluentButton Appearance="ButtonAppearance.Default"
                                           IconStart="@FluentIcons.Edit"
                                           Title="Edit segment"
                                           OnClick="@(() => OpenEditDialogAsync(idx))" />
-                            <FluentButton Appearance="Appearance.Neutral"
+                            <FluentButton Appearance="ButtonAppearance.Default"
                                           IconStart="@FluentIcons.ChevronUp"
                                           Title="Move up"
                                           Disabled="@(idx == 0)"
                                           OnClick="@(() => MoveUp(idx))" />
-                            <FluentButton Appearance="Appearance.Neutral"
+                            <FluentButton Appearance="ButtonAppearance.Default"
                                           IconStart="@FluentIcons.ChevronDown"
                                           Title="Move down"
                                           Disabled="@(idx == Segments.Count - 1)"
                                           OnClick="@(() => MoveDown(idx))" />
-                            <FluentButton Appearance="Appearance.Neutral"
+                            <FluentButton Appearance="ButtonAppearance.Default"
                                           IconStart="@FluentIcons.Delete"
                                           Title="Remove segment"
                                           OnClick="@(() => DeleteRow(idx))" />
@@ -142,7 +142,7 @@
         };
 
         var result = await DialogService.ShowShellDialogAsync<SegmentEditDialog, SegmentEditFormModel, SegmentEditResult>(
-            model, $"Edit segment #{original.Index}", DialogSize.Medium);
+            model, $"Edit segment #{original.Index}", DialogWidth.Medium);
 
         if (result is null) return; // cancelled
 

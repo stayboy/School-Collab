@@ -45,19 +45,19 @@
                                    components, so the binding fell into AdditionalAttributes — a stray
                                    selectedvalues HTML attribute — and the picker neither showed nor
                                    reported a selection.) *@
-                                <FluentSelect TOption="TopicDto" Items="@_allTopics"
+                                <FluentSelect TOption="TopicDto" TValue="string" Items="@_allTopics"
                                               OptionText="@(t => t.Name)"
                                               OptionValue="@(t => t.Id.ToString())"
                                               Multiple="true"
-                                              SelectedOptions="@SelectedTopicOptions"
-                                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
+                                              SelectedItems="@SelectedTopicOptions"
+                                              SelectedItemsChanged="@OnSelectedTopicsChanged"
                                               Style="width: 100%; min-height: 160px;"
                                               Title="Pick which topics belong to this grade. Picked topics are assigned on save." />
                             </FormRow>
                         }
                         else
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                            <FluentMessageBar Intent="MessageBarIntent.Info" class="mt-3">
                                 No topics exist yet. Create topics first, then assign them here or from the grade detail page.
                             </FluentMessageBar>
                         }
@@ -65,18 +65,18 @@
                 </GradeLevelFormFields>
 
                 <div class="action-bar">
-                    <FluentButton Appearance="Appearance.Outline" OnClick="GoBack">Back to Grade Levels</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" OnClick="GoBack">Back to Grade Levels</FluentButton>
                 </div>
             </ChildContent>
             <Fallback>
-                <FluentMessageBar Intent="MessageIntent.Warning">
+                <FluentMessageBar Intent="MessageBarIntent.Warning">
                     You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
                 </FluentMessageBar>
             </Fallback>
         </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -99,7 +99,7 @@
         _allTopics.Where(t => _selectedTopicIds.Contains(t.Id));
 
     /// <summary>Writes the picker's option objects back to the ids field.</summary>
-    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
+    private void OnSelectedTopicsChanged(IEnumerable<TopicDto> selected) =>
         _selectedTopicIds = (selected ?? []).Select(t => t.Id).ToList();
 
     protected override async Task OnInitializedAsync()

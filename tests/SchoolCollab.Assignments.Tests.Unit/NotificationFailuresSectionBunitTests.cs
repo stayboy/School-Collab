@@ -149,8 +149,8 @@ public class NotificationFailuresSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("No failed notifications.");
-            cut.Markup.Should().Contain("fluent-messagebar");
-            cut.Markup.Should().Contain("intent-info",
+            cut.Markup.Should().Contain("fluent-message-bar");
+            cut.Markup.Should().Contain("intent=\"info\"",
                 "the empty state is Information, not Success (zero rows is legitimate — null sender / unconfigured SMTP)");
             cut.Markup.Should().NotContain("notification-failures-table",
                 "an empty result must never render the table");
@@ -176,12 +176,12 @@ public class NotificationFailuresSectionBunitTests : BunitContext
         {
             cut.Markup.Should().Contain("Failed \u2014 no more retries",
                 "a null NextRetryAt renders the terminal 'no more retries' badge");
-            cut.Markup.Should().Contain("appearance=\"neutral\"",
-                "the terminal badge uses the render-safe Neutral appearance (decision (c))");
+            cut.Markup.Should().Contain("appearance=\"filled\"",
+                "v5's BadgeAppearance.Filled (v4's Appearance.Neutral) is the render-safe terminal appearance (decision (c))");
             cut.Markup.Should().Contain("Retry scheduled",
                 "a future NextRetryAt renders the retry-scheduled badge");
-            cut.Markup.Should().Contain("appearance=\"lightweight\"",
-                "the retrying badge uses the render-safe Lightweight appearance (decision (c))");
+            cut.Markup.Should().Contain("appearance=\"ghost\"",
+                "v5's BadgeAppearance.Ghost (v4's Appearance.Lightweight) is the render-safe retrying appearance (decision (c))");
         });
     }
 
@@ -199,8 +199,8 @@ public class NotificationFailuresSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("fluent-messagebar");
-            cut.Markup.Should().Contain("intent-error",
+            cut.Markup.Should().Contain("fluent-message-bar");
+            cut.Markup.Should().Contain("intent=\"error\"",
                 "the load failure must render the Error message bar, not the empty state");
             cut.Markup.Should().MatchRegex("500|Internal Server Error",
                 "the error bar surfaces the exception message");
@@ -229,7 +229,7 @@ public class NotificationFailuresSectionBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("intent-error",
+            cut.Markup.Should().Contain("intent=\"error\"",
                 "a transport cancellation (token NOT cancelled) must surface as the error bar");
             cut.Markup.Should().NotContain("No failed notifications.",
                 "it must never masquerade as the empty state (decision (e) / finding F2)");
@@ -380,7 +380,7 @@ public class NotificationFailuresSectionBunitTests : BunitContext
             .Add(x => x.CanHaveFailures, true)
             .Add(x => x.OnFailureCountLoaded, (int count) => reported = count));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("intent-error"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("intent=\"error\""));
         reported.Should().BeNull(
             "a failed load must not report a count — the error bar is the only signal");
     }

@@ -29,6 +29,7 @@
 @inject StudentsApiClient Api
 @inject AssignmentPolicyApiClient SettingsApi
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <p class="panel-caption">
@@ -60,6 +61,7 @@
                            SavingText="Saving..." OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     /// <summary>Which value editor a policy row needs.</summary>

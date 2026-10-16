@@ -76,7 +76,7 @@ public class GuardianSignOffPageTests : BunitContext
 
         // decision (b) no-self-select invariant: no guardian picker dropdown (the sign
         // page has no FluentSelect / guardian selector — the identity is token-bound).
-        cut.Markup.Should().NotContain("fluent-select");
+        cut.Markup.Should().NotContain("fluent-dropdown");
     }
 
     [TestMethod]
@@ -97,7 +97,7 @@ public class GuardianSignOffPageTests : BunitContext
         // carries CheckboxChangeEventArgs, not ChangeEventArgs), so drive the BOUND callbacks
         // directly — the repo's FluentCheckbox/InputBase bUnit pattern — rather than
         // synthesising web-component events. This exercises the page's real bind path.
-        await cut.InvokeAsync(() => cut.FindComponent<FluentTextField>().Instance.ValueChanged.InvokeAsync("Jane Doe"));
+        await cut.InvokeAsync(() => cut.FindComponent<FluentTextInput>().Instance.ValueChanged.InvokeAsync("Jane Doe"));
         await cut.InvokeAsync(() => cut.FindComponent<FluentCheckbox>().Instance.ValueChanged.InvokeAsync(true));
 
         var sign = cut.FindAll("fluent-button")
@@ -153,7 +153,11 @@ public class GuardianSignOffPageTests : BunitContext
 
         var cut = RenderPage();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("This sign-off has been completed"));
-        cut.Markup.Should().NotContain("fluent-button");                       // no sign affordance
+        // The v5 message-bar's dismiss control IS a <fluent-button> (icon-only), so a blanket
+        // NotContain("fluent-button") is now false. Narrow to the real intent: no SIGN affordance.
+        cut.FindAll("fluent-button")
+            .Where(b => b.TextContent.Contains("Sign", StringComparison.OrdinalIgnoreCase))
+            .Should().BeEmpty("a completed sign-off offers no Sign affordance");
         cut.Markup.Should().NotContain("Type your full name");
     }
 
@@ -164,7 +168,7 @@ public class GuardianSignOffPageTests : BunitContext
 
         var cut = RenderPage();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assignment or student not found."));
-        cut.Markup.Should().NotContain("fluent-progress-ring");
+        cut.Markup.Should().NotContain("fluent-spinner", "the ring was renamed to <fluent-spinner> in v5");
     }
 
     [TestMethod]

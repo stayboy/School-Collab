@@ -28,11 +28,11 @@
 
 @if (!string.IsNullOrWhiteSpace(Error))
 {
-    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@Error</FluentMessageBar>
+    <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-3">@Error</FluentMessageBar>
 }
 
 <div class="button-row">
-    <FluentButton Appearance="Appearance.Outline"
+    <FluentButton Appearance="ButtonAppearance.Outline"
                   OnClick="OnCancel"
                   Disabled="@Saving">
         @CancelText
@@ -42,7 +42,7 @@
         @if (SubmitIsServerSubmit)
         {
             <FluentButton Type="ButtonType.Submit"
-                          Appearance="Appearance.Accent"
+                          Appearance="ButtonAppearance.Primary"
                           Disabled="@(Saving || SubmitDisabled)">
                 @(Saving ? SavingText : SubmitText)
             </FluentButton>
@@ -53,7 +53,7 @@
                "Update Fields" button, which reflects changes back to the
                read-only display section instead of submitting to the server. *@
             <FluentButton Type="ButtonType.Button"
-                          Appearance="Appearance.Accent"
+                          Appearance="ButtonAppearance.Primary"
                           Disabled="@(Saving || SubmitDisabled)"
                           OnClick="OnSubmit">
                 @SubmitText

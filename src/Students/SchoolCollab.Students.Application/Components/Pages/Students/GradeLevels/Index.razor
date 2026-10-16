@@ -12,7 +12,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="GradeLevelLandingDto"
@@ -35,11 +35,11 @@
              RowActionsUseMenuService="false">
     <Columns>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Name" Sortable="true" SortBy="@_sortByName">
-            <FluentAnchor Appearance="Appearance.Lightweight"
+            <FluentLink Appearance="LinkAppearance.Subtle"
                           Href="@($"/students/grade-levels/{context.Id}")"
                           Title="Open grade level detail">
                 @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Age range">
             @if (context.MinAge.HasValue || context.MaxAge.HasValue)
@@ -55,7 +55,7 @@
             @if (context.AllowedGenderCodedValueId is { } gid
                  && _resolvedGenderNames.TryGetValue(gid, out var gname))
             {
-                <FluentBadge Appearance="Appearance.Neutral">@gname</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">@gname</FluentBadge>
             }
             else if (context.AllowedGenderCodedValueId is not null)
             {
@@ -67,28 +67,28 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Topics">
-            <FluentAnchor Appearance="Appearance.Lightweight"
+            <FluentLink Appearance="LinkAppearance.Subtle"
                           Href="@($"/students/subjects?gradeLevelId={context.Id}")">
                 @context.TopicCount
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Strands">
-            <FluentAnchor Appearance="Appearance.Lightweight"
+            <FluentLink Appearance="LinkAppearance.Subtle"
                           Href="@($"/students/grade-levels/{context.Id}")">
                 @context.StrandCount
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Lessons">
-            <FluentAnchor Appearance="Appearance.Lightweight"
+            <FluentLink Appearance="LinkAppearance.Subtle"
                           Href="@($"/students/grade-levels/{context.Id}")">
                 @context.LessonCount
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Students">
-            <FluentAnchor Appearance="Appearance.Lightweight"
+            <FluentLink Appearance="LinkAppearance.Subtle"
                           Href="@($"/students?gradeLevelId={context.Id}")">
                 @context.StudentCount
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Enrollment">
             <div class="enrollment-cell">
@@ -305,12 +305,10 @@
     {
         if (_disposed) return;
 
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete grade level '{name}'? This cannot be undone if students or topics are assigned.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         var previous = _items;
         _items = _items?.Where(x => x.Id != id).ToArray();
@@ -321,7 +319,7 @@
             await Api.DeleteGradeLevelAsync(id);
             if (_disposed) return;
             Logger.LogInformation("Deleted grade level {Id}", id);
-            Toast.ShowSuccess($"Grade level '{name}' deleted.");
+            await NotificationService.ShowSuccessToastAsync($"Grade level '{name}' deleted.");
         }
         catch (Exception ex)
         {

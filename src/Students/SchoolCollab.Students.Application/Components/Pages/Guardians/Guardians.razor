@@ -9,7 +9,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Guardians> Logger
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="GuardianDto"
@@ -49,11 +49,11 @@
         <TemplateColumn TGridItem="GuardianDto" Title="Students" Class="guardian-students-col">
             @if (context.StudentCount is > 0)
             {
-                <FluentAnchor Appearance="Appearance.Lightweight"
+                <FluentLink Appearance="LinkAppearance.Subtle"
                               Href="@($"/students?guardianId={context.Id}")"
                               Class="guardian-students-link">
                     @context.StudentCount students
-                </FluentAnchor>
+                </FluentLink>
             }
             else
             {
@@ -198,12 +198,10 @@
 
         _error = null;
 
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete guardian '{name}'? This blocks the record but keeps its history, links and contacts.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         var previous = _items;
         _items = _items?.Where(x => x.Id != id).ToArray();
@@ -212,7 +210,7 @@
         try
         {
             await Api.DeleteGuardianAsync(id);
-            Toast.ShowSuccess($"Guardian '{name}' deleted.");
+            await NotificationService.ShowSuccessToastAsync($"Guardian '{name}' deleted.");
         }
         catch (Exception ex)
         {

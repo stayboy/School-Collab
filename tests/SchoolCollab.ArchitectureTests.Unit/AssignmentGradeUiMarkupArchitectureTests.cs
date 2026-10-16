@@ -13,7 +13,7 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 /// <list type="number">
 /// <item><b>The Add dialog is single-value + chips.</b> Every category renders ONE control whose pick
 /// APPENDS to the dismissible chip row (<c>TargetsAndAudienceDialog.razor</c> + the new scoped
-/// <c>.razor.css</c>). The retired markup bound <c>SelectedOptions</c> with <c>Multiple="true"</c> and an
+/// <c>.razor.css</c>). The retired markup bound <c>SelectedItems</c> with <c>Multiple="true"</c> and an
 /// inline <c>min-height: 160px</c> listbox — both are explicitly forbidden here, because a
 /// multi-select is invisible to an assertion that only counts chips.</item>
 /// <item><b>No assignment grade seam is left in the markup.</b> The authoring page carries no
@@ -43,15 +43,16 @@ public class AssignmentGradeUiMarkupArchitectureTests
     {
         Dialog.Should().NotContain("Multiple=\"true\"",
             "round drop-primary-grade replaced the multi-select listboxes with single-value pickers");
-        Dialog.Should().NotContain("SelectedOptions",
+        Dialog.Should().NotContain("SelectedItems",
             "the selection is no longer HELD by the control — every pick is appended to the chip row");
         Dialog.Should().NotContain("160px",
             "the retired listbox's inline min-height is gone; the control fills its cell via CSS");
         Dialog.Should().NotContain("Style=",
             "no inline style on a control (the blazor-components rule) — the scoped class owns it");
 
-        Dialog.Should().Contain("SelectedOptionChanged",
-            "each single-value picker reports its pick through the changed callback the dialog appends on");
+        Dialog.Should().Contain("ValueChanged",
+            "each single-value picker reports its pick through the changed callback the dialog appends on"
+            + " (FluentUI 5.x: ValueChanged → ValueChanged)");
         Dialog.Should().Contain("AppendPicked(",
             "the pick is appended to the model's chip list — the one write point for a new chip");
         Dialog.Should().Contain("RemovePicked(entry)",

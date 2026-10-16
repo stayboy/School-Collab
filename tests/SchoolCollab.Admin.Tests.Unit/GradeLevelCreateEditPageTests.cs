@@ -152,7 +152,9 @@ public class GradeLevelCreateEditPageTests : BunitContext
 
         cut.Markup.Should().Contain("New Grade Level");
         cut.Markup.Should().Contain("No topics exist yet.", "empty catalog shows the info bar in the topics section");
-        cut.Markup.Should().Contain(">Create</", "the submit button label is Create");
+        // v5's FluentButton renders its label inside the element with newline+indent padding,
+        // so the needle is the label itself, not a ">label<" boundary.
+        cut.Markup.Should().MatchRegex(@">\s*Create\s*</", "the submit button label is Create");
     }
 
     [TestMethod]
@@ -168,7 +170,7 @@ public class GradeLevelCreateEditPageTests : BunitContext
 
         var cut = Render<Edit>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit — Grade 5"));
-        cut.Markup.Should().Contain(">Save</", "the submit button label is Save");
+        cut.Markup.Should().MatchRegex(@">\s*Save\s*</", "the submit button label is Save");
     }
 
     [TestMethod]
@@ -213,12 +215,14 @@ public class GradeLevelCreateEditPageTests : BunitContext
 
         cut.Markup.Should().NotContain("selectedvalues",
             "the dead SelectedValues binding must not leak into the DOM");
-        cut.FindAll("fluent-listbox").Should().BeEmpty(
+        cut.FindAll("div.fluent-listbox").Should().BeEmpty(
+            "v5's FluentListbox renders a div.fluent-listbox host, while the multi-select FluentSelect renders a fluent-dropdown host — so the bare listbox is what this guard is after");
+        cut.FindAll("fluent-dropdown[multiple]").Should().NotBeEmpty(
             "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
 
-        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
+        var picker = cut.FindComponent<FluentSelect<TopicDto, string>>();
         picker.Instance.Multiple.Should().BeTrue();
-        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+        await cut.InvokeAsync(() => picker.Instance.SelectedItemsChanged.InvokeAsync(
             picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
 
         // The label's count is projected from _selectedTopicIds — the page's single
@@ -261,15 +265,18 @@ public class GradeLevelCreateEditPageTests : BunitContext
 
         cut.Markup.Should().NotContain("selectedvalues",
             "the dead SelectedValues binding must not leak into the DOM");
-        cut.FindAll("fluent-listbox").Should().BeEmpty();
+        cut.FindAll("div.fluent-listbox").Should().BeEmpty(
+            "v5's FluentListbox renders a div.fluent-listbox host, while the multi-select FluentSelect renders a fluent-dropdown host — so the bare listbox is what this guard is after");
         cut.Markup.Should().Contain("Topics (1)", "the loaded assignment is the field's single source of truth");
         cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicA.ToString())
             .HasAttribute("selected").Should().BeTrue("the loaded assignment renders as selected");
         cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
             .HasAttribute("selected").Should().BeFalse("an unassigned topic must not render as selected");
 
-        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
-        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+        // v5's FluentListBase<TOption, TValue>: the picker binds TValue="string" (the option's
+        // id text) while SelectedItems stays over TOption, so the second type argument is string.
+        var picker = cut.FindComponent<FluentSelect<TopicDto, string>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedItemsChanged.InvokeAsync(
             picker.Instance.Items!.Where(t => t.Id == topicB).ToArray()));
 
         cut.Find("form").Submit();

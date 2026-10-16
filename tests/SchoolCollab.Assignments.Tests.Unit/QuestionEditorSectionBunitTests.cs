@@ -54,7 +54,8 @@ public class QuestionEditorSectionBunitTests : BunitContext
         });
     }
 
-    /// <summary>QA-10/D4: opens the row's kebab and clicks the named RowActionsMenu item.</summary>
+    /// <summary>QA-10/D4: opens the row's kebab and activates the named RowActionsMenu item
+    /// through the v5 <c>onmenuitemchange</c> event (see <see cref="FluentMenuItemTestEvent"/>).</summary>
     private static void ClickRowAction(IRenderedComponent<QuestionEditorSection> cut, int rowIndex, string label)
     {
         var actions = cut.Find($"#cq-qrow-{rowIndex}-actions");
@@ -64,7 +65,7 @@ public class QuestionEditorSectionBunitTests : BunitContext
         cut.Find($"#cq-qrow-{rowIndex}-actions")
             .QuerySelectorAll("fluent-menu-item")
             .First(item => item.TextContent.Trim() == label)
-            .Click();
+            .MenuItemClick();
     }
 
     private static AssignmentEditFormModel SeedModel(int questionCount)
@@ -266,14 +267,10 @@ public class QuestionEditorSectionBunitTests : BunitContext
     {
         var model = SeedModel(3);
 
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(null!)));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(null!));
 
         var cut = RenderEditor(model);
 
@@ -284,8 +281,7 @@ public class QuestionEditorSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             dialogMock.Verify(
-                d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                    It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+                d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
                 Times.Once,
                 "remove must request the destructive confirmation dialog");
         });
@@ -300,14 +296,10 @@ public class QuestionEditorSectionBunitTests : BunitContext
     {
         var model = SeedModel(3);
 
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
 
         var cut = RenderEditor(model);
 
@@ -316,8 +308,7 @@ public class QuestionEditorSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             dialogMock.Verify(
-                d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                    It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+                d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
                 Times.Once);
         });
         cut.WaitForAssertion(() =>

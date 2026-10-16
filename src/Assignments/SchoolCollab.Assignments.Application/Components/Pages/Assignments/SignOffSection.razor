@@ -24,11 +24,11 @@
         }
         else if (!string.IsNullOrEmpty(_error))
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
         }
         else if (_rows is null || _rows.Count == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info">No submissions yet.</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Info">No submissions yet.</FluentMessageBar>
         }
         else
         {
@@ -60,11 +60,11 @@
                             <td>
                                 @if (row.Delivered)
                                 {
-                                    <FluentBadge Appearance="Appearance.Neutral" Title="Delivered">Delivered</FluentBadge>
+                                    <FluentBadge Appearance="BadgeAppearance.Filled" Title="Delivered">Delivered</FluentBadge>
                                 }
                                 @if (row.Opened)
                                 {
-                                    <FluentBadge Appearance="Appearance.Neutral" Title="Opened">Opened</FluentBadge>
+                                    <FluentBadge Appearance="BadgeAppearance.Filled" Title="Opened">Opened</FluentBadge>
                                 }
                                 @if (!row.Delivered && !row.Opened)
                                 {
@@ -74,18 +74,18 @@
                             <td>@row.CurrentVersionNumber</td>
                             <td>@(row.Score?.ToString("0.##") ?? "—")</td>
                             <td>
-                                <FluentAnchor Href="@($"/assignments/{AssignmentId}/students/{row.StudentId}/sign-off")">
+                                <FluentLink Href="@($"/assignments/{AssignmentId}/students/{row.StudentId}/sign-off")">
                                     Open sign-off page
-                                </FluentAnchor>
+                                </FluentLink>
                                 @if (row.SignOffState == SignOffStateDto.AwaitingSignature)
                                 {
-                                    <FluentButton Appearance="Appearance.Outline"
+                                    <FluentButton Appearance="ButtonAppearance.Outline"
                                                   OnClick="@(() => OpenReassignDialogAsync(row))"
                                                   class="ms-2">Reassign signer</FluentButton>
                                 }
                                 @if (row.SignOffState == SignOffStateDto.Signed && row.FinalizedAt is null)
                                 {
-                                    <FluentButton Appearance="Appearance.Outline"
+                                    <FluentButton Appearance="ButtonAppearance.Outline"
                                                   Title="Finalize the sign-off (marks the locked state)"
                                                   OnClick="@(() => FinalizeAsync(row))"
                                                   class="ms-2"
@@ -93,7 +93,7 @@
                                 }
                                 @if (row.FinalizedAt is not null)
                                 {
-                                    <FluentButton Appearance="Appearance.Lightweight"
+                                    <FluentButton Appearance="ButtonAppearance.Transparent"
                                                   Title="Download the signed certificate PDF"
                                                   OnClick="@(() => DownloadCertificateAsync(row))"
                                                   class="ms-2"
@@ -170,7 +170,7 @@
             var picked = await DialogService.ShowShellDialogAsync<ReassignSignerDialog, ReassignSignerFormModel, ReassignSignerResult>(
                 new ReassignSignerFormModel(row.StudentName, [.. context.Guardians]),
                 $"Reassign signer — {row.StudentName}",
-                DialogSize.Small);
+                DialogWidth.Small);
 
             if (picked is not null)
             {
@@ -246,17 +246,16 @@
         _ => "None"
     };
 
-    // FluentUI 4.14.2 FluentBadge render-validates Appearance to Accent / Neutral /
-    // Lightweight only (Outline/Warning/Success crash the page — the Detail.razor
-    // WS-A2 documented deviation). The round doc's "warning/success/accent" mapping
-    // is therefore mapped onto the render-safe triad: AwaitingSignature =
-    // Lightweight (pending), Signed = Accent (strong), Finalized = Neutral (terminal).
-    private static Appearance StatusAppearance(SignOffStatusDto row) => row.SignOffState switch
+    // FluentUI v5 FluentBadge takes the BadgeAppearance pair (Outline/Tint is not the v4
+    // triad — the Detail.razor WS-A2 documented deviation). The round doc's “warning/success/accent” mapping
+    // is therefore mapped onto the render-safe pair: AwaitingSignature =
+    // Ghost (pending), Signed = Filled (strong), Finalized = Filled (terminal).
+    private static BadgeAppearance StatusAppearance(SignOffStatusDto row) => row.SignOffState switch
     {
-        SignOffStateDto.AwaitingSignature => Appearance.Lightweight,
-        SignOffStateDto.Signed when row.FinalizedAt is not null => Appearance.Neutral,
-        SignOffStateDto.Signed => Appearance.Accent,
-        _ => Appearance.Neutral
+        SignOffStateDto.AwaitingSignature => BadgeAppearance.Ghost,
+        SignOffStateDto.Signed when row.FinalizedAt is not null => BadgeAppearance.Filled,
+        SignOffStateDto.Signed => BadgeAppearance.Filled,
+        _ => BadgeAppearance.Filled
     };
 
     public async ValueTask DisposeAsync()

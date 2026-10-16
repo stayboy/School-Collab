@@ -33,7 +33,7 @@
                                    OnCancel="@(() => Nav.NavigateTo("/students"))" />
             </ChildContent>
             <Fallback>
-                <FluentMessageBar Intent="MessageIntent.Warning">
+                <FluentMessageBar Intent="MessageBarIntent.Warning">
                     You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
                 </FluentMessageBar>
             </Fallback>
@@ -41,7 +41,7 @@
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 

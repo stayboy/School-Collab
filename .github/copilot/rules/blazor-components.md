@@ -165,6 +165,37 @@ clear side-effect paths. The same principle applies to **any** parameter not
 declared on the FluentUI control you're using: if `intellisense` doesn't show
 it, it's a swallowed attribute, not a real callback.
 
+## Removed FluentUI *parameters* are silent — sweep attributes, not just components
+
+A v4 → v5 component **rename or removal** at least announces itself: an unknown *tag* renders as
+an inert HTML element and Razor emits `RZ10012`. An unknown **attribute** on a component that has
+`AdditionalAttributes` is captured **silently** — no warning, no error, and the thing it configured
+simply does nothing. The 4.14.2 → 5.0.1 upgrade shipped 26 such regressions
+(`FluentTextArea.Rows` ~16, `FluentMenu.Anchor`/`UseMenuService`, `FluentBadge.DismissTitle`/
+`OnDismissClick`, `FluentCard.AreaRestricted` 5, `FluentDivider.Role` 2,
+`FluentInputFile.OnFileCountExceeded`) that a green build **and** a green test suite could not see.
+
+When the library version moves, sweep **attributes** as well as tags:
+
+1. Enumerate the `[Parameter]` properties per component from the **installed** package's XML
+   (`~/.nuget/packages/microsoft.fluentui.aspnetcore.components/<version>/lib/net10.0/*.xml`,
+   members are `P:Microsoft.FluentUI.AspNetCore.Components.<Component>.<Property>`), resolving the
+   inheritance chain — generic bases such as `FluentTextArea : FluentInputImmediateBase<string>` and
+   the external `InputBase<TValue>` properties (`Value`, `ValueChanged`, `EditContext`, …) are
+   legitimate and must not be reported as unknown.
+2. Grep the markup for every attribute passed to those components and diff it against that list.
+   Match **case-insensitively** (Blazor binds case-insensitively, so `Autofocus` is not a mismatch
+   for `AutoFocus`). Ignore `class`, `style`, `id`, `aria-*`, `data-*`, `slot`, `title`, `@on*`,
+   `@bind*`, `ChildContent`.
+3. For each mismatch, check the **previous** version's XML for the same property. Present there →
+   **this upgrade broke it**; absent there → long-standing and out of scope. That one fact is what
+   separates a regression from a pre-existing bug, and it belongs in the report either way.
+4. Record every confirmed case in the round doc (`file:line`, element, attribute, and the v5 name
+   where one exists) **before** fixing anything.
+
+Where v5 has **no** equivalent (badge dismissal, for example), author the affordance or report it as
+a named finding — never silently drop a working control.
+
 ## ShouldRender optimisation
 
 Override `ShouldRender()` on components that receive frequent external events but only
@@ -479,6 +510,12 @@ instead of replicating the same effect in CSS.
 
 ### FluentAnchor patterns in grids
 
+> **FluentUI v5:** `FluentAnchor` is **removed** from 5.0.1 — the replacements are `FluentLink`
+> (anchors/links) and `FluentAnchorButton` (button-styled anchors), with a changed `Appearance`
+> mapping (see `MigrationFluentAnchor.md`). The repo's ~50 existing `<FluentAnchor>` usages render as
+> unknown HTML elements until the rename round lands (the build only emits an `RZ10012` warning, so
+> this fails **silently**). When you touch one of these grids, convert it to `FluentLink`.
+
 `<FluentAnchor>` inside a `<FluentDataGrid>` falls into two roles, each with its own
 convention:
 
@@ -520,10 +557,15 @@ RowAction.Callback("Remove", () => RemoveTopicAsync(topic.TopicId), FluentIcons.
 
 The prompt is the reusable `ConfirmDialog` (`src/SchoolCollab.Admin.Shared/Components/Dialogs/`),
 shown via `ShowConfirmDialogAsync(message, primaryText, secondaryText, title)`. It renders a
-**modal** dialog (dark overlay, `Modal = true`) that is **dismissible by clicking the overlay**
-(`PreventDismissOnOverlayClick = false`) or pressing ESC. Do NOT use FluentUI's
-`ShowConfirmationAsync`/`ShowMessageBoxAsync` for destructive confirmations — those hide the
-dark overlay whenever a secondary (Cancel) button is present.
+**modal** dialog with a dark overlay that is **dismissible by clicking the overlay** or pressing ESC.
+In v5 that posture is expressed by the modal *type* rather than a parameter: `Modal = false` renders
+`type="modal"`, which keeps the backdrop **and** allows overlay/ESC dismissal (v4 spelled this
+`Modal = true` + `PreventDismissOnOverlayClick = false`; `PreventDismissOnOverlayClick` no longer
+exists). Do NOT use FluentUI's `ShowConfirmationAsync`/`ShowMessageBoxAsync` for destructive
+confirmations: v5's version always sets `Modal = true` (`type="alert"`), so a backdrop click is
+swallowed and ESC-only dismissal differs from this repo's own prompt — one confirmation mechanism,
+plus overlay/ESC parity with v4, is why this helper exists. (Round A, 2026-10-15: the ~25 call sites
+that still used the library API were routed through this helper.)
 
 Do NOT add a second, page-level confirmation dialog for an action already marked
 `destructive` — that would double-prompt the user. If an action is destructive, mark it
@@ -532,34 +574,57 @@ Do NOT add a second, page-level confirmation dialog for an action already marked
 ### Show a success toast after successful mutations
 
 Every successful mutation (delete/remove, create, save, unlink, etc.) SHOULD surface a
-success toast via the FluentUI `IToastService`. The `FluentToastProvider` is already in
-`MainLayout.razor`, and `AddFluentUIComponents()` registers `IToastService` (scoped) — so
-just inject it and call `ShowSuccess` after the API call succeeds:
+success notification via FluentUI's `INotificationService`. The `FluentToastProvider` is still in
+`MainLayout.razor`, and `AddFluentUIComponents()` registers the service (scoped) — so just inject it
+and await the call after the API succeeds:
 
 ```razor
-@inject IToastService Toast
+@inject INotificationService NotificationService
 // ...
 await Api.DeleteSubjectAsync(id);
-Toast.ShowSuccess($"Subject '{name}' deleted.");
+_items = await LoadSubjectsAsync();          // follow-up work first …
+await NotificationService.ShowSuccessToastAsync($"Subject '{name}' deleted.");   // … toast LAST
 ```
 
+**FluentUI v5 rename (Round A, 2026-10-15):** `IToastService`/`ToastService` and
+`Toast.ShowSuccess(...)` no longer exist — v5 unifies toasts, message bars and progress into
+`INotificationService`. The toast methods are **async** (`await` them): `ShowSuccessToastAsync`,
+`ShowErrorToastAsync`, `ShowInfoToastAsync`, `ShowProgressToastAsync`, `CloseAllToastsAsync`; the
+message-bar siblings are `ShowSuccessBarAsync`/`ShowErrorBarAsync`/`ShowInfoBarAsync`.
+
 Guidelines:
-- Inject `IToastService`, NOT the concrete `ToastService` — `AddFluentUIComponents()`
-  registers it under the `IToastService` interface, so injecting the concrete type fails.
+- Inject `INotificationService` (the interface), never a concrete type — `AddFluentUIComponents()`
+  registers it under the interface.
 - Fire the toast ONLY after the API call succeeds (inside the `try`, after the await). Do
   not show success in the `catch` path.
+- **Await it LAST on the success path.** `ShowSuccessToastAsync` "waits for the close result"
+  (the library's own doc): the awaited task completes when the toast *closes* (7 s default), so a
+  toast awaited *before* the list reload / route change gates that work behind it for up to 7 s
+  (invisible in bUnit, whose loose JS returns in ~26 ms). Order the success path as
+  mutate → reload/navigate → toast; if a mutation has no follow-up work, the existing
+  "await the toast last" call site is already correct. Owner pin Q29(a), 2026-10-16.
 - Include the affected item's name in the message (e.g. `Subject '{name}' deleted.`).
 - For display text of a Topic entity, use the term "subject" (per the product's display
   convention) — never "topic" in user-facing strings.
 
-### Side-panel drawers (`FluentDialog` + `DialogType.Panel`)
+### Side-panel drawers (`FluentDialog` + a drawer alignment)
 
-FluentUI Blazor has no standalone `Drawer` component. Use `FluentDialog` with
-`DialogType.Panel` instead — that's its purpose-built side-drawer primitive.
-There is a project precedent in `CodedValuesChatPanel.razor` (the AI assistant
-drawer on the coded-values landing page).
+FluentUI Blazor has no standalone `Drawer` component: a drawer is a `FluentDialog` with the drawer
+alignment. There is a project precedent in `CodedValuesChatPanel.razor` (the AI assistant drawer on
+the coded-values landing page).
 
-API:
+> **FluentUI v5 (Round A, 2026-10-15):** the v4 API below no longer compiles. Verified changes:
+> `DialogType.Panel` is gone — the drawer mode is `DialogOptions.Alignment`
+> (`DialogAlignment.Start` / `.End`, rendered as the `<fluent-drawer>` element);
+> `DialogParameters` is `DialogOptions`; `HorizontalAlignment` is `DialogAlignment`; the two-generic
+> `ShowDialogAsync<TDialog, TData>` overload is gone
+> (`ShowDialogAsync(typeof(TDialog), options)` + `options.Parameters`); and
+> `IDialogContentComponent<TData>` is gone — a dialog body now derives from `FluentDialogInstance`
+> (v5 spreads `DialogOptions.Parameters` onto the body's typed `[Parameter]`s by name).
+> The header close (×) affordance lives on `DialogOptionsHeader` — read `MigrationFluentDialog.md`
+> before changing it. The **file itself** (`CodedValuesChatPanel.razor`) is migrated in a later round.
+
+v4 API (do not copy — superseded above):
 
 ```razor
 @inject IDialogService DialogService
@@ -654,16 +719,21 @@ Use FluentUI's own layout components for edit/create forms:
   strings or `narrow-field`:
   - **Repo dropdown wrappers** (`CodedValueDropdown`, `DropdownForEnum`,
     `DropdownComponent`): set the strongly-typed `Width` parameter —
-    `Width="FieldWidth.W3"`. The wrapper emits an inline `style` on the
-    underlying `<FluentSelect>` that beats its scoped `width:100%` default.
-  - **Third-party inputs** (`FluentTextField`, `FluentSelect`,
-    `FluentDatePicker`, `FluentNumberField`, `FluentTextArea`): apply the
-    matching CSS class — `Class="w-3"`.
+    `Width="FieldWidth.W3"`. The wrapper's inline `style` lands on the
+    `fluent-field` **host** v5 renders around the select, and the control is
+    sized from it by `fluent-field > fluent-dropdown { width: inherit; }` in
+    `src/SchoolCollab.Admin.Shared/wwwroot/app.css` (owner pin Q28(a),
+    2026-10-16). Both halves are needed — the pin's slotted-control rule is what
+    makes the width reach the visible control.
+  - **Third-party inputs** (`FluentTextInput`, `FluentSelect`,
+    `FluentDatePicker`, `FluentNumberInput`, `FluentTextArea`): apply the
+    matching CSS class — `Class="w-3"`. The class lands on the same
+    `fluent-field` host, so it rides the same slotted-control rule.
   - The ladder lives in `src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs`
-    (enum + `ToCssStyle()`) and the `w-1`…`w-9` classes in
-    `src/SchoolCollab.Admin/wwwroot/css/app.css`. Both share one pixel
-    ladder — keep them in sync. See the `input-width-scale` skill for the
-    full step→width→use map and the scoped-CSS specificity gotcha.
+    (enum + `ToCssStyle()`), the `w-1`…`w-9` classes in
+    `src/SchoolCollab.Admin/wwwroot/css/app.css` and the slotted-control rule in
+    `src/SchoolCollab.Admin.Shared/wwwroot/app.css` — all share one pixel ladder,
+    keep them in sync.
   - `narrow-field` and `full-width` remain for legacy call sites; prefer the
     W1–W9 ladder for new code.
 - Required labels must include the asterisk in the label text, for example
