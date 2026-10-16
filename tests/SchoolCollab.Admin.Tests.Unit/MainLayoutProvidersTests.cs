@@ -72,12 +72,16 @@ public class MainLayoutProvidersTests : BunitContext
         // matching feature — a build-time test is much friendlier.
         // (FluentUI v5: the FluentMenuProvider half of this check was retired —
         // the component no longer exists and menus need no provider.)
+        //
+        // v5 also collapsed the toast/dialog/tooltip/key-code providers into the single
+        // <FluentProviders> host, which must sit at the layout root as a SELF-CLOSING sibling:
+        // it declares no ChildContent, so any markup given to it is discarded. The message-bar
+        // provider is NOT part of that host and still has to be declared here — which is why
+        // this test pins the pair rather than counting provider tags. The shell-level proof that
+        // the placement actually renders lives in RoutesShellRenderTests.
         var source = ReadLayoutSource();
-        source.Should().Contain("<FluentToastProvider");
-        source.Should().Contain("<FluentDialogProvider");
+        source.Should().Contain("<FluentProviders /");
         source.Should().Contain("<FluentMessageBarProvider");
-        source.Should().Contain("<FluentTooltipProvider");
-        source.Should().Contain("<FluentKeyCodeProvider");
     }
 
     [TestMethod]
