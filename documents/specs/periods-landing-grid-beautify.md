@@ -59,7 +59,7 @@ grid polish and make the two most common navigation paths one click shorter:
     `DialogShellBase` Cancel/Save footer; mirror `TopicStrandsDialog.razor`:
     a plain `IDialogService` dialog with a `.dialog-footer` + `FluentButton`
     Close, styled with `border-top` — never a `FluentDivider`).
-  - Width ~640px — the `DialogSize.Medium` default of
+  - Width ~640px — the `DialogWidth.Medium` default of
     `ShowReadonlyDialogAsync` (opened via `Content.TryGet<T>(key)` inputs,
     per `TopicStrandsDialog.razor`).
 - **FR-5 (Row actions cleanup)** — The "Sub-periods" navigate row action is

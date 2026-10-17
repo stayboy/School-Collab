@@ -18,7 +18,7 @@ public sealed class LandingGridSettings
     public string GridTemplateColumns { get; set; } = string.Empty;
 
     /// <summary>Header generation. Defaults to <c>Sticky</c>.</summary>
-    public GenerateHeaderOption GenerateHeader { get; set; } = GenerateHeaderOption.Sticky;
+    public DataGridGeneratedHeaderType GenerateHeader { get; set; } = DataGridGeneratedHeaderType.Sticky;
 
     /// <summary>Whether cells wrap onto multiple lines. Defaults to <c>true</c>.</summary>
     public bool MultiLine { get; set; } = true;

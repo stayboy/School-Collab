@@ -1,4 +1,9 @@
-﻿<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+﻿@* The Router must stay the root element: FluentUI v5's <FluentProviders> has no ChildContent
+   parameter and renders only its own provider set, so wrapping the Router in it discards every
+   routed page (blank app, no error) — including the NotFoundPage path, which renders outside
+   <RouteView>. The provider host lives at the layout root instead — see
+   Components/Layout/MainLayout.razor. *@
+<Router AppAssembly="typeof(MauiProgram).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />

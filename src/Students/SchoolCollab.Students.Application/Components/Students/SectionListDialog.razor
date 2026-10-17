@@ -15,11 +15,11 @@
    Follows the established read-only dialog pattern (SubPeriodsListDialog /
    GuardianContactsDialog / GradeTopicsDialog): NOT a DialogShellBase (no
    model/form/result), opened via DialogServiceExtensions.ShowReadonlyDialogAsync,
-   reads its inputs from Content.TryGet&lt;T&gt;(key) — NOT from separate
-   [Parameter]s, because FluentUI renders dialog content via DynamicComponent
-   with only { "Content": &lt;DialogParameters&gt; } and does not spread the
-   indexer entries (see documents/solution/dialog-parameter-binding.md) — and
-   closes via the cascading FluentDialog reference.
+   and declares typed [Parameter]s whose key constants are
+   nameof(&lt;Parameter&gt;) — FluentUI 5.x spreads DialogOptions.Parameters onto
+   [Parameter] properties by name (see
+   documents/solution/dialog-parameter-binding.md) — closing via the cascading
+   IDialogInstance reference.
 
    Presentational only: rows are not clickable and carry no actions. The card
    itself owns edit/add affordances for the same items.
@@ -34,15 +34,15 @@
    optional OnChanged so the hosting page/card refreshes too. A failing callback
    leaves the local order untouched and surfaces the message in an error bar.
    Without those keys every existing caller renders exactly as before. *@
-@implements IDialogContentComponent<DialogParameters>
 @using Microsoft.FluentUI.AspNetCore.Components
 @typeparam TItem
 
+<DialogShellBody>
 <ReadOnlyDialogShell Class="section-list-dialog">
     <Toolbar>
         @if (_moveError is { } moveError)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@moveError</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@moveError</FluentMessageBar>
         }
     </Toolbar>
     <ChildContent>
@@ -61,13 +61,13 @@
                         @if (ReorderEnabled)
                         {
                             <div class="section-list-dialog__order">
-                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                               IconStart="@FluentIcons.ChevronUp"
                                               Title="Move up"
                                               AriaLabel="@($"Move {_textSelector(item)} up")"
                                               Disabled="@(_moving || position == 0)"
                                               OnClick="@(() => MoveAsync(position, position - 1, _moveUp))" />
-                                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                               IconStart="@FluentIcons.ChevronDown"
                                               Title="Move down"
                                               AriaLabel="@($"Move {_textSelector(item)} down")"
@@ -97,14 +97,16 @@
         }
     </ChildContent>
     <Footer>
-        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CloseAsync">Close</FluentButton>
     </Footer>
 </ReadOnlyDialogShell>
+</DialogShellBody>
 
 @code {
-    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
-    /// indexer). Exposed so callers (SectionCard) set the same keys this
-    /// dialog reads here.</summary>
+    /// <summary>Keys used in <c>DialogOptions.Parameters</c>. Exposed so
+    /// callers (SectionCard) set the same keys this dialog binds to — each key
+    /// MUST match a <c>[Parameter]</c> name (FluentUI 5.x spreads the
+    /// entries).</summary>
     public const string ItemsKey = nameof(Items);
     public const string TextSelectorKey = nameof(TextSelector);
     public const string MetaSelectorKey = nameof(MetaSelector);
@@ -113,11 +115,35 @@
     public const string MoveDownKey = nameof(MoveDown);
     public const string OnChangedKey = nameof(OnChanged);
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
+
+    /// <summary>The card's items to list. Required — no default.</summary>
+    [Parameter] public TItem[] Items { get; set; } = [];
+
+    /// <summary>Selector for each row's display text. Optional: an empty
+    /// selector renders blank rows.</summary>
+    [Parameter] public Func<TItem, string?> TextSelector { get; set; } = static _ => string.Empty;
+
+    /// <summary>Optional selector for each row's secondary (meta) line.</summary>
+    [Parameter] public Func<TItem, string[]?>? MetaSelector { get; set; }
+
+    /// <summary>Shown when the caller supplies no items.</summary>
+    [Parameter] public string EmptyMessage { get; set; } = "No items yet.";
+
+    /// <summary>Optional reorder callback: move this item one position up.
+    /// Reorder controls render only when BOTH <see cref="MoveUp"/> and
+    /// <see cref="MoveDown"/> arrive.</summary>
+    [Parameter] public Func<TItem, Task>? MoveUp { get; set; }
+
+    /// <summary>Optional reorder callback: move this item one position down.</summary>
+    [Parameter] public Func<TItem, Task>? MoveDown { get; set; }
+
+    /// <summary>Optional callback the hosting page/card passes so it can
+    /// refresh after a local reorder.</summary>
+    [Parameter] public Func<Task>? OnChanged { get; set; }
 
     // Snapshot fields: the dialog is presentational and opened once with the
-    // card's current data, so everything is read from Content in OnInitialized
+    // card's current data, so everything is snapshotted in OnInitialized
     // (the card owns refreshes; it re-opens the dialog with fresh entries).
     // _items is re-assigned (never mutated in place) on a move, so the caller's
     // own array is left alone.
@@ -131,39 +157,24 @@
     private string? _moveError;
     private bool _moving;
 
-    // Placeholder members so the key constants can use nameof(...) and stay
-    // rename-safe together with their readers.
-    private TItem[] Items => _items;
-    private Func<TItem, string?> TextSelector => _textSelector;
-    private Func<TItem, string[]?>? MetaSelector => _metaSelector;
-    private string EmptyMessage => _emptyMessage;
-    private Func<TItem, Task> MoveUp => _moveUp!;
-    private Func<TItem, Task> MoveDown => _moveDown!;
-    private Func<Task> OnChanged => _onChanged!;
-
     /// <summary>Reorder controls render only when BOTH move callbacks arrived —
     /// a card that wires just one has no coherent move semantics.</summary>
     private bool ReorderEnabled => _moveUp is not null && _moveDown is not null;
 
-    /// <summary>Safely reads a key from <see cref="Content"/> (the
-    /// DialogParameters indexer throws <see cref="KeyNotFoundException"/> for a
-    /// missing key, so use <c>TryGet</c>). Returns default when absent.</summary>
-    private T? Get<T>(string key) => Content is { } c ? c.TryGet<T>(key) : default;
-
-    /// <summary>Invokes the footer Close anchor (and the X / overlay dismiss,
-    /// which BuildShellParameters keeps enabled for read-only dialogs).
+    /// <summary>Invokes the footer Close anchor (and the X dismiss, which the
+    /// shell options keep enabled for read-only dialogs).
     /// <see cref="CloseAsync"/> short-circuits when null.</summary>
-    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    private Task CloseAsync() => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
 
     protected override void OnInitialized()
     {
-        _items = Get<TItem[]>(ItemsKey) ?? [];
-        _textSelector = Get<Func<TItem, string?>>(TextSelectorKey) ?? (_ => string.Empty);
-        _metaSelector = Get<Func<TItem, string[]?>>(MetaSelectorKey);
-        _emptyMessage = Get<string>(EmptyMessageKey) ?? "No items yet.";
-        _moveUp = Get<Func<TItem, Task>>(MoveUpKey);
-        _moveDown = Get<Func<TItem, Task>>(MoveDownKey);
-        _onChanged = Get<Func<Task>>(OnChangedKey);
+        _items = Items;
+        _textSelector = TextSelector;
+        _metaSelector = MetaSelector;
+        _emptyMessage = EmptyMessage;
+        _moveUp = MoveUp;
+        _moveDown = MoveDown;
+        _onChanged = OnChanged;
     }
 
     /// <summary>

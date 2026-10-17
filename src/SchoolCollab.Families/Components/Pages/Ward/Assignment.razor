@@ -11,10 +11,10 @@
     <ChildContent>
         @if (_studentId != Guid.Empty)
         {
-            <FluentAnchor Appearance="Appearance.Hypertext" class="ward-back"
+            <FluentLink Appearance="LinkAppearance.Default" class="ward-back"
                           Href="@($"/ward/{_studentId}")">
                 Back to ward
-            </FluentAnchor>
+            </FluentLink>
         }
 
         <h1>@(_view?.Title ?? "Assignment")</h1>
@@ -23,11 +23,11 @@
         {
             @if (_error is not null)
             {
-                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
             }
             else
             {
-                <FluentProgressRing />
+                <FluentSpinner />
             }
         }
         else
@@ -130,7 +130,7 @@
 
                 @if (module.CompletedAt is null)
                 {
-                    <FluentButton Appearance="Appearance.Accent"
+                    <FluentButton Appearance="ButtonAppearance.Primary"
                                   Disabled="@_busy"
                                   OnClick="@(() => MarkModuleReadAsync(module.ModuleId))">
                         Mark @(module.ModuleType == ModuleTypeDto.Video ? "watched" : "read")
@@ -143,8 +143,8 @@
             @if (_view.QuestionsUnlocked)
             {
                 <p>Questions are unlocked. Write your answers below, then submit.</p>
-                <FluentTextArea Label="Your answer" Rows="4" @bind-Value="_content" />
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentTextArea Label="Your answer" Class="ta-lines-4" @bind-Value="_content" />
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Disabled="@_busy"
                               OnClick="@SubmitAsync">
                     @(_busy ? "Submitting…" : "Submit answers")
@@ -152,7 +152,7 @@
             }
             else
             {
-                <FluentMessageBar Intent="MessageIntent.Info">
+                <FluentMessageBar Intent="MessageBarIntent.Info">
                     Complete all required modules above to unlock the questions.
                 </FluentMessageBar>
             }
@@ -168,7 +168,7 @@
                 }
                 @if (_submissionPassed is not null)
                 {
-                    <FluentMessageBar Intent="@(_submissionPassed == true ? MessageIntent.Success : MessageIntent.Warning)">
+                    <FluentMessageBar Intent="@(_submissionPassed == true ? MessageBarIntent.Success : MessageBarIntent.Warning)">
                         @(_submissionPassed == true ? "Passed" : "Not passed — you may retry.")
                     </FluentMessageBar>
                 }
@@ -179,12 +179,12 @@
 
         @if (_error is not null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
         }
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 

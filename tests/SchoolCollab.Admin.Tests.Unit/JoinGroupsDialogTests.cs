@@ -131,7 +131,7 @@ public class JoinGroupsDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
-            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogSize.Medium);
+            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("not enabled for this tenant"));
 
@@ -163,7 +163,7 @@ public class JoinGroupsDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
-            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogSize.Medium);
+            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
         cut.Markup.Should().Contain("OpenEnded", "the group option text shows the span");
@@ -191,7 +191,7 @@ public class JoinGroupsDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
-            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogSize.Medium);
+            new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId }, "Join groups", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
         cut.Markup.Should().NotContain("Semester Band", "a Semester group is not joinable while a Term is active (AC-35)");
@@ -225,20 +225,22 @@ public class JoinGroupsDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var model = new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId };
         var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
-            model, "Join groups", DialogSize.Medium);
+            model, "Join groups", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
 
         cut.Markup.Should().NotContain("selectedvalues",
             "the dead SelectedValues binding must not leak into the DOM");
-        cut.FindAll("fluent-listbox").Should().BeEmpty(
+        cut.FindAll("div.fluent-listbox").Should().BeEmpty(
+            "v5's FluentListbox renders a div.fluent-listbox host, while the multi-select FluentSelect renders a fluent-dropdown host — so the bare listbox is what this guard is after");
+        cut.FindAll("fluent-dropdown[multiple]").Should().NotBeEmpty(
             "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
 
-        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
+        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto, string>>();
         picker.Instance.Multiple.Should().BeTrue();
         cut.FindAll("fluent-option").Should().ContainSingle("the available group is offered by the picker");
 
-        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+        await cut.InvokeAsync(() => picker.Instance.SelectedItemsChanged.InvokeAsync(
             picker.Instance.Items!.ToArray()));
 
         model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId },
@@ -275,19 +277,19 @@ public class JoinGroupsDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var model = new JoinGroupsDialog.JoinGroupsModel { StudentId = StudentId };
         var task = DialogService.ShowShellDialogAsync<JoinGroupsDialog, JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>(
-            model, "Join groups", DialogSize.Medium);
+            model, "Join groups", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Chess Club"));
 
         // Pick group A ("Chess Club") from the unfiltered list.
-        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
-        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+        var picker = cut.FindComponent<FluentSelect<ActivityGroupDto, string>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedItemsChanged.InvokeAsync(
             picker.Instance.Items!.Where(g => g.Id == OpenGroupId).ToArray()));
         model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId });
 
         // Search text that keeps "Chess Club" out of the rendered Items. The search box is
         // not Immediate, so the browser's change event (blur) is what drives @bind-Value.
-        await cut.InvokeAsync(() => cut.Find("fluent-text-field").ChangeAsync("Robotics"));
+        await cut.InvokeAsync(() => cut.Find("fluent-text-input").ChangeAsync("Robotics"));
 
         cut.FindAll("fluent-option").Should().ContainSingle(
             "the active search renders only the matching group");
@@ -295,8 +297,8 @@ public class JoinGroupsDialogTests : BunitContext
             "the selected group is no longer part of the options FluentSelect renders");
 
         // Fire a selection change against the filtered list, picking the visible group B.
-        var filteredPicker = cut.FindComponent<FluentSelect<ActivityGroupDto>>();
-        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedOptionsChanged.InvokeAsync(
+        var filteredPicker = cut.FindComponent<FluentSelect<ActivityGroupDto, string>>();
+        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedItemsChanged.InvokeAsync(
             filteredPicker.Instance.Items!.ToArray()));
 
         model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId, TermGroupId },
@@ -304,7 +306,7 @@ public class JoinGroupsDialogTests : BunitContext
 
         // Clearing the visible selection must leave the hidden pick untouched: the user
         // cannot deselect a group the search is currently hiding.
-        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedOptionsChanged.InvokeAsync(
+        await cut.InvokeAsync(() => filteredPicker.Instance.SelectedItemsChanged.InvokeAsync(
             Array.Empty<ActivityGroupDto>()));
 
         model.SelectedGroupIds.Should().BeEquivalentTo(new[] { OpenGroupId },

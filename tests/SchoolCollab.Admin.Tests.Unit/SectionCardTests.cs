@@ -30,7 +30,7 @@ public class SectionCardTests : BunitContext
     public SectionCardTests()
     {
         // bUnit needs the FluentUI services registered (JSRuntime + DI for
-        // FluentCard / FluentAnchor / FluentButton / FluentProgressRing).
+        // FluentCard / FluentLink / FluentButton / FluentSpinner).
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
     }
@@ -152,9 +152,9 @@ public class SectionCardTests : BunitContext
         var cut = RenderCard(new[] { new TestItem("Math", Href: "/students/1") }, p => p
             .Add(x => x.ItemHrefSelector, (TestItem i) => i.Href));
 
-        var anchor = cut.Find("fluent-anchor.item-name");
-        anchor.GetAttribute("href").Should().Be("/students/1",
-            "ItemHrefSelector renders the item name as a real hypertext anchor");
+        var link = cut.Find("fluent-link.item-name");
+        link.GetAttribute("href").Should().Be("/students/1",
+            "ItemHrefSelector renders the item name as a hypertext element carrying the URL");
     }
 
     [TestMethod]
@@ -164,10 +164,12 @@ public class SectionCardTests : BunitContext
         var cut = RenderCard(new[] { new TestItem("Math") }, p => p
             .Add(x => x.ItemOnClick, (TestItem i) => { clicked = i; return Task.CompletedTask; }));
 
-        cut.Find("fluent-anchor.item-name").Click();
+        var link = cut.Find("fluent-link.item-name");
+        link.GetAttribute("href").Should().Be("#",
+            "ItemOnClick renders the item name as a hypertext element, not a plain span");
 
-        clicked.Should().NotBeNull("ItemOnClick fires when the item name is clicked");
-        clicked!.Name.Should().Be("Math");
+        link.Click();
+        clicked.Should().NotBeNull("ItemOnClick fires when the hypertext item name is clicked");
     }
 
     // ── Central edit-action key guard (ItemKeySelector + OnItemActionBlocked) ──
@@ -187,10 +189,12 @@ public class SectionCardTests : BunitContext
             .Add(x => x.ItemKeySelector, (TestItem i) => i.Id)
             .Add(x => x.ItemNameTitle, "Edit topic"));
 
-        cut.Find("fluent-anchor.item-name").Click();
+        var link = cut.Find("fluent-link.item-name");
+        link.GetAttribute("href").Should().Be("#",
+            "a keyed item still renders the edit affordance as the hypertext element");
 
-        clicked.Should().NotBeNull("an item with a non-empty key invokes the edit action");
-        clicked!.Name.Should().Be("Math");
+        link.Click();
+        clicked.Should().NotBeNull("a non-empty item key lets the guarded edit action through");
     }
 
     [TestMethod]
@@ -204,10 +208,13 @@ public class SectionCardTests : BunitContext
             .Add(x => x.ItemNameTitle, "Edit topic")
             .Add(x => x.OnItemActionBlocked, EventCallback.Factory.Create<string>(this, name => blockedName = name)));
 
-        cut.Find("fluent-anchor.item-name").Click();
+        var link = cut.Find("fluent-link.item-name");
+        link.GetAttribute("href").Should().Be("#",
+            "the edit affordance renders regardless of the item key");
 
-        clicked.Should().BeNull("an empty-key item must NOT invoke the edit action");
-        blockedName.Should().Be("Edit topic", "the block fires with the item's display name (ItemNameTitle first)");
+        link.Click();
+        clicked.Should().BeNull("an empty item key blocks the edit action (it must never open on Guid.Empty)");
+        blockedName.Should().Be("Edit topic", "the blocked callback reports the item's display name");
     }
 
     [TestMethod]
@@ -220,10 +227,14 @@ public class SectionCardTests : BunitContext
             .Add(x => x.ItemKeySelector, (TestItem i) => i.Id)
             .Add(x => x.OnItemActionBlocked, EventCallback.Factory.Create<string>(this, name => blockedName = name)));
 
-        cut.Find("fluent-anchor.item-name").Click();
+        var link = cut.Find("fluent-link.item-name");
+        link.GetAttribute("href").Should().Be("#",
+            "the edit affordance renders regardless of the item key");
 
-        clicked.Should().BeNull("a null-key item must NOT invoke the edit action");
-        blockedName.Should().Be("Math", "the block fires with the item's display name (falls back to the item text)");
+        link.Click();
+        clicked.Should().BeNull("a null item key blocks the edit action");
+        blockedName.Should().Be("Math",
+            "the blocked callback falls back to the item text when ItemNameTitle is unset (the empty-key sibling pins the ItemNameTitle-first path)");
     }
 
     [TestMethod]
@@ -236,9 +247,12 @@ public class SectionCardTests : BunitContext
         var cut = RenderCard(new[] { new TestItem("Math") }, p => p
             .Add(x => x.ItemOnClick, (TestItem i) => { clicked = i; return Task.CompletedTask; }));
 
-        cut.Find("fluent-anchor.item-name").Click();
+        var link = cut.Find("fluent-link.item-name");
+        link.GetAttribute("href").Should().Be("#",
+            "the edit affordance renders when no key selector is set");
 
-        clicked.Should().NotBeNull("without ItemKeySelector the action is invoked as-is");
+        link.Click();
+        clicked.Should().NotBeNull("with no ItemKeySelector the card does not guard the action");
     }
 
     [TestMethod]
@@ -248,8 +262,8 @@ public class SectionCardTests : BunitContext
             .Add(x => x.ItemHrefSelector, (TestItem i) => i.Href)
             .Add(x => x.ItemNameTitle, "View student"));
 
-        cut.Find("fluent-anchor.item-name").GetAttribute("title").Should().Be("View student",
-            "ItemNameTitle sets the anchor tooltip");
+        cut.Find("fluent-link.item-name").GetAttribute("title").Should().Be("View student",
+            "ItemNameTitle sets the hypertext element's tooltip");
     }
 
     [TestMethod]
@@ -287,10 +301,10 @@ public class SectionCardTests : BunitContext
             .Add(x => x.ViewAllNavigationUrl, "/students")
             .Add(x => x.ViewAllText, "View all"));
 
-        var anchor = cut.Find(".section-card__footer fluent-anchor");
-        anchor.GetAttribute("href").Should().Be("/students",
-            "ViewAllNavigationUrl renders the footer as a real navigation anchor");
-        anchor.TextContent.Should().Contain("View all");
+        var link = cut.Find(".section-card__footer fluent-link");
+        link.GetAttribute("href").Should().Be("/students",
+            "ViewAllNavigationUrl renders the footer as a hypertext element carrying the URL");
+        link.TextContent.Should().Contain("View all");
     }
 
     [TestMethod]
@@ -300,9 +314,12 @@ public class SectionCardTests : BunitContext
         var cut = RenderCard(new[] { new TestItem("Math") }, p => p
             .Add(x => x.OnViewAllClick, () => { clicked = true; return Task.CompletedTask; }));
 
-        cut.Find(".section-card__footer fluent-anchor").Click();
+        var link = cut.Find(".section-card__footer fluent-link");
+        link.GetAttribute("href").Should().Be("#",
+            "the View-all footer renders as the hypertext element");
 
-        clicked.Should().BeTrue("the View-all footer fires OnViewAllClick");
+        link.Click();
+        clicked.Should().BeTrue("OnViewAllClick fires when the footer hypertext element is clicked");
     }
 
     [TestMethod]

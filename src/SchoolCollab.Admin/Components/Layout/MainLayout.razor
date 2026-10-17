@@ -7,22 +7,12 @@
 @using SchoolCollab.Students.Application.Components.Toolbar
 @implements IDisposable
 @inject NavigationManager Nav
-@inject ILogger<MainLayout> Logger
 
-<FluentDesignTheme @bind-Mode="@_mode"
-                   @bind-OfficeColor="@_officeColor"
-                   StorageName="theme"
-                   OnLuminanceChanged="OnLuminanceChanged" />
-
-<FluentToastProvider />
-<FluentDialogProvider />
+<FluentProviders />
 <FluentMessageBarProvider />
-<FluentTooltipProvider />
-<FluentKeyCodeProvider />
-<FluentMenuProvider />
 
 <FluentLayout>
-    <FluentHeader Height="50">
+    <FluentLayoutItem Area="LayoutArea.Header" Height="50">
         <div class="layout-header-stack">
             <FluentStack Orientation="Orientation.Horizontal"
                          VerticalAlignment="VerticalAlignment.Center"
@@ -32,14 +22,14 @@
                 <span class="brand-sep" aria-hidden="true">&#183;</span>
                 <span class="brand-page">@(_pageTitle ?? DefaultTitle)</span>
 
-                <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
+                <ThemeSwitcher />
 
                 <FluentSpacer />
 
                 <div class="header-actions-trailing">
                     @HeaderActionsLeading
 
-                    <FluentButton Appearance="Appearance.Stealth"
+                    <FluentButton Appearance="ButtonAppearance.Subtle"
                                   OnClick="@(() => Nav.NavigateTo("/settings"))"
                                   Title="Settings"
                                   aria-label="Settings"
@@ -49,24 +39,28 @@
                 </div>
             </FluentStack>
         </div>
-    </FluentHeader>
-    <div class="layout-body">
-        @SidebarContent
+    </FluentLayoutItem>
 
-        <div class="layout-content">
-            <article class="content">
-                <div class="page-toolbar-slot">
-                    <SectionOutlet SectionName="page-toolbar" />
-                </div>
-                <div class="page-scroll">
-                    @Body
-                </div>
-                <div class="page-footer-slot">
-                    <SectionOutlet SectionName="page-footer" />
-                </div>
-            </article>
-        </div>
-    </div>
+    @if (_showSidebar)
+    {
+        <FluentLayoutItem Area="LayoutArea.Navigation">
+            <NavMenu />
+        </FluentLayoutItem>
+    }
+
+    <FluentLayoutItem Area="LayoutArea.Content">
+        <article class="content">
+            <div class="page-toolbar-slot">
+                <SectionOutlet SectionName="page-toolbar" />
+            </div>
+            <div class="page-scroll">
+                @Body
+            </div>
+            <div class="page-footer-slot">
+                <SectionOutlet SectionName="page-footer" />
+            </div>
+        </article>
+    </FluentLayoutItem>
 </FluentLayout>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -82,9 +76,6 @@
         <ActiveTermToolbar />
         <DevTenantSwitcher />
     };
-    private RenderFragment? SidebarContent => _showSidebar ? __builder => {
-        <NavMenu />
-    } : null;
 
     private bool _showSidebar = true;
 
@@ -107,8 +98,6 @@
         _                                                                                   => null
     };
 
-    private DesignThemeModes _mode = DesignThemeModes.System;
-    private OfficeColor? _officeColor = OfficeColor.Teams;
     private string? _pageTitle;
     private string? _lastPath;
 
@@ -141,11 +130,6 @@
         _lastPath = path;
         _pageTitle = ResolveTitle(path);
         InvokeAsync(StateHasChanged);
-    }
-
-    private void OnLuminanceChanged(LuminanceChangedEventArgs args)
-    {
-        Logger.LogInformation("Theme luminance changed to {Mode}", args.Mode);
     }
 
     public void Dispose()

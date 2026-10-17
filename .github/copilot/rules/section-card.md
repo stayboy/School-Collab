@@ -36,7 +36,7 @@ rule sets.
 ## Create / Edit dialogs — shared form-fields; never nest a dialog inside a dialog
 
 - **Card-level create + per-row edit use shared-form-fields dialogs** (`XxxFormFields` bound to a model,
-  wrapped in a `DialogShellBase`/`IDialogContentComponent` dialog) — mirroring
+  wrapped in a `DialogShellBase` dialog) — mirroring
   `TopicCreateDialog`/`TopicEditDialog` — not landing-page forms. The card Add button opens the create
   dialog; the row kebab Edit opens the edit dialog.
 - **Never open a dialog from another dialog instance.** When a dialog needs to expose a sub-editor
@@ -45,26 +45,31 @@ rule sets.
   shared `TeacherSubjectRoleFormFields` is reused both in a standalone dialog (`TeacherSubjectsDialog`,
   from the kebab) and inline-toggled within `GradeTeachersDialog`.
 
-## Read-only dialog plumbing (`IDialogContentComponent<DialogParameters>`)
+## Read-only dialog plumbing (typed `[Parameter]`s)
 
-- **Every dialog opened via `ShowReadonlyDialogAsync<TComponent>` must mark its `Content`
-  property with `[Parameter]`** (it implements `IDialogContentComponent<DialogParameters>`).
-  FluentUI's dialog host sets `Content` as a regular parameter on open — if the attribute is
-  missing, Blazor throws `ThrowForUnknownIncomingParameterName` and the dialog **never renders**
-  (silently "does nothing" from the user's POV). This is exactly what broke the section-card
-  create/edit dialogs. Do NOT use `[CascadingParameter]` here — FluentUI passes it as a direct
-  parameter, so `[CascadingParameter]` fails with "cannot be set explicitly".
+- **Every dialog opened via `ShowReadonlyDialogAsync<TComponent>` must mark each supplied
+  property with `[Parameter]`.** FluentUI's dialog host sets the supplied names as regular
+  parameters on open — if the attribute is missing, Blazor throws
+  `ThrowForUnknownIncomingParameterName` and the dialog **never renders** (silently "does nothing"
+  from the user's POV). This is exactly what broke the section-card create/edit dialogs. Do NOT use
+  `[CascadingParameter]` here — FluentUI passes them as direct parameters, so `[CascadingParameter]`
+  fails with "cannot be set explicitly".
+
+  **FluentUI v5 (Round A, 2026-10-15):** `IDialogContentComponent<DialogParameters>` no longer exists.
+  v5 spreads `DialogOptions.Parameters` onto the body's typed `[Parameter]`s by name, so the
+  convention is unchanged in spirit but stricter in mechanism: the dialogs declare their keys as
+  `const string XxxKey = nameof(Xxx)` and callers pass the constant (not a bare `nameof`), so a
+  property rename updates the key and every caller follows. See
+  `documents/solution/dialog-parameter-binding.md`.
 
 ## Await the dialog result before reloading the card
 
 - **Create/Edit handlers must `await` the dialog's result and reload the card only on a
-  non-cancelled / successful save.** `ShowReadonlyDialogAsync` returns the `IDialogReference`
-  as soon as the dialog is shown; reloading immediately after it returns pulls **stale** data
-  (before the user saved). The correct pattern:
+  non-cancelled / successful save.** Reloading before the dialog closes pulls **stale** data
+  (before the user saved). The correct pattern (v5: the call itself returns the `DialogResult` —
+  there is no `IDialogReference.Result` task any more):
   ```
-  var dialog = await DialogService.ShowReadonlyDialogAsync<XxxDialog>(...);
-  if (_disposed) return;
-  var result = await dialog.Result;
+  var result = await DialogService.ShowReadonlyDialogAsync<XxxDialog>(...);
   if (_disposed || result.Cancelled) return;
   await ReloadXxxAsync();
   ```

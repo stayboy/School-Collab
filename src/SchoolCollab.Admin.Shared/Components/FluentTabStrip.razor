@@ -3,14 +3,15 @@
    top corners; the PANEL carries one continuous top border across the full width; the SELECTED tab
    loses its bottom border and, filled opaque, masks the panel's line exactly beneath itself — the
    only break in that line — while unselected tabs keep theirs (coinciding with the panel's border,
-   so it reads single). FluentUI's accent underline is retired through the exposed ::part.
+   so it reads single). The v4 accent-underline suppression (an exposed ::part) has no v5
+   equivalent — v5 keeps its indicator shadow-internal; see FluentTabStrip.razor.css.
 
    Pass FluentTab elements as children — FluentUI's semantics (aria-selected, keyboard navigation,
    and the hidden-panel behaviour rich editors inside tabs rely on) are preserved untouched:
 
        <FluentTabStrip>
-           <FluentTab Label="First">…</FluentTab>
-           <FluentTab Label="Second">…</FluentTab>
+           <FluentTab Header="First">…</FluentTab>
+           <FluentTab Header="Second">…</FluentTab>
        </FluentTabStrip> *@
 <div class="fluent-tab-strip">
     <FluentTabs>

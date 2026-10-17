@@ -25,7 +25,7 @@
 
     @if (Segments.Count == 0)
     {
-        <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+        <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-3">
             A rule must have at least one segment. Click <strong>Add segment</strong> to start.
         </FluentMessageBar>
     }
@@ -55,17 +55,17 @@
         <div class="segment-row">
             <div class="segment-row-toolbar">
                 <span class="segment-index-badge" title="Row position (drag-and-drop skipped for v1)">@seg.Index</span>
-                <FluentButton Appearance="Appearance.Neutral"
+                <FluentButton Appearance="ButtonAppearance.Default"
                               IconStart="@FluentIcons.ChevronUp"
                               Title="Move up"
                               Disabled="@(idx == 0)"
                               OnClick="@(() => MoveUp(idx))" />
-                <FluentButton Appearance="Appearance.Neutral"
+                <FluentButton Appearance="ButtonAppearance.Default"
                               IconStart="@FluentIcons.ChevronDown"
                               Title="Move down"
                               Disabled="@(idx == Segments.Count - 1)"
                               OnClick="@(() => MoveDown(idx))" />
-                <FluentButton Appearance="Appearance.Neutral"
+                <FluentButton Appearance="ButtonAppearance.Default"
                               IconStart="@FluentIcons.Delete"
                               Title="Remove segment"
                               OnClick="@(() => RemoveAt(idx))" />
@@ -73,24 +73,26 @@
 
             <div class="segment-row-fields">
                 <FluentSelect TOption="string"
+                              TValue="string"
                               Items="@_roleOptions"
-                              @bind-SelectedOption="seg.Role"
+                              @bind-Value="seg.Role"
                               OptionText="@(r => r)"
                               OptionValue="@(r => r)"
                               Label="Role"
                               Placeholder="(none)"
                               class="seg-role" />
                 <FluentSelect TOption="SegmentTypeDto"
+                              TValue="SegmentTypeDto"
                               Items="@_segmentTypeOptions"
-                              @bind-SelectedOption="seg.Type"
+                              @bind-Value="seg.Type"
                               OptionText="@(t => t.ToString())"
-                              OptionValue="@(t => t.ToString())"
+                              OptionValueToString="@(t => t.ToString())"
                               Label="Type"
                               class="seg-type" />
 
                 @if (showFixedFields)
                 {
-                    <FluentTextField @bind-Value="seg.FixedText"
+                    <FluentTextInput @bind-Value="seg.FixedText"
                                      Label="FixedText"
                                      Placeholder="e.g. STU"
                                      Required="true"
@@ -98,7 +100,7 @@
                 }
                 else
                 {
-                    <FluentTextField @bind-Value="seg.FixedText"
+                    <FluentTextInput @bind-Value="seg.FixedText"
                                      Label="FixedText (unused)"
                                      Placeholder="—"
                                      Disabled="true"
@@ -107,12 +109,12 @@
 
                 @if (!showFixedFields)
                 {
-                    <FluentTextField @bind-Value="seg.Prefix"
+                    <FluentTextInput @bind-Value="seg.Prefix"
                                      Label="@(seg.Type == SegmentTypeDto.AlphanumericSequence ? "Prefix *" : "Prefix")"
                                      Placeholder="@(seg.Type == SegmentTypeDto.AlphanumericSequence ? "A" : "")"
                                      Required="@(seg.Type == SegmentTypeDto.AlphanumericSequence)"
                                      class="seg-prefix" />
-                    <FluentNumberField @bind-Value="seg.MinWidth"
+                    <FluentNumberInput @bind-Value="seg.MinWidth"
                                        Label="MinWidth"
                                        Min="1"
                                        Disabled="@(!showNumericFields)"
@@ -120,35 +122,36 @@
                 }
                 else
                 {
-                    <FluentTextField Value="" Label="Prefix (unused)" Disabled="true" class="seg-prefix" />
-                    <FluentTextField Value="" Label="MinWidth (unused)" Disabled="true" class="seg-minwidth" />
+                    <FluentTextInput Value="" Label="Prefix (unused)" Disabled="true" class="seg-prefix" />
+                    <FluentTextInput Value="" Label="MinWidth (unused)" Disabled="true" class="seg-minwidth" />
                 }
 
-                <FluentTextField @bind-Value="seg.Suffix"
+                <FluentTextInput @bind-Value="seg.Suffix"
                                  Label="Suffix"
                                  Placeholder=""
                                  Disabled="false"
                                  class="seg-suffix" />
 
                 <FluentSelect TOption="ResetPeriodDto"
+                              TValue="ResetPeriodDto"
                               Items="@_resetPeriodOptions"
-                              @bind-SelectedOption="seg.ResetPeriod"
+                              @bind-Value="seg.ResetPeriod"
                               OptionText="@(r => r.ToString())"
-                              OptionValue="@(r => r.ToString())"
+                              OptionValueToString="@(r => r.ToString())"
                               Label="Reset"
                               Disabled="showFixedFields"
                               class="seg-reset" />
 
                 @if (showAlphaFields)
                 {
-                    <FluentTextField @bind-Value="seg.UpperLimit"
+                    <FluentTextInput @bind-Value="seg.UpperLimit"
                                      Label="UpperLimit"
                                      Placeholder="Z"
                                      class="seg-upperlimit" />
                 }
                 else
                 {
-                    <FluentTextField @bind-Value="seg.UpperLimit"
+                    <FluentTextInput @bind-Value="seg.UpperLimit"
                                      Label="UpperLimit"
                                      Placeholder="(numeric)"
                                      Disabled="@(!showNumericFields)"
@@ -158,14 +161,14 @@
 
             @if (fixedTextError is not null || prefixError is not null || minWidthError is not null || upperLimitError is not null || indexDup is not null)
             {
-                <FluentMessageBar Intent="MessageIntent.Error" class="segment-row-error">
+                <FluentMessageBar Intent="MessageBarIntent.Error" class="segment-row-error">
                     @(fixedTextError) @(prefixError) @(minWidthError) @(upperLimitError) @(indexDup)
                 </FluentMessageBar>
             }
         </div>
     }
 
-    <FluentButton Appearance="Appearance.Accent"
+    <FluentButton Appearance="ButtonAppearance.Primary"
                   IconStart="@FluentIcons.Add"
                   OnClick="Add"
                   class="mt-2">

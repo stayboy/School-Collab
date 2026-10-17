@@ -15,17 +15,17 @@
         promotes the value to a shared global blueprint (visible to all tenants); rejecting
         keeps it scoped to the requesting tenant.
     </p>
-    <FluentButton Appearance="Appearance.Neutral" OnClick="ReloadAsync">Refresh</FluentButton>
+    <FluentButton Appearance="ButtonAppearance.Default" OnClick="ReloadAsync">Refresh</FluentButton>
 </div>
 
 @if (_error is not null)
 {
-    <FluentMessageBar Intent="@MessageIntent.Error">@_error</FluentMessageBar>
+    <FluentMessageBar Intent="@MessageBarIntent.Error">@_error</FluentMessageBar>
 }
 
 @if (_loading)
 {
-    <FluentProgressRing />
+    <FluentSpinner />
 }
 else if (_items.Length == 0)
 {
@@ -50,8 +50,8 @@ else
             @context.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
         </TemplateColumn>
         <TemplateColumn Title="Actions">
-            <FluentButton Appearance="Appearance.Accent" Size="Size.Small" OnClick="@(() => OnApproveAsync(context))">Approve</FluentButton>
-            <FluentButton Appearance="Appearance.Neutral" Size="Size.Small" OnClick="@(() => OnRejectAsync(context))">Reject</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="@(() => OnApproveAsync(context))">Approve</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Default" Size="ButtonSize.Small" OnClick="@(() => OnRejectAsync(context))">Reject</FluentButton>
         </TemplateColumn>
     </FluentDataGrid>
 }
@@ -92,12 +92,10 @@ else
 
     private async Task OnApproveAsync(CodedValueDto item)
     {
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Approve '{item.Code}' ({item.Name}) as a global coded value? It becomes visible to all tenants.",
-            "Approve",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Approve");
+        if (!confirmed) return;
 
         try
         {
@@ -115,12 +113,10 @@ else
 
     private async Task OnRejectAsync(CodedValueDto item)
     {
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Reject '{item.Code}' ({item.Name})? It stays scoped to its requesting tenant (not deleted).",
-            "Reject",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Reject");
+        if (!confirmed) return;
 
         try
         {

@@ -77,7 +77,7 @@ public class ActivityGroupSpanDialogTests : BunitContext
 
     private async Task DriveSpanAsync(IRenderedComponent<FluentDialogProvider> cut, string span)
     {
-        var spanSelect = cut.FindComponents<FluentSelect<string>>()
+        var spanSelect = cut.FindComponents<FluentSelect<string, string>>()
             .First(s => s.Instance.Id == "ag-create-span");
         await cut.InvokeAsync(() => spanSelect.Instance.ValueChanged.InvokeAsync(span));
     }
@@ -100,16 +100,16 @@ public class ActivityGroupSpanDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<ActivityGroupCreateDialog, ActivityGroupCreateDialog.ActivityGroupCreateModel, ActivityGroupDto>(
-            new ActivityGroupCreateDialog.ActivityGroupCreateModel(), "Create activity group", DialogSize.Medium);
+            new ActivityGroupCreateDialog.ActivityGroupCreateModel(), "Create activity group", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
         // Default span is OpenEnded — no window date pickers.
-        cut.FindComponents<FluentDatePicker>().Should().BeEmpty("OpenEnded carries no window dates");
+        cut.FindComponents<FluentDatePicker<System.DateTime?>>().Should().BeEmpty("OpenEnded carries no window dates");
 
         // Switch to DateRange — the window + next-window pickers appear.
         await DriveSpanAsync(cut, "DateRange");
-        cut.WaitForAssertion(() => cut.FindComponents<FluentDatePicker>().Should().HaveCount(4,
+        cut.WaitForAssertion(() => cut.FindComponents<FluentDatePicker<System.DateTime?>>().Should().HaveCount(4,
             "DateRange reveals start/end + next-start/next-end pickers"));
 
         // Cleanup: close the dialog.
@@ -130,11 +130,11 @@ public class ActivityGroupSpanDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<ActivityGroupCreateDialog, ActivityGroupCreateDialog.ActivityGroupCreateModel, ActivityGroupDto>(
-            new ActivityGroupCreateDialog.ActivityGroupCreateModel(), "Create activity group", DialogSize.Medium);
+            new ActivityGroupCreateDialog.ActivityGroupCreateModel(), "Create activity group", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
-        cut.FindComponents<FluentDatePicker>().Should().BeEmpty("OpenEnded carries no window dates");
+        cut.FindComponents<FluentDatePicker<System.DateTime?>>().Should().BeEmpty("OpenEnded carries no window dates");
         cut.Markup.Should().NotContain("Enrollment window", "OpenEnded does not render the window row");
 
         // Cleanup: close the dialog.
@@ -167,7 +167,7 @@ public class ActivityGroupSpanDialogTests : BunitContext
             NextEnrollmentEndDate = null,
         };
         var task = DialogService.ShowShellDialogAsync<ActivityGroupCreateDialog, ActivityGroupCreateDialog.ActivityGroupCreateModel, ActivityGroupDto>(
-            model, "Create activity group", DialogSize.Medium);
+            model, "Create activity group", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -207,7 +207,7 @@ public class ActivityGroupSpanDialogTests : BunitContext
             NextEnrollmentEndDate = new DateTime(2026, 12, 31),
         };
         var task = DialogService.ShowShellDialogAsync<ActivityGroupCreateDialog, ActivityGroupCreateDialog.ActivityGroupCreateModel, ActivityGroupDto>(
-            model, "Create activity group", DialogSize.Medium);
+            model, "Create activity group", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -247,7 +247,7 @@ public class ActivityGroupSpanDialogTests : BunitContext
             NextEnrollmentEndDate = new DateTime(2026, 12, 31),
         };
         var task = DialogService.ShowShellDialogAsync<ActivityGroupCreateDialog, ActivityGroupCreateDialog.ActivityGroupCreateModel, ActivityGroupDto>(
-            model, "Create activity group", DialogSize.Medium);
+            model, "Create activity group", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -290,14 +290,14 @@ public class ActivityGroupSpanDialogTests : BunitContext
             AutoRenewDefault = true,
         };
         var task = DialogService.ShowShellDialogAsync<ActivityGroupEditDialog, ActivityGroupEditDialog.ActivityGroupEditModel, ActivityGroupDto>(
-            model, "Edit activity group", DialogSize.Medium);
+            model, "Edit activity group", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
         // The span field is a read-only text field, not a select.
         var spanField = cut.Find("#ag-edit-span");
         spanField.GetAttribute("readonly").Should().NotBeNull("the span is immutable after creation");
-        cut.FindComponents<FluentSelect<string>>().Should().BeEmpty("the edit dialog offers no span select");
+        cut.FindComponents<FluentSelect<string, string>>().Should().BeEmpty("the edit dialog offers no span select");
 
         await SubmitAsync(cut);
 

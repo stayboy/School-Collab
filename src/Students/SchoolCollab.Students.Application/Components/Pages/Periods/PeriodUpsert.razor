@@ -14,7 +14,7 @@
 @inject IDialogService DialogService
 @inject ILogger<PeriodUpsert> Logger
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <PageTitle>@(IsCreate ? "New Period" : "Edit Period")</PageTitle>
@@ -25,7 +25,7 @@
             <ChildContent>
                 @if (!_isRealTenant)
                 {
-                    <FluentMessageBar Intent="MessageIntent.Warning">
+                    <FluentMessageBar Intent="MessageBarIntent.Warning">
                         You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
                     </FluentMessageBar>
                 }
@@ -34,7 +34,7 @@
                     <section class="page-container">
                         @if (!IsCreate && !string.IsNullOrEmpty(_loadError))
                         {
-                            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Error">@_loadError</FluentMessageBar>
                         }
 
                         <div class="period-form">
@@ -52,9 +52,9 @@
                                 {
                                     @* P2-5: a None-division parent year cannot host sub-periods. Inline
                                        warning + back affordance instead of a dead-end form. *@
-                                    <FluentMessageBar Intent="MessageIntent.Warning" class="mt-3">@BlockedParentMessage</FluentMessageBar>
+                                    <FluentMessageBar Intent="MessageBarIntent.Warning" class="mt-3">@BlockedParentMessage</FluentMessageBar>
                                     <div class="mt-3">
-                                        <FluentButton Appearance="Appearance.Accent" Autofocus="true" OnClick="CancelAsync">Back to periods</FluentButton>
+                                        <FluentButton Appearance="ButtonAppearance.Primary" Autofocus="true" OnClick="CancelAsync">Back to periods</FluentButton>
                                     </div>
                                 }
                                 else
@@ -89,8 +89,8 @@
                                                             YearEnd="@_model.End" />
 
                                     <div class="form-actions">
-                                        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-                                        <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
+                                        <FluentButton Appearance="ButtonAppearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                                        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SubmitAsync" Disabled="@(_saving)">
                                             @(_saving ? "Saving…" : "Create period")
                                         </FluentButton>
                                     </div>
@@ -98,7 +98,7 @@
 
                                 @if (!string.IsNullOrEmpty(_error))
                                 {
-                                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
                                 }
                             }
                             else
@@ -135,15 +135,15 @@
                                                             OnChanged="OnSubPeriodsChangedAsync" />
 
                                     <div class="form-actions">
-                                        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-                                        <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
+                                        <FluentButton Appearance="ButtonAppearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                                        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SubmitAsync" Disabled="@(_saving)">
                                             @(_saving ? "Saving…" : "Save changes")
                                         </FluentButton>
                                     </div>
 
                                     @if (!string.IsNullOrEmpty(_saveError))
                                     {
-                                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_saveError</FluentMessageBar>
+                                        <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_saveError</FluentMessageBar>
                                     }
 
                                     @* FR-X9: Deactivate is available on Active periods (NOT the Draft danger zone). *@
@@ -153,7 +153,7 @@
                                         <section class="period-edit-danger" aria-label="Period lifecycle">
                                             <h3>Deactivate period</h3>
                                             <p class="form-hint">Retire this active period and free its date range so you can create a corrected period.</p>
-                                            <FluentButton Appearance="Appearance.Stealth"
+                                            <FluentButton Appearance="ButtonAppearance.Subtle"
                                                           IconStart="@FluentIcons.Dismiss"
                                                           Title="Deactivate period"
                                                           OnClick="OnDeactivateAsync">Deactivate…</FluentButton>
@@ -168,7 +168,7 @@
                                         <section class="period-edit-danger" aria-label="Danger zone">
                                             <h3>Danger zone</h3>
                                             <p class="form-hint">Deleting a draft period cannot be undone.</p>
-                                            <FluentButton Appearance="Appearance.Stealth"
+                                            <FluentButton Appearance="ButtonAppearance.Subtle"
                                                           IconStart="@FluentIcons.Delete"
                                                           Title="Delete period"
                                                           OnClick="OnDeleteAsync">Delete…</FluentButton>
@@ -181,14 +181,14 @@
                 }
             </ChildContent>
             <Fallback>
-                <FluentMessageBar Intent="MessageIntent.Warning">
+                <FluentMessageBar Intent="MessageBarIntent.Warning">
                     You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
                 </FluentMessageBar>
             </Fallback>
         </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -488,10 +488,11 @@
 
             if (_disposed) return;
             Logger.LogInformation("Period created {Id}", saved?.Id);
-            // Success toast fires before navigation; the FluentToastProvider
-            // (root layout) survives the route change.
-            Toast.ShowSuccess($"Period '{_model.Name.Trim()}' created.");
             Nav.NavigateTo("/students/periods");
+            // Toast LAST: ShowSuccessToastAsync completes only when the toast closes
+            // (7 s default), so awaiting it before the route change would gate the
+            // navigation; the FluentToastProvider (root layout) survives it.
+            await NotificationService.ShowSuccessToastAsync($"Period '{_model.Name.Trim()}' created.");
         }
         catch (Exception ex)
         {
@@ -538,8 +539,9 @@
 
             if (_disposed) return;
             Logger.LogInformation("Period {Id} updated", Id);
-            Toast.ShowSuccess($"Period '{_model.Name.Trim()}' updated.");
             Nav.NavigateTo("/students/periods");
+            // Toast LAST — see OnSave (created): it must not gate the route change.
+            await NotificationService.ShowSuccessToastAsync($"Period '{_model.Name.Trim()}' updated.");
         }
         catch (Exception ex)
         {
@@ -559,12 +561,10 @@
     {
         if (_disposed || _period is null) return;
 
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             PeriodDeactivatePrompts.DeactivateMessage(_period.Name),
-            "Deactivate",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Deactivate");
+        if (!confirmed) return;
 
         Logger.LogInformation("Deactivating period {Id} from edit page", Id);
         try
@@ -605,9 +605,8 @@
             message = PeriodDeletePrompts.SubPeriodMessage(_period.Name, kind);
         }
 
-        var dialog = await DialogService.ShowConfirmationAsync(message, "Delete", "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+        var confirmed = await DialogService.ShowConfirmDialogAsync(message, "Delete");
+        if (!confirmed) return;
 
         Logger.LogInformation("Deleting period {Id} from edit page", Id);
         try

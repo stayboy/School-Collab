@@ -85,13 +85,13 @@
                             @if (ActiveToolCalls is { Count: > 0 })
                             {
                                 <div class="tool-call-summary tool-call-progress">
-                                    <FluentProgressRing class="progress-ring-small" />
+                                    <FluentSpinner class="progress-ring-small" />
                                     <span>Working…</span>
                                 </div>
                             }
                             @if (string.IsNullOrEmpty(StreamingText) && (ActiveToolCalls is null || ActiveToolCalls.Count == 0))
                             {
-                                <FluentProgressRing class="progress-ring-small" />
+                                <FluentSpinner class="progress-ring-small" />
                             }
                         </div>
                     }
@@ -102,20 +102,20 @@
                non-InputOnly modes the Clear control lives here too, on the
                left edge, so it reads as a header for the input area rather
                than a footer below it. The model name stays pinned right.
-               FluentAnchor (Hypertext) is used instead of a button so the
+               FluentLink (Hypertext) is used instead of a button so the
                control reads as a lightweight inline link, matching the rest
                of the admin UI's link styling. *@
             <div class="chat-input-block chat-input-block-@Mode.ToString().ToLowerInvariant()">
             <div class="model-info">
                 @if (Mode != AiChatMode.InputOnly)
                 {
-                    <FluentAnchor Appearance="Appearance.Hypertext"
+                    <FluentLink Appearance="LinkAppearance.Default"
                                  Href="#"
                                  OnClick="ClearAsync"
                                  Disabled="@_isStreaming"
                                  aria-label="Clear chat">
                         Clear
-                    </FluentAnchor>
+                    </FluentLink>
                 }
                 <span class="model-label-text">@EffectiveModel (@_provider)</span>
             </div>
@@ -139,7 +139,6 @@
                                        Id="@_inputId"
                                        Placeholder="@Placeholder"
                                        class="full-width"
-                                       Rows="2"
                                        Immediate="true"
                                        aria-label="Chat input" />
                         @* Key handling is wired from JS (chatInput.js#attachKeydownHandler)
@@ -150,7 +149,7 @@
                            the static @onkeydown:preventDefault directive. The JS listener
                            forwards actions to the DotNetObjectReference below. *@
                     </div>
-                    <FluentButton Appearance="Appearance.Accent"
+                    <FluentButton Appearance="ButtonAppearance.Primary"
                                  OnClick="SendAsync"
                                  Disabled="@_isStreaming"
                                  aria-label="Send message">
@@ -162,7 +161,7 @@
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
-            <FluentMessageBar Intent="MessageIntent.Error">
+            <FluentMessageBar Intent="MessageBarIntent.Error">
                 Chat error: @ex.Message
             </FluentMessageBar>
         </ErrorContent>

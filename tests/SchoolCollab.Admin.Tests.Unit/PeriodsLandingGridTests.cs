@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Pages.Periods;
 using SchoolCollab.Students.Application.Services;
@@ -134,9 +135,12 @@ public class PeriodsLandingGridTests : BunitContext
 
         var cut = Render<Periods>();
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain($"href=\"/students/periods/{YearId}/edit\""));
+        // Round B converts FluentAnchor → FluentLink (removed in v5, so the repo renders the unknown
+        // element <FluentAnchor> today; the markup carries the authored attribute case). Until then
+        // assert the DOM truth: the name exposes the edit URL + accessible title.
+        cut.WaitForAssertion(() => cut.Markup.ToLower().Should().Contain($"href=\"/students/periods/{YearId}/edit\""));
         cut.Markup.Should().Contain("Edit period",
-            "the name anchor carries an accessible title for the edit navigation");
+            "the name hypertext element carries an accessible title for the edit navigation");
     }
 
     [TestMethod]
@@ -148,8 +152,8 @@ public class PeriodsLandingGridTests : BunitContext
         var cut = Render<Periods>();
 
         // Year 2026 has 2 sub-periods — rendered as a worded link (click target).
-        cut.WaitForAssertion(() => cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("title") == "View sub-periods"));
-        var countLink = cut.FindAll("fluent-anchor").First(a => a.GetAttribute("title") == "View sub-periods");
+        cut.WaitForAssertion(() => cut.FindAll("fluent-link").Any(a => a.GetAttribute("title") == "View sub-periods"));
+        var countLink = cut.FindAll("fluent-link").First(a => a.GetAttribute("title") == "View sub-periods");
         countLink.TextContent.Trim().Should().Be("2 sub-periods", "2026 has two sub-periods");
     }
 
@@ -164,8 +168,8 @@ public class PeriodsLandingGridTests : BunitContext
         // 2026 (2 subs) and the Draft 2027 year (1 sub) each render a
         // View-sub-periods link; the empty year (2025) renders a
         // non-interactive muted "None", not a link.
-        cut.WaitForAssertion(() => cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("title") == "View sub-periods"));
-        cut.FindAll("fluent-anchor").Count(a => a.GetAttribute("title") == "View sub-periods").Should().Be(2);
+        cut.WaitForAssertion(() => cut.FindAll("fluent-link").Any(a => a.GetAttribute("title") == "View sub-periods"));
+        cut.FindAll("fluent-link").Count(a => a.GetAttribute("title") == "View sub-periods").Should().Be(2);
         cut.FindAll(".muted").Any(m => m.TextContent.Trim() == "None").Should().BeTrue(
             "a year with no sub-periods renders a muted, non-interactive None");
     }
@@ -194,24 +198,26 @@ public class PeriodsLandingGridTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
             $"[{PeriodJson(Term1Id, "Term 1", "Term", "Draft", YearId, "2026-01-01", "2026-06-30")}]");
 
-        // Mock IDialogService so the read-only dialog open is assertable (the
+        // Mock the dialog service so the read-only dialog open is assertable (the
         // grid page opens it via ShowReadonlyDialogAsync → ShowDialogAsync).
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<SubPeriodsListDialog, DialogParameters>(
-                It.IsAny<DialogParameters>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(SubPeriodsListDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
 
         var cut = Render<Periods>();
-        cut.WaitForAssertion(() => cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("title") == "View sub-periods"));
+        cut.WaitForAssertion(() => cut.FindAll("fluent-link").Any(a => a.GetAttribute("title") == "View sub-periods"));
 
-        cut.FindAll("fluent-anchor").First(a => a.GetAttribute("title") == "View sub-periods").Click();
+        // The count is a live hypertext control (FluentAnchor → FluentLink): clicking it opens
+        // the read-only sub-periods dialog.
+        var countLink = cut.FindAll("fluent-link").First(a => a.GetAttribute("title") == "View sub-periods");
+        countLink.TextContent.Trim().Should().NotBeEmpty("the sub-period count renders as a hypertext link");
 
-        dialogMock.Verify(d => d.ShowDialogAsync<SubPeriodsListDialog, DialogParameters>(
-            It.IsAny<DialogParameters>(), It.IsAny<DialogParameters>()), Times.Once);
+        countLink.Click();
+        dialogMock.Verify(
+            d => d.ShowDialogAsync(typeof(SubPeriodsListDialog), It.IsAny<DialogOptions>()),
+            Times.Once,
+            "clicking the sub-period count opens the read-only sub-periods dialog");
     }
 
     [TestMethod]
@@ -353,15 +359,18 @@ public class PeriodsLandingGridTests : BunitContext
 
     // ── FR-4 dialog assertions ──────────────────────────────────────────────
 
-    private static DialogParameters SubPeriodsContent(Guid yearId, string yearName = "2026", Func<Task>? onChanged = null)
+    /// <summary>Seeds the inputs <see cref="SubPeriodsListDialog"/> takes as typed
+    /// <c>[Parameter]</c>s (FluentUI 5.x spreads <c>DialogOptions.Parameters</c> onto the
+    /// matching <c>[Parameter]</c>s by name; a bUnit render seeds them directly).</summary>
+    private static void SeedSubPeriods(
+        ComponentParameterCollectionBuilder<SubPeriodsListDialog> parameters,
+        Guid yearId,
+        string yearName = "2026",
+        Func<Task>? onChanged = null)
     {
-        var c = new DialogParameters
-        {
-            [SubPeriodsListDialog.YearIdKey] = yearId,
-            [SubPeriodsListDialog.YearNameKey] = yearName,
-        };
-        if (onChanged is not null) c[SubPeriodsListDialog.OnChangedKey] = onChanged;
-        return c;
+        parameters.Add(p => p.YearId, yearId);
+        parameters.Add(p => p.YearName, yearName);
+        if (onChanged is not null) parameters.Add(p => p.OnChanged, onChanged);
     }
 
     [TestMethod]
@@ -372,7 +381,7 @@ public class PeriodsLandingGridTests : BunitContext
             $"[{PeriodJson(Term1Id, "Term 1", "Term", "Draft", YearId, "2026-01-01", "2026-06-30")}," +
             $"{PeriodJson(Term2Id, "Semester 1", "Semester", "Active", YearId, "2026-07-01", "2026-12-31")}]");
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content, SubPeriodsContent(YearId)));
+        var cut = Render<SubPeriodsListDialog>(p => SeedSubPeriods(p, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Term 1"));
         cut.Markup.Should().Contain("Semester 1", "both sub-period rows render");
@@ -381,13 +390,38 @@ public class PeriodsLandingGridTests : BunitContext
         cut.Markup.Should().Contain("Complete", "the Active row offers Complete");
     }
 
+    /// <summary>
+    /// Q24 (Round A): the v5 badge mapping sends both v4 <c>Appearance.Accent</c> and
+    /// <c>Appearance.Neutral</c> to <c>BadgeAppearance.Filled</c>, so a Draft and an Active
+    /// sub-period rendered identical chips. The semantics ride on <c>BadgeColor</c> now
+    /// (MigrationFluentBadge.md §Color) while each Appearance mapping stays as migrated.
+    /// </summary>
+    [TestMethod]
+    public void Dialog_StatusBadges_DistinguishActiveFromDraftByColour()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
+            $"[{PeriodJson(Term1Id, "Term 1", "Term", "Draft", YearId, "2026-01-01", "2026-06-30")}," +
+            $"{PeriodJson(Term2Id, "Semester 1", "Semester", "Active", YearId, "2026-07-01", "2026-12-31")}]");
+
+        var cut = Render<SubPeriodsListDialog>(p => SeedSubPeriods(p, YearId));
+
+        cut.WaitForAssertion(() => cut.FindAll("fluent-badge").Any(b => b.TextContent.Trim() == "Active"));
+        StatusBadge(cut, "Active").GetAttribute("color").Should().Be("success");
+        StatusBadge(cut, "Draft").GetAttribute("color").Should().Be("subtle");
+    }
+
+    /// <summary>The status chip for <paramref name="status"/> — its text is the status value.</summary>
+    private static IElement StatusBadge(IRenderedComponent<SubPeriodsListDialog> cut, string status) =>
+        cut.FindAll("fluent-badge").Single(b => b.TextContent.Trim() == status);
+
     [TestMethod]
     public void Dialog_EmptyState_ShowsNewSubPeriodLink()
     {
         var handler = RegisterClient();
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content, SubPeriodsContent(YearId)));
+        var cut = Render<SubPeriodsListDialog>(p => SeedSubPeriods(p, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("No sub-periods for this academic year yet."));
         cut.Markup.Should().Contain("+ New sub-period");
@@ -399,7 +433,7 @@ public class PeriodsLandingGridTests : BunitContext
         var handler = RegisterClient();
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.InternalServerError, "{\"message\":\"boom\"}");
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content, SubPeriodsContent(YearId)));
+        var cut = Render<SubPeriodsListDialog>(p => SeedSubPeriods(p, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Couldn't load sub-periods"));
         cut.Markup.Should().Contain("boom", "the underlying failure message is surfaced");
@@ -416,8 +450,8 @@ public class PeriodsLandingGridTests : BunitContext
         handler.Map("POST", $"/students/periods/{Term1Id}/activate", HttpStatusCode.OK, "");
         var gridRefresh = 0;
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content,
-            SubPeriodsContent(YearId, onChanged: () => { gridRefresh++; return Task.CompletedTask; })));
+        var cut = Render<SubPeriodsListDialog>(p =>
+            SeedSubPeriods(p, YearId, onChanged: () => { gridRefresh++; return Task.CompletedTask; }));
 
         cut.WaitForAssertion(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Activate")));
         cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Activate")).Click();
@@ -438,16 +472,13 @@ public class PeriodsLandingGridTests : BunitContext
 
         // Complete is gated by a confirmation prompt (FR-4); mock the message box
         // so the primary (Confirm) action resolves as accepted.
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object>(null!)));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object>(null!));
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content,
-            SubPeriodsContent(YearId, onChanged: () => { gridRefresh++; return Task.CompletedTask; })));
+        var cut = Render<SubPeriodsListDialog>(p =>
+            SeedSubPeriods(p, YearId, onChanged: () => { gridRefresh++; return Task.CompletedTask; }));
 
         cut.WaitForAssertion(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Complete")));
         cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Complete")).Click();
@@ -455,8 +486,10 @@ public class PeriodsLandingGridTests : BunitContext
         // Confirmation was accepted, so the parent grid reload callback fires after
         // the dialog mutation (the core sync-back contract).
         cut.WaitForAssertion(() => gridRefresh.Should().Be(1));
-        dialogMock.Verify(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
-            Times.Once, "Complete must prompt for confirmation before acting");
+        dialogMock.Verify(
+            d => d.ShowDialogAsync(typeof(ConfirmDialog),
+                It.Is<DialogOptions>(o => o.Modal == false && o.PreventDismissOnEscape == false)),
+            Times.Once, "Complete must prompt with the dismissible confirmation dialog before acting");
     }
 
     [TestMethod]
@@ -467,16 +500,13 @@ public class PeriodsLandingGridTests : BunitContext
             $"[{PeriodJson(Term2Id, "Semester 1", "Semester", "Active", YearId, "2026-07-01", "2026-12-31")}]");
         var gridRefresh = 0;
 
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content,
-            SubPeriodsContent(YearId, onChanged: () => { gridRefresh++; return Task.CompletedTask; })));
+        var cut = Render<SubPeriodsListDialog>(p =>
+            SeedSubPeriods(p, YearId, onChanged: () => { gridRefresh++; return Task.CompletedTask; }));
 
         cut.WaitForAssertion(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Complete")));
         cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Complete")).Click();
@@ -498,7 +528,7 @@ public class PeriodsLandingGridTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
             $"[{PeriodJson(Term1Id, "Term 1", "Term", "Draft", YearId, "2026-01-01", "2026-06-30")}]");
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content, SubPeriodsContent(YearId)));
+        var cut = Render<SubPeriodsListDialog>(p => SeedSubPeriods(p, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Close\""));
     }
@@ -513,9 +543,9 @@ public class PeriodsLandingGridTests : BunitContext
         var handler = RegisterClient();
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<SubPeriodsListDialog>(p => p.Add(x => x.Content, SubPeriodsContent(YearId)));
+        var cut = Render<SubPeriodsListDialog>(p => SeedSubPeriods(p, YearId));
 
-        cut.WaitForAssertion(() => cut.FindAll("fluent-anchor")
+        cut.WaitForAssertion(() => cut.FindAll("fluent-link")
             .Any(a => a.GetAttribute("title") == "New sub-period").Should().BeTrue());
     }
 
@@ -525,15 +555,20 @@ public class PeriodsLandingGridTests : BunitContext
     private static readonly Guid DraftSub1Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid DraftSub2Id = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
-    private static Mock<IDialogService> ConfirmationDialog(StringBuilder? capturedMessage = null)
+    private Mock<DialogService> ConfirmationDialog(StringBuilder? capturedMessage = null)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object>(null!)));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<string, string, string, string>((msg, _, __, ___) => capturedMessage?.Append(msg))
-            .ReturnsAsync(dialogRef.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+            {
+                if (capturedMessage is not null &&
+                    options.Parameters[nameof(ConfirmDialog.Content)] is ConfirmDialogContent content)
+                {
+                    capturedMessage.Append(content.Message);
+                }
+            })
+            .ReturnsAsync(DialogResult.Ok<object>(null!));
         return dialogMock;
     }
 
@@ -572,8 +607,15 @@ public class PeriodsLandingGridTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
         cut.FindAll("fluent-button").Any(b => b.GetAttribute("title") == "Delete").Should().BeFalse(
             "Active/Completed rows offer no labeled Delete (AC-D8)");
-        cut.FindAll("fluent-menu-item").Any(m => m.TextContent.Contains("Delete")).Should().BeFalse(
-            "Active/Completed rows offer no Delete menu item (AC-D8)");
+        // v5 renders a kebab menu's items into the DOM even while the menu is closed (v4
+        // materialised them on open), so the NON-DRAFT claim must be scoped to the non-Draft
+        // rows — the landing also lists a Draft row, whose Delete item is correct (Periods.razor
+        // adds Delete only for status == "Draft").
+        cut.FindAll("tr.fluent-data-grid-row")
+            .Where(r => !r.TextContent.Contains("Draft"))
+            .SelectMany(r => r.QuerySelectorAll("fluent-menu-item"))
+            .Any(m => m.TextContent.Contains("Delete")).Should().BeFalse(
+                "Active/Completed rows offer no Delete menu item (AC-D8)");
     }
 
     /// <summary>FR-D9: confirming the delete fires the DELETE call and reloads the list.</summary>
@@ -584,7 +626,7 @@ public class PeriodsLandingGridTests : BunitContext
         handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
             "[" + LandingJson(DraftYearId, "2026", "None", "Draft", 0, 0) + "]");
         handler.Map("DELETE", $"/students/periods/{DraftYearId}", HttpStatusCode.NoContent, "");
-        Services.AddSingleton(ConfirmationDialog().Object);
+        ConfirmationDialog();
 
         var cut = Render<Periods>();
         cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
@@ -593,10 +635,14 @@ public class PeriodsLandingGridTests : BunitContext
             .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue());
         var beforeGets = handler.GetCount;
 
-        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).Click();
+        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).MenuItemClick();
 
-        cut.WaitForAssertion(() => handler.DeleteCount.Should().Be(1, "the confirmed delete fires the DELETE call"));
-        handler.GetCount.Should().BeGreaterThan(beforeGets, "the list is re-fetched after a successful delete (FR-D9)");
+        cut.WaitForAssertion(() =>
+        {
+            handler.DeleteCount.Should().Be(1, "the confirmed delete fires the DELETE call");
+            handler.GetCount.Should().BeGreaterThan(beforeGets,
+                "the list is re-fetched after a successful delete (FR-D9)");
+        });
     }
 
     /// <summary>FR-D9: cancelling the confirmation never fires the API call.</summary>
@@ -606,13 +652,10 @@ public class PeriodsLandingGridTests : BunitContext
         var handler = RegisterClient();
         handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
             "[" + LandingJson(DraftYearId, "2026", "None", "Draft", 0, 0) + "]");
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
 
         var cut = Render<Periods>();
         cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
@@ -620,8 +663,11 @@ public class PeriodsLandingGridTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
             .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue());
 
-        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).Click();
+        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).MenuItemClick();
 
+        dialogMock.Verify(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()), Times.Once,
+            "the Delete item reaches the shared confirmation — without this the zero-call assertion below "
+            + "passes whether or not the item's event still reaches the handler");
         handler.DeleteCount.Should().Be(0, "cancelling the confirmation must not fire the DELETE call");
     }
 
@@ -633,7 +679,7 @@ public class PeriodsLandingGridTests : BunitContext
         handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
             "[" + LandingJson(DraftYearId, "2026", "Terms", "Draft", 2, 2) + "]");
         var captured = new StringBuilder();
-        Services.AddSingleton(ConfirmationDialog(captured).Object);
+        ConfirmationDialog(captured);
 
         var cut = Render<Periods>();
         cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
@@ -641,7 +687,7 @@ public class PeriodsLandingGridTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
             .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue());
 
-        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).Click();
+        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).MenuItemClick();
 
         cut.WaitForAssertion(() => captured.ToString().Should().Contain("2026"));
         captured.ToString().Should().Contain("2 draft sub-periods",

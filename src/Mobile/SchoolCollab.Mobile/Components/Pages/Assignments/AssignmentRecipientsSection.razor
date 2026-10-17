@@ -10,7 +10,7 @@
     @if (Recipients is null || Recipients.Length == 0)
     {
         <div class="recipients__notice">
-            <FluentMessageBar Intent="MessageIntent.Info">
+            <FluentMessageBar Intent="MessageBarIntent.Info">
                 No recipients yet. Publish the assignment to notify subscribed student/guardian contacts.
             </FluentMessageBar>
         </div>
@@ -23,7 +23,8 @@
                 <li class="recipients__card">
                     <div class="recipients__header">
                         <span class="recipients__owner">@AssignmentEnumDisplay.GetDescription(recipient.OwnerType)</span>
-                        <FluentBadge Appearance="@(recipient.SubscriptionActive ? Appearance.Accent : Appearance.Neutral)">
+                        <FluentBadge Appearance="BadgeAppearance.Filled"
+                                     Color="@(recipient.SubscriptionActive ? BadgeColor.Success : BadgeColor.Subtle)">
                             @(recipient.SubscriptionActive ? "Active" : "Inactive")
                         </FluentBadge>
                     </div>

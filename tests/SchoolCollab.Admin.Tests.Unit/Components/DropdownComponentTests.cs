@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
 using Bunit;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
@@ -44,10 +46,10 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
-        // Assert: the fluent-select is rendered with the items.
-        cut.Find("fluent-select").Should().NotBeNull();
+        // Assert: the fluent-dropdown is rendered with the items.
+        cut.Find("fluent-dropdown").Should().NotBeNull();
     }
 
     [TestMethod]
@@ -70,10 +72,16 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
-        // Assert: the fluent-select's current-value reflects the selected key.
-        cut.Find("fluent-select")?.GetAttribute("current-value")?.Should().Be(alphaId.ToString());
+        // Assert: FluentUI 5.x no longer renders the bound value as a `current-value`
+        // attribute on the dropdown (that was the v4 <fluent-select> DOM). The selection
+        // is expressed on the resolved option instead: the key resolves to the full item
+        // and that item's option — and only it — renders as `selected`, which is the
+        // guarantee the parent's key-only binding rests on.
+        var selectedOptions = cut.FindAll("fluent-option").Where(o => o.HasAttribute("selected")).ToList();
+        selectedOptions.Should().ContainSingle("the bound key resolves to exactly one option");
+        selectedOptions[0].TextContent.Should().Contain("Alpha");
     }
 
     [TestMethod]
@@ -97,10 +105,10 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
         // Act: simulate a pick by changing SelectedValue (in real use this
-        // would come from the fluent-select's internal selection change).
+        // would come from the fluent-dropdown's internal selection change).
         // We verify the contract via TryFindItem below; the EventCallback
         // wiring is covered by the CodedValueDropdown tests.
         cut.Instance.TryFindItem(betaId, out var resolved).Should().BeTrue();
@@ -126,7 +134,7 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
         // Assert: TryFindItem resolves the full item for a given key.
         cut.Instance.TryFindItem(alphaId, out var alpha).Should().BeTrue();
@@ -150,7 +158,7 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
         // Assert: a null key returns false (no item matches).
         cut.Instance.TryFindItem(null, out var item).Should().BeFalse();
@@ -160,10 +168,14 @@ public class DropdownComponentTests : BunitContext
     [TestMethod]
     public void DropdownComponent_Width_EmitsInlineStyle_OnFluentSelect()
     {
-        // Arrange: the repo's W1–W9 FieldWidth enum emits an inline `style`
-        // on the underlying <fluent-select> so the width always wins over
-        // the wrapper's scoped `width:100%` default (inline style beats
-        // Blazor scoped CSS). W1 = 80px.
+        // Arrange: the repo's W1–W9 FieldWidth enum sizes the FluentUI control
+        // from the OUTSIDE, and v5 splits that "outside" into two elements —
+        // <FluentSelect> renders as
+        //   <fluent-field class="dropdown-component" style="width:80px; …">
+        //     <fluent-dropdown slot="input">…
+        // (probe-verified, Round A) — so the `Style` parameter lands on the
+        // `fluent-field` HOST and carries the width + the min-width:0 / max-width:100%
+        // safety nets from FieldWidthExtensions.ToCssStyle. W1 = 80px.
         var items = new[] { new TestItem(Guid.NewGuid(), "Alpha") };
 
         // Act
@@ -173,22 +185,29 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionValue, i => i.Id)
             .Add(p => p.Width, FieldWidth.W1));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
-        // Assert: the style attribute carries the W1 width + the min-width:0
-        // / max-width:100% safety nets from FieldWidthExtensions.ToCssStyle.
-        var style = cut.Find("fluent-select").GetAttribute("style");
-        style.Should().Contain("width:80px");
-        style.Should().Contain("min-width:0");
-        style.Should().Contain("max-width:100%");
+        // Assert: the style lands on the host that actually receives it …
+        var hostStyle = cut.Find("fluent-field").GetAttribute("style");
+        hostStyle.Should().Contain("width:80px");
+        hostStyle.Should().Contain("min-width:0");
+        hostStyle.Should().Contain("max-width:100%");
+
+        // … and NOT on the control (moving this assertion onto the control would
+        // assert the old v4 DOM and fail for the right reason).
+        cut.Find("fluent-dropdown").GetAttribute("style").Should().BeNullOrEmpty();
+
+        // The host width only reaches the visible control through the declared
+        // slotted-control rule — that second half is pinned here.
+        AssertSlottedControlSizesFromFieldHost();
     }
 
     [TestMethod]
     public void DropdownComponent_WidthNull_OmitsStyleAttribute()
     {
         // Arrange: when Width is not set, no inline style is emitted (so the
-        // wrapper's scoped default / consumer Class controls the width) and
-        // no empty style="" attribute leaks onto the element.
+        // consumer's Class controls the width) and no empty style="" attribute
+        // leaks onto either the host or the control.
         var items = new[] { new TestItem(Guid.NewGuid(), "Alpha") };
 
         // Act
@@ -197,11 +216,45 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
-        // Assert: no style attribute is rendered when Width is null.
-        var styleAttr = cut.Find("fluent-select").GetAttribute("style");
-        styleAttr.Should().BeNullOrEmpty();
+        // Assert: neither the fluent-field host nor the control carries a style.
+        cut.Find("fluent-field").GetAttribute("style").Should().BeNullOrEmpty();
+        cut.Find("fluent-dropdown").GetAttribute("style").Should().BeNullOrEmpty();
+
+        // The sizing rule is a property of the ladder, not of a single call site,
+        // so it must be declared whether or not Width is set.
+        AssertSlottedControlSizesFromFieldHost();
+    }
+
+    /// <summary>
+    /// Pins the second half of the width ladder's mechanism (owner pin Q28(a),
+    /// 2026-10-16): v5 puts the wrapper's inline width style on the `fluent-field`
+    /// HOST, and `@fluentui/web-components` gives the slotted control no width of
+    /// its own (only `grid-area: input`), so the control must be told to size from
+    /// the host by the rule in the shared global stylesheet the Admin host links
+    /// (<c>_content/SchoolCollab.Admin.Shared/app.css</c>). bUnit cannot compute
+    /// CSS, so this reads that stylesheet and requires the declaration to be
+    /// present — deleting or renaming it re-breaks the ladder and fails here.
+    /// LIMIT: this pins the declared mechanism, not the rendered pixels. The
+    /// control's own shadow CSS still clamps — <c>fluent-dropdown</c>'s inner
+    /// <c>.control</c> carries <c>min-width: 160px</c>, so a W1/W2 host renders at
+    /// 160px until that part is reset too. Only a live browser can confirm widths.
+    /// </summary>
+    private static void AssertSlottedControlSizesFromFieldHost()
+    {
+        var stylesheetPath = Path.GetFullPath(Path.Combine(
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
+            "..", "..", "..", "..", "..",
+            "src", "SchoolCollab.Admin.Shared", "wwwroot", "app.css"));
+        File.Exists(stylesheetPath).Should().BeTrue(
+            $"the shared global stylesheet should exist at '{stylesheetPath}' — check the path resolution");
+
+        var css = File.ReadAllText(stylesheetPath);
+        Regex.IsMatch(css, @"fluent-field\s*>\s*fluent-dropdown\s*,[^{}]*\{\s*width:\s*inherit\s*;")
+            .Should().BeTrue(
+                "the slotted control must size from the fluent-field host that carries the inline width style "
+                + "(fluent-field > fluent-dropdown { width: inherit; } in src/SchoolCollab.Admin.Shared/wwwroot/app.css)");
     }
 
     [TestMethod]
@@ -222,7 +275,7 @@ public class DropdownComponentTests : BunitContext
             .Add(p => p.OptionText, i => i.Name)
             .Add(p => p.OptionValue, i => i.Id));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
         // Act: mutate in place + Refresh(). The Refresh() call must be on
         // the Blazor dispatcher (bunit's InvokeAsync) — StateHasChanged()

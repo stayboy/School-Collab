@@ -5,9 +5,10 @@
 @using SchoolCollab.Assignments.Application.Helpers
 @inherits DialogShellBase<QuestionEditModel, QuestionEditResult>
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
-        <FluentTextField @bind-Value="Model.Row.QuestionText"
+        <FluentTextInput @bind-Value="Model.Row.QuestionText"
                          Id="cq-qedit-text"
                          Label="Question *"
                          class="full-width mb-3" />
@@ -67,12 +68,12 @@
                                              Checked="@(Model.Row.CorrectOptionIndex == optIndex)"
                                              CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(optIndex, v)))"
                                              aria-label="Mark as correct option" />
-                                <FluentTextField @bind-Value="opt.OptionText"
+                                <FluentTextInput @bind-Value="opt.OptionText"
                                                  Placeholder="@($"Option {optIndex + 1}")"
                                                  class="full-width" />
                                 @if (Model.Row.Options.Count > QuestionEditorRow.MinOptions)
                                 {
-                                    <FluentButton Appearance="Appearance.Stealth"
+                                    <FluentButton Appearance="ButtonAppearance.Subtle"
                                                   OnClick="@(() => OnRemoveOption(optIndex))"
                                                   aria-label="Remove option">
                                         ×
@@ -81,7 +82,7 @@
                             </div>
                         }
                     </FluentRadioGroup>
-                    <FluentButton Appearance="Appearance.Outline"
+                    <FluentButton Appearance="ButtonAppearance.Outline"
                                   Disabled="@(Model.Row.Options.Count >= QuestionEditorRow.MaxOptions)"
                                   OnClick="OnAddOption">
                         Add option
@@ -110,7 +111,6 @@
             {
                 <FluentTextArea @bind-Value="Model.Row.ModelAnswer"
                                 Label="Model answer (teacher reference)"
-                                Rows="2"
                                 class="full-width" />
                 break;
             }
@@ -122,6 +122,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     /// <summary>A per-dialog radio-group name so each question's radios stay independent.</summary>

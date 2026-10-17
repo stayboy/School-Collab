@@ -10,6 +10,7 @@
 
 @inherits DialogShellBase<OverrideFormModel, OverrideResult>
 
+<DialogShellBody>
 <div class="override-dialog">
     <p class="override-dialog-hint">
         Override one segment field for <strong>this tenant only</strong>. The shared
@@ -20,24 +21,24 @@
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
-        <FluentSelect TOption="SegmentOption"
+        <FluentSelect TOption="SegmentOption" TValue="SegmentOption"
                       Items="@_segmentOptions"
-                      @bind-SelectedOption="@Model.SelectedSegment"
+                      @bind-Value="@Model.SelectedSegment"
                       Label="Segment"
                       Disabled="@Model.IsEdit"
                       OptionText="@(o => o.Label)"
-                      OptionValue="@(o => o.SegmentId.ToString())"
+                      OptionValueToString="@(o => o.SegmentId.ToString())"
                       class="full-width mb-3" />
 
-        <FluentSelect TOption="OverrideFieldDto"
+        <FluentSelect TOption="OverrideFieldDto" TValue="OverrideFieldDto"
                       Items="@_fieldOptions"
-                      @bind-SelectedOption="Model.Field"
+                      @bind-Value="Model.Field"
                       Label="Field"
                       OptionText="@(f => f.ToString())"
-                      OptionValue="@(f => ((int)f).ToString())"
+                      OptionValueToString="@(f => ((int)f).ToString())"
                       class="full-width mb-3" />
 
-        <FluentTextField @bind-Value="Model.Value"
+        <FluentTextInput @bind-Value="Model.Value"
                          Label="Value *"
                          Placeholder="e.g. ABC (FixedText), X (Prefix), 4 (MinWidth)"
                          Required
@@ -50,6 +51,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     /// <summary>

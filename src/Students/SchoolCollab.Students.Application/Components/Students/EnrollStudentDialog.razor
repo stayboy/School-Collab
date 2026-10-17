@@ -142,14 +142,15 @@
 @inject IDialogService DialogService
 @inject ILogger<EnrollStudentDialog> Logger
 
+<DialogShellBody>
 <div class="enroll-dialog">
     @if (_loading)
     {
-        <FluentProgressRing />
+        <FluentSpinner />
     }
     else if (!string.IsNullOrWhiteSpace(Error))
     {
-        <FluentMessageBar Intent="MessageIntent.Error">@Error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">@Error</FluentMessageBar>
     }
     else if (_activePeriod is null)
     {
@@ -157,9 +158,9 @@
            any enrollment whose PeriodId does not match the tenant's
            active period, so this is a hard block. Surface a clear
            action: open a period first. *@
-        <FluentMessageBar Intent="MessageIntent.Warning">
+        <FluentMessageBar Intent="MessageBarIntent.Warning">
             No active academic period is open for this tenant. Open a period on the
-            <FluentAnchor Href="/students/periods" Appearance="Appearance.Hypertext">periods</FluentAnchor>
+            <FluentLink Href="/students/periods" Appearance="LinkAppearance.Default">periods</FluentLink>
             page before enrolling.
         </FluentMessageBar>
     }
@@ -193,7 +194,7 @@
                        exposed as a native <code>title=</code> tooltip
                        on the input so the user can hover for the
                        complete context without the row overflowing. *@
-                    <FluentTextField Value="@ActivePeriodText"
+                    <FluentTextInput Value="@ActivePeriodText"
                                      ReadOnly="true"
                                      Title="@ActivePeriodTooltip"
                                      class="enroll-form-input--readonly" />
@@ -262,7 +263,7 @@
                                    Either gate being false hides the button. *@
                                 @if (IsNewEnrollment)
                                 {
-                                    <FluentButton Appearance="Appearance.Neutral"
+                                    <FluentButton Appearance="ButtonAppearance.Default"
                                                   Title="Create a new grade level for this tenant"
                                                   OnClick="OnAddNewGradeAsync"
                                                   Disabled="@_creatingGrade"
@@ -279,7 +280,7 @@
                                    immediately. *@
                                 @if (_formModel.GradeCodedValueId is not null)
                                 {
-                                    <FluentButton Appearance="Appearance.Neutral"
+                                    <FluentButton Appearance="ButtonAppearance.Default"
                                                   Title="Override the selected grade's name for this tenant"
                                                   OnClick="OnOverrideGradeNameAsync"
                                                   Disabled="@_overridingGrade"
@@ -305,14 +306,15 @@
                     @if (GradeCodedValueIdForFilter is not null)
                     {
                         <FluentSelect TOption="string"
+                                      TValue="string"
                                       Id="enroll-stream"
                                       @bind-Value="_streamSelection"
                                       @bind-Value:after="OnStreamSelectionChanged"
                                       Style="flex:1; min-width:0">
-                            <FluentOption Value="">No stream</FluentOption>
+                            <FluentOptionString Value="">No stream</FluentOptionString>
                             @foreach (var stream in _streamOptions)
                             {
-                                <FluentOption Value="@stream.StreamCodedValueId.ToString()">@stream.Name</FluentOption>
+                                <FluentOptionString Value="@stream.StreamCodedValueId.ToString()">@stream.Name</FluentOptionString>
                             }
                         </FluentSelect>
                     }
@@ -327,7 +329,7 @@
                        from the model's DateOnly? on the way in and back
                        on the way out. The input has no built-in label
                        (the FormRow above provides it). *@
-                    <FluentDatePicker Value="@EnrolledOnAsDateTime"
+                    <FluentDatePicker TValue="DateTime?" Value="@EnrolledOnAsDateTime"
                                       ValueChanged="@OnEnrolledOnChanged"
                                       class="enroll-form-input--enrolled-on" />
                     @* Per-field error display. Mirrors the dialog's
@@ -344,7 +346,7 @@
                        user-facing message. *@
                     @if (!string.IsNullOrWhiteSpace(Error))
                     {
-                        <FluentMessageBar Intent="MessageIntent.Error"
+                        <FluentMessageBar Intent="MessageBarIntent.Error"
                                           class="enroll-form-field-error">
                             @Error
                         </FluentMessageBar>
@@ -360,6 +362,7 @@
         </EditForm>
     }
 </div>
+</DialogShellBody>
 
 @code {
     private readonly EnrollStudentFormModel _formModel = new();
@@ -674,7 +677,7 @@
             var cvResult = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
                 CodedValueFormModel.ForCreate(parentId: null),
                 title: "New grade",
-                size: DialogSize.Medium);
+                size: DialogWidth.Medium);
             if (cvResult is null) return;
 
             // Refresh the dropdown so the new coded value is selectable, then
@@ -725,7 +728,7 @@
             var result = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
                 CodedValueFormModel.ForOverride(cv, cv.IsOverridden),
                 title: "Override grade name",
-                size: DialogSize.Medium);
+                size: DialogWidth.Medium);
             if (result is null) return;
 
             // Refresh the dropdown so the overridden (per-tenant) name shows

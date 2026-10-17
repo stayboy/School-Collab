@@ -20,12 +20,12 @@
     <ChildContent>
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (_context is null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">Assignment or student not found.</FluentMessageBar>
-            <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-2">Back to assignments</FluentButton>
+            <FluentMessageBar Intent="MessageBarIntent.Error">Assignment or student not found.</FluentMessageBar>
+            <FluentButton Appearance="ButtonAppearance.Outline" @onclick="Cancel" class="mt-2">Back to assignments</FluentButton>
         }
         else
         {
@@ -41,7 +41,7 @@
                 {
                     @* Already-signed view: the idempotent second visit is a VIEW, not
                        a 409 page — the 409 only fires on a second POST. *@
-                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-3">
+                    <FluentMessageBar Intent="MessageBarIntent.Success" class="mt-3">
                         This sign-off has been completed
                         @(_context.FinalizedAt is not null
                             ? $"and finalized on {_context.FinalizedAt.Value.ToLocalTime():g}."
@@ -50,11 +50,11 @@
                     <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="mt-3">
                         @if (_context.FinalizedAt is not null)
                         {
-                            <FluentButton Appearance="Appearance.Accent"
+                            <FluentButton Appearance="ButtonAppearance.Primary"
                                           OnClick="DownloadCertificateAsync"
                                           Disabled="@_downloadBusy">Download certificate</FluentButton>
                         }
-                        <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to assignments</FluentButton>
+                        <FluentButton Appearance="ButtonAppearance.Outline" @onclick="Cancel">Back to assignments</FluentButton>
                     </FluentStack>
                 }
                 else
@@ -84,7 +84,7 @@
                         <h5>Signing as (guardian) *</h5>
                         @if (_context.Guardians.Count == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Warning">No linked guardians found for this ward.</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Warning">No linked guardians found for this ward.</FluentMessageBar>
                         }
                         else
                         {
@@ -109,7 +109,7 @@
 
                     @if (_signatureType == SignatureTypeDto.Typed)
                     {
-                        <FluentTextField @bind-Value="_typedSignature"
+                        <FluentTextInput @bind-Value="_typedSignature"
                                          Label="Type your full name *"
                                          Placeholder="e.g. Jane Doe"
                                          MaxLength="200"
@@ -119,23 +119,23 @@
 
                     @if (!string.IsNullOrEmpty(_error))
                     {
-                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                        <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-3">@_error</FluentMessageBar>
                     }
 
                     <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="mt-4">
-                        <FluentButton Appearance="Appearance.Accent"
+                        <FluentButton Appearance="ButtonAppearance.Primary"
                                       OnClick="SubmitSignAsync"
                                       Disabled="@(_busy || !_consentChecked || !_selectedGuardianId.HasValue || (_signatureType == SignatureTypeDto.Typed && string.IsNullOrWhiteSpace(_typedSignature)))">
                             @(_busy ? "Signing…" : _signatureType == SignatureTypeDto.Typed ? "Sign" : "Click to sign")
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Cancel</FluentButton>
+                        <FluentButton Appearance="ButtonAppearance.Outline" @onclick="Cancel">Cancel</FluentButton>
                     </FluentStack>
                 }
             </div>
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -258,11 +258,13 @@
         _ => "None"
     };
 
-    private static Appearance ContextStatusAppearance(SignOffContextDto ctx) => ctx.SignOffState switch
+    // FluentUI v5 BadgeAppearance offers the render-safe pair only (the Detail.razor WS-A2
+    // documented deviation — Outline/Tint are not the v4 triad).
+    private static BadgeAppearance ContextStatusAppearance(SignOffContextDto ctx) => ctx.SignOffState switch
     {
-        SignOffStateDto.Signed when ctx.FinalizedAt is not null => Appearance.Neutral,
-        SignOffStateDto.Signed => Appearance.Accent,
-        SignOffStateDto.AwaitingSignature => Appearance.Lightweight,
-        _ => Appearance.Neutral
+        SignOffStateDto.Signed when ctx.FinalizedAt is not null => BadgeAppearance.Filled,
+        SignOffStateDto.Signed => BadgeAppearance.Filled,
+        SignOffStateDto.AwaitingSignature => BadgeAppearance.Ghost,
+        _ => BadgeAppearance.Filled
     };
 }

@@ -20,11 +20,10 @@
         <FluentTextArea @bind-Value="Model.AiPromptOverride"
                         Id="cq-composer-prompt"
                         MaxLength="4000"
-                        Rows="3"
                         Disabled="@PromptLocked"
                         Placeholder="Describe the questions you want — e.g. '10 mixed questions on fractions, 40% hard'"
                         Tooltip="@(PromptLocked ? "Your organization has locked the AI prompt." : null)"
-                        class="full-width" />
+                        class="full-width ta-lines-3" />
 
         @* QA-3/QA-4/QA-22 (spec §6.1, D14): the knobs moved into the dialog, so the composer shows
            only the read-only summary and the Configure trigger. The Generate row keeps the
@@ -32,7 +31,7 @@
         <div class="cq-composer-config">
             <span class="cq-config-summary" id="cq-config-summary">@ConfigSummary</span>
             <FluentButton Id="cq-configure"
-                          Appearance="Appearance.Outline"
+                          Appearance="ButtonAppearance.Outline"
                           IconStart="@FluentIcons.Settings"
                           Disabled="@(!GateEnabled || TopicId is null || _generating)"
                           OnClick="OpenPromptDialogAsync"
@@ -49,7 +48,7 @@
 
         <div class="cq-composer-footer">
             <div class="cq-composer-actions">
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Disabled="@(!GateEnabled || _generating)"
                               OnClick="OnGenerateAsync"
                               Tooltip="@(GateEnabled ? null : QuestionGenerationGate.DisabledTooltip)">
@@ -58,8 +57,8 @@
 
                 @if (_generating)
                 {
-                    <FluentProgressRing class="question-generation-progress" />
-                    <FluentButton Appearance="Appearance.Neutral"
+                    <FluentSpinner class="question-generation-progress" />
+                    <FluentButton Appearance="ButtonAppearance.Default"
                                   OnClick="OnCancelAsync">
                         Cancel
                     </FluentButton>
@@ -69,17 +68,17 @@
 
         @if (!string.IsNullOrEmpty(_generationError))
         {
-            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_generationError</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_generationError</FluentMessageBar>
         }
 
         @if (!string.IsNullOrEmpty(_urlWarning))
         {
-            <FluentMessageBar Intent="MessageIntent.Warning" class="mt-2">@_urlWarning</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Warning" class="mt-2">@_urlWarning</FluentMessageBar>
         }
 
         @if (!string.IsNullOrEmpty(_attachmentWarning))
         {
-            <FluentMessageBar Intent="MessageIntent.Warning" class="mt-2">@_attachmentWarning</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Warning" class="mt-2">@_attachmentWarning</FluentMessageBar>
         }
     </div>
 </section>
@@ -217,7 +216,7 @@
 
         var result = await DialogService
             .ShowShellDialogAsync<QuestionPromptDialog, QuestionPromptModel, QuestionPromptResult>(
-                model, "Configure questions", DialogSize.Medium);
+                model, "Configure questions", DialogWidth.Medium);
 
         if (result is null)
         {

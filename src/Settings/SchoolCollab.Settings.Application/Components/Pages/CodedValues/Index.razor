@@ -7,7 +7,7 @@
 @inject IDialogService DialogService
 @inject AiChatHub ChatHub
 @inject NavigationManager Nav
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="CodedValueDto"
@@ -35,7 +35,7 @@
            the runtime, tenant-overridable FEATURE:EnableCodedValuesAiChat flag
            via the <FeatureFlagGate> component (reactive to live flag changes). *@
         <FeatureFlagGate Key="@FeatureFlagKeys.EnableCodedValuesAiChat">
-            <FluentButton Appearance="Appearance.Neutral"
+            <FluentButton Appearance="ButtonAppearance.Default"
                           Title="Open AI assistant"
                           OnClick="OpenChatDrawerAsync">
                 ✨ Chat
@@ -47,23 +47,23 @@
             <code>@context.Code</code>
         </TemplateColumn>
         <TemplateColumn TGridItem="CodedValueDto" Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
+            <FluentLink Appearance="LinkAppearance.Default" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
                 @context.Name (@context.ChildrenCount)
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <PropertyColumn TGridItem="CodedValueDto" TProp="string" Property="@(x => x.Description)" Title="Description" />
         <TemplateColumn TGridItem="CodedValueDto" Title="Status">
             @if (context.IsDeleted)
             {
-                <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Deleted</FluentBadge>
             }
             else if (context.IsDisabled)
             {
-                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Disabled</FluentBadge>
             }
             else
             {
-                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="CodedValueDto" Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
@@ -315,12 +315,10 @@
     private async Task OnRecoverAsync(Guid id, string code)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Recover '{code}'? This will restore the item to the active list.",
-            "Recover",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Recover");
+        if (!confirmed) return;
 
         try
         {
@@ -377,18 +375,15 @@
     private async Task OnDeleteAsync(Guid id, string code)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete '{code}'? This will soft-delete the item. Items with children or SourceCode references cannot be deleted.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         try
         {
             await Api.DeleteAsync(id);
             if (_disposed) return;
-            Toast.ShowSuccess($"'{code}' deleted.");
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != id).ToArray();
@@ -401,6 +396,7 @@
                 if (_disposed) return;
                 StateHasChanged();
             }
+            await NotificationService.ShowSuccessToastAsync($"'{code}' deleted.");
         }
         catch (InvalidOperationException ex)
         {

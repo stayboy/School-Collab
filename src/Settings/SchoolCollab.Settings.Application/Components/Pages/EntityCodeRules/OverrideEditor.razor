@@ -30,7 +30,7 @@
 
         @if (_overrides.Count == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2">
                 No tenant overrides configured. This tenant sees the shared blueprint's format.
             </FluentMessageBar>
         }
@@ -44,25 +44,25 @@
                 : (string?)null;
 
             <div class="override-row">
-                <FluentSelect TOption="OverrideOption"
+                <FluentSelect TOption="OverrideOption" TValue="OverrideOption"
                               Items="@_segmentOptions"
-                              @bind-SelectedOption="@row.SelectedSegment"
+                              @bind-Value="@row.SelectedSegment"
                               OptionText="@(o => o.Label)"
-                              OptionValue="@(o => o.SegmentId.ToString())"
+                              OptionValueToString="@(o => o.SegmentId.ToString())"
                               Label="Segment"
                               class="ov-segment" />
-                <FluentSelect TOption="OverrideFieldDto"
+                <FluentSelect TOption="OverrideFieldDto" TValue="OverrideFieldDto"
                               Items="@_fieldOptions"
-                              @bind-SelectedOption="row.Field"
+                              @bind-Value="row.Field"
                               OptionText="@(f => f.ToString())"
-                              OptionValue="@(f => ((int)f).ToString())"
+                              OptionValueToString="@(f => ((int)f).ToString())"
                               Label="Field"
                               class="ov-field" />
-                <FluentTextField @bind-Value="row.Value"
+                <FluentTextInput @bind-Value="row.Value"
                                  Label="Value"
                                  Placeholder="e.g. ABC (FixedText), X (Prefix), 4 (MinWidth)"
                                  class="ov-value" />
-                <FluentButton Appearance="Appearance.Neutral"
+                <FluentButton Appearance="ButtonAppearance.Default"
                               IconStart="@FluentIcons.Delete"
                               Title="Remove override"
                               OnClick="@(() => RemoveAt(idx))" />
@@ -74,13 +74,13 @@
         }
 
         <div class="override-actions">
-            <FluentButton Appearance="Appearance.Accent"
+            <FluentButton Appearance="ButtonAppearance.Primary"
                           IconStart="@FluentIcons.Add"
                           OnClick="Add"
                           Disabled="@(_segmentOptions.Count == 0)">
                 Add override
             </FluentButton>
-            <FluentButton Appearance="Appearance.Outline"
+            <FluentButton Appearance="ButtonAppearance.Outline"
                           OnClick="SaveAsync"
                           Disabled="@(_saving || _segmentOptions.Count == 0)">
                 @(_saving ? "Saving…" : "Save overrides")
@@ -110,7 +110,7 @@
     private bool _loading = true;
     private bool _saving;
     private string? _status;
-    private MessageIntent _statusIntent = MessageIntent.Info;
+    private MessageBarIntent _statusIntent = MessageBarIntent.Info;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -178,7 +178,7 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load overrides for rule {Id}", Rule.Id);
             _status = $"Failed to load overrides: {ex.Message}";
-            _statusIntent = MessageIntent.Error;
+            _statusIntent = MessageBarIntent.Error;
             _loading = false;
         }
     }
@@ -213,7 +213,7 @@
         if (valid.Count != _overrides.Count)
         {
             _status = "Some rows are missing a segment or value. Fix or remove them before saving.";
-            _statusIntent = MessageIntent.Error;
+            _statusIntent = MessageBarIntent.Error;
             _saving = false;
             return;
         }
@@ -226,7 +226,7 @@
             await Api.ReplaceOverridesAsync(Rule.Id, payload);
             if (_disposed) return;
             _status = $"Saved {payload.Count} override(s).";
-            _statusIntent = MessageIntent.Success;
+            _statusIntent = MessageBarIntent.Success;
             // Reload so the rows carry their server-assigned ids.
             await LoadAsync();
         }
@@ -234,20 +234,20 @@
         {
             if (_disposed) return;
             _status = ex.Message;
-            _statusIntent = MessageIntent.Error;
+            _statusIntent = MessageBarIntent.Error;
         }
         catch (KeyNotFoundException)
         {
             if (_disposed) return;
             _status = "This rule was deleted by someone else. Reload the list.";
-            _statusIntent = MessageIntent.Error;
+            _statusIntent = MessageBarIntent.Error;
         }
         catch (Exception ex)
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to save overrides for rule {Id}", Rule.Id);
             _status = $"Failed to save: {ex.Message}";
-            _statusIntent = MessageIntent.Error;
+            _statusIntent = MessageBarIntent.Error;
         }
         finally
         {

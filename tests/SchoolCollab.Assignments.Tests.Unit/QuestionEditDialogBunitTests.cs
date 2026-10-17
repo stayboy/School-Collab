@@ -34,7 +34,7 @@ public class QuestionEditDialogBunitTests : BunitContext
     {
         var provider = Render<FluentDialogProvider>();
         var closed = DialogService.ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>(
-            model, title: "Edit question", size: DialogSize.Medium);
+            model, title: "Edit question", size: DialogWidth.Medium);
         provider.WaitForAssertion(() => provider.Find("form"));
         return (provider, closed);
     }
@@ -92,7 +92,7 @@ public class QuestionEditDialogBunitTests : BunitContext
 
         var boxes = provider.FindComponents<FluentCheckbox>();
         boxes.Should().HaveCount(4, "one box per response kind");
-        boxes.Should().OnlyContain(box => box.Instance.Disabled,
+        boxes.Should().OnlyContain(box => box.Instance.Disabled ?? false,
             "the media rule forbids every kind on Auto Scored, so none may be picked");
         provider.Find("#cq-qedit-kinds-reason").TextContent.Should()
             .Contain("Teacher Marked", "the reason is stated once rather than left to the author to infer");

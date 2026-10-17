@@ -1,6 +1,8 @@
 using Bunit;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components;
 
@@ -15,6 +17,10 @@ namespace SchoolCollab.Admin.Tests.Unit;
 [TestClass]
 public class FormRowCellBunitTests : BunitContext
 {
+    /// <summary>The help-hint renders a <c>FluentIcon</c>, which constructor-injects
+    /// <c>LibraryConfiguration</c> in v5 — the standard FluentUI bUnit setup.</summary>
+    public FormRowCellBunitTests() => Services.AddFluentUIComponents();
+
     [TestMethod]
     public void RendersTheCaptionUnderTheInput_AndLabelsIt()
     {

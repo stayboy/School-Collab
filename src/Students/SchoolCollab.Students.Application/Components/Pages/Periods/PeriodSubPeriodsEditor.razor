@@ -31,7 +31,7 @@
         <div class="sub-periods-header mb-3">
             <h4>Sub-periods</h4>
             <div class="sub-periods-actions">
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               OnClick="AutoSplitAsync"
                               Disabled="@(!CanAutoSplit)"
                               Title="@AutoSplitTitle">
@@ -57,12 +57,12 @@
                              HorizontalGap="8"
                              VerticalAlignment="VerticalAlignment.Bottom"
                              class="subperiods-inline-add">
-                    <FluentTextField @bind-Value="_name"
+                    <FluentTextInput @bind-Value="_name"
                                      Placeholder="New sub-period name (e.g. Term 1)"
                                      class="subperiods-field-name" />
                     <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
                     <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="AddCreateRowFromInlineAsync"
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="AddCreateRowFromInlineAsync"
                                   Title="Add sub-period">Add</FluentButton>
                 </FluentStack>
             }
@@ -77,7 +77,7 @@
                 {
                     var row = _createRows[rowIndex];
                     <div class="sub-period-row">
-                        <FluentTextField Label="" @bind-Value="row.Name"
+                        <FluentTextInput Label="" @bind-Value="row.Name"
                                          Placeholder="Name"
                                          Style="flex:1; min-width:0" />
                         <FluentDatePicker Label="" @bind-Value="row.Start" Style="flex:1; min-width:0" />
@@ -100,12 +100,12 @@
                              HorizontalGap="8"
                              VerticalAlignment="VerticalAlignment.Bottom"
                              class="subperiods-inline-add">
-                    <FluentTextField @bind-Value="_name"
+                    <FluentTextInput @bind-Value="_name"
                                      Placeholder="New sub-period name (e.g. Term 1)"
                                      class="subperiods-field-name" />
                     <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
                     <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SubmitAsync" Disabled="@_saving"
                                   Title="Add sub-period">
                         @(_saving ? "Saving…" : "Add")
                     </FluentButton>
@@ -114,18 +114,18 @@
 
             @if (!string.IsNullOrEmpty(_error))
             {
-                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
             }
 
             @if (IsEnabled)
             {
                 @if (_loading)
                 {
-                    <div class="spinner-container"><FluentProgressRing /></div>
+                    <div class="spinner-container"><FluentSpinner /></div>
                 }
                 else if (_subs.Length == 0 && _editingId is null)
                 {
-                    <FluentMessageBar Intent="MessageIntent.Info">
+                    <FluentMessageBar Intent="MessageBarIntent.Info">
                         No sub-periods yet. Add terms or semesters below.
                     </FluentMessageBar>
                 }
@@ -133,13 +133,13 @@
                 {
                     <FluentDataGrid TGridItem="PeriodDto"
                                     Items="_subs.AsQueryable()"
-                                    GenerateHeader="GenerateHeaderOption.Default"
+                                    GenerateHeader="DataGridGeneratedHeaderType.Default"
                                     RowClass="@(p => p.Id == _editingId ? "subperiods-row--editing" : null)"
                                     GridTemplateColumns="minmax(160px,2fr) 130px 130px 110px auto">
                         <TemplateColumn TGridItem="PeriodDto" Title="Name">
                             @if (context.Id == _editingId)
                             {
-                                <FluentTextField @bind-Value="_name" class="subperiods-cell-name" />
+                                <FluentTextInput @bind-Value="_name" class="subperiods-cell-name" />
                             }
                             else
                             {
@@ -167,15 +167,15 @@
                             }
                         </TemplateColumn>
                         <TemplateColumn TGridItem="PeriodDto" Title="Status">
-                            <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
+                            <FluentBadge Appearance="@GetStatusAppearance(context.Status)" Color="@GetStatusColor(context.Status)">@context.Status</FluentBadge>
                         </TemplateColumn>
                         <TemplateColumn TGridItem="PeriodDto" Title="">
                             <div class="subperiods-actions">
                                 @if (context.Id == _editingId)
                                 {
-                                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SubmitAsync" Disabled="@_saving"
                                                   Title="Save sub-period">Save</FluentButton>
-                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
+                                    <FluentButton Appearance="ButtonAppearance.Subtle" IconStart="@FluentIcons.Dismiss"
                                                   Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
                                 }
                                 else
@@ -413,13 +413,11 @@
                 var draftCount = _subs.Count(sp => sp.Status == "Draft");
                 if (draftCount > 0)
                 {
-                    var dialog = await DialogService.ShowConfirmationAsync(
+                    var confirmed = await DialogService.ShowConfirmDialogAsync(
                         $"Auto-split will replace {draftCount} existing draft sub-period{(draftCount == 1 ? "" : "s")} " +
                         "with new equal spans. Continue?",
-                        "Auto-split",
-                        "Cancel");
-                    var result = await dialog.Result;
-                    if (result.Cancelled) return;
+                        "Auto-split");
+                    if (!confirmed) return;
                 }
             }
 
@@ -517,6 +515,13 @@
         _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
         _sequence = p.Sequence;
         _error = null;
+
+        // The kebab's Edit action reaches this method through RowActionsMenu's raw
+        // RowAction.OnClick callback, not through an EventCallback owned by this
+        // component, so the renderer does not re-render this component when the click
+        // completes. Without this call the row would keep its read-only cells and the
+        // grid would never show the in-cell Save/Cancel row.
+        StateHasChanged();
     }
 
     private void CancelEdit()
@@ -622,13 +627,26 @@
     private static string GetKindLabel(PeriodDto period)
         => period.Division == "Semesters" ? "Semester" : "Term";
 
-    private static Appearance GetStatusAppearance(string status) => status switch
+    // v5 FluentBadge carries colour outside Appearance (MigrationFluentBadge.md): the v4
+    // triad collapses — Neutral/Accent → Filled, Lightweight → Ghost — so the v4
+    // Accent(Active) / Neutral(everything else) distinction now lives in BadgeColor.
+    private static BadgeAppearance GetStatusAppearance(string status) => status switch
     {
-        "Draft"     => Appearance.Neutral,
-        "Active"    => Appearance.Accent,
-        "Completed" => Appearance.Lightweight,
-        "Archived"  => Appearance.Neutral,
-        _           => Appearance.Neutral
+        "Draft"     => BadgeAppearance.Filled,
+        "Active"    => BadgeAppearance.Filled,
+        "Completed" => BadgeAppearance.Ghost,
+        "Archived"  => BadgeAppearance.Filled,
+        _           => BadgeAppearance.Filled
+    };
+
+    // Active keeps its v4 Accent emphasis as the success colour; every other status keeps
+    // the v4 Neutral as the muted one. Completed is null: its v4 Lightweight look (now
+    // Ghost) carried no colour, and none is invented here.
+    private static BadgeColor? GetStatusColor(string status) => status switch
+    {
+        "Active"    => BadgeColor.Success,
+        "Completed" => null,
+        _           => BadgeColor.Subtle,
     };
 
     public void Dispose() => _disposed = true;

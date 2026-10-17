@@ -145,7 +145,7 @@ public class StudentTransferDialogBunitTests : BunitContext
     {
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
-            model, title: "Transfer student", size: DialogSize.Medium);
+            model, title: "Transfer student", size: DialogWidth.Medium);
         return (cut, task);
     }
 

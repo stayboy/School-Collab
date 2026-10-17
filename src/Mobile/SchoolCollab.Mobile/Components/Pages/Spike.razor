@@ -46,7 +46,7 @@
             <div class="spike__auth-actions">
                 @* aria-busy is the screen-reader half of the disabled state: `Disabled` alone is the
                    only sign the click was accepted, and it says nothing to assistive technology. *@
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Disabled="@_signingIn"
                               aria-busy="@_signingIn"
                               OnClick="SignInAsync">
@@ -72,7 +72,7 @@
                    does not exist here, which would be shown on every cold start. The head supplies its
                    own copy instead of changing the shared gate. *@
                 <Fallback>
-                    <FluentMessageBar Intent="MessageIntent.Warning">
+                    <FluentMessageBar Intent="MessageBarIntent.Warning">
                         Sign in to see the tenant this session belongs to — the gate reads the token's
                         own claims.
                     </FluentMessageBar>
@@ -81,7 +81,7 @@
         </section>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">
+        <FluentMessageBar Intent="MessageBarIntent.Error">
             The reuse spike page failed to render: @ex.Message
         </FluentMessageBar>
     </ErrorContent>
@@ -101,7 +101,7 @@
     // The message bar's intent and title follow the OUTCOME, not the fact that something was
     // reported: a dismissal is not a failure, so it is never red. Both default to the error
     // presentation and are reset to it on every attempt, so every genuine failure stays red.
-    private MessageIntent _errorIntent = MessageIntent.Error;
+    private MessageBarIntent _errorIntent = MessageBarIntent.Error;
     private string _errorTitle = "Sign-in failed";
 
     private string? _tenantName;
@@ -113,7 +113,7 @@
     {
         _signingIn = true;
         _errorMessage = null;
-        _errorIntent = MessageIntent.Error;
+        _errorIntent = MessageBarIntent.Error;
         _errorTitle = "Sign-in failed";
         StateHasChanged();
 
@@ -126,7 +126,7 @@
         {
             // The user dismissed the browser: that is an outcome to report, not an error. Same
             // message text, a non-error intent and a title that matches it.
-            _errorIntent = MessageIntent.Info;
+            _errorIntent = MessageBarIntent.Info;
             _errorTitle = "Sign-in cancelled";
             _errorMessage = ex.Message;
         }

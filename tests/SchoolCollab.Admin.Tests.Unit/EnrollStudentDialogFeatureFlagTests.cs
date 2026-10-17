@@ -81,7 +81,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 ///     back into the markup (regression of the empty-list check)
 ///   - The dialog adding a "Set up first grade" CTA inside the form
 ///     (regression of the empty-list check)
-///   - The grade dropdown falling back to <c>FluentSelect</c> with
+///   - The grade dropdown falling back to <c>FluentSelect</c, /c> with
 ///     the stale mirrored name (regression of the "load coded
 ///     values" fix)
 ///   - The period being a user-pickable dropdown (regression of
@@ -781,8 +781,8 @@ public class EnrollStudentDialogFeatureFlagTests
         // unparenthesized form.
         afterEnrolledOnRow.Should().Contain("@Error",
             "the per-field error MessageBar MUST render the dialog's @Error property (so the same text surfaces in the footer's error bar and the per-field bar)");
-        afterEnrolledOnRow.Should().Contain("MessageIntent.Error",
-            "the per-field error MessageBar MUST use MessageIntent.Error to match the dialog's error semantics");
+        afterEnrolledOnRow.Should().Contain("MessageBarIntent.Error",
+            "the per-field error MessageBar MUST use MessageBarIntent.Error to match the dialog's error semantics");
     }
 
     [TestMethod]
@@ -813,7 +813,7 @@ public class EnrollStudentDialogFeatureFlagTests
     //
     // The user observed the dialog's error MessageBar showing only
     // the word "Error" (the FluentMessageBar's built-in heading for
-    // MessageIntent.Error) with no body detail. Tracing the chain:
+    // MessageBarIntent.Error) with no body detail. Tracing the chain:
     //   1. The user clicks Enroll.
     //   2. <SubmitAsync> calls <EnrollStudentAsync> on the API client.
     //   3. The server returns a non-2xx (e.g. 400 for

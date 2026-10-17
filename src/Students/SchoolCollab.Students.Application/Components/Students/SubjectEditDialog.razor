@@ -26,6 +26,7 @@
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -40,7 +41,7 @@
         <FormRow Label="Name" For="subject-static-name">
             <div class="subject-static-row">
                 <span id="subject-static-name" class="subject-static-name">@Model.CurrentName</span>
-                <FluentButton Appearance="Appearance.Stealth"
+                <FluentButton Appearance="ButtonAppearance.Subtle"
                               IconStart="@(new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Edit())"
                               Title="Override the tenant display name for this subject"
                               aria-label="Override tenant name"
@@ -56,6 +57,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 
 @code {
@@ -106,7 +108,7 @@
                 CodedValueDto>(
                 CodedValueFormModel.ForOverride(_codedValue, _codedValue.IsOverridden),
                 title: $"Override subject name — {Model.CurrentName}",
-                size: DialogSize.Small);
+                size: DialogWidth.Small);
 
             if (updated is not null)
             {

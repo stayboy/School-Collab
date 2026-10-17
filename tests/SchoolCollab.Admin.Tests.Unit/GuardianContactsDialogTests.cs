@@ -16,8 +16,8 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// Note: this dialog is intentionally NOT a <c>DialogShellBase</c> (no
 /// model, no OK/Cancel result, no form). It is a plain
 /// <c>ComponentBase</c> hosting the full-contacts read-only display, and
-/// it closes itself by calling <c>Dialog.CloseAsync()</c> on the
-/// cascading <c>FluentDialog</c> reference provided by the dialog host.
+/// it closes itself by calling <c>DialogInstance.CloseAsync()</c> on the
+/// cascading <c>IDialogInstance</c> reference provided by the dialog host.
 /// </summary>
 [TestClass]
 public class GuardianContactsDialogTests
@@ -46,16 +46,15 @@ public class GuardianContactsDialogTests
     {
         var razor = ReadSource(ComponentPath);
 
-        // FluentUI 4.14.x does NOT spread DialogParameters indexer entries onto
-        // separate [Parameter]s, so the dialog reads its inputs from Content.
-        razor.Should().Contain("public const string GuardianIdKey",
-            "GuardianId is read from Content (the DialogParameters indexer)");
-        razor.Should().Contain("TryGet<Guid>(GuardianIdKey)",
-            "GuardianId is the required input that drives the contact load");
+        // FluentUI 5.x binds a dialog's inputs by spreading DialogOptions.Parameters
+        // onto matching typed [Parameter]s (the key constants are nameof(<Parameter>)).
+        razor.Should().Contain("public const string GuardianIdKey = nameof(GuardianId)")
+            .And.Contain("[Parameter] public Guid GuardianId",
+                "GuardianId is the required input that drives the contact load");
         razor.Should().Contain("public const string GuardianNameKey",
-            "GuardianName is read from Content (used for the dialog title)");
+            "GuardianName has a published key constant (used for the dialog title)");
         razor.Should().Contain("public const string SubtitleKey",
-            "Subtitle is read from Content (the optional secondary line)");
+            "Subtitle has a published key constant (the optional secondary line)");
     }
 
     [TestMethod]
@@ -134,15 +133,16 @@ public class GuardianContactsDialogTests
     {
         var razor = ReadSource(ComponentPath);
 
-        // The dialog host (FluentUI) provides its FluentDialog reference
+        // The dialog host (FluentUI) provides its IDialogInstance handle
         // via a cascading parameter; the footer Close button calls
-        // Dialog.CloseAsync(). OnParametersSetAsync reloads whenever
-        // GuardianId changes so the same component instance can be
-        // reused for a different guardian.
-        razor.Should().Contain("[CascadingParameter] public FluentDialog? Dialog",
-            "the FluentDialog reference comes from a cascading parameter (not injected)");
-        razor.Should().Contain("Dialog.CloseAsync()",
-            "the footer Close button dismisses the host FluentDialog");
+        // DialogInstance.CloseAsync(). (v4's `FluentDialog` cascade is gone
+        // in v5 — `IDialogInstance` is the host handle.) OnParametersSetAsync
+        // reloads whenever GuardianId changes so the same component instance
+        // can be reused for a different guardian.
+        razor.Should().Contain("[CascadingParameter] public IDialogInstance? DialogInstance",
+            "the IDialogInstance handle comes from a cascading parameter (not injected)");
+        razor.Should().Contain("DialogInstance.CloseAsync()",
+            "the footer Close button dismisses the host dialog through IDialogInstance");
         razor.Should().Contain("if (_loadedFor == GuardianId) return",
             "OnParametersSetAsync reloads only when GuardianId changes");
     }
@@ -153,7 +153,7 @@ public class GuardianContactsDialogTests
         var css = ReadSource(CssPath);
 
         // The dialog has no PrimaryAction/SecondaryAction (the host sets
-        // both null in BuildShellParameters), so the body owns the close
+        // both null in BuildShellOptions), so the body owns the close
         // affordance. A top border separates content from footer actions
         // (the dialog-ui skill's content/actions split).
         css.Should().Contain(".guardian-contacts-footer",

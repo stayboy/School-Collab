@@ -4,13 +4,13 @@
    creates the student via CreateStudentAsync, linking any guardians drafted
    on the form. Opens from the Students card Add button via
    ShowReadonlyDialogAsync. *@
-@implements IDialogContentComponent<DialogParameters>
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject ILogger<StudentCreateDialog> Logger
 
+<DialogShellBody>
 <StudentFormFields Model="_model"
                    ShowGuardians="true"
                    ShowContacts="true"
@@ -21,27 +21,35 @@
                    SubmittingLabel="Creating…"
                    Submitting="@_saving"
                    OnCancel="CancelAsync" />
+</DialogShellBody>
 
 @code {
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    /// <summary>The hosting dialog instance provided by the dialog host as a
+    /// cascading parameter. Nullable so unit tests that render the component
+    /// without a host do not NRE.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
 
-    /// <summary>Keys used in <see cref="Content"/> for the optional enrollment
-    /// target. Exposed so callers (Detail.razor) set the same keys they read here.</summary>
+    /// <summary>Keys used in <c>DialogOptions.Parameters</c> for the optional
+    /// enrollment target. Exposed so callers (Detail.razor) set the same keys
+    /// this dialog binds to — each key MUST match a <c>[Parameter]</c> name
+    /// (FluentUI 5.x spreads the entries).</summary>
     public const string EnrollmentGradeLevelIdKey = nameof(EnrollmentGradeLevelId);
     public const string EnrollmentPeriodIdKey = nameof(EnrollmentPeriodId);
 
     // Optional enrollment target. When set (e.g. the grade-detail "Add" passes the
     // grade id), the student is enrolled in the same atomic create — no separate
     // EnrollStudentAsync round-trip, no "created but not on the grade card" state.
-    //
-    // Read from Content (the DialogParameters indexer) rather than separate
-    // [Parameter] properties: FluentUI renders dialog content via DynamicComponent
-    // with only { "Content": <DialogParameters> } and does NOT spread the indexer
-    // entries onto [Parameter] properties, so separate parameters would silently
-    // default to null.
-    private Guid? EnrollmentGradeLevelId => Content is { } c ? c.TryGet<Guid?>(EnrollmentGradeLevelIdKey) : null;
-    private Guid? EnrollmentPeriodId => Content is { } c ? c.TryGet<Guid?>(EnrollmentPeriodIdKey) : null;
+    // The parameter names are the key constants' `nameof(...)` targets, so a
+    // caller that stops passing one is caught by
+    // Dialog_Parameters_AreDeclaredAndSuppliedByCallers.
+
+    /// <summary>Optional enrollment target: the grade the new student is
+    /// enrolled in, in the same atomic create.</summary>
+    [Parameter] public Guid? EnrollmentGradeLevelId { get; set; }
+
+    /// <summary>Optional enrollment target: the period the new student is
+    /// enrolled in, in the same atomic create.</summary>
+    [Parameter] public Guid? EnrollmentPeriodId { get; set; }
 
     private readonly StudentFormModel _model = new();
     private bool _saving;
@@ -61,7 +69,7 @@
             // ToUpdateRequest (see documents/solution/dto-form-model-mapping.md).
             var request = _model.ToCreateRequest(EnrollmentGradeLevelId, EnrollmentPeriodId);
             var studentId = await Api.CreateStudentWithLinkedDataAsync(request);
-            if (Dialog is not null) await Dialog.CloseAsync(studentId);
+            if (DialogInstance is not null) await DialogInstance.CloseAsync(studentId);
         }
         catch (Exception ex)
         {
@@ -74,5 +82,5 @@
         }
     }
 
-    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    private Task CancelAsync() => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
 }

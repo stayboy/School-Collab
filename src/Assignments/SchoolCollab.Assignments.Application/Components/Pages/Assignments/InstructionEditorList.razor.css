@@ -60,7 +60,7 @@
 /* Owner request 2026-10-15 (grill Q13a): the IMAGE row's metadata link. Hypertext appearance gives it
    the admin UI's native link colour; `flex: 0 0 auto` keeps it out of the readout's ellipsis fight and
    `white-space: nowrap` keeps the two-word "Edit Note" label on one line (the label was per-medium
-   until the owner simplified it the same day). FluentAnchor renders its clickable text in a
+   until the owner simplified it the same day). FluentLink renders its clickable text in a
    shadow part, so the label is styled through ::part(control) — the QuestionEditorSection precedent. */
 .cq-instruction-edit-note {
     flex: 0 0 auto;

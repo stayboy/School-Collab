@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Pages.Periods;
 using SchoolCollab.Students.Application.Services;
@@ -264,7 +265,7 @@ public class PeriodEditPageTests : BunitContext
         // Open the sub-period row's kebab (⋮, RowActionsMenu) and click Edit.
         cut.Find("fluent-button[title='Sub-period actions']").Click();
         var editItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Edit"));
-        editItem.Click();
+        editItem.MenuItemClick();
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Save sub-period\""));
         cut.Markup.Should().Contain("title=\"Cancel editing\"", "in-cell editing shows a Cancel affordance");
@@ -327,15 +328,20 @@ public class PeriodEditPageTests : BunitContext
     private static string DraftYearJson(string? division = null) =>
         $"{{\"id\":\"{YearId}\",\"name\":\"2026\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Draft\",\"periodType\":\"AcademicYear\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":{(division is null ? "null" : $"\"{division}\"")},\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
-    private static Mock<IDialogService> ConfirmationDialog(StringBuilder? capturedMessage = null)
+    private Mock<DialogService> ConfirmationDialog(StringBuilder? capturedMessage = null)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object>(null!)));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<string, string, string, string>((msg, _, __, ___) => capturedMessage?.Append(msg))
-            .ReturnsAsync(dialogRef.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+            {
+                if (capturedMessage is not null &&
+                    options.Parameters[nameof(ConfirmDialog.Content)] is ConfirmDialogContent content)
+                {
+                    capturedMessage.Append(content.Message);
+                }
+            })
+            .ReturnsAsync(DialogResult.Ok<object>(null!));
         return dialogMock;
     }
 
@@ -378,7 +384,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
         handler.Map("DELETE", $"/students/periods/{YearId}", HttpStatusCode.NoContent, "");
-        Services.AddSingleton(ConfirmationDialog().Object);
+        ConfirmationDialog();
 
         var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Delete period\""));
@@ -399,7 +405,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
             $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)},{PeriodJson(DraftSub2Id, "Term 2", "Term", "Draft", YearId)}]");
         var captured = new StringBuilder();
-        Services.AddSingleton(ConfirmationDialog(captured).Object);
+        ConfirmationDialog(captured);
 
         var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Delete period\""));

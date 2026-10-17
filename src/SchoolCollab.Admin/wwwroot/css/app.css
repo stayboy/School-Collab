@@ -40,20 +40,27 @@
    Single source of truth for field widths so every input across every
    form/dialog uses the same ladder. Apply via the `Class` parameter on
    any third-party FluentUI input:
-       <FluentTextField Class="w-9" ... />
+       <FluentTextInput Class="w-9" ... />
        <FluentSelect Class="w-3" ... />
    The repo's dropdown wrappers (DropdownForEnum, CodedValueDropdown,
    DropdownComponent) expose a strongly-typed `Width` parameter
-   (FieldWidth enum) that emits the SAME values as an inline style —
-   inline style beats Blazor scoped CSS, so the enum path is robust
-   against the wrappers' own scoped `width:100%`. Keep these pixel
-   values in sync with FieldWidthExtensions.ToCssStyle() in
+   (FieldWidth enum) that emits the SAME values as an inline style.
+   v5 renders every one of those inputs as
+       <fluent-field class="…" [style="width:…"]><fluent-dropdown slot="input">…
+   — so `Class` and `Style` both land on the `fluent-field` HOST, and the
+   control is sized from it by the slotted-control rule
+       fluent-field > fluent-dropdown { width: inherit; }
+   in src/SchoolCollab.Admin.Shared/wwwroot/app.css (that half is what makes
+   this ladder reach the visible control; see the comment there). Keep these
+   pixel values in sync with FieldWidthExtensions.ToCssStyle() in
    src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs.
 
-   Every step sets `min-width: 0` so <fluent-select>/<fluent-combobox>
-   honor the width (defeats any intrinsic web-component min-width) and
-   `max-width: 100%` so a long value can't blow out its column. w-9 is
-   the "fill" step (flex grow) — matches the existing
+   `min-width: 0` defeats the host's own intrinsic minimum and
+   `max-width: 100%` keeps a long value from blowing out its column. Note the
+   control's OWN shadow CSS can still clamp a step: `fluent-dropdown`'s inner
+   `.control` carries `min-width: 160px`, so W1 (80px) / W2 (120px) currently
+   render at 160px on the select — resetting that part is a separate decision.
+   w-9 is the "fill" step (flex grow) — matches the existing
    .student-form-input--email / --name pattern. */
 .w-1 { width:  80px; min-width: 0; max-width: 100%; }
 .w-2 { width: 120px; min-width: 0; max-width: 100%; }
@@ -64,3 +71,14 @@
 .w-7 { width: 320px; min-width: 0; max-width: 100%; }
 .w-8 { width: 400px; min-width: 0; max-width: 100%; }
 .w-9 { width: 100%; min-width: 0; max-width: 100%; flex: 1 1 0; }
+/* FluentUI v5 dark-theme flash mitigation — the guide's "Flash effect (optional)" snippet
+   (ThemeLightDark.md), kept here instead of inline in App.razor because this repo forbids
+   inline style/script elements in Razor. The library applies the stored theme from its own
+   JS at startup, so the browser default white background can paint first and flash for a
+   dark-mode user; this sheet is linked from the head, so the dark background lands first. */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #292929;
+        color: #ffffff;
+    }
+}

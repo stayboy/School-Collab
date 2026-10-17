@@ -9,11 +9,11 @@
     <ChildContent>
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (!string.IsNullOrEmpty(_loadError))
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@_loadError</FluentMessageBar>
         }
         else
         {
@@ -28,27 +28,26 @@
                 <FluentTextArea Label="Consent text"
                                 Placeholder="Leave empty to use the built-in default consent text"
                                 MaxLength="4000"
-                                Rows="6"
-                                class="full-width"
+                                class="full-width ta-lines-6"
                                 @bind-Value="_consentText" />
                 <div class="mt-3">
-                    <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveAsync">
+                    <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@_busy" OnClick="SaveAsync">
                         @(_busy ? "Saving…" : "Save")
                     </FluentButton>
                 </div>
                 @if (_saved)
                 {
-                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-2">Consent text saved.</FluentMessageBar>
+                    <FluentMessageBar Intent="MessageBarIntent.Success" class="mt-2">Consent text saved.</FluentMessageBar>
                 }
                 @if (!string.IsNullOrEmpty(_saveError))
                 {
-                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_saveError</FluentMessageBar>
+                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_saveError</FluentMessageBar>
                 }
             </FluentCard>
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 

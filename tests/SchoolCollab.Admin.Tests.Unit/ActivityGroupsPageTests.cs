@@ -181,7 +181,7 @@ public class ActivityGroupsPageTests : BunitContext
     /// AC-1a/1b: when the list API fails (404 here), the page shows the red
     /// error message (via LandingPage Error), the empty-state bar reads "Could
     /// not load activity groups.", and the loading spinner stops (no
-    /// fluent-progress-ring) instead of spinning forever.
+    /// fluent-spinner) instead of spinning forever.
     /// </summary>
     [TestMethod]
     public void ListPage_ApiFailure_ShowsErrorAndStopsSpinner()
@@ -196,7 +196,7 @@ public class ActivityGroupsPageTests : BunitContext
 
         cut.Markup.Should().Contain("Could not load activity groups.", "AC-1b: empty state reads as a failure, not an empty list");
         cut.Markup.Should().Contain("404", "AC-1a: the rendered error text includes the failure (HttpRequestException message)");
-        cut.Markup.Should().NotContain("fluent-progress-ring", "AC-1b: the loading spinner stops on failure");
+        cut.Markup.Should().NotContain("fluent-spinner", "AC-1b: the loading spinner stops on failure");
     }
 
     [TestMethod]
@@ -228,6 +228,33 @@ public class ActivityGroupsPageTests : BunitContext
         cut.Markup.Should().Contain("Alice Smith");
         cut.Markup.Should().Contain("Members");
         cut.Markup.Should().Contain("Remove");
+    }
+
+    /// <summary>
+    /// Q24 (Round A): v5 maps both v4 <c>Appearance.Accent</c> and <c>Appearance.Neutral</c> to
+    /// <c>BadgeAppearance.Filled</c>, so an Active chip and an Inactive one rendered identically.
+    /// The distinction rides on <c>BadgeColor</c> now (MigrationFluentBadge.md §Color): Success for
+    /// Active, Subtle for every other status. Covers both chips on this page — the group header's
+    /// Active/Inactive badge and the member row's status badge (MemberStatusColor). The header chip
+    /// lives in the <c>page-toolbar</c> SectionContent, so the page is hosted under the
+    /// <see cref="RolloverHost"/> toolbar outlet — a bare render drops it and would assert only the
+    /// member chip.
+    /// </summary>
+    [TestMethod]
+    public void DetailsPage_ActiveChips_CarryTheActiveColour()
+    {
+        RegisterWith(
+            ($"/activity-groups/{GroupId}/members", HttpStatusCode.OK, MembersJson()),
+            ($"/activity-groups/{GroupId}", HttpStatusCode.OK, GroupJson()));
+
+        var cut = Render<RolloverHost>(p => p.Add(x => x.GroupId, GroupId));
+        cut.WaitForState(() => cut.Markup.Contains("Alice Smith"), TimeSpan.FromSeconds(2));
+
+        var activeChips = cut.FindAll("fluent-badge").Where(b => b.TextContent.Trim() == "Active").ToList();
+
+        activeChips.Should().HaveCountGreaterThanOrEqualTo(2,
+            "the group header chip and the member status chip both read Active");
+        activeChips.Should().OnlyContain(b => b.GetAttribute("color") == "success");
     }
 
     /// <summary>

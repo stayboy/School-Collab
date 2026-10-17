@@ -34,7 +34,7 @@ else
 {
     <div class="topic-form-fields__edit">
         <FormRow Label="Name" For="topic-form-name">
-            <FluentTextField Id="topic-form-name"
+            <FluentTextInput Id="topic-form-name"
                              @bind-Value="Model.Name"
                              Placeholder="Topic / subject name"
                              Required="true"
@@ -42,7 +42,7 @@ else
         </FormRow>
 
         <FormRow Label="Code" For="topic-form-code">
-            <FluentTextField Id="topic-form-code"
+            <FluentTextInput Id="topic-form-code"
                              @bind-Value="Model.Code"
                              Placeholder="@CodePlaceholder"
                              Disabled="@CodeDisabled"

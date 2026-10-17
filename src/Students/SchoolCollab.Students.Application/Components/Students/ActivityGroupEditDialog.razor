@@ -9,18 +9,19 @@
 @using SchoolCollab.Students.Application.Services
 @inject StudentsApiClient Api
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
         <FormRow Label="Name" For="ag-edit-name" Required="true">
-            <FluentTextField @bind-Value="Model.Name"
+            <FluentTextInput @bind-Value="Model.Name"
                              Id="ag-edit-name"
                              MaxLength="200" />
         </FormRow>
 
         <FormRow Label="Category" For="ag-edit-category">
-            <FluentTextField @bind-Value="Model.Category"
+            <FluentTextInput @bind-Value="Model.Category"
                              Id="ag-edit-category"
                              MaxLength="100" />
         </FormRow>
@@ -33,7 +34,7 @@
         </FormRow>
 
         <FormRow Label="Enrollment span" For="ag-edit-span">
-            <FluentTextField Value="@Model.Span" Readonly="true" Id="ag-edit-span" Style="flex:1; min-width:0" />
+            <FluentTextInput Value="@Model.Span" Readonly="true" Id="ag-edit-span" Style="flex:1; min-width:0" />
         </FormRow>
 
         @if (Model.Span == "DateRange")
@@ -73,7 +74,7 @@
         </FormRow>
 
         <FormRow Label="Capacity" For="ag-edit-capacity">
-            <FluentNumberField @bind-Value="Model.Capacity"
+            <FluentNumberInput @bind-Value="Model.Capacity"
                                Id="ag-edit-capacity"
                                Min="1"
                                Title="Maximum number of active members. Leave blank for no limit." />
@@ -82,6 +83,7 @@
         <DialogShellFooter Error="@Error" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private GradeLevelLandingDto[] _gradeLevels = [];

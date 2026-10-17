@@ -34,7 +34,7 @@
                 @HeaderAction
             }
         </div>
-        <FluentButton Appearance="Appearance.Neutral"
+        <FluentButton Appearance="ButtonAppearance.Default"
                       Id="@($"{Id}-cancel")"
                       IconStart="@FluentIcons.Dismiss"
                       OnClick="CancelAsync">
@@ -62,7 +62,7 @@
             }
         }
         <div class="recorder-controls">
-            <FluentButton Appearance="Appearance.Neutral"
+            <FluentButton Appearance="ButtonAppearance.Default"
                           Id="@($"{Id}-retake")"
                           IconStart="@FluentIcons.ArrowClockwise"
                           OnClick="RetakeAsync">
@@ -108,7 +108,7 @@
         <div class="recorder-controls">
             @if (_state == RecorderState.Idle)
             {
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Id="@($"{Id}-start")"
                               IconStart="@(IsVideo ? new Icons.Regular.Size20.Video() : FluentIcons.Mic)"
                               OnClick="StartAsync">
@@ -117,8 +117,8 @@
             }
             else if (_state == RecorderState.Recording)
             {
-                <FluentBadge Appearance="Appearance.Accent" Class="recorder-live">● Recording @_elapsed</FluentBadge>
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentBadge Appearance="BadgeAppearance.Filled" Class="recorder-live">● Recording @_elapsed</FluentBadge>
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Id="@($"{Id}-stop")"
                               IconStart="@FluentIcons.Dismiss"
                               OnClick="StopAsync">
@@ -127,15 +127,15 @@
             }
             else if (_state == RecorderState.Review)
             {
-                <FluentBadge Appearance="Appearance.Neutral">@AttachmentUploadPolicy.FormatFileSize(_recordedSize)</FluentBadge>
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentBadge Appearance="BadgeAppearance.Filled">@AttachmentUploadPolicy.FormatFileSize(_recordedSize)</FluentBadge>
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Id="@($"{Id}-commit")"
                               IconStart="@FluentIcons.Checkmark"
                               Disabled="@_committing"
                               OnClick="CommitAsync">
                     @(_committing ? "Adding…" : "Use this recording")
                 </FluentButton>
-                <FluentButton Appearance="Appearance.Neutral"
+                <FluentButton Appearance="ButtonAppearance.Default"
                               Id="@($"{Id}-retake")"
                               IconStart="@FluentIcons.ArrowClockwise"
                               OnClick="RetakeAsync">
@@ -157,7 +157,7 @@
 
     @if (_error is not null)
     {
-        <FluentMessageBar Intent="MessageIntent.Error" Class="recorder-error">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" Class="recorder-error">@_error</FluentMessageBar>
     }
 </div>
 

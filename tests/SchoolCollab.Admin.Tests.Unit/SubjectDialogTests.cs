@@ -113,7 +113,7 @@ public class SubjectDialogTests : BunitContext
             SubjectEditDialog,
             SubjectEditDialog.SubjectEditModel,
             CodedValueDto>(
-            model, "Edit subject - MATH", DialogSize.Small);
+            model, "Edit subject - MATH", DialogWidth.Small);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Markup.Should().Contain("MATH");
@@ -142,7 +142,7 @@ public class SubjectDialogTests : BunitContext
             SubjectCreateDialog,
             SubjectCreateDialog.SubjectCreateModel,
             SubjectDto>(
-            model, "New subject", DialogSize.Small);
+            model, "New subject", DialogWidth.Small);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Markup.Should().Contain("Subject");

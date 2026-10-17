@@ -17,14 +17,14 @@
         if (!firstRender) return;
         if (Model.Cancel)
         {
-            await Dialog.CancelAsync();
+            await DialogInstance.CancelAsync();
         }
         else
         {
             // Close with a payload that is NOT a DialogShellResult<TestShellResult>,
             // so ShowShellDialogAsync's `result.Data is DialogShellResult<TResult>`
             // check fails and it returns null (AC-7).
-            await Dialog.CloseAsync("foreign");
+            await DialogInstance.CloseAsync("foreign");
         }
     }
 

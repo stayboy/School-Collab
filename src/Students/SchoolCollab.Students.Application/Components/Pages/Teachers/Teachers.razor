@@ -10,7 +10,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Teachers> Logger
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="TeacherDto"
@@ -108,12 +108,10 @@
         if (_disposed) return;
         _error = null;
 
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete teacher '{name}'? This blocks the record but keeps its subject and grade-level links.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         var previous = _items;
         _items = _items?.Where(x => x.Id != id).ToArray();
@@ -122,7 +120,7 @@
         try
         {
             await Api.DeleteTeacherAsync(id);
-            Toast.ShowSuccess($"Teacher '{name}' deleted.");
+            await NotificationService.ShowSuccessToastAsync($"Teacher '{name}' deleted.");
         }
         catch (Exception ex)
         {
@@ -144,7 +142,7 @@
         var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
             new TeacherEditDialog.TeacherFormModel { TeacherId = teacherId },
             title,
-            DialogSize.Large);
+            DialogWidth.Large);
         if (_disposed || saved is null) return;
         Nav.NavigateTo($"/students/teachers/{saved.Id}");
     }

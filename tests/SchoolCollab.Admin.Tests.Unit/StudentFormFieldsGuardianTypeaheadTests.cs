@@ -7,7 +7,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// <summary>
 /// Model-level tests for the "Add Existing Guardian" typeahead (plan §11.7).
 /// These tests follow the §9.4 guidance — test the option MODEL rather than
-/// the rendered DOM, since <c>FluentSelect</c> / <c>FluentAutocomplete</c>
+/// the rendered DOM, since <c>FluentSelect</c, /c> / <c>FluentAutocomplete</c, /c>
 /// render as web-component custom elements whose internals are fragile to
 /// assert against. The types were made <c>internal</c> and exposed to this
 /// test project via <c>InternalsVisibleTo</c> on

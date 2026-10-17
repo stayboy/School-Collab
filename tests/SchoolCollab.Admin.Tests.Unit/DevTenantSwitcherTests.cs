@@ -186,24 +186,18 @@ public class DevTenantSwitcherTests : BunitContext
 
     /// <summary>
     /// Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves to
-    /// <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at a fixed outcome, and
+    /// <c>ShowDialogAsync(typeof(ConfirmDialog), DialogOptions)</c>) at a fixed outcome, and
     /// records the content it was handed so a test can pin the wording the operator reads.
     /// Registered AFTER <c>AddFluentUIComponents()</c>, so it wins resolution.
     /// </summary>
     private void RegisterConfirmDialog(bool confirm, List<ConfirmDialogContent>? captured = null)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
-            confirm ? DialogResult.Ok<object?>(null) : DialogResult.Cancel()));
-
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .Callback<ConfirmDialogContent, DialogParameters>((content, _) => captured?.Add(content))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+                captured?.Add((ConfirmDialogContent)options.Parameters[nameof(ConfirmDialog.Content)]!))
+            .ReturnsAsync(confirm ? DialogResult.Ok<object?>(null) : DialogResult.Cancel());
     }
 
     private (IRenderedComponent<DevTenantSwitcher> Cut,
@@ -268,9 +262,9 @@ public class DevTenantSwitcherTests : BunitContext
         return (Render<DevTenantSwitcher>(), dialogs, selection, handler);
     }
 
-    private static IRenderedComponent<FluentSelect<DevTenantSwitcher.TenantOption>> SelectOf(
+    private static IRenderedComponent<FluentSelect<DevTenantSwitcher.TenantOption, DevTenantSwitcher.TenantOption>> SelectOf(
         IRenderedComponent<DevTenantSwitcher> cut)
-        => cut.FindComponent<FluentSelect<DevTenantSwitcher.TenantOption>>();
+        => cut.FindComponent<FluentSelect<DevTenantSwitcher.TenantOption, DevTenantSwitcher.TenantOption>>();
 
     private static List<string> LabelsOf(IRenderedComponent<DevTenantSwitcher> cut)
         => cut.FindAll("fluent-option").Select(o => o.TextContent.Trim()).ToList();
@@ -278,6 +272,21 @@ public class DevTenantSwitcherTests : BunitContext
     /// <summary>The rendered option element whose label is exactly <paramref name="label"/>.</summary>
     private static IElement OptionOf(IRenderedComponent<DevTenantSwitcher> cut, string label)
         => cut.FindAll("fluent-option").First(o => o.TextContent.Trim() == label);
+
+    /// <summary>
+    /// Selects the rendered option whose label is <paramref name="label"/> the way the v5 control
+    /// is driven: the web component raises the library's <c>dropdownchange</c> event on the host
+    /// <c>&lt;fluent-dropdown&gt;</c> carrying the selected option's id, and
+    /// <c>FluentListBase.OnDropdownChangeHandlerAsync</c> maps that id back onto the bound
+    /// <c>ValueChanged</c>. A <c>fluent-option</c> carries no Blazor event handler at all in v5
+    /// (v4 attached one to <c>onclick</c>), so a bare <c>Click()</c> on the option raises nothing.
+    /// </summary>
+    private static Task SelectOptionAsync(IRenderedComponent<DevTenantSwitcher> cut, string label)
+    {
+        var optionId = OptionOf(cut, label).GetAttribute("id");
+        return cut.Find("fluent-dropdown")
+            .TriggerEventAsync("ondropdownchange", new DropdownEventArgs { SelectedOptions = optionId });
+    }
 
     private static bool HasActionZone(IRenderedComponent<DevTenantSwitcher> cut)
         => LabelsOf(cut).Contains(ActionLabel);
@@ -307,7 +316,7 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, selection, _) = Render(selected: null);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(
+        SelectOf(cut).Instance.Value!.Value.Should().Be(
             Alpha.ToString(), "the control's selected value is the tenant the portal resolved and is operating under");
         selection.Selected.Should().BeNull(
             "showing the resolved default is display-only — only a pick by the operator writes the selection slot");
@@ -323,7 +332,7 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, _, _) = Render(selected: Guid.Empty);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be("system");
+        SelectOf(cut).Instance.Value!.Value.Should().Be("system");
     }
 
     [TestMethod]
@@ -331,7 +340,7 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, _, _) = Render(selected: Beta);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Beta.ToString());
+        SelectOf(cut).Instance.Value!.Value.Should().Be(Beta.ToString());
     }
 
     /// <summary>
@@ -344,7 +353,7 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, _, _) = Render(selected: null, preference: Beta);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Beta.ToString());
+        SelectOf(cut).Instance.Value!.Value.Should().Be(Beta.ToString());
     }
 
     /// <summary>
@@ -356,12 +365,12 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, _, _) = Render(selected: null, tenantsJson: NoDefaultTenantsJson);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be("system");
+        SelectOf(cut).Instance.Value!.Value.Should().Be("system");
     }
 
     /// <summary>
     /// A resolved default the registry no longer lists has no row to select: the select falls back
-    /// to the system row instead of leaving <c>SelectedOption</c> null (B2).
+    /// to the system row instead of leaving <c>Value</c> null (B2).
     /// </summary>
     [TestMethod]
     public void WithAResolvedDefaultNotInTheRegistry_SelectsTheSystemRow()
@@ -371,7 +380,7 @@ public class DevTenantSwitcherTests : BunitContext
             preference: Guid.Parse("33333333-3333-3333-3333-333333333333"),
             tenantsJson: NoDefaultTenantsJson);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be("system");
+        SelectOf(cut).Instance.Value!.Value.Should().Be("system");
     }
 
     // ── FR-2 / FR-3: the action zone ─────────────────────────────────────────
@@ -386,7 +395,7 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, _, _) = Render(selected: null, preference: null);
 
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Alpha.ToString());
+        SelectOf(cut).Instance.Value!.Value.Should().Be(Alpha.ToString());
         HasActionZone(cut).Should().BeTrue();
         LabelsOf(cut).Should().Contain(SeparatorLabel);
     }
@@ -454,7 +463,7 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, selection, handler) = Render(selected: Beta, preference: null, confirmDialog: true);
 
-        await cut.InvokeAsync(() => OptionOf(cut, ActionLabel).Click());
+        await cut.InvokeAsync(() => SelectOptionAsync(cut, ActionLabel));
 
         var put = PutCalls(handler).Single();
         put.Body.Should().Contain(
@@ -480,26 +489,25 @@ public class DevTenantSwitcherTests : BunitContext
         var (cut, dialogs, selection, handler) = Render(selected: Beta, preference: null);
         dialogs.Should().NotBeNull();
 
-        // The click handler awaits the dialog result, so dispatch it WITHOUT awaiting the handler
-        // chain: awaiting here would never return while the dialog is still open.
+        // The click handler awaits the dialog result, so dispatch the change WITHOUT awaiting the
+        // handler chain: awaiting here would never return while the dialog is still open.
         await cut.InvokeAsync(() =>
         {
-            // bUnit registers Blazor's @onclick handler under "onclick". The dispatch is
-            // fire-and-forget on purpose (see below).
-            _ = OptionOf(cut, ActionLabel).TriggerEventAsync("onclick", new MouseEventArgs());
+            // The dispatch is fire-and-forget on purpose (see below).
+            _ = SelectOptionAsync(cut, ActionLabel);
         });
 
         dialogs!.WaitForAssertion(() => dialogs.Markup.Should().Contain(
             "Set default tenant", "the prompt is the shared modal confirm dialog"));
 
         // FR-6: while the dialog is open the bound selection is still the tenant, never the action entry.
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Beta.ToString());
+        SelectOf(cut).Instance.Value!.Value.Should().Be(Beta.ToString());
 
         dialogs.Find(".confirm-dialog fluent-button[appearance='outline']").Click();
 
         cut.WaitForAssertion(() => PutCalls(handler).Should().BeEmpty(
             "cancelling must not record a preference"));
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(
+        SelectOf(cut).Instance.Value!.Value.Should().Be(
             Beta.ToString(), "the dropdown comes back showing the tenant the operator had selected");
         selection.Applied.Should().NotBe(Beta, "nothing was re-published for a cancelled write");
     }
@@ -513,11 +521,11 @@ public class DevTenantSwitcherTests : BunitContext
         var (cut, _, selection, handler) = Render(
             selected: Beta, preference: null, putStatus: HttpStatusCode.InternalServerError, confirmDialog: true);
 
-        await cut.InvokeAsync(() => OptionOf(cut, ActionLabel).Click());
+        await cut.InvokeAsync(() => SelectOptionAsync(cut, ActionLabel));
 
         PutCalls(handler).Should().HaveCount(1, "the attempt is made");
         Nav.ForcedReloads.Should().BeEmpty("a failed write must not reload the circuit");
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Beta.ToString());
+        SelectOf(cut).Instance.Value!.Value.Should().Be(Beta.ToString());
         selection.Applied.Should().NotBe(Beta);
     }
 
@@ -525,17 +533,28 @@ public class DevTenantSwitcherTests : BunitContext
     /// The forced reload supersedes a toast (the removed button showed none either), and a
     /// success toast would be misleading when the write is followed by a full page load.
     /// </summary>
+    /// <remarks>
+    /// v5's <see cref="INotificationService"/> methods are all emitted <c>virtual final</c> and the
+    /// interface itself cannot be mocked, so the outcome is asserted against the <em>rendered</em>
+    /// toast surface — the real <c>&lt;FluentToastProvider /&gt;</c> both layouts put at the top of
+    /// the shell — rather than a call log. The write is asserted first, so the test cannot pass by
+    /// the action never having run.
+    /// </remarks>
     [TestMethod]
     public async Task SetAsDefault_DoesNotShowASuccessToast()
     {
-        var toastMock = new Mock<IToastService>();
-        Services.AddSingleton(toastMock.Object);
+        var (cut, _, _, handler) = Render(selected: Beta, preference: null, confirmDialog: true);
 
-        var (cut, _, _, _) = Render(selected: Beta, preference: null, confirmDialog: true);
+        // Rendered as its own root beside the switcher, so no toast text can leak into the
+        // component's own markup and satisfy any other assertion.
+        var toasts = Render<FluentToastProvider>();
 
-        await cut.InvokeAsync(() => OptionOf(cut, ActionLabel).Click());
+        await cut.InvokeAsync(() => SelectOptionAsync(cut, ActionLabel));
 
-        toastMock.VerifyNoOtherCalls();
+        PutCalls(handler).Should().HaveCount(1, "the write is what a success toast would have reported on");
+        Nav.ForcedReloads.Should().ContainSingle("the reload is what replaces the toast");
+        toasts.FindAll("fluent-toast-b").Should().BeEmpty(
+            "no toast is shown — the forced reload supersedes it");
     }
 
     // ── the circuit reconciliation reload ────────────────────────────────────
@@ -593,11 +612,14 @@ public class DevTenantSwitcherTests : BunitContext
     {
         var (cut, _, selection, handler) = Render(selected: Beta, preference: null);
 
-        await cut.InvokeAsync(() => OptionOf(cut, SeparatorLabel).Click());
+        OptionOf(cut, SeparatorLabel).HasAttribute("disabled").Should().BeTrue(
+            "the separator is rendered unselectable — the browser-level guard");
+
+        await cut.InvokeAsync(() => SelectOptionAsync(cut, SeparatorLabel));
 
         PutCalls(handler).Should().BeEmpty("the separator is decorative — it must never write anything");
         Nav.ForcedReloads.Should().BeEmpty();
-        SelectOf(cut).Instance.SelectedOption!.Value.Should().Be(Beta.ToString());
+        SelectOf(cut).Instance.Value!.Value.Should().Be(Beta.ToString());
         selection.Applied.Should().NotBe(Beta);
     }
 
@@ -637,7 +659,7 @@ public class DevTenantSwitcherTests : BunitContext
 
         var cut = Render<DevTenantSwitcher>();
 
-        await cut.InvokeAsync(() => OptionOf(cut, ActionLabel).Click());
+        await cut.InvokeAsync(() => SelectOptionAsync(cut, ActionLabel));
 
         captured.Should().ContainSingle();
         captured[0].Title.Should().Be("Set default tenant");

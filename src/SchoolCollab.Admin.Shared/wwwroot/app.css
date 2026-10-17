@@ -28,18 +28,74 @@ fluent-data-grid {
     width: 100%;
 }
 
-fluent-nav-menu,
-fluent-nav-link,
-fluent-nav-group {
+/* The repo's W1–W9 input-width ladder (FieldWidth enum / `w-1`…`w-9` classes) sizes a
+   FluentUI input from the OUTSIDE, and v5 splits that outside into two elements: it renders
+   <fluent-field class="…" style="width:80px; …"><fluent-dropdown slot="input">…, so the
+   wrapper's inline `Style` (DropdownComponent / DropdownForEnum / CodedValueDropdown `Width`)
+   and a consumer's `Class="w-3"` both land on the `fluent-field` HOST — never on the control.
+   @fluentui/web-components gives the field `display:inline-grid`, `justify-items:start` and
+   only `::slotted([slot='input']) { grid-area: input }` for the slotted control, i.e. no width
+   at all — so without this rule the ladder sizes only the wrapper and the control keeps its
+   intrinsic width. This is the second half of the mechanism: the control sizes from the host
+   that carries the width. Owner pin Q28(a), 2026-10-16 — keep the pixel ladder in sync with
+   src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs and the `w-1`…`w-9` classes in
+   src/SchoolCollab.Admin/wwwroot/css/app.css.
+   Tag names are the v5 web-component names (v4's `fluent-select`/`fluent-text-field` are gone —
+   the Blazor wrappers render `fluent-dropdown` / `fluent-text-input`). */
+fluent-field > fluent-dropdown,
+fluent-field > fluent-text-input,
+fluent-field > fluent-text-area,
+fluent-field > fluent-number-field,
+fluent-field > fluent-date-picker {
+    width: inherit;
+}
+
+/* v5 replaced the nav menu components (`FluentNavMenu`/`FluentNavLink`/`FluentNavGroup`) with
+   `FluentNav`/`FluentNavItem`/`FluentNavCategory`, which render Blazor-owned markup — not custom
+   elements — so the nav entries are matched by the class names those components put on their
+   `div`s. */
+.fluent-navitem,
+.fluent-navsubitem,
+.fluent-navcategoryitem {
     color: var(--neutral-foreground-1, inherit);
 }
 
-a, .btn-link, fluent-anchor {
+/* FluentUI 5.0.1 removed FluentTextArea.Rows, and the textarea's own box height now lives
+   inside the web component: its `:host` rule declares `--block-size: var(--min-block-size)`
+   (52px — two lines plus chrome) and `.root { block-size: var(--block-size) }`. A host-level
+   `height` (the wrapper's own Height parameter) cannot change that box, and a class on the
+   Blazor component lands on the surrounding `fluent-field` — so the override has to match the
+   `fluent-textarea` element itself from this (outer) stylesheet, which beats the component's
+   `:host` declaration. The `ta-lines-N` class rides the component's own `Class` parameter onto
+   the `fluent-field` wrapper, the textarea's parent.
+   The ladder: 20px is Fluent's `--lineHeightBase300` (one text line); the +12px is the
+   control's vertical padding and border, calibrated so N=2 lands on the component's own 52px
+   default — which is why the two-line call sites carry no class at all.
+   Keep this ladder aligned with the `ta-lines-N` classes used by the call sites; the Families
+   host does not load this stylesheet, so its own copy of the one class it needs lives in
+   src/SchoolCollab.Families/wwwroot/css/app.css. */
+.ta-lines-3 fluent-textarea {
+    --block-size: 72px;
+}
+
+.ta-lines-4 fluent-textarea {
+    --block-size: 92px;
+}
+
+.ta-lines-6 fluent-textarea {
+    --block-size: 132px;
+}
+
+.ta-lines-8 fluent-textarea {
+    --block-size: 172px;
+}
+
+a, .btn-link, fluent-link {
     color: var(--accent-fill-rest, #006bb7);
     text-decoration: none;
 }
 
-a:hover, fluent-anchor:hover {
+a:hover, fluent-link:hover {
     text-decoration: underline;
 }
 
@@ -92,7 +148,10 @@ h1:focus {
 
 .content {
     padding: 1.25rem 1.5rem;
-    flex: 1 1 0;
+    /* v5: the FluentLayoutItem Content region is the grid item that carries the
+       row height; height:100% makes this region inherit it so .page-scroll
+       stays the sole scroll region (see MainLayout.razor.css). */
+    height: 100%;
     min-height: 0;
     display: flex;
     flex-direction: column;

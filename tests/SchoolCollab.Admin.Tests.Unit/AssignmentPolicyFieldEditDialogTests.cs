@@ -112,7 +112,7 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<AssignmentPolicyFieldEditDialog,
             AssignmentPolicyFieldEditDialog.EditModel,
-            AssignmentPolicyFieldEditDialog.EditResult>(model, $"Edit {model.Label}", DialogSize.Large);
+            AssignmentPolicyFieldEditDialog.EditResult>(model, $"Edit {model.Label}", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("#apd-global").Should().NotBeNull(),
             TimeSpan.FromSeconds(5));
@@ -130,16 +130,16 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
         cut.InvokeAsync(() => { }).GetAwaiter().GetResult();
 
         var select = cut
-            .FindComponents<FluentSelect<AssignmentPolicyFieldValueEditor.ValueOption>>()
+            .FindComponents<FluentSelect<AssignmentPolicyFieldValueEditor.ValueOption, AssignmentPolicyFieldValueEditor.ValueOption>>()
             .Single(s => s.Instance.Id == inputId);
 
-        cut.InvokeAsync(() => select.Instance.SelectedOptionChanged.InvokeAsync(
+        cut.InvokeAsync(() => select.Instance.ValueChanged.InvokeAsync(
             new AssignmentPolicyFieldValueEditor.ValueOption(key, key))).GetAwaiter().GetResult();
 
         cut.WaitForAssertion(() => cut
-            .FindComponents<FluentSelect<AssignmentPolicyFieldValueEditor.ValueOption>>()
+            .FindComponents<FluentSelect<AssignmentPolicyFieldValueEditor.ValueOption, AssignmentPolicyFieldValueEditor.ValueOption>>()
             .Single(s => s.Instance.Id == inputId)
-            .Instance.SelectedOption!.Value.Should().Be(key,
+            .Instance.Value!.Value.Should().Be(key,
                 $"the {inputId} editor must render the option the dialog stored, which proves the change was applied"));
     }
 
@@ -170,7 +170,7 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
 
         var dialog = Open(model);
 
-        dialog.Cut.WaitForAssertion(() => dialog.Cut.FindAll("fluent-select").Should().HaveCount(2));
+        dialog.Cut.WaitForAssertion(() => dialog.Cut.FindAll("fluent-dropdown").Should().HaveCount(2));
         dialog.Cut.Markup.Should().Contain("Global settings", "the global-settings panel header renders");
         dialog.Cut.Markup.Should().Contain("This grade", "the per-grade panel header renders");
         dialog.Cut.Markup.Should().Contain("Not set", "the tenant default's sentinel clears the value");
@@ -373,7 +373,7 @@ public class AssignmentPolicyFieldEditDialogTests : BunitContext
         var dialog = Open(model);
 
         dialog.Cut.FindComponents<FluentMessageBar>()
-            .Where(b => b.Instance.Intent == MessageIntent.Error)
+            .Where(b => b.Instance.Intent == MessageBarIntent.Error)
             .Should().BeEmpty(
                 "a clean open must render no error bar — one reading 'Error' means the footer's Error " +
                 "parameter was passed as a string literal instead of '@Error'");

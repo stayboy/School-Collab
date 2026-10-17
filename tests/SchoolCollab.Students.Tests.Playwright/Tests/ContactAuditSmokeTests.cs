@@ -76,7 +76,7 @@ public class ContactAuditSmokeTests : PageTest
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         // Contacts are not seeded, so add one via the UI to guarantee a row.
-        var valueInput = Page.Locator("fluent-text-field.contacts-value");
+        var valueInput = Page.Locator("fluent-field.contacts-value input");
         await valueInput.FillAsync("smoke-" + Guid.NewGuid().ToString("N")[..8] + "@example.com");
         await Page.Locator(".contacts-editor")
             .GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true })

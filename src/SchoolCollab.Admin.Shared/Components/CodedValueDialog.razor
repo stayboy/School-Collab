@@ -13,16 +13,17 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject CodedValuesApiClient CodedValuesApi
 
+<DialogShellBody>
 <div class="dialog-container">
     @if (Mode == "Create")
     {
         <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
             <DataAnnotationsValidator />
 
-            <FluentTextField @bind-Value="Model.Code" Label="Code *" Placeholder="e.g. GRADE9" Required class="full-width mb-3" />
-            <FluentTextField @bind-Value="Model.Name" Label="Name *" Placeholder="e.g. Grade 9" Required class="full-width mb-3" />
-            <FluentTextField @bind-Value="Model.Description" Label="Description" Rows="2" class="full-width mb-3" />
-            <FluentNumberField @bind-Value="Model.DisplayOrder" Label="Display Order" class="full-width mb-3" />
+            <FluentTextInput @bind-Value="Model.Code" Label="Code *" Placeholder="e.g. GRADE9" Required class="full-width mb-3" />
+            <FluentTextInput @bind-Value="Model.Name" Label="Name *" Placeholder="e.g. Grade 9" Required class="full-width mb-3" />
+            <FluentTextArea @bind-Value="Model.Description" Label="Description" class="full-width mb-3" />
+            <FluentNumberInput TValue="int?" @bind-Value="Model.DisplayOrder" Label="Display Order" class="full-width mb-3" />
 
             <DialogShellFooter Saving="@Saving"
                                Error="@Error"
@@ -38,18 +39,18 @@
 
             <p class="hint">Overriding: <strong>@GetDefaultName()</strong></p>
             <FormRow Label="Override Name" For="override-name">
-                <FluentTextField Id="override-name" @bind-Value="Model.Name" Placeholder="@GetPlaceholder()" />
+                <FluentTextInput Id="override-name" @bind-Value="Model.Name" Placeholder="@GetPlaceholder()" />
             </FormRow>
             <FormRow Label="Description" For="override-description">
-                <FluentTextArea Id="override-description" @bind-Value="Model.Description" Rows="2" />
+                <FluentTextArea Id="override-description" @bind-Value="Model.Description" />
             </FormRow>
 
             @if (_hasOverride)
             {
-                <FluentButton Appearance="Appearance.Neutral" OnClick="RemoveOverrideAndCloseAsync" Disabled="@_removing" class="mb-3">
+                <FluentButton Appearance="ButtonAppearance.Default" OnClick="RemoveOverrideAndCloseAsync" Disabled="@_removing" class="mb-3">
                     @if (_removing)
                     {
-                        <FluentProgressRing Style="width: 16px; height: 16px;" />
+                        <FluentSpinner Style="width: 16px; height: 16px;" />
                     }
                     else
                     {
@@ -66,6 +67,7 @@
         </EditForm>
     }
 </div>
+</DialogShellBody>
 
 
 @code {
@@ -162,7 +164,7 @@
             var original = await CodedValuesApi.GetByIdAsync(_codedValue.Id);
             if (original is not null)
             {
-                await Dialog.CloseAsync(new DialogShellResult<CodedValueDto>(original));
+                await DialogInstance.CloseAsync(new DialogShellResult<CodedValueDto>(original));
             }
         }
         catch (Exception ex)

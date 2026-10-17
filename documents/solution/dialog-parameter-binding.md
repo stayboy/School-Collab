@@ -73,7 +73,7 @@ Callers pass the key, not `nameof`:
 ```csharp
 ShowReadonlyDialogAsync<StudentEditDialog>(title,
     new Dictionary<string, object?> { { StudentEditDialog.StudentIdKey, student.Id } },
-    DialogSize.ExtraLarge);
+    DialogWidth.ExtraLarge);
 ```
 
 **Why `StudentEditDialog.StudentIdKey` and not `nameof(StudentId)`?** The key constant is

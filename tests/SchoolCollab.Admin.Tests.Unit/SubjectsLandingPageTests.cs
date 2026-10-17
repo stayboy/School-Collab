@@ -303,7 +303,7 @@ public class SubjectsLandingPageTests : BunitContext
     /// <summary>
     /// The kebab actions for the single rendered row, read from the page's own
     /// delegate. <c>FluentMenu</c> does NOT materialise its items while closed —
-    /// the same trap as <c>FluentSelect</c>'s option children — so asserting on
+    /// the same trap as <c>FluentSelect</c, /c>'s option children — so asserting on
     /// menu markup would test nothing. <c>LandingPage.RowActions</c> is public.
     /// </summary>
     private static IReadOnlyList<RowAction> SingleRowActions(IRenderedComponent<Subjects> cut)
@@ -336,7 +336,7 @@ public class SubjectsLandingPageTests : BunitContext
         markup.Should().Contain("Mathematics", "topics must load regardless of the activity-groups flag");
 
         // Not stuck loading, and no error surfaced for a normal, expected state.
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "the page must not spin forever when an optional feature is dark-launched");
         cut.FindComponents<FluentMessageBar>().Should().BeEmpty(
             "an off flag is a normal state, not an error to report to the user");
@@ -371,8 +371,11 @@ public class SubjectsLandingPageTests : BunitContext
         // GradeLevelDetailPageTests covers markup-invisible wiring.
         var source = ReadSubjectsSource();
 
+        // The v5 spelling of a literal option is FluentOptionString, not
+        // FluentOption (which is the option-item type FluentSelect now generates
+        // itself) — the pinned text tracks the guard as written today.
         source.Should().MatchRegex(
-            @"@if \(_activityGroupsEnabled\)\s*\{\s*<FluentOption Value=""ActivityGroup"">",
+            @"@if \(_activityGroupsEnabled\)\s*\{\s*<FluentOptionString Value=""ActivityGroup"">",
             "the Activity Group owner option must be gated on the feature flag");
     }
 
@@ -394,7 +397,7 @@ public class SubjectsLandingPageTests : BunitContext
             "an enabled flag must actually load the groups");
 
         cut.Markup.Should().Contain("Mathematics", "topics still load alongside the groups");
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty();
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty();
     }
 
     /// <summary>
@@ -418,7 +421,7 @@ public class SubjectsLandingPageTests : BunitContext
 
         cut.Markup.Should().Contain("Mathematics",
             "a failing optional filter must not prevent topics from rendering");
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "the page must not be left spinning by a failed optional fetch");
     }
 
@@ -438,7 +441,7 @@ public class SubjectsLandingPageTests : BunitContext
             topicsStatus: HttpStatusCode.InternalServerError);
 
         var cut = harness.Cut;
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "_items must be reset so Loading is no longer true after a failure");
 
         var messageBars = cut.FindComponents<FluentMessageBar>();

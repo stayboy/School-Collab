@@ -33,7 +33,7 @@
                 <span class="grid-header-wrap" title="Current Grade">Current Grade</span>
             </HeaderCellTitleTemplate>
             <ChildContent>
-                <FluentBadge Value="@(context.CurrentGrade?.Name ?? "—")" Appearance="Appearance.Neutral" Primary="true" />
+                <FluentBadge Value="@(context.CurrentGrade?.Name ?? "—")" Appearance="BadgeAppearance.Filled" Primary="true" />
             </ChildContent>
         </TemplateColumn>
         <TemplateColumn TGridItem="StudentDto" Title="Actions">

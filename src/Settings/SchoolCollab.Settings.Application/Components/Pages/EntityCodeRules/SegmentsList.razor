@@ -9,14 +9,14 @@
 
 @if (Segments.Count == 0)
 {
-    <FluentMessageBar Intent="MessageIntent.Info">No segments defined.</FluentMessageBar>
+    <FluentMessageBar Intent="MessageBarIntent.Info">No segments defined.</FluentMessageBar>
 }
 else
 {
     <div class="segments-list">
         <div class="segments-list-header">
             <h6 class="segments-list-title">Segments (preview)</h6>
-            <FluentButton Appearance="Appearance.Neutral"
+            <FluentButton Appearance="ButtonAppearance.Default"
                           OnClick="ComputePreview"
                           Disabled="@(_preview.Count > 0)">
                 Preview next 5 codes

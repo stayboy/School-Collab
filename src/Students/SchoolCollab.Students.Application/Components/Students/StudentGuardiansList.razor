@@ -39,11 +39,11 @@
 
 @if (Items is null)
 {
-    <div class="spinner-container"><FluentProgressRing /></div>
+    <div class="spinner-container"><FluentSpinner /></div>
 }
 else if (Items.Length == 0)
 {
-    <FluentMessageBar Intent="MessageIntent.Info">@(EmptyMessage ?? "No guardians linked yet.")</FluentMessageBar>
+    <FluentMessageBar Intent="MessageBarIntent.Info">@(EmptyMessage ?? "No guardians linked yet.")</FluentMessageBar>
 }
 else
 {

@@ -20,17 +20,18 @@
 
 @if (Kind == AssignmentPolicyFieldEditDialog.FieldKind.Int)
 {
-    <FluentNumberField Id="@InputId" @bind-Value="IntValue" Min="1" Class="w-9" />
+    <FluentNumberInput Id="@InputId" @bind-Value="IntValue" Min="1" Class="w-9" />
 }
 else
 {
     <FluentSelect TOption="ValueOption"
+                  TValue="ValueOption"
                   Id="@InputId"
                   Items="@Options"
                   OptionText="@(o => o.Label)"
-                  OptionValue="@(o => o.Value)"
-                  SelectedOption="@SelectedOption"
-                  SelectedOptionChanged="@OnOptionChanged"
+                  OptionValueToString="@(o => o.Value)"
+                  Value="@SelectedOption"
+                  ValueChanged="@OnOptionChanged"
                   Class="w-9" />
 }
 

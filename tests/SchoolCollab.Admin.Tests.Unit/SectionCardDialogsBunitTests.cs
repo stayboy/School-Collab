@@ -84,15 +84,14 @@ public class SectionCardDialogsBunitTests : BunitContext
     }
 
     /// <summary>
-    /// Renders StudentEditDialog as FluentUI would: its data comes via the
-    /// <c>Content</c> DialogParameters indexer (StudentId key), because FluentUI
-    /// does NOT spread indexer entries onto separate <c>[Parameter]</c>s.
+    /// Renders StudentEditDialog with the input FluentUI 5.x spreads: the dialog
+    /// declares one typed <c>[Parameter]</c> per input and a caller seeds it by name
+    /// (<c>DialogOptions.Parameters[StudentEditDialog.StudentIdKey]</c>, where the key
+    /// constant is <c>nameof(StudentId)</c>). A bUnit render seeds the same property
+    /// directly.
     /// </summary>
     private IRenderedComponent<StudentEditDialog> RenderEditDialog(Guid studentId)
-    {
-        var content = new DialogParameters { [StudentEditDialog.StudentIdKey] = studentId };
-        return Render<StudentEditDialog>(p => p.Add(x => x.Content, content));
-    }
+        => Render<StudentEditDialog>(p => p.Add(x => x.StudentId, studentId));
 
     private static string JsonArray(params object[] items) => JsonSerializer.Serialize(items);
 
@@ -120,13 +119,11 @@ public class SectionCardDialogsBunitTests : BunitContext
         Register(new ScriptedHandler());
         var roleId = Guid.NewGuid();
         Guid? saved = null;
-        // FluentUI passes dialog inputs via the Content DialogParameters indexer.
-        var content = new DialogParameters
-        {
-            [TeacherRoleDialog.CurrentRoleIdKey] = roleId,
-            [TeacherRoleDialog.SaveKey] = new Func<Guid?, Task>(r => { saved = r; return Task.CompletedTask; }),
-        };
-        var cut = Render<TeacherRoleDialog>(p => p.Add(x => x.Content, content));
+        // FluentUI 5.x spreads dialog inputs onto the dialog's typed [Parameter]s by
+        // name (DialogOptions.Parameters; the key constants are nameof(<Parameter>)).
+        var cut = Render<TeacherRoleDialog>(p => p
+            .Add(x => x.CurrentRoleId, roleId)
+            .Add(x => x.Save, new Func<Guid?, Task>(r => { saved = r; return Task.CompletedTask; })));
 
         cut.Markup.Should().Contain("Role", "the role dropdown label renders");
         cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Save")).Click();
@@ -189,7 +186,7 @@ public class SectionCardDialogsBunitTests : BunitContext
         // Regression: the edit dialog must bind the existing student's profile
         // into the form input values (not leave them blank). The form is gated
         // on the profile load so the FluentTextField bindings connect with the
-        // populated model — without that, fluent-text-field's Web Component does
+        // populated model — without that, fluent-text-input's Web Component does
         // not re-sync its internal value after an async model update and the
         // inputs render empty.
         var studentId = Guid.NewGuid();
@@ -205,7 +202,7 @@ public class SectionCardDialogsBunitTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Find("#studentFormFirstName").GetAttribute("value")
             .Should().Be("Ada", "First name binds the existing student profile"));
-        cut.Find("fluent-text-field[placeholder='Last name']").GetAttribute("value")
+        cut.Find("fluent-text-input[placeholder='Last name']").GetAttribute("value")
             .Should().Be("Lovelace", "Last name binds the existing student profile");
         cut.Find("#studentFormNumber").GetAttribute("value")
             .Should().Be("STU001", "Student number binds the existing student profile");
@@ -467,7 +464,7 @@ public class SectionCardDialogsBunitTests : BunitContext
     [TestMethod]
     public void StudentEditDialog_AddGuardianAnchor_OpensDrawerWithoutError()
     {
-        // Regression: clicking the "Add guardian" FluentAnchor below the cards
+        // Regression: clicking the "Add guardian" hypertext link below the cards
         // must open the drawer in Add mode (IsAdd=true) without throwing.
         var studentId = Guid.NewGuid();
         var handler = new ScriptedHandler();
@@ -482,14 +479,13 @@ public class SectionCardDialogsBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Add guardian",
             "the Add guardian anchor renders below the summary"));
 
-        var addAnchor = cut.FindAll("fluent-anchor").First(a => a.TextContent.Trim().Contains("Add guardian"));
-        addAnchor.Click();
+        var addLink = cut.Find("fluent-link.guardian-add-anchor");
+        addLink.TextContent.Trim().Should().Contain("Add guardian",
+            "the Add guardian hypertext affordance renders below the summary");
 
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("Add guardian", "the drawer title reflects add mode");
-            cut.Markup.Should().Contain("First name", "the blank add form renders the first-name row");
-        });
+        addLink.Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("First name",
+            "clicking Add guardian opens the drawer in Add mode"));
     }
 
     [TestMethod]

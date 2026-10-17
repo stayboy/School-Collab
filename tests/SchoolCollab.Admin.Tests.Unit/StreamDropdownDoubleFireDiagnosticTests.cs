@@ -24,8 +24,8 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// <c>OnParametersSetAsync</c> compares against <c>LoadKey</c> which also
 /// includes the <c>AttributeFilter</c>. For the filtered stream picker the
 /// comparison could never be equal, so EVERY render took the reload branch,
-/// clearing Items/SelectedOption mid-flight — and FluentUI's ListComponentBase
-/// then raised a spurious SelectedOptionChanged(null) which flowed through the
+/// clearing Items/Value mid-flight — and FluentUI's ListComponentBase
+/// then raised a spurious ValueChanged(null) which flowed through the
 /// binder and wiped _formModel.StreamCodedValueId.
 ///
 /// These tests drive the shared CodedValueDropdown exactly as the dialog's
@@ -144,8 +144,8 @@ public class StreamDropdownDoubleFireDiagnosticTests : BunitContext
 
     private static (string, string)? ToTuple((string, string)? f) => f;
 
-    private FluentSelect<CodedValueDto> Select(IRenderedComponent<StreamPickerProbeHost> cut) =>
-        cut.FindComponent<FluentSelect<CodedValueDto>>().Instance;
+    private FluentSelect<CodedValueDto, CodedValueDto> Select(IRenderedComponent<StreamPickerProbeHost> cut) =>
+        cut.FindComponent<FluentSelect<CodedValueDto, CodedValueDto>>().Instance;
 
     private CodedValueDropdown Dropdown(IRenderedComponent<StreamPickerProbeHost> cut) =>
         cut.FindComponent<CodedValueDropdown>().Instance;
@@ -163,7 +163,7 @@ public class StreamDropdownDoubleFireDiagnosticTests : BunitContext
         cut.WaitForAssertion(() => Dropdown(cut).Items.Count.Should().Be(3)); // 2 streams + sentinel
 
         var picked = Dropdown(cut).Items.First(i => i.Id == Stream5AId);
-        await cut.InvokeAsync(() => Select(cut).SelectedOptionChanged.InvokeAsync(picked));
+        await cut.InvokeAsync(() => Select(cut).ValueChanged.InvokeAsync(picked));
 
         Dump("AfterValues", cut.Instance.AfterValues);
         cut.Instance.AfterValues.Should().ContainSingle("one user pick = exactly one binder callback");
@@ -187,7 +187,7 @@ public class StreamDropdownDoubleFireDiagnosticTests : BunitContext
         });
 
         var picked = Dropdown(cut).Items.First(i => i.Id == Stream5AId);
-        await cut.InvokeAsync(() => Select(cut).SelectedOptionChanged.InvokeAsync(picked));
+        await cut.InvokeAsync(() => Select(cut).ValueChanged.InvokeAsync(picked));
 
         for (var i = 0; i < 3; i++)
         {
@@ -210,12 +210,16 @@ public class StreamDropdownDoubleFireDiagnosticTests : BunitContext
         cut.WaitForAssertion(() => Dropdown(cut).Items.Count.Should().Be(3));
 
         var picked = Dropdown(cut).Items.First(i => i.Id == Stream5AId);
-        await cut.InvokeAsync(() => Select(cut).SelectedOptionChanged.InvokeAsync(picked));
+        await cut.InvokeAsync(() => Select(cut).ValueChanged.InvokeAsync(picked));
         cut.Instance.BoundId.Should().Be(Stream5AId);
 
         // Simulate the grade change: new filter value → reload.
         await cut.InvokeAsync(() => cut.Instance.ChangeFilterAsync(("gradeLevel", Grade7CvId.ToString())));
         cut.WaitForAssertion(() => Dropdown(cut).Items.Count.Should().Be(1)); // sentinel only
+
+        // The wrapper raises the clear in phase 2 of the reload (after it re-applies the
+        // resolved selection), so wait for the callback itself, not just for the items.
+        cut.WaitForAssertion(() => cut.Instance.AfterValues.Should().HaveCount(2));
 
         Dump("AfterValues", cut.Instance.AfterValues);
         // Changing the grade invalidates the previously-picked stream (it is
@@ -247,7 +251,7 @@ public class StreamDropdownDoubleFireDiagnosticTests : BunitContext
         cut.WaitForAssertion(() => Dropdown(cut).Items.Count.Should().Be(3));
 
         var picked = Dropdown(cut).Items.First(i => i.Id == Stream5AId);
-        await cut.InvokeAsync(() => Select(cut).SelectedOptionChanged.InvokeAsync(picked));
+        await cut.InvokeAsync(() => Select(cut).ValueChanged.InvokeAsync(picked));
         cut.Instance.BoundId.Should().Be(Stream5AId);
 
         // Widen the in-flight window and slam a parent re-render into it.
@@ -257,6 +261,10 @@ public class StreamDropdownDoubleFireDiagnosticTests : BunitContext
         cut.Render();                               // full-tree re-render mid-load
         await reload;
         cut.WaitForAssertion(() => Dropdown(cut).Items.Count.Should().Be(1));
+
+        // The wrapper raises the clear in phase 2 of the reload (after it re-applies the
+        // resolved selection), so wait for the callback itself, not just for the items.
+        cut.WaitForAssertion(() => cut.Instance.AfterValues.Should().HaveCount(2));
 
         Dump("AfterValues", cut.Instance.AfterValues);
         cut.Instance.AfterValues.Should().HaveCount(2,

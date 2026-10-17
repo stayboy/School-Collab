@@ -49,34 +49,37 @@
         <div class="authoring-page">
             @* D8 (assignment-create-edit-redesign): breadcrumb navigation — the crumb trail sits at
                the top of EVERY branch (spec §6: while `_item` is null — loading or not found — it
-               degrades to `Assignments › …`). First FluentBreadcrumb usage in the repo. *@
+               degrades to `Assignments › …`). v5 removed FluentBreadcrumb/FluentBreadcrumbItem with
+               no replacement, so the trail is authored here: linked crumbs are FluentLinks and the
+               trailing crumb is the current page (a non-link). The landmark, its class and the
+               `›` separators are what the removed pair rendered. *@
             <nav id="authoring-breadcrumb" class="authoring-breadcrumb" aria-label="Breadcrumb">
-                <FluentBreadcrumb>
-                    <FluentBreadcrumbItem Href="/assignments">Assignments</FluentBreadcrumbItem>
-                    @if (Mode == AssignmentAuthoringMode.Create)
-                    {
-                        <FluentBreadcrumbItem>New assignment</FluentBreadcrumbItem>
-                    }
-                    else if (_item is not null)
-                    {
-                        <FluentBreadcrumbItem Href="@($"/assignments/{_item.Id}")">@_item.Title</FluentBreadcrumbItem>
-                        <FluentBreadcrumbItem>@CurrentCrumb</FluentBreadcrumbItem>
-                    }
-                    else
-                    {
-                        <FluentBreadcrumbItem>…</FluentBreadcrumbItem>
-                    }
-                </FluentBreadcrumb>
+                <FluentLink Appearance="LinkAppearance.Default" Href="/assignments">Assignments</FluentLink>
+                <span class="authoring-crumb-separator" aria-hidden="true">›</span>
+                @if (Mode == AssignmentAuthoringMode.Create)
+                {
+                    <span class="authoring-crumb-current" aria-current="page">New assignment</span>
+                }
+                else if (_item is not null)
+                {
+                    <FluentLink Appearance="LinkAppearance.Default" Href="@($"/assignments/{_item.Id}")">@_item.Title</FluentLink>
+                    <span class="authoring-crumb-separator" aria-hidden="true">›</span>
+                    <span class="authoring-crumb-current" aria-current="page">@CurrentCrumb</span>
+                }
+                else
+                {
+                    <span class="authoring-crumb-current" aria-current="page">…</span>
+                }
             </nav>
 
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (Mode != AssignmentAuthoringMode.Create && _item is null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">Assignment not found.</FluentMessageBar>
-            <FluentButton Appearance="Appearance.Outline" OnClick="BackToList">Back to List</FluentButton>
+            <FluentMessageBar Intent="MessageBarIntent.Error">Assignment not found.</FluentMessageBar>
+            <FluentButton Appearance="ButtonAppearance.Outline" OnClick="BackToList">Back to List</FluentButton>
         }
         else
         {
@@ -95,7 +98,7 @@
                         @if (!ShowSummary && Mode != AssignmentAuthoringMode.Create)
                         {
                             <FluentButton Id="authoring-summary-back"
-                                          Appearance="Appearance.Outline"
+                                          Appearance="ButtonAppearance.Outline"
                                           IconStart="@FluentIcons.ArrowLeft"
                                           Disabled="@_busy"
                                           OnClick="ExitEditFieldsView">Back to summary</FluentButton>
@@ -103,7 +106,7 @@
                         @if (PrimaryActionLabel is not null)
                         {
                             <FluentButton Id="authoring-primary-action"
-                                          Appearance="Appearance.Accent"
+                                          Appearance="ButtonAppearance.Primary"
                                           Disabled="@_busy"
                                           OnClick="OnPrimaryActionAsync">
                                 @(_busy ? "Working…" : PrimaryActionLabel)
@@ -128,7 +131,7 @@
 
                 @if (!string.IsNullOrEmpty(_error))
                 {
-                    <FluentMessageBar Id="authoring-error" Intent="MessageIntent.Error" class="authoring-message">@_error</FluentMessageBar>
+                    <FluentMessageBar Id="authoring-error" Intent="MessageBarIntent.Error" class="authoring-message">@_error</FluentMessageBar>
                 }
 
                 @* U4 (round-3 Q2 settlement, owner 2026-10-09): the count of questions whose response
@@ -137,7 +140,7 @@
                    the ONLY prompt for a legacy question, because nothing is backfilled for them. *@
                 @if (QuestionsMissingResponseDefinition > 0)
                 {
-                    <FluentMessageBar Id="authoring-response-kinds-banner" Intent="MessageIntent.Warning" class="authoring-message">
+                    <FluentMessageBar Id="authoring-response-kinds-banner" Intent="MessageBarIntent.Warning" class="authoring-message">
                         @($"{QuestionsMissingResponseDefinition} question(s) need a response definition — open each question and pick what the student submits (video, audio, document or image).")
                     </FluentMessageBar>
                 }
@@ -169,7 +172,7 @@
                                    structural edits (Draft|Scheduled). Published/Closed/Archived get
                                    the same summary without it. *@
                                 <FluentButton Id="authoring-summary-edit"
-                                              Appearance="Appearance.Accent"
+                                              Appearance="ButtonAppearance.Primary"
                                               IconStart="@FluentIcons.Edit"
                                               Title="Edit assignment details"
                                               AriaLabel="Edit assignment details"
@@ -231,7 +234,7 @@
                         </FormRow>
 
                         <FormRow Label="Title" Required For="authoring-basics-title">
-                            <FluentTextField Id="authoring-basics-title" @bind-Value="_model.Title" Required
+                            <FluentTextInput Id="authoring-basics-title" @bind-Value="_model.Title" Required
                                              ReadOnly="@IsReadOnly" Placeholder="e.g. Chapter 5 Quiz" class="full-width" />
                         </FormRow>
 
@@ -255,12 +258,12 @@
                            unknown keys to null, losing the label; (c) the CP-4 side effect is
                            async, while the wrapper's contract wants a sync `:after` Action. *@
                         <FormRow Label="Subject" Required For="authoring-basics-subject">
-                            <FluentSelect TOption="PickerOption" Id="authoring-basics-subject"
+                            <FluentSelect TOption="PickerOption" TValue="PickerOption" Id="authoring-basics-subject"
                                           Items="@SubjectOptions"
-                                          SelectedOption="@_selectedSubject"
-                                          SelectedOptionChanged="@OnSubjectChangedAsync"
+                                          Value="@_selectedSubject"
+                                          ValueChanged="@OnSubjectChangedAsync"
                                           OptionText="@(o => o?.Label ?? string.Empty)"
-                                          OptionValue="@(o => o?.Value ?? string.Empty)"
+                                          OptionValueToString="@(o => o?.Value ?? string.Empty)"
                                           Placeholder="@SubjectPickerPlaceholder"
                                           Disabled="@(IsReadOnly || SubjectPickerDisabled)" class="full-width" />
                         </FormRow>
@@ -313,21 +316,21 @@
                              these are neither (enum-with-description, see above).
                            *@
                             <FormRowCell Caption="Assignment type" For="authoring-basics-type" Help="@TypeCellHelp">
-                                <FluentSelect TOption="PickerOption" Id="authoring-basics-type"
+                                <FluentSelect TOption="PickerOption" TValue="PickerOption" Id="authoring-basics-type"
                                               Items="@TypeOptions"
-                                              SelectedOption="@_selectedType"
-                                              SelectedOptionChanged="@OnTypeChangedAsync"
+                                              Value="@_selectedType"
+                                              ValueChanged="@OnTypeChangedAsync"
                                               OptionText="@(o => o?.Label ?? string.Empty)"
-                                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                                              OptionValueToString="@(o => o?.Value ?? string.Empty)"
                                               Disabled="@IsReadOnly" />
                             </FormRowCell>
                             <FormRowCell Caption="Grading format" For="authoring-basics-grading" Help="@GradingFormatCellHelp">
-                                <FluentSelect TOption="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
+                                <FluentSelect TOption="PickerOption" TValue="PickerOption" Id="authoring-basics-grading" aria-label="Grading format"
                                               Items="@GradingFormatOptions"
-                                              SelectedOption="@_selectedGradingFormat"
-                                              SelectedOptionChanged="@OnGradingFormatChanged"
+                                              Value="@_selectedGradingFormat"
+                                              ValueChanged="@OnGradingFormatChanged"
                                               OptionText="@(o => o?.Label ?? string.Empty)"
-                                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                                              OptionValueToString="@(o => o?.Value ?? string.Empty)"
                                               Disabled="@IsReadOnly" />
                             </FormRowCell>
                         </FormRow>
@@ -360,11 +363,11 @@
                         <FormRow Label="Score" AlignTop
                                  For="authoring-basics-max-score">
                             <FormRowCell Caption="Max score" For="authoring-basics-max-score">
-                                <FluentNumberField Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
+                                <FluentNumberInput Id="authoring-basics-max-score" @bind-Value="_model.MaxScore"
                                                    ReadOnly="@IsReadOnly" />
                             </FormRowCell>
                             <FormRowCell Caption="Max attempts" For="scoringFieldsMaxAttempts">
-                                <FluentNumberField Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
+                                <FluentNumberInput Id="scoringFieldsMaxAttempts" aria-label="Max attempts" @bind-Value="_model.MaxAttempts"
                                                    Disabled="@ScoringFieldsSection.IsScoringInapplicable(SelectedGradingFormat)" />
                             </FormRowCell>
                             <FormRowCell Caption="Pass score" For="scoringFieldsPassScore"
@@ -412,13 +415,13 @@
                         else
                         {
                             <FluentTabStrip>
-                                <FluentTab Label="Student guidance">
+                                <FluentTab Header="Student guidance">
                                     <RichInstructionEditor @ref="_guidanceEditor"
                                                            Id="authoring-basics-instructions"
                                                            Value="@_model.Instructions"
                                                            Placeholder="What the student must do — shown to students…" />
                                 </FluentTab>
-                                <FluentTab Label="Teacher notes">
+                                <FluentTab Header="Teacher notes">
                                     <RichInstructionEditor @ref="_teacherNotesEditor"
                                                            Id="authoring-basics-description"
                                                            Value="@_model.Description"
@@ -440,7 +443,7 @@
                            that grade, otherwise the tenant default). *@
                         @if (_gradeLevels is { Length: 0 })
                         {
-                            <FluentMessageBar Intent="MessageIntent.Warning">
+                            <FluentMessageBar Intent="MessageBarIntent.Warning">
                                 No grade levels available. Please create grade levels in the Students module first.
                             </FluentMessageBar>
                         }
@@ -518,7 +521,7 @@
                                         @* D5: the refusal is surfaced, named and actionable — a
                                            FluentMessageBar, the shape every other error here takes. *@
                                         <FluentMessageBar Id="authoring-materials-refusal"
-                                                          Intent="MessageIntent.Error">@_materialRefusal</FluentMessageBar>
+                                                          Intent="MessageBarIntent.Error">@_materialRefusal</FluentMessageBar>
                                     }
                                 }
                                     </ChildContent>
@@ -548,7 +551,7 @@
                                     </div>
                                     @* P1-1: the remove action lives INSIDE the ItemTemplate — SectionCard
                                        ignores ItemActions whenever a template is supplied. *@
-                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                    <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                                   IconStart="@FluentIcons.Delete" Title="Remove"
                                                   AriaLabel="@($"Remove {entry.Label}")"
                                                   Disabled="@BuilderDisabled"
@@ -559,7 +562,7 @@
 
                         @if (AudienceEditorDisabledReason is not null)
                         {
-                            <FluentButton Appearance="Appearance.Outline"
+                            <FluentButton Appearance="ButtonAppearance.Outline"
                                           IconStart="@FluentIcons.Add"
                                           Title="Add target"
                                           AriaLabel="Add target"
@@ -620,8 +623,8 @@
                                         <span class="authoring-policy-value">@readout.Value</span>
                                         @if (PolicyLinkHref is not null)
                                         {
-                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@PolicyLinkHref"
-                                                          class="authoring-policy-link">Grade policy</FluentAnchor>
+                                            <FluentLink Appearance="LinkAppearance.Default" Href="@PolicyLinkHref"
+                                                          class="authoring-policy-link">Grade policy</FluentLink>
                                         }
                                     </div>
                                     }
@@ -768,10 +771,10 @@
 
                             <FluentAccordion>
                                 <FluentAccordionItem @bind-Expanded="_targetsExpanded">
-                                    <HeadingTemplate>
+                                    <HeaderTemplate>
                                         <span class="authoring-targets-heading">Targets &amp; audience</span>
                                         <span class="authoring-targets-count">@_targetsAndAudience.Count</span>
-                                    </HeadingTemplate>
+                                    </HeaderTemplate>
                                     <ChildContent>
                                         <div class="authoring-targets-panel" id="authoring-targets-accordion">
                                             <SectionCard TItem="TargetsAndAudienceEntry"
@@ -789,7 +792,7 @@
                                                                 <span class="targets-audience-item__label">@TargetCategoryLabel(entry.Category)</span>
                                                                 <span class="targets-audience-item__value">@entry.Label</span>
                                                             </div>
-                                                            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                                                           IconStart="@FluentIcons.Delete" Title="Remove"
                                                                           AriaLabel="@($"Remove {entry.Label}")"
                                                                           Disabled="@BuilderDisabled"
@@ -800,7 +803,7 @@
 
                                             @if (AudienceEditorDisabledReason is not null)
                                             {
-                                                <FluentButton Appearance="Appearance.Outline"
+                                                <FluentButton Appearance="ButtonAppearance.Outline"
                                                               IconStart="@FluentIcons.Add"
                                                               Title="Add target"
                                                               AriaLabel="Add target"
@@ -839,7 +842,7 @@
         </div>
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -1198,14 +1201,14 @@
             return;
         }
 
-        // DialogSize.Large (720px), not the Small (420px) default: the dialog's entity pickers are
+        // DialogWidth.Large (720px), not the Small (420px) default: the dialog's entity pickers are
         // multi-select listboxes, and the dialog's `full-width` fields floor at 400px — beside the
         // fixed 180px label column, only the 720px body leaves the option rows that room.
         var result = await DialogService.ShowShellDialogAsync<
             TargetsAndAudienceDialog, TargetsAndAudienceDialogModel, TargetsAndAudienceDialogResult>(
             BuildTargetsAndAudienceDialogModel(),
             "Add target & audience",
-            DialogSize.Large);
+            DialogWidth.Large);
 
         if (result is null || result.Entries.Count == 0)
         {
@@ -1500,11 +1503,11 @@
                 : string.Join(", ",
                     ids.Select(id => names.TryGetValue(id, out var name) ? name : ContextPicksSection.RemovedPickMarker));
 
-    private static Appearance StatusAppearance(AssignmentStatusDto status) => status switch
+    private static BadgeAppearance StatusAppearance(AssignmentStatusDto status) => status switch
     {
-        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => Appearance.Accent,
-        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => Appearance.Neutral,
-        _ => Appearance.Lightweight
+        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => BadgeAppearance.Filled,
+        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => BadgeAppearance.Filled,
+        _ => BadgeAppearance.Ghost
     };
 
     // ── Typed selection projections ───────────────────────────────────────────
@@ -2801,7 +2804,7 @@
         var result = await DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             model,
             kind == InstructionKindDto.Text ? "Add Text Content" : "Add Link",
-            DialogSize.Medium);
+            DialogWidth.Medium);
 
         if (result is null)
         {
@@ -2862,7 +2865,7 @@
                 // the media row's optional title/description.
                 _ => "Edit Material",
             },
-            DialogSize.Medium);
+            DialogWidth.Medium);
 
         if (result is null)
         {
@@ -3656,7 +3659,7 @@
             var model = new PublishFormModel(contacts.ToList(), $"Audience: {DerivedAudienceText}", _item.MandatoryReview);
 
             var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
-                model, title: "Publish assignment", size: DialogSize.Medium);
+                model, title: "Publish assignment", size: DialogWidth.Medium);
 
             if (result is null) return; // cancelled
 
@@ -3783,7 +3786,7 @@
         try
         {
             var result = await DialogService.ShowShellDialogAsync<ScheduleDialog, ScheduleFormModel, ScheduleResult>(
-                new ScheduleFormModel(), title: "Schedule assignment", size: DialogSize.Medium);
+                new ScheduleFormModel(), title: "Schedule assignment", size: DialogWidth.Medium);
 
             if (result is null) return; // cancelled
 

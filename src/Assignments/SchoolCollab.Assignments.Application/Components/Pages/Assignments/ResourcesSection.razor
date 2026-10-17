@@ -45,7 +45,9 @@
                              MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
                              Accept="@AttachmentUploadPolicy.AcceptExtensions"
                              OnFileUploaded="@OnFileUploadedAsync"
-                             OnFileCountExceeded="@OnFileCountExceededAsync"
+                             @* FluentUI 5.0.1 removed OnFileCountExceeded; the same condition is
+                                reported through OnFileError with the FileCountExceeded error code. *@
+                             OnFileError="@OnFileErrorAsync"
                              DragDropZoneVisible="true">
                 Upload files
             </FluentInputFile>
@@ -60,7 +62,7 @@
 
     @if (!string.IsNullOrEmpty(_error))
     {
-        <FluentMessageBar Intent="MessageIntent.Error" class="resources-section-error">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" class="resources-section-error">@_error</FluentMessageBar>
     }
 
     @* CR-5/CR-6 (D10): Files are a hairline-separated two-line row list. The group head
@@ -87,7 +89,7 @@
                                    silently dropped — this badge is the fail-open surface the author sees. *@
                                 @if (row.ExtractionStatus != AttachmentExtractionStatusDto.Succeeded)
                                 {
-                                    <FluentBadge Appearance="Appearance.Lightweight"
+                                    <FluentBadge Appearance="BadgeAppearance.Ghost"
                                                 title="@row.ExtractionError">
                                         @ExtractionStatusText(row.ExtractionStatus)
                                     </FluentBadge>
@@ -97,7 +99,7 @@
                         <div class="cq-row-actions">
                             @if (AssignmentId is not null && row.Id is not null)
                             {
-                                <FluentButton Appearance="Appearance.Neutral"
+                                <FluentButton Appearance="ButtonAppearance.Default"
                                               IconStart="@FluentIcons.ArrowClockwise"
                                               Disabled="@(_reextractingIndex is not null)"
                                               OnClick="@(() => RegenerateExtractionAsync(index))"
@@ -106,7 +108,7 @@
                                     @(_reextractingIndex == index ? "Reading…" : "Re-read")
                                 </FluentButton>
                             }
-                            <FluentButton Appearance="Appearance.Neutral"
+                            <FluentButton Appearance="ButtonAppearance.Default"
                                           IconEnd="@(FluentIcons.Dismiss)"
                                           OnClick="@(() => RemoveAtAsync(index))"
                                           aria-label="@($"Remove {row.FileName}")" />
@@ -135,7 +137,7 @@
                                     aria-hidden="true" />
                         <span class="cq-row-name" title="@(row.DisplayName ?? row.Url)">@(row.DisplayName ?? row.Url)</span>
                         <div class="cq-row-actions">
-                            <FluentButton Appearance="Appearance.Neutral"
+                            <FluentButton Appearance="ButtonAppearance.Default"
                                           IconEnd="@(FluentIcons.Dismiss)"
                                           OnClick="@(() => RemoveUrlAtAsync(index))"
                                           aria-label="@($"Remove {row.Url}")" />
@@ -147,7 +149,7 @@
 
         @if (!string.IsNullOrEmpty(_urlError))
         {
-            <FluentMessageBar Intent="MessageIntent.Warning" class="resources-section-error">@_urlError</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Warning" class="resources-section-error">@_urlError</FluentMessageBar>
         }
     </div>
 </section>
@@ -314,14 +316,25 @@
         }
     }
 
-    private Task OnFileCountExceededAsync(int exceededCount)
+    /// <summary>Upload guard: surfaces the FluentUI count-cap rejection.
+    ///
+    /// <para>FluentUI 4.14.2 raised <c>OnFileCountExceeded</c>, a dedicated callback whose
+    /// parameter is the number of files that were <em>attempted</em>, not the configured cap.
+    /// 5.0.1 removed that callback: the same condition now arrives on <c>OnFileError</c> as
+    /// <c>FluentInputFileErrorEventArgs.FileCountExceeded</c> (with <c>FileCount</c> carrying the
+    /// attempted count). The guard therefore keys off the error code, and any other error code
+    /// (the size cap the web component enforces) is left to the component's own display —
+    /// <see cref="AttachmentUploadPolicy.Validate"/> already front-runs both checks.</para></summary>
+    private Task OnFileErrorAsync(FluentInputFileErrorEventArgs args)
     {
-        // FluentUI 4.14.2's callback parameter is "the total number of files
-        // that were attempted for upload", NOT the configured cap — so we
-        // must reference AttachmentUploadPolicy.MaximumFileCount directly
-        // (the same constant the FluentInputFile markup is bound to) to
-        // show the user the true ceiling instead of the attempted batch size.
-        _ = exceededCount;
+        if (args.ErrorCode != FluentInputFileErrorEventArgs.FileCountExceeded.Code)
+        {
+            return Task.CompletedTask;
+        }
+
+        // The callback's FileCount is the attempted batch size, NOT the configured
+        // cap — so the message references AttachmentUploadPolicy.MaximumFileCount,
+        // the same constant the FluentInputFile markup is bound to.
         _error = $"Too many files selected at once — the limit is {AttachmentUploadPolicy.MaximumFileCount}. Add them in smaller batches.";
         return Task.CompletedTask;
     }

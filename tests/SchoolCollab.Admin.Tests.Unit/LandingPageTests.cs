@@ -61,14 +61,23 @@ public class LandingPageTests : BunitContext
     }
 
     [TestMethod]
-    public void NewButton_Navigates_To_CreateRoute()
+    public async Task NewButton_Navigates_To_CreateRoute()
     {
         var cut = RenderWrapper(items: []);
 
-        cut.Find("fluent-anchor").Click();
+        // Q33(a): the New control is a FluentButton (FluentAnchorButton carries no OnClick in
+        // 5.0.1 and FluentLink only offers LinkAppearance.Default|Subtle, so it cannot be
+        // accent-styled). This wrapper supplies no OnCreate, so the control's contract is the
+        // CreateRoute fallback: clicking it must navigate to CreateRoute.
+        var newButton = cut.FindAll("fluent-button")
+            .Single(b => b.TextContent.Contains("+ New Widget"));
+        cut.FindAll("fluent-link").Should().BeEmpty(
+            "the New control no longer renders as the Q33(a)-superseded FluentLink");
+        await cut.InvokeAsync(() => newButton.Click());
 
         Services.GetRequiredService<NavigationManager>().Uri
-                .Should().EndWith("/widgets/create");
+            .Should().EndWith("/widgets/create",
+                "with no OnCreate supplied, the New button falls back to CreateRoute navigation");
     }
 
     [TestMethod]
@@ -76,7 +85,18 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: [], createEnabled: false);
 
-        cut.FindAll("fluent-anchor").Should().BeEmpty();
+        // The toolbar still renders, so an empty match below is the New control being hidden
+        // rather than the whole action bar failing to render.
+        cut.FindAll(".action-bar").Should().ContainSingle("the action bar still renders");
+
+        // The New control is absent. The same selector + label predicate finds it in
+        // NewButton_Navigates_To_CreateRoute (CreateEnabled defaults to true), so this pin
+        // discriminates on CreateEnabled instead of on a tag that no longer exists. Scoped to the
+        // action bar because the empty-items info message bar renders a dismiss <fluent-button>
+        // of its own elsewhere on the page.
+        cut.FindAll(".action-bar fluent-button")
+            .Should().NotContain(b => b.TextContent.Contains("+ New Widget"),
+                "CreateEnabled=false hides the New button");
     }
 
     [TestMethod]
@@ -84,7 +104,8 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: null);
 
-        cut.Markup.ToLower().Should().Contain("progress");
+        cut.Markup.ToLower().Should().Contain("fluent-spinner",
+            "v5 renders the loading indicator as <fluent-spinner> (was FluentProgressRing); Round B restores the real ring markup");
     }
 
     [TestMethod]
@@ -93,7 +114,8 @@ public class LandingPageTests : BunitContext
         var cut = RenderWrapper(
             items: [new(Guid.NewGuid(), "W1")], loading: true);
 
-        cut.Markup.ToLower().Should().Contain("progress");
+        cut.Markup.ToLower().Should().Contain("fluent-spinner",
+            "v5 renders the loading indicator as <fluent-spinner> even while items are present");
     }
 
     [TestMethod]
@@ -129,7 +151,7 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: [], searchEnabled: false);
 
-        cut.FindAll("fluent-text-field").Should().BeEmpty();
+        cut.FindAll("fluent-text-input").Should().BeEmpty();
     }
 
     [TestMethod]
@@ -137,21 +159,35 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: []);
 
-        cut.Find("fluent-text-field").GetAttribute("placeholder")
+        // Round B: FluentTextField → FluentTextInput; the component renders
+        // <fluent-field><fluent-text-input>, and the placeholder rides the inner element.
+        cut.Find("fluent-text-input").GetAttribute("placeholder")
             .Should().Be("Search widgets…");
     }
 
     [TestMethod]
     public async Task SearchBox_Change_Fires_SearchTextChanged()
     {
-        var captured = string.Empty;
+        string? captured = null;
         var cb = EventCallback.Factory.Create<string>(this, v => captured = v);
 
         var cut = RenderWrapper(items: [], searchChanged: cb);
 
-        await cut.Find("fluent-text-field").InputAsync("needle");
+        // Round B: FluentTextInput renders <fluent-field><fluent-text-input>, and the v5 web
+        // component's editable <input> lives in shadow DOM — bUnit cannot reach it, so the
+        // drive seam is the wrapper element's own DOM event. The rendered element carries
+        // blazor:onfocusin/onfocusout/onchange/ontextimmediate; onchange (what .ChangeAsync()
+        // raises) and ontextimmediate (the Immediate=true per-keystroke path) both reach the
+        // component's ValueChanged binding, so driving onchange exercises the same
+        // SearchTextChanged wiring the production search box uses.
+        var box = cut.Find("fluent-text-input");
+        box.GetAttribute("placeholder").Should().Be("Search widgets…",
+            "the search box renders with its placeholder");
 
-        captured.Should().Be("needle");
+        await cut.InvokeAsync(() => box.ChangeAsync("W1"));
+
+        captured.Should().Be("W1",
+            "typing into the search box must invoke SearchTextChanged with the typed value");
     }
 
     [TestMethod]

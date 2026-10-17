@@ -335,7 +335,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
     {
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
-            model, title: "Enroll student", size: DialogSize.Medium);
+            model, title: "Enroll student", size: DialogWidth.Medium);
         return (cut, task);
     }
 
@@ -389,14 +389,13 @@ public class EnrollStudentDialogBunitTests : BunitContext
         // the read-only input's value.
         cut.WaitForAssertion(() =>
         {
-            // FluentTextField renders as a <fluent-text-field> custom element (not a
-            // native <input>); the value is exposed via the `current-value` attribute.
-            var periodField = cut.FindAll("fluent-text-field")
-                .FirstOrDefault(f => f.GetAttribute("class")?.Contains("enroll-form-input--readonly") == true);
-            periodField.Should().NotBeNull("the Period row renders a read-only FluentTextField");
-            // The active period spans 2025-09-01 → 2026-08-31, so the academic-year
-            // token is "2025/2026". FluentUI exposes the bound Value as `current-value`.
-            var value = periodField!.GetAttribute("current-value") ?? periodField.GetAttribute("value") ?? "";
+            // v5's FluentTextInput renders a <fluent-field class="enroll-form-input--readonly">
+            // wrapping a <fluent-text-input> (not a native <input>); the bound Value is exposed
+            // as that element's `value` attribute (v4's `current-value` is gone).
+            var periodField = cut.FindAll("fluent-field.enroll-form-input--readonly fluent-text-input")
+                .FirstOrDefault();
+            periodField.Should().NotBeNull("the Period row renders a read-only FluentTextInput");
+            var value = periodField!.GetAttribute("value") ?? "";
             value.Should().Be("2025/2026",
                 "the Period row displays the canonical academic-year format {StartDate.Year}/{EndDate.Year}");
         });
@@ -653,12 +652,12 @@ public class EnrollStudentDialogBunitTests : BunitContext
         // streams, every one carrying a non-null Guid value string.
         cut.WaitForState(() =>
         {
-            var stream = cut.FindComponents<FluentSelect<string>>()
+            var stream = cut.FindComponents<FluentSelect<string, string>>()
                 .FirstOrDefault(s => s.Instance.Id == "enroll-stream");
             return stream is not null;
         }, timeout: TimeSpan.FromSeconds(5));
 
-        var streamSelect = cut.FindComponents<FluentSelect<string>>()
+        var streamSelect = cut.FindComponents<FluentSelect<string, string>>()
             .First(s => s.Instance.Id == "enroll-stream");
 
         // FluentSelect renders its child options as FluentOption<string>
@@ -697,7 +696,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
         await cut.InvokeAsync(() => streamSelect.Instance.ValueChanged.InvokeAsync(Stream5AId.ToString()));
 
         // The FluentSelect instance must stay stable across the bind write.
-        var streamSelectAfter = cut.FindComponents<FluentSelect<string>>()
+        var streamSelectAfter = cut.FindComponents<FluentSelect<string, string>>()
             .First(s => s.Instance.Id == "enroll-stream").Instance;
         ReferenceEquals(streamSelect.Instance, streamSelectAfter).Should().BeTrue(
             "the stream picker must NOT remount during a selection — a remount orphans the binder write");
@@ -739,7 +738,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
             // The placeholder shows; no stream FluentSelect exists.
             cut.Markup.Should().Contain("Select a grade first",
                 "the stream row shows a read-only placeholder until a grade is picked");
-            cut.FindComponents<FluentSelect<string>>()
+            cut.FindComponents<FluentSelect<string, string>>()
                 .Should().NotContain(s => s.Instance.Id == "enroll-stream",
                     "the stream picker must not render without a selected grade");
         });
@@ -776,7 +775,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
         gradeDropdown.Instance.SelectedId.Should().Be(Grade5CodedValueId,
             "the grade dropdown must bind to the suggested grade's coded value");
 
-        var streamSelect = cut.FindComponents<FluentSelect<string>>()
+        var streamSelect = cut.FindComponents<FluentSelect<string, string>>()
             .FirstOrDefault(s => s.Instance.Id == "enroll-stream");
         streamSelect.Should().NotBeNull("the stream picker renders when a grade is preselected");
         streamSelect!.Instance.Value.Should().Be(Stream5AId.ToString(),

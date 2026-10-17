@@ -27,6 +27,7 @@
 @using SchoolCollab.Students.Application.Components.Students
 @inject ILogger<GuardianFormDialog> _logger
 
+<DialogShellBody>
 <div class="guardian-dialog">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -65,6 +66,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private bool _isEdit => Model.IsEdit;

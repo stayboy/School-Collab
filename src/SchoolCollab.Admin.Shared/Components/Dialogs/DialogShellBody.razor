@@ -1,0 +1,56 @@
+@* Shared dialog chrome for EVERY dialog in the repo — the sibling of
+   DialogShellFooter (and of ReadOnlyDialogShell for the read-only case).
+
+   It renders FluentUI v5's <FluentDialogBody> around ChildContent. That is the
+   whole point: in v5 the dialog header is NOT rendered by the FluentDialog host
+   and NOT by FluentDialogInstance — it renders only inside FluentDialogBody,
+   which owns the title slot (FluentSlot.DialogTitle), the close (X) slot
+   (FluentSlot.DialogTitleAction for a dialog, FluentSlot.DialogClose for a
+   drawer) and the footer-action slot. A v5 dialog that omits
+   <FluentDialogBody> compiles and runs, renders its body, and silently ships
+   TITLE-LESS and X-LESS: v4's FluentDialogHeader/FluentDialogFooter were
+   removed (MigrationFluentDialog.md §"FluentDialogHeader and FluentDialogFooter
+   removed") and nothing in the build flags the omission.
+
+   The title comes from DialogOptions.Header.Title (BuildShellOptions sets it);
+   the close (X) routes to the dialog's cancel path with no per-dialog plumbing:
+   FluentDialogInstance.OnInitializedAsync wires Header.CloseAction.OnClickAsync
+   to DialogShellBase.OnActionClickedAsync(primary: false) → HandleCancelAsync().
+   CloseAction.Visible = true is required for the X to display at all
+   (DialogOptionsHeaderAction.ToDisplay is false while Visible is false, and
+   Visible defaults to false) — BuildShellOptions sets it for every dialog it
+   builds options for, so both the shell dialogs and the read-only dialogs get
+   the X.
+
+   Usage — it wraps the dialog's WHOLE body, i.e. it is the outermost element of
+   the dialog's markup, with the existing root (the EditForm, the root div, or
+   ReadOnlyDialogShell) inside it:
+
+     <DialogShellBody>
+         <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+             ... form fields ...
+             <DialogShellFooter Saving="@Saving" Error="@Error"
+                                OnCancel="HandleCancelAsync" />
+         </EditForm>
+     </DialogShellBody>
+
+   The footer is NOT part of this component: DialogShellFooter stays where it is
+   today, inside the EditForm it submits. Parameters:
+     ChildContent — the dialog's body: the form (shell dialogs) or the
+                    list/grid root (read-only dialogs). *@
+
+<FluentDialogBody>
+    @ChildContent
+</FluentDialogBody>
+
+@code {
+    /// <summary>
+    /// The dialog's body — everything except the footer. For a
+    /// <see cref="DialogShellBase{TModel, TResult}"/> dialog that is the markup
+    /// holding the <c>&lt;EditForm&gt;</c> (which itself holds the
+    /// <see cref="DialogShellFooter"/>); for a read-only dialog it is the
+    /// content root (<see cref="ReadOnlyDialogShell"/> or the dialog's own root
+    /// element).
+    /// </summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

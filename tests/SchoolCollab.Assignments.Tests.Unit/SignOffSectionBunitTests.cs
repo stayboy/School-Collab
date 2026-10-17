@@ -124,25 +124,18 @@ public class SignOffSectionBunitTests : BunitContext
             });
     }
 
-    /// <summary>Replaces the FluentUI <see cref="IDialogService"/> with the mock
-    /// (GetRequiredService returns the FIRST registration — remove, don't shadow).</summary>
-    private Mock<IDialogService> SetupReassignDialogResult(ReassignSignerResult? result)
+    /// <summary>Registers the FluentUI <see cref="IDialogService"/> replacement that answers the
+    /// reassign-dialog open with <paramref name="result"/>.</summary>
+    private Mock<DialogService> SetupReassignDialogResult(ReassignSignerResult? result)
     {
-        var dialogRef = new Mock<IDialogReference>();
         var dialogResult = result is null
             ? DialogResult.Cancel()
             : DialogResult.Ok<object?>(new DialogShellResult<ReassignSignerResult>(result));
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(dialogResult));
 
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ReassignSignerDialog, DialogShellData<ReassignSignerFormModel>>(
-                It.IsAny<DialogShellData<ReassignSignerFormModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-
-        var existing = Services.Where(s => s.ServiceType == typeof(IDialogService)).ToList();
-        foreach (var s in existing) Services.Remove(s);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ReassignSignerDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(dialogResult);
         return dialogMock;
     }
 
@@ -207,8 +200,7 @@ public class SignOffSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             dialogMock.Verify(
-                d => d.ShowDialogAsync<ReassignSignerDialog, DialogShellData<ReassignSignerFormModel>>(
-                    It.IsAny<DialogShellData<ReassignSignerFormModel>>(), It.IsAny<DialogParameters>()),
+                d => d.ShowDialogAsync(typeof(ReassignSignerDialog), It.IsAny<DialogOptions>()),
                 Times.Once,
                 "the reassign dialog opens with the ward's guardians");
             _statusesGetCount.Should().BeGreaterThanOrEqualTo(2, "the card reloads after a successful reassign");
@@ -277,7 +269,7 @@ public class SignOffSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("500", "the failure surfaces as the error bar");
-            cut.FindAll("fluent-progress-ring").Should().BeEmpty("_busy must reset in finally");
+            cut.FindAll("fluent-spinner").Should().BeEmpty("_busy must reset in finally");
         });
     }
 }

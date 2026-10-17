@@ -2,6 +2,10 @@
 @using SchoolCollab.Assignments.Application
 @using SchoolCollab.Students.Application
 
+@* The Router must stay the root element: FluentUI v5's <FluentProviders> has no ChildContent
+   parameter and renders only its own provider set, so wrapping the Router in it discards every
+   routed page (blank app, no error). The provider host lives at the layout root instead — see
+   Components/Layout/MainLayout.razor. *@
 <Router AppAssembly="typeof(global::Program).Assembly"
         AdditionalAssemblies="new[] { typeof(SchoolCollab.Settings.Application.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Application.Components._Imports).Assembly, typeof(SchoolCollab.Students.Application.Components._Imports).Assembly }">
     <Found Context="routeData">

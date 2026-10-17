@@ -35,11 +35,11 @@
     </FormRow>
     <FormRow Label="Name" Required Orientation="RowOrientation.Vertical" For="guardianEditFirstName">
         <div class="guardian-name-row">
-            <FluentTextField Id="guardianEditFirstName"
+            <FluentTextInput Id="guardianEditFirstName"
                              @bind-Value="Model.FirstName"
                              Required Placeholder="First name"
                              class="guardian-name-field" />
-            <FluentTextField Id="guardianEditLastName"
+            <FluentTextInput Id="guardianEditLastName"
                              @bind-Value="Model.LastName"
                              Required Placeholder="Last name"
                              class="guardian-name-field" />

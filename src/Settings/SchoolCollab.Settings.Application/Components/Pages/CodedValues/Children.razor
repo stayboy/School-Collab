@@ -3,7 +3,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Children> Logger
 @inject IDialogService DialogService
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="CodedValueDto"
@@ -25,27 +25,27 @@
             <code>@context.Code</code>
         </TemplateColumn>
         <TemplateColumn TGridItem="CodedValueDto" Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
+            <FluentLink Appearance="LinkAppearance.Default" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
                 @context.Name
-            </FluentAnchor>
+            </FluentLink>
         </TemplateColumn>
         <PropertyColumn TGridItem="CodedValueDto" TProp="string" Property="@(x => x.Description)" Title="Description" />
         <PropertyColumn TGridItem="CodedValueDto" TProp="int" Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
         <TemplateColumn TGridItem="CodedValueDto" Title="Status">
             @if (context.IsDisabled)
             {
-                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Disabled</FluentBadge>
             }
             else
             {
-                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="CodedValueDto" Title="Attributes" TooltipText="@(x => string.Join(", ", x.Attributes.Select(a => $"{a.Key}={a.Value}")))">
             @foreach (var attr in context.Attributes)
             {
                 var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);
-                <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
+                <FluentBadge @key="attr.Key" Appearance="BadgeAppearance.Ghost" class="me-1">
                     @attr.Key=@attr.Value
                     @if (def?.IsRequired == true)
                     {
@@ -63,7 +63,7 @@
                 <div class="attr-list">
                     @foreach (var def in _parent.AttributeDefinitions)
                     {
-                        <FluentBadge @key="def.Key" Appearance="Appearance.Lightweight">
+                        <FluentBadge @key="def.Key" Appearance="BadgeAppearance.Ghost">
                             @def.Key
                             @if (!string.IsNullOrEmpty(def.DisplayName))
                             {
@@ -219,22 +219,20 @@
 
     private async Task OnDeleteAsync(Guid id, string code)
     {
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete '{code}'? Items with children or SourceCode references cannot be deleted.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         try
         {
             await Api.DeleteAsync(id, MutationToken);
-            Toast.ShowSuccess($"'{code}' deleted.");
             if (_parent is not null && _children is not null)
             {
                 _children = _children.Where(c => c.Id != id).ToArray();
                 StateHasChanged();
             }
+            await NotificationService.ShowSuccessToastAsync($"'{code}' deleted.");
         }
         catch (OperationCanceledException) { }
         catch (InvalidOperationException ex)

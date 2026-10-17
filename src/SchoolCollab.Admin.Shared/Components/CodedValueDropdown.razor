@@ -54,15 +54,16 @@
 
 @if (_error is not null)
 {
-    <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
 }
 
 <FluentSelect TOption="CodedValueDto"
+              TValue="CodedValueDto"
               Items="@(_items ?? [])"
-              SelectedOption="@_selectedOption"
-              SelectedOptionChanged="@OnSelectedOptionChanged"
+              Value="@_selectedOption"
+              ValueChanged="@OnSelectedOptionChanged"
               OptionText="@EffectiveOptionText"
-              OptionValue="@(o => o.Id.ToString())"
+              OptionValue="@(o => o)"
               Label="@Label"              
               Placeholder="@EffectivePlaceholder"              
               Disabled="@IsDisabled"
@@ -272,42 +273,63 @@
         }
         else
         {
-            SyncSelection();
+            await SyncSelectionAsync(_selectedOption);
         }
     }
 
-    private void SyncSelection()
+    /// <summary>
+    /// Reconciles the internal selection with the consumer's
+    /// <see cref="SelectedId"/> against the current items, and owns the
+    /// clear-on-stale-selection contract: when the bound id is no longer among
+    /// the items — the reloaded list no longer contains it (a grade/filter
+    /// change), or the consumer set an id that was never loaded — the wrapper
+    /// clears the selection and raises <see cref="SelectedIdChanged"/> with
+    /// <c>null</c> itself. v4's <c>ListComponentBase</c> emitted that clear when
+    /// the bound item disappeared from <c>Items</c>; v5's <c>FluentSelect</c>
+    /// does not, so leaving it to the library left the stale id bound.
+    /// </summary>
+    /// <param name="priorSelection">
+    /// The selection published before this pass: <see cref="_selectedOption"/> on
+    /// a plain parameter set, and the pre-reload option on the load path (which
+    /// blanks <see cref="_selectedOption"/> for the phase-1 render). The clear is
+    /// raised only when there was a selection to clear, which keeps the pass
+    /// idempotent — the mid-load re-render and phase 2 can both run it and the
+    /// callback still fires exactly once.
+    /// </param>
+    private async Task SyncSelectionAsync(CodedValueDto? priorSelection)
     {
-        // Keep the internal selection in sync when the consumer updates SelectedId.
-        // Runs synchronously during the normal lifecycle so a re-render triggered by
-        // a sibling control does not defer the dropdown update or re-open the list.
-        if (_items is not null)
+        // Runs during the normal lifecycle so a re-render triggered by a sibling
+        // control does not defer the dropdown update or re-open the list.
+        if (_items is null) return;
+
+        // When the consumer sets SelectedId to null (e.g. an optimistic-UI pick
+        // handler that resets the picker immediately after rendering a
+        // confirmation chip from the dropdown's data), clear the internal
+        // selection too — otherwise FluentSelect keeps showing the stale picked
+        // option. We only touch _selectedOption when the consumer-driven value
+        // disagrees with what we have, so we don't fight the user's mid-pick state.
+        if (!SelectedId.HasValue)
         {
-            // When the consumer sets SelectedId to null (e.g. an optimistic-UI
-            // pick handler that resets the picker immediately after rendering
-            // a confirmation chip from the dropdown's data), clear the
-            // internal selection too — otherwise FluentSelect keeps showing
-            // the stale picked option. We only touch _selectedOption when
-            // the consumer-driven value disagrees with what we have, so we
-            // don't fight the user's mid-pick state.
-            if (!SelectedId.HasValue)
+            // When no value is selected, show the empty option (if enabled)
+            // so the user can see the "clear" affordance; otherwise clear.
+            var empty = ShowEmptyOption ? _items.FirstOrDefault(x => x.Id == Guid.Empty) : null;
+            if (!Equals(empty, _selectedOption))
             {
-                // When no value is selected, show the empty option (if enabled)
-                // so the user can see the "clear" affordance; otherwise clear.
-                var empty = ShowEmptyOption ? _items.FirstOrDefault(x => x.Id == Guid.Empty) : null;
-                if (!Equals(empty, _selectedOption))
-                {
-                    _selectedOption = empty;
-                }
+                _selectedOption = empty;
             }
-            else
-            {
-                var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
-                if (!Equals(selected, _selectedOption))
-                {
-                    _selectedOption = selected;
-                }
-            }
+
+            return;
+        }
+
+        var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
+        if (!Equals(selected, _selectedOption))
+        {
+            _selectedOption = selected;
+        }
+
+        if (selected is null && priorSelection is not null)
+        {
+            await SelectedIdChanged.InvokeAsync(null);
         }
     }
 
@@ -366,6 +388,10 @@
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
 
+        // Remember what was published before this load blanks it: phase 2 needs it
+        // to tell "the reloaded items no longer contain the bound id" (raise the
+        // clear) from "there was no selection to clear".
+        var priorSelection = _selectedOption;
         _items = null;
         _error = null;
         _selectedOption = null;
@@ -401,7 +427,7 @@
 
             // Phase 1: render the new items with NO selection. FluentSelect does
             // not apply a SelectedOption when Items and SelectedOption change in the
-            // same render cycle — the <fluent-select> web component has not yet
+            // same render cycle — the <fluent-dropdown> web component has not yet
             // registered the new option list (microsoft/fluentui-blazor #1533).
             // By rendering the items first and yielding one tick, we give the web
             // component time to attach its options before we ask it to select one.
@@ -421,7 +447,7 @@
             // resolved selection will display it. Resolving again is idempotent;
             // the explicit render is only needed when a concrete option is selected
             // (a null/empty-option selection has nothing new to re-apply).
-            _selectedOption = ResolveSelection();
+            await SyncSelectionAsync(priorSelection);
             if (_selectedOption is not null)
             {
                 await InvokeAsync(StateHasChanged);

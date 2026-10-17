@@ -13,6 +13,7 @@ public sealed class DashboardCardTests
     public void DashboardCard_RendersStudentNavigationCard()
     {
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var cut = ctx.Render(builder =>
         {
@@ -35,6 +36,7 @@ public sealed class DashboardCardTests
     public void DashboardCard_ClipsLongDescriptionAndKeepsFullTextInTitleAttribute()
     {
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var longDescription =
             "Manage student records, enrollments, grade levels, subjects, periods, guardians, " +
@@ -65,6 +67,7 @@ public sealed class DashboardCardTests
     public void DashboardCard_DoesNotClipShortDescription()
     {
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var cut = ctx.Render(builder =>
         {
@@ -93,6 +96,7 @@ public sealed class DashboardCardTests
         // to an extra line and the FluentCard's height: fit-content
         // expanded to fit the content.
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var cut = ctx.Render(builder =>
         {
@@ -115,6 +119,7 @@ public sealed class DashboardCardTests
         // Even with the line-clamp class applied, hover must still expose
         // the full uncut description to the user.
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var fullDescription = "Manage student records, enrollments, grade levels, subjects, and periods.";
 
@@ -172,6 +177,7 @@ public sealed class DashboardCardTests
         // different description lengths, all rendered with the same
         // line-clamped paragraph so the cards share row height.
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var cut = ctx.Render(builder =>
         {

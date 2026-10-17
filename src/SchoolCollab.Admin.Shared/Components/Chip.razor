@@ -1,12 +1,18 @@
 @* Reusable "chip" (pill). Two modes:
 
    1. Selected / added item (default) — built on the native <FluentBadge>: FluentUI
-      Blazor 4.14.2 has no dedicated Chip component, and <FluentBadge> already
-      supplies a built-in dismiss button (rendered automatically when `OnDismiss`
-      is set). The badge uses a fill-less (Lightweight) appearance and is further
-      neutralized in CSS so it shows no inner background of its own — all the
-      visible styling (border, fill, radius, padding, hover) comes from our own
-      .chip wrapper, which wraps BOTH the text and the dismiss button.
+      Blazor has no dedicated Chip component. The badge uses a fill-less (Ghost)
+      appearance and is further neutralized in CSS so it shows no inner background
+      of its own — all the visible styling (border, fill, radius, padding, hover)
+      comes from our own .chip wrapper, which wraps BOTH the text and the dismiss
+      button.
+
+      The badge's own dismiss affordance did not survive the FluentUI 5.0.1 port:
+      <FluentBadge> 5.0.1 has no DismissTitle / OnDismissClick (Content, ChildContent,
+      Shape and Size replace the 4.14.2 dismissal API), so those parameters would now
+      render as meaningless HTML attributes and the chip would silently lose its remove
+      button. The dismiss control is therefore authored here as a real <button> beside
+      the badge — styled by .chip-dismiss in Chip.razor.css.
 
    2. Selectable (opt-in, round content-questions-modern-ui) — set `OnToggle` and
       the chip renders as a real <button type="button" aria-pressed> instead of a
@@ -15,6 +21,7 @@
       `.is-selected` (filled, no border) vs the default (hairline, transparent).
       This mode is purely additive: every existing call site keeps mode 1. *@
 @using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
 <span class="chip @(OnToggle.HasDelegate ? "chip--toggle" : null) @(OnToggle.HasDelegate && Selected ? "is-selected" : null)">
     @if (OnToggle.HasDelegate)
@@ -29,10 +36,7 @@
     }
     else
     {
-        <FluentBadge Class="chip-badge"
-                     Appearance="Appearance.Lightweight"
-                     DismissTitle="@DismissTitle"
-                     OnDismissClick="OnDismiss">
+        <FluentBadge Class="chip-badge" Appearance="BadgeAppearance.Ghost">
             <span class="chip-inner">
                 <span class="chip-label">@Label</span>
                 @if (!string.IsNullOrEmpty(Subtitle))
@@ -41,6 +45,14 @@
                 }
             </span>
         </FluentBadge>
+        @if (OnDismiss.HasDelegate)
+        {
+            <button type="button" class="chip-dismiss"
+                    title="@DismissTitle" aria-label="@DismissTitle"
+                    @onclick="OnDismiss">
+                <FluentIcon Value="@(new Icons.Regular.Size12.Dismiss())" />
+            </button>
+        }
     }
 </span>
 
@@ -51,7 +63,7 @@
     /// <summary>Optional secondary text shown after the label (e.g. a number).</summary>
     [Parameter] public string? Subtitle { get; set; }
 
-    /// <summary>Tooltip for the dismiss (remove) button. Default "Remove".</summary>
+    /// <summary>Tooltip / accessible name of the dismiss (remove) button. Default "Remove".</summary>
     [Parameter] public string DismissTitle { get; set; } = "Remove";
 
     /// <summary>When set, a dismiss button is shown and invoked to remove the chip.

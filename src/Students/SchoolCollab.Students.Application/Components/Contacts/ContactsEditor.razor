@@ -45,7 +45,7 @@
            editor in View="Edit". *@
         @if (RowSource.Count == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info" class="contacts-empty">No contacts yet.</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="contacts-empty">No contacts yet.</FluentMessageBar>
         }
         else
         {
@@ -61,23 +61,23 @@
                         }
                         @if (c.IsPreferred)
                         {
-                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">
+                            <FluentBadge Appearance="BadgeAppearance.Filled" class="contact-badge">
                                 @(Mode == EditorMode.Live ? "Primary" : "Preferred")
                             </FluentBadge>
                         }
                         @if (Mode == EditorMode.Live)
                         {
-                            <FluentBadge Appearance="@(c.IsVerified ? Appearance.Accent : Appearance.Neutral)" class="contact-badge">
+                            <FluentBadge Appearance="@BadgeAppearance.Filled" class="contact-badge">
                                 @(c.IsVerified ? "Verified" : "Unverified")
                             </FluentBadge>
                         }
                         <span class="contact-actions">
-                            <FluentButton Appearance="Appearance.Lightweight"
+                            <FluentButton Appearance="ButtonAppearance.Transparent"
                                           Title="Edit contact"
                                           IconStart="@FluentIcons.Edit"
                                           Disabled="@EditDisabled"
                                           OnClick="@(() => OnEditContact.InvokeAsync(c.Key))" />
-                            <FluentButton Appearance="Appearance.Lightweight"
+                            <FluentButton Appearance="ButtonAppearance.Transparent"
                                           Title="Remove contact"
                                           IconStart="@FluentIcons.Delete"
                                           Disabled="@EditDisabled"
@@ -87,9 +87,9 @@
                 }
             </ul>
         }
-        <FluentAnchor Href="#" Appearance="Appearance.Hypertext" OnClick="@(() => OnAddContact.InvokeAsync())" class="contacts-add-anchor">
+        <FluentLink Href="#" Appearance="LinkAppearance.Default" OnClick="@(() => OnAddContact.InvokeAsync())" class="contacts-add-anchor">
             Add contact
-        </FluentAnchor>
+        </FluentLink>
     }
     else if (View == ContactsView.Edit)
     {
@@ -131,7 +131,7 @@
         @if (Mode == EditorMode.Live && _loading)
         {
             <div class="contacts-editor-loading">
-                <FluentProgressRing />
+                <FluentSpinner />
             </div>
         }
         else
@@ -158,15 +158,15 @@
                                         Width="FieldWidth.W3"
                                         OptionText="@FormatCountryCodeOption" />
                 }
-                <FluentTextField @bind-Value="_newContactModel.Label"
+                <FluentTextInput @bind-Value="_newContactModel.Label"
                                  Placeholder="Label (optional)"
                                  class="contacts-label" />
             </div>
             <div class="contacts-editor-add__row contacts-editor-add__row--bottom">
-                <FluentTextField @bind-Value="_newContactModel.Value"
+                <FluentTextInput @bind-Value="_newContactModel.Value"
                                  Placeholder="@ValuePlaceholder"
                                  class="contacts-value" />
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               IconStart="@FluentIcons.Add"
                               Title="Add contact"
                               OnClick="AddAsync"
@@ -177,12 +177,12 @@
 
         @if (!string.IsNullOrEmpty(_error))
         {
-            <FluentMessageBar Intent="MessageIntent.Error" class="contacts-error">@_error</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error" class="contacts-error">@_error</FluentMessageBar>
         }
 
         @if (RowSource.Count == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info" class="contacts-empty">No contacts yet.</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="contacts-empty">No contacts yet.</FluentMessageBar>
         }
         else
         {
@@ -198,7 +198,7 @@
                             }
                             @if (c.IsPreferred)
                             {
-                                <FluentBadge Appearance="Appearance.Accent" class="contact-badge">
+                                <FluentBadge Appearance="BadgeAppearance.Filled" class="contact-badge">
                                     @(Mode == EditorMode.Live ? "Primary" : "Preferred")
                                 </FluentBadge>
                             }
@@ -206,11 +206,11 @@
                             {
                                 if (c.IsVerified)
                                 {
-                                    <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Verified</FluentBadge>
+                                    <FluentBadge Appearance="BadgeAppearance.Filled" class="contact-badge">Verified</FluentBadge>
                                 }
                                 else
                                 {
-                                    <FluentBadge Appearance="Appearance.Neutral" class="contact-badge">Unverified</FluentBadge>
+                                    <FluentBadge Appearance="BadgeAppearance.Filled" class="contact-badge">Unverified</FluentBadge>
                                 }
                             }
 
@@ -226,12 +226,12 @@
                             <span class="contact-actions">
                                 @if (Mode == EditorMode.Live && !c.IsVerified)
                                 {
-                                    <FluentButton Appearance="Appearance.Lightweight"
+                                    <FluentButton Appearance="ButtonAppearance.Transparent"
                                                   Title="Mark verified"
                                                   IconStart="@FluentIcons.Checkmark"
                                                   OnClick="@(() => VerifyAsync(c.Key))" />
                                 }
-                                <FluentButton Appearance="Appearance.Lightweight"
+                                <FluentButton Appearance="ButtonAppearance.Transparent"
                                               Title="Edit contact"
                                               IconStart="@FluentIcons.Edit"
                                               Disabled="@EditDisabled"
@@ -239,17 +239,17 @@
                                 @* Move-up / move-down reorder. Live swaps ids
                                    and calls the reorder endpoint; Buffered swaps
                                    the in-memory list and raises ContactsChanged. *@
-                                <FluentButton Appearance="Appearance.Lightweight"
+                                <FluentButton Appearance="ButtonAppearance.Transparent"
                                               Title="Move up (higher priority)"
                                               IconStart="@FluentIcons.ChevronUp"
                                               Disabled="@(IsFirst(c))"
                                               OnClick="@(() => MoveUpAsync(c.Key))" />
-                                <FluentButton Appearance="Appearance.Lightweight"
+                                <FluentButton Appearance="ButtonAppearance.Transparent"
                                               Title="Move down (lower priority)"
                                               IconStart="@FluentIcons.ChevronDown"
                                               Disabled="@(IsLast(c))"
                                               OnClick="@(() => MoveDownAsync(c.Key))" />
-                                <FluentButton Appearance="Appearance.Lightweight"
+                                <FluentButton Appearance="ButtonAppearance.Transparent"
                                               Title="Remove contact"
                                               IconStart="@FluentIcons.Delete"
                                               OnClick="@(() => OnRemoveAsync(c))" />
@@ -286,17 +286,17 @@
                 }
             </div>
             <div class="contacts-editor-add__value">
-                <FluentTextField @bind-Value="_editContactModel.Value"
+                <FluentTextInput @bind-Value="_editContactModel.Value"
                                   Placeholder="@EditValuePlaceholder"
                                   class="contacts-value" />
-                <FluentTextField @bind-Value="_editContactModel.Label"
+                <FluentTextInput @bind-Value="_editContactModel.Label"
                                   Placeholder="Label (optional)"
                                   class="contacts-label" />
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               OnClick="SaveInlineEditAsync">
                     Save
                 </FluentButton>
-                <FluentButton Appearance="Appearance.Lightweight"
+                <FluentButton Appearance="ButtonAppearance.Transparent"
                               OnClick="CancelInlineEditAsync">
                     Cancel
                 </FluentButton>
@@ -797,7 +797,7 @@
         var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
             new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Edit),
             "Edit contact",
-            DialogSize.Medium);
+            DialogWidth.Medium);
 
         if (result is null) return;
 
@@ -912,7 +912,7 @@
         var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
             new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Delete),
             "Delete contact",
-            DialogSize.Small);
+            DialogWidth.Small);
 
         if (result is null) return;
 

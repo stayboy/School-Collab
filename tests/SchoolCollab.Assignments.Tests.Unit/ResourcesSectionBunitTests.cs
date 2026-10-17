@@ -51,17 +51,14 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// <see cref="IDialogService"/> + <see cref="ILogger{T}"/>.
 ///
 /// <para>
-/// <b>Note on <c>FluentInputFile.OnFileError</c>:</b> the Microsoft
-/// FluentUI Blazor 4.14.2 documentation explicitly marks this callback as
-/// "Not yet used" (verified against the published
-/// <c>Microsoft.FluentUI.AspNetCore.Components.xml</c> for 4.14.2).
-/// Because of that, the ResourcesSection does NOT bind
-/// <c>OnFileError</c> — size/allowlist rejections are caught by the
-/// <c>AttachmentUploadPolicy.Validate</c> pre-check inside
-/// <see cref="ResourcesSection.StageFileAsync"/> and rendered via the
-/// section's error bar. If a future FluentUI upgrade makes
-/// <c>OnFileError</c> a real callback, the re-add must be deliberate
-/// (and must not duplicate the pre-check logic).
+/// <b>Note on <c>FluentInputFile.OnFileError</c>:</b> FluentUI 4.14.2 documented this
+/// callback as "Not yet used", so this section did not bind it and relied on
+/// <see cref="AttachmentUploadPolicy.Validate"/> alone. 5.0.1 raises it for real —
+/// the count-cap rejection (the 4.14.2 <c>OnFileCountExceeded</c>, which 5.0.1 removed)
+/// arrives as <c>FluentInputFileErrorEventArgs.FileCountExceeded</c> on that callback,
+/// so the section binds it and filters on the error code. The size/allowlist rejections
+/// stay on the client pre-check inside <see cref="ResourcesSection.StageFileAsync"/> and
+/// are not duplicated in the handler.
 /// </para>
 /// </summary>
 [TestClass]
@@ -96,13 +93,8 @@ public class ResourcesSectionBunitTests : BunitContext
     }
 
     private IRenderedComponent<ResourcesSection> RenderSection(
-        AssignmentEditFormModel model,
-        Mock<IDialogService>? dialogMock = null)
+        AssignmentEditFormModel model)
     {
-        if (dialogMock is not null)
-        {
-            Services.AddSingleton(dialogMock.Object);
-        }
         return Render<ResourcesSection>(parameters =>
         {
             parameters.Add(p => p.Model, model);
@@ -305,15 +297,12 @@ public class ResourcesSectionBunitTests : BunitContext
             StoragePath = "tenants/t/staging/g/stay.pdf",
         });
 
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
 
-        var cut = RenderSection(model, dialogMock);
+        var cut = RenderSection(model);
 
         // Find the row's remove button. The button has aria-label
         // "Remove <fileName>".
@@ -324,8 +313,7 @@ public class ResourcesSectionBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             dialogMock.Verify(
-                d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                    It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+                d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
                 Times.Once,
                 "remove must request the destructive confirmation dialog");
         });
@@ -348,15 +336,12 @@ public class ResourcesSectionBunitTests : BunitContext
             StoragePath = "tenants/t/staging/g/go.pdf",
         });
 
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(null!)));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(null!));
 
-        var cut = RenderSection(model, dialogMock);
+        var cut = RenderSection(model);
 
         var removeButton = cut.FindAll("fluent-button")
             .First(b => b.GetAttribute("aria-label") == "Remove go.pdf");
@@ -420,31 +405,18 @@ public class ResourcesSectionBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void OnFileCountExceeded_RendersConfiguredCap_NotAttemptedCount()
+    public void OnFileError_FileCountExceeded_RendersConfiguredCap_NotAttemptedCount()
     {
-        // P1 fix: the FluentUI 4.14.2 callback parameter is documented as
+        // P1 fix: the count-cap callback parameter is documented as
         // "the total number of files that were attempted for upload", NOT
         // the configured cap. The handler must reference the configured
         // MaximumFileCount (10) so the user sees the true ceiling.
         var model = new AssignmentEditFormModel();
         var cut = RenderSection(model);
 
-        // Drive the private OnFileCountExceededAsync directly via reflection
-        // (the FluentInputFile JS pipeline is not driven in bUnit; the
-        // section deliberately keeps the handler private). The handler
-        // assigns _error, which is the exact field the error bar reads.
-        var handler = typeof(ResourcesSection).GetMethod(
-            "OnFileCountExceededAsync",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        handler.Should().NotBeNull("the count-cap handler must exist on the section");
-        var errorField = typeof(ResourcesSection).GetField(
-            "_error",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        errorField.Should().NotBeNull("the section's error-bar field must exist");
+        InvokeFileErrorHandler(cut, FluentInputFileErrorEventArgs.FileCountExceeded.Code, fileCount: 13);
 
-        ((Task)handler!.Invoke(cut.Instance, [13])!).GetAwaiter().GetResult();
-
-        var error = (string?)errorField!.GetValue(cut.Instance);
+        var error = ReadErrorField(cut);
         error.Should().Be(
             $"Too many files selected at once — the limit is {AttachmentUploadPolicy.MaximumFileCount}. Add them in smaller batches.",
             "the error must report the configured cap (10), not the attempted count (13)");
@@ -452,6 +424,54 @@ public class ResourcesSectionBunitTests : BunitContext
             "the user-facing message must not echo the attempted batch size as the cap");
         model.Attachments.Should().BeEmpty(
             "the count-cap message is a UX surface only and does not touch the form model");
+    }
+
+    [TestMethod]
+    public void OnFileError_OtherErrorCode_LeavesTheErrorBarAlone()
+    {
+        // 5.0.1 funnels size rejections and the count cap through the same OnFileError
+        // callback. The section claims only the count cap (its own message, referencing the
+        // policy constant); a size rejection must fall through untouched so the control's own
+        // display and the StageFileAsync pre-check stay the single source of that message.
+        var model = new AssignmentEditFormModel();
+        var cut = RenderSection(model);
+
+        InvokeFileErrorHandler(cut, FluentInputFileErrorEventArgs.MaximumSizeReached.Code, fileName: "huge.pdf");
+
+        ReadErrorField(cut).Should().BeNull(
+            "a size rejection is not the count-cap guard's business");
+    }
+
+    /// <summary>
+    /// Drives the section's private <c>OnFileErrorAsync</c> handler. The
+    /// <see cref="FluentInputFileErrorEventArgs"/> constructor is internal to FluentUI, so the
+    /// error args are built through it by reflection; the FluentInputFile JS pipeline itself is
+    /// not driven in bUnit.
+    /// </summary>
+    private static void InvokeFileErrorHandler(IRenderedComponent<ResourcesSection> cut, string errorCode, int? fileCount = null, string? fileName = null)
+    {
+        var handler = typeof(ResourcesSection).GetMethod(
+            "OnFileErrorAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        handler.Should().NotBeNull("the count-cap guard must exist on the section");
+
+        var errorArgs = (FluentInputFileErrorEventArgs)Activator.CreateInstance(
+            typeof(FluentInputFileErrorEventArgs),
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            args: [errorCode, "test message", fileCount, fileName],
+            culture: null)!;
+
+        ((Task)handler!.Invoke(cut.Instance, [errorArgs])!).GetAwaiter().GetResult();
+    }
+
+    private static string? ReadErrorField(IRenderedComponent<ResourcesSection> cut)
+    {
+        var errorField = typeof(ResourcesSection).GetField(
+            "_error",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        errorField.Should().NotBeNull("the section's error-bar field must exist");
+        return (string?)errorField!.GetValue(cut.Instance);
     }
 
     [TestMethod]

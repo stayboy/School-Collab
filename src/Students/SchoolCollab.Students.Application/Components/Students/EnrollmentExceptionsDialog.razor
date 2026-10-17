@@ -39,6 +39,7 @@
     SERVER's own sentence verbatim, which the client extracts from the 409/422 body.
 *@
 
+<DialogShellBody>
 <div class="exceptions-dialog">
     <section class="exceptions-section" aria-label="Enrollment exceptions">
         <div class="section-head">
@@ -49,7 +50,7 @@
             <span class="section-owner">@Model.OwnerName</span>
             @if (_exceptions is { Length: > 0 })
             {
-                <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                <FluentBadge Appearance="BadgeAppearance.Filled" Title="Enrollment exceptions">
                     @EnrollmentExceptionLabels.FormatCount(_exceptions.Length)
                 </FluentBadge>
             }
@@ -57,11 +58,11 @@
 
         @if (_exceptions is null)
         {
-            <FluentProgressRing aria-label="Loading enrollment exceptions" />
+            <FluentSpinner aria-label="Loading enrollment exceptions" />
         }
         else if (_loadError is not null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@_loadError</FluentMessageBar>
         }
         else if (_exceptions.Length > 0)
         {
@@ -71,7 +72,7 @@
                     <div class="exception-row" @key="exception.Id">
                         @* The subject column is omitted: the dialog is already one subject
                            (D5), so repeating the name in every row would say nothing. *@
-                        <FluentBadge Appearance="Appearance.Neutral" Title="Period part">
+                        <FluentBadge Appearance="BadgeAppearance.Filled" Title="Period part">
                             @PartLabel(DivisionOf(exception.Division))
                         </FluentBadge>
                         <span class="exception-span">@SpanLabel(exception.StartDate, exception.EndDate)</span>
@@ -79,7 +80,7 @@
                         {
                             <span class="exception-reason" title="Reason">@exception.Reason</span>
                         }
-                        <FluentButton Appearance="Appearance.Stealth"
+                        <FluentButton Appearance="ButtonAppearance.Subtle"
                                       Class="exception-remove"
                                       IconStart="@FluentIcons.Delete"
                                       Title="Remove this exception"
@@ -115,7 +116,7 @@
                        EditForm it sits in (unlike the footer's own Add exception). *@
                     @if (ShowAddTrigger)
                     {
-                        <FluentButton Appearance="Appearance.Outline"
+                        <FluentButton Appearance="ButtonAppearance.Outline"
                                       Title="Add a new exception"
                                       OnClick="OnAddTrigger">
                             + Add exception
@@ -128,7 +129,7 @@
                        neither submits the form nor touches the footer's own Add exception. *@
                     @if (ShowAddReset)
                     {
-                        <FluentButton Appearance="Appearance.Outline"
+                        <FluentButton Appearance="ButtonAppearance.Outline"
                                       Title="Cancel adding an exception"
                                       OnClick="OnAddReset">
                             Reset
@@ -220,7 +221,7 @@
                     }
 
                     <FormRow Label="Reason (optional)" LabelPosition="RowLabelPosition.Below">
-                        <FluentTextField @bind-Value="_reason" Placeholder="Why?" Class="w-5" Disabled="@(!FormActive)" />
+                        <FluentTextInput @bind-Value="_reason" Placeholder="Why?" Class="w-5" Disabled="@(!FormActive)" />
                     </FormRow>
                 </FluentStack>
 
@@ -255,6 +256,7 @@
         </EditForm>
     </section>
 </div>
+</DialogShellBody>
 
 @code {
     private const string ActivityGroupOwner = "ActivityGroup";

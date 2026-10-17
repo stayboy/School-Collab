@@ -26,7 +26,7 @@
 }
 
 /* FluentSelect and CodedValueDropdown both render their popup list as a
-   <fluent-anchored-region> with class `fluent-popup-body`. The library
+   <fluent-linked-region> with class `fluent-popup-body`. The library
    sets `position: absolute` inline because FixedPlacement is not used by
    these high-level components. Force fixed so it escapes the card and the
    page scroll region. */

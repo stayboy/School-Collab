@@ -311,7 +311,7 @@ Replace the existing "StudentNumber ··· [Edit]" with a richer header:
             SuggestedPeriodId: _periodNames.Keys.FirstOrDefault(),
             SuggestedGradeLevelId: _gradeLevelNames.Keys.FirstOrDefault());
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
-            model, "Enroll student", DialogSize.Medium);
+            model, "Enroll student", DialogWidth.Medium);
         if (result is { Success: true }) await ReloadEnrollmentsAsync();
     }
 
@@ -319,7 +319,7 @@ Replace the existing "StudentNumber ··· [Edit]" with a richer header:
     {
         if (_disposed) return;
         var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
-            new StudentTransferModel(Id), "Transfer student", DialogSize.Medium);
+            new StudentTransferModel(Id), "Transfer student", DialogWidth.Medium);
         if (result is { Success: true }) await ReloadEnrollmentsAsync();
     }
 

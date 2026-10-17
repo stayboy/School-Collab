@@ -26,30 +26,30 @@
         {
             @if (_error is not null)
             {
-                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
             }
             else
             {
-                <FluentProgressRing />
+                <FluentSpinner />
             }
         }
         else if (_context is null)
         {
             @if (_error is not null)
             {
-                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
             }
             else
             {
-                <FluentProgressRing />
+                <FluentSpinner />
             }
         }
         else
         {
             <FluentStack Orientation="Orientation.Vertical" Gap="0.75rem">
-                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/ward/{StudentId}")">
+                <FluentLink Appearance="LinkAppearance.Default" Href="@($"/ward/{StudentId}")">
                     Back to ward
-                </FluentAnchor>
+                </FluentLink>
 
                 <div>
                     <h1>Sign off — @_context.AssignmentTitle</h1>
@@ -62,7 +62,7 @@
                 {
                     @* Already-signed view: the idempotent second visit is a VIEW, not a 409
                        page — the 409 only fires on a second POST. *@
-                    <FluentMessageBar Intent="MessageIntent.Success">
+                    <FluentMessageBar Intent="MessageBarIntent.Success">
                         This sign-off has been completed
                         @(_context.FinalizedAt is not null
                             ? $"and finalized on {_context.FinalizedAt.Value.ToLocalTime():g}."
@@ -71,7 +71,7 @@
                     <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
                         @if (_context.FinalizedAt is not null)
                         {
-                            <FluentButton Appearance="Appearance.Accent"
+                            <FluentButton Appearance="ButtonAppearance.Primary"
                                           OnClick="DownloadCertificateAsync"
                                           Disabled="@_downloadBusy">Download certificate</FluentButton>
                         }
@@ -110,7 +110,7 @@
 
                     @if (_signatureType == SignatureTypeDto.Typed)
                     {
-                        <FluentTextField @bind-Value="_typedSignature"
+                        <FluentTextInput @bind-Value="_typedSignature"
                                          Label="Type your full name"
                                          Placeholder="e.g. Jane Doe"
                                          MaxLength="200"
@@ -119,11 +119,11 @@
 
                     @if (_error is not null)
                     {
-                        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+                        <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
                     }
 
                     <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
-                        <FluentButton Appearance="Appearance.Accent"
+                        <FluentButton Appearance="ButtonAppearance.Primary"
                                       OnClick="SubmitSignAsync"
                                       Disabled="@(_busy || !_consentChecked || (_signatureType == SignatureTypeDto.Typed && string.IsNullOrWhiteSpace(_typedSignature)))">
                             @(_busy ? "Signing…" : _signatureType == SignatureTypeDto.Typed ? "Sign" : "Click to sign")
@@ -134,7 +134,7 @@
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -302,7 +302,10 @@
     }
 
     // FluentUI 4.14.2 FluentBadge render-safe triad only (the Detail.razor WS-A2
-    // documented deviation — Outline/Warning/Success crash the page).
+    // documented deviation — Outline/Warning/Success crash the page). V5 keeps the
+    // triad but maps it through BadgeAppearance (MigrationFluentBadge.md):
+    // Neutral/Accent → Filled, Lightweight → Ghost, so Finalized and Signed now
+    // share one badge appearance.
     private static string ContextStatusLabel(SignOffContextDto ctx) => ctx.SignOffState switch
     {
         SignOffStateDto.Signed when ctx.FinalizedAt is not null => "Finalized",
@@ -311,11 +314,11 @@
         _ => "None"
     };
 
-    private static Appearance ContextStatusAppearance(SignOffContextDto ctx) => ctx.SignOffState switch
+    private static BadgeAppearance? ContextStatusAppearance(SignOffContextDto ctx) => ctx.SignOffState switch
     {
-        SignOffStateDto.Signed when ctx.FinalizedAt is not null => Appearance.Neutral,
-        SignOffStateDto.Signed => Appearance.Accent,
-        SignOffStateDto.AwaitingSignature => Appearance.Lightweight,
-        _ => Appearance.Neutral
+        SignOffStateDto.Signed when ctx.FinalizedAt is not null => BadgeAppearance.Filled,
+        SignOffStateDto.Signed => BadgeAppearance.Filled,
+        SignOffStateDto.AwaitingSignature => BadgeAppearance.Ghost,
+        _ => BadgeAppearance.Filled
     };
 }

@@ -19,7 +19,7 @@
     @if (ShowSearch)
     {
         <div class="entity-grid-toolbar">
-            <FluentTextField Value="@Search"
+            <FluentTextInput Value="@Search"
                              ValueChanged="@OnSearchChangedAsync"
                              Immediate="true"
                              ImmediateDelay="300"
@@ -42,7 +42,7 @@
 
     @if (Loading || Items is null)
     {
-        <div class="entity-grid-loading"><FluentProgressRing /></div>
+        <div class="entity-grid-loading"><FluentSpinner /></div>
     }
     else
     {
@@ -69,7 +69,7 @@
             </FluentDataGrid>
             @if (Items.Length == 0 && !string.IsNullOrWhiteSpace(EmptyMessage))
             {
-                <FluentMessageBar Intent="MessageIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
             }
             @if (ShowPager)
             {
@@ -80,7 +80,7 @@
 
     @if (!string.IsNullOrEmpty(Error))
     {
-        <FluentMessageBar Intent="MessageIntent.Error" class="entity-grid-error">@Error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" class="entity-grid-error">@Error</FluentMessageBar>
     }
 </div>
 

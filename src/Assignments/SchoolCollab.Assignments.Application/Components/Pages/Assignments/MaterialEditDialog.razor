@@ -23,6 +23,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Contracts
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -30,7 +31,7 @@
         @if (Model.Kind == InstructionKindDto.Text)
         {
             <p class="dialog-hint">A text material is named: the title is required, the body is optional.</p>
-            <FluentTextField Label="Title" @bind-Value="Model.Title" class="full-width mb-3" />
+            <FluentTextInput Label="Title" @bind-Value="Model.Title" class="full-width mb-3" />
             <label class="material-body-label" for="@BodyFieldId">Body (optional)</label>
             <RichInstructionEditor @ref="_bodyEditor"
                                    Id="@BodyFieldId"
@@ -40,8 +41,8 @@
         else if (Model.Kind == InstructionKindDto.Url)
         {
             <p class="dialog-hint">A link needs an absolute http(s) URL. Its label is optional.</p>
-            <FluentTextField Label="URL" @bind-Value="Model.Url" Placeholder="https://…" class="full-width mb-3" />
-            <FluentTextField Label="Label (optional)" @bind-Value="Model.Title" class="full-width" />
+            <FluentTextInput Label="URL" @bind-Value="Model.Url" Placeholder="https://…" class="full-width mb-3" />
+            <FluentTextInput Label="Label (optional)" @bind-Value="Model.Title" class="full-width" />
         }
         else
         {
@@ -51,7 +52,7 @@
                is opened from the row's READOUT (Dialog-mode host) and from the recorder's commit; the
                Inline-mode host (question dialog) expands the same pair on the row instead (Q12). *@
             <p class="dialog-hint">Both fields are optional: name this material and/or describe what it covers.</p>
-            <FluentTextField Label="Title (optional)" @bind-Value="Model.Title" class="full-width mb-3" />
+            <FluentTextInput Label="Title (optional)" @bind-Value="Model.Title" class="full-width mb-3" />
 
             @* Post-close rework (owner 2026-10-14): the Preview ⇄ Description swap. The toggle
                renders only when a preview can resolve (the loader seam is present) — never a dead
@@ -60,7 +61,7 @@
             @if (Model.PreviewLoader is not null)
             {
                 <div class="media-preview-toggle">
-                    <FluentButton Appearance="Appearance.Stealth"
+                    <FluentButton Appearance="ButtonAppearance.Subtle"
                                   IconStart="@FluentIcons.Eye"
                                   Disabled="@_previewLoading"
                                   OnClick="@TogglePreviewAsync"
@@ -96,7 +97,7 @@
                 @* Post-close correction (owner 2026-10-14): the media DESCRIPTION is the SAME shared
                    rich editor as a Text material's body — Q10's letter ("mirroring its Text branch's
                    Title + rich Body"). Read at submit and sanitised there (no binding exists); the
-                   label element replaces the FluentTextField's own Label, exactly as in the Text branch. *@
+                   label element replaces the FluentTextInput's own Label, exactly as in the Text branch. *@
                 <label class="material-body-label" for="@BodyFieldId">Description (optional)</label>
                 <RichInstructionEditor @ref="_bodyEditor"
                                        Id="@BodyFieldId"
@@ -108,6 +109,7 @@
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="@SubmitText" OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     /// <summary>The body field's id — the seam the rich editor wraps (and the bUnit seam).</summary>

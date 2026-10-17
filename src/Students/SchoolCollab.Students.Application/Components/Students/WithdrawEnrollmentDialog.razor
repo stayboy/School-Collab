@@ -8,8 +8,9 @@
 @inject StudentsApiClient Api
 @inject ILogger<WithdrawEnrollmentDialog> Logger
 
+<DialogShellBody>
 <div class="withdraw-dialog">
-    <FluentMessageBar Intent="MessageIntent.Info">
+    <FluentMessageBar Intent="MessageBarIntent.Info">
         Withdraw <strong>@(Model.StudentName ?? "this student")</strong>
         @if (!string.IsNullOrWhiteSpace(Model.GradeName))
         {
@@ -20,7 +21,7 @@
 
     <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync">
         <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-            <FluentDatePicker Value="@ExitDateAsDateTime" ValueChanged="@OnExitDateChanged" Label="Exit date" Required="true" />
+            <FluentDatePicker TValue="DateTime?" Value="@ExitDateAsDateTime" ValueChanged="@OnExitDateChanged" Label="Exit date" Required="true" />
             <FluentTextArea @bind-Value="_form.Reason" Label="Reason" Required="true" Placeholder="Why is this student being withdrawn?" />
         </FluentStack>
 
@@ -31,6 +32,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private sealed class FormState

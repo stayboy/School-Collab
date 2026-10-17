@@ -26,18 +26,23 @@
                     <header class="assignments__header">
                         <h1 class="assignments__title">Assignments</h1>
                         <div class="assignments__search">
-                            <FluentSearch Placeholder="Search assignments…"
-                                          AriaLabel="Search assignments"
-                                          Immediate="true"
-                                          @bind-Value="_searchText"
-                                          @bind-Value:after="OnSearchChangedAsync" />
+                            @* v5 merged FluentSearch into FluentTextInput (`TextInputType.Search`), and the
+                               v4 `@bind-Value` on the removed element is an RZ9991 error, not a warning.
+                               `Immediate` is the same immediate-base flag FluentSearch had: the field
+                               still reports every keystroke (debounced) to OnSearchChangedAsync. *@
+                            <FluentTextInput Placeholder="Search assignments…"
+                                             AriaLabel="Search assignments"
+                                             TextInputType="TextInputType.Search"
+                                             Immediate="true"
+                                             @bind-Value="_searchText"
+                                             @bind-Value:after="OnSearchChangedAsync" />
                         </div>
                     </header>
 
                     <div class="assignments__filters" role="group" aria-label="Filter by status">
                         @foreach (var filter in StatusFilterOptions)
                         {
-                            <FluentButton Appearance="@(ViewModel.StatusFilter == filter.Value ? Appearance.Accent : Appearance.Outline)"
+                            <FluentButton Appearance="@(ViewModel.StatusFilter == filter.Value ? ButtonAppearance.Primary : ButtonAppearance.Outline)"
                                           aria-pressed="@(ViewModel.StatusFilter == filter.Value)"
                                           OnClick="@(() => SelectStatusAsync(filter.Value))">
                                 @filter.Label
@@ -48,7 +53,7 @@
                     @if (ViewModel.IsLoading)
                     {
                         <div class="assignments__busy" role="status" aria-label="Loading assignments">
-                            <FluentProgressRing />
+                            <FluentSpinner />
                         </div>
                     }
                     else if (ViewModel.Error is not null)
@@ -56,10 +61,10 @@
                         @* Only a LOAD failure owns this branch: it is the state that replaces the list.
                            A failed action renders below instead, over the rows it acted on. *@
                         <div class="assignments__failure">
-                            <FluentMessageBar Intent="MessageIntent.Error" Title="@ViewModel.ErrorTitle">
+                            <FluentMessageBar Intent="MessageBarIntent.Error" Title="@ViewModel.ErrorTitle">
                                 @ViewModel.Error
                             </FluentMessageBar>
-                            <FluentButton Appearance="Appearance.Outline" OnClick="RetryLoadAsync">Retry</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" OnClick="RetryLoadAsync">Retry</FluentButton>
                         </div>
                     }
                     else
@@ -70,10 +75,10 @@
                                and with them the button that failed, stay tappable — which is what makes
                                "Try again" a recovery rather than the only way back. *@
                             <div class="assignments__failure">
-                                <FluentMessageBar Intent="MessageIntent.Error" Title="@ViewModel.ActionErrorTitle">
+                                <FluentMessageBar Intent="MessageBarIntent.Error" Title="@ViewModel.ActionErrorTitle">
                                     @ViewModel.ActionError
                                 </FluentMessageBar>
-                                <FluentButton Appearance="Appearance.Outline" OnClick="RetryActionAsync">Try again</FluentButton>
+                                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="RetryActionAsync">Try again</FluentButton>
                             </div>
                         }
 
@@ -91,7 +96,7 @@
                         else
                         {
                             <div class="assignments__notice">
-                                <FluentMessageBar Intent="MessageIntent.Info">@ViewModel.EmptyMessage</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Info">@ViewModel.EmptyMessage</FluentMessageBar>
                             </div>
                         }
                     }
@@ -144,7 +149,7 @@
     /// <summary>The gate fallbacks' shared body — one sign-in control, two honest copies.</summary>
     private RenderFragment CallToAction(string message, string buttonLabel) => @<div class="assignments__sign-in">
         <p class="assignments__sign-in-text">@message</p>
-        <FluentButton Appearance="Appearance.Accent"
+        <FluentButton Appearance="ButtonAppearance.Primary"
                       Disabled="@_signingIn"
                       aria-busy="@_signingIn"
                       OnClick="SignInAsync">
@@ -152,7 +157,7 @@
         </FluentButton>
         @if (_signInError is not null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error" Title="Sign-in failed">
+            <FluentMessageBar Intent="MessageBarIntent.Error" Title="Sign-in failed">
                 @_signInError
             </FluentMessageBar>
         }

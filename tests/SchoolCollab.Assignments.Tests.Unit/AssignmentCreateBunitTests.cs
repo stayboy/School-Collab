@@ -31,7 +31,7 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// (<c>_requiresSignature</c>, <c>_selectedGradeLevel</c>, <c>_selectedSubject</c>, nested
 /// option records) and indexed <c>FindComponents&lt;FluentCheckbox&gt;()[1]</c>. Every
 /// behavioural assertion it protected is ported here onto the shared component's real
-/// surface: the public pickers' <c>SelectedOptionChanged</c> callback, the stable control
+/// surface: the public pickers' <c>ValueChanged</c> callback, the stable control
 /// ids, and the action-bar primary button.</para>
 /// </summary>
 [TestClass]
@@ -228,18 +228,12 @@ public class AssignmentCreateBunitTests : BunitContext
     /// author adds through the builder. Mocks the Add dialog to return ONE grade target.</summary>
     private void RegisterGradeTargetDialog(Guid gradeLevelId, string label)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
-            DialogResult.Ok<object?>(new DialogShellResult<TargetsAndAudienceDialogResult>(
-                new TargetsAndAudienceDialogResult(
-                    [new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, gradeLevelId, label)])))));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<TargetsAndAudienceDialog, DialogShellData<TargetsAndAudienceDialogModel>>(
-                It.IsAny<DialogShellData<TargetsAndAudienceDialogModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(TargetsAndAudienceDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(new DialogShellResult<TargetsAndAudienceDialogResult>(
+                new TargetsAndAudienceDialogResult(
+                    [new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, gradeLevelId, label)]))));
     }
 
     private static Guid TopicId { get; } = Guid.Parse("00000000-0000-0000-0000-0000000000cc");
@@ -255,8 +249,8 @@ public class AssignmentCreateBunitTests : BunitContext
         cut.FindComponents<FluentCheckbox>()
             .Single(c => c.Instance.Id == "authoring-basics-mandatory-review").Instance;
 
-    private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<CreatePage> cut, string id) =>
-        cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
+    private static FluentSelect<Authoring.PickerOption, Authoring.PickerOption> Picker(IRenderedComponent<CreatePage> cut, string id) =>
+        cut.FindComponents<FluentSelect<Authoring.PickerOption, Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
     /// <summary>Renders the create page and waits for the builder's Add action to be live — the create
     /// surface's load marker now that there is no grade picker to wait on (round
@@ -273,7 +267,7 @@ public class AssignmentCreateBunitTests : BunitContext
         return cut;
     }
 
-    /// <summary>Drives a picker through its real <c>SelectedOptionChanged</c> callback (the
+    /// <summary>Drives a picker through its real <c>ValueChanged</c> callback (the
     /// AssignmentPolicyFieldEditDialogTests pattern) — never a raw DOM event. Each pick is
     /// followed by a wait-for-assertion so the bound state is observably applied before the next
     /// interaction; this closes the FR-58 subject-reload race that otherwise lets a late cascade
@@ -281,13 +275,13 @@ public class AssignmentCreateBunitTests : BunitContext
     private static async Task SelectAsync(IRenderedComponent<CreatePage> cut, string pickerId, Guid value, string label)
     {
         var option = new Authoring.PickerOption(value.ToString(), label);
-        await cut.InvokeAsync(() => Picker(cut, pickerId).SelectedOptionChanged.InvokeAsync(option));
+        await cut.InvokeAsync(() => Picker(cut, pickerId).ValueChanged.InvokeAsync(option));
 
         cut.WaitForAssertion(() =>
         {
             var picker = Picker(cut, pickerId);
-            picker.SelectedOption.Should().NotBeNull($"picker {pickerId} should have a selected option after picking {label}");
-            picker.SelectedOption!.Value.Should().Be(value.ToString(),
+            picker.Value.Should().NotBeNull($"picker {pickerId} should have a selected option after picking {label}");
+            picker.Value!.Value.Should().Be(value.ToString(),
                 $"picker {pickerId} should reflect the picked value {value}");
         }, DialogRoundTripBudget);
     }
@@ -313,12 +307,12 @@ public class AssignmentCreateBunitTests : BunitContext
     /// guards require a non-empty title before anything is posted.</summary>
     private static async Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title)
     {
-        await cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
+        await cut.InvokeAsync(() => cut.FindComponents<FluentTextInput>()
             .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
 
         cut.WaitForAssertion(() =>
         {
-            var field = cut.FindComponents<FluentTextField>()
+            var field = cut.FindComponents<FluentTextInput>()
                 .Single(f => f.Instance.Id == "authoring-basics-title").Instance;
             field.Value.Should().Be(title, "the title field should reflect the typed value");
         }, TimeSpan.FromSeconds(5));
@@ -464,7 +458,7 @@ public class AssignmentCreateBunitTests : BunitContext
             cut.Markup.Should().Contain("Require guardian review before student submits"),
             TimeSpan.FromSeconds(5));
 
-        cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+        cut.FindComponents<FluentSpinner>().Should().BeEmpty(
             "the page must not be left spinning by the absent optional fetch");
     }
 
@@ -658,7 +652,7 @@ public class AssignmentCreateBunitTests : BunitContext
             ReviewToggle(cut).Disabled.Should().BeFalse(
                 "fail-open: a transport failure must never lock the author out of their own choice");
             cut.FindComponents<FluentMessageBar>()
-                .Should().NotContain(mb => mb.Instance.Intent == MessageIntent.Error,
+                .Should().NotContain(mb => mb.Instance.Intent == MessageBarIntent.Error,
                     "the fail-open policy read does not render an error message bar");
         }, TimeSpan.FromSeconds(5));
     }

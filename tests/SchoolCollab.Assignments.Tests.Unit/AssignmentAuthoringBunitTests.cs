@@ -327,8 +327,8 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private static bool ScoringFieldDisabled(IRenderedComponent<Authoring> cut, string id) =>
         cut.Find($"#{id}").HasAttribute("disabled");
 
-    private static FluentSelect<Authoring.PickerOption> Picker(IRenderedComponent<Authoring> cut, string id) =>
-        cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
+    private static FluentSelect<Authoring.PickerOption, Authoring.PickerOption> Picker(IRenderedComponent<Authoring> cut, string id) =>
+        cut.FindComponents<FluentSelect<Authoring.PickerOption, Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
     /// <summary>The five Rules readout ids, in card order (round <c>authoring-compact-fields</c>: the
     /// readouts became card items, and their ids are the seam the surface has always exposed).</summary>
@@ -397,21 +397,14 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private TargetsDialogStub RegisterTargetsDialog()
     {
         var stub = new TargetsDialogStub();
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<TargetsAndAudienceDialog, DialogShellData<TargetsAndAudienceDialogModel>>(
-                It.IsAny<DialogShellData<TargetsAndAudienceDialogModel>>(), It.IsAny<DialogParameters>()))
-            .Callback<DialogShellData<TargetsAndAudienceDialogModel>, DialogParameters>(
-                (data, _) => stub.Models.Add(data.Model))
-            .Returns(() =>
-            {
-                var dialogRef = new Mock<IDialogReference>();
-                dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(stub.TryDequeue(out var result)
-                    ? DialogResult.Ok<object?>(new DialogShellResult<TargetsAndAudienceDialogResult>(result))
-                    : DialogResult.Cancel()));
-                return Task.FromResult(dialogRef.Object);
-            });
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(TargetsAndAudienceDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+                stub.Models.Add(((DialogShellData<TargetsAndAudienceDialogModel>)options.Parameters["Content"]!).Model))
+            .Returns(() => Task.FromResult(stub.TryDequeue(out var result)
+                ? DialogResult.Ok<object?>(new DialogShellResult<TargetsAndAudienceDialogResult>(result))
+                : DialogResult.Cancel()));
         return stub;
     }
 
@@ -432,7 +425,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private static void RemoveBuilderEntry(IRenderedComponent<Authoring> cut, int index) =>
         cut.FindAll("#authoring-targets fluent-button[title='Remove']")[index].Click();
 
-    /// <summary>Drives a picker's real <c>SelectedOptionChanged</c> callback — never a raw DOM
+    /// <summary>Drives a picker's real <c>ValueChanged</c> callback — never a raw DOM
     /// event (the AssignmentCreateBunitTests / AssignmentPolicyFieldEditDialogTests pattern).</summary>
     /// <summary>Drives a FluentUI picker to a value and does not return until the pick is
     /// OBSERVABLY applied — the shared seam every picker-driving test inherits (skill
@@ -440,7 +433,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// <c>Items</c> is rebuilt as a FRESH array when a prerequisite target/interaction settles, and
     /// a pick made before that rebuild lands is dropped — FluentUI matches the selection by
     /// INSTANCE — so we wait for the value to appear in <c>Items</c> and then pick that very
-    /// instance, never a synthetic one; (2) the pick's own <c>SelectedOptionChanged</c> cascade is
+    /// instance, never a synthetic one; (2) the pick's own <c>ValueChanged</c> cascade is
     /// one render pass late, so a Submit in the next statement could read the pre-pick state — we
     /// assert the landed selection before returning.</summary>
     private static async Task SelectAsync(IRenderedComponent<Authoring> cut, string pickerId, string value)
@@ -457,33 +450,39 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             var picker = Picker(cut, pickerId);
             var option = picker.Items!.First(o => o.Value == value);
-            return picker.SelectedOptionChanged.InvokeAsync(option);
+            return picker.ValueChanged.InvokeAsync(option);
         });
 
-        cut.WaitForAssertion(() => Picker(cut, pickerId).SelectedOption?.Value.Should().Be(value,
+        cut.WaitForAssertion(() => Picker(cut, pickerId).Value?.Value.Should().Be(value,
             "the pick must be applied before the next interaction: the FluentUI cascade is one pass late"),
             TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>Drives the subject picker with the option INSTANCE its own Items hold (a foreign
-    /// instance is not accepted as the selection by the FluentUI control).</summary>
+    /// <summary>Drives the subject picker through the hardened seam above — FluentUI accepts only
+    /// the option INSTANCE its own current <c>Items</c> hold, and the FR-58 group reset rebuilds
+    /// that array, so an un-settled pick is dropped: <c>_selectedSubject</c> stays null and the
+    /// save guard bails without issuing the PUT.</summary>
     private static Task SelectSubjectAsync(IRenderedComponent<Authoring> cut, Guid topicId) =>
-        cut.InvokeAsync(() =>
-        {
-            var picker = Picker(cut, "authoring-basics-subject");
-            var option = picker.Items!.First(o => o.Value == topicId.ToString());
-            return picker.SelectedOptionChanged.InvokeAsync(option);
-        });
+        SelectAsync(cut, "authoring-basics-subject", topicId.ToString());
 
     private static ActivityGroupDto Group(Guid id, string name, bool isActive = true) =>
         new(id, name, null, null, null, isActive, "span", null, null, false, [], 0,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <summary>Fills the Basics title through the bound text field's own callback — the save
-    /// guards require a non-empty title (the AssignmentCreateBunitTests precedent).</summary>
-    private static Task SetTitleAsync(IRenderedComponent<Authoring> cut, string title) =>
-        cut.InvokeAsync(() => cut.FindComponents<FluentTextField>()
+    /// guards require a non-empty title (the AssignmentCreateBunitTests precedent). The title is
+    /// also a save guard, so the one-pass-late cascade has the same "no PUT" signature as the
+    /// subject pick: the drive returns only once the bound value reflects the title.</summary>
+    private static async Task SetTitleAsync(IRenderedComponent<Authoring> cut, string title)
+    {
+        await cut.InvokeAsync(() => cut.FindComponents<FluentTextInput>()
             .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
+
+        cut.WaitForAssertion(() => cut.FindComponents<FluentTextInput>()
+                .Single(f => f.Instance.Id == "authoring-basics-title").Instance.Value.Should().Be(title,
+                    "the title is a save guard, so the bound value must reflect it before returning"),
+            TimeSpan.FromSeconds(5));
+    }
 
     // ── Criterion 3: six compartments in all editable modes (D1) + assignment-create-edit-redesign D5/D7 ──
 
@@ -775,7 +774,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
             cut.Find("#authoring-summary-edit").Should().NotBeNull(
                 "the pencil (top right) is the only entry to the input fields");
             cut.Find("#authoring-summary").QuerySelectorAll(
-                    "input, textarea, fluent-select, fluent-text-field, fluent-date-picker, fluent-number-field")
+                    "input, textarea, fluent-dropdown, fluent-text-input, fluent-date-picker, fluent-number-field")
                 .Should().BeEmpty("the owner's rule: no input fields on the summary unless requested");
             cut.Find("#authoring-fact-status").TextContent.Trim().Should().Be("Draft");
             cut.Find("#authoring-fact-instructions").TextContent.Trim().Should().Be("Do the thing");
@@ -811,7 +810,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.Find("#authoring-summary-edit").Click();
         cut.WaitForAssertion(() =>
-            cut.FindComponents<FluentTextField>()
+            cut.FindComponents<FluentTextInput>()
                 .Single(f => f.Instance.Id == "authoring-basics-title").Instance.Value
                 .Should().Be("Dirty title", "D9: the model survives the flip in both directions"));
 
@@ -908,7 +907,12 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     /// <summary>D8: the breadcrumb trail on each route — three crumbs on Edit (the title crumb
-    /// links to the assignment's Detail page), two on Create.</summary>
+    /// links to the assignment's Detail page), two on Create. v5 removed
+    /// FluentBreadcrumb/FluentBreadcrumbItem with no replacement, so the trail is authored in
+    /// markup (FluentLinks for the linked crumbs, a span for the current page); these assertions
+    /// pin that STRUCTURE — crumb counts, order and hrefs — because the crumb text alone is not
+    /// discriminating: "Assignments" and the title also render elsewhere on the page, so a
+    /// text-only check would pass with the whole trail deleted.</summary>
     [TestMethod]
     public void Breadcrumb_RendersTheTrailOnEveryRoute()
     {
@@ -916,23 +920,39 @@ public class AssignmentAuthoringBunitTests : BunitContext
         var editCut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto, enterEditFields: false);
         editCut.WaitForAssertion(() =>
         {
-            var crumbs = editCut.FindComponents<FluentBreadcrumbItem>();
-            crumbs.Should().HaveCount(3, "D8: Assignments › {title} › Edit");
-            crumbs[0].Instance.Href.Should().Be("/assignments", "the root crumb links to the list");
-            crumbs[1].Instance.Href.Should().Be($"/assignments/{dto.Id}",
+            var links = editCut.FindAll("#authoring-breadcrumb fluent-link");
+            links.Should().HaveCount(2,
+                "Edit's trail is Assignments › title › Edit — the trailing crumb is the current page, not a link");
+            links[0].GetAttribute("href").Should().Be("/assignments");
+            links[0].TextContent.Trim().Should().Be("Assignments");
+            links[1].GetAttribute("href").Should().Be($"/assignments/{dto.Id}",
                 "the title crumb links to the assignment's Detail page");
-            crumbs[1].Instance.ChildContent.Should().NotBeNull();
-            crumbs[2].Instance.Href.Should().BeNull("the current crumb is not a link");
-            editCut.Find("#authoring-breadcrumb").TextContent.Should().Contain("Math HW");
+            links[1].TextContent.Trim().Should().Be(dto.Title);
+
+            var current = editCut.FindAll("#authoring-breadcrumb .authoring-crumb-current");
+            current.Should().ContainSingle();
+            current[0].TextContent.Trim().Should().Be("Edit");
+            current[0].GetAttribute("aria-current").Should().Be("page");
+
+            editCut.FindAll("#authoring-breadcrumb .authoring-crumb-separator").Should().HaveCount(2,
+                "three crumbs means two separators between them");
         }, TimeSpan.FromSeconds(5));
 
         var createCut = RenderAuthoring(AssignmentAuthoringMode.Create);
         createCut.WaitForAssertion(() =>
         {
-            var crumbs = createCut.FindComponents<FluentBreadcrumbItem>();
-            crumbs.Should().HaveCount(2, "D8: Assignments › New assignment");
-            crumbs[1].Instance.Href.Should().BeNull();
-            createCut.Find("#authoring-breadcrumb").TextContent.Should().Contain("New assignment");
+            var links = createCut.FindAll("#authoring-breadcrumb fluent-link");
+            links.Should().ContainSingle(
+                "Create's trail is Assignments › New assignment — only the landed crumb links");
+            links[0].GetAttribute("href").Should().Be("/assignments");
+            links[0].TextContent.Trim().Should().Be("Assignments");
+
+            var current = createCut.FindAll("#authoring-breadcrumb .authoring-crumb-current");
+            current.Should().ContainSingle();
+            current[0].TextContent.Trim().Should().Be("New assignment");
+            current[0].GetAttribute("aria-current").Should().Be("page");
+
+            createCut.FindAll("#authoring-breadcrumb .authoring-crumb-separator").Should().ContainSingle();
         });
     }
 
@@ -983,10 +1003,11 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 .Should().Equal(
                     new[] { "authoring-basics-instructions", "authoring-basics-description" },
                     "D9's ids ride on the two editors, guidance first (Q1)");
-            cut.Find("fluent-tabs").Should().NotBeNull("the notes are a TAB group (the owner's choice)");
-            basics.InnerHtml.IndexOf(">Student guidance<", StringComparison.Ordinal)
-                .Should().BeLessThan(basics.InnerHtml.IndexOf(">Teacher notes<", StringComparison.Ordinal),
-                    "guidance is the first tab (Q1)");
+            cut.Find("fluent-tablist").Should().NotBeNull(
+                "the notes are a TAB group (the owner's choice) — v5's FluentTabs renders a fluent-tablist element (the v4 fluent-tabs tag is gone)");
+            basics.InnerHtml.IndexOf("Student guidance", StringComparison.Ordinal)
+                .Should().BeLessThan(basics.InnerHtml.IndexOf("Teacher notes", StringComparison.Ordinal),
+                    "guidance is the first tab (Q1) — v5 wraps the header text in a padded fluent-tab, so the needle is the label, not a '>label<' boundary");
             cut.FindComponents<FluentTextArea>().Select(t => t.Instance.Id)
                 .Should().NotContain("authoring-basics-instructions")
                 .And.NotContain("authoring-basics-description",
@@ -1047,7 +1068,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "the guidance reader renders sanitised markup");
             cut.FindAll(".authoring-note-caption").Select(c => c.TextContent.Trim())
                 .Should().Equal(new[] { "Student guidance", "Teacher notes" });
-            cut.FindAll("fluent-tabs").Should().BeEmpty("a reader should not click through tabs (Q3)");
+            cut.FindAll("fluent-tablist").Should().BeEmpty("a reader should not click through tabs (Q3)");
         });
     }
 
@@ -1141,8 +1162,11 @@ public class AssignmentAuthoringBunitTests : BunitContext
             var passScore = cut.Find("#scoringFieldsPassScore");
             passScore.TagName.ToLowerInvariant().Should().Be("fluent-checkbox",
                 "D11: the inapplicable state is a disabled checkbox");
-            passScore.TextContent.Should().Contain(ScoringFieldsSection.ScoringInapplicableShortLabel,
-                "owner 2026-10-11: the checkbox label stays SHORT (FluentCheckbox renders its Label as child content)");
+            // v5 renders FluentCheckbox's Label as a <label slot="label"> SIBLING of the control,
+            // inside the fluent-field wrapper — not as the checkbox's own child text.
+            passScore.ParentElement.QuerySelector("label[slot='label']")!.TextContent
+                .Should().Contain(ScoringFieldsSection.ScoringInapplicableShortLabel,
+                    "owner 2026-10-11: the checkbox label stays SHORT (v5 renders it in the surrounding fluent-field's label slot)");
             cut.FindAll(".scoring-fields-reason").Should().BeEmpty(
                 "D11: the standalone reason paragraph is gone");
             ScoringFieldDisabled(cut, "scoringFieldsMaxAttempts").Should().BeTrue();
@@ -1198,7 +1222,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            Picker(cut, "authoring-basics-grading").SelectedOption!.Value
+            Picker(cut, "authoring-basics-grading").Value!.Value
                 .Should().Be(((int)GradingFormatDto.TeacherGraded).ToString(),
                     "an Offline assignment is always Teacher Marked");
             cut.Find("#authoring-grading-switched").TextContent.Trim()
@@ -1221,7 +1245,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
             Picker(cut, "authoring-basics-grading").Items!.Select(option => option.Value)
                 .Should().Contain(((int)GradingFormatDto.AutoGraded).ToString(),
                     "the out-of-matrix stored value stays in the list so its label renders");
-            Picker(cut, "authoring-basics-grading").SelectedOption!.Value
+            Picker(cut, "authoring-basics-grading").Value!.Value
                 .Should().Be(((int)GradingFormatDto.AutoGraded).ToString(),
                     "the page never rewrites the persisted pair on load");
             cut.FindAll("#authoring-grading-switched").Should().BeEmpty(
@@ -1230,7 +1254,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void ChangingGradingFormat_TogglesEnablement_NotPresence()
+    public async Task ChangingGradingFormat_TogglesEnablement_NotPresence()
     {
         var cut = RenderAuthoring(
             AssignmentAuthoringMode.Edit,
@@ -1238,19 +1262,14 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() => ScoringFieldDisabled(cut, "scoringFieldsPassScore").Should().BeTrue());
 
-        var gradingSelect = cut
-            .FindComponents<FluentSelect<Authoring.PickerOption>>()
-            .Single(s => s.Instance.Id == "authoring-basics-grading");
-
-        cut.InvokeAsync(() => gradingSelect.Instance.SelectedOptionChanged.InvokeAsync(
-            new Authoring.PickerOption(((int)GradingFormatDto.AutoGraded).ToString(), "Auto Scored")));
+        await SelectAsync(cut, "authoring-basics-grading", ((int)GradingFormatDto.AutoGraded).ToString());
 
         cut.WaitForAssertion(() =>
         {
             ScoringFieldDisabled(cut, "scoringFieldsPassScore").Should().BeFalse(
                 "AutoGraded makes the pass score applicable again");
-            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-number-field",
-                "D11: the applicable state renders the number field again");
+            cut.Find("#scoringFieldsPassScore").TagName.ToLowerInvariant().Should().Be("fluent-text-input",
+                "D11: the applicable state renders the number field again — v5's FluentNumberInput renders a fluent-text-input with inputmode=numeric");
             cut.FindAll("#scoringFieldsPassScore").Should().ContainSingle(
                 "the field is still rendered — gating swaps the control, it never reflows the page");
             cut.Markup.Should().NotContain(ScoringFieldsSection.ScoringInapplicableReason);
@@ -1310,11 +1329,11 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
             foreach (var row in rows)
             {
-                row.QuerySelectorAll("input, fluent-text-field, fluent-number-field, fluent-select, fluent-checkbox, fluent-date-picker, fluent-listbox, fluent-text-area")
+                row.QuerySelectorAll("input, fluent-text-input, fluent-number-field, fluent-dropdown, fluent-checkbox, fluent-date-picker, fluent-listbox, fluent-text-area")
                     .Should().BeEmpty("UX-13/D2: a policy-derived value is never an editable control");
             }
 
-            rules.QuerySelectorAll("fluent-number-field, fluent-date-picker, fluent-checkbox, fluent-text-field")
+            rules.QuerySelectorAll("fluent-number-field, fluent-date-picker, fluent-checkbox, fluent-text-input")
                 .Should().BeEmpty("D2/AC8: no author-editable input remains inside Rules");
         });
     }
@@ -1542,7 +1561,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 // element children also carry FluentUI's own <style> elements, so the assertion
                 // counts the CONTROLS, never the cell's children.)
                 var cell = row.QuerySelector(".form-row-input")!;
-                cell.QuerySelectorAll("fluent-select, fluent-number-field, fluent-checkbox, span.authoring-readonly-value")
+                cell.QuerySelectorAll("fluent-dropdown, fluent-text-input, fluent-checkbox, span.authoring-readonly-value")
                     .Should().HaveCount(ids.Length, $"all {name} controls sit in the ONE input cell, so they sit inline");
                 ids.Should().OnlyContain(id => cell.QuerySelector($"#{id}") != null,
                     $"both {name} controls belong to that one row");
@@ -2107,7 +2126,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "the Draft's kebab hosts the save action; rendered items were: ["
                 + string.Join(", ", cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim())) + "]"),
             TimeSpan.FromSeconds(5));
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Save draft").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Save draft").MenuItemClick();
     }
 
     /// <summary>A fresh recipient-preview response per read (the mock re-sends it on every
@@ -2144,40 +2163,29 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// </summary>
     private void RegisterConfirmationDialog(bool confirm, List<ConfirmDialogContent> captured)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
-            confirm ? DialogResult.Ok<object>(null!) : DialogResult.Cancel()));
-
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .Callback<ConfirmDialogContent, DialogParameters>((content, _) => captured.Add(content))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+                captured.Add((ConfirmDialogContent)options.Parameters[nameof(ConfirmDialog.Content)]!))
+            .ReturnsAsync(confirm ? DialogResult.Ok<object>(null!) : DialogResult.Cancel());
     }
 
     /// <summary>
     /// Mocks the PublishDialog shell open so the primary action's publish round trip completes:
     /// <c>ShowShellDialogAsync&lt;PublishDialog, PublishFormModel, PublishResult&gt;</c> resolves to
-    /// <c>ShowDialogAsync&lt;PublishDialog, DialogShellData&lt;PublishFormModel&gt;&gt;</c>, and the
+    /// <c>ShowDialogAsync(typeof(PublishDialog), DialogOptions)</c>, and the
     /// dialog Result carries the <see cref="DialogShellResult{TResult}"/> the extension unwraps into
     /// the typed result (the <c>AssignmentDetailBunitTests</c> schedule-dialog pattern).
     /// </summary>
     private void RegisterPublishDialog()
     {
-        var dialogRef = new Mock<IDialogReference>();
         var payload = new DialogShellResult<PublishResult>(new PublishResult(null));
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(payload)));
 
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<PublishDialog, DialogShellData<PublishFormModel>>(
-                It.IsAny<DialogShellData<PublishFormModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(PublishDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(payload));
     }
 
     /// <summary>The rendered fragment's navigation target, i.e. what an in-app navigation would
@@ -3074,7 +3082,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain("Math HW", "F13: the loaded form is on screen");
-            cut.FindComponents<FluentProgressRing>().Should().BeEmpty(
+            cut.FindComponents<FluentSpinner>().Should().BeEmpty(
                 "F13: and the loading ring is gone without the clock having moved");
         }, TimeSpan.FromSeconds(5));
 
@@ -3748,7 +3756,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     /// <summary>
-    /// FluentUI's <c>FluentSelect</c> emits an inline <c>&lt;style&gt;</c> for its own popup (a
+    /// FluentUI's <c>FluentSelect</c, /c> emits an inline <c>&lt;style&gt;</c> for its own popup (a
     /// <c>z-index</c> on the listbox and the selected-value ellipsis) — a library implementation detail
     /// we cannot remove from our markup (verified: the rule text lives in
     /// <c>Microsoft.FluentUI.AspNetCore.Components</c> 4.14.2, not in any file of ours; it is gone in the
@@ -3840,21 +3848,14 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// the dialog's Result carries the <see cref="DialogShellResult{TResult}"/> it unwraps).</summary>
     private void RegisterMaterialEditDialog(MaterialEditResult? result, List<MaterialEditFormModel> captured)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
-            result is null
-                ? DialogResult.Cancel()
-                : DialogResult.Ok<object?>(new DialogShellResult<MaterialEditResult>(result))));
-
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<MaterialEditDialog, DialogShellData<MaterialEditFormModel>>(
-                It.IsAny<DialogShellData<MaterialEditFormModel>>(), It.IsAny<DialogParameters>()))
-            .Callback<DialogShellData<MaterialEditFormModel>, DialogParameters>(
-                (data, _) => captured.Add(data.Model))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(MaterialEditDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+                captured.Add(((DialogShellData<MaterialEditFormModel>)options.Parameters["Content"]!).Model))
+            .ReturnsAsync(result is null
+                ? DialogResult.Cancel()
+                : DialogResult.Ok<object?>(new DialogShellResult<MaterialEditResult>(result)));
     }
 
     /// <summary>AC-14: the materials list reads its rows out (no inline fields), the affordance reopens
@@ -3882,7 +3883,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("#authoring-instruction-items-label-0").Should().ContainSingle());
 
         // Q4(b): the row reads out — the page's list is no longer a form.
-        cut.FindAll("#authoring-instruction-items fluent-text-field").Should().BeEmpty(
+        cut.FindAll("#authoring-instruction-items fluent-text-input").Should().BeEmpty(
             "the page edits its materials in the dialog, so no row renders a field");
 
         cut.Find("#authoring-instruction-items-edit-0").Click();

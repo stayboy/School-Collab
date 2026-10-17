@@ -16,36 +16,35 @@
     <ChildContent>
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (_item is null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">Assignment not found.</FluentMessageBar>
-            <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-2">Back to List</FluentButton>
+            <FluentMessageBar Intent="MessageBarIntent.Error">Assignment not found.</FluentMessageBar>
+            <FluentButton Appearance="ButtonAppearance.Outline" @onclick="Cancel" class="mt-2">Back to List</FluentButton>
         }
         else
         {
             <div class="detail-container">
                 <div class="title-row">
                     <h2 class="page-title">@_item.Title</h2>
-                    @* WS-A2 deviation from decision (j): FluentBadge only supports Accent /
-                        Neutral / Lightweight (validated at render in Fluent UI 4.14) — Outline
-                        would crash the page. Scheduled shares Accent with Published (both
+                    @* WS-A2 deviation from decision (j): BadgeAppearance only offers Filled /
+                        Ghost, so Scheduled shares Filled with Published (both
                         committed publishing states); the badge text distinguishes them. *@
-                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Accent
-                        : _item.Status == AssignmentStatusDto.Scheduled ? Appearance.Accent
-                        : _item.Status == AssignmentStatusDto.Closed || _item.Status == AssignmentStatusDto.Archived ? Appearance.Neutral
-                        : Appearance.Lightweight)">
+                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? BadgeAppearance.Filled
+                        : _item.Status == AssignmentStatusDto.Scheduled ? BadgeAppearance.Filled
+                        : _item.Status == AssignmentStatusDto.Closed || _item.Status == AssignmentStatusDto.Archived ? BadgeAppearance.Filled
+                        : BadgeAppearance.Ghost)">
                         @_item.Status
                     </FluentBadge>
                     @if (_item.MandatoryReview)
                     {
-                        <FluentBadge Appearance="Appearance.Lightweight" Title="Guardian review required before students submit">Review required</FluentBadge>
+                        <FluentBadge Appearance="BadgeAppearance.Ghost" Title="Guardian review required before students submit">Review required</FluentBadge>
                     }
                 </div>
 
                 <FluentTabs>
-                    <FluentTab Label="Overview" Icon="@FluentIcons.ClipboardCheckmark">
+                    <FluentTab Header="Overview" IconStart="@FluentIcons.ClipboardCheckmark">
                         @* R1 (UX-10 / assignment-authoring-compartments §5): the read-only
                            authoring summary IS the shared View mode — the hand-rolled Overview
                            grid was retired so Detail can never drift from Create/Edit (NFR-4).
@@ -56,16 +55,16 @@
                                              Changed="ReloadItemAsync" />
 
                         <div class="mt-3">
-                            <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to List</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Outline" @onclick="Cancel">Back to List</FluentButton>
                             @* WS-A4 / spec §3.1: duplicate the assignment as a fresh
                                Draft template copy. Rendered regardless of status — it
                                is a read-only-on-source operation. *@
-                            <FluentButton Appearance="Appearance.Outline" OnClick="OnDuplicateAsync" Disabled="@_duplicating" class="ms-2">
+                            <FluentButton Appearance="ButtonAppearance.Outline" OnClick="OnDuplicateAsync" Disabled="@_duplicating" class="ms-2">
                                 @(_duplicating ? "Duplicating…" : "Duplicate")
                             </FluentButton>
                             @if (!string.IsNullOrEmpty(_duplicateError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_duplicateError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_duplicateError</FluentMessageBar>
                             }
                         </div>
 
@@ -83,24 +82,24 @@
 
                                 @if (_item.Status == AssignmentStatusDto.Draft && (_item.ApprovalStatus is null || _item.ApprovalStatus == ApprovalStatusDto.Rejected))
                                 {
-                                    <FluentButton Appearance="Appearance.Accent" OnClick="OnSubmitForApprovalAsync" Disabled="@_submittingForApproval" class="ms-2">
+                                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="OnSubmitForApprovalAsync" Disabled="@_submittingForApproval" class="ms-2">
                                         @(_submittingForApproval ? "Submitting…" : "Submit for Approval")
                                     </FluentButton>
                                 }
 
                                 @if (_item.ApprovalStatus == ApprovalStatusDto.Pending)
                                 {
-                                    <FluentButton Appearance="Appearance.Accent" OnClick="OnApproveAsync" Disabled="@_actingOnApproval" class="ms-2">
+                                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="OnApproveAsync" Disabled="@_actingOnApproval" class="ms-2">
                                         @(_actingOnApproval ? "Working…" : "Approve")
                                     </FluentButton>
-                                    <FluentButton Appearance="Appearance.Outline" OnClick="OnRejectAsync" Disabled="@_actingOnApproval" class="ms-2">
+                                    <FluentButton Appearance="ButtonAppearance.Outline" OnClick="OnRejectAsync" Disabled="@_actingOnApproval" class="ms-2">
                                         @(_actingOnApproval ? "Working…" : "Reject")
                                     </FluentButton>
                                 }
                             </div>
                             @if (!string.IsNullOrEmpty(_approvalError))
                             {
-                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_approvalError</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_approvalError</FluentMessageBar>
                             }
                         }
 
@@ -110,27 +109,27 @@
                             <h4>Submit Review</h4>
                             <EditForm Model="_reviewModel" OnValidSubmit="SubmitReviewAsync" class="form-container">
                                 <DataAnnotationsValidator />
-                                <FluentNumberField @bind-Value="_reviewModel.Score" Label="Score" class="narrow-field mb-3" />
-                                <FluentTextArea @bind-Value="_reviewModel.Comments" Label="Comments" Rows="3" class="full-width mb-3" />
+                                <FluentNumberInput @bind-Value="_reviewModel.Score" Label="Score" class="narrow-field mb-3" />
+                                <FluentTextArea @bind-Value="_reviewModel.Comments" Label="Comments" class="full-width mb-3 ta-lines-3" />
                                 @if (!string.IsNullOrEmpty(_reviewError))
                                 {
-                                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_reviewError</FluentMessageBar>
+                                    <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-3">@_reviewError</FluentMessageBar>
                                 }
                                 <div>
-                                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submittingReview">@(_submittingReview ? "Submitting…" : "Submit Review")</FluentButton>
+                                    <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary" Disabled="@_submittingReview">@(_submittingReview ? "Submitting…" : "Submit Review")</FluentButton>
                                 </div>
                             </EditForm>
                         }
                     </FluentTab>
 
-                    <FluentTab Label="Recipients" Icon="@FluentIcons.People">
+                    <FluentTab Header="Recipients" IconStart="@FluentIcons.People">
                         @if (_loadingRecipients)
                         {
-                            <FluentProgressRing />
+                            <FluentSpinner />
                         }
                         else if (_recipients is null || _recipients.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                            <FluentMessageBar Intent="MessageBarIntent.Info" class="mt-3">
                                 No recipients yet. Publish the assignment to notify subscribed student/guardian contacts.
                             </FluentMessageBar>
                         }
@@ -154,7 +153,7 @@
                                             <td>@EnumHelper.GetDescription(r.Channel)</td>
                                             <td>@(r.Role is not null ? EnumHelper.GetDescription(r.Role) : "—")</td>
                                             <td>
-                                                <FluentBadge Appearance="@(r.SubscriptionActive ? Appearance.Accent : Appearance.Neutral)">
+                                                <FluentBadge Appearance="@(r.SubscriptionActive ? BadgeAppearance.Filled : BadgeAppearance.Filled)">
                                                     @(r.SubscriptionActive ? "Active" : "Inactive")
                                                 </FluentBadge>
                                             </td>
@@ -166,15 +165,15 @@
                         }
                     </FluentTab>
 
-                    <FluentTab Label="Submissions" Icon="@FluentIcons.TextBulletList">
+                    <FluentTab Header="Submissions" IconStart="@FluentIcons.TextBulletList">
                         @if (_loadingSubmissions)
                         {
-                            <FluentProgressRing />
+                            <FluentSpinner />
                         }
                         else if (_selectedSubmission is not null)
                         {
                             <div class="mt-3">
-                                <FluentButton Appearance="Appearance.Outline" OnClick="BackToSubmissionsAsync">← All submissions</FluentButton>
+                                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="BackToSubmissionsAsync">← All submissions</FluentButton>
                                 <h4 class="mt-2">Student @_selectedSubmission.StudentId</h4>
                                 <p class="dialog-hint">Current version @_selectedSubmission.CurrentVersionNumber · Review: @EnumHelper.GetDescription(_selectedSubmission.ReviewState)</p>
 
@@ -205,7 +204,7 @@
 
                                 @if (_selectedSubmission.Review is not null)
                                 {
-                                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-3">
+                                    <FluentMessageBar Intent="MessageBarIntent.Success" class="mt-3">
                                         Reviewed: @(_selectedSubmission.Review!.Score?.ToString("0.##") ?? "—") @(_selectedSubmission.Review.Grade ?? "") — @(_selectedSubmission.Review.Comments ?? "")
                                     </FluentMessageBar>
                                 }
@@ -214,15 +213,15 @@
                                 <h5>Teacher review / grade</h5>
                                 <EditForm Model="_submissionReviewModel" OnValidSubmit="SubmitSubmissionReviewAsync" class="form-container">
                                     <DataAnnotationsValidator />
-                                    <FluentNumberField @bind-Value="_submissionReviewModel.Score" Label="Score" class="narrow-field mb-3" />
-                                    <FluentTextField @bind-Value="_submissionReviewModel.Grade" Label="Grade" class="full-width mb-3" />
-                                    <FluentTextArea @bind-Value="_submissionReviewModel.Comments" Label="Comments" Rows="3" class="full-width mb-3" />
+                                    <FluentNumberInput @bind-Value="_submissionReviewModel.Score" Label="Score" class="narrow-field mb-3" />
+                                    <FluentTextInput @bind-Value="_submissionReviewModel.Grade" Label="Grade" class="full-width mb-3" />
+                                    <FluentTextArea @bind-Value="_submissionReviewModel.Comments" Label="Comments" class="full-width mb-3 ta-lines-3" />
                                     @if (!string.IsNullOrEmpty(_submissionReviewError))
                                     {
-                                        <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_submissionReviewError</FluentMessageBar>
+                                        <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-3">@_submissionReviewError</FluentMessageBar>
                                     }
                                     <div>
-                                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submittingSubmissionReview">
+                                        <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary" Disabled="@_submittingSubmissionReview">
                                             @(_submittingSubmissionReview ? "Submitting…" : "Submit Review")
                                         </FluentButton>
                                     </div>
@@ -231,7 +230,7 @@
                         }
                         else if (_submissions is null || _submissions.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">No submissions yet.</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageBarIntent.Info" class="mt-3">No submissions yet.</FluentMessageBar>
                         }
                         else
                         {
@@ -247,7 +246,7 @@
                                             <td>@s.CurrentVersionNumber</td>
                                             <td>@EnumHelper.GetDescription(s.ReviewState)</td>
                                             <td>@s.LastSubmittedAt.ToLocalTime().ToString("g")</td>
-                                            <td><FluentButton Appearance="Appearance.Outline" OnClick="@(() => SelectSubmissionAsync(s.StudentId))">View</FluentButton></td>
+                                            <td><FluentButton Appearance="ButtonAppearance.Outline" OnClick="@(() => SelectSubmissionAsync(s.StudentId))">View</FluentButton></td>
                                         </tr>
                                     }
                                 </tbody>
@@ -260,7 +259,7 @@
                        require a signature (the section self-loads its own data). *@
                     @if (_item.RequiresSignature)
                     {
-                        <FluentTab Label="Guardian Sign-off">
+                        <FluentTab Header="Guardian Sign-off">
                             <SignOffSection AssignmentId="@Id" RequiresSignature="true" />
                         </FluentTab>
                     }
@@ -276,7 +275,7 @@
                        renders an Info empty state when the endpoint returns zero rows. *@
                     @if (_item.PublishedAt is not null)
                     {
-                        <FluentTab Label="@NotificationsTabLabel">
+                        <FluentTab Header="@NotificationsTabLabel">
                             <NotificationFailuresSection AssignmentId="@Id" CanHaveFailures="true"
                                                           OnFailureCountLoaded="@OnFailureCountLoaded" />
                         </FluentTab>
@@ -286,7 +285,7 @@
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -419,17 +418,16 @@
         _ => "—"
     };
 
-    // WS-A2 deviation from decision (j): FluentBadge only supports Accent / Neutral /
-    // Lightweight, so Pending shares Neutral with Rejected (both "submitted, not yet
-    // approved" — text distinguishes). Approved keeps the Accent success fill and
-    // "Not submitted" stays muted Lightweight.
-    private Appearance ApprovalBadgeAppearance() => _item?.ApprovalStatus switch
+    // WS-A2 deviation from decision (j): BadgeAppearance offers only Filled / Ghost, so Pending
+    // shares Filled with Rejected (both "submitted, not yet approved" — text distinguishes).
+    // Approved keeps the Filled success fill and "Not submitted" stays the muted Ghost.
+    private BadgeAppearance ApprovalBadgeAppearance() => _item?.ApprovalStatus switch
     {
-        null => Appearance.Lightweight,
-        ApprovalStatusDto.Pending => Appearance.Neutral,
-        ApprovalStatusDto.Approved => Appearance.Accent,
-        ApprovalStatusDto.Rejected => Appearance.Neutral,
-        _ => Appearance.Lightweight
+        null => BadgeAppearance.Ghost,
+        ApprovalStatusDto.Pending => BadgeAppearance.Filled,
+        ApprovalStatusDto.Approved => BadgeAppearance.Filled,
+        ApprovalStatusDto.Rejected => BadgeAppearance.Filled,
+        _ => BadgeAppearance.Ghost
     };
 
     private async Task OnSubmitForApprovalAsync()

@@ -29,7 +29,7 @@
 /* Student column body: name on its own line, "(Gender, Age)" beneath it in
    a muted style. We use flex column (not a <br>) so the demographics line
    reflows with wrapping on narrow viewports. The whole cell is a
-   FluentAnchor (Lightweight), so it stretches to fill the column width and
+   FluentLink (Lightweight), so it stretches to fill the column width and
    the full name + demographics are clickable to the student detail page. */
 ::deep .student-full-name {
     display: flex;
@@ -60,7 +60,7 @@
     text-overflow: ellipsis;
 }
 
-/* Guardians column — the count renders as a Lightweight FluentAnchor (the
+/* Guardians column — the count renders as a Lightweight FluentLink (the
    repo's standard grid-link pattern); muted plain text when zero/unknown. */
 ::deep .student-guardians-link {
     white-space: nowrap;

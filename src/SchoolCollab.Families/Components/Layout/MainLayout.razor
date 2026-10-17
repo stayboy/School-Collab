@@ -1,26 +1,27 @@
 @inherits LayoutComponentBase
 @using Microsoft.AspNetCore.Components.Sections
+@using SchoolCollab.Admin.Shared.Components.Theme
+@inject IJSRuntime JS
+@inject IThemeService ThemeService
 
-<FluentDesignTheme StorageName="families-theme" />
-
-<FluentToastProvider />
-<FluentDialogProvider />
+<FluentProviders />
 <FluentMessageBarProvider />
-<FluentTooltipProvider />
 
 <FluentLayout>
-    <FluentHeader Height="50">
+    <FluentLayoutItem Area="LayoutArea.Header" Height="50">
         <FluentStack Orientation="Orientation.Horizontal"
                      VerticalAlignment="VerticalAlignment.Center"
                      HorizontalGap="12">
             <span class="families-brand">School Collab — My Assignments</span>
         </FluentStack>
-    </FluentHeader>
-    <div class="families-body">
-        <div class="families-content">
-            @Body
+    </FluentLayoutItem>
+    <FluentLayoutItem Area="LayoutArea.Content">
+        <div class="families-body">
+            <div class="families-content">
+                @Body
+            </div>
         </div>
-    </div>
+    </FluentLayoutItem>
 </FluentLayout>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -28,3 +29,22 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">&#10060;</span>
 </div>
+
+@code {
+    /// <summary>
+    /// Carries this host's v4 theme preference over into the library's v5 theme store. The
+    /// host renders no theme switcher, but v4 persisted a mode here too
+    /// (<c>StorageName="families-theme"</c>), and v5 applies only its own store at startup —
+    /// without this a returning user would land on the default theme. Runs once, on the
+    /// layout's first render; <see cref="LegacyThemeMigration"/> owns the idempotency.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await LegacyThemeMigration.RunAsync(JS, ThemeService, LegacyThemeMigration.FamiliesStorageKey);
+    }
+}

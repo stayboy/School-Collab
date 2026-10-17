@@ -11,7 +11,7 @@
 @inject NavigationManager Nav
 @inject ILogger<ActivityGroups> Logger
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
@@ -34,10 +34,10 @@
                  RowActionsUseMenuService="false">
         <Columns>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Name" Sortable="true" SortBy="@_sortByName">
-                <FluentAnchor Appearance="Appearance.Lightweight"
+                <FluentLink Appearance="LinkAppearance.Subtle"
                               Href="@($"/activity-groups/{context.Id}")">
                     @context.Name
-                </FluentAnchor>
+                </FluentLink>
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Category">
                 @if (string.IsNullOrWhiteSpace(context.Category))
@@ -50,10 +50,10 @@
                 }
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Status">
-                <FluentBadge Appearance="@(context.IsActive ? Appearance.Accent : Appearance.Neutral)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
+                <FluentBadge Appearance="@BadgeAppearance.Filled" Color="@(context.IsActive ? BadgeColor.Success : BadgeColor.Subtle)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Span">
-                <FluentBadge Appearance="Appearance.Neutral">@context.Span</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">@context.Span</FluentBadge>
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Window">
                 @if (context.Span == "DateRange" && context.EnrollmentStartDate.HasValue)
@@ -82,10 +82,10 @@
                 @(context.Capacity?.ToString() ?? "Unlimited")
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Members">
-                <FluentAnchor Appearance="Appearance.Lightweight"
+                <FluentLink Appearance="LinkAppearance.Subtle"
                               Href="@($"/activity-groups/{context.Id}")">
                     @context.ActiveMemberCount
-                </FluentAnchor>
+                </FluentLink>
             </TemplateColumn>
         </Columns>
     </LandingPage>
@@ -178,7 +178,7 @@
             ActivityGroupCreateDialog,
             ActivityGroupCreateDialog.ActivityGroupCreateModel,
             ActivityGroupDto>(
-            model, "Create activity group", DialogSize.Medium);
+            model, "Create activity group", DialogWidth.Medium);
 
         if (_disposed) return;
         if (created is not null)
@@ -230,7 +230,7 @@
             ActivityGroupEditDialog,
             ActivityGroupEditDialog.ActivityGroupEditModel,
             ActivityGroupDto>(
-            model, $"Edit activity group — {row.Name}", DialogSize.Medium);
+            model, $"Edit activity group — {row.Name}", DialogWidth.Medium);
 
         if (_disposed) return;
         if (updated is not null)
@@ -262,11 +262,10 @@
     private async Task OnDeleteAsync(Guid id, string name)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete activity group '{name}'? This cannot be undone if it has members or linked assignments.",
-            "Delete", "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         var previous = _items;
         _items = _items?.Where(x => x.Id != id).ToArray();
@@ -277,7 +276,7 @@
             await Api.DeleteActivityGroupAsync(id);
             if (_disposed) return;
             Logger.LogInformation("Deleted activity group {Id}", id);
-            Toast.ShowSuccess($"Activity group '{name}' deleted.");
+            await NotificationService.ShowSuccessToastAsync($"Activity group '{name}' deleted.");
         }
         catch (Exception ex)
         {

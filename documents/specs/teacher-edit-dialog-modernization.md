@@ -18,7 +18,7 @@
 >
 > **v3 changes (decisions locked):**
 > 1. **Grade section hidden entirely in grade context.** When the dialog is opened from a grade detail page (create *or* edit), the grade section is **not rendered at all** — no locked chip, no picker, no checklist. The grade link is implicit on save. (Resolves §8 Q1 — simplest option.)
-> 2. **Size stays `DialogSize.Large` (720px).** No downsize to `Medium`. (Resolves §8 Q2.)
+> 2. **Size stays `DialogWidth.Large` (720px).** No downsize to `Medium`. (Resolves §8 Q2.)
 > 3. **`TeacherSetupWizard` retired now.** `/students/teachers/create` route removed; wizard component deleted. (Resolves §8 Q3.)
 > **Owner:** Students context — `TeacherEditDialog` + its call sites
 > **Depends on:** `grade-detail-rich-grids-plan.md` §5 (cg/6, original dialog), `documents/solution/dialog-consolidation-plan.md` (`DialogShellBase`), `section-card-lessons-adoption.md`, `dialog-ui` skill
@@ -41,7 +41,7 @@
 5. **Grade-context linking (v4).** `ContextGradeLevelId` / `ContextGradeLevelName` pre-set the default grade for new grade-assignment rows. From a grade detail page the context grade is the default (and can be left implicit on save if no other grade is set); the separate chips/checklist grade picker is removed (§3.5).
 6. **Assignments data source (v4).** The grid loads the teacher's grade assignments (grade + subject + role) and activity assignments; the subjects add-picker is scoped to a chosen grade's enrolled subjects (§3.6).
 7. **Shell migration** to `DialogShellBase<TeacherFormModel, Guid>` + `DialogShellFooter` + `EditForm` validation (repo convention; this dialog is the only hand-rolled form dialog left — 13 siblings already use the shell).
-8. **Size** stays `DialogSize.Large` (720px) — no downsize.
+8. **Size** stays `DialogWidth.Large` (720px) — no downsize.
 9. **Backend change for v4.** Reuse `TeacherGradeLevel` for grade + optional subject + role rows (add nullable `topic_id`, relax the unique index so a teacher can teach multiple subjects per grade); **remove** the standalone `TeacherTopic`; add a new `TeacherActivityAssignment` (+ grades join) entity + endpoints. Overturns the v3 “zero backend changes” decision (§4).
 
 ## 1. Goal
@@ -63,7 +63,7 @@ Modern, compact, context-aware teacher create/edit dialog:
 | P4 | Subjects = full topic catalog with checkboxes + inline role dropdowns in a 180px scroll box; from a grade page it also offers subjects irrelevant to that grade | lines 107-123 | Assignments grid with **grade-scoped subjects**, §3.4/§3.6 |
 | P5 | Grade detail "Add teacher" pre-checks a grade checkbox but still shows the whole grade checklist | `GradeLevels/Detail.razor:846` passes `InitialGradeLevelIds`; dialog lines 127-153 | Grid row with default grade, §3.5 |
 | P6 | Hand-rolled shell/footer — inconsistent with the repo's `DialogShellBase` convention | lines 11, 156-165 | §3.7 |
-| P7 | `DialogSize.Large` everywhere — oversized for slimmed content | 4 call sites | §3.8 |
+| P7 | `DialogWidth.Large` everywhere — oversized for slimmed content | 4 call sites | §3.8 |
 
 **Reused as-is (no new shared components, no new packages):** `Chip.razor` (`SchoolCollab.Admin.Shared/Components`), `CodedValueDropdown` (per-subject role dropdown only), `FormRow`, `DialogShellBase` / `DialogShellFooter` / `ShowShellDialogAsync`, `FluentCombobox` (FluentUI 4.14.2).
 
@@ -274,7 +274,7 @@ Client methods: `ListTeacherGradeAssignmentsAsync`, `UpsertTeacherGradeAssignmen
 - **Assignments grid (v4):** grade rows render read-only; **Edit** converts a row to editable (grade/subject/role dropdowns); **Save** commits, **Cancel** reverts; **Add assignment** appends a row; **Remove** deletes; `Assignments (N)` count tracks.
 - **Two row types (v4):** grade row = grade + optional subject + role; activity row = activity + role + optional grades. A grade row's subject dropdown is scoped to the grade's enrolled subjects (mock `GET /students/topic-assignments/by-grade/{id}`).
 - **Context default grade (v4):** with `ContextGradeLevelId` set, a grade-assignment row is pre-created with the context grade; new grade rows default to it. Context create save = `POST /teachers` + the grade / grade-scoped-subject / activity link calls for the grid rows.
-- `GradeLevelDetailPageTests`: wiring assertions — `ContextGradeLevelId` / `ContextGradeLevelName` passed, shell open, `DialogSize.Large`.
+- `GradeLevelDetailPageTests`: wiring assertions — `ContextGradeLevelId` / `ContextGradeLevelName` passed, shell open, `DialogWidth.Large`.
 
 HTTP contract coverage for the new grade-scoped-subject and teacher-activity endpoints stays in the new client + CQRS tests (§4).
 
@@ -296,5 +296,5 @@ HTTP contract coverage for the new grade-scoped-subject and teacher-activity end
 ## 8. Resolved decisions (v3)
 
 1. **Grade-context edit** — **hide the grade section entirely** in grade context (simplest). Context grade link implicit on save; other linked grades managed from the teacher detail / landing edit surface.
-2. **Size** — keep **`DialogSize.Large`** (720px); no downsize.
+2. **Size** — keep **`DialogWidth.Large`** (720px); no downsize.
 3. **Wizard route** — **retire `/students/teachers/create` now**; delete `TeacherSetupWizard` and its route.

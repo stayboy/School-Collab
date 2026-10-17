@@ -4,7 +4,10 @@
 @inject IDialogService DialogService
 @typeparam TItem
 
-<FluentCard class="section-card-wrapper" AreaRestricted="false">
+@* FluentUI 5.0.1 removed FluentCard.AreaRestricted — and with it the card's own
+   content-visibility/contain restriction, so there is nothing left to lift. The section
+   card therefore no longer needs the 4.14.2 AreaRestricted="false" flag. *@
+<FluentCard class="section-card-wrapper">
     <div class="section-card @Class">
         <div class="section-card__header">
         @if (Icon is { } icon)
@@ -15,7 +18,7 @@
         <span class="section-card__count">@Count</span>
         @if (ShowAddButton)
         {
-            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                         IconStart="@AddIcon" Title="@AddTitle"
                         AriaLabel="@AddAriaLabel" OnClick="HandleAddClickAsync" />
         }
@@ -23,7 +26,7 @@
     <div class="section-card__body">
         @if (Loading)
         {
-            <FluentProgressRing class="section-card__spinner" />
+            <FluentSpinner class="section-card__spinner" />
         }
         else if (!string.IsNullOrEmpty(ErrorMessage))
         {
@@ -50,17 +53,17 @@
                             {
                                 if (ItemHrefSelector is { } hrefSel && hrefSel(item) is { } href)
                                 {
-                                    <FluentAnchor Appearance="Appearance.Hypertext" Class="item-name"
+                                    <FluentLink Appearance="LinkAppearance.Default" Class="item-name"
                                                   Href="@href" Title="@(ItemNameTitle ?? textSel(item))">
                                         @textSel(item)
-                                    </FluentAnchor>
+                                    </FluentLink>
                                 }
                                 else if (ItemOnClick is { } onClick)
                                 {
-                                    <FluentAnchor Appearance="Appearance.Hypertext" Class="item-name"
+                                    <FluentLink Appearance="LinkAppearance.Default" Class="item-name"
                                                   Href="#" OnClick="() => InvokeItemClickAsync(item, onClick)" Title="@(ItemNameTitle ?? textSel(item))">
                                         @textSel(item)
-                                    </FluentAnchor>
+                                    </FluentLink>
                                 }
                                 else
                                 {
@@ -98,21 +101,21 @@
     <div class="section-card__footer">
         @if (ViewAllNavigationUrl is { } url)
         {
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@url" IconEnd="@FluentIcons.ArrowRight">
+            <FluentLink Appearance="LinkAppearance.Default" Href="@url" IconEnd="@FluentIcons.ArrowRight">
                 @ViewAllText (@Count)
-            </FluentAnchor>
+            </FluentLink>
         }
         else if (OnViewAllClick is not null)
         {
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="OnViewAllClick" IconEnd="@FluentIcons.ArrowRight">
+            <FluentLink Appearance="LinkAppearance.Default" Href="#" OnClick="OnViewAllClick" IconEnd="@FluentIcons.ArrowRight">
                 @ViewAllText (@Count)
-            </FluentAnchor>
+            </FluentLink>
         }
         else if (ViewAllAsDialog)
         {
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="OpenViewAllDialogAsync" IconEnd="@FluentIcons.ArrowRight">
+            <FluentLink Appearance="LinkAppearance.Default" Href="#" OnClick="OpenViewAllDialogAsync" IconEnd="@FluentIcons.ArrowRight">
                 @ViewAllText (@Count)
-            </FluentAnchor>
+            </FluentLink>
         }
     </div>
 </div>

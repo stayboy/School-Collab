@@ -5,6 +5,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    @* FluentUI v5 dark-theme flash mitigation — the guide's "Flash effect (optional)"
+       snippet (ThemeLightDark.md), living in css/app.css (linked on the next line) rather
+       than an inline <style>: this repo forbids inline style/script elements in Razor
+       (NoInlineStyleOrScriptElements_InRazor). The library applies the stored theme from
+       its own JS at startup, so the browser's default white background can paint first and
+       flash when the user runs dark; the linked stylesheet is in the head, so it lands
+       first. No cookie and no inline script. *@
     <link rel="stylesheet" href="@Assets["css/app.css"]" />
     <link rel="stylesheet" href="@Assets["_content/SchoolCollab.Admin.Shared/app.css"]" />
     <link rel="stylesheet" href="@Assets["_content/SchoolCollab.Admin.Shared/nav.css"]" />

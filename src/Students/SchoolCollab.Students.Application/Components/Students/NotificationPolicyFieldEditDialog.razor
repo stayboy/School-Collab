@@ -28,6 +28,7 @@
 @inject StudentsApiClient Api
 @inject NotificationPolicyApiClient SettingsApi
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <div class="panel-caption">
@@ -65,6 +66,7 @@
                            SavingText="Saving..." OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 
 @code {

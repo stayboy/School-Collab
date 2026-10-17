@@ -22,15 +22,15 @@
 {
     @if (_busy)
     {
-        <FluentProgressRing />
+        <FluentSpinner />
     }
     else if (!string.IsNullOrEmpty(_error))
     {
-        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
     }
     else if (_failures is null || _failures.Count == 0)
     {
-        <FluentMessageBar Intent="MessageIntent.Info">No failed notifications.</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Info">No failed notifications.</FluentMessageBar>
     }
     else
     {
@@ -59,11 +59,11 @@
                         <td>
                             @if (row.NextRetryAt is null)
                             {
-                                <FluentBadge Appearance="Appearance.Neutral">Failed — no more retries</FluentBadge>
+                                <FluentBadge Appearance="BadgeAppearance.Filled">Failed — no more retries</FluentBadge>
                             }
                             else
                             {
-                                <FluentBadge Appearance="Appearance.Lightweight">
+                                <FluentBadge Appearance="BadgeAppearance.Ghost">
                                     Retry scheduled @row.NextRetryAt.Value.ToLocalTime().ToString("g")
                                 </FluentBadge>
                             }

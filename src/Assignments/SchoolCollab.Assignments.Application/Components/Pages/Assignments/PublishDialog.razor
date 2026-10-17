@@ -4,6 +4,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Students.Core.DTOs
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -13,7 +14,7 @@
 
         @if (Model.MandatoryReview)
         {
-            <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-3">
                 Guardian review is required before students can submit.
             </FluentMessageBar>
         }
@@ -24,7 +25,7 @@
         {
             @if (Model.Contacts.Count == 0)
             {
-                <FluentMessageBar Intent="MessageIntent.Warning">No subscribed contacts available to select.</FluentMessageBar>
+                <FluentMessageBar Intent="MessageBarIntent.Warning">No subscribed contacts available to select.</FluentMessageBar>
             }
             else
             {
@@ -42,6 +43,7 @@
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Publish" OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     protected override string SubmitText => "Publish";

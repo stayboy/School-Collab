@@ -2,3 +2,22 @@
 html {
     font-family: 'Segoe UI', system-ui, sans-serif;
 }
+
+/* FluentUI v5 dark-theme flash mitigation — the guide's "Flash effect (optional)" snippet
+   (ThemeLightDark.md); see the Admin host for the full note. Lives here, not inline in
+   App.razor, because this repo forbids inline style/script elements in Razor. */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #292929;
+        color: #ffffff;
+    }
+}
+
+/* FluentUI 5.0.1 removed FluentTextArea.Rows; the textarea's box height now comes from the
+   web component's own `--block-size` token (52px by default — two lines plus chrome), which a
+   host-level `height` cannot change. This host does not load the shared Admin.Shared stylesheet
+   that carries the ladder, so the one class used here is declared locally. Full rationale:
+   src/SchoolCollab.Admin.Shared/wwwroot/app.css. */
+.ta-lines-4 fluent-textarea {
+    --block-size: 92px;
+}

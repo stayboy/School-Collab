@@ -5,6 +5,7 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -18,6 +19,7 @@
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Schedule" OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     protected override string SubmitText => "Schedule";

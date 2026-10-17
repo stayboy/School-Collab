@@ -35,12 +35,12 @@
        never loaded (or resolved empty) disables its own button with the matching title, so an
        unreadable list is never offered as an empty one. *@
     <div class="context-picks__buttons">
-        <FluentButton Id="authoring-add-strand" Appearance="Appearance.Outline"
+        <FluentButton Id="authoring-add-strand" Appearance="ButtonAppearance.Outline"
                       IconStart="@FluentIcons.Add"
                       Disabled="@(Disabled || !StrandsLoaded || StrandOptions.Count == 0)"
                       Title="@StrandPickerTitle"
                       OnClick="OpenStrandDialogAsync">Add strand</FluentButton>
-        <FluentButton Id="authoring-add-lesson" Appearance="Appearance.Outline"
+        <FluentButton Id="authoring-add-lesson" Appearance="ButtonAppearance.Outline"
                       IconStart="@FluentIcons.Add"
                       Disabled="@(Disabled || !LessonsLoaded || LessonOptions.Count == 0)"
                       Title="@LessonPickerTitle"
@@ -251,7 +251,7 @@
         };
 
         return await DialogService.ShowShellDialogAsync<
-            ContextPickDialog, ContextPickDialogModel, ContextPickDialogResult>(model, title, DialogSize.Medium)
+            ContextPickDialog, ContextPickDialogModel, ContextPickDialogResult>(model, title, DialogWidth.Medium)
             is { } result ? result.Ids : null;
     }
 
