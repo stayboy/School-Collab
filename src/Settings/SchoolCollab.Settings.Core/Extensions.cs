@@ -65,6 +65,7 @@ public static class Extensions
         // (injected per call via the handler), so a transient/scoped lifetime
         // is correct.
         services.AddScoped<FeatureFlagAuditor>();
+        services.AddScoped<TemplateAuditRecorder>();
 
         services.AddHybridCache(options =>
         {

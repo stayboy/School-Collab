@@ -226,6 +226,15 @@ var smtpUser        = builder.AddParameter("smtp-user");
 var smtpPassword    = builder.AddParameter("smtp-password", secret: true);
 var smtpFromAddress = builder.AddParameter("smtp-from-address");
 
+// Families public base URL (assignment-notification-templates §3.5): the absolute
+// origin the notification renderer prefixes onto `/l/{code}` short links and
+// `/deeplink/{token}` URLs in outbound email/SMS. FAIL-CLOSED base default is the
+// empty string — empty means "keep today's relative href" — with the dev posture
+// committed in appsettings.Development.json. Fanned to assignments-api ONLY: the
+// Families app builds relative redirects and needs nothing. See
+// documents/configuration.md §2/§11.
+var familiesPublicBaseUrl = builder.AddParameter("families-public-base-url");
+
 // AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
 // see every knob they may need to set in exactly one place — the AppHost's
@@ -362,6 +371,9 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithEnvironment("Smtp__User", smtpUser)
     .WithEnvironment("Smtp__Password", smtpPassword)
     .WithEnvironment("Smtp__FromAddress", smtpFromAddress)
+    // Absolute origin for notification links (assignment-notification-templates §3.5).
+    // Empty ⇒ relative hrefs, which is the fail-closed default.
+    .WithEnvironment("Families__PublicBaseUrl", familiesPublicBaseUrl)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);

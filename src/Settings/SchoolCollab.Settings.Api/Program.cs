@@ -67,6 +67,8 @@ app.MapConfigEndpoints(featureFlags);
 app.MapEntityCodeRuleEndpoints(featureFlags);
 // Notification & Delivery: per-tenant global-default policy (spec §3).
 app.MapNotificationPolicyEndpoints(featureFlags);
+// Notification templates: per-tenant kind × channel store (assignment-notification-templates §5).
+app.MapNotificationTemplateEndpoints(featureFlags);
 // Guardian-signature default (WS-C1 / spec §7 Q1).
 app.MapAssignmentPolicyEndpoints(featureFlags);
 // Guardian sign-off consent text (WS-C2 / spec §3.2).
