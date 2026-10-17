@@ -458,25 +458,31 @@ public class AssignmentAuthoringBunitTests : BunitContext
             TimeSpan.FromSeconds(5));
     }
 
-    /// <summary>Drives the subject picker with the option INSTANCE its own Items hold (a foreign
-    /// instance is not accepted as the selection by the FluentUI control).</summary>
+    /// <summary>Drives the subject picker through the hardened seam above — FluentUI accepts only
+    /// the option INSTANCE its own current <c>Items</c> hold, and the FR-58 group reset rebuilds
+    /// that array, so an un-settled pick is dropped: <c>_selectedSubject</c> stays null and the
+    /// save guard bails without issuing the PUT.</summary>
     private static Task SelectSubjectAsync(IRenderedComponent<Authoring> cut, Guid topicId) =>
-        cut.InvokeAsync(() =>
-        {
-            var picker = Picker(cut, "authoring-basics-subject");
-            var option = picker.Items!.First(o => o.Value == topicId.ToString());
-            return picker.ValueChanged.InvokeAsync(option);
-        });
+        SelectAsync(cut, "authoring-basics-subject", topicId.ToString());
 
     private static ActivityGroupDto Group(Guid id, string name, bool isActive = true) =>
         new(id, name, null, null, null, isActive, "span", null, null, false, [], 0,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     /// <summary>Fills the Basics title through the bound text field's own callback — the save
-    /// guards require a non-empty title (the AssignmentCreateBunitTests precedent).</summary>
-    private static Task SetTitleAsync(IRenderedComponent<Authoring> cut, string title) =>
-        cut.InvokeAsync(() => cut.FindComponents<FluentTextInput>()
+    /// guards require a non-empty title (the AssignmentCreateBunitTests precedent). The title is
+    /// also a save guard, so the one-pass-late cascade has the same "no PUT" signature as the
+    /// subject pick: the drive returns only once the bound value reflects the title.</summary>
+    private static async Task SetTitleAsync(IRenderedComponent<Authoring> cut, string title)
+    {
+        await cut.InvokeAsync(() => cut.FindComponents<FluentTextInput>()
             .Single(f => f.Instance.Id == "authoring-basics-title").Instance.ValueChanged.InvokeAsync(title));
+
+        cut.WaitForAssertion(() => cut.FindComponents<FluentTextInput>()
+                .Single(f => f.Instance.Id == "authoring-basics-title").Instance.Value.Should().Be(title,
+                    "the title is a save guard, so the bound value must reflect it before returning"),
+            TimeSpan.FromSeconds(5));
+    }
 
     // ── Criterion 3: six compartments in all editable modes (D1) + assignment-create-edit-redesign D5/D7 ──
 
@@ -1248,7 +1254,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void ChangingGradingFormat_TogglesEnablement_NotPresence()
+    public async Task ChangingGradingFormat_TogglesEnablement_NotPresence()
     {
         var cut = RenderAuthoring(
             AssignmentAuthoringMode.Edit,
@@ -1256,12 +1262,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
 
         cut.WaitForAssertion(() => ScoringFieldDisabled(cut, "scoringFieldsPassScore").Should().BeTrue());
 
-        var gradingSelect = cut
-            .FindComponents<FluentSelect<Authoring.PickerOption, Authoring.PickerOption>>()
-            .Single(s => s.Instance.Id == "authoring-basics-grading");
-
-        cut.InvokeAsync(() => gradingSelect.Instance.ValueChanged.InvokeAsync(
-            new Authoring.PickerOption(((int)GradingFormatDto.AutoGraded).ToString(), "Auto Scored")));
+        await SelectAsync(cut, "authoring-basics-grading", ((int)GradingFormatDto.AutoGraded).ToString());
 
         cut.WaitForAssertion(() =>
         {

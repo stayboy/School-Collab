@@ -173,3 +173,32 @@ Two observations bundled here: (1) active marking follows the href prefix, so a 
 (2) `/students` appears **twice** in the nav, which may be intentional (a category landing link plus a list link) but reads as a
 duplicate. Round C verified the nav renders, highlights the active item and carries `aria-current` — this is a refinement, not
 a break, which is why it is backlogged rather than fixed inside the repair round that touched the router.
+
+## L. Test-suite stability observations (from the Round D verification loop, 2026-10-16)
+
+Surfaced by the 12-iteration whole-suite Release loop that Round D ran in a 2-CPU Linux container
+(`--filter FullyQualifiedName~Tests.Unit`, 3951 tests). **None of these is caused by Round D** — that round's diff is a single
+test file, and each item below lives in a different file or a different test project.
+
+**Fixed by Round D (the reason the loop ran):** `Edit_RemovingAnActivityGroupEntry_SendsTheReducedTargetSetAndLinks` — the
+subject pick was not settled, so a FluentUI `Items` rebuild could drop it, leaving `_selectedSubject` null and the save guard
+bailing with no PUT (the CI `NotBeNull` on `updateBody`). Now routed through the hardened `SelectAsync`. Result: **0 failures
+across 12 iterations** of the loaded whole-suite run that produced the original failure.
+
+**Deterministic, pre-existing, container-only: `AutoGraded_BindToModelEchoesValues`**
+(`tests/SchoolCollab.Assignments.Tests.Unit/ScoringFieldsSectionBunitTests.cs:108`) — fails **12/12** inside the whole-suite
+container run (~1.0s each), but passes when run alone and passes when its own assembly runs alone (1167/1167). An A/B run of
+the identical command with Round D's diff reverted reproduces the failure exactly (`failed: 1`, 3950 succeeded), so it is not
+Round D's. CI has not exhibited it (all three stack layers are green). Signature suggests cross-assembly interference or a
+container-environment difference rather than a product defect. **Next step if it bites CI:** reproduce with the flake skill's
+loop and check for shared static/ambient state across the unit assemblies.
+
+**Two one-off failures, 1/12 each, both outside the Round D surface:**
+
+| Test | File | Duration | Note |
+|---|---|---|---|
+| `Create_UnsetReviewPolicy_SubmitsTheAuthorsReviewChoice` | `tests/SchoolCollab.Assignments.Tests.Unit/AssignmentCreateBunitTests.cs` | 15.1 s | this is the very file the flake skill names as carrying the case-1 diagnostic wrapper (`_error` dump) — the longest-running failure in the loop, so a contention/cascade shape is suspected |
+| `CodedValueDropdown_WithSelectedId_MarksOptionSelected` | `tests/SchoolCollab.Settings.Tests.Unit/Components/CodedValueDropdownTests.cs` | 59 ms | a shared-component test; `CodedValueDropdown`'s clear-on-stale-selection contract was touched in Round A (Q31), so a late-cascade interaction is plausible |
+
+**Recommended follow-up:** run each through `fix-flaky-bunit-fluentui-after-cascade` before it red-lights a PR — in an atomic
+`gh stack` train a single red test in any layer blocks the whole merge, which is exactly how the Round D work started.
