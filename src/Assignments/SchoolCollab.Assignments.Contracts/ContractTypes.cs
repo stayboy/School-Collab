@@ -669,7 +669,23 @@ public record RecordQuestionGenerationResponse(Guid GenerationId);
 /// <summary>Publish an assignment (spec §8). Optional contact selection:
 /// when <see cref="ContactIds"/> is non-empty, only those subscribed contacts
 /// receive the broadcast; null/empty = all subscribed contacts.</summary>
-public record PublishAssignmentRequest(IReadOnlyList<Guid>? ContactIds);
+public record PublishAssignmentRequest(
+    IReadOnlyList<Guid>? ContactIds,
+    PublishChannel? Channels = null,
+    Guid? PublishEmailTemplateId = null,
+    Guid? PublishSmsTemplateId = null);
+
+/// <summary>Per-sendout medium restriction for a publish (spec §3.8 / Q19).
+/// Per-publish, not persisted; blocked channels still win server-side.</summary>
+public enum PublishChannel
+{
+    /// <summary>Apply the tenant/grade notification policy (default; absent = per policy).</summary>
+    PerPolicy = 0,
+    /// <summary>Email channel only.</summary>
+    EmailOnly = 1,
+    /// <summary>SMS + WhatsApp channels only.</summary>
+    SmsOnly = 2
+}
 
 public record ReviewAssignmentRequest(
     /// <summary>
