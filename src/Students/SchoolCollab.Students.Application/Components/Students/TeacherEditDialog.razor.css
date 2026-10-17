@@ -29,7 +29,9 @@
     gap: 0.5rem;
     width: 100%;
 }
-.name-fields ::deep fluent-text-field {
+/* v5's FluentTextInput renders a `fluent-field` wrapper, so that wrapper is the
+   row's flex child (the inner `fluent-text-input` never is). */
+.name-fields ::deep fluent-field {
     flex: 1;
     min-width: 0;
 }

@@ -16,13 +16,15 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem 1rem;
-    /* Allow the inputs (FluentTextField etc.) to shrink/wrap as the dialog
+    /* Allow the inputs (FluentTextInput etc.) to shrink/wrap as the dialog
        width changes — without this the right column overflows the dialog
        body on narrower viewports. */
     min-width: 0;
 }
 
-.segment-edit-grid ::deep fluent-text-field,
+/* Each v5 input renders a `fluent-field` wrapper, so that wrapper — not the
+   inner `fluent-text-input` — is the grid child that has to shrink and fill. */
+.segment-edit-grid ::deep fluent-field,
 .segment-edit-grid ::deep fluent-dropdown {
     min-width: 0;
     width: 100%;

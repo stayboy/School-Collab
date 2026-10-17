@@ -23,15 +23,15 @@
 @if (!_loaded)
 {
     @* The student profile is still loading. We gate the whole form on
-       _loaded so the <FluentTextField @bind-Value> components are created
-       AFTER the model is populated. FluentUI's fluent-text-field Web
+       _loaded so the <FluentTextInput @bind-Value> components are created
+       AFTER the model is populated. FluentUI's fluent-text-input Web
        Component does not re-sync its internal value when the Blazor Value
        attribute changes after initial connection — rendering it against an
        empty model (the pre-load state) leaves the inputs blank even though
        the model is populated a tick later. Gating on _loaded avoids that
        entirely: the fields connect with the real values on first render. *@
     <div class="student-edit-loading">
-        <FluentProgressRing />
+        <FluentSpinner />
     </div>
 }
 else

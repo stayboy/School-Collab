@@ -151,7 +151,7 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: [], searchEnabled: false);
 
-        cut.FindAll("fluenttextfield").Should().BeEmpty();
+        cut.FindAll("fluent-text-input").Should().BeEmpty();
     }
 
     [TestMethod]
@@ -159,30 +159,35 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: []);
 
-        // Round B converts FluentTextField → FluentField + FluentTextInput (removed in v5, so the
-        // repo renders the unknown element <fluenttextfield> today). Selector tracks the rendered tag.
-        cut.Find("fluenttextfield").GetAttribute("placeholder")
+        // Round B: FluentTextField → FluentTextInput; the component renders
+        // <fluent-field><fluent-text-input>, and the placeholder rides the inner element.
+        cut.Find("fluent-text-input").GetAttribute("placeholder")
             .Should().Be("Search widgets…");
     }
 
     [TestMethod]
     public async Task SearchBox_Change_Fires_SearchTextChanged()
     {
-        var captured = string.Empty;
+        string? captured = null;
         var cb = EventCallback.Factory.Create<string>(this, v => captured = v);
 
         var cut = RenderWrapper(items: [], searchChanged: cb);
 
-        // Round B converts FluentTextField → FluentField + FluentTextInput (removed in v5): today
-        // <fluenttextfield> renders with NO Blazor change handler (its Immediate flags are literal
-        // attributes), so the InputAsync wiring assertion returns with FluentTextInput. Until then
-        // assert the DOM truth: the search box renders with its placeholder and the bound value.
-        var box = cut.Find("fluenttextfield");
+        // Round B: FluentTextInput renders <fluent-field><fluent-text-input>, and the v5 web
+        // component's editable <input> lives in shadow DOM — bUnit cannot reach it, so the
+        // drive seam is the wrapper element's own DOM event. The rendered element carries
+        // blazor:onfocusin/onfocusout/onchange/ontextimmediate; onchange (what .ChangeAsync()
+        // raises) and ontextimmediate (the Immediate=true per-keystroke path) both reach the
+        // component's ValueChanged binding, so driving onchange exercises the same
+        // SearchTextChanged wiring the production search box uses.
+        var box = cut.Find("fluent-text-input");
         box.GetAttribute("placeholder").Should().Be("Search widgets…",
             "the search box renders with its placeholder");
-        box.GetAttribute("value").Should().Be(string.Empty,
-            "the search box renders bound to SearchText");
-        captured.Should().BeEmpty("the change cannot fire until FluentTextInput lands (Round B)");
+
+        await cut.InvokeAsync(() => box.ChangeAsync("W1"));
+
+        captured.Should().Be("W1",
+            "typing into the search box must invoke SearchTextChanged with the typed value");
     }
 
     [TestMethod]

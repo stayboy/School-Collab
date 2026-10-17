@@ -6,29 +6,29 @@
 @inject NavigationManager Nav
 @inject IFeatureFlagService FeatureFlags
 
-<FluentNavMenu Width="250"
-               Title="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
+<FluentNav Width="250"
+               aria-label="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
 
-    <FluentNavLink Href="/"
-                 Icon="@FluentIcons.Home"
+    <FluentNavItem Href="/"
+                 IconRest="@FluentIcons.Home"
                  Match="NavLinkMatch.All">
         Home
-    </FluentNavLink>
+    </FluentNavItem>
 
-    <FluentNavGroup Title="Admin Modules" Expanded="false">
-        <FluentNavLink Href="/settings"
-                        Icon="@FluentIcons.Settings">
+    <FluentNavCategory Title="Admin Modules" Expanded="false">
+        <FluentNavItem Href="/settings"
+                        IconRest="@FluentIcons.Settings">
             Settings
-        </FluentNavLink>
-        <FluentNavLink Href="/assignments"
-                        Icon="@FluentIcons.ClipboardCheckmark">
+        </FluentNavItem>
+        <FluentNavItem Href="/assignments"
+                        IconRest="@FluentIcons.ClipboardCheckmark">
             Assignments
-        </FluentNavLink>
-        <FluentNavLink Href="/students"
-                        Icon="@FluentIcons.People">
+        </FluentNavItem>
+        <FluentNavItem Href="/students"
+                        IconRest="@FluentIcons.People">
             Students
-        </FluentNavLink>
-    </FluentNavGroup>
+        </FluentNavItem>
+    </FluentNavCategory>
 
     @* When the user is on a Coded Values page, show the Coded Values sub-nav
        (parent categories + AI Assistant) regardless of whether they arrived
@@ -38,137 +38,137 @@
        so the drawer is available from any Coded Values page. *@
     @if (_currentModule == "settings" || _currentModule == "coded-values" || _currentModule == "entity-code-rules")
     {
-        <FluentNavGroup Title="Settings"
+        <FluentNavCategory Title="Settings"
                        Expanded="true">
-            <FluentNavLink Href="/settings"
-                          Icon="@FluentIcons.Home">
+            <FluentNavItem Href="/settings"
+                          IconRest="@FluentIcons.Home">
                 Settings Home
-            </FluentNavLink>
+            </FluentNavItem>
 
-            <FluentNavLink Href="/coded-values"
-                          Icon="@FluentIcons.TextBulletList">
+            <FluentNavItem Href="/coded-values"
+                          IconRest="@FluentIcons.TextBulletList">
                 Coded Values
-            </FluentNavLink>
+            </FluentNavItem>
 
-            <FluentNavLink Href="/entity-code-rules"
-                          Icon="@FluentIcons.Tag">
+            <FluentNavItem Href="/entity-code-rules"
+                          IconRest="@FluentIcons.Tag">
                 Generation Rules
-            </FluentNavLink>
+            </FluentNavItem>
 
-            <FluentNavGroup Title="Coded Values"
+            <FluentNavCategory Title="Coded Values"
                            Expanded="true"
-                           Icon="@FluentIcons.Tag">
+                           IconRest="@FluentIcons.Tag">
                 @if (_loadingParents)
                 {
-                   <FluentNavLink Href="#" Disabled="true">
-                      <FluentProgressRing class="progress-ring-small" />
-                   </FluentNavLink>
+                   <FluentNavItem Href="#" Disabled="true">
+                      <FluentSpinner class="progress-ring-small" />
+                   </FluentNavItem>
                 }
                 else if (_parentValues is { Length: > 0 })
                 {
                    foreach (var cv in _parentValues.Take(20))
                    {
-                      <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
-                                    Icon="@FluentIcons.Tag"
+                      <FluentNavItem Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
+                                    IconRest="@FluentIcons.Tag"
                                     Tooltip="@cv.Name">
                           @Truncate(cv.Name, 22)
-                      </FluentNavLink>
+                      </FluentNavItem>
                    }
 
                    if (_parentValues.Length > 20)
                    {
-                      <FluentNavLink Href="/coded-values"
-                                    Icon="@FluentIcons.ArrowExportUp">
+                      <FluentNavItem Href="/coded-values"
+                                    IconRest="@FluentIcons.ArrowExportUp">
                           <i>Show More …</i>
-                      </FluentNavLink>
+                      </FluentNavItem>
                    }
                 }
                 else
                 {
-                   <FluentNavLink Href="/coded-values"
-                                Icon="@FluentIcons.TextBulletList">
+                   <FluentNavItem Href="/coded-values"
+                                IconRest="@FluentIcons.TextBulletList">
                       All Categories
-                   </FluentNavLink>
+                   </FluentNavItem>
                 }
 
                 <hr class="nav-separator" />
 
-                <FluentNavLink Href="/coded-values/chat"
-                              Icon="@FluentIcons.Bot">
+                <FluentNavItem Href="/coded-values/chat"
+                              IconRest="@FluentIcons.Bot">
                    AI Assistant
-                </FluentNavLink>
+                </FluentNavItem>
 
-                <FluentNavLink Href="/coded-values/approvals"
-                              Icon="@FluentIcons.CheckmarkCircleFilled">
+                <FluentNavItem Href="/coded-values/approvals"
+                              IconRest="@FluentIcons.CheckmarkCircleFilled">
                    Approvals
-                </FluentNavLink>
-            </FluentNavGroup>
+                </FluentNavItem>
+            </FluentNavCategory>
 
-            <FluentNavLink Href="/config-flags"
-                          Icon="@FluentIcons.SlideText">
+            <FluentNavItem Href="/config-flags"
+                          IconRest="@FluentIcons.SlideText">
                 Config Flags
-            </FluentNavLink>
-        </FluentNavGroup>
+            </FluentNavItem>
+        </FluentNavCategory>
     }
 
     @if (_currentModule == "assignments")
     {
-        <FluentNavGroup Title="Assignments"
+        <FluentNavCategory Title="Assignments"
                        Expanded="true">
-            <FluentNavLink Href="/assignments"
-                         Icon="@FluentIcons.TextBulletList">
+            <FluentNavItem Href="/assignments"
+                         IconRest="@FluentIcons.TextBulletList">
                All Assignments
-            </FluentNavLink>
-            <FluentNavLink Href="/assignments/create"
-                         Icon="@FluentIcons.Add">
+            </FluentNavItem>
+            <FluentNavItem Href="/assignments/create"
+                         IconRest="@FluentIcons.Add">
                New Assignment
-            </FluentNavLink>
-        </FluentNavGroup>
+            </FluentNavItem>
+        </FluentNavCategory>
     }
 
     @if (_currentModule == "students")
     {
-        <FluentNavGroup Title="Students"
+        <FluentNavCategory Title="Students"
                        Expanded="true">
-            <FluentNavLink Href="/students"
-                         Icon="@FluentIcons.People">
+            <FluentNavItem Href="/students"
+                         IconRest="@FluentIcons.People">
                All Students
-            </FluentNavLink>
-            <FluentNavLink Href="/students/create"
-                         Icon="@FluentIcons.PersonAdd">
+            </FluentNavItem>
+            <FluentNavItem Href="/students/create"
+                         IconRest="@FluentIcons.PersonAdd">
                New Student
-            </FluentNavLink>
-            <FluentNavLink Href="/students/guardians"
-                         Icon="@FluentIcons.People">
+            </FluentNavItem>
+            <FluentNavItem Href="/students/guardians"
+                         IconRest="@FluentIcons.People">
                Guardians
-            </FluentNavLink>
-            <FluentNavLink Href="/students/teachers"
-                         Icon="@FluentIcons.Person">
+            </FluentNavItem>
+            <FluentNavItem Href="/students/teachers"
+                         IconRest="@FluentIcons.Person">
                Teachers
-            </FluentNavLink>
+            </FluentNavItem>
             <hr class="nav-separator" />
-            <FluentNavLink Href="/students/grade-levels"
-                         Icon="@FluentIcons.SlideText">
+            <FluentNavItem Href="/students/grade-levels"
+                         IconRest="@FluentIcons.SlideText">
                Grade Levels
-            </FluentNavLink>
-            <FluentNavLink Href="/students/subjects"
-                         Icon="@FluentIcons.Book">
+            </FluentNavItem>
+            <FluentNavItem Href="/students/subjects"
+                         IconRest="@FluentIcons.Book">
                Subjects
-            </FluentNavLink>
-            <FluentNavLink Href="/students/periods"
-                         Icon="@FluentIcons.Calendar">
+            </FluentNavItem>
+            <FluentNavItem Href="/students/periods"
+                         IconRest="@FluentIcons.Calendar">
                Periods
-            </FluentNavLink>
+            </FluentNavItem>
             <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
-                <FluentNavLink Href="/activity-groups"
-                             Icon="@FluentIcons.People">
+                <FluentNavItem Href="/activity-groups"
+                             IconRest="@FluentIcons.People">
                    Activity Groups
-                </FluentNavLink>
+                </FluentNavItem>
             </FeatureFlagGate>
-        </FluentNavGroup>
+        </FluentNavCategory>
     }
 
-</FluentNavMenu>
+</FluentNav>
 
 @code {
     private CodedValueDto[]? _parentValues;

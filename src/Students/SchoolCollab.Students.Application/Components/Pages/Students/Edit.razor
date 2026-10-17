@@ -31,7 +31,7 @@
             @if (_student is null)
             {
                 <div class="spinner-container">
-                    <FluentProgressRing />
+                    <FluentSpinner />
                 </div>
             }
             else
@@ -162,7 +162,7 @@
                             @if (_enrollments is null)
                             {
                                 <div class="spinner-container">
-                                    <FluentProgressRing />
+                                    <FluentSpinner />
                                 </div>
                             }
                             else if (PrimaryActiveEnrollment is { } active)

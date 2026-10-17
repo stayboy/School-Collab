@@ -49,29 +49,32 @@
         <div class="authoring-page">
             @* D8 (assignment-create-edit-redesign): breadcrumb navigation — the crumb trail sits at
                the top of EVERY branch (spec §6: while `_item` is null — loading or not found — it
-               degrades to `Assignments › …`). First FluentBreadcrumb usage in the repo. *@
+               degrades to `Assignments › …`). v5 removed FluentBreadcrumb/FluentBreadcrumbItem with
+               no replacement, so the trail is authored here: linked crumbs are FluentLinks and the
+               trailing crumb is the current page (a non-link). The landmark, its class and the
+               `›` separators are what the removed pair rendered. *@
             <nav id="authoring-breadcrumb" class="authoring-breadcrumb" aria-label="Breadcrumb">
-                <FluentBreadcrumb>
-                    <FluentBreadcrumbItem Href="/assignments">Assignments</FluentBreadcrumbItem>
-                    @if (Mode == AssignmentAuthoringMode.Create)
-                    {
-                        <FluentBreadcrumbItem>New assignment</FluentBreadcrumbItem>
-                    }
-                    else if (_item is not null)
-                    {
-                        <FluentBreadcrumbItem Href="@($"/assignments/{_item.Id}")">@_item.Title</FluentBreadcrumbItem>
-                        <FluentBreadcrumbItem>@CurrentCrumb</FluentBreadcrumbItem>
-                    }
-                    else
-                    {
-                        <FluentBreadcrumbItem>…</FluentBreadcrumbItem>
-                    }
-                </FluentBreadcrumb>
+                <FluentLink Appearance="LinkAppearance.Default" Href="/assignments">Assignments</FluentLink>
+                <span class="authoring-crumb-separator" aria-hidden="true">›</span>
+                @if (Mode == AssignmentAuthoringMode.Create)
+                {
+                    <span class="authoring-crumb-current" aria-current="page">New assignment</span>
+                }
+                else if (_item is not null)
+                {
+                    <FluentLink Appearance="LinkAppearance.Default" Href="@($"/assignments/{_item.Id}")">@_item.Title</FluentLink>
+                    <span class="authoring-crumb-separator" aria-hidden="true">›</span>
+                    <span class="authoring-crumb-current" aria-current="page">@CurrentCrumb</span>
+                }
+                else
+                {
+                    <span class="authoring-crumb-current" aria-current="page">…</span>
+                }
             </nav>
 
         @if (_loading)
         {
-            <FluentProgressRing />
+            <FluentSpinner />
         }
         else if (Mode != AssignmentAuthoringMode.Create && _item is null)
         {

@@ -8,7 +8,7 @@
    Layout follows the repo-wide FormRow convention: every row has a fixed-
    width 180px label cell on the left and a flex input cell on the right.
    The name row is a single FormRow with the label "Name" and TWO
-   FluentTextField children in the input cell (first + last side-by-side,
+   FluentTextInput children in the input cell (first + last side-by-side,
    each `flex: 1 1 0` so they split the cell equally). This matches the
    same pattern <c>StudentFormFields</c> uses for the student's own
    Name row — a single horizontal label + a flex pair of inputs — so the
@@ -16,7 +16,7 @@
    form, and the picker / dialog fits more fields in less vertical
    space. The Required marker on the row covers both fields (the
    `Required` parameter renders a red asterisk after the label, and
-   each FluentTextField also has its own `Required` HTML attribute for
+   each FluentTextInput also has its own `Required` HTML attribute for
    browser-level validation).
 
    Country calling codes: when the preferred contact channel is SMS or

@@ -26,7 +26,7 @@
     <div class="section-card__body">
         @if (Loading)
         {
-            <FluentProgressRing class="section-card__spinner" />
+            <FluentSpinner class="section-card__spinner" />
         }
         else if (!string.IsNullOrEmpty(ErrorMessage))
         {
