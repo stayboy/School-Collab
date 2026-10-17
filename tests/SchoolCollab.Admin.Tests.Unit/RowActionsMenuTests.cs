@@ -175,6 +175,31 @@ public class RowActionsMenuTests : BunitContext
             .GetAttribute("title").Should().BeNull("no reason, no title attribute"));
     }
 
+    /// <summary>A kebab action's items live inside a <c>&lt;FluentMenuList&gt;</c> under the menu.
+    /// <para>Discriminating: v5's own stylesheet hides <c>fluent-menu-list:not([popover])</c> and the
+    /// menu's JS flips that popover state on trigger click. Bare <c>&lt;FluentMenuItem&gt;</c> children
+    /// under <c>&lt;FluentMenu&gt;</c> are therefore never hidden, so every menu rendered as an
+    /// always-visible inline list and clicking the kebab did nothing — the post-merge "kebab menu is
+    /// broken on Content &amp; Resources" defect (2026-10-17). Assert the STRUCTURE: asserting that the
+    /// items exist passes either way, because the broken markup contained them too.</para></summary>
+    [TestMethod]
+    public void Kebab_KeepsItsItemsInsideAFluentMenuList()
+    {
+        var cut = Render<RowActionsMenu>(p => p
+            .Add(x => x.Actions, new[] { Edit(), Delete() })
+            .Add(x => x.UseMenuService, false));
+
+        cut.Find("fluent-button[title='More actions']").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            var list = cut.Find("fluent-menu fluent-menu-list");
+            list.QuerySelectorAll("fluent-menu-item").Should().HaveCount(2,
+                "the items must be children of the menu list, which is the element v5 hides until the " +
+                "menu is opened");
+        });
+    }
+
     [TestMethod]
     public void HasKebabActions_True_OnlyForTwoOrMoreNonSeparators()
     {

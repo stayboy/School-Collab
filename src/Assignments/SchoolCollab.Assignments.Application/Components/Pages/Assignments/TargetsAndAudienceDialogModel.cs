@@ -16,6 +16,15 @@ public sealed class TargetsAndAudienceDialogModel
     public TargetsAndAudienceCategory Category { get; set; } = TargetsAndAudienceCategory.GradeLevels;
 
     /// <summary>
+    /// The caller's statement that <see cref="Category"/> is <b>already chosen</b>: the page's header
+    /// kebab picks a category before opening the dialog (owner Q88/Q90, round
+    /// <c>targets-panel-kebab</c>), so the dialog hides its own Category row and shows only the value
+    /// picker for that category. Left false (the default) by a caller that presets nothing — the
+    /// summary surface's own Add — which keeps the selector as the one way to choose a category.
+    /// </summary>
+    public bool CategoryLocked { get; init; }
+
+    /// <summary>
     /// The entries picked so far, in pick order — one chip each, and the whole submission: the pickers
     /// append and reset to their placeholder rather than holding a selection, so a double pick must not
     /// mint a duplicate chip (deduped by <c>(Category, RefId)</c>).

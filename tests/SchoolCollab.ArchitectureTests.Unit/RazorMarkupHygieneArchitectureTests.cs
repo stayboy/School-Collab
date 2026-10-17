@@ -35,6 +35,22 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 /// <para>Following the <see cref="DotNetBestPracticesArchitectureTests"/> convention, every rule here was
 /// verified to hold across the current tree before it was enabled — the block-keyword scan reports zero
 /// findings, and the inline-style rule landed only after the three offending files were migrated.</para>
+///
+/// <para>Two CSS rules join them, for the same reason — both classes compile cleanly and fail
+/// <b>silently</b>, and one of them caused a visible post-merge defect during the FluentUI v5 upgrade
+/// (2026-10-17):</para>
+/// <list type="number">
+/// <item><b>A stray <c>*/</c>.</b> A <c>*/</c> written INSIDE comment text closes the comment early; the
+/// leftover text is parsed as CSS and can swallow the rule that follows it. In
+/// <c>ActiveTermToolbar.razor.css</c> a comment spelling <c>--neutral-*</c>-style names ended the comment
+/// mid-sentence, the base <c>.active-term-link</c> rule was consumed as garbage, its <c>--term-fg</c>
+/// never reached the DOM, and the component's <c>var(--term-fg)</c> declarations became invalid — the
+/// toolbar's period text rendered blue-on-blue and invisible.</item>
+/// <item><b>A legacy design token with no fallback.</b> v5 defines no <c>--neutral-*</c> or
+/// <c>--accent-*</c> custom property at all (its design tokens are <c>--color*</c>), so
+/// <c>var(--neutral-stroke-rest)</c> is unresolvable, which makes its <b>whole declaration</b> invalid at
+/// computed-value time and silently dropped — how the folder-tab borders disappeared.</item>
+/// </list>
 /// </summary>
 [TestClass]
 public class RazorMarkupHygieneArchitectureTests
@@ -222,5 +238,118 @@ public class RazorMarkupHygieneArchitectureTests
             "MarkupString is a never — rich/HTML content must go through the shared sanitiser + render " +
             "component (question-response-types §8 Q15), except the two files named in this test. Files:\n" +
             string.Join("\n", failures));
+    }
+
+    /// <summary>
+    /// A <c>*/</c> outside a comment closes an EARLIER comment than the author intended. Everything the
+    /// author meant to keep commented out becomes CSS: the parser can consume the following rule as
+    /// garbage, so a rule vanishes without a build error, a warning or a failing test.
+    ///
+    /// <para>Found in <c>ActiveTermToolbar.razor.css</c> (2026-10-17): a comment naming legacy tokens
+    /// contained <c>--neutral-*/--accent-*</c>, whose <c>*/</c> ended the comment early and swallowed the
+    /// base <c>.active-term-link</c> rule — the toolbar's period text then fell back to the link's own
+    /// accent colour and rendered blue on the blue header.</para>
+    /// </summary>
+    [TestMethod]
+    public void NoStrayCommentTerminator_InCss()
+    {
+        var failures = new List<string>();
+
+        foreach (var file in SourceFiles([".css"]))
+        {
+            var text = File.ReadAllText(file);
+            var inComment = false;
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                var pair = i + 1 < text.Length ? text.Substring(i, 2) : null;
+
+                if (pair == "/*")
+                {
+                    inComment = true;
+                    i++;
+                    continue;
+                }
+
+                if (pair != "*/")
+                {
+                    continue;
+                }
+
+                if (!inComment)
+                {
+                    var line = text.Take(i).Count(c => c == '\n') + 1;
+                    failures.Add(
+                        $"{Relative(file)}:{line} — a '*/' appears OUTSIDE a comment. It closes an earlier " +
+                        "comment than intended, and the leftover text is parsed as CSS — which can consume " +
+                        "the next rule whole, silently. Rewrite the comment so it contains no '*/'.");
+                    break;
+                }
+
+                inComment = false;
+                i++;
+            }
+
+            if (inComment)
+            {
+                failures.Add($"{Relative(file)} — a '/*' is never closed.");
+            }
+        }
+
+        failures.Should().BeEmpty(string.Join(Environment.NewLine, failures));
+    }
+
+    /// <summary>
+    /// The files whose v4 design tokens silently died in v5 must reference the v5 vocabulary
+    /// (<c>--color*</c>) and carry no bare legacy token. Each of these two files caused a visible
+    /// post-merge regression when its token stopped resolving: the toolbar's period text became
+    /// blue-on-blue and the folder-tab borders vanished.
+    ///
+    /// <para>A fallback would also make a legacy name harmless (<c>var(--neutral-x, #d1d1d1)</c>), but
+    /// these two are repointed rather than patched, so the intent is visible: use the token the design
+    /// system actually defines. The rest of the tree still carries legacy usages (102 without a
+    /// fallback, tracked in <c>documents/solution/fluentui-v5-residual-backlog.md</c>); this rule pins the
+    /// two regressions that were actually observed and must not creep back.</para>
+    /// </summary>
+    [TestMethod]
+    public void RepointedFiles_UseTheV5ColourTokens_WithNoBareLegacyToken()
+    {
+        // Path fragments, normalised to '/', so the check holds whichever separator a caller reports.
+        string[] repointed =
+        [
+            "Students.Application/Components/Toolbar/ActiveTermToolbar.razor.css",
+            "Admin.Shared/Components/FluentTabStrip.razor.css",
+        ];
+
+        var failures = new List<string>();
+
+        foreach (var file in SourceFiles([".css"]))
+        {
+            var rel = Relative(file).Replace('\\', '/');
+            var match = repointed.FirstOrDefault(r => rel.EndsWith(r, StringComparison.OrdinalIgnoreCase));
+            if (match is null)
+            {
+                continue;
+            }
+
+            var text = File.ReadAllText(file);
+
+            // The declared value, not the fallback: a bare `var(--neutral-…)` is the defect.
+            foreach (Match token in Regex.Matches(text, @"var\(\s*--(?:neutral|accent|foreground-on)[a-z0-9-]*\s*\)"))
+            {
+                var line = text.Take(token.Index).Count(c => c == '\n') + 1;
+                failures.Add(
+                    $"{rel}:{line} — '{token.Value}' names a v4 token that v5 does not define, so the " +
+                    "whole declaration is dropped silently. Use the v5 token (--color*) or give the " +
+                    "legacy name a literal fallback.");
+            }
+
+            if (!text.Contains("--color", StringComparison.Ordinal))
+            {
+                failures.Add($"{rel} — expected at least one v5 '--color*' token reference; none found.");
+            }
+        }
+
+        failures.Should().BeEmpty(string.Join(Environment.NewLine, failures));
     }
 }
