@@ -16,12 +16,7 @@ public static class NotificationTemplateEndpoints
     {
         var group = app.MapGroup("/api/settings");
 
-        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            group.RequireAuthorization(policy => policy
-                .RequireAuthenticatedUser()
-                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
-        }
+        group.RequireAuthIfOidc(featureFlags);
 
         group.MapNotificationTemplateRoutes();
 

@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Settings.Api.Endpoints;
@@ -17,12 +16,7 @@ public static class AssignmentPolicyEndpoints
     {
         var group = app.MapGroup("/api/settings");
 
-        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            group.RequireAuthorization(policy => policy
-                .RequireAuthenticatedUser()
-                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
-        }
+        group.RequireAuthIfOidc(featureFlags);
 
         group.MapAssignmentPolicyRoutes();
 
