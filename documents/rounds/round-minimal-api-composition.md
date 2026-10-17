@@ -1,6 +1,6 @@
 # Round — minimal-api-composition
 
-**Status:** CLOSED — implemented and verified, **uncommitted** (no commit/PR/branch per the repo's gate; tree sits on `feat/notification-templates-round-a`, which is NOT this round's branch — see §Acceptance residual)
+**Status:** CLOSED — verified; delivered on `feat/minimal-api-composition`, PR #363
 **Tier:** 2 (light) · **Mode:** attended · **Provider:** clinepass
 **Worker:** `cline-pass/deepseek-v4.1-flash` · **Reviewer:** `cline-pass/glm-5.3-flash` (substituted — the profile id `cline-pass/mimo-v2.6-flash` is not in this session's registry; still ≠ the worker's model)
 **Round base:** `10e00ae3`
@@ -114,5 +114,8 @@ and CPM (no Never-list hits, XML docs present, no inline versions, minimal refer
 2. **Schema debt:** 0 of 212 documented operations declare a response schema; D2 (new/touched endpoints
    only) is the path. The pin forces the number up deliberately.
 3. **Deferred by decision:** `AssignmentRoutes.cs` split (D5); `.http` artifacts (D6).
-4. **Branch hygiene:** the tree sits on `feat/notification-templates-round-a`, an unrelated branch. This
-   work needs its own branch before commit; nothing is staged and no commit/PR was made (repo gate).
+4. **Delivery:** committed on `feat/minimal-api-composition` (off `origin/main` at `d3328320`) as three
+   commits + a docs commit, PR #363 to `main`. The round started on
+   `feat/notification-templates-round-a`; that branch's PR #362 merged while the round was open, which
+   dissolved the file dependency (`NotificationTemplateEndpoints.cs` now exists on `main`) and reverted
+   the delivery to a plain `main`-based PR.
