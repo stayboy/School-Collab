@@ -459,6 +459,136 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.ToTable("flag_audit_entries", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TemplateAuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("actor_display_name");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ChangeKind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("change_kind");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("NewBody")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("new_body");
+
+                    b.Property<string>("NewConstraints")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("new_constraints");
+
+                    b.Property<string>("NewSubject")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("new_subject");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("PreviousBody")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("previous_body");
+
+                    b.Property<string>("PreviousConstraints")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("previous_constraints");
+
+                    b.Property<string>("PreviousSubject")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("previous_subject");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("reason");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("template_id");
+
+                    b.Property<string>("TemplateKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("template_key");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_template_audit_entries");
+
+                    b.HasIndex("TemplateId", "OccurredAt")
+                        .HasDatabaseName("ix_template_audit_entries_template_occurred");
+
+                    b.HasIndex("TenantId", "OccurredAt")
+                        .HasDatabaseName("ix_template_audit_entries_tenant_occurred");
+
+                    b.ToTable("template_audit_entries", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TemplateConstraint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Dimension")
+                        .HasColumnType("integer")
+                        .HasColumnName("dimension");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("template_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id")
+                        .HasName("pk_template_constraints");
+
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("ix_template_constraints_template");
+
+                    b.ToTable("template_constraints", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.Tenant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -916,6 +1046,70 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.ToTable("tenant_notification_policies", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantNotificationTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("body");
+
+                    b.Property<int>("Channel")
+                        .HasColumnType("integer")
+                        .HasColumnName("channel");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("subject");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenant_notification_templates");
+
+                    b.HasIndex("TenantId", "Kind", "Channel")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_notification_templates_tenant_kind_channel")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("tenant_notification_templates", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantSignatureConsentText", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1158,6 +1352,16 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.Navigation("Segments");
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TemplateConstraint", b =>
+                {
+                    b.HasOne("SchoolCollab.Settings.Core.Domain.TenantNotificationTemplate", null)
+                        .WithMany("Constraints")
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_template_constraints_tenant_notification_templates_template");
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantFeatureFlagOverride", b =>
                 {
                     b.HasOne("SchoolCollab.Settings.Core.Domain.FeatureFlag", null)
@@ -1166,6 +1370,11 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_tenant_flag_overrides_feature_flags_feature_flag_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantNotificationTemplate", b =>
+                {
+                    b.Navigation("Constraints");
                 });
 #pragma warning restore 612, 618
         }
