@@ -8,44 +8,55 @@
    targeting the FluentLink root would silently fail to match -- the same
    scope mismatch documented in MainLayout.razor.css. The plain wrapper
    receives the Students Application scope, so the rules here apply. The inner
-   FluentLink picks up the color via the CSS custom properties we publish
-   on the wrapper (which it reads inside its shadow DOM). */
+   FluentLink does NOT take its color from CSS custom properties published on this
+   wrapper: v5's FluentLink shadow root is just a <slot>, and the v4 design tokens
+   (--neutral-foreground-rest, --foreground-on-accent-rest) are gone from v5 — no
+   shipped v5 asset defines any --neutral-* or --accent-* property, so the link keeps its
+   own accent color and the text vanished blue-on-blue. The slotted spans below are
+   authored HERE, so colouring them directly is what actually paints the text
+   (post-merge defect, 2026-10-17). */
 .active-term-link {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    /* The header sits on the active OfficeColor accent. Content on an
-       accent fill must use the FluentUI "foreground-on-accent" tokens, not
-       the neutral foreground (which is tuned for the body canvas). The
-       tokens are defined by <fluent-header> on itself, so they cascade into
-       us. The white literal is a safety net in case the design system is
-       not yet bootstrapped. */
-    --link-fg: var(--foreground-on-accent-rest, #ffffff);
-    --link-fg-hover: var(--foreground-on-accent-hover, #ffffff);
-    --link-fg-active: var(--foreground-on-accent-active, #ffffff);
-    color: var(--link-fg);
+    /* The header paints --colorBrandBackground (measured rgb(15,108,189) = #0f6cbd
+       at runtime), so its content must use the matching on-brand token. v4 got this
+       from <fluent-header> publishing --foreground-on-accent-*; v5 has no FluentHeader
+       and defines no --neutral-* or --accent-* property at all (its design tokens are
+       --color*), so those old var()s were silently dropped. The literal fallback keeps
+       the text visible even if the token is ever absent. */
+    --term-fg: var(--colorNeutralForegroundOnBrand, #ffffff);
+    color: var(--term-fg);
     font-size: 0.85rem;
     line-height: 1.2;
     white-space: nowrap;
     background: transparent;
     border: none;
     padding: 0;
-    /* Push the same color into the FluentLink's Hypertext shadow tokens so
-       the icon and the link's underline use the contrasting color too. */
-    --neutral-foreground-rest: var(--link-fg);
-    --accent-foreground-rest: var(--link-fg);
-    --accent-foreground-hover: var(--link-fg-hover);
-    --accent-foreground-active: var(--link-fg-active);
-    --accent-foreground-focus: var(--link-fg-hover);
 }
 
 .active-term-link:hover {
-    color: var(--link-fg-hover);
+    color: var(--term-fg);
     text-decoration: underline;
 }
 
 .active-term-link:active {
-    color: var(--link-fg-active);
+    color: var(--term-fg);
+}
+
+/* The link's own text is slotted light-DOM content authored in this component, so
+   these scoped rules are what colour it — not the (ignored) token push on the
+   wrapper. Specificity (0,2,0) also beats the plain .active-term-name rule below. */
+.active-term-link .active-term-name,
+.active-term-link .active-term-muted {
+    color: var(--term-fg);
+}
+
+/* FluentIcon renders its own <svg> (it is a child component, so the svg carries the
+   CHILD's scope attribute and only ::deep from our own wrapper reaches it). The svg
+   carries an inline `fill: currentColor`, so setting `color` here colours the glyph. */
+.active-term-link ::deep svg {
+    color: var(--term-fg);
 }
 
 .active-term-name {

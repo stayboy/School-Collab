@@ -16,10 +16,13 @@
    with 0 actions still render nothing. Use <see cref="HasKebabActions"/> to
    compute the grid-level flag from a row-action builder.
 
-   FluentMenu 5.0.1 removed the menu provider (and with it Anchor → Trigger,
-   UseMenuService and Open): the menu always renders inline and is positioned from
-   the trigger element by the web component, so it is never clipped by the grid's
-   scroll container. The trigger button's Id and the menu's Id are auto-generated per
+   FluentMenu 5.0.1 removed the menu provider (Anchor → Trigger, UseMenuService and
+   Open gone) and moved the popover state onto the menu's LIST child: the library's
+   own stylesheet hides `fluent-menu-list:not([popover])`, and the menu's JS flips
+   that state when the trigger is clicked. The items therefore MUST be wrapped in a
+   <FluentMenuList> — bare <FluentMenuItem> children under <FluentMenu> render inline
+   and permanently visible, with the trigger doing nothing (post-merge defect
+   2026-10-17). The trigger button's Id and the menu's Id are auto-generated per
    instance so multiple rows each get a unique trigger pair. *@
 @using SchoolCollab.Admin.Shared.Constants
 @inject NavigationManager Nav
@@ -60,13 +63,15 @@
     </FluentButton>
 
     @* FluentMenu 5.0.1 renamed Anchor to Trigger (still the HTML id of the element
-       that toggles the menu) and removed UseMenuService — the menu provider is gone,
-       so every menu now renders inline. There is no Open parameter either: the menu's
-       state is reported back through OpenedChanged, which is what keeps the trigger's
-       aria-expanded honest. The web component itself handles the trigger's click. *@
+       that toggles the menu) and removed UseMenuService/Open. The items go in a
+       <FluentMenuList>: v5 hides `fluent-menu-list:not([popover])` and flips that
+       popover state on trigger click, which is also what reports back through
+       OpenedChanged (keeping aria-expanded honest). Without the list wrapper the
+       items are always visible and the trigger does nothing. *@
     <FluentMenu Id="@_menuId"
                 Trigger="@_buttonId"
                 OpenedChanged="@(opened => _open = opened)">
+        <FluentMenuList>
         @foreach (var action in Actions)
         {
             @if (action.IsSeparator)
@@ -89,6 +94,7 @@
                 </FluentMenuItem>
             }
         }
+        </FluentMenuList>
     </FluentMenu>
     }
 </span>
@@ -124,10 +130,11 @@
 
     /// <summary>
     /// Retained for call-site compatibility only: FluentUI 5.0.1 removed
-    /// <c>FluentMenu.UseMenuService</c> together with the menu provider, so a
-    /// <c>FluentMenu</c> always renders inline and this flag no longer changes
-    /// anything. Callers that pass <c>false</c> in bUnit hosts (so items are
-    /// assertable in the markup) keep working unchanged.
+    /// <c>FluentMenu.UseMenuService</c> together with the menu provider, and the items
+    /// are always present in the markup (nested in a <c>FluentMenuList</c>) whatever
+    /// the open state, so this flag no longer changes anything. Callers that pass
+    /// <c>false</c> in bUnit hosts (items assertable in the markup) keep working
+    /// unchanged.
     /// </summary>
     [Parameter]
     public bool UseMenuService { get; set; } = true;

@@ -84,8 +84,10 @@ show a recovery UI instead of crashing the whole layout:
 
 ## `@key` on dynamic lists
 
-Any `@foreach` that renders child components or elements **must** include `@key` so
-Blazor's diffing algorithm can reuse existing DOM nodes instead of re-creating them:
+`@key` is **required** on a `@foreach`/`@for` whose collection can reorder, insert in the
+middle, or filter, and on any loop rendering **components that own state** (an editor row, a
+bound input, anything held by `@ref`) — there Blazor must match nodes to items, and without
+a key it diffs by position, tearing down and re-creating DOM and losing that state:
 
 ```razor
 @* ✅ correct *@
@@ -100,6 +102,17 @@ Blazor's diffing algorithm can reuse existing DOM nodes instead of re-creating t
     <FluentBadge>@attr.Key=@attr.Value</FluentBadge>
 }
 ```
+
+**Exempt: append-only, purely presentational rows** — a list that is only appended to, whose
+rows are plain markup (a label, an action button) and hold no state of their own. Positional
+diffing is correct there, and a key can be *worse* than none: a value key that can legitimately
+repeat (the user adds the same entity twice) throws `InvalidOperationException` at render.
+When you rely on this exemption, **say so in a comment** on the loop, so the missing `@key`
+does not read as an oversight.
+
+*(Owner, 2026-10-17: narrowed from an unconditional "must" after a review measured 66 of 80
+loops in `src/**/*.razor` unkeyed — a rule most of the codebase ignores weakens every rule
+beside it.)*
 
 ## Component parameters
 
@@ -496,6 +509,28 @@ fix) must account for it. And the same consumer-scoped pattern constrains conten
 that would otherwise overflow a shared pill/chip in a grid cell —
 `.my-cell ::deep .chip { max-width: 100%; }` (long strand names claimed whole
 rows until that was added).
+
+### FluentUI v5 tokens: only `--color*` exists — a dead `var()` is dropped silently
+
+v5 defines **no** `--neutral-*` / `--accent-*` custom property at all (its 481 design tokens are `--color*`), so a `var()`
+naming one of the v4 names makes its **whole declaration** invalid at computed-value time and the browser drops it: no
+build error, no console warning, and no bUnit test can see it. `border: 1px solid var(--neutral-stroke-rest)` renders as
+a `0px` border, and the rule still looks “applied” because its other properties took effect. Two post-merge UI defects
+hid this way (2026-10-17): an invisible toolbar period pill and vanished folder-tab borders.
+
+- Use the v5 name and keep the old value as a **literal fallback**: `var(--colorNeutralStroke1, #d1d1d1)`. The fallback is
+  what stops a typo or a future rename from failing silently again.
+- Read the real name off the DOM rather than guessing:
+  `getComputedStyle(document.documentElement).getPropertyValue('--colorNeutralForegroundOnBrand')`.
+- **Never write `*/` inside a CSS comment.** It closes the comment early; the leftover text is parsed as CSS and can
+  swallow the rule that follows *whole*, silently. This cost a full debugging cycle on `ActiveTermToolbar.razor.css`
+  (2026-10-17). Guarded by `NoStrayCommentTerminator_InCss`.
+- `FluentLink`'s shadow root is only a `<slot>`: its text is slotted light-DOM content, so colour **the slotted element**
+  (plus `::deep svg` for its icon) — do not try to push tokens into the link.
+- `FluentIcon` renders a bare `<svg style="fill: currentColor">`; target `svg` from your own wrapper via `::deep`.
+
+A value fix is **not** proven by a green build or a passing test. Verify the **computed** value in a live browser with the
+HTTP cache disabled, or a stale scoped-CSS bundle will look exactly like a fix that did not work.
 
 ### Global styles in `wwwroot/app.css`
 

@@ -202,3 +202,65 @@ loop and check for shared static/ambient state across the unit assemblies.
 
 **Recommended follow-up:** run each through `fix-flaky-bunit-fluentui-after-cascade` before it red-lights a PR — in an atomic
 `gh stack` train a single red test in any layer blocks the whole merge, which is exactly how the Round D work started.
+
+---
+
+## M. Dead v4 design tokens across the CSS — 102 usages with no fallback (found 2026-10-17, post-merge)
+
+**Why this is a class, not a typo.** v5 defines **no** `--neutral-*` / `--accent-*` custom property at all: it ships
+**481** design tokens under the Fluent v9 `--color*` vocabulary (`--colorNeutralStroke1`, `--colorNeutralBackground1`,
+`--colorNeutralForegroundOnBrand`, `--colorBrandBackground`, …). In v4 those legacy names were supplied by the
+design-system provider the port deleted. A `var()` naming a token that does not exist makes its **whole declaration**
+invalid at computed-value time, and the browser drops it **silently** — no build error, no console warning, and bUnit
+cannot see it. Measured on the running app: `border: 1px solid var(--neutral-stroke-rest)` computed to
+`border-top-width: 0px`, while the same rule's `border-radius` / `padding` / `background` still applied.
+
+**Counts (measured 2026-10-17 over `src/**/*.css`, including `.razor.css`):**
+
+| Usage | Count |
+|---|---|
+| legacy token with **no** fallback — the declaration dies | **102** |
+| legacy token **with** a fallback — survives, but now always takes the fallback, so the design system no longer drives it | 207 |
+
+Worst offenders: `Assignments.Application/…/AssignmentAuthoring.razor.css` (16), `…/ResourcesSection.razor.css` (13),
+`Students.Application/…/GradeLevels/Detail.razor.css` (7), `…/QuestionEditorSection.razor.css` (6),
+`…/QuestionGenerationSection.razor.css` (5).
+
+Two of the 102 were **visible** post-merge defects and are fixed with guards this round (the toolbar period pill and the
+folder-tab borders) — see `round-fluentui-v5-postfix.md`.
+
+**Repair recipe (per usage):** repoint at the v5 token and keep the old value as a **literal fallback**, e.g.
+`var(--colorNeutralStroke1, #d1d1d1)`. Read the real name off the live DOM rather than guessing
+(`getComputedStyle(document.documentElement).getPropertyValue('--colorNeutralStroke1')`), and grep the v5 bundle
+(`…/5.0.1/staticwebassets/Microsoft.FluentUI.AspNetCore.Components.bundle.scp.css`) for the component's own rules — that
+is where the actual look-and-feel values live. **Do not** convert them to bare literals wholesale: the tokens are how
+light/dark and brand changes reach the UI.
+
+**Verification:** a value fix is **not** proven by a green build or a passing bUnit test — both are blind to it. Check the
+**computed** value in a live browser with the HTTP cache disabled (`Network.setCacheDisabled`), because a stale scoped-CSS
+bundle otherwise looks exactly like a fix that did not work (that cost this round two builds, on top of the stray-`*/`
+trap below).
+
+**Two traps that made this class invisible, both now guarded:** (a) an unresolvable `var()` kills only its own
+declaration, so the surviving properties make the rule look “applied”; (b) a `*/` written inside a CSS comment closes it
+early and can swallow the *next whole rule* — `NoStrayCommentTerminator_InCss` and
+`RepointedFiles_UseTheV5ColourTokens_WithNoBareLegacyToken` in `RazorMarkupHygieneArchitectureTests`.
+
+---
+
+## N. Cleanup + environment observations (from round `targets-panel-kebab`, 2026-10-17)
+
+**N.1 — Dead Rules-era CSS (reviewer P2, accepted as a backlog item).** `AssignmentAuthoring.razor.css` still carries
+`.authoring-rules-card :deep(.section-card__header)` (≈line 240) from the round that moved Rules onto `PanelSection`. It
+matches nothing now. Harmless (the panel header has no padding to undo), but it is a lie about what renders; delete it
+in a cleanup pass. The surrounding stale prose — the rules comment claiming a `SectionCard`, the `section-card-style`
+mode, the old "Targets & audience" casing — was corrected in this round rather than parked.
+
+**N.2 — Two environment observations, no code action.** (i) The first app launch of this round came up with every
+service idle and port 7300 held by Aspire's `dcp` proxy, answering nothing for 30 s per request; two Aspire container
+generations were present (a 2-day-old `postgres`/`rabbitmq` pair plus a fresh set). A clean relaunch fixed it, so it is
+orchestration state, not a defect from the change — but it cost ~15 minutes, and `documents/runbooks/dev-loop-hot-reload.md`
+is the right home if it recurs. (ii) `SchoolCollab.ArchitectureTests.Unit` reports `total: 0 / Failed!`
+(no test ran) — but only **when the three unit suites are run back-to-back inside one shell invocation**; the identical
+standalone command then passes **116/116** (observed twice during round `targets-panel-kebab`, 2026-10-17). Same transient
+family as §L: suspect testhost/process contention before suspecting the suite, and run the scanner as its own command.

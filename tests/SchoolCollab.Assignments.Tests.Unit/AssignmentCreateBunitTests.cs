@@ -252,16 +252,17 @@ public class AssignmentCreateBunitTests : BunitContext
     private static FluentSelect<Authoring.PickerOption, Authoring.PickerOption> Picker(IRenderedComponent<CreatePage> cut, string id) =>
         cut.FindComponents<FluentSelect<Authoring.PickerOption, Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
-    /// <summary>Renders the create page and waits for the builder's Add action to be live — the create
+    /// <summary>Renders the create page and waits for the builder's add affordance to be live — the create
     /// surface's load marker now that there is no grade picker to wait on (round
     /// <c>drop-primary-grade</c>: Create-mode <c>_loading</c> is false from the start, so a rendered form is
-    /// not evidence the load finished; the Add button is rendered only by the loaded surface).
+    /// not evidence the load finished; the header kebab is rendered only by the loaded surface — round
+    /// <c>targets-panel-kebab</c> replaced the old <c>fluent-button[title='Add target']</c> with it).
     /// </summary>
     private IRenderedComponent<CreatePage> RenderCreatePage()
     {
         var cut = Render<CreatePage>();
         cut.WaitForAssertion(() =>
-            cut.FindAll("#authoring-targets fluent-button[title='Add target']").Should().NotBeEmpty(
+            cut.FindAll("#authoring-targets fluent-button[title='Add a target']").Should().NotBeEmpty(
                 "the create surface must be loaded and live before the first authoring step"),
             TimeSpan.FromSeconds(5));
         return cut;
@@ -286,13 +287,23 @@ public class AssignmentCreateBunitTests : BunitContext
         }, DialogRoundTripBudget);
     }
 
-    /// <summary>Adds ONE grade-level target through the builder's Add dialog (the mocked dialog returns
-    /// it) and waits for the FR-58 subject union that target feeds to land — round
+    /// <summary>Adds ONE grade-level target through the builder's header kebab (round
+    /// <c>targets-panel-kebab</c>: the add affordance is the kebab's "Add grade levels" item now, driven
+    /// through the v5 <c>onmenuitemchange</c> event — see <see cref="FluentMenuItemTestEvent"/>) and waits
+    /// for the FR-58 subject union that target feeds to land — round
     /// <c>drop-primary-grade</c>: the grade TARGET is the create surface's grade scope, and it is what the
     /// subject picker's options (and the derived signature default) follow.</summary>
     private static async Task AddGradeTargetAsync(IRenderedComponent<CreatePage> cut, string label)
     {
-        await cut.InvokeAsync(() => cut.Find("fluent-button[title='Add target']").Click());
+        await cut.InvokeAsync(() =>
+        {
+            cut.Find("fluent-button[title='Add a target']").Click();
+            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+                .Single(m => m.Instance.AriaLabel == "Add a target")
+                .FindAll("fluent-menu-item")
+                .Single(i => i.TextContent.Trim() == "Add grade levels")
+                .MenuItemClick();
+        });
 
         cut.WaitForAssertion(() =>
         {

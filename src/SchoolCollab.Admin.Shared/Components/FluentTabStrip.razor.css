@@ -11,8 +11,14 @@
     width: 100%;
 }
 
+/* The stroke/fill values are v5's own design tokens --colorNeutralStroke1 (#d1d1d1)
+   and --colorNeutralBackground1 (#ffffff), each with its literal as fallback. v5
+   defines no --neutral-* property at all (its tokens are --color*), so the v4 var()
+   here — which the deleted design-system provider used to supply — made the whole
+   `border` shorthand invalid at computed-value time and it was silently dropped
+   (post-merge defect, 2026-10-17). */
 .fluent-tab-strip ::deep fluent-tab {
-    border: 1px solid var(--neutral-stroke-rest);
+    border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
     border-radius: 6px 6px 0 0;
     background: transparent;
     margin: 0 4px -1px 0;
@@ -27,7 +33,7 @@
    the only place the content area's top line is allowed to break. */
 .fluent-tab-strip ::deep fluent-tab[aria-selected="true"] {
     border-bottom-color: transparent;
-    background: var(--neutral-layer-1, #ffffff);
+    background: var(--colorNeutralBackground1, #ffffff);
     font-weight: 600;
 }
 
@@ -42,7 +48,7 @@
 /* v5's panels are <div class="fluent-tab-panel" role="tabpanel"> — FluentTab.razor.cs ClassValue adds
    the `fluent-tab-panel` CLASS; the v4 `fluent-tab-panel` ELEMENT no longer exists. */
 .fluent-tab-strip ::deep .fluent-tab-panel:not([hidden]) {
-    border: 1px solid var(--neutral-stroke-rest);
+    border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
     border-radius: 0 0 6px 6px;
     padding: 12px;
     margin-top: 0;

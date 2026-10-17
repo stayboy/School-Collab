@@ -19,15 +19,23 @@
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
-        <FormRow Label="Category" Required For="ta-category">
-            <FluentSelect TOption="CategoryOption" TValue="CategoryOption" Id="ta-category"
-                          Items="CategoryOptions"
-                          Value="@SelectedCategory"
-                          ValueChanged="@OnCategoryChanged"
-                          OptionText="@(o => o.Label)"
-                          OptionValueToString="@(o => o.Value.ToString())"
-                          class="full-width" />
-        </FormRow>
+        @* Owner Q90 (round targets-panel-kebab): the Category row renders ONLY while nothing is
+           preset. The page's header kebab already chose the category for this dialog (one menu item
+           per category), so asking again would be a redundant step the author cannot answer — while
+           the summary surface's own Add presets nothing and keeps the selector, which is its only
+           way to pick a category. *@
+        @if (!Model.CategoryLocked)
+        {
+            <FormRow Label="Category" Required For="ta-category">
+                <FluentSelect TOption="CategoryOption" TValue="CategoryOption" Id="ta-category"
+                              Items="CategoryOptions"
+                              Value="@SelectedCategory"
+                              ValueChanged="@OnCategoryChanged"
+                              OptionText="@(o => o.Label)"
+                              OptionValueToString="@(o => o.Value.ToString())"
+                              class="full-width" />
+            </FormRow>
+        }
 
         @* The picked-targets zone: ALWAYS rendered, so the pills have a demarcated home before the
            first pick and the author sees where a pick will land — an empty zone reads as "nothing

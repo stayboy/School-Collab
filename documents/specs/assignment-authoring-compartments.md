@@ -289,6 +289,26 @@ matched** and **contacts reachable** (after policy filtering). The preview is
 resolved server-side from the current constraint set, debounced, and is advisory
 only — publish re-resolves fresh.
 
+### 7.6 Targeting entry on the create/edit surface
+
+*(Recorded 2026-10-17, round `targets-panel-kebab`, owner Q86–Q93 — the entry flow the
+TGT-1..TGT-7 model is authored through.)*
+
+- The **create/edit surface** enters targets through the **Targets & Audience panel's header
+  kebab** — one item per category (`Add grade levels`, `Add streams`, `Add students`,
+  `Add activity groups`, `Add everyone`) — with **no Add button** and no per-category button
+  row. The panel is the shared `PanelSection` treatment Content & Resources and Rules already
+  wear. The read-only **summary** surface (`FluentAccordion` + card) is unchanged and keeps its
+  own Add, which is the one path that does not preset a category.
+- **The dialog's category selector appears only when the caller did not preset a category.**
+  A kebab item presets it, so the author never re-picks what they just clicked; the summary's
+  Add presets nothing and therefore keeps the selector as its only way to choose one. Everyone
+  is one of the five preset items — the dialog's Everyone branch is a one-click confirm — so
+  **TGT-2**'s exclusive-clear rule stays implemented in exactly one place (the page's merge).
+- A disabled builder (the UX-21 load failure, or View mode) renders **no** add affordance other
+  than the kebab: every item is disabled and names the reason, and the reason stays a **visible**
+  paragraph — never a tooltip-only explanation.
+
 ---
 
 ## 8. AI question generation action

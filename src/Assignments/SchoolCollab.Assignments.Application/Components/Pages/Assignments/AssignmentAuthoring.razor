@@ -529,45 +529,58 @@
                             </section>
                         }
 
-                        @* The card keeps SectionCard's native header Add (grill Q4) and its header IS the
-                           compartment's single title — the section renders no <h3> of its own. The Add is
-                           wired through SectionCard's own ShowAddButton (the card header shows no Add while
-                           the audience editor is disabled) and the disabled state renders the
-                           disabled-with-reason replacement below the card. *@
-                        <SectionCard TItem="TargetsAndAudienceEntry"
-                                     Title="Targets & audience"
-                                     Count="@_targetsAndAudience.Count"
-                                     ShowAddButton="@BuilderAddEnabled"
-                                     AddTitle="Add target"
-                                     AddAriaLabel="Add target"
-                                     OnAddClick="@OpenTargetsAndAudienceDialogAsync"
-                                     Items="@_targetsAndAudience.ToArray()"
-                                     EmptyMessage="No targets yet. Click + to add.">
-                            <ItemTemplate Context="entry">
-                                <div class="targets-audience-item">
-                                    <div class="targets-audience-item__text">
-                                        <span class="targets-audience-item__label">@TargetCategoryLabel(entry.Category)</span>
-                                        <span class="targets-audience-item__value">@entry.Label</span>
-                                    </div>
-                                    @* P1-1: the remove action lives INSIDE the ItemTemplate — SectionCard
-                                       ignores ItemActions whenever a template is supplied. *@
-                                    <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
-                                                  IconStart="@FluentIcons.Delete" Title="Remove"
-                                                  AriaLabel="@($"Remove {entry.Label}")"
-                                                  Disabled="@BuilderDisabled"
-                                                  OnClick="() => RemoveTargetEntryAsync(entry)" />
-                                </div>
-                            </ItemTemplate>
-                        </SectionCard>
+                        @* Owner, 2026-10-17 (grill Q86–Q93): the builder wears the SHARED PanelSection —
+                           the same header treatment Content & Resources and Rules wear — and it enters
+                           targets through its header KEBAB, one item per category (Q88: the category
+                           choice left the dialog for the menu item the author just clicked), with NO Add
+                           button. PanelSection is a dumb container, so the entry list renders INLINE
+                           inside an explicit ChildContent (RZ9996). The count chip stays in the header
+                           slot (Q87) — the target count carries information, unlike the Rules card's
+                           fixed five-row readout. Q91: the kebab is ALWAYS rendered; a disabled builder
+                           disables every item and each carries the reason (RowActionsMenu's F7
+                           treatment). P1-3/UX-21 is unchanged: the reason paragraph stays visible above
+                           (never a tooltip) and the save path still refuses to write. *@
+                        <PanelSection Title="Targets &amp; Audience" TitleId="authoring-targets-title">
+                            <HeaderActions>
+                                <span class="authoring-targets-count">@_targetsAndAudience.Count</span>
+                                <RowActionsMenu UseMenuService="false"
+                                                ForceKebab="true"
+                                                Actions="@TargetActions"
+                                                AriaLabel="Add a target" />
+                            </HeaderActions>
 
-                        @if (AudienceEditorDisabledReason is not null)
-                        {
-                            <FluentButton Appearance="ButtonAppearance.Outline"
-                                          IconStart="@FluentIcons.Add"
-                                          Title="Add target"
-                                          AriaLabel="Add target"
-                                          Disabled="true">Add target</FluentButton>
-                        }
+                            <ChildContent>
+                                @if (_targetsAndAudience.Count == 0)
+                                {
+                                    @* Q88: the empty-state copy must not point at a button that no
+                                       longer exists — the ⋮ menu is this surface's add affordance. *@
+                                    <p class="authoring-hint">No targets yet. Use the ⋮ menu to add one.</p>
+                                }
+                                else
+                                {
+                                    @* No @key: append-only purely presentational rows, and duplicate entries are
+                                       legitimate here (the same target added twice), so a value key could throw —
+                                       see the @key rule's exemption in blazor-components.md. *@
+                                    @foreach (var entry in _targetsAndAudience)
+                                    {
+                                        <div class="targets-audience-item">
+                                            <div class="targets-audience-item__text">
+                                                <span class="targets-audience-item__label">@TargetCategoryLabel(entry.Category)</span>
+                                                <span class="targets-audience-item__value">@entry.Label</span>
+                                            </div>
+                                            @* P1-1: the remove action lived INSIDE the card's ItemTemplate,
+                                               because SectionCard ignores ItemActions whenever a template is
+                                               supplied. The inline body keeps it in the same place. *@
+                                            <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
+                                                          IconStart="@FluentIcons.Delete" Title="Remove"
+                                                          AriaLabel="@($"Remove {entry.Label}")"
+                                                          Disabled="@BuilderDisabled"
+                                                          OnClick="() => RemoveTargetEntryAsync(entry)" />
+                                        </div>
+                                    }
+                                }
+                            </ChildContent>
+                        </PanelSection>
 
                         @* TGT-16 / D-4: live, server-resolved, advisory preview (debounced; never blocks
                            save). F10: a degraded read answers all-zero counts, so only the unavailable
@@ -585,15 +598,13 @@
                         }
 
                         @* ── 3 · Rules (D1/D2: policy-derived readouts only) ────────────
-                           Round authoring-compact-fields (OD1/OD2): the five policy readouts render as a
-                           SectionCard stacked directly beneath the Targets & audience card, inside this same
+                           Round authoring-compact-fields (OD1/OD2): the five policy readouts render as five
+                           rows inside this panel, stacked directly beneath the Targets & Audience panel, inside this same
                            right-hand column (the element carrying authoring-compartment--right).
-                           OD2: all five stay card items and the card's own row chrome wraps — no compact row
-                           component, no truncation. The card header IS the compartment's single title (no
-                           <h3>), ShowAddButton="false" hides the header Add (a readout list authors
-                           nothing), and #authoring-rules stays on the card's container so the
+                           OD2: all five stay rows and each row's chrome wraps — no compact row
+                           component, no truncation. #authoring-rules stays on the panel's container so the
                            readout rows keep their long-standing element ids (D12 removed the
-                           jump-nav that used to link to this anchor). *@
+                           jump-nav that used to link here). *@
                         <div id="authoring-rules" class="authoring-rules-card">
                             @* Owner, 2026-10-10: the Rules card wears the SHARED PanelSection — the same header
                                treatment Content & Resources uses — so the two panels cannot drift. SectionCard's
@@ -772,7 +783,7 @@
                             <FluentAccordion>
                                 <FluentAccordionItem @bind-Expanded="_targetsExpanded">
                                     <HeaderTemplate>
-                                        <span class="authoring-targets-heading">Targets &amp; audience</span>
+                                        <span class="authoring-targets-heading">Targets &amp; Audience</span>
                                         <span class="authoring-targets-count">@_targetsAndAudience.Count</span>
                                     </HeaderTemplate>
                                     <ChildContent>
@@ -836,7 +847,7 @@
                     @* Owner, 2026-10-10: the Instructions compartment is COLLAPSED, entirely. Its two notes
                        moved into Basics (one inline row beneath Guardian review) and its Content & Resources
                        block moved — complete, with its header, kebab, list, dropzone and refusal — to the top
-                       of the right pane above Targets & audience. Nothing renders here any more. *@
+                       of the right pane above Targets & Audience. Nothing renders here any more. *@
                 }
         }
         </div>
@@ -1191,10 +1202,22 @@
         await OnTargetsChangedAsync();
     }
 
-    /// <summary>Opens the single add dialog (category + a single-value picker that APPENDS every pick
-    /// as a chip), then appends every entry it returned. Inert while the builder is disabled, so the
-    /// unknown persisted set can never be extended (P1-3).</summary>
-    private async Task OpenTargetsAndAudienceDialogAsync()
+    /// <summary>The summary surface's own Add: it presets NO category, so the dialog keeps its Category
+    /// selector — that surface has no per-category kebab to choose one (owner Q90, round
+    /// <c>targets-panel-kebab</c>). It is a separate entry point rather than an omitted optional
+    /// argument because the summary binds a METHOD GROUP to <c>SectionCard.OnAddClick</c>, and a method
+    /// group conversion does not substitute a default argument (CS0123).</summary>
+    private Task OpenTargetsAndAudienceDialogAsync() => OpenTargetsAndAudienceDialogAsync(null);
+
+    /// <summary>Opens the single add dialog (a single-value picker that APPENDS every pick as a chip),
+    /// then appends every entry it returned. Inert while the builder is disabled, so the unknown
+    /// persisted set can never be extended (P1-3).
+    /// <para>Round <c>targets-panel-kebab</c> (owner Q88/Q90): <paramref name="category"/> is the
+    /// category the CALLER already chose — the header kebab's per-category item presets it, so the
+    /// dialog hides its own Category row and the author never re-picks what they just clicked. Null
+    /// keeps the unlocked dialog, whose category selector is the summary surface's only way to pick
+    /// one.</para></summary>
+    private async Task OpenTargetsAndAudienceDialogAsync(TargetsAndAudienceCategory? category)
     {
         if (!BuilderAddEnabled)
         {
@@ -1206,7 +1229,7 @@
         // fixed 180px label column, only the 720px body leaves the option rows that room.
         var result = await DialogService.ShowShellDialogAsync<
             TargetsAndAudienceDialog, TargetsAndAudienceDialogModel, TargetsAndAudienceDialogResult>(
-            BuildTargetsAndAudienceDialogModel(),
+            BuildTargetsAndAudienceDialogModel(category),
             "Add target & audience",
             DialogWidth.Large);
 
@@ -1239,9 +1262,15 @@
     /// groups) and the student search, so the dialog itself stays data-free. The student search runs on
     /// the page's load token — the dialog has no cancellation source of its own, and a reload that
     /// swaps this instance must take an in-flight search with it.
+    /// <para><paramref name="category"/> is passed straight through: a non-null category is the
+    /// caller's own choice (the header kebab), so the model reports it as locked and the dialog hides
+    /// its Category row. Null keeps the dialog's own default category and its selector.</para>
     /// </summary>
-    private TargetsAndAudienceDialogModel BuildTargetsAndAudienceDialogModel() => new()
+    private TargetsAndAudienceDialogModel BuildTargetsAndAudienceDialogModel(
+        TargetsAndAudienceCategory? category) => new()
     {
+        Category = category ?? TargetsAndAudienceCategory.GradeLevels,
+        CategoryLocked = category is not null,
         GradeLevelOptions = ToDialogOptions(_gradeLevelOptions),
         StreamOptions = ToDialogOptions(_streamOptions),
         ActivityGroupOptions = ToDialogOptions(_activityGroupOptions),
@@ -2750,6 +2779,63 @@
 
     private const string InstructionMediaModulePath =
         "./_content/SchoolCollab.Assignments.Application/Components/Pages/Assignments/InstructionEditorList.razor.js";
+
+    /// <summary>Q88/Q93 (round <c>targets-panel-kebab</c>, owner 2026-10-17): the Targets &amp; Audience
+    /// panel's header kebab — ONE item per category of the CLOSED set, verb-first labels reusing the
+    /// dialog's own category names. Each item opens the add dialog with that category PRESET (Q90), so
+    /// the category choice left the dialog for the control the author is looking at; the Everyone item
+    /// pre-scopes the one-click checkpoint through the same code path as every other category, leaving
+    /// TGT-2's exclusive-clear rule in the page merge and nowhere else.
+    /// <para>Q91: the kebab is always rendered — a disabled builder disables every item and each carries
+    /// <see cref="AudienceEditorDisabledReason"/> (the F7 reason-as-description treatment of
+    /// <see cref="RowActionsMenu"/>), never a hidden affordance. The retired disabled "Add target"
+    /// button is GONE: it was an add button, and Q88 puts every add behind this menu.</para>
+    /// <para>Every item carries the shared <see cref="FluentIcons.Add"/> glyph: the five categories have
+    /// no icon of their own among the names already proven in this file, and inventing a FluentUI icon
+    /// name is a compile error — the glyph that names the ACTION (add) is the honest one.</para></summary>
+    private IReadOnlyList<RowAction> TargetActions =>
+    [
+        new()
+        {
+            Label = "Add grade levels",
+            Icon = FluentIcons.Add,
+            Disabled = !BuilderAddEnabled,
+            DisabledReason = AudienceEditorDisabledReason,
+            OnClick = () => OpenTargetsAndAudienceDialogAsync(TargetsAndAudienceCategory.GradeLevels),
+        },
+        new()
+        {
+            Label = "Add streams",
+            Icon = FluentIcons.Add,
+            Disabled = !BuilderAddEnabled,
+            DisabledReason = AudienceEditorDisabledReason,
+            OnClick = () => OpenTargetsAndAudienceDialogAsync(TargetsAndAudienceCategory.Streams),
+        },
+        new()
+        {
+            Label = "Add students",
+            Icon = FluentIcons.Add,
+            Disabled = !BuilderAddEnabled,
+            DisabledReason = AudienceEditorDisabledReason,
+            OnClick = () => OpenTargetsAndAudienceDialogAsync(TargetsAndAudienceCategory.Students),
+        },
+        new()
+        {
+            Label = "Add activity groups",
+            Icon = FluentIcons.Add,
+            Disabled = !BuilderAddEnabled,
+            DisabledReason = AudienceEditorDisabledReason,
+            OnClick = () => OpenTargetsAndAudienceDialogAsync(TargetsAndAudienceCategory.ActivityGroups),
+        },
+        new()
+        {
+            Label = "Add everyone",
+            Icon = FluentIcons.Add,
+            Disabled = !BuilderAddEnabled,
+            DisabledReason = AudienceEditorDisabledReason,
+            OnClick = () => OpenTargetsAndAudienceDialogAsync(TargetsAndAudienceCategory.Everyone),
+        },
+    ];
 
     /// <summary>D2/AC-1 (revised D3, owner 2026-10-10): the compartment's one kebab. Text and Link are
     /// captured in MaterialEditDialog and appended from its result (Q1/Q2); Upload From Device pops the

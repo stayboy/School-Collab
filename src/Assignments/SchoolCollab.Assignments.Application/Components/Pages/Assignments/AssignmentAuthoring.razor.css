@@ -1,7 +1,7 @@
 /*
     Isolated styles for the shared assignment authoring surface
     (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): a sticky action bar
-    and stacked section-card-style compartments. D12: the sticky compartment jump-nav was
+    and stacked panel-style compartments. D12: the sticky compartment jump-nav was
     removed — the sections keep their ids (and a reduced scroll-margin) as anchors.
 */
 

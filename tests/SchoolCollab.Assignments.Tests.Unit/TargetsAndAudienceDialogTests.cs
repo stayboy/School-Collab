@@ -101,6 +101,44 @@ public class TargetsAndAudienceDialogTests : BunitContext
             "the server-search route stays wired; a pick still lands in the chip row");
     }
 
+    // ── preset-category mode (round targets-panel-kebab, owner Q88/Q90) ─────────
+
+    /// <summary>Round <c>targets-panel-kebab</c> (owner Q90): a caller that presets the category — the
+    /// create/edit surface's per-category kebab item — gets a dialog WITHOUT the Category row, because
+    /// the choice was already made where the author clicked; a caller that presets nothing (the summary
+    /// surface's own Add) keeps the selector, which is that path's only way to choose a category.
+    /// <para>Discriminating in BOTH directions: the pre-round dialog rendered <c>#ta-category</c>
+    /// unconditionally (so the locked half fails against it), and the value picker for the preset
+    /// category must still render (so the hidden row can never be bought by hiding the whole body).</para></summary>
+    [TestMethod]
+    public void PresetCategory_HidesTheCategorySelector_WhileAnUnpresetCallerKeepsIt()
+    {
+        var lockedModel = new TargetsAndAudienceDialogModel
+        {
+            Category = TargetsAndAudienceCategory.Streams,
+            CategoryLocked = true,
+            StreamOptions = [new TargetsAndAudienceOption(StreamA.ToString(), "Grade 5 · Blue")]
+        };
+
+        var lockedCut = Render<FluentDialogProvider>();
+        var lockedTask = DialogService.ShowShellDialogAsync<
+            TargetsAndAudienceDialog, TargetsAndAudienceDialogModel, TargetsAndAudienceDialogResult>(
+            lockedModel, "Add target & audience", DialogWidth.Large);
+
+        lockedCut.WaitForAssertion(
+            () => lockedCut.Find("#ta-stream").Should().NotBeNull(
+                "the preset category's own value picker still renders — only the Category ROW is hidden"),
+            TimeSpan.FromSeconds(5));
+        lockedCut.FindAll("#ta-category").Should().BeEmpty(
+            "the caller already chose the category, so asking again is a step the author cannot answer");
+        lockedTask.IsCompleted.Should().BeFalse("hiding the row never submits the dialog");
+
+        // The other direction: an unpresetted caller (the summary surface) keeps the selector.
+        var dialog = Open();
+        dialog.Cut.FindAll("#ta-category").Should().ContainSingle(
+            "with no preset category the selector is the caller's only way to pick one");
+    }
+
     // ── the picked-targets zone (always rendered) ──────────────────────────────
 
     /// <summary>The picked-targets zone renders with ZERO picks: it is a demarcated home carrying its

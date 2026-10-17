@@ -408,10 +408,29 @@ public class AssignmentAuthoringBunitTests : BunitContext
         return stub;
     }
 
-    /// <summary>Clicks the builder's Add action — the card's native header Add (grill Q4), or its
-    /// disabled-with-reason replacement (P1-3), both named "Add target".</summary>
-    private static void OpenAddTargetDialog(IRenderedComponent<Authoring> cut) =>
-        cut.Find("fluent-button[title='Add target']").Click();
+    /// <summary>The Targets &amp; Audience panel's header kebab — the ONE menu on the surface whose
+    /// accessible name is "Add a target" (Content &amp; Resources' is "Add a material", the action bar's
+    /// "More assignment actions"). Round <c>targets-panel-kebab</c> (owner Q88) moved every target add
+    /// behind its per-category items, so this is the surface's only add affordance.</summary>
+    private static IRenderedComponent<SchoolCollab.Admin.Shared.Components.RowActionsMenu> TargetsKebab(
+        IRenderedComponent<Authoring> cut) =>
+        cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .Single(m => m.Instance.AriaLabel == "Add a target");
+
+    /// <summary>Clicks the builder's Add action — since round <c>targets-panel-kebab</c> (owner Q88/Q93)
+    /// that is the header kebab's per-category item named <paramref name="label"/>, whose category the
+    /// dialog then receives PRESET. v5 fires a menu item's <c>OnClick</c> on <c>onmenuitemchange</c>, not
+    /// on the DOM click event, so the item is activated through the repo's MenuItemClick helper.
+    /// <para>Discriminating: before this round the surface's add was SectionCard's header button
+    /// (<c>fluent-button[title='Add target']</c>) and this method could not resolve at all.</para></summary>
+    private static void OpenAddTargetDialog(
+        IRenderedComponent<Authoring> cut, string label = "Add grade levels")
+    {
+        cut.Find("fluent-button[title='Add a target']").Click();
+        TargetsKebab(cut).FindAll("fluent-menu-item")
+            .Single(i => i.TextContent.Trim() == label)
+            .MenuItemClick();
+    }
 
     /// <summary>The builder's rendered entries — (category label, value label) in authored order.</summary>
     private static IReadOnlyList<(string Category, string Value)> BuilderEntries(IRenderedComponent<Authoring> cut) =>
@@ -635,7 +654,11 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// single-title intent is preserved per CARD, and the stacking order is now pinned too.
     /// Round <c>drop-primary-grade</c>: the assignment carries no primary grade, so no grade control
     /// exists anywhere on the surface — the grade half of the audience is the grade TARGET rows inside
-    /// the card (AC-9).</summary>
+    /// the card (AC-9).
+    /// Round <c>targets-panel-kebab</c> (owner Q86): the Targets block moved onto the same shared
+    /// <c>PanelSection</c>, so its title is a <c>.panel-section__title</c> like the other two — the
+    /// retired <c>.section-card__title</c> alternative is gone and the TEXT it must find is the panel's
+    /// Title Case "Targets &amp; Audience".</summary>
     [TestMethod]
     public void TargetsCompartment_CardHeaderIsTheOnlyTitle_AndNoPrimaryGradeFieldRenders()
     {
@@ -650,12 +673,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 cut.FindAll("#authoring-targets h3.authoring-compartment-title").Should().BeEmpty(
                     "the column renders no heading of its own — each card's header is its title");
                 // Owner, 2026-10-10: the pane's headers no longer all come from SectionCard — Content &
-                // Resources and Rules wear the shared PanelSection, Targets stays a SectionCard. The
+                // Resources and Rules wear the shared PanelSection, and round targets-panel-kebab moved
+                // the Targets block onto it too (owner Q86), so all three are panel titles now. The
                 // ORDER is what this asserts, top-to-bottom in the column.
-                cut.FindAll("#authoring-targets .section-card__title, #authoring-targets .panel-section__title")
+                cut.FindAll("#authoring-targets .panel-section__title")
                     .Select(title => title.TextContent.Trim())
-                    .Should().Equal(["Content & Resources", "Targets & audience", "Rules"],
-                        "the pane's headers, top to bottom: Content & Resources, Targets & audience, then Rules");
+                    .Should().Equal(["Content & Resources", "Targets & Audience", "Rules"],
+                        "the pane's headers, top to bottom: Content & Resources, Targets & Audience, then Rules");
                 cut.FindAll("#authoring-basics-grade").Should().BeEmpty(
                     "round drop-primary-grade: the Primary grade control is gone from every mode (AC-9)");
                 cut.Markup.Should().NotContain("Primary grade",
@@ -672,11 +696,101 @@ public class AssignmentAuthoringBunitTests : BunitContext
         {
             viewCut.FindAll("#authoring-targets h3.authoring-compartment-title").Should().BeEmpty(
                 "the summary's Targets block carries no h3 either — the accordion heading is its title");
-            viewCut.Find("#authoring-targets").TextContent.Should().Contain("Targets & audience",
+            viewCut.Find("#authoring-targets").TextContent.Should().Contain("Targets & Audience",
                 "the accordion heading names the block");
             viewCut.FindAll("#authoring-basics-grade").Should().BeEmpty();
             viewCut.Markup.Should().NotContain("Primary grade");
         });
+    }
+
+    // ── Round targets-panel-kebab: the Targets & Audience PanelSection + its category kebab (owner Q86–Q93) ──
+
+    /// <summary>Round <c>targets-panel-kebab</c> (owner Q88/Q93): the Targets &amp; Audience panel wears
+    /// the shared <c>PanelSection</c> and offers ONE header-kebab item per category of the closed set,
+    /// verb-first and in category order — the surface's ONLY add affordance.
+    /// <para>Discriminating: the pre-round surface had no kebab at all (the add was SectionCard's header
+    /// button, titled "Add target"), so both the trigger and the item list were absent.</para></summary>
+    [TestMethod]
+    public void TargetsPanel_HeaderKebab_OffersOneItemPerCategory_WithThePinnedLabels()
+    {
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() =>
+        {
+            string[] pinned =
+                ["Add grade levels", "Add streams", "Add students", "Add activity groups", "Add everyone"];
+
+            TargetsKebab(cut).Instance.Actions.Where(a => !a.IsSeparator).Select(a => a.Label)
+                .Should().Equal(pinned,
+                    "Q93: one item per category of the CLOSED set — no sixth category, no generic 'Add target'");
+
+            TargetsKebab(cut).FindAll("fluent-menu-list fluent-menu-item")
+                .Select(i => i.TextContent.Trim()).Should().Equal(pinned,
+                    "R3: the items render INSIDE the menu list (v5 hides a bare item list and the trigger then does nothing)");
+
+            cut.FindAll("#authoring-targets fluent-button[title='Add target']").Should().BeEmpty(
+                "Q88: every target add goes through the kebab — no Add button survives");
+        });
+    }
+
+    /// <summary>Round <c>targets-panel-kebab</c> (owner Q88/Q90): activating a kebab item opens the add
+    /// dialog with THAT category preset, marked locked so the dialog hides its own Category row.
+    /// <para>Discriminating: the pre-round path opened the dialog unlocked with the model's own default
+    /// category (GradeLevels) and the page had no kebab to preset one.</para></summary>
+    [TestMethod]
+    public void TargetsPanel_KebabItem_OpensTheDialogWithThatCategoryPresetAndLocked()
+    {
+        var stub = RegisterTargetsDialog();
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+
+        cut.WaitForAssertion(() => TargetsKebab(cut).FindAll("fluent-menu-item").Should().HaveCount(5));
+
+        OpenAddTargetDialog(cut, "Add students");
+
+        cut.WaitForAssertion(() => stub.Models.Should().ContainSingle(
+            "the kebab's one item opens the one add dialog"), TimeSpan.FromSeconds(5));
+        stub.Models[0].Category.Should().Be(TargetsAndAudienceCategory.Students,
+            "the item the author clicked is the dialog's category — the choice moved OUT of the dialog");
+        stub.Models[0].CategoryLocked.Should().BeTrue(
+            "Q90: a preset category means the dialog must not ask for one again");
+    }
+
+    /// <summary>Round <c>targets-panel-kebab</c> (owner Q87): the count chip STAYS — the target count
+    /// carries information, unlike the Rules card's fixed five-row readout — and it now sits in the
+    /// panel's header ACTION slot beside the kebab. Also pins R2's two ids: the wrapping section and the
+    /// panel's title id.
+    /// <para>Discriminating: the pre-round count rendered inside SectionCard's own header
+    /// (<c>.section-card__count</c>), so a panel-actions-scoped query found nothing, and the title id did
+    /// not exist at all.</para></summary>
+    [TestMethod]
+    public async Task TargetsPanel_HeaderCarriesTheCountChipAndThePanelTitle()
+    {
+        _gradeLevels = [BuilderGrade(BuilderGradeAId, 5, "Grade 5")];
+        RegisterTargetsDialog()
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.GradeLevels, BuilderGradeAId, "Grade 5"))
+            .Enqueue(new TargetsAndAudienceEntry(TargetsAndAudienceCategory.Streams, BuilderStreamId, "Grade 5 · Blue"));
+        var previewReads = SetupRecipientPreviewRead();
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, MakeDto(AssignmentStatusDto.Draft));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
+        WaitForLoadSettled(cut, previewReads);
+
+        cut.FindAll("#authoring-targets").Should().ContainSingle(
+            "A6/R2: the wrapping section is still the ONE #authoring-targets on the create/edit surface "
+            + "(the grid CSS and several assertions address it)");
+        cut.Find("#authoring-targets-title").TextContent.Trim().Should().Be("Targets & Audience",
+            "R2: the panel's title keeps its own id, on the title TEXT (never on the menu control)");
+        cut.FindAll("#authoring-targets .panel-section__actions .authoring-targets-count")
+            .Should().ContainSingle("Q87: the count chip lives in the panel's header action slot")
+            .Which.TextContent.Trim().Should().Be("0", "nothing is authored yet");
+
+        await AddTargetEntryAsync(cut);
+        await AddTargetEntryAsync(cut, "Add streams");
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("#authoring-targets .panel-section__actions .authoring-targets-count")
+                .Single().TextContent.Trim().Should().Be("2",
+                    "the chip follows the authored target count"), TimeSpan.FromSeconds(5));
     }
 
     // ── Criterion 4: Edit parity, View for later statuses ──────────────────
@@ -1020,14 +1134,16 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "both tab PANELS render even while one is inactive — switching tabs must not remount an editor");
             basics.QuerySelector("#authoring-basics-description").Should().NotBeNull();
 
-            // ── The materials block tops the right pane, above the Targets & audience card.
+            // ── The materials block tops the right pane, above the Targets & Audience panel.
             var pane = cut.Find("#authoring-targets");
             pane.QuerySelector("#authoring-materials-section").Should().NotBeNull(
                 "Content & Resources moved into the right pane (owner, 2026-10-10)");
             pane.InnerHtml.IndexOf("authoring-materials-section", StringComparison.Ordinal)
                 .Should().BeLessThan(
-                    pane.InnerHtml.IndexOf("section-card", StringComparison.OrdinalIgnoreCase),
-                    "…and it TOPS the pane, above the Targets & audience card");
+                    pane.InnerHtml.IndexOf("authoring-targets-title", StringComparison.Ordinal),
+                    "…and it TOPS the pane, above the Targets & Audience panel (the needle is the panel "
+                    + "title's own id: the retired 'section-card' needle matches nothing now that the "
+                    + "block wears the shared PanelSection)");
 
             // ── AC-9: the block's header carries a TITLE and the kebab MENU — two distinct elements.
             cut.Find("#authoring-materials-title").TextContent.Trim().Should().Be("Content & Resources",
@@ -3104,13 +3220,17 @@ public class AssignmentAuthoringBunitTests : BunitContext
     private static GradeLevelDto BuilderGrade(Guid id, int level, string name) =>
         new(id, Guid.NewGuid(), level, name, 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
-    /// <summary>Adds one entry by clicking the builder's Add action (the mocked dialog returns the next
-    /// queued entry).</summary>
-    private static Task AddTargetEntryAsync(IRenderedComponent<Authoring> cut) =>
-        cut.InvokeAsync(() => OpenAddTargetDialog(cut));
+    /// <summary>Adds one entry through the header kebab's item for <paramref name="label"/> (the mocked
+    /// dialog returns the next queued entry).</summary>
+    private static Task AddTargetEntryAsync(
+        IRenderedComponent<Authoring> cut, string label = "Add grade levels") =>
+        cut.InvokeAsync(() => OpenAddTargetDialog(cut, label));
 
-    /// <summary>R2 (Q1): the Add dialog hands back a TYPED entry per category, and the builder renders
-    /// each with its category label over the picked value's label.</summary>
+    /// <summary>R2 (Q1), re-pointed at the per-category kebab items by round <c>targets-panel-kebab</c>
+    /// (owner Q88): the Add dialog hands back a TYPED entry per category, and the builder renders each
+    /// with its category label over the picked value's label. Each add now goes through the header
+    /// kebab's OWN item for that category, so the item the author clicks and the entry that lands are
+    /// the same category — not merely the stub's queued payload.</summary>
     [TestMethod]
     public async Task Create_AddDialog_AddsATypedEntryOfEachCategoryToTheBuilder()
     {
@@ -3127,15 +3247,15 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Basics"));
         WaitForLoadSettled(cut, previewReads);
 
-        foreach (var expected in new[]
+        foreach (var (kebabItem, expected) in new[]
                  {
-                     ("Grade Levels", "Grade 5"),
-                     ("Streams", "Grade 5 · Blue"),
-                     ("Students", "Ada Lovelace (S1001)"),
-                     ("Activity Groups", "Alpha")
+                     ("Add grade levels", ("Grade Levels", "Grade 5")),
+                     ("Add streams", ("Streams", "Grade 5 · Blue")),
+                     ("Add students", ("Students", "Ada Lovelace (S1001)")),
+                     ("Add activity groups", ("Activity Groups", "Alpha"))
                  })
         {
-            await AddTargetEntryAsync(cut);
+            await AddTargetEntryAsync(cut, kebabItem);
             cut.WaitForAssertion(() => BuilderEntries(cut).Should().Contain(expected,
                 "each typed category renders its category label over the picked value's label"));
         }
@@ -3185,7 +3305,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         await AddTargetEntryAsync(cut);
         cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(new[] { ("Grade Levels", "Grade 5") }));
 
-        await AddTargetEntryAsync(cut);
+        await AddTargetEntryAsync(cut, "Add everyone");
         cut.WaitForAssertion(() => BuilderEntries(cut).Should().Equal(
             new[] { ("Applies to All in Org", TargetsAndAudienceEntry.EveryoneLabel) },
             "adding Everyone clears the entity entries (TGT-2)"));
@@ -3327,7 +3447,7 @@ public class AssignmentAuthoringBunitTests : BunitContext
         WaitForLoadSettled(cut, previewReads);
         await SetTitleAsync(cut, "Targeted HW");
         await AddTargetEntryAsync(cut);
-        await AddTargetEntryAsync(cut);
+        await AddTargetEntryAsync(cut, "Add activity groups");
         cut.WaitForAssertion(() => BuilderEntries(cut).Should().HaveCount(2));
         await SelectAsync(cut, "authoring-basics-subject", topicId.ToString());
 
@@ -3437,9 +3557,13 @@ public class AssignmentAuthoringBunitTests : BunitContext
             "link missing from its payload");
     }
 
-    /// <summary>P1-3 (UX-21): an editable Edit surface whose persisted targets could not be read
-    /// renders the builder DISABLED WITH REASON — the add action is inert and a save writes no target
-    /// set at all.</summary>
+    /// <summary>P1-3 (UX-21), re-pointed at the header kebab by round <c>targets-panel-kebab</c>
+    /// (owner Q88/Q91): an editable Edit surface whose persisted targets could not be read renders the
+    /// builder DISABLED WITH REASON — the reason stays a VISIBLE paragraph, no Add button survives, and
+    /// every kebab item is disabled AND names that reason instead of being a dead end — so the add is
+    /// inert and a save writes no target set at all.
+    /// <para>Discriminating: the pre-round path was a disabled <c>fluent-button[title='Add target']</c>
+    /// with no kebab on the surface at all.</para></summary>
     [TestMethod]
     public void Edit_TargetsLoadFails_RendersTheBuilderDisabledWithReason_AndBlocksTheSave()
     {
@@ -3449,10 +3573,18 @@ public class AssignmentAuthoringBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.FindAll("#authoring-targets-reason").Should().ContainSingle(
-                "UX-21: the builder names the reason it is disabled")
+                "UX-21: the builder names the reason it is disabled — visibly, not as a tooltip")
                 .Which.TextContent.Should().Contain(Authoring.ChildrenUnavailableReason);
-            cut.Find("fluent-button[title='Add target']").HasAttribute("disabled").Should().BeTrue(
+            cut.FindAll("fluent-button[title='Add target']").Should().BeEmpty(
+                "Q88: the disabled Add BUTTON is gone — every target add goes through the kebab");
+
+            var items = TargetsKebab(cut).FindAll("fluent-menu-item");
+            items.Should().HaveCount(5,
+                "Q91: the kebab is ALWAYS rendered — a disabled builder hides no affordance");
+            items.Should().OnlyContain(i => i.HasAttribute("disabled"),
                 "P1-3: no entry may be authored over an unknown persisted set");
+            items.Should().OnlyContain(i => i.GetAttribute("title") == Authoring.ChildrenUnavailableReason,
+                "F7: each disabled item carries the reason as its accessible description");
         }, TimeSpan.FromSeconds(5));
 
         string? updateBody = null;

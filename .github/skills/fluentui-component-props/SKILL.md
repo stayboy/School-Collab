@@ -183,6 +183,24 @@ Note both `Neutral` **and** `Default` exist here (unlike the appearance enums, w
 
 ---
 
+### `FluentMenu` — the items belong in a `FluentMenuList`
+
+v5 hides `fluent-menu-list:not([popover])` in its own stylesheet, and `FluentMenu`'s JS toggles that popover state from
+the trigger (`Trigger="<element-id>"` — `Anchor` was renamed, and `UseMenuService` no longer exists). Items placed
+**directly** under `<FluentMenu>` are therefore never hidden: every menu renders as an always-visible inline list and the
+trigger does nothing — the post-merge “kebab menu is broken” defect (2026-10-17).
+
+```razor
+<FluentMenu Id="@_menuId" Trigger="@_buttonId" OpenedChanged="@(o => _open = o)">
+    <FluentMenuList>
+        <FluentMenuItem Label="Edit" OnClick="@(async () => await EditAsync())" />
+    </FluentMenuList>
+</FluentMenu>
+```
+
+For the CSS side of v5 — `--color*` tokens only, and the silent death of an unresolvable `var()` — see
+`.github/copilot/rules/blazor-components.md` § "FluentUI v5 tokens: only `--color*` exists".
+
 ## ✅ Quick validation checklist
 
 1. **`<FluentBadge Appearance="…">`** → only `BadgeAppearance.*` (`Filled`/`Ghost`/`Outline`/`Tint`); colour via `BadgeColor`, text via `Content`.
