@@ -1,22 +1,23 @@
-/* Layout structure
+/* Layout structure (FluentUI v5)
 
-   The body region is a plain <div> (not FluentStack) and the content region is
-   a plain <div> (not FluentBodyContent) so that Blazor tags them with THIS
-   component's CSS-isolation scope attribute. A component's rendered root
-   element receives the *child component's* scope attribute, not the layout's,
-   which means scoped rules targeting a FluentStack/FluentBodyContent div would
-   never match. Plain divs authored here get the layout scope, so the rules below
-   actually apply and the height chain becomes viewport-driven instead of
-   content-driven.
+   v5 replaced FluentHeader/FluentBodyContent/FluentFooter with a CSS-grid
+   <FluentLayout> whose children are <FluentLayoutItem Area="..."> regions:
 
-   Height chain:
-     FluentLayout root (.layout)  : height:100% of <body> (= viewport), flex column
-     .layout-body                 : flex:1 1 0, min-height:0  -> fills viewport - header
-     .layout-content              : flex:1, flex column, overflow:hidden
-     article.content              : flex:1 1 0, flex column, overflow:hidden (global app.css)
-       .page-toolbar-slot         : flex-shrink:0  -> pinned top (page toolbar via section)
-       .page-scroll               : flex:1 1 0, min-height:0, overflow:auto  -> SOLE scroll region
-       .page-footer-slot          : flex-shrink:0  -> pinned bottom (page footer via section)
+     .layout / .fluent-layout       : display:grid, height:100%, rows auto 1fr auto
+     [area=header] (FluentLayoutItem): row 1, 50px (Height="50")
+     [area=nav]    (FluentLayoutItem): row 2 col 1, the sidebar
+     [area=content](FluentLayoutItem): row 2 col 2, the page region
+     article.content                : height:100% (Admin.Shared app.css) so the
+                                      grid-stretched item's height is inherited
+       .page-toolbar-slot           : flex-shrink:0  -> pinned top (page toolbar via section)
+       .page-scroll                 : flex:1 1 0, min-height:0, overflow:auto  -> SOLE scroll region
+       .page-footer-slot            : flex-shrink:0  -> pinned bottom (page footer via section)
+
+   The region wrappers are FluentLayoutItem, not plain divs, because the v5 grid
+   places them by area. Inside each region the elements authored HERE are plain
+   divs on purpose: Blazor tags a component's rendered root with the CHILD's
+   scope attribute, so a scoped rule targeting a FluentStack/FluentBodyContent
+   div would never match.
 
    Pages publish a pinned toolbar with <SectionContent SectionName="page-toolbar"> and
    a pinned footer (e.g. an inline chat launcher) with <SectionContent
@@ -73,23 +74,6 @@
     white-space: nowrap;
     max-width: 32ch;
     min-width: 0;
-}
-
-.layout-body {
-    flex: 1 1 0;
-    min-height: 0;
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-}
-
-.layout-content {
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
 }
 
 .page-toolbar-slot {

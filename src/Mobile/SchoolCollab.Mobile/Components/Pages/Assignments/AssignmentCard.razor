@@ -12,14 +12,14 @@
 
 <div class="assignment-card">
     <div class="assignment-card__header">
-        <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{Item.Id}")">@Item.Title</FluentAnchor>
-        <FluentBadge Appearance="@StatusAppearance">@Item.Status</FluentBadge>
+        <FluentLink Appearance="LinkAppearance.Default" Href="@($"/assignments/{Item.Id}")">@Item.Title</FluentLink>
+        <FluentBadge Appearance="@StatusAppearance" Color="@StatusColor">@Item.Status</FluentBadge>
     </div>
 
     @if (Item.RequiresApproval)
     {
         <div class="assignment-card__approval">
-            <FluentBadge Appearance="@ApprovalAppearance">@ApprovalText</FluentBadge>
+            <FluentBadge Appearance="@ApprovalAppearance" Color="@ApprovalColor">@ApprovalText</FluentBadge>
         </div>
     }
 
@@ -38,7 +38,7 @@
         <div class="assignment-card__actions">
             @foreach (var action in Actions)
             {
-                <FluentButton Appearance="@(action.Primary ? Appearance.Accent : Appearance.Outline)"
+                <FluentButton Appearance="@(action.Primary ? ButtonAppearance.Primary : ButtonAppearance.Outline)"
                               Disabled="@ActionPending"
                               aria-busy="@ActionPending"
                               OnClick="@action.Invoke">
@@ -60,23 +60,38 @@
     /// </summary>
     [Parameter, EditorRequired] public AssignmentsListViewModel ViewModel { get; set; } = default!;
 
-    // WS-A2 deviation from decision (j), preserved: FluentBadge supports Accent / Neutral /
-    // Lightweight only, so Scheduled shares Accent with Published (both committed publishing states)
-    // and the badge text distinguishes them.
-    private Appearance StatusAppearance => Item.Status switch
+    // WS-A2 deviation from decision (j), preserved: FluentBadge's v5 BadgeAppearance offers only
+    // Filled / Ghost, so Scheduled shares Filled with Published (both committed publishing states).
+    // The v4 Accent/Neutral pair would otherwise collapse into one look, so the semantics ride on
+    // BadgeColor instead — the round's Q24 badge rule (Accent -> Success, Neutral -> Subtle).
+    private BadgeAppearance StatusAppearance => Item.Status switch
     {
-        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => Appearance.Accent,
-        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => Appearance.Neutral,
-        _ => Appearance.Lightweight
+        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => BadgeAppearance.Filled,
+        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => BadgeAppearance.Filled,
+        _ => BadgeAppearance.Ghost
     };
 
-    private Appearance ApprovalAppearance => Item.ApprovalStatus switch
+    private BadgeColor? StatusColor => Item.Status switch
     {
-        null => Appearance.Lightweight,
-        ApprovalStatusDto.Pending => Appearance.Neutral,
-        ApprovalStatusDto.Approved => Appearance.Accent,
-        ApprovalStatusDto.Rejected => Appearance.Neutral,
-        _ => Appearance.Lightweight
+        AssignmentStatusDto.Published or AssignmentStatusDto.Scheduled => BadgeColor.Success,
+        AssignmentStatusDto.Closed or AssignmentStatusDto.Archived => BadgeColor.Subtle,
+        _ => null
+    };
+
+    private BadgeAppearance ApprovalAppearance => Item.ApprovalStatus switch
+    {
+        null => BadgeAppearance.Ghost,
+        ApprovalStatusDto.Pending => BadgeAppearance.Filled,
+        ApprovalStatusDto.Approved => BadgeAppearance.Filled,
+        ApprovalStatusDto.Rejected => BadgeAppearance.Filled,
+        _ => BadgeAppearance.Ghost
+    };
+
+    private BadgeColor? ApprovalColor => Item.ApprovalStatus switch
+    {
+        ApprovalStatusDto.Approved => BadgeColor.Success,
+        ApprovalStatusDto.Pending or ApprovalStatusDto.Rejected => BadgeColor.Subtle,
+        _ => null
     };
 
     private string ApprovalText => Item.ApprovalStatus switch

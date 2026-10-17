@@ -45,9 +45,11 @@ public class PeriodFormSequenceOptionsTests : BunitContext
 
     /// <summary>The positions the Sequence row offers, read off the bound select's items — a
     /// FluentSelect does not materialise its options while closed, so this is the only honest way
-    /// to read an offer set.</summary>
+    /// to read an offer set. <c>DropdownComponent</c> instantiates <c>FluentSelect</c, /c> with
+    /// <c>TValue</c> = its own <c>TItem</c>, so the rendered component is
+    /// <c>FluentSelect&lt;int, int&gt;</c> (v5 added the <c>TValue</c> parameter).</summary>
     private static int[] Offered(IRenderedComponent<PeriodFormFields> cut) =>
-        [.. cut.FindComponent<FluentSelect<int>>().Instance.Items!];
+        [.. cut.FindComponent<FluentSelect<int, int>>().Instance.Items!];
 
     private IRenderedComponent<PeriodFormFields> RenderSequenceRow(
         int? sequence, params int[] unavailable) =>
@@ -101,7 +103,7 @@ public class PeriodFormSequenceOptionsTests : BunitContext
             .Add(x => x.Model, new TestModel { ParentPeriodIdText = "", Sequence = null }));
 
         cut.Markup.Should().Contain("Period name", "the form itself rendered");
-        cut.FindComponents<FluentSelect<int>>().Should().BeEmpty(
+        cut.FindComponents<FluentSelect<int, int>>().Should().BeEmpty(
             "a top-level academic year is not the 1st of anything — the entity and the filtered index both refuse a position on it");
     }
 }

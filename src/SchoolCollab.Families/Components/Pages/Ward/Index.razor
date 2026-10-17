@@ -16,14 +16,14 @@
 
         @if (!_studentId.HasValue)
 {
-    <FluentMessageBar Intent="MessageIntent.Warning">No ward selected for this session.</FluentMessageBar>
+    <FluentMessageBar Intent="MessageBarIntent.Warning">No ward selected for this session.</FluentMessageBar>
 }
 else if (_items is null)
 {
     @if (_error is not null)
     {
         @* The load failed: show the error instead of a perpetual spinner. *@
-        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
     }
     else
     {
@@ -43,11 +43,11 @@ else
         <TemplateColumn Title="Modules">
             @if (context.HasLockedModules)
             {
-                <FluentBadge Color="Color.Red">Locked</FluentBadge>
+                <FluentBadge Color="BadgeColor.Danger">Locked</FluentBadge>
             }
             else
             {
-                <FluentBadge Color="Color.Green">Ready</FluentBadge>
+                <FluentBadge Color="BadgeColor.Success">Ready</FluentBadge>
             }
         </TemplateColumn>
         @* WS-F3 (ar-15-signoff-relocation, decision (e)): the guardian "Sign off" affordance
@@ -58,14 +58,14 @@ else
         <TemplateColumn Title="">
             @if (context.State == WardSubmissionStateDto.Completed)
             {
-                <FluentAnchor Appearance="Appearance.Hypertext" class="ward-sign-off"
+                <FluentLink Appearance="LinkAppearance.Default" class="ward-sign-off"
                               Href="@($"/ward/{_studentId}/assignments/{context.Id}/sign-off")">
                     Sign off
-                </FluentAnchor>
+                </FluentLink>
             }
         </TemplateColumn>
         <TemplateColumn Title="">
-            <FluentButton Appearance="Appearance.Accent"
+            <FluentButton Appearance="ButtonAppearance.Primary"
                           OnClick="@(() => Nav.NavigateTo($"/ward/{_studentId}/assignments/{context.Id}"))">Open</FluentButton>
         </TemplateColumn>
     </FluentDataGrid>
@@ -73,11 +73,11 @@ else
 
         @if (_error is not null && _items is not null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 

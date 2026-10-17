@@ -21,6 +21,7 @@ public sealed class DashboardSectionTests
     public void Items_RendersOneCardPerItemWithCorrectAttributes()
     {
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var items = new List<DashboardItem>
         {
@@ -85,6 +86,7 @@ public sealed class DashboardSectionTests
         // renders cards and ignores ChildContent. This guards against a page
         // accidentally supplying both and seeing stale hand-authored markup.
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var items = new List<DashboardItem>
         {
@@ -109,6 +111,7 @@ public sealed class DashboardSectionTests
     public void Items_RespectsPerItemMatchAndIconWidth()
     {
         using var ctx = new BunitContext();
+        ctx.Services.AddFluentUIComponents();
 
         var items = new List<DashboardItem>
         {

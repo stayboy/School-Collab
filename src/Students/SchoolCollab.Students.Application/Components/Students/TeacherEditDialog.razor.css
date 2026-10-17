@@ -20,7 +20,7 @@
     margin-left: 192px;
 }
 /* Comboboxes fill their column so they align with the full-width text fields. */
-.teacher-dialog ::deep fluent-combobox {
+.teacher-dialog ::deep fluent-dropdown {
     width: 100%;
 }
 /* Inline First/Last name pair under one "Name" label. */
@@ -64,8 +64,7 @@
 .assignment-row--editing {
     border-color: var(--accent-fill-rest);
 }
-.assignment-row ::deep fluent-select,
-.assignment-row ::deep fluent-combobox {
+.assignment-row ::deep fluent-dropdown {
     min-width: 150px;
 }
 .row-type {

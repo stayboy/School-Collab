@@ -64,7 +64,7 @@
     font-size: 0.9375rem;
 }
 
-/* FluentAnchor renders the clickable text inside its shadow DOM's part="control". */
+/* FluentLink renders the clickable text inside its shadow DOM's part="control". */
 .cq-qrow-open::part(control) {
     display: block;
     overflow: hidden;

@@ -34,6 +34,7 @@
 @inject CodedValuesApiClient CodedValues
 @inject ILogger<StreamCreateDialog> Logger
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -47,7 +48,7 @@
                                     ShowEmptyOption="true"
                                     EmptyOptionText="None — new stream"
                                     Placeholder="Optional — pick an existing stream to pre-fill" />
-                <FluentButton Appearance="Appearance.Stealth"
+                <FluentButton Appearance="ButtonAppearance.Subtle"
                               Class="stream-icon-button"
                               IconStart="@FluentIcons.Edit"
                               Title="Edit the stream fields"
@@ -57,7 +58,7 @@
             <p class="hint">Optional. Picking an existing stream pre-fills the fields below; you can still edit them. Leave blank to create a new stream in the catalogue.</p>
             @if (_duplicateCodedValue)
             {
-                <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
+                <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-2">
                     This stream is already linked to the grade. A coded value can only be offered once per grade.
                 </FluentMessageBar>
             }
@@ -69,20 +70,19 @@
             @if (_editing || Model.CodedValueId is null)
             {
                 <FormRow Label="Code" For="stream-create-code" Required="true">
-                    <FluentTextField @bind-Value="Model.Code"
+                    <FluentTextInput @bind-Value="Model.Code"
                                      Id="stream-create-code"
                                      Placeholder="e.g. 5A"
                                      Style="flex:1; min-width:0" />
                 </FormRow>
                 <FormRow Label="Name" For="stream-create-name" Required="true">
-                    <FluentTextField @bind-Value="Model.Name"
+                    <FluentTextInput @bind-Value="Model.Name"
                                      Id="stream-create-name"
                                      Style="flex:1; min-width:0" />
                 </FormRow>
                 <FormRow Label="Description" For="stream-create-description">
                     <FluentTextArea @bind-Value="Model.Description"
                                     Id="stream-create-description"
-                                    Rows="2"
                                     Style="flex:1; min-width:0" />
                 </FormRow>
             }
@@ -94,7 +94,7 @@
             }
 
             <FormRow Label="Version label" For="stream-create-version">
-                <FluentTextField @bind-Value="Model.Version"
+                <FluentTextInput @bind-Value="Model.Version"
                                  Id="stream-create-version"
                                  Placeholder="e.g. 5A (optional)"
                                  Style="flex:1; min-width:0" />
@@ -112,6 +112,7 @@
                            OnCancel="HandleCancel" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private CodedValueDropdown? _codedValueDropdown;

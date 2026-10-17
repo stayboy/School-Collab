@@ -6,37 +6,44 @@
    through and owns the Close affordance. Not a DialogShellBase (no
    model/form/result) — mirrors GuardianContactsDialog and is opened via
    ShowReadonlyDialogAsync. *@
-@implements IDialogContentComponent<DialogParameters>
 @using SchoolCollab.Students.Application.Components.Students
 @using Microsoft.FluentUI.AspNetCore.Components
 
+<DialogShellBody>
 <div class="topic-dialog">
     <StrandsEditor TopicId="@TopicId" TopicName="@TopicName" />
     <div class="dialog-footer">
-        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CloseAsync">Close</FluentButton>
     </div>
 </div>
+</DialogShellBody>
 
 @code {
-    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
-    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    /// <summary>Keys used in <c>DialogOptions.Parameters</c>. Exposed so
+    /// callers set the same keys this dialog binds to — each key MUST match a
+    /// <c>[Parameter]</c> name (FluentUI 5.x spreads the entries).</summary>
     public const string TopicIdKey = nameof(TopicId);
     public const string TopicNameKey = nameof(TopicName);
     public const string OnChangedKey = nameof(OnChanged);
 
-    /// <summary>Read from <see cref="Content"/> — FluentUI renders dialog
-    /// content via DynamicComponent with only { "Content": &lt;DialogParameters&gt; }
-    /// and does NOT spread indexer entries onto separate <c>[Parameter]</c>s.</summary>
-    private Guid TopicId => Content is { } c ? c.TryGet<Guid>(TopicIdKey) : Guid.Empty;
-    private string? TopicName => Content is { } c ? c.TryGet<string>(TopicNameKey) : null;
-    private Func<Task>? OnChanged => Content is { } c ? c.TryGet<Func<Task>>(OnChangedKey) : null;
+    /// <summary>The topic whose curriculum to edit. Required — no default.</summary>
+    [Parameter] public Guid TopicId { get; set; }
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    /// <summary>The topic name, shown by the editor.</summary>
+    [Parameter] public string? TopicName { get; set; }
+
+    /// <summary>Optional callback the parent runs when the dialog closes, so
+    /// it can refresh the card the editor mutated.</summary>
+    [Parameter] public Func<Task>? OnChanged { get; set; }
+
+    /// <summary>The hosting dialog instance provided by the dialog host as a
+    /// cascading parameter. Nullable so unit tests that render the component
+    /// without a host do not NRE.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
 
     private async Task CloseAsync()
     {
         if (OnChanged is not null) await OnChanged.Invoke();
-        if (Dialog is not null) await Dialog.CloseAsync();
+        if (DialogInstance is not null) await DialogInstance.CloseAsync();
     }
 }

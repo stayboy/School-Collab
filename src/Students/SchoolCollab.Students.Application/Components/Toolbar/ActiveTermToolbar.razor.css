@@ -2,13 +2,13 @@
    real anchor to /students/periods, where the user can view/edit, activate
    (open) a draft, complete (close) an active period, or create a new one.
 
-   The class lives on a <span> WRAPPER (not the FluentAnchor root) because
+   The class lives on a <span> WRAPPER (not the FluentLink root) because
    Blazor CSS-isolation scopes a child component's root element with the
    CHILD's scope attribute, not the parent's. A rule on .active-term-link
-   targeting the FluentAnchor root would silently fail to match -- the same
+   targeting the FluentLink root would silently fail to match -- the same
    scope mismatch documented in MainLayout.razor.css. The plain wrapper
    receives the Students Application scope, so the rules here apply. The inner
-   FluentAnchor picks up the color via the CSS custom properties we publish
+   FluentLink picks up the color via the CSS custom properties we publish
    on the wrapper (which it reads inside its shadow DOM). */
 .active-term-link {
     display: inline-flex;
@@ -30,7 +30,7 @@
     background: transparent;
     border: none;
     padding: 0;
-    /* Push the same color into the FluentAnchor's Hypertext shadow tokens so
+    /* Push the same color into the FluentLink's Hypertext shadow tokens so
        the icon and the link's underline use the contrasting color too. */
     --neutral-foreground-rest: var(--link-fg);
     --accent-foreground-rest: var(--link-fg);

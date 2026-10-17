@@ -3,12 +3,12 @@
    grade-level role dropdown (reusing GradeTeachersDialog's CodedValueDropdown
    binding) and saves via a page-owned callback so the page keeps ownership of
    the SetTeacherGradeLevelRoleAsync call. *@
-@implements IDialogContentComponent<DialogParameters>
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
 
+<DialogShellBody>
 <div class="teacher-role-dialog">
     <FormRow Label="Role">
         <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
@@ -16,29 +16,29 @@
                             Placeholder="No role" />
     </FormRow>
     <div class="dialog-footer">
-        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-        <FluentButton Appearance="Appearance.Accent" OnClick="SaveAsync" class="ms-2">Save</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="SaveAsync" class="ms-2">Save</FluentButton>
     </div>
 </div>
+</DialogShellBody>
 
 @code {
-    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
-    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    /// <summary>Keys used in <c>DialogOptions.Parameters</c>. Exposed so
+    /// callers set the same keys this dialog binds to — each key MUST match a
+    /// <c>[Parameter]</c> name (FluentUI 5.x spreads the entries).</summary>
     public const string CurrentRoleIdKey = nameof(CurrentRoleId);
     public const string SaveKey = nameof(Save);
 
-    /// <summary>The teacher's current grade-level role (to prefill the dropdown).
-    /// Read from <see cref="Content"/> — FluentUI renders dialog content via
-    /// DynamicComponent with only { "Content": &lt;DialogParameters&gt; } and does
-    /// NOT spread indexer entries onto separate <c>[Parameter]</c>s.</summary>
-    private Guid? CurrentRoleId => Content is { } c ? c.TryGet<Guid?>(CurrentRoleIdKey) : null;
+    /// <summary>The teacher's current grade-level role (to prefill the dropdown).</summary>
+    [Parameter] public Guid? CurrentRoleId { get; set; }
 
-    /// <summary>Page-owned save callback (invoked with the chosen role id).
-    /// Read from <see cref="Content"/> (see <see cref="CurrentRoleId"/>).</summary>
-    private Func<Guid?, Task>? Save => Content is { } c ? c.TryGet<Func<Guid?, Task>>(SaveKey) : null;
+    /// <summary>Page-owned save callback (invoked with the chosen role id).</summary>
+    [Parameter] public Func<Guid?, Task>? Save { get; set; }
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    /// <summary>The hosting dialog instance provided by the dialog host as a
+    /// cascading parameter. Nullable so unit tests that render the component
+    /// without a host do not NRE.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
 
     private Guid? _roleId;
 
@@ -50,8 +50,8 @@
     private async Task SaveAsync()
     {
         if (Save is not null) await Save(_roleId);
-        if (Dialog is not null) await Dialog.CloseAsync();
+        if (DialogInstance is not null) await DialogInstance.CloseAsync();
     }
 
-    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    private Task CancelAsync() => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
 }

@@ -42,6 +42,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValues
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -59,7 +60,7 @@
                    selected coded value and any changes. *@
                 @if (!_editing)
                 {
-                    <FluentButton Appearance="Appearance.Accent"
+                    <FluentButton Appearance="ButtonAppearance.Primary"
                                   IconStart="@FluentIcons.Edit"
                                   Title="Edit the topic fields"
                                   aria-label="Edit topic fields"
@@ -98,6 +99,7 @@
                            OnCancel="HandleCancel" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 
 @code {

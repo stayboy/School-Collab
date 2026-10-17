@@ -14,7 +14,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Subjects> Logger
 @inject VisibleTenantService VisibleTenant
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="SubjectDto"
@@ -36,24 +36,26 @@
              RowActionsUseMenuService="false">
     <ToolbarFilters>
         <FluentSelect TOption="string"
+                      TValue="string"
                       @bind-Value="_ownerType"
                       @bind-Value:after="OnOwnerTypeChangedAsync"
                       Label="Owner"
                       Style="width:160px;">
-            <FluentOption Value="GradeLevel">Grade Level</FluentOption>
+            <FluentOptionString Value="GradeLevel">Grade Level</FluentOptionString>
             @if (_activityGroupsEnabled)
             {
-                <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+                <FluentOptionString Value="ActivityGroup">Activity Group</FluentOptionString>
             }
         </FluentSelect>
         @if (_ownerType == "GradeLevel")
         {
             <FluentSelect TOption="GradeLevelOption"
+                          TValue="GradeLevelOption"
                           Items="@_gradeLevelOptions"
-                          @bind-SelectedOption="_selectedGradeLevel"
-                          @bind-SelectedOption:after="OnSelectedGradeLevelChangedAsync"
+                          @bind-Value="_selectedGradeLevel"
+                          @bind-Value:after="OnSelectedGradeLevelChangedAsync"
                           OptionText="@(o => o?.Label ?? "")"
-                          OptionValue="@(o => o?.Value ?? "")"
+                          OptionValueToString="@(o => o?.Value ?? "")"
                           Label="Grade Level"
                           Placeholder="Select a grade level"
                           class="grade-filter" />
@@ -61,11 +63,12 @@
         else
         {
             <FluentSelect TOption="ActivityGroupOption"
+                          TValue="ActivityGroupOption"
                           Items="@_activityGroupOptions"
-                          @bind-SelectedOption="_selectedActivityGroup"
-                          @bind-SelectedOption:after="OnSelectedActivityGroupChangedAsync"
+                          @bind-Value="_selectedActivityGroup"
+                          @bind-Value:after="OnSelectedActivityGroupChangedAsync"
                           OptionText="@(o => o?.Label ?? "")"
-                          OptionValue="@(o => o?.Value ?? "")"
+                          OptionValueToString="@(o => o?.Value ?? "")"
                           Label="Activity Group"
                           Placeholder="Select an activity group"
                           class="grade-filter" />
@@ -87,7 +90,7 @@
                 @* Count badge only (spec §5.2 row 1): zero exceptions renders NO badge —
                    the absence of an exception is the normal state. The kebab opens the
                    EnrollmentExceptionsDialog; nothing is edited on this grid. *@
-                <FluentBadge Appearance="Appearance.Accent" Title="Enrollment exceptions">
+                <FluentBadge Appearance="BadgeAppearance.Filled" Title="Enrollment exceptions">
                     @EnrollmentExceptionLabels.FormatCount(exceptionCount)
                 </FluentBadge>
             }
@@ -503,7 +506,7 @@
             EnrollmentExceptionsDialog.EnrollmentExceptionsResult>(
             scope,
             title: $"Enrollment exceptions — {scope.TopicName}",
-            size: DialogSize.Large);
+            size: DialogWidth.Large);
 
         if (_disposed) return;
         await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
@@ -604,7 +607,7 @@
             TopicCreateDialog,
             TopicCreateDialog.TopicCreateModel,
             TopicDto>(
-            model, "New topic", DialogSize.Large);
+            model, "New topic", DialogWidth.Large);
 
         if (_disposed) return;
         if (created is not null)
@@ -636,7 +639,7 @@
             SubjectEditDialog,
             SubjectEditDialog.SubjectEditModel,
             CodedValueDto>(
-            model, $"Edit topic — {row.Code}", DialogSize.Small);
+            model, $"Edit topic — {row.Code}", DialogWidth.Small);
 
         if (_disposed) return;
         await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
@@ -646,12 +649,10 @@
     {
         if (_disposed) return;
 
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Are you sure you want to delete subject '{name}'? This cannot be undone if grade-subject assignments exist.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         var previous = _items;
         _items = _items?.Where(x => x.Id != id).ToArray();
@@ -662,7 +663,7 @@
             await Api.DeleteSubjectAsync(id);
             if (_disposed) return;
             Logger.LogInformation("Deleted subject {Id}", id);
-            Toast.ShowSuccess($"Subject '{name}' deleted.");
+            await NotificationService.ShowSuccessToastAsync($"Subject '{name}' deleted.");
         }
         catch (Exception ex)
         {

@@ -94,7 +94,7 @@
    the label is top-aligned (AlignTop) to sit naturally against the taller
    cell — matches the pre-FormRow visual. *@
 <FormRow Label="Period name *" AlignTop For="periodName">
-    <FluentTextField Id="periodName" @bind-Value="Model.Name"
+    <FluentTextInput Id="periodName" @bind-Value="Model.Name"
                      Label=""
                      Placeholder="e.g. 2025–2026 Academic Year"
                      Style="flex:1; min-width:0" />
@@ -118,7 +118,7 @@
 <FormRow Label="Activation tolerance (days)"
          LabelTip="Optional. How many days before the start date and after the end date this period may be activated. Leave blank to use the default."
          For="activationTolerance">
-    <FluentNumberField Id="activationTolerance" @bind-Value="Model.ActivationToleranceDays" Min="0" Style="width: 8rem" />
+    <FluentNumberInput Id="activationTolerance" @bind-Value="Model.ActivationToleranceDays" Min="0" Style="width: 8rem" />
 </FormRow>
 
 @code {

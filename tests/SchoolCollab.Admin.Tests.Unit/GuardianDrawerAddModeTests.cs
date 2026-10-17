@@ -1,6 +1,7 @@
 using System.Net;
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -95,15 +96,19 @@ public class GuardianDrawerAddModeTests : BunitContext
         cut.WaitForState(() => cut.FindAll(".guardian-drawer-existing").Count > 0,
             timeout: TimeSpan.FromSeconds(5));
 
-        // Act: focus/click the typeahead input. In FluentAutocomplete v4 the
-        // input's click handler runs OnDropDownExpandedAsync → InputHandlerAsync,
-        // which debounces into InvokeOptionsSearchAsync (OnOptionsSearch callback).
-        cut.Find("fluent-text-field").Click();
+        // Act: focus/click the typeahead input. v5's FluentAutocomplete renders its input
+        // as a FluentTextInput — a <fluent-text-input> inside <fluent-field> — and installs
+        // the click handler on that element; the click runs DisplayFilteredOptionsAsync,
+        // the same search pipeline v4 reached via OnDropDownExpandedAsync.
+        var typeahead = cut.FindAll(".guardian-drawer-existing fluent-text-input").First();
+        typeahead.Click();
 
-        // Act: type a search query (input path through the same pipeline).
+        // Act: type a search query (input path through the same pipeline). v5's
+        // FluentTextInput binds the custom `ontextimmediate` event (Immediate=true), not
+        // the DOM `oninput` that bUnit's Input() raises, so raise the bound event directly.
         // Wait past the 300ms ImmediateDelay so the debounced
         // InvokeOptionsSearchAsync actually runs before asserting.
-        cut.Find("fluent-text-field").Input("Al");
+        typeahead.TriggerEvent("ontextimmediate", new ChangeEventArgs { Value = "Al" });
         await Task.Delay(500);
 
         // Assert: the existing-guardian surface is still showing.

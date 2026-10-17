@@ -319,6 +319,17 @@ section below.
 - **Targets:** run `dotnet build SchoolCollab.slnx` from the repo root — the solution uses the **`.slnx`** XML format. Do **not** re-add a `SchoolCollab.sln`: CI runs no-arg `dotnet build` / `dotnet test` and relies on single-solution discovery (two solution files in one directory is an error). Tests
   aren't required for the in-session check unless the change touches test
   files directly.
+- **Second target — the MAUI head is NOT in that solution.** `src/Mobile/SchoolCollab.Mobile` is
+  deliberately not registered in `SchoolCollab.slnx` (it builds only from
+  `src/Mobile/SchoolCollab.Mobile.slnx`), so a change to a shared component —
+  `SchoolCollab.Admin.Shared` in particular — can break the mobile head with **no** signal from the
+  main build. That is not hypothetical: the FluentUI 4.14.2 → 5.0.1 bump (2026-10-16) left the head
+  with 22 v5-invalid sites while `SchoolCollab.slnx` stayed green. When a change touches a shared
+  component or any package version, also run:
+  `dotnet build src/Mobile/SchoolCollab.Mobile/SchoolCollab.Mobile.csproj -f net10.0-windows10.0.19041.0 -m:1 -p:BuildInParallel=false`
+  The `-m:1 -p:BuildInParallel=false` flags are **not** optional: the default parallel build exhausts
+  memory on this machine and has repeatedly killed the agent process (~`0xC0000409`) instead of
+  reporting a compile error.
 - **Fast UI-iteration loop (hot reload):** for local visual iteration, prefer IDE hot
   reload (human) or a detached `dotnet watch` on the AppHost (agent) over the
   kill→build→restart cycle — markup/CSS/method-body edits then apply in place and

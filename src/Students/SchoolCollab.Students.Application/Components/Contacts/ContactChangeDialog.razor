@@ -15,11 +15,12 @@
 @inject CodedValuesApiClient CodedValuesApi
 @inject ILogger<ContactChangeDialog> Logger
 
+<DialogShellBody>
 <div class="contact-change-dialog">
     @if (Model.Mode == ContactChangeMode.Delete)
     {
         @* ── Delete mode: confirmation summary + reason ── *@
-        <FluentMessageBar Intent="MessageIntent.Warning">
+        <FluentMessageBar Intent="MessageBarIntent.Warning">
             Delete <strong>@FormatValue(Model.Channel, Model.Value, Model.CountryCode)</strong>?
             This cannot be undone.
         </FluentMessageBar>
@@ -44,10 +45,10 @@
                 }
             </div>
             <div class="contact-change-edit-row">
-                <FluentTextField @bind-Value="_form.Value"
+                <FluentTextInput @bind-Value="_form.Value"
                                   Placeholder="@ValuePlaceholder"
                                   class="contacts-value" />
-                <FluentTextField @bind-Value="_form.Label"
+                <FluentTextInput @bind-Value="_form.Label"
                                   Placeholder="Label (optional)"
                                   class="contacts-label" />
             </div>
@@ -69,6 +70,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     private sealed class FormState

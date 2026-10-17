@@ -1,78 +1,99 @@
-@implements IDisposable
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@inject IThemeService ThemeService
+
+@* Theme switcher (FluentUI v5). The v4 <FluentDesignTheme> root this file used to host is
+   gone from 5.0.1, together with the DesignThemeModes / OfficeColor enums it was bound
+   through; theming is CSS-variable based and driven by IThemeService
+   (MigrationFluentDesignTheme.md).
+
+   Persistence belongs to the library, not to us: its own JS reads the
+   `fluentui-blazor:theme-settings` localStorage entry while Blazor starts and applies both
+   the mode and the brand colour to <body data-theme> / <body data-theme-color> before this
+   component runs. So the switcher mirrors nothing — it reads the current mode and brand
+   colour back out of IThemeService after the first render (that store is the single source
+   of truth) and writes every change straight back through the same service. Without the
+   read-back the button and the picker would keep showing this session's stale choice after
+   a reload or in a second tab. *@
 
 <FluentStack Orientation="Orientation.Horizontal"
              HorizontalGap="4"
              VerticalAlignment="VerticalAlignment.Center"
              class="theme-switcher-stack">
 
-    <FluentButton Appearance="Appearance.Stealth"
-                  OnClick="CycleMode"
-                  Title="@($"Mode: {_mode} — click to switch")"
-                  aria-label="@($"Mode: {_mode}")">
+    <FluentButton Appearance="ButtonAppearance.Subtle"
+                  OnClick="CycleModeAsync"
+                  Title="@($"Mode: {_mode} — click to switch")">
         @ModeGlyph
     </FluentButton>
 
-    <FluentSelect Items="@_officeColors"
-                  OptionText="@(c => c.ToString())"
-                  SelectedOption="@_officeColor"
-                  SelectedOptionChanged="EventCallback.Factory.Create<OfficeColor?>(this, OnAccentChanged)"
-                  Width="120px"
-                  aria-label="Accent colour" />
+    <FluentSelect TOption="ThemeAccent"
+                  TValue="string"
+                  Items="@ThemeAccents.All"
+                  Value="@_accentColor"
+                  ValueChanged="@OnAccentChangedAsync"
+                  OptionText="@(accent => accent?.Name ?? string.Empty)"
+                  OptionValue="@(accent => accent?.Color)"
+                  AriaLabel="Accent colour"
+                  Style="width: 120px;" />
 </FluentStack>
 
 @code {
-    [Parameter] public DesignThemeModes Mode { get; set; } = DesignThemeModes.System;
-    [Parameter] public EventCallback<DesignThemeModes> ModeChanged { get; set; }
+    private ThemeMode _mode = ThemeMode.System;
+    private string? _accentColor;
 
-    [Parameter] public OfficeColor? Accent { get; set; } = OfficeColor.Teams;
-    [Parameter] public EventCallback<OfficeColor?> AccentChanged { get; set; }
-
-    private DesignThemeModes _mode;
-    private OfficeColor? _officeColor;
-    private OfficeColor?[]? _officeColors;
-
-    protected override void OnInitialized()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _officeColors = new OfficeColor?[]
+        if (!firstRender)
         {
-            OfficeColor.Teams,
-            OfficeColor.Word,
-            OfficeColor.Excel,
-            OfficeColor.PowerPoint,
-            OfficeColor.Outlook,
-            OfficeColor.OneNote
-        };
+            return;
+        }
+
+        // The Admin host's v4 theme preference, if any, before we read the state back —
+        // otherwise the button would report the migrated mode only from the next click on.
+        await LegacyThemeMigration.RunAsync(JS, ThemeService, LegacyThemeMigration.AdminStorageKey);
+        await RestoreFromThemeStoreAsync();
     }
 
-    protected override void OnParametersSet()
+    private async Task RestoreFromThemeStoreAsync()
     {
-        _mode = Mode;
-        _officeColor = Accent;
+        var settings = await ThemeService.GetThemeSettingsAsync();
+        if (settings is null)
+        {
+            return;
+        }
+
+        _mode = settings.Mode;
+        // The store holds the brand colour in hex; the picker holds the named accents, so
+        // match the two to show the applied accent again.
+        _accentColor = ThemeAccents.All
+            .FirstOrDefault(accent => string.Equals(accent.Color, settings.Color, StringComparison.OrdinalIgnoreCase))
+            ?.Color;
+
+        StateHasChanged();
     }
 
     private string ModeGlyph => _mode switch
     {
-        DesignThemeModes.Light => "\u2600",
-        DesignThemeModes.Dark  => "\uD83C\uDF19",
-        _                      => "\u25D0"
+        ThemeMode.Light => "\u2600",
+        ThemeMode.Dark  => "\uD83C\uDF19",
+        _               => "\u25D0"
     };
 
-    private async Task CycleMode()
+    private async Task CycleModeAsync()
     {
         _mode = _mode switch
         {
-            DesignThemeModes.Light => DesignThemeModes.Dark,
-            DesignThemeModes.Dark  => DesignThemeModes.System,
-            _                      => DesignThemeModes.Light
+            ThemeMode.Light => ThemeMode.Dark,
+            ThemeMode.Dark  => ThemeMode.System,
+            _               => ThemeMode.Light
         };
-        await ModeChanged.InvokeAsync(_mode);
+        await ThemeService.SetThemeAsync(_mode);
     }
 
-    private async Task OnAccentChanged(OfficeColor? value)
+    private async Task OnAccentChangedAsync(string color)
     {
-        _officeColor = value;
-        await AccentChanged.InvokeAsync(value);
+        _accentColor = color;
+        await ThemeService.SetThemeAsync(color, isExact: true);
     }
-
-    public void Dispose() { }
 }

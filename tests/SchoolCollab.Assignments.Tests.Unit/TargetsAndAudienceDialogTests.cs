@@ -21,7 +21,7 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// control that APPENDS its pick as a dismissible chip in the always-rendered picked-targets zone
 /// above it, so a submission returns every chip — and a category change clears the zone first.
 ///
-/// <para>Discriminating: the retired dialog bound <c>SelectedOptions</c>/<c>SelectedOptionsChanged</c>
+/// <para>Discriminating: the retired dialog bound <c>SelectedItems</c>/<c>SelectedItemsChanged</c>
 /// with <c>Multiple="true"</c> and held the whole selection in the control, so every assertion below
 /// (append-and-reset, chip dismiss, the picked-targets zone) fails against it.</para>
 /// </summary>
@@ -62,7 +62,7 @@ public class TargetsAndAudienceDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<
             TargetsAndAudienceDialog, TargetsAndAudienceDialogModel, TargetsAndAudienceDialogResult>(
-            model, "Add target & audience", DialogSize.Large);
+            model, "Add target & audience", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("#ta-category").Should().NotBeNull(), TimeSpan.FromSeconds(5));
         return new OpenDialog(cut, model, task);
@@ -78,7 +78,7 @@ public class TargetsAndAudienceDialogTests : BunitContext
         var dialog = Open();
 
         SelectCategory(dialog, TargetsAndAudienceCategory.GradeLevels);
-        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption>>()
+        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption, TargetsAndAudienceOption>>()
             .Single(s => s.Instance.Id == "ta-grade-level").Instance.Multiple
             .Should().BeFalse("the grade picker is single-value — a pick APPENDS, it is not a held selection");
         dialog.Cut.Find("#ta-grade-level").HasAttribute("multiple").Should().BeFalse();
@@ -86,15 +86,15 @@ public class TargetsAndAudienceDialogTests : BunitContext
             "the retired listbox carried an inline min-height:160px; the class owns the width now");
 
         SelectCategory(dialog, TargetsAndAudienceCategory.Streams);
-        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption>>()
+        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption, TargetsAndAudienceOption>>()
             .Single(s => s.Instance.Id == "ta-stream").Instance.Multiple.Should().BeFalse();
 
         SelectCategory(dialog, TargetsAndAudienceCategory.ActivityGroups);
-        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption>>()
+        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption, TargetsAndAudienceOption>>()
             .Single(s => s.Instance.Id == "ta-activity-group").Instance.Multiple.Should().BeFalse();
 
         SelectCategory(dialog, TargetsAndAudienceCategory.Students);
-        var students = dialog.Cut.FindComponents<FluentAutocomplete<TargetsAndAudienceOption>>()
+        var students = dialog.Cut.FindComponents<FluentAutocomplete<TargetsAndAudienceOption, TargetsAndAudienceOption>>()
             .Single(a => a.Instance.Id == "ta-student").Instance;
         students.Multiple.Should().BeFalse("TGT-6 keeps the server search but the pick is single");
         students.OnOptionsSearch.HasDelegate.Should().BeTrue(
@@ -160,8 +160,8 @@ public class TargetsAndAudienceDialogTests : BunitContext
 
         ChipLabels(dialog).Should().Equal(new[] { "Grade 5" },
             "one pick appends exactly one chip");
-        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption>>()
-            .Single(s => s.Instance.Id == "ta-grade-level").Instance.SelectedOption
+        dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption, TargetsAndAudienceOption>>()
+            .Single(s => s.Instance.Id == "ta-grade-level").Instance.Value
             .Should().BeNull("the picker resets to its placeholder so the next pick APPENDS");
 
         // The same value again: deduped by (Category, RefId) — one chip, never two.
@@ -356,11 +356,11 @@ public class TargetsAndAudienceDialogTests : BunitContext
 
     private static void SelectCategory(OpenDialog dialog, TargetsAndAudienceCategory category)
     {
-        var picker = dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceDialog.CategoryOption>>()
+        var picker = dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceDialog.CategoryOption, TargetsAndAudienceDialog.CategoryOption>>()
             .Single(s => s.Instance.Id == "ta-category");
         var option = picker.Instance.Items!.Single(o => o.Value == category);
 
-        dialog.Cut.InvokeAsync(() => picker.Instance.SelectedOptionChanged.InvokeAsync(option))
+        dialog.Cut.InvokeAsync(() => picker.Instance.ValueChanged.InvokeAsync(option))
             .GetAwaiter().GetResult();
 
         dialog.Cut.WaitForAssertion(() => dialog.Model.Category.Should().Be(category));
@@ -369,10 +369,10 @@ public class TargetsAndAudienceDialogTests : BunitContext
     private static void Pick(
         OpenDialog dialog, string controlId, TargetsAndAudienceCategory category, Guid refId, string label)
     {
-        var picker = dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption>>()
+        var picker = dialog.Cut.FindComponents<FluentSelect<TargetsAndAudienceOption, TargetsAndAudienceOption>>()
             .Single(s => s.Instance.Id == controlId);
 
-        dialog.Cut.InvokeAsync(() => picker.Instance.SelectedOptionChanged.InvokeAsync(
+        dialog.Cut.InvokeAsync(() => picker.Instance.ValueChanged.InvokeAsync(
                 new TargetsAndAudienceOption(refId.ToString(), label)))
             .GetAwaiter().GetResult();
 

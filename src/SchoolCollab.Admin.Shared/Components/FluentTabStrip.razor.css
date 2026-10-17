@@ -5,7 +5,9 @@
     width: 100%;
 }
 
-.fluent-tab-strip ::deep fluent-tabs {
+/* v5's FluentTabs renders a plain <div> host holding a <fluent-tablist> element; the v4
+   `fluent-tabs` custom tag no longer exists (FluentTabs.razor, fluentui-blazor v5.0.1 tag). */
+.fluent-tab-strip ::deep fluent-tablist {
     width: 100%;
 }
 
@@ -29,13 +31,17 @@
     font-weight: 600;
 }
 
-.fluent-tab-strip ::deep fluent-tabs::part(activeIndicator) {
-    display: none;
-}
+/* RETIRED, no v5 equivalent: v4 exposed the accent underline as `fluent-tabs::part(activeIndicator)`;
+   v5 draws it shadow-internally — `:host::after` (anchor-positioned on the selected tab) plus
+   `::slotted([slot='tab'][aria-selected='true'])::before` — with no part and no exportparts to reach
+   it (0 hits for either in the 5.0.1 staticwebassets bundle). The suppression cannot be re-pointed
+   from consumer CSS; leg D2k finding, not a selector to invent. */
 
 /* The panel is the box the selected tab opens into: a FULL continuous border (top line included),
    rounded bottom corners. */
-.fluent-tab-strip ::deep fluent-tab-panel:not([hidden]) {
+/* v5's panels are <div class="fluent-tab-panel" role="tabpanel"> — FluentTab.razor.cs ClassValue adds
+   the `fluent-tab-panel` CLASS; the v4 `fluent-tab-panel` ELEMENT no longer exists. */
+.fluent-tab-strip ::deep .fluent-tab-panel:not([hidden]) {
     border: 1px solid var(--neutral-stroke-rest);
     border-radius: 0 0 6px 6px;
     padding: 12px;

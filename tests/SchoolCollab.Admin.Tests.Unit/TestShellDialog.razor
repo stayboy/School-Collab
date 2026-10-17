@@ -1,23 +1,26 @@
 @* Spike + fixture for DialogShellTests. Proves that a .razor can do
    @inherits DialogShellBase<TModel, TResult> and render its form fields +
-   DialogShellFooter inside an EditForm — the composition at the heart of
-   the consolidation. The test class drives the Behavior enum to exercise
-   the success / stay-open-with-error / throw paths. *@
+   DialogShellFooter inside an EditForm wrapped in the shared DialogShellBody
+   chrome — the composition at the heart of the consolidation. The test class
+   drives the Behavior enum to exercise the success / stay-open-with-error /
+   throw paths. *@
 @inherits DialogShellBase<TestShellModel, TestShellResult>
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Forms
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
-        <FluentTextField @bind-Value="Model.Value" Label="Value" />
+        <FluentTextInput @bind-Value="Model.Value" Label="Value" />
         <DialogShellFooter Saving="@Saving"
                            Error="@Error"
                            SubmitText="@SubmitText"
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     protected override string SubmitText => "Test Submit";

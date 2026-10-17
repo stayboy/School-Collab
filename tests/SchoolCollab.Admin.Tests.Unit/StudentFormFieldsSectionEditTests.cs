@@ -129,7 +129,7 @@ public class StudentFormFieldsSectionEditTests
 
     // ---- StudentFormFields renders Readonly summaries with per-card Edit/Delete + Add anchor ----
     // No section-level "Manage" button — entry to the drawer is per-card Edit or
-    // the "Add contact" / "Add guardian" FluentAnchor.
+    // the "Add contact" / "Add guardian" FluentLink.
 
     [TestMethod]
     public void StudentFormFields_RendersReadonlySummariesWithoutManageButtons()
@@ -495,43 +495,39 @@ public class StudentFormFieldsSectionEditTests
             "the Guardians Edit title is 'Edit Guardian'");
     }
 
-    // ---- DialogServiceExtensions: height is forwarded to DialogParameters.Height (§4.1) ----
-    // The explicit-height open path depends on `BuildShellParameters` setting
-    // `Height` on the DialogParameters it returns, and on
+    // ---- DialogServiceExtensions: height is forwarded to DialogOptions.Height (§4.1) ----
+    // The explicit-height open path depends on `BuildShellOptions` setting
+    // `Height` on the DialogOptions it returns, and on
     // `ShowReadonlyDialogAsync` threading the `height` argument through to it.
     // Both helpers must default to null so callers that omit height keep the
-    // 480px host default.
+    // FluentUI default.
 
     [TestMethod]
-    public void DialogServiceExtensions_BuildShellParameters_ForwardsHeightToDialogParameters()
+    public void DialogServiceExtensions_BuildShellOptions_ForwardsHeightToDialogOptions()
     {
         var source = ReadDialogServiceExtensionsSource();
 
-        // BuildShellParameters accepts a height argument and forwards it to
-        // DialogParameters.Height. Default is null so other read-only dialogs
-        // keep the 480px host default.
-        source.Should().Contain("BuildShellParameters(string title, DialogSize size = DialogSize.Small, string? height = null)",
-            "BuildShellParameters accepts an optional height (default null = 480px host default)");
+        // BuildShellOptions accepts a height argument and forwards it to
+        // DialogOptions.Height. Default is null so other read-only dialogs
+        // keep the FluentUI default.
+        source.Should().Contain("BuildShellOptions(string title, DialogWidth size = DialogWidth.Small, string? height = null)",
+            "BuildShellOptions accepts an optional height (default null = FluentUI's own default)");
         source.Should().Contain("Height = height",
-            "BuildShellParameters forwards height to DialogParameters.Height (FluentUI's --dialog-height)");
+            "BuildShellOptions forwards height to DialogOptions.Height");
 
         // ShowReadonlyDialogAsync threads the height argument through to
-        // BuildShellParameters. The signature grows the new parameter; the
+        // BuildShellOptions. The signature grows the new parameter; the
         // body passes it on.
         source.Should().Contain("ShowReadonlyDialogAsync<TComponent>(",
             "the read-only-dialog helper exists");
         source.Should().MatchRegex(
-            @"public\s+static\s+async\s+Task<IDialogReference>\s+ShowReadonlyDialogAsync<TComponent>\(\s*this\s+IDialogService\s+dialogService,\s*string\s+title,",
-            "the helper signature starts with the canonical (this IDialogService dialogService, string title)");
+            @"public\s+static\s+async\s+Task<DialogResult>\s+ShowReadonlyDialogAsync<TComponent>\(\s*this\s+IDialogService\s+dialogService,\s*string\s+title,",
+            "the helper signature starts with the canonical (this IDialogService dialogService, string title) " +
+            "and returns the dialog's DialogResult (FluentUI 5.x has no IDialogReference handle)");
         source.Should().Contain("string? height = null",
             "the read-only helper accepts an optional height parameter");
-        source.Should().Contain("BuildShellParameters(title, size, height)",
-            "the read-only helper passes height through to BuildShellParameters");
-
-        // The XML doc on height must name --dialog-height so future readers
-        // see the FluentUI CSS-var mapping.
-        source.Should().Contain("--dialog-height",
-            "the XML doc names FluentUI's --dialog-height CSS var so the mapping is explicit");
+        source.Should().Contain("BuildShellOptions(title, size, height)",
+            "the read-only helper passes height through to BuildShellOptions");
     }
 
     // ---- GradeLevels/Detail: opens StudentEditDialog WITHOUT pinning a fixed height (§4.1) ----
@@ -735,10 +731,10 @@ public class StudentFormFieldsSectionEditTests
         source.Should().Contain("CancelContactEditAsync",
             "the inner switch's cancel button calls CancelContactEditAsync");
 
-        // The Add contact affordance is a FluentAnchor (hypertext), gated
-        // by `showAddAnchor` (drafts only — spec §4.3).
-        source.Should().Contain("Appearance=\"Appearance.Hypertext\"",
-            "the Add contact affordance is a FluentAnchor with the Hypertext appearance");
+        // The Add contact affordance is a FluentLink (v5's hypertext element),
+        // gated by `showAddAnchor` (drafts only — spec §4.3).
+        source.Should().Contain("Appearance=\"LinkAppearance.Default\"",
+            "the Add contact affordance is a FluentLink with the hypertext (Default) appearance");
         source.Should().Contain("guardian-contact-add-anchor",
             "the Add anchor has its own .guardian-contact-add-anchor class");
 
@@ -1139,11 +1135,11 @@ public class StudentFormFieldsSectionEditTests
         var source = ReadGuardianSectionSource();
 
         // The Add branch title row carries the "New guardian" identity on the
-        // left and the far-right Hypertext toggle anchor.
+        // left and the far-right hypertext toggle link.
         source.Should().Contain("guardian-drawer-add-title",
             "the Add branch wraps the identity in a dedicated title row");
-        source.Should().Contain("Appearance=\"Appearance.Hypertext\"",
-            "the toggle is a native hypertext anchor");
+        source.Should().Contain("Appearance=\"LinkAppearance.Default\"",
+            "the toggle is a FluentLink with the hypertext (Default) appearance");
         source.Should().Contain("class=\"guardian-drawer-add-toggle\"",
             "the anchor is positioned far-right via the toggle class");
         source.Should().Contain("Select existing guardian",
@@ -1167,8 +1163,9 @@ public class StudentFormFieldsSectionEditTests
             "the existing-selection screen renders its container");
         source.Should().Contain("<FluentAutocomplete TOption=\"GuardianSearchRow\"",
             "the selection screen reuses the guardian typeahead");
-        source.Should().Contain("SelectedOptionChanged=\"OnTypeaheadSelectedAsync\"",
-            "a typeahead pick resolves via the shared handler");
+        source.Should().Contain("SelectedItemChanged=\"OnTypeaheadSelectedAsync\"",
+            "a typeahead pick resolves via the shared handler (v5 renamed FluentAutocomplete's "
+            + "selection callback from ValueChanged to SelectedItemChanged)");
         source.Should().Contain("OnTypeaheadSearchAsync",
             "the typeahead search uses the shared handler");
         source.Should().Contain("FluentRadioGroup",

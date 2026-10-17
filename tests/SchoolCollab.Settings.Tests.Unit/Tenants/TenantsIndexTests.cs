@@ -164,22 +164,15 @@ public class TenantsIndexTests : BunitContext
     /// Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves to
     /// <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at a fixed outcome, and
     /// records the content it was handed so a test can pin the wording the operator reads.
-    /// Registered AFTER <c>AddFluentUIComponents()</c>, so it wins resolution.
     /// </summary>
     private void RegisterConfirmDialog(bool confirm, List<ConfirmDialogContent>? captured = null)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(
-            confirm ? DialogResult.Ok<object?>(null) : DialogResult.Cancel()));
-
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .Callback<ConfirmDialogContent, DialogParameters>((content, _) => captured?.Add(content))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+                captured?.Add((ConfirmDialogContent)options.Parameters[nameof(ConfirmDialog.Content)]!))
+            .ReturnsAsync(confirm ? DialogResult.Ok<object?>(null) : DialogResult.Cancel());
     }
 
     private (IRenderedComponent<TenantsIndex> Cut, ScriptedHandler Handler) Render(
@@ -208,10 +201,8 @@ public class TenantsIndexTests : BunitContext
         Nav = new RecordingNavigationManager();
         Services.AddSingleton<NavigationManager>(Nav);
 
-        // The row action menu is rendered through the menu service (the production default), so the
-        // harness needs the provider the layout supplies — exactly as DevTenantSwitcherTests does
-        // for the dialog provider.
-        Render<FluentMenuProvider>();
+        // FluentUI v5 dropped FluentMenuProvider: the row action menu no longer needs a provider
+        // rendered into the tree (the v4 seam that stood here was retired with the component).
 
         return (Render<TenantsIndex>(), handler);
     }

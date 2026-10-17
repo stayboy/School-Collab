@@ -116,4 +116,35 @@ public class ChipBunitTests : BunitContext
         cut.Markup.Should().Contain("chip-badge");
         cut.Markup.Should().Contain("Fractions");
     }
+
+    [TestMethod]
+    public void DismissButton_CarriesTheDismissTitleAndInvokesOnDismiss()
+    {
+        // FluentUI 5.0.1's FluentBadge dropped the built-in dismiss button (and with it
+        // DismissTitle / OnDismissClick), so the chip authors its own control. This test pins
+        // the authored replacement: a real button, named by DismissTitle, wired to OnDismiss.
+        var dismissed = 0;
+        var cut = Render<Chip>(p => p
+            .Add(c => c.Label, "Fractions")
+            .Add(c => c.DismissTitle, "Remove strand")
+            .Add(c => c.OnDismiss, EventCallback.Factory.Create(this, () => dismissed++)));
+
+        var dismiss = cut.Find("button.chip-dismiss");
+        dismiss.GetAttribute("title").Should().Be("Remove strand",
+            "the tooltip is the 4.14.2 DismissTitle value, kept on the authored control");
+        dismiss.GetAttribute("aria-label").Should().Be("Remove strand",
+            "the icon-only button must carry an accessible name");
+
+        dismiss.Click();
+        dismissed.Should().Be(1, "the dismiss affordance must actually invoke OnDismiss");
+    }
+
+    [TestMethod]
+    public void ReadOnlyChip_RendersNoDismissButton()
+    {
+        var cut = Render<Chip>(p => p.Add(c => c.Label, "Fractions"));
+
+        cut.FindAll("button.chip-dismiss").Should().BeEmpty(
+            "without OnDismiss the chip stays read-only");
+    }
 }

@@ -178,7 +178,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<NotificationPolicyFieldEditDialog,
             NotificationPolicyFieldEditDialog.EditModel,
-            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Blocked channels", DialogSize.Large);
+            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Blocked channels", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel").Should().HaveCount(2));
         cut.Markup.Should().Contain("Global settings", "the global-settings panel header renders");
@@ -206,7 +206,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<NotificationPolicyFieldEditDialog,
             NotificationPolicyFieldEditDialog.EditModel,
-            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Blocked channels", DialogSize.Large);
+            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Blocked channels", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel--grade .channel-option").Should().NotBeEmpty());
         // Toggle SMS into the GRADE-side blocked list only.
@@ -237,7 +237,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<NotificationPolicyFieldEditDialog,
             NotificationPolicyFieldEditDialog.EditModel,
-            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Preferred channels", DialogSize.Large);
+            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Preferred channels", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel--global .channel-option").Should().NotBeEmpty());
         // Add SMS to the GLOBAL-side preferred list only.
@@ -269,7 +269,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<NotificationPolicyFieldEditDialog,
             NotificationPolicyFieldEditDialog.EditModel,
-            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Preferred channels", DialogSize.Large);
+            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Preferred channels", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".channel-option").Should().NotBeEmpty());
         // Global: Email (kept) + SMS. Grade (no override yet): WhatsApp only. Each interaction is
@@ -302,7 +302,7 @@ public class NotificationPolicyFieldEditDialogTests : BunitContext
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<NotificationPolicyFieldEditDialog,
             NotificationPolicyFieldEditDialog.EditModel,
-            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Sendout time of day", DialogSize.Large);
+            NotificationPolicyFieldEditDialog.EditResult>(model, "Edit Sendout time of day", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.FindAll(".split__panel--grade input[type=time]").Should().NotBeEmpty());
         await SetTimeAsync(cut, GradePanel, "09:30");

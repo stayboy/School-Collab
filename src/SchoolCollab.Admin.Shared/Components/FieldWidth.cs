@@ -8,7 +8,7 @@ namespace SchoolCollab.Admin.Shared.Components;
 /// wrappers (<see cref="DropdownForEnum"/>, <see cref="CodedValueDropdown"/>,
 /// <see cref="DropdownComponent"/>); the matching <c>w-1</c>…<c>w-9</c> CSS
 /// classes in <c>src/SchoolCollab.Admin/wwwroot/css/app.css</c> cover
-/// third-party inputs (<c>FluentTextField</c>, direct <c>FluentSelect</c>)
+/// third-party inputs (<c>FluentTextInput</c>, direct <c>FluentSelect</c>)
 /// that the repo does not wrap. Both expressions of the ladder MUST stay in
 /// sync — see <see cref="FieldWidthExtensions.ToCssStyle"/> for the values.
 /// </summary>
@@ -37,6 +37,14 @@ namespace SchoolCollab.Admin.Shared.Components;
 /// wrapper's <see cref="FluentSelect.Style"/> parameter always wins, with no
 /// <c>!important</c> and no edits to the wrappers' scoped CSS. This is the
 /// repo convention's documented exception ("dynamic values computed in C#").</para>
+/// <para><b>v5 splits that inline style's target in two.</b> The
+/// <c>FluentSelect</c> renders as
+/// <c>&lt;fluent-field class="…" style="width:…"&gt;&lt;fluent-dropdown slot="input"&gt;</c>,
+/// so the inline style lands on the <c>fluent-field</c> HOST, not on the
+/// control. The control is sized from the host by
+/// <c>fluent-field &gt; fluent-dropdown { width: inherit; }</c> in
+/// <c>src/SchoolCollab.Admin.Shared/wwwroot/app.css</c> (owner pin Q28(a),
+/// 2026-10-16) — remove either half and the ladder sizes only the wrapper.</para>
 /// </remarks>
 public enum FieldWidth
 {
@@ -70,11 +78,12 @@ public enum FieldWidth
 
 /// <summary>
 /// <see cref="FieldWidth"/> → CSS <c>style</c> string. Used by the dropdown
-/// wrappers to emit an inline style on their underlying
-/// <see cref="Microsoft.FluentUI.AspNetCore.Components.FluentSelect"/> (inline
-/// style beats Blazor scoped CSS, so the width always wins over the
-/// wrapper's default <c>width:100%</c>). The same pixel values are encoded as
-/// the <c>w-1</c>…<c>w-9</c> classes in
+/// wrappers to emit an inline style on the <c>fluent-field</c> host v5 renders
+/// around their <see cref="Microsoft.FluentUI.AspNetCore.Components.FluentSelect"/>
+/// (inline style beats Blazor scoped CSS, so the width always wins over the
+/// wrapper's default <c>width:100%</c>); the control sizes from that host via
+/// the slotted-control rule in <c>SchoolCollab.Admin.Shared/wwwroot/app.css</c>.
+/// The same pixel values are encoded as the <c>w-1</c>…<c>w-9</c> classes in
 /// <c>src/SchoolCollab.Admin/wwwroot/css/app.css</c> for third-party inputs —
 /// keep the two in sync.
 /// </summary>
@@ -83,9 +92,11 @@ public static class FieldWidthExtensions
     /// <summary>
     /// Returns the inline CSS <c>style</c> string for <paramref name="width"/>,
     /// e.g. <c>"width:80px; min-width:0; max-width:100%"</c>. <c>min-width:0</c>
-    /// lets <c>&lt;fluent-select&gt;</c>/<c>&lt;fluent-combobox&gt;</c> honor
-    /// widths below their intrinsic minimum; <c>max-width:100%</c> prevents a
-    /// long value from blowing out its column.
+    /// lets the host honor widths below its intrinsic minimum;
+    /// <c>max-width:100%</c> prevents a long value from blowing out its column.
+    /// The string is applied to the <c>fluent-field</c> host — the slotted
+    /// control is sized from it by the rule in
+    /// <c>src/SchoolCollab.Admin.Shared/wwwroot/app.css</c>.
     /// </summary>
     /// <exception cref="System.ArgumentOutOfRangeException"><paramref name="width"/> is not a defined <see cref="FieldWidth"/> value.</exception>
     public static string ToCssStyle(this FieldWidth width) => width switch

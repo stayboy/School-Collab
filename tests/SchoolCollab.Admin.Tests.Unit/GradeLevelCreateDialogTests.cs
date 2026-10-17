@@ -211,7 +211,7 @@ public class GradeLevelCreateDialogTests : BunitContext
         var task = DialogService.ShowShellDialogAsync<GradeLevelCreateDialog, GradeLevelCreateDialog.GradeLevelCreateModel, SchoolCollab.Students.Application.Services.GradeLevelDto>(
             new GradeLevelCreateDialog.GradeLevelCreateModel(),
             title: "Create grade level",
-            size: DialogSize.Medium);
+            size: DialogWidth.Medium);
 
         // Wait for the EditForm to mount inside the provider.
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
@@ -273,7 +273,7 @@ public class GradeLevelCreateDialogTests : BunitContext
             GradeLevelCreateDialog,
             GradeLevelCreateDialog.GradeLevelCreateModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Create grade level", DialogSize.Medium);
+            model, "Create grade level", DialogWidth.Medium);
 
         // Wait for the dialog's EditForm to render, then submit.
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
@@ -322,18 +322,20 @@ public class GradeLevelCreateDialogTests : BunitContext
             GradeLevelCreateDialog,
             GradeLevelCreateDialog.GradeLevelCreateModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Create grade level", DialogSize.Medium);
+            model, "Create grade level", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra", "the topic catalog renders as picker options"));
 
         cut.Markup.Should().NotContain("selectedvalues",
             "the dead SelectedValues binding must not leak into the DOM");
-        cut.FindAll("fluent-listbox").Should().BeEmpty(
+        cut.FindAll("div.fluent-listbox").Should().BeEmpty(
+            "v5's FluentListbox renders a div.fluent-listbox host, while the multi-select FluentSelect renders a fluent-dropdown host — so the bare listbox is what this guard is after");
+        cut.FindAll("fluent-dropdown[multiple]").Should().NotBeEmpty(
             "the supported control is the multi-select FluentSelect (the skills' multi-select route)");
 
-        var picker = cut.FindComponent<FluentSelect<TopicDto>>().Instance;
+        var picker = cut.FindComponent<FluentSelect<TopicDto, string>>().Instance;
         picker.Multiple.Should().BeTrue();
-        picker.SelectedOptions.Should().ContainSingle(o => o.Id == topicB,
+        picker.SelectedItems.Should().ContainSingle(o => o.Id == topicB,
             "the pre-populated Model.TopicIds projects into the picker's selected options");
 
         cut.FindAll("fluent-option").Single(o => o.GetAttribute("value") == topicB.ToString())
@@ -376,12 +378,14 @@ public class GradeLevelCreateDialogTests : BunitContext
             GradeLevelCreateDialog,
             GradeLevelCreateDialog.GradeLevelCreateModel,
             SchoolCollab.Students.Application.Services.GradeLevelDto>(
-            model, "Create grade level", DialogSize.Medium);
+            model, "Create grade level", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
 
-        var picker = cut.FindComponent<FluentSelect<TopicDto>>();
-        await cut.InvokeAsync(() => picker.Instance.SelectedOptionsChanged.InvokeAsync(
+        // v5's FluentListBase<TOption, TValue>: the picker binds TValue="string" (the option's
+        // id text) while SelectedItems stays over TOption, so the test's second type argument is string.
+        var picker = cut.FindComponent<FluentSelect<TopicDto, string>>();
+        await cut.InvokeAsync(() => picker.Instance.SelectedItemsChanged.InvokeAsync(
             picker.Instance.Items!.Where(t => t.Id == topicA || t.Id == topicB).ToArray()));
 
         model.TopicIds.Should().BeEquivalentTo(new[] { topicA, topicB },

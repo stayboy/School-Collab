@@ -5,10 +5,10 @@ namespace SchoolCollab.Admin.Shared.Components.Dialogs;
 
 /// <summary>
 /// Base for "form" dialogs. Owns the shared logic that every
-/// <c>IDialogContentComponent</c>-style dialog in the admin apps
-/// duplicates today: the <c>Content</c> parameter, the
-/// <c>FluentDialog</c> cascade, the <c>_saving</c>/<c>_error</c> state,
-/// the submit&rarr;close plumbing, and the cancel plumbing.
+/// <c>FluentDialogInstance</c>-style dialog in the admin apps duplicates
+/// today: the <c>Content</c> parameter, the <c>IDialogInstance</c> cascade,
+/// the <c>_saving</c>/<c>_error</c> state, the submit&rarr;close plumbing,
+/// and the cancel plumbing.
 ///
 /// <para>A derived dialog is a <c>.razor</c> file that does
 /// <c>@inherits DialogShellBase&lt;TModel, TResult&gt;</c> and provides:</para>
@@ -26,35 +26,37 @@ namespace SchoolCollab.Admin.Shared.Components.Dialogs;
 ///         exception message in the error bar and keep the dialog open.</item>
 /// </list>
 ///
-/// <para>This class has <strong>no markup of its own</strong> — it is a
-/// plain C# abstract class so it composes cleanly with FluentUI's
-/// <c>ShowDialogAsync&lt;TComponent, TData&gt;</c> hosting model, which
-/// renders <c>TComponent</c> as the dialog's entire content. The shared
-/// markup (error message bar + Cancel/Save footer) lives in the
+/// <para>This class has <strong>no markup of its own</strong> — it is an
+/// abstract class so it composes cleanly with FluentUI's
+/// <c>ShowDialogAsync&lt;TDialog&gt;(DialogOptions)</c> hosting model, which
+/// renders <c>TDialog</c> as the dialog's entire body and spreads
+/// <c>DialogOptions.Parameters</c> onto its <c>[Parameter]</c> properties.
+/// The shared markup (error message bar + Cancel/Save footer) lives in the
 /// <see cref="DialogShellFooter"/> child component.</para>
 ///
-/// <para>The <c>IDialogContentComponent&lt;DialogShellData&lt;TModel&gt;&gt;</c>
-/// interface is implemented here (not re-declared via <c>@implements</c> in
-/// the derived <c>.razor</c>) and inherited via standard C# inheritance.</para>
+/// <para>FluentUI 5.x's <c>FluentDialogInstance</c> derives from
+/// <c>ComponentBase</c> and supplies the <c>IDialogInstance</c> cascade plus
+/// the localizer; it also pre-fills the built-in footer OK/Cancel labels and
+/// routes their clicks to <see cref="OnActionClickedAsync"/>. The shell
+/// clears those labels in <see cref="OnInitializeDialog"/> (the dialog then
+/// renders only the shell's own Cancel/Save row, exactly as the v4
+/// <c>DialogParameters.PrimaryAction/SecondaryAction = null</c> pair did) and
+/// maps the header's close (X) affordance onto the shell's cancel path.</para>
 /// </summary>
 /// <typeparam name="TModel">The dialog's form-state type (typically a <c>record</c> with a primary constructor). Supplied non-null via <see cref="Content"/> by <c>DialogServiceExtensions.ShowShellDialogAsync</c>; if absent, <see cref="Model"/> throws — that is a programming error, not a runtime condition.</typeparam>
 /// <typeparam name="TResult">The success-payload type returned to the caller via <see cref="DialogShellResult{TResult}"/>.</typeparam>
-public abstract class DialogShellBase<TModel, TResult>
-    : ComponentBase, IDialogContentComponent<DialogShellData<TModel>>
+public abstract class DialogShellBase<TModel, TResult> : FluentDialogInstance
     where TModel : class
     where TResult : class
 {
     /// <summary>
     /// The dialog payload supplied by
-    /// <c>DialogServiceExtensions.ShowShellDialogAsync</c>. Wraps the
-    /// derived dialog's form model.
+    /// <c>DialogServiceExtensions.ShowShellDialogAsync</c> via
+    /// <c>DialogOptions.Parameters["Content"]</c>. Wraps the derived dialog's
+    /// form model.
     /// </summary>
     [Parameter]
     public DialogShellData<TModel> Content { get; set; } = default!;
-
-    /// <summary>The FluentUI dialog that hosts this component.</summary>
-    [CascadingParameter]
-    public FluentDialog Dialog { get; set; } = default!;
 
     private TModel? _model;
     private bool _saving;
@@ -108,7 +110,28 @@ public abstract class DialogShellBase<TModel, TResult>
     /// </summary>
     protected abstract Task<TResult?> SubmitAsync(TModel model);
 
+    /// <summary>
+    /// Suppresses FluentUI's built-in OK/Cancel footer actions.
+    /// <c>FluentDialogInstance.OnInitializedAsync</c> fills both labels before
+    /// calling this hook, so clearing them here is what restores the v4 shell
+    /// posture (<c>PrimaryAction = null</c>, <c>SecondaryAction = null</c>) —
+    /// the dialog then renders only the shell's own Cancel/Save row.
+    /// </summary>
+    protected override void OnInitializeDialog(DialogOptionsHeader header, DialogOptionsFooter footer)
+    {
+        footer.PrimaryAction.Label = null;
+        footer.SecondaryAction.Label = null;
+    }
+
     protected override void OnInitialized() => OnModelInitialized(Model);
+
+    /// <summary>
+    /// Routes FluentUI's built-in header/footer action clicks. Only the header
+    /// close (X) affordance survives the label suppression above; it maps onto
+    /// the shell's cancel path, matching v4's dismiss behaviour.
+    /// </summary>
+    protected override Task OnActionClickedAsync(bool primary)
+        => primary ? HandleSubmitAsync() : HandleCancelAsync();
 
     /// <summary>
     /// The <c>EditForm.OnValidSubmit</c> handler. Guards against
@@ -126,7 +149,7 @@ public abstract class DialogShellBase<TModel, TResult>
             var result = await SubmitAsync(Model);
             if (result is not null)
             {
-                await Dialog.CloseAsync(new DialogShellResult<TResult>(result));
+                await DialogInstance.CloseAsync(new DialogShellResult<TResult>(result));
             }
         }
         catch (Exception ex)
@@ -139,6 +162,6 @@ public abstract class DialogShellBase<TModel, TResult>
         }
     }
 
-    /// <summary>The Cancel button handler. Delegates to <c>Dialog.CancelAsync</c>.</summary>
-    protected Task HandleCancelAsync() => Dialog.CancelAsync();
+    /// <summary>The Cancel button handler. Delegates to <c>IDialogInstance.CancelAsync</c>.</summary>
+    protected Task HandleCancelAsync() => DialogInstance.CancelAsync();
 }

@@ -15,18 +15,18 @@
             <h1 class="page-title">@(_group?.Name ?? "Activity Group")</h1>
             @if (_group is not null)
             {
-                <FluentBadge Appearance="@(_group.IsActive ? Appearance.Accent : Appearance.Neutral)">@(_group.IsActive ? "Active" : "Inactive")</FluentBadge>
+                <FluentBadge Appearance="@BadgeAppearance.Filled" Color="@(_group.IsActive ? BadgeColor.Success : BadgeColor.Subtle)">@(_group.IsActive ? "Active" : "Inactive")</FluentBadge>
             }
         </div>
         <div class="action-bar">
-            <FluentButton Appearance="Appearance.Neutral"
+            <FluentButton Appearance="ButtonAppearance.Default"
                           Icon="@FluentIcons.ArrowLeft"
                           OnClick="@(() => Nav.NavigateTo("/activity-groups"))">
                 Back
             </FluentButton>
             @if (_group is not null && _group.IsActive)
             {
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               Icon="@FluentIcons.PersonAdd"
                               Disabled="@_loading"
                               OnClick="@OpenAddMemberDialogAsync">
@@ -34,7 +34,7 @@
                 </FluentButton>
                 @if (_group.Span != "OpenEnded")
                 {
-                    <FluentButton Appearance="Appearance.Outline"
+                    <FluentButton Appearance="ButtonAppearance.Outline"
                                   Icon="@FluentIcons.ArrowClockwise"
                                   Disabled="@(_loading || _saving)"
                                   OnClick="@OnRolloverAsync">
@@ -51,8 +51,8 @@
     }
     else if (_group is null)
     {
-        <FluentMessageBar Intent="MessageIntent.Warning">Activity group not found.</FluentMessageBar>
-        <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/activity-groups"))">Back</FluentButton>
+        <FluentMessageBar Intent="MessageBarIntent.Warning">Activity group not found.</FluentMessageBar>
+        <FluentButton Appearance="ButtonAppearance.Default" OnClick="@(() => Nav.NavigateTo("/activity-groups"))">Back</FluentButton>
     }
     else
     {
@@ -74,7 +74,7 @@
 
         @if (_error is not null)
         {
-            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_error</FluentMessageBar>
+            <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_error</FluentMessageBar>
         }
 
         @if (_members is null)
@@ -83,7 +83,7 @@
         }
         else if (_members.Length == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info" class="mt-2">
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="mt-2">
                 No members yet. Use “Add members” to enrol students.
             </FluentMessageBar>
         }
@@ -115,18 +115,18 @@
                                   Title="Admin-settable: re-enrol this member into the next window on rollover" />
                 </TemplateColumn>
                 <TemplateColumn Title="Status" Context="m">
-                    <FluentBadge Appearance="@MemberStatusBadge(m.Status)">@m.Status</FluentBadge>
+                    <FluentBadge Appearance="@MemberStatusBadge(m.Status)" Color="@MemberStatusColor(m.Status)">@m.Status</FluentBadge>
                 </TemplateColumn>
                 <TemplateColumn Title="" Context="m">
                     @if (m.Status == "Active")
                     {
-                        <FluentButton Appearance="Appearance.Lightweight"
+                        <FluentButton Appearance="ButtonAppearance.Transparent"
                                       Icon="@FluentIcons.ArrowRight"
                                       Disabled="@_saving"
                                       OnClick="@(() => OnExitMemberAsync(m.StudentId))">
                             Exit
                         </FluentButton>
-                        <FluentButton Appearance="Appearance.Lightweight"
+                        <FluentButton Appearance="ButtonAppearance.Transparent"
                                       Icon="@FluentIcons.Delete"
                                       Disabled="@_saving"
                                       OnClick="@(() => OnRemoveMemberAsync(m.StudentId))">
@@ -153,8 +153,16 @@
 
     private static Appearance StatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
 
-    private static Appearance MemberStatusBadge(string status) =>
-        status == "Active" ? Appearance.Accent : Appearance.Neutral;
+    // v5 FluentBadge carries colour outside Appearance (MigrationFluentBadge.md):
+    // Accent and Neutral both map to BadgeAppearance.Filled.
+    private static BadgeAppearance MemberStatusBadge(string status) =>
+        status == "Active" ? BadgeAppearance.Filled : BadgeAppearance.Filled;
+
+    // v4's Accent/Neutral distinction, carried in BadgeColor (which is where v5 keeps
+    // it): an Active member is the success state, every other status is the neutral
+    // one. Without this the two chips are visually identical.
+    private static BadgeColor MemberStatusColor(string status) =>
+        status == "Active" ? BadgeColor.Success : BadgeColor.Subtle;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -198,7 +206,7 @@
             StudentPickerDialog,
             StudentPickerModel,
             SchoolCollab.Students.Core.DTOs.StudentDto[]>(
-            new StudentPickerModel(), "Add members", DialogSize.Medium);
+            new StudentPickerModel(), "Add members", DialogWidth.Medium);
 
         if (_disposed || selected is null || selected.Length == 0) return;
 
@@ -287,11 +295,10 @@
     private async Task OnRolloverAsync()
     {
         if (_disposed || _saving) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             "Roll over this group? This closes the current window and re-enrols auto-renew members into the next window.",
-            "Roll over", "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Roll over");
+        if (!confirmed) return;
 
         _saving = true;
         try

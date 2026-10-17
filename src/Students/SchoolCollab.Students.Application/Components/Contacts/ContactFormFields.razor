@@ -45,13 +45,13 @@
     </div>
 </FormRow>
 <FormRow Label="@ValueLabel" Required Orientation="RowOrientation.Vertical">
-    <FluentTextField @bind-Value="Model.Value"
+    <FluentTextInput @bind-Value="Model.Value"
                      Placeholder="@ValuePlaceholder"
                      Required
                      class="w-9" />
 </FormRow>
 <FormRow Label="Label" Orientation="RowOrientation.Vertical">
-    <FluentTextField @bind-Value="Model.Label"
+    <FluentTextInput @bind-Value="Model.Label"
                      Placeholder="Label (optional)"
                      class="w-9" />
 </FormRow>

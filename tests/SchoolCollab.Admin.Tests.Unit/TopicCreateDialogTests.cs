@@ -127,7 +127,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            CreateModel(), "Add subject", DialogSize.Large);
+            CreateModel(), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull(
             "the dialog must open even though /activity-groups 404s"));
@@ -163,7 +163,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            model, "Add subject", DialogSize.Large);
+            model, "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -186,7 +186,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            CreateModel(), "Add subject", DialogSize.Large);
+            CreateModel(), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -213,7 +213,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            CreateModel(), "Add subject", DialogSize.Large);
+            CreateModel(), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -262,15 +262,15 @@ public class TopicCreateDialogTests : BunitContext
         var model = CreateModel();
         model.ExistingTopicCodedValueIds = new HashSet<Guid> { cvId };
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            model, "Add subject", DialogSize.Large);
+            model, "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
         // Drive the CodedValueDropdown's FluentSelect to pick the coded value.
         var dropdown = cut.FindComponent<CodedValueDropdown>();
-        var fluentSelect = dropdown.FindComponent<FluentSelect<CodedValueDto>>();
+        var fluentSelect = dropdown.FindComponent<FluentSelect<CodedValueDto, CodedValueDto>>();
         var picked = dropdown.Instance.Items.First(i => i.Id == cvId);
-        await cut.InvokeAsync(() => fluentSelect.Instance.SelectedOptionChanged.InvokeAsync(picked));
+        await cut.InvokeAsync(() => fluentSelect.Instance.ValueChanged.InvokeAsync(picked));
 
         // The duplicate warning bar renders and Create is disabled.
         cut.WaitForAssertion(() =>
@@ -294,9 +294,9 @@ public class TopicCreateDialogTests : BunitContext
 
     private async Task DriveGroupSelectAsync(IRenderedComponent<FluentDialogProvider> cut, string groupId)
     {
-        var groupSelect = cut.FindComponents<FluentSelect<string>>()
+        var groupSelect = cut.FindComponents<FluentSelect<string, string>>()
             .First(s => s.Instance.Id == "topic-create-group");
-        // Drive the bound ValueChanged callback (not SelectedOptionChanged): the
+        // Drive the bound ValueChanged callback (not ValueChanged): the
         // dialog binds @bind-Value:after="OnActivityGroupChangedAsync", so only
         // ValueChanged sets _activityGroupIdText AND triggers the group-topic reload
         // that backs the duplicate-coded-value guard.
@@ -318,7 +318,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            GroupModel("ActivityGroup"), "Add subject", DialogSize.Large);
+            GroupModel("ActivityGroup"), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         // AC-2a: nothing selected yet → no span display.
@@ -350,7 +350,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            CreateModel(), "Add subject", DialogSize.Large);
+            CreateModel(), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -381,7 +381,7 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            GroupModel("ActivityGroup"), "Add subject", DialogSize.Large);
+            GroupModel("ActivityGroup"), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         await DriveGroupSelectAsync(cut, GroupId.ToString());
@@ -418,16 +418,16 @@ public class TopicCreateDialogTests : BunitContext
 
         var cut = Render<FluentDialogProvider>();
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            GroupModel("ActivityGroup"), "Add subject", DialogSize.Large);
+            GroupModel("ActivityGroup"), "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         await DriveGroupSelectAsync(cut, GroupId.ToString());
 
         // Pick the coded value that is already assigned to the group.
         var dropdown = cut.FindComponent<CodedValueDropdown>();
-        var fluentSelect = dropdown.FindComponent<FluentSelect<CodedValueDto>>();
+        var fluentSelect = dropdown.FindComponent<FluentSelect<CodedValueDto, CodedValueDto>>();
         var picked = dropdown.Instance.Items.First(i => i.Id == cvId);
-        await cut.InvokeAsync(() => fluentSelect.Instance.SelectedOptionChanged.InvokeAsync(picked));
+        await cut.InvokeAsync(() => fluentSelect.Instance.ValueChanged.InvokeAsync(picked));
 
         // Warning bar + disabled Create.
         cut.WaitForAssertion(() =>
@@ -473,7 +473,7 @@ public class TopicCreateDialogTests : BunitContext
         var model = CreateModel();
         model.Name = "Mathematics";
         var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
-            model, "Add subject", DialogSize.Large);
+            model, "Add subject", DialogWidth.Large);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 

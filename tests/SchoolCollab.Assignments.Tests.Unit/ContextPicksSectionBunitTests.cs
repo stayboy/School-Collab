@@ -89,7 +89,7 @@ public class ContextPicksSectionBunitTests : BunitContext
         cut.Find("#authoring-basics-strand-chips").Should().NotBeNull(
             "picks render as chips beneath the buttons");
         cut.Find("#authoring-basics-lesson-chips").Should().NotBeNull();
-        cut.FindAll("fluent-select[multiple], fluent-select[multiple='true']").Should().BeEmpty(
+        cut.FindAll("fluent-dropdown[multiple], fluent-dropdown[multiple='true']").Should().BeEmpty(
             "D4: the two multi-selects are retired in favour of the buttons + dialog");
     }
 
@@ -201,23 +201,18 @@ public class ContextPicksSectionBunitTests : BunitContext
         });
     }
 
-    /// <summary>Registers a mocked <see cref="IDialogService"/> that answers the strand/lesson
+    /// <summary>Registers a mocked <see cref="DialogService"/> that answers the strand/lesson
     /// picker open with a fixed OK payload (the <c>RegisterPublishDialog</c>/<c>ContactsEditorTests</c>
     /// shell-dialog pattern), so the write-back path after the dialog runs for real.</summary>
     private void RegisterContextPickDialog(params Guid[] selectedIds)
     {
-        var dialogRef = new Mock<IDialogReference>();
         var payload = new DialogShellResult<ContextPickDialogResult>(
             new ContextPickDialogResult(selectedIds));
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(payload)));
 
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ContextPickDialog, DialogShellData<ContextPickDialogModel>>(
-                It.IsAny<DialogShellData<ContextPickDialogModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ContextPickDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(payload));
     }
 
     [TestMethod]
@@ -497,11 +492,11 @@ public class ContextPicksSectionBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
                 .Should().Contain(i => i.TextContent.Trim() == "Save draft"),
             TimeSpan.FromSeconds(5));
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Save draft").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Save draft").MenuItemClick();
     }
 
-    private static FluentSelect<Authoring.PickerOption> PagePicker(IRenderedComponent<Authoring> cut, string id) =>
-        cut.FindComponents<FluentSelect<Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
+    private static FluentSelect<Authoring.PickerOption, Authoring.PickerOption> PagePicker(IRenderedComponent<Authoring> cut, string id) =>
+        cut.FindComponents<FluentSelect<Authoring.PickerOption, Authoring.PickerOption>>().Single(s => s.Instance.Id == id).Instance;
 
     [TestMethod]
     public void CreateMode_RendersTheRowBeneathSubject_WithBothAddButtonsDisabled()
@@ -605,7 +600,7 @@ public class ContextPicksSectionBunitTests : BunitContext
         // the callback directly with a constructed option still exercises the subject-change hook.
         var subjectPicker = PagePicker(cut, "authoring-basics-subject");
         var other = new Authoring.PickerOption(OtherTopicId.ToString(), "Other subject");
-        cut.InvokeAsync(() => subjectPicker.SelectedOptionChanged.InvokeAsync(other));
+        cut.InvokeAsync(() => subjectPicker.ValueChanged.InvokeAsync(other));
 
         cut.WaitForAssertion(() =>
         {

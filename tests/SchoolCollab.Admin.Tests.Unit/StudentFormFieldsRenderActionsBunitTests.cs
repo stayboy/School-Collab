@@ -98,7 +98,7 @@ public class StudentFormFieldsRenderActionsBunitTests : BunitContext
         var cut = Render<TestStudentFormFields>(p => p
             .Add(x => x.RenderActions, true));
 
-        var stack = cut.Find(".form-actions .stack-horizontal");
+        var stack = cut.Find(".form-actions .fluent-stack-horizontal");
         stack.GetAttribute("style").Should().Contain("justify-content: end",
             "ActionsAlignment defaults to Right, which must right-align the buttons inside the stack");
     }
@@ -110,7 +110,7 @@ public class StudentFormFieldsRenderActionsBunitTests : BunitContext
             .Add(x => x.RenderActions, true)
             .Add(x => x.ActionsAlignment, StudentFormFields.StudentFormActionsAlignment.Left));
 
-        var stack = cut.Find(".form-actions .stack-horizontal");
+        var stack = cut.Find(".form-actions .fluent-stack-horizontal");
         stack.GetAttribute("style").Should().Contain("justify-content: start",
             "ActionsAlignment=Left must left-align the buttons inside the stack");
     }

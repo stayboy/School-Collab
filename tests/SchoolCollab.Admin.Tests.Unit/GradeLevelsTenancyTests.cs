@@ -97,7 +97,11 @@ public class GradeLevelsTenancyTests : BunitContext
 
         handler.CallCount.Should().Be(0, "no tenant-scoped API call may be issued when !IsRealTenant");
         cut.Markup.Should().Contain(TenantEmptyMessage);
-        cut.FindAll("fluent-button").Should().BeEmpty("the + New Grade Level button is hidden when !IsRealTenant");
+        // The v5 message bar renders its own dismiss <fluent-button>, so an "any fluent-button"
+        // probe is no longer a proxy for the create control. Pin the create label instead — the
+        // assertion fails whenever the + New Grade Level affordance renders without a real tenant.
+        cut.Markup.Should().NotContain("+ New Grade Level",
+            "the + New Grade Level control is hidden when !IsRealTenant");
     }
 
     [TestMethod]

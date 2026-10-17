@@ -24,6 +24,7 @@
 @inject IFeatureFlagService FeatureFlags
 @inject ILogger<TeacherEditDialog> Logger
 
+<DialogShellBody>
 <div class="teacher-dialog">
     @if (_loading)
     {
@@ -45,19 +46,19 @@
                 </FormRow>
                 <FormRow Label="Name" Required For="teacherFirstName">
                     <div class="name-fields">
-                        <FluentTextField Id="teacherFirstName" @bind-Value="Model.FirstName" Placeholder="First name" />
-                        <FluentTextField Id="teacherLastName" @bind-Value="Model.LastName" Placeholder="Last name" />
+                        <FluentTextInput Id="teacherFirstName" @bind-Value="Model.FirstName" Placeholder="First name" />
+                        <FluentTextInput Id="teacherLastName" @bind-Value="Model.LastName" Placeholder="Last name" />
                     </div>
                 </FormRow>
                 <FormRow Label="Display name">
-                    <FluentTextField @bind-Value="Model.DisplayName" Placeholder="e.g. Mr. Smith (optional)" />
+                    <FluentTextInput @bind-Value="Model.DisplayName" Placeholder="e.g. Mr. Smith (optional)" />
                 </FormRow>
                 <FormRow Label="Gender">
                     <CodedValueDropdown Parent="CodedValueParent.Genders"
                                         @bind-SelectedId="Model.GenderCodedValueId" />
                 </FormRow>
                 <FormRow Label="Date of birth">
-                    <FluentDatePicker Id="teacherDialogDob"
+                    <FluentDatePicker TValue="DateTime?" Id="teacherDialogDob"
                                       Value="@DateOfBirthAsDateTime"
                                       ValueChanged="@OnDateOfBirthChanged"
                                       Placeholder="Select date" />
@@ -79,12 +80,11 @@
                     {
                         @if (UnselectedQualifications.Length > 0)
                         {
-                            <FluentCombobox @key="_qualKey" TOption="CodedValueDto"
+                            <FluentCombobox @key="_qualKey" TOption="CodedValueDto" TValue="CodedValueDto"
                                             Items="@UnselectedQualifications"
                                             OptionText="@(q => q.Name)"
-                                            SelectedOption="@_qualToAdd"
-                                            SelectedOptionChanged="@OnQualificationPicked"
-                                            Autocomplete="ComboboxAutocomplete.List"
+                                            Value="@_qualToAdd"
+                                            ValueChanged="@OnQualificationPicked"
                                             Placeholder="Add qualification…" Height="240px" />
                         }
                         else
@@ -111,10 +111,10 @@
                 </div>
 
                 <div class="assignments-toolbar">
-                    <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddGradeAssignment">+ Grade</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="AddGradeAssignment">+ Grade</FluentButton>
                     @if (_activityGroupsEnabled)
                     {
-                        <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddActivityAssignment">+ Activity</FluentButton>
+                        <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="AddActivityAssignment">+ Activity</FluentButton>
                     }
                 </div>
 
@@ -133,7 +133,7 @@
                                     @if (row.IsActivity)
                                     {
                                         <span class="row-type">Activity</span>
-                                        <FluentSelect TOption="ActivityGroupDto" Items="@_allActivities"
+                                        <FluentSelect TOption="ActivityGroupDto" TValue="string" Items="@_allActivities"
                                                       OptionText="@(a => a.Name)" OptionValue="@(a => a.Id.ToString())"
                                                       Value="@(row.ActivityGroupId?.ToString())"
                                                       ValueChanged="@((string? v) => SetRowActivity(row, ParseGuid(v)))"
@@ -142,21 +142,21 @@
                                                             SelectedId="@row.RoleCodedValueId"
                                                             SelectedIdChanged="@((Guid? v) => SetRowRole(row, v))"
                                                             Placeholder="No role" />
-                                        <FluentSelect TOption="GradeLevelDto" Multiple Items="@_allGradeLevels"
+                                        <FluentSelect TOption="GradeLevelDto" TValue="string" Multiple Items="@_allGradeLevels"
                                                       OptionText="@(g => g.Name)" OptionValue="@(g => g.Id.ToString())"
-                                                      SelectedOptions="@(SelectedGradeObjects(row))"
-                                                      SelectedOptionsChanged="@((IEnumerable<GradeLevelDto>? v) => SetRowGrades(row, v))"
+                                                      SelectedItems="@(SelectedGradeObjects(row))"
+                                                      SelectedItemsChanged="@((IEnumerable<GradeLevelDto> v) => SetRowGrades(row, v))"
                                                       Placeholder="Grades (optional)" />
                                     }
                                     else
                                     {
                                         <span class="row-type">Grade</span>
-                                        <FluentSelect TOption="GradeLevelDto" Items="@_allGradeLevels"
+                                        <FluentSelect TOption="GradeLevelDto" TValue="string" Items="@_allGradeLevels"
                                                       OptionText="@(g => g.Name)" OptionValue="@(g => g.Id.ToString())"
                                                       Value="@(row.GradeLevelId?.ToString())"
                                                       ValueChanged="@((string? v) => SetRowGrade(row, ParseGuid(v)))"
                                                       Placeholder="Grade" />
-                                        <FluentSelect TOption="TopicDto" Items="@SubjectsForGrade(row.GradeLevelId)"
+                                        <FluentSelect TOption="TopicDto" TValue="string" Items="@SubjectsForGrade(row.GradeLevelId)"
                                                       OptionText="@(t => t.Name)" OptionValue="@(t => t.Id.ToString())"
                                                       Value="@(row.SubjectId?.ToString())"
                                                       ValueChanged="@((string? v) => SetRowSubject(row, ParseGuid(v)))"
@@ -166,15 +166,15 @@
                                                             SelectedIdChanged="@((Guid? v) => SetRowRole(row, v))"
                                                             Placeholder="No role" />
                                     }
-                                    <FluentButton Appearance="Appearance.Accent" Size="Size.Small" OnClick="() => SaveRow(row)">Save</FluentButton>
-                                    <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="() => CancelRow(row)">Cancel</FluentButton>
+                                    <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="() => SaveRow(row)">Save</FluentButton>
+                                    <FluentButton Appearance="ButtonAppearance.Outline" Size="ButtonSize.Small" OnClick="() => CancelRow(row)">Cancel</FluentButton>
                                 }
                                 else
                                 {
                                     <span class="row-type">@(row.IsActivity ? "Activity" : "Grade")</span>
                                     <span class="row-display">@DisplayText(row)</span>
-                                    <FluentButton Appearance="Appearance.Stealth" Size="Size.Small" OnClick="() => row.Editing = true">Edit</FluentButton>
-                                    <FluentButton Appearance="Appearance.Stealth" Size="Size.Small"
+                                    <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" OnClick="() => row.Editing = true">Edit</FluentButton>
+                                    <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small"
                                                   IconStart="@FluentIcons.Delete" Title="Remove assignment"
                                                   OnClick="() => RemoveRow(row)">Remove</FluentButton>
                                 }
@@ -192,6 +192,7 @@
         </EditForm>
     }
 </div>
+</DialogShellBody>
 
 
 @code {

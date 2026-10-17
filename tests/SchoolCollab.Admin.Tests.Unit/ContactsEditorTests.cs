@@ -292,10 +292,11 @@ public class ContactsEditorTests : BunitContext
 
         var cut = RenderEditor(fake);
 
-        // Type a value into the new-contact text field. FluentTextField
-        // renders as <fluent-text-field class="contacts-value"> — the
-        // custom element itself carries the class, not the inner <input>.
-        var valueInput = cut.Find("fluent-text-field.contacts-value");
+        // Type a value into the new-contact text field. In v5 FluentTextInput
+        // renders <fluent-field class="contacts-value"><fluent-text-input> —
+        // the class lands on the fluent-field wrapper, the editable element is
+        // the inner fluent-text-input (that is where .Change() belongs).
+        var valueInput = cut.Find("fluent-field.contacts-value fluent-text-input");
         valueInput.Change("user@example.com");
 
         // Click the Add button. The fluent-button contains the "Add" text.
@@ -305,7 +306,7 @@ public class ContactsEditorTests : BunitContext
         // Assert: the form is not cleared after the failure.
         cut.WaitForAssertion(() =>
         {
-            var refreshed = cut.Find("fluent-text-field.contacts-value");
+            var refreshed = cut.Find("fluent-field.contacts-value fluent-text-input");
             refreshed.GetAttribute("value").Should().Be("user@example.com",
                 "a failed Add must preserve the user's typed value");
         });
@@ -342,11 +343,11 @@ public class ContactsEditorTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             // The country-code dropdown is a <CodedValueDropdown> whose
-            // underlying <fluent-select> carries the `coded-value-dropdown`
+            // underlying <fluent-dropdown> carries the `coded-value-dropdown`
             // base class (it used to carry a `contacts-country-code` width
             // class before the FieldWidth enum migration — see Width="W2"
             // on the call site). For the Email channel it is not rendered.
-            cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty();
+            cut.FindAll("fluent-field.coded-value-dropdown").Should().BeEmpty();
         });
     }
 
@@ -360,7 +361,9 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle();
+            // v5's FluentSelect puts the caller's class on its <fluent-field> wrapper; the
+            // <fluent-dropdown> inside carries none.
+            cut.FindAll("fluent-field.coded-value-dropdown").Should().ContainSingle();
         });
     }
 
@@ -374,7 +377,9 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle();
+            // v5's FluentSelect puts the caller's class on its <fluent-field> wrapper; the
+            // <fluent-dropdown> inside carries none.
+            cut.FindAll("fluent-field.coded-value-dropdown").Should().ContainSingle();
         });
     }
 
@@ -393,7 +398,7 @@ public class ContactsEditorTests : BunitContext
                 new[] { new CodedValueAttributeDto("COUNTRY", "Ghana") }, [])
         });
 
-        var valueInput = cut.Find("fluent-text-field.contacts-value");
+        var valueInput = cut.Find("fluent-field.contacts-value fluent-text-input");
         valueInput.Change("201234567");
 
         var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
@@ -495,7 +500,7 @@ public class ContactsEditorTests : BunitContext
         var contacts = new List<ContactModel>();
         var cut = RenderBuffered(contacts);
 
-        var valueInput = cut.Find("fluent-text-field.contacts-value");
+        var valueInput = cut.Find("fluent-field.contacts-value fluent-text-input");
         valueInput.Change("parent@example.com");
 
         var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
@@ -571,7 +576,7 @@ public class ContactsEditorTests : BunitContext
         // The Add row stays usable when EditDisabled=true: it only disables
         // while an Add is in flight or the value field is empty, never
         // because of EditDisabled. Type a value to prove it's actionable.
-        cut.Find("fluent-text-field.contacts-value").Change("new@x.com");
+        cut.Find("fluent-field.contacts-value fluent-text-input").Change("new@x.com");
         var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
         addButton.HasAttribute("disabled").Should().BeFalse(
             "the Add row stays usable when EditDisabled=true");
@@ -592,20 +597,16 @@ public class ContactsEditorTests : BunitContext
         => cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == title);
 
     /// <summary>
-    /// Registers a mocked <see cref="IDialogService"/> that returns
+    /// Registers a mocked <see cref="DialogService"/> that returns
     /// <paramref name="result"/> when <c>ContactChangeDialog</c> is opened.
     /// Returns the mock so tests can <c>Verify</c> the open occurred.
     /// </summary>
-    private Mock<IDialogService> RegisterMockDialog(DialogResult result)
+    private Mock<DialogService> RegisterMockDialog(DialogResult result)
     {
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(result));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ContactChangeDialog, DialogShellData<ContactChangeModel>>(
-                It.IsAny<DialogShellData<ContactChangeModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(ContactChangeDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(result);
         return dialogMock;
     }
 
@@ -621,8 +622,7 @@ public class ContactsEditorTests : BunitContext
         RowButton(cut, "Edit contact").Click();
 
         cut.WaitForAssertion(() =>
-            dialogMock.Verify(d => d.ShowDialogAsync<ContactChangeDialog, DialogShellData<ContactChangeModel>>(
-                It.IsAny<DialogShellData<ContactChangeModel>>(), It.IsAny<DialogParameters>()), Times.Once));
+            dialogMock.Verify(d => d.ShowDialogAsync(typeof(ContactChangeDialog), It.IsAny<DialogOptions>()), Times.Once));
     }
 
     [TestMethod]
@@ -637,8 +637,7 @@ public class ContactsEditorTests : BunitContext
         RowButton(cut, "Remove contact").Click();
 
         cut.WaitForAssertion(() =>
-            dialogMock.Verify(d => d.ShowDialogAsync<ContactChangeDialog, DialogShellData<ContactChangeModel>>(
-                It.IsAny<DialogShellData<ContactChangeModel>>(), It.IsAny<DialogParameters>()), Times.Once));
+            dialogMock.Verify(d => d.ShowDialogAsync(typeof(ContactChangeDialog), It.IsAny<DialogOptions>()), Times.Once));
     }
 
     [TestMethod]
@@ -794,8 +793,8 @@ public class ContactsEditorTests : BunitContext
         cut.WaitForAssertion(() => cut.Find(".contacts-inline-edit").Should().NotBeNull());
 
         // Email -> only the channel picker (DropdownForEnum renders a
-        // <fluent-select>). No country-code picker.
-        cut.FindAll(".contacts-inline-edit fluent-select").Should().HaveCount(1,
+        // <fluent-dropdown>). No country-code picker.
+        cut.FindAll(".contacts-inline-edit fluent-dropdown").Should().HaveCount(1,
             "an Email contact has no country-code picker");
 
         // Simulate switching the channel to SMS, then run the inline channel
@@ -809,8 +808,8 @@ public class ContactsEditorTests : BunitContext
         cut.Render();
 
         // SMS -> the inline form now shows the channel picker AND the
-        // country-code picker (a second <fluent-select>).
-        cut.FindAll(".contacts-inline-edit fluent-select").Should().HaveCount(2,
+        // country-code picker (a second <fluent-dropdown>).
+        cut.FindAll(".contacts-inline-edit fluent-dropdown").Should().HaveCount(2,
             "switching to SMS reveals the channel-gated country-code picker");
     }
 
@@ -869,7 +868,7 @@ public class ContactsEditorTests : BunitContext
         var cut = RenderEditView(isAdd: true);
 
         // Email is the default channel -> no country-code picker.
-        cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty();
+        cut.FindAll("fluent-field.coded-value-dropdown").Should().BeEmpty();
     }
 
     [TestMethod]
@@ -877,7 +876,7 @@ public class ContactsEditorTests : BunitContext
     {
         var cut = RenderContactFormFields(ContactChannel.Email);
 
-        cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty(
+        cut.FindAll("fluent-field.coded-value-dropdown").Should().BeEmpty(
             "an Email channel renders no country-code picker");
     }
 
@@ -890,7 +889,7 @@ public class ContactsEditorTests : BunitContext
         // (Regression: the old Edit-view Add form bound its channel dropdown
         // with @bind-Value that DropdownForEnum ignores, so SMS/WhatsApp was
         // never detected and the picker never appeared.)
-        cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle(
+        cut.FindAll("fluent-field.coded-value-dropdown").Should().ContainSingle(
             "SMS must reveal the country-code picker in the shared field group");
     }
 
@@ -906,7 +905,7 @@ public class ContactsEditorTests : BunitContext
         // The edit form initializes from an SMS contact, so the country-code
         // picker is present in the shared Edit form.
         cut.WaitForAssertion(() =>
-            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle(
+            cut.FindAll("fluent-field.coded-value-dropdown").Should().ContainSingle(
                 "an SMS contact being edited must reveal the country-code picker"));
     }
 }

@@ -108,12 +108,12 @@
                         <span>@label</span>
                         @if (GetIsEmergencyContact?.Invoke(row) == true)
                         {
-                            <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge>
+                            <FluentBadge Appearance="BadgeAppearance.Filled">Emergency</FluentBadge>
                         }
                     </div>
                     @if (showViewAll)
                     {
-                        <FluentButton Appearance="Appearance.Hypertext"
+                        <FluentButton Appearance="ButtonAppearance.Default"
                                       Size="ButtonSize.Small"
                                       Class="guardian-view-all-contacts"
                                       Title="@($"View all {totalContacts} contacts for {name}")"
@@ -157,13 +157,13 @@
                 <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
                     @if (OnEdit.HasDelegate)
                     {
-                        <FluentButton Appearance="Appearance.Lightweight"
+                        <FluentButton Appearance="ButtonAppearance.Transparent"
                                       Title="Edit guardian link"
                                       OnClick="@(() => OnEdit.InvokeAsync(row))">
                             <FluentIcon Icon="@(Icons.Regular.Size20.Edit)" />
                         </FluentButton>
                     }
-                    <FluentButton Appearance="Appearance.Lightweight"
+                    <FluentButton Appearance="ButtonAppearance.Transparent"
                                   Title="Remove guardian link"
                                   OnClick="@(() => OnRemove.InvokeAsync(row))">
                         <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />

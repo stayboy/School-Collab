@@ -12,7 +12,7 @@
 
    Dialog title: the caller passes a base title ("Manage guardians" /
    "Add guardians") via ShowShellDialogAsync. The picker mutates
-   <c>Dialog.Instance.Parameters.Title</c> to append " — New guardian" while
+   <c>DialogInstance.Options.Header.Title</c> to append " — New guardian" while
    the New panel is open and restores the base title on cancel / add-to-list,
    so the dialog's chrome reflects the current sub-mode. The in-body "New
    guardian" heading was removed because the title now carries it.
@@ -47,6 +47,7 @@
 @inject CodedValuesApiClient CodedValuesApi
 @inject ILogger<GuardianPickerDialog> _logger
 
+<DialogShellBody>
 <div class="picker-dialog">
     <EditForm Model="Model" OnValidSubmit="OnFormSubmitAsync">
         <FluentStack Orientation="Orientation.Vertical" Spacing="3">
@@ -90,7 +91,7 @@
                    always clearly visible. Outline/Neutral washed the icon out
                    against the dialog body — the icon was effectively
                    invisible. Accent reads as the primary create affordance. *@
-                <FluentButton Appearance="Appearance.Accent"
+                <FluentButton Appearance="ButtonAppearance.Primary"
                               IconStart="@FluentIcons.PersonAdd"
                               Type="ButtonType.Button"
                               OnClick="StartCreateNew">
@@ -143,6 +144,7 @@
                            OnCancel="@(_panelMode == PickerPanelMode.New ? EventCallback.Factory.Create(this, CancelCreateNew) : EventCallback.Factory.Create(this, HandleCancelAsync))" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     /// <summary>Panel mode for the picker's body. <see cref="List"/> shows
@@ -182,7 +184,7 @@
     private string? _createError;
 
     /// <summary>The dialog's base title, captured from
-    /// <c>Dialog.Instance.Parameters.Title</c> on first init so it can be
+    /// <c>DialogInstance.Options.Header.Title</c> on first init so it can be
     /// restored when leaving New mode. The caller passes this via
     /// <c>ShowShellDialogAsync(model, title, size)</c> ("Manage guardians" /
     /// "Add guardians").</summary>
@@ -236,14 +238,14 @@
 
     /// <summary>Captures the caller's base dialog title once (on init) so
     /// <see cref="UpdateDialogTitle"/> can restore it when leaving New mode.
-    /// Reads from <c>Dialog.Instance.Parameters.Title</c> — the same store
-    /// the caller populated via <c>BuildShellParameters</c>.</summary>
+    /// Reads from <c>DialogInstance.Options.Header.Title</c> — the same store
+    /// the caller populated via <c>DialogServiceExtensions.BuildShellOptions</c>.</summary>
     private void CaptureBaseTitle()
     {
         if (_baseTitleCaptured) return;
         try
         {
-            _baseTitle = Dialog.Instance?.Parameters?.Title;
+            _baseTitle = DialogInstance.Options.Header.Title;
         }
         catch (Exception ex)
         {
@@ -253,45 +255,29 @@
         _baseTitleCaptured = true;
     }
 
-    /// <summary>Mutates <c>Dialog.Instance.Parameters.Title</c> to reflect
-    /// the current panel mode, then nudges the hosting <c>FluentDialog</c>
-    /// to re-render its header so the new title is visible. In New mode the
-    /// base title is suffixed with " — New guardian" (e.g. "Manage guardians
-    /// — New guardian"); in List mode the title is restored to the caller's
-    /// original value. Uses the em-dash separator (matches the repo's
-    /// breadcrumb / page-header suffix convention). Falls back to "Manage
-    /// guardians" when the base title could not be captured.
+    /// <summary>Mutates <c>DialogInstance.Options.Header.Title</c> to reflect
+    /// the current panel mode. In New mode the base title is suffixed with
+    /// " — New guardian" (e.g. "Manage guardians — New guardian"); in List
+    /// mode the title is restored to the caller's original value. Uses the
+    /// em-dash separator (matches the repo's breadcrumb / page-header suffix
+    /// convention). Falls back to "Manage guardians" when the base title could
+    /// not be captured.
     ///
-    /// <para>FluentDialog captures its parameters once in
-    /// <c>OnInitialized</c> via <c>_parameters = Instance.Parameters</c> — a
-    /// reference assignment, so <c>_parameters</c> and
-    /// <c>Instance.Parameters</c> alias the same object. Mutating
-    /// <c>Instance.Parameters.Title</c> in place therefore updates the value
-    /// FluentDialog reads on its next render. But the content component's
-    /// own <c>StateHasChanged</c> only re-renders the content, not the
-    /// FluentDialog parent that owns the header — so the title would not
-    /// visibly update without an extra nudge. <c>RefreshHeaderFooter</c> is
-    /// private and <c>SetDialogHeader</c> is internal, so neither is callable
-    /// from here. The least-invasive public method that triggers
-    /// FluentDialog's <c>StateHasChanged</c> (and refreshes the default
-    /// header) is <c>TogglePrimaryActionButton</c>. This dialog sets
-    /// <c>PrimaryAction = null</c> (no built-in primary button — the footer
-    /// owns the actions), so toggling <c>PrimaryActionEnabled</c> has no
-    /// visible side effect; we call it purely for its re-render side
-    /// effect.</para></summary>
+    /// <para>FluentUI 5.x dropped the v4 re-render workaround this method used
+    /// to carry: <c>Dialog.TogglePrimaryActionButton</c> no longer exists, and
+    /// no public v5 API lets a dialog-content component force the hosting
+    /// <c>FluentDialog</c> to re-render its chrome. The mutation therefore
+    /// takes effect on the host's next natural render (v4 needed the explicit
+    /// nudge because <c>FluentDialog</c> read a cached parameters object;
+    /// v5 reads <c>Options.Header</c> directly).</para></summary>
     private void UpdateDialogTitle()
     {
         var baseTitle = string.IsNullOrWhiteSpace(_baseTitle) ? "Manage guardians" : _baseTitle!;
         try
         {
-            if (Dialog.Instance?.Parameters is not null)
-            {
-                Dialog.Instance.Parameters.Title = _panelMode == PickerPanelMode.New
-                    ? $"{baseTitle} \u2014 New guardian"
-                    : baseTitle;
-                // Nudge the FluentDialog host to re-render its header.
-                Dialog.TogglePrimaryActionButton(true);
-            }
+            DialogInstance.Options.Header.Title = _panelMode == PickerPanelMode.New
+                ? $"{baseTitle} \u2014 New guardian"
+                : baseTitle;
         }
         catch (Exception ex)
         {

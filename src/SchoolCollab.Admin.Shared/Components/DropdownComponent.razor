@@ -68,11 +68,12 @@
 *@
 
 <FluentSelect TOption="TItem"
+              TValue="TItem"
               Items="@Items"
-              SelectedOption="@_selectedOption"
-              SelectedOptionChanged="@OnSelectedOptionChangedInternal"
+              Value="@_selectedOption"
+              ValueChanged="@OnSelectedOptionChangedInternal"
               OptionText="@OptionText"
-              OptionValue="@(o => OptionValue(o)?.ToString() ?? string.Empty)"
+              OptionValue="@(o => o)"
               Label="@Label"
               Placeholder="@(Placeholder ?? "Select…")"
               Disabled="@Disabled"

@@ -25,7 +25,7 @@
     contain: none !important;
 }
 
-/* FluentSelect renders its popup list as a <fluent-anchored-region> with
+/* FluentSelect renders its popup list as a <fluent-linked-region> with
    class `fluent-popup-body`. The library sets `position: absolute` inline
    because FixedPlacement is not used by this high-level component. Force
    fixed so it escapes the card and the page scroll region. */

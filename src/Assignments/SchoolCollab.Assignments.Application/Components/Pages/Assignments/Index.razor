@@ -4,7 +4,7 @@
 @using SchoolCollab.Admin.Shared.Components.Landing
 @inject AssignmentsApiClient Api
 @inject ILogger<Index> Logger
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="AssignmentSummaryDto"
@@ -23,16 +23,16 @@
              RowActionsAriaLabel="Assignment actions"
              RowActionsUseMenuService="false">
     <ToolbarFilters>
-        <FluentSelect Items="@StatusFilterOptions"
-                      @bind-SelectedOption="_selectedStatus"
-                      @bind-SelectedOption:after="OnStatusFilterChangedAsync"
+        <FluentSelect TOption="StatusOption" TValue="StatusOption" Items="@StatusFilterOptions"
+                      @bind-Value="_selectedStatus"
+                      @bind-Value:after="OnStatusFilterChangedAsync"
                       OptionText="@(o => o!.Label)"
-                      OptionValue="@(o => o!.Value?.ToString() ?? "")"
+                      OptionValueToString="@(o => o!.Value?.ToString() ?? "")"
                       class="status-filter" />
     </ToolbarFilters>
     <Columns>
         <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Title" SortBy="@_sortByTitle" Sortable="true">
-            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
+            <FluentLink Appearance="LinkAppearance.Default" Href="@($"/assignments/{context.Id}")">@context.Title</FluentLink>
         </TemplateColumn>
         <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Type" SortBy="@_sortByType" Sortable="true">
             @EnumHelper.GetDescription(context.AssignmentType)
@@ -44,14 +44,13 @@
             @EnumHelper.GetDescription(context.TargetAudienceType)
         </TemplateColumn>
         <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Status" SortBy="@_sortByStatus" Sortable="true">
-            @* WS-A2 deviation from decision (j): FluentBadge only supports Accent / Neutral /
-               Lightweight (validated at render in Fluent UI 4.14) — Outline would crash the grid.
-               Scheduled therefore shares Accent with Published (both committed publishing
-               states); the badge text distinguishes them. *@
-            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
-                : context.Status == AssignmentStatusDto.Scheduled ? Appearance.Accent
-                : context.Status == AssignmentStatusDto.Closed || context.Status == AssignmentStatusDto.Archived ? Appearance.Neutral
-                : Appearance.Lightweight)">
+            @* WS-A2 deviation from decision (j): BadgeAppearance offers only Filled / Ghost —
+               Outline would crash the grid. Scheduled therefore shares Filled with Published (both
+               committed publishing states); the badge text distinguishes them. *@
+            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? BadgeAppearance.Filled
+                : context.Status == AssignmentStatusDto.Scheduled ? BadgeAppearance.Filled
+                : context.Status == AssignmentStatusDto.Closed || context.Status == AssignmentStatusDto.Archived ? BadgeAppearance.Filled
+                : BadgeAppearance.Ghost)">
                 @context.Status
             </FluentBadge>
         </TemplateColumn>
@@ -302,13 +301,13 @@
         {
             await Api.DeleteAsync(id);
             if (_disposed) return;
-            Toast.ShowSuccess($"Assignment '{title}' deleted.");
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != id).ToArray();
                 RemoveSearchResult(id);
                 StateHasChanged();
             }
+            await NotificationService.ShowSuccessToastAsync($"Assignment '{title}' deleted.");
         }
         catch (Exception ex)
         {
@@ -361,7 +360,6 @@
         {
             await Api.DuplicateAsync(id);
             if (_disposed) return;
-            Toast.ShowSuccess($"Assignment duplicated: '{title} (copy)'.");
             _items = await LoadAssignmentsAsync(_loadCts?.Token ?? CancellationToken.None);
             // DisplayItems renders the search result set while a search is active, so the
             // list reload that surfaces the new Draft must be mirrored there too (same
@@ -372,6 +370,7 @@
                 await OnSearchValueChanged(_searchText);
             }
             StateHasChanged();
+            await NotificationService.ShowSuccessToastAsync($"Assignment duplicated: '{title} (copy)'.");
         }
         catch (Exception ex)
         {
@@ -396,13 +395,13 @@
         _ => "—"
     };
 
-    private static Appearance ApprovalChipAppearance(ApprovalStatusDto? status) => status switch
+    private static BadgeAppearance ApprovalChipAppearance(ApprovalStatusDto? status) => status switch
     {
-        null => Appearance.Lightweight,
-        ApprovalStatusDto.Pending => Appearance.Neutral,
-        ApprovalStatusDto.Approved => Appearance.Accent,
-        ApprovalStatusDto.Rejected => Appearance.Neutral,
-        _ => Appearance.Lightweight
+        null => BadgeAppearance.Ghost,
+        ApprovalStatusDto.Pending => BadgeAppearance.Filled,
+        ApprovalStatusDto.Approved => BadgeAppearance.Filled,
+        ApprovalStatusDto.Rejected => BadgeAppearance.Filled,
+        _ => BadgeAppearance.Ghost
     };
 
     private IReadOnlyList<RowAction> BuildAssignmentActions(AssignmentSummaryDto a)

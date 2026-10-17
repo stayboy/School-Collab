@@ -55,15 +55,16 @@
 
            @key re-creates the select after an action-zone entry is rejected: FluentSelect
            records the clicked entry as its own internal selection and only re-reads
-           SelectedOption when that parameter's value actually changes, so the entry the
+           the bound Value when that parameter's value actually changes, so the entry the
            operator clicked has to be reset away from by identity, not by value. *@
         <FluentSelect @key="_selectionEpoch"
                       TOption="TenantOption"
+                      TValue="TenantOption"
                       Items="@_options"
-                      SelectedOption="@_selectedOption"
-                      SelectedOptionChanged="@OnSelectionChanged"
+                      Value="@_selectedOption"
+                      ValueChanged="@OnSelectionChanged"
                       OptionText="@(o => o?.Label ?? string.Empty)"
-                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                      OptionValueToString="@(o => o?.Value ?? string.Empty)"
                       OptionDisabled="@(o => o?.IsSeparator ?? false)"
                       AriaLabel="Switch the dev tenant (auth disabled)"
                       Width="180px" />
@@ -265,7 +266,7 @@
     /// The row the select shows as selected. Its selected value IS the tenant the portal is
     /// operating under: the explicit pick's row when there is one, otherwise the row of the
     /// resolved default (<see cref="_effective"/>). Never <see langword="null"/> — a null
-    /// <c>SelectedOption</c> leaves the select blank.
+    /// <c>Value</c> leaves the select blank.
     /// </summary>
     /// <remarks>
     /// Display-only: this method never writes the selection slot. Showing the resolved default as
@@ -361,7 +362,7 @@
     /// <summary>
     /// Re-applies the tenant entry the operator still has selected after clicking an action-zone
     /// entry (FR-6). Bumping the <c>@key</c> epoch re-creates the FluentSelect, which is the only
-    /// way to make it re-read its <c>SelectedOption</c>: the bound value never changed, so the
+    /// way to make it re-read its <c>Value</c>: the bound value never changed, so the
     /// normal parameter diff would leave the select pointing at the entry just rejected.
     /// </summary>
     private void RestoreTenantSelection()

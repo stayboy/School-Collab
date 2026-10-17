@@ -33,6 +33,18 @@ public class MaterialEditDialogBunitTests : BunitContext
 
     private IRenderedComponent<FluentDialogProvider> RenderProvider() => Render<FluentDialogProvider>();
 
+    /// <summary>Builds the v5 options for opening <see cref="MaterialEditDialog"/> directly: the shell
+    /// options plus the <c>Content</c> entry FluentUI 5.x spreads onto the dialog's typed
+    /// <c>[Parameter]</c>. FluentUI 5.x completes the show task only when the dialog CLOSES, so
+    /// callers hold the task to observe an open dialog.</summary>
+    private static DialogOptions MaterialOptions(MaterialEditFormModel model, string title)
+    {
+        var options = DialogServiceExtensions.BuildShellOptions(title, DialogWidth.Medium);
+        options.Parameters[nameof(DialogShellBase<MaterialEditFormModel, MaterialEditResult>.Content)] =
+            new DialogShellData<MaterialEditFormModel>(model);
+        return options;
+    }
+
     /// <summary>AC-12 (Text half): a text material must be NAMED (D6/D7). An unnamed one is refused in
     /// the dialog with the reason — not silently sent to the API to be rejected there.</summary>
     [TestMethod]
@@ -46,16 +58,14 @@ public class MaterialEditDialogBunitTests : BunitContext
             Body = "The body alone is not enough.",
         };
 
-        var dialog = await DialogService.ShowDialogAsync<MaterialEditDialog, DialogShellData<MaterialEditFormModel>>(
-            new DialogShellData<MaterialEditFormModel>(model),
-            DialogServiceExtensions.BuildShellParameters("Add Text Content", DialogSize.Medium));
+        var task = DialogService.ShowDialogAsync(typeof(MaterialEditDialog), MaterialOptions(model, "Add Text Content"));
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() =>
-            cut.Find(".fluent-messagebar").TextContent.Should().Contain("A text material needs its title."));
-        dialog.Result.IsCompleted.Should().BeFalse("the dialog stays open so the author can fix it");
+            cut.Find("fluent-message-bar").TextContent.Should().Contain("A text material needs its title."));
+        task.IsCompleted.Should().BeFalse("the dialog stays open so the author can fix it");
     }
 
     /// <summary>AC-12 (Link half): a link's target must be absolute http(s) — a relative path is refused
@@ -70,16 +80,14 @@ public class MaterialEditDialogBunitTests : BunitContext
             Url = "/relative/path",
         };
 
-        var dialog = await DialogService.ShowDialogAsync<MaterialEditDialog, DialogShellData<MaterialEditFormModel>>(
-            new DialogShellData<MaterialEditFormModel>(model),
-            DialogServiceExtensions.BuildShellParameters("Add Link", DialogSize.Medium));
+        var task = DialogService.ShowDialogAsync(typeof(MaterialEditDialog), MaterialOptions(model, "Add Link"));
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
 
         cut.WaitForAssertion(() =>
-            cut.Find(".fluent-messagebar").TextContent.Should().Contain("A link needs an absolute http(s) URL."));
-        dialog.Result.IsCompleted.Should().BeFalse("the dialog stays open so the author can fix it");
+            cut.Find("fluent-message-bar").TextContent.Should().Contain("A link needs an absolute http(s) URL."));
+        task.IsCompleted.Should().BeFalse("the dialog stays open so the author can fix it");
     }
 
     /// <summary>The mirror must not OVER-refuse: an absolute https link closes with its payload, and the
@@ -96,7 +104,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         };
 
         var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
-            model, "Add Link", DialogSize.Medium);
+            model, "Add Link", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
@@ -122,7 +130,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         };
 
         var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
-            MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogSize.Medium);
+            MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Markup.Should().Contain("Save", "an edit saves; it does not add")
@@ -154,7 +162,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         };
 
         _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
-            MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogSize.Medium);
+            MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -162,8 +170,9 @@ public class MaterialEditDialogBunitTests : BunitContext
             .Should().ContainSingle(e => e.Instance.Id == MaterialEditDialog.BodyFieldId
                 && e.Instance.Value == "Read pages 4-6 and answer the questions.",
                 "the seeded body must reach the editor that paints it");
-        cut.Find("fluent-text-field").OuterHtml.Should().Contain("Fraction basics",
-            "…and so must the seeded title");
+        cut.FindComponents<FluentTextInput>()
+            .Should().ContainSingle(e => e.Instance.Value == "Fraction basics",
+                "…and so must the seeded title");
     }
 
     /// <summary>The write-back half — the scenario the owner hit: the author EDITS the body and saves.
@@ -183,7 +192,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         };
 
         var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
-            MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogSize.Medium);
+            MaterialEditFormModel.FromRow(row), "Edit Text Content", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
@@ -205,7 +214,7 @@ public class MaterialEditDialogBunitTests : BunitContext
 
         var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Text, Title = "Fraction basics" },
-            "Add Text Content", DialogSize.Medium);
+            "Add Text Content", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
@@ -225,7 +234,7 @@ public class MaterialEditDialogBunitTests : BunitContext
 
         var task = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Text, Title = "Fraction basics" },
-            "Add Text Content", DialogSize.Medium);
+            "Add Text Content", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
@@ -243,7 +252,7 @@ public class MaterialEditDialogBunitTests : BunitContext
 
         _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Url, Url = "https://khan.example/x" },
-            "Add Link", DialogSize.Medium);
+            "Add Link", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -271,10 +280,10 @@ public class MaterialEditDialogBunitTests : BunitContext
         // ── Both blank: independent and optional, so nothing refuses it. ──
         var blankCut = RenderProvider();
         var blankTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
-            MaterialEditFormModel.FromRow(row), "Edit Material", DialogSize.Medium);
+            MaterialEditFormModel.FromRow(row), "Edit Material", DialogWidth.Medium);
 
         blankCut.WaitForAssertion(() => blankCut.Find("form").Should().NotBeNull());
-        blankCut.FindAll("form fluent-text-field").Should().HaveCount(1,
+        blankCut.FindAll("form fluent-text-input").Should().HaveCount(1,
             "a media row renders its optional Title field; the Description is the shared rich editor");
         blankCut.Markup.Should().Contain("Title (optional)").And.Contain("Description (optional)");
         blankCut.FindComponents<RichInstructionEditor>().Should().ContainSingle(
@@ -301,7 +310,7 @@ public class MaterialEditDialogBunitTests : BunitContext
                 Title = "Diagram",
                 Text = "Label the parts.",
             }),
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         filledCut.WaitForAssertion(() => filledCut.Find("form").Should().NotBeNull());
         filledCut.Find("form").Submit();
@@ -336,10 +345,10 @@ public class MaterialEditDialogBunitTests : BunitContext
                 FileName = "clip.mp4",
                 ContentType = "video/mp4",
             }),
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
-        cut.FindAll("form fluent-text-field").Should().HaveCount(1,
+        cut.FindAll("form fluent-text-input").Should().HaveCount(1,
             "the Title field renders; the Description is the shared rich editor");
         cut.FindComponents<RichInstructionEditor>().Should().ContainSingle(
             e => e.Instance.Id == MaterialEditDialog.BodyFieldId,
@@ -361,7 +370,7 @@ public class MaterialEditDialogBunitTests : BunitContext
                 Kind = InstructionKindDto.Video,
                 PreviewLoader = LoaderReturning("blob:http://localhost/abc", () => calls++),
             },
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
@@ -369,7 +378,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         await cut.InvokeAsync(() => show.Click());
 
         cut.WaitForAssertion(() => cut.Find("video").GetAttribute("src").Should().Be("blob:http://localhost/abc"));
-        cut.FindAll("form fluent-text-field").Should().HaveCount(1,
+        cut.FindAll("form fluent-text-input").Should().HaveCount(1,
             "the description slot is occupied by the preview; the title stays");
         cut.FindComponents<RichInstructionEditor>().Should().BeEmpty(
             "the preview OWNS the slot — the editor is unmounted, not merely hidden");
@@ -394,7 +403,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         var cut = RenderProvider();
         _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Image, PreviewLoader = LoaderReturning(null) },
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         var show = cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
@@ -404,29 +413,44 @@ public class MaterialEditDialogBunitTests : BunitContext
         cut.FindAll("img").Should().BeEmpty();
     }
 
-    /// <summary>Kind-faithful rendering: Image previews as the native img, Audio as the audio player —
-    /// the same elements the ward surface uses, so the preview never lies about the media.</summary>
+    /// <summary>Kind-faithful rendering: an Image preview is the native img — the same element the
+    /// ward surface uses, so the preview never lies about the media. Rendered in its OWN provider root,
+    /// because in v5 every <c>FluentDialogProvider</c> root renders the content of EVERY dialog open in
+    /// the shared service — probe-verified: a second root re-renders the first dialog's body as a fresh
+    /// instance — so two kinds sharing one root leave two identical "Preview" toggles with no way to
+    /// name the intended subject.</summary>
     [TestMethod]
     public async Task MediaDialog_PreviewRendersTheKindNativeElement()
     {
         var imageCut = RenderProvider();
         _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Image, PreviewLoader = LoaderReturning("blob:http://localhost/img") },
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         imageCut.WaitForAssertion(() => imageCut.Find("form").Should().NotBeNull());
-        var showImage = imageCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        // The toggle is named by its container plus its own aria-label, not by the word "Preview":
+        // the dialog's buttons include a close button and the footer pair, and the aria-label flips
+        // with the toggle's state ("Preview the media file" ⇄ "Hide the media preview").
+        var showImage = imageCut.FindAll(".media-preview-toggle fluent-button")
+            .Single(b => b.GetAttribute("aria-label") == "Preview the media file");
         await imageCut.InvokeAsync(() => showImage.Click());
         imageCut.WaitForAssertion(() => imageCut.Find("img").GetAttribute("src").Should().Be("blob:http://localhost/img"));
         imageCut.FindAll("video").Should().BeEmpty();
+    }
 
+    /// <summary>Kind-faithful rendering, audio half of the pair above — its own provider root for the
+    /// reason given there (a second root would also render the image dialog's freshly-instanced body).</summary>
+    [TestMethod]
+    public async Task MediaDialog_PreviewRendersTheAudioElement()
+    {
         var audioCut = RenderProvider();
         _ = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Audio, PreviewLoader = LoaderReturning("blob:http://localhost/aud") },
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         audioCut.WaitForAssertion(() => audioCut.Find("form").Should().NotBeNull());
-        var showAudio = audioCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
+        var showAudio = audioCut.FindAll(".media-preview-toggle fluent-button")
+            .Single(b => b.GetAttribute("aria-label") == "Preview the media file");
         await audioCut.InvokeAsync(() => showAudio.Click());
         audioCut.WaitForAssertion(() => audioCut.Find("audio").GetAttribute("src").Should().Be("blob:http://localhost/aud"));
         audioCut.FindAll("video").Should().BeEmpty();
@@ -450,7 +474,7 @@ public class MaterialEditDialogBunitTests : BunitContext
                 Title = "Diagram",
                 Text = "stale seeded body",
             }),
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Find("form").Submit();
@@ -477,7 +501,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         var hideCut = RenderProvider();
         var hideTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Audio, PreviewLoader = LoaderReturning("blob:http://localhost/a") },
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         hideCut.WaitForAssertion(() => hideCut.Find("form").Should().NotBeNull());
         var toPreview = hideCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");
@@ -497,7 +521,7 @@ public class MaterialEditDialogBunitTests : BunitContext
         var showCut = RenderProvider();
         var showTask = DialogService.ShowShellDialogAsync<MaterialEditDialog, MaterialEditFormModel, MaterialEditResult>(
             new MaterialEditFormModel { Kind = InstructionKindDto.Video, PreviewLoader = LoaderReturning("blob:http://localhost/v") },
-            "Edit Material", DialogSize.Medium);
+            "Edit Material", DialogWidth.Medium);
 
         showCut.WaitForAssertion(() => showCut.Find("form").Should().NotBeNull());
         var preview = showCut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Preview");

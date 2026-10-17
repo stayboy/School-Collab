@@ -78,9 +78,9 @@ public class WardIndexBunitTests : BunitContext
 
         var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sign off"));
-        cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentA}/sign-off")
+        cut.FindAll("fluent-link").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentA}/sign-off")
             .Should().BeTrue("a completed assignment must link to the guardian sign page");
-        cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentB}/sign-off")
+        cut.FindAll("fluent-link").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentB}/sign-off")
             .Should().BeFalse("an in-progress assignment shows no sign-off affordance");
     }
 

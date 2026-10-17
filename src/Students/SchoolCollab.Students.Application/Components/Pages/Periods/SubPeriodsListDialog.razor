@@ -5,12 +5,12 @@
    and the parent grid (via OnChanged) so the two stay in sync.
 
    Not a DialogShellBase (no model/form/result). Mirrors TopicStrandsDialog /
-   GuardianContactsDialog: opened via ShowReadonlyDialogAsync, reads its inputs
-   from Content.TryGet<T>(key), closes via the cascading FluentDialog. See
-   documents/solution/dialog-parameter-binding.md for the FluentUI 4.14.x
-   "does not spread indexer entries onto [Parameter]s" gotcha. *@
+   GuardianContactsDialog: opened via ShowReadonlyDialogAsync, declares typed
+   [Parameter]s whose key constants are nameof(<Parameter>), and closes via the
+   cascading IDialogInstance. See
+   documents/solution/dialog-parameter-binding.md for the FluentUI 5.x
+   "DialogOptions.Parameters must match [Parameter] names" contract. *@
 @implements IDisposable
-@implements IDialogContentComponent<DialogParameters>
 @using Microsoft.Extensions.Logging
 @using Microsoft.AspNetCore.Components
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -19,6 +19,7 @@
 @inject ILogger<SubPeriodsListDialog> Logger
 @inject IDialogService DialogService
 
+<DialogShellBody>
 <div class="sub-periods-dialog">
     @if (_loading)
     {
@@ -26,24 +27,24 @@
     }
     else if (!string.IsNullOrEmpty(_error))
     {
-        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
     }
     else if (_items is null || _items.Length == 0)
     {
-        <FluentMessageBar Intent="MessageIntent.Info">
+        <FluentMessageBar Intent="MessageBarIntent.Info">
             No sub-periods for this academic year yet.
         </FluentMessageBar>
-        <FluentAnchor Appearance="Appearance.Lightweight"
+        <FluentLink Appearance="LinkAppearance.Subtle"
                       Title="New sub-period"
                       OnClick="CreateSubPeriodAsync">
             + New sub-period
-        </FluentAnchor>
+        </FluentLink>
     }
     else
     {
         <FluentDataGrid TGridItem="PeriodDto"
                         Items="_items.AsQueryable()"
-                        GenerateHeader="GenerateHeaderOption.Default"
+                        GenerateHeader="DataGridGeneratedHeaderType.Default"
                         GridTemplateColumns="minmax(140px,2fr) 90px 90px 110px auto"
                         Class="sub-periods-grid"
                         AriaLabel="Sub-periods">
@@ -57,18 +58,18 @@
                 @context.EndDate.ToString("d")
             </TemplateColumn>
             <TemplateColumn TGridItem="PeriodDto" Title="Status">
-                <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
+                <FluentBadge Appearance="@GetStatusAppearance(context.Status)" Color="@GetStatusColor(context.Status)">@context.Status</FluentBadge>
             </TemplateColumn>
             <TemplateColumn TGridItem="PeriodDto" Title="">
                 <div class="sub-periods-actions">
                     @if (context.Status == "Draft")
                     {
-                        <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.ArrowExportUp"
+                        <FluentButton Appearance="ButtonAppearance.Subtle" IconStart="@FluentIcons.ArrowExportUp"
                                       Title="Activate" OnClick="@(() => ActivateAsync(context.Id))">Activate</FluentButton>
                     }
                     else if (context.Status == "Active")
                     {
-                        <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Checkmark"
+                        <FluentButton Appearance="ButtonAppearance.Subtle" IconStart="@FluentIcons.Checkmark"
                                       Title="Complete" OnClick="@(() => CompleteAsync(context.Id))">Complete</FluentButton>
                     }
                 </div>
@@ -76,45 +77,39 @@
         </FluentDataGrid>
     }
 
-    @* Footer — a single Close button. The dialog host has no
-       PrimaryAction/SecondaryAction (BuildShellParameters sets both null),
-       so the body owns the close affordance. The top border is the
-       content/actions separator mandated by the dialog-ui skill. *@
+    @* Footer — a single Close button. The dialog host has no built-in
+       footer actions (the shell options leave both labels unset), so the body
+       owns the close affordance. The top border is the content/actions
+       separator mandated by the dialog-ui skill. *@
     <div class="dialog-footer">
-        <FluentButton Appearance="Appearance.Accent" Title="Close" OnClick="CloseAsync">Close</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Primary" Title="Close" OnClick="CloseAsync">Close</FluentButton>
     </div>
 </div>
+</DialogShellBody>
 
 @code {
-    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
-    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    /// <summary>Keys used in <c>DialogOptions.Parameters</c>. Exposed so
+    /// callers set the same keys the dialog binds to — each key MUST match a
+    /// <c>[Parameter]</c> name (FluentUI 5.x spreads the entries).</summary>
     public const string YearIdKey = nameof(YearId);
     public const string YearNameKey = nameof(YearName);
     public const string OnChangedKey = nameof(OnChanged);
 
     /// <summary>The academic year whose sub-periods to list. Required — no
-    /// default. Read from <see cref="Content"/> (see header comment).</summary>
-    private Guid YearId => Content is { } c ? c.TryGet<Guid>(YearIdKey) : Guid.Empty;
+    /// default.</summary>
+    [Parameter] public Guid YearId { get; set; }
 
-    /// <summary>The academic year name, used for the dialog title. Read from
-    /// <see cref="Content"/>.</summary>
-    private string? YearName => Content is { } c ? c.TryGet<string>(YearNameKey) : null;
+    /// <summary>The academic year name, used for the dialog title.</summary>
+    [Parameter] public string? YearName { get; set; }
 
     /// <summary>Optional callback the parent grid passes so it can refresh
-    /// after this dialog mutates a sub-period. Read from
-    /// <see cref="Content"/>.</summary>
-    private Func<Task>? OnChanged => Content is { } c ? c.TryGet<Func<Task>>(OnChangedKey) : null;
+    /// after this dialog mutates a sub-period.</summary>
+    [Parameter] public Func<Task>? OnChanged { get; set; }
 
-    /// <summary>The hosting <see cref="FluentDialog"/> reference provided by
-    /// the dialog host as a cascading parameter. Nullable so unit tests that
-    /// render the component without a host do not NRE.</summary>
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-
-    /// <summary>Required by <c>IDialogContentComponent&lt;DialogParameters&gt;</c>
-    /// for the two-type-arg <c>IDialogService.ShowDialogAsync</c> overload used
-    /// by <c>ShowReadonlyDialogAsync</c>. The dialog reads its inputs from this
-    /// <c>DialogParameters</c> indexer (see header comment).</summary>
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    /// <summary>The hosting dialog instance provided by the dialog host as a
+    /// cascading parameter. Nullable so unit tests that render the component
+    /// without a host do not NRE.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
 
     private PeriodDto[]? _items;
     private bool _loading;
@@ -188,12 +183,10 @@
     {
         if (_disposed) return;
 
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             "Complete this period? This will finalize the period.",
-            "Complete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Complete");
+        if (!confirmed) return;
 
         try
         {
@@ -239,20 +232,33 @@
     /// pre-parented to this year.</summary>
     private async Task CreateSubPeriodAsync()
     {
-        if (Dialog is not null) await Dialog.CloseAsync();
+        if (DialogInstance is not null) await DialogInstance.CloseAsync();
         Nav.NavigateTo($"/students/periods/create?parent={YearId}");
     }
 
     private Task CloseAsync()
-        => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+        => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
 
-    private static Appearance GetStatusAppearance(string status) => status switch
+    // v5 FluentBadge carries colour outside Appearance (MigrationFluentBadge.md): the v4
+    // triad collapses — Neutral/Accent → Filled, Lightweight → Ghost — so the v4
+    // Accent(Active) / Neutral(everything else) distinction now lives in BadgeColor.
+    private static BadgeAppearance GetStatusAppearance(string status) => status switch
     {
-        "Draft"     => Appearance.Neutral,
-        "Active"    => Appearance.Accent,
-        "Completed" => Appearance.Lightweight,
-        "Archived"  => Appearance.Neutral,
-        _           => Appearance.Neutral
+        "Draft"     => BadgeAppearance.Filled,
+        "Active"    => BadgeAppearance.Filled,
+        "Completed" => BadgeAppearance.Ghost,
+        "Archived"  => BadgeAppearance.Filled,
+        _           => BadgeAppearance.Filled
+    };
+
+    // Active keeps its v4 Accent emphasis as the success colour; every other status keeps
+    // the v4 Neutral as the muted one. Completed is null: its v4 Lightweight look (now
+    // Ghost) carried no colour, and none is invented here.
+    private static BadgeColor? GetStatusColor(string status) => status switch
+    {
+        "Active"    => BadgeColor.Success,
+        "Completed" => null,
+        _           => BadgeColor.Subtle,
     };
 
     public void Dispose()

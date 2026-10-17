@@ -40,13 +40,13 @@
                 <HeaderAction>
                     @if (_reviewSeed is not null)
                     {
-                        <FluentAnchor Appearance="Appearance.Hypertext"
+                        <FluentLink Appearance="LinkAppearance.Default"
                                       Href="#"
                                       Id="@($"{Id}-review-edit")"
                                       Class="cq-review-edit"
                                       OnClick="@(() => OnReviewMetadataAsync(_recordingRow!))">
                             @EditNoteLabel
-                        </FluentAnchor>
+                        </FluentLink>
                     }
                 </HeaderAction>
             </RecorderPanel>
@@ -91,12 +91,12 @@
                             {
                                 @* D6/D10: a Text material is TITLED (the title is required, the body optional) —
                                    the title is the row's first field, so it is also the focus target (AC-2). *@
-                                <FluentTextField @ref="_focusTarget"
+                                <FluentTextInput @ref="_focusTarget"
                                                  @bind-Value="row.Title"
                                                  ReadOnly="@ReadOnly"
                                                  Placeholder="Name this material"
                                                  class="cq-instruction-title" />
-                                <FluentTextField @bind-Value="row.Text"
+                                <FluentTextInput @bind-Value="row.Text"
                                                  ReadOnly="@ReadOnly"
                                                  Placeholder="What the student should read or do"
                                                  class="cq-instruction-payload" />
@@ -113,13 +113,13 @@
                             }
                             else
                             {
-                                <FluentTextField @ref="_focusTarget"
+                                <FluentTextInput @ref="_focusTarget"
                                                  @bind-Value="row.Url"
                                                  ReadOnly="@ReadOnly"
                                                  Placeholder="https://…"
                                                  class="cq-instruction-payload" />
                                 @* D7: a Link's title is an optional LABEL — never prose (D10). *@
-                                <FluentTextField @bind-Value="row.Title"
+                                <FluentTextInput @bind-Value="row.Title"
                                                  ReadOnly="@ReadOnly"
                                                  Placeholder="Label (optional)"
                                                  class="cq-instruction-title" />
@@ -143,7 +143,7 @@
                                                      OnCompleted="@(args => OnFileUploadedAsync(row, args))" />
                                     @if (!ReadOnly && StageMediaAsync is not null)
                                     {
-                                        <FluentButton Appearance="Appearance.Neutral"
+                                        <FluentButton Appearance="ButtonAppearance.Default"
                                                       Id="@($"{Id}-record-{index}")"
                                                       IconStart="@(row.Kind == InstructionKindDto.Audio ? FluentIcons.Mic : new Icons.Regular.Size20.Video())"
                                                       OnClick="@(() => ToggleRecorderAsync(row))">
@@ -170,11 +170,11 @@
                                     @* Q12 (owner-pinned): the question dialog host cannot nest a dialog, so
                                        there the same optional Title + Description pair edits INLINE on the row
                                        (the pattern Text/Link rows already use in this mode). *@
-                                    <FluentTextField @bind-Value="row.Title"
+                                    <FluentTextInput @bind-Value="row.Title"
                                                      ReadOnly="@ReadOnly"
                                                      Placeholder="Title (optional)"
                                                      class="cq-instruction-title" />
-                                    <FluentTextField @bind-Value="row.Text"
+                                    <FluentTextInput @bind-Value="row.Text"
                                                      ReadOnly="@ReadOnly"
                                                      Placeholder="Description (optional)"
                                                      class="cq-instruction-payload" />
@@ -191,7 +191,7 @@
                            READOUT instead (round media-pill-listing C2), never through a pencil. *@
                         @if (EditingMode == RowEditingMode.Dialog && !row.HasMedia)
                         {
-                            <FluentButton Appearance="Appearance.Stealth"
+                            <FluentButton Appearance="ButtonAppearance.Subtle"
                                           Id="@($"{Id}-edit-{index}")"
                                           OnClick="@(() => EditRowRequested.InvokeAsync(row))"
                                           IconStart="@FluentIcons.Edit"
@@ -204,7 +204,7 @@
                            standard shape (Q4/Q13). *@
                         @if (row.HasMedia && row.Kind != InstructionKindDto.Image && !string.IsNullOrWhiteSpace(row.StoragePath))
                         {
-                            <FluentButton Appearance="Appearance.Stealth"
+                            <FluentButton Appearance="ButtonAppearance.Subtle"
                                           Id="@($"{Id}-play-{index}")"
                                           IconStart="@(new Icons.Regular.Size20.Play())"
                                           aria-label="Play"
@@ -218,16 +218,16 @@
                            READOUT stays data; this is the action. *@
                         @if (row.HasMedia && row.Kind == InstructionKindDto.Image && !string.IsNullOrWhiteSpace(row.StoragePath))
                         {
-                            <FluentAnchor Appearance="Appearance.Hypertext"
+                            <FluentLink Appearance="LinkAppearance.Default"
                                           Href="#"
                                           Id="@($"{Id}-edit-note-{index}")"
                                           Class="cq-instruction-edit-note"
                                           OnClick="@(() => OnReadoutClickedAsync(row))">
                                 @EditNoteLabel
-                            </FluentAnchor>
+                            </FluentLink>
                         }
 
-                        <FluentButton Appearance="Appearance.Stealth"
+                        <FluentButton Appearance="ButtonAppearance.Subtle"
                                       Id="@($"{Id}-remove-{index}")"
                                       OnClick="@(() => RemoveAsync(row))"
                                       aria-label="Remove instruction">×</FluentButton>
@@ -244,7 +244,7 @@
     @if (!ReadOnly && ShowAddButton)
     {
         <div class="cq-instruction-actions">
-            <FluentButton Appearance="Appearance.Outline"
+            <FluentButton Appearance="ButtonAppearance.Outline"
                           Id="@($"{Id}-add")"
                           IconStart="@FluentIcons.Add"
                           OnClick="AddAsync">
@@ -423,7 +423,7 @@
 
     /// <summary>The row's first field, captured per row during render — the LAST assignment wins, so
     /// after an append this points at the new row's first field (AC-2's focus target).</summary>
-    private FluentTextField? _focusTarget;
+    private FluentTextInput? _focusTarget;
     private bool _focusPending;
 
     /// <summary>D2/D3 (spec instructional-materials): the host's menu appends a row of the chosen kind
@@ -457,16 +457,14 @@
         await NotifyRecorderStateAsync();
     }
 
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (_focusPending && _focusTarget is not null)
         {
             _focusPending = false;
-            // FocusAsync is void in this FluentUI version (the ResourcesSection:365 precedent).
-            _focusTarget.FocusAsync();
+            // FluentTextInput exposes its Element; focus it through ElementReference.FocusAsync().
+            await _focusTarget.Element.FocusAsync();
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>Appends a Text block — the method the question dialog and the page's own tests call.</summary>

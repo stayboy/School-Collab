@@ -14,13 +14,13 @@
 <div class="editor-block">
     <div class="editor-header">
         <h4>Strands (@(_roots.Length))</h4>
-        <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+        <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small"
                       IconStart="@FluentIcons.Add" OnClick="ToggleNewStrand">New Strand</FluentButton>
     </div>
 
     @if (_error is not null)
     {
-        <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_error</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" class="mb-2">@_error</FluentMessageBar>
     }
     @if (_items is null)
     {
@@ -39,9 +39,9 @@
                     @if (_editingId == root.Id)
                     {
                         <div class="strand-row">
-                            <FluentTextField @bind-Value="_editName" Placeholder="Strand name" class="strand-input" />
-                            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" OnClick="@(() => SaveEditAsync(root))">Save</FluentButton>
-                            <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelEdit">Cancel</FluentButton>
+                            <FluentTextInput @bind-Value="_editName" Placeholder="Strand name" class="strand-input" />
+                            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="@(() => SaveEditAsync(root))">Save</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Default" Size="ButtonSize.Small" OnClick="CancelEdit">Cancel</FluentButton>
                         </div>
                     }
                     else
@@ -49,10 +49,10 @@
                         <div class="strand-row">
                             <span class="strand-name">@root.Name</span>
                             <span class="strand-actions">
-                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small"
                                               IconStart="@FluentIcons.Edit" Title="Rename strand"
                                               OnClick="@(() => StartEdit(root))" />
-                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small"
                                               IconStart="@FluentIcons.Delete" Title="Delete strand"
                                               OnClick="@(() => DeleteAsync(root))" />
                             </span>
@@ -68,9 +68,9 @@
                                     @if (_editingId == lesson.Id)
                                     {
                                         <div class="lesson-row">
-                                            <FluentTextField @bind-Value="_editName" Placeholder="Lesson name" class="lesson-input" />
-                                            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" OnClick="@(() => SaveEditAsync(lesson))">Save</FluentButton>
-                                            <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelEdit">Cancel</FluentButton>
+                                            <FluentTextInput @bind-Value="_editName" Placeholder="Lesson name" class="lesson-input" />
+                                            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="@(() => SaveEditAsync(lesson))">Save</FluentButton>
+                                            <FluentButton Appearance="ButtonAppearance.Default" Size="ButtonSize.Small" OnClick="CancelEdit">Cancel</FluentButton>
                                         </div>
                                     }
                                     else
@@ -78,10 +78,10 @@
                                         <div class="lesson-row">
                                             <span class="lesson-name">@lesson.Name</span>
                                             <span class="lesson-actions">
-                                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small"
                                                               IconStart="@FluentIcons.Edit" Title="Rename lesson"
                                                               OnClick="@(() => StartEdit(lesson))" />
-                                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small"
                                                               IconStart="@FluentIcons.Delete" Title="Delete lesson"
                                                               OnClick="@(() => DeleteAsync(lesson))" />
                                             </span>
@@ -94,15 +94,15 @@
                         @if (_newLessonParentId == root.Id)
                         {
                             <div class="new-form">
-                                <FluentTextField @bind-Value="_newLessonName" Placeholder="Lesson name" class="lesson-input" />
-                                <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                                <FluentTextInput @bind-Value="_newLessonName" Placeholder="Lesson name" class="lesson-input" />
+                                <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small"
                                               OnClick="@(() => CreateLessonAsync(root.Id))" Disabled="@string.IsNullOrWhiteSpace(_newLessonName)">Add</FluentButton>
-                                <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelNewLesson">Cancel</FluentButton>
+                                <FluentButton Appearance="ButtonAppearance.Default" Size="ButtonSize.Small" OnClick="CancelNewLesson">Cancel</FluentButton>
                             </div>
                         }
                         else
                         {
-                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                            <FluentButton Appearance="ButtonAppearance.Transparent" Size="ButtonSize.Small"
                                           IconStart="@FluentIcons.Add" OnClick="@(() => ToggleNewLesson(root.Id))">New Lesson</FluentButton>
                         }
                     </div>
@@ -114,10 +114,10 @@
     @if (_showNewStrand)
     {
         <div class="new-form">
-            <FluentTextField @bind-Value="_newStrandName" Placeholder="Strand name" class="strand-input" />
-            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+            <FluentTextInput @bind-Value="_newStrandName" Placeholder="Strand name" class="strand-input" />
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small"
                           OnClick="CreateStrandAsync" Disabled="@string.IsNullOrWhiteSpace(_newStrandName)">Add</FluentButton>
-            <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelNewStrand">Cancel</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Default" Size="ButtonSize.Small" OnClick="CancelNewStrand">Cancel</FluentButton>
         </div>
     }
 </div>

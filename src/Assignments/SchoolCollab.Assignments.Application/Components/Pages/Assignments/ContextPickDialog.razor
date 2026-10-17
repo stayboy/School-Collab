@@ -8,6 +8,7 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 
+<DialogShellBody>
 <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
     <DataAnnotationsValidator />
 
@@ -31,6 +32,7 @@
     <DialogShellFooter Saving="@Saving" Error="@Error"
                        OnCancel="HandleCancelAsync" SubmitText="Add" />
 </EditForm>
+</DialogShellBody>
 
 @code {
     /// <summary>Returns the checked set as the section's full-replacement pick list. An empty

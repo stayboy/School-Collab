@@ -2,37 +2,51 @@
    renders a dark modal overlay even when both a Primary and a Secondary button
    are present (FluentUI's MessageBox hides the overlay whenever a secondary
    action is defined). Shown via DialogServiceExtensions.ShowConfirmDialogAsync
-   with Modal = true and PreventDismissOnOverlayClick = false, so the user can
-   either click a button or dismiss by clicking the overlay / pressing ESC.
+   with Modal = false (v5 renders type="modal": the native backdrop stays, and
+   the user can dismiss by clicking the overlay or pressing ESC).
 
-   Result contract:
-     • Primary button  → DialogResult.Ok(true)   → Cancelled = false (proceed)
+   Result contract (v5 DialogResult):
+     • Primary button   → DialogResult.Ok(true)   → Cancelled = false (proceed)
      • Secondary button → DialogResult.Cancel()   → Cancelled = true  (abort)
      • Overlay / ESC    → Cancelled = true         (abort)
 *@
 @using Microsoft.FluentUI.AspNetCore.Components
-@implements IDialogContentComponent<ConfirmDialogContent>
 
+@* Wrapped in the shared DialogShellBody so the v5 dialog header renders
+   DialogOptions.Header.Title (and the header-action slot). In v5 the header is
+   rendered only INSIDE <FluentDialogBody>; a dialog that omits it is title-less.
+   ShowConfirmDialogAsync sets Header.Title, so without this wrapper the prompt's
+   title never reaches the DOM. The built-in footer actions stay suppressed: this
+   dialog is not a FluentDialogInstance (nothing pre-fills the OK/Cancel labels)
+   and ShowConfirmDialogAsync leaves the footer unset, so FluentDialogBody renders
+   no built-in buttons — only the dialog's own Cancel/confirm row. *@
+<DialogShellBody>
 <div class="confirm-dialog">
-    <FluentMessageBar Intent="MessageIntent.Warning">
+    <FluentMessageBar Intent="MessageBarIntent.Warning">
         @Content.Message
     </FluentMessageBar>
     <div class="confirm-dialog__actions">
-        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">
+        <FluentButton Appearance="ButtonAppearance.Outline" OnClick="CancelAsync">
             @Content.SecondaryText
         </FluentButton>
-        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmAsync">
+        <FluentButton Appearance="ButtonAppearance.Primary" OnClick="ConfirmAsync">
             @Content.PrimaryText
         </FluentButton>
     </div>
 </div>
+</DialogShellBody>
 
 @code {
-    [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
+    /// <summary>The dialog handle FluentUI cascades into the dialog body. Used
+    /// to close with the confirm/cancel result.</summary>
+    [CascadingParameter] public IDialogInstance DialogInstance { get; set; } = default!;
 
+    /// <summary>The confirmation content, spread from
+    /// <c>DialogOptions.Parameters["Content"]</c> by
+    /// <see cref="DialogServiceExtensions.ShowConfirmDialogAsync"/>.</summary>
     [Parameter] public ConfirmDialogContent Content { get; set; } = default!;
 
-    private async Task ConfirmAsync() => await Dialog.CloseAsync(DialogResult.Ok(true));
+    private async Task ConfirmAsync() => await DialogInstance.CloseAsync(DialogResult.Ok(true));
 
-    private async Task CancelAsync() => await Dialog.CloseAsync(DialogResult.Cancel());
+    private async Task CancelAsync() => await DialogInstance.CloseAsync(DialogResult.Cancel());
 }

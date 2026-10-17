@@ -387,38 +387,22 @@ public class AssignmentDetailBunitTests : BunitContext
 
     // ── Approve confirm/decline flows (decision (k) binding coverage) ──
 
-    /// <summary>Replaces the registered <see cref="IDialogService"/> (the real
-    /// FluentUI one added by <c>AddFluentUIComponents</c>) with the mock so the
-    /// page's injection resolves it — <c>GetRequiredService</c> returns the
-    /// FIRST registration, so the real service must be removed, not
-    /// shadowed.</summary>
-    private void ReplaceDialogService(Mock<IDialogService> dialogMock)
-    {
-        var existing = Services.Where(s => s.ServiceType == typeof(IDialogService)).ToList();
-        foreach (var s in existing) Services.Remove(s);
-        Services.AddSingleton(dialogMock.Object);
-    }
-
     /// <summary>Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves
     /// to <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at the
     /// requested outcome — the ResourcesSectionBunitTests /
-    /// QuestionEditorSectionBunitTests pattern. Property-getter setups use
-    /// <c>.Returns(Task.FromResult(...))</c>: Moq 4.20 has no ReturnsAsync on
-    /// <c>SetupGet</c> receivers.</summary>
-    private Mock<IDialogService> SetupConfirmDialogResult(bool confirmed)
+    /// QuestionEditorSectionBunitTests pattern. <see cref="FluentServiceMocks.RegisterDialogService"/>
+    /// replaces the real FluentUI registration (GetRequiredService returns the FIRST registration,
+    /// so it must be removed, not shadowed).</summary>
+    private Mock<DialogService> SetupConfirmDialogResult(bool confirmed)
     {
-        var dialogRef = new Mock<IDialogReference>();
         // Cancelled when the user declines; Ok when they confirm.
         var result = confirmed
             ? DialogResult.Ok<object?>(null)
             : DialogResult.Cancel();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(result));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        ReplaceDialogService(dialogMock);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(result);
         return dialogMock;
     }
 
@@ -516,8 +500,7 @@ public class AssignmentDetailBunitTests : BunitContext
 
         // Positive wait first: the confirm dialog opened and resolved (declined).
         cut.WaitForAssertion(() => dialogMock.Verify(
-            d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+            d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
             Times.Once));
 
         approvePosts.Should().Be(0,
@@ -568,16 +551,11 @@ public class AssignmentDetailBunitTests : BunitContext
     /// the extension unwraps into the typed result.</summary>
     private void SetupScheduleDialogResult(DateTimeOffset availableFromUtc)
     {
-        var dialogRef = new Mock<IDialogReference>();
         var payload = new DialogShellResult<ScheduleResult>(new ScheduleResult(availableFromUtc));
-        dialogRef.SetupGet(r => r.Result)
-            .Returns(Task.FromResult(DialogResult.Ok<object?>(payload)));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ScheduleDialog, DialogShellData<ScheduleFormModel>>(
-                It.IsAny<DialogShellData<ScheduleFormModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        ReplaceDialogService(dialogMock);
+            .Setup(d => d.ShowDialogAsync(typeof(ScheduleDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(payload));
     }
 
     [TestMethod]
@@ -614,7 +592,7 @@ public class AssignmentDetailBunitTests : BunitContext
             .WithContent(expectedJson)
             .Respond(HttpStatusCode.NoContent);
 
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Schedule").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Schedule").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -691,8 +669,7 @@ public class AssignmentDetailBunitTests : BunitContext
         cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
 
         cut.WaitForAssertion(() => dialogMock.Verify(
-            d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+            d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
             Times.Once));
 
         postCount.Should().Be(0, "declining the confirm dialog must not fire the duplicate POST");
@@ -720,9 +697,9 @@ public class AssignmentDetailBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             _mockHttp.VerifyNoOutstandingExpectation();
-            cut.Markup.Should().Contain("fluent-messagebar",
+            cut.Markup.Should().Contain("fluent-message-bar",
                 "a failing duplicate POST must render the dedicated error bar");
-            cut.Markup.Should().Contain("intent-error",
+            cut.Markup.Should().Contain("intent=\"error\"",
                 "the rendered message bar must carry the error intent");
             cut.Markup.Should().MatchRegex("500|Internal Server Error",
                 "the error bar must surface the failure message");

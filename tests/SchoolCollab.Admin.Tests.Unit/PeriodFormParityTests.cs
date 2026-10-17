@@ -85,7 +85,7 @@ public class PeriodFormParityTests : BunitContext
         var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Edit period"));
-        var divisionSelect = cut.FindAll("fluent-select").FirstOrDefault(s => s.TextContent.Contains("Terms"));
+        var divisionSelect = cut.FindAll("fluent-dropdown").FirstOrDefault(s => s.TextContent.Contains("Terms"));
         divisionSelect.Should().NotBeNull("the Division selector is present on edit");
         divisionSelect!.GetAttribute("disabled").Should().NotBeNull("Division is disabled on edit (FR-E2)");
     }

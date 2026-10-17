@@ -14,17 +14,18 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
 
+<DialogShellBody>
 <div class="targets-audience-dialog">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
         <FormRow Label="Category" Required For="ta-category">
-            <FluentSelect TOption="CategoryOption" Id="ta-category"
+            <FluentSelect TOption="CategoryOption" TValue="CategoryOption" Id="ta-category"
                           Items="CategoryOptions"
-                          SelectedOption="@SelectedCategory"
-                          SelectedOptionChanged="@OnCategoryChanged"
+                          Value="@SelectedCategory"
+                          ValueChanged="@OnCategoryChanged"
                           OptionText="@(o => o.Label)"
-                          OptionValue="@(o => o.Value.ToString())"
+                          OptionValueToString="@(o => o.Value.ToString())"
                           class="full-width" />
         </FormRow>
 
@@ -69,15 +70,15 @@
                Model.StudentSearch on every query of two characters or more. Single-pick: the pick
                lands in the chip row and the control resets. *@
             <FormRow Label="@CategoryLabel" Required For="ta-student">
-                <FluentAutocomplete TOption="TargetsAndAudienceOption" Id="ta-student"
+                <FluentAutocomplete TOption="TargetsAndAudienceOption" TValue="TargetsAndAudienceOption" Id="ta-student"
                                     Multiple="false"
                                     MaximumOptionsSearch="20"
                                     ImmediateDelay="300"
                                     Placeholder="Search students by name or number…"
                                     OptionText="@(o => o.Label)"
-                                    OptionValue="@(o => o.Value)"
-                                    SelectedOption="@_selectedValue"
-                                    SelectedOptionChanged="@OnValuePicked"
+                                    OptionValueToString="@(o => o.Value)"
+                                    SelectedItem="@_selectedValue"
+                                    SelectedItemChanged="@OnValuePicked"
                                     OnOptionsSearch="@OnStudentSearchAsync"
                                     class="full-width" />
             </FormRow>
@@ -85,12 +86,12 @@
         else if (Model.Category == TargetsAndAudienceCategory.GradeLevels)
         {
             <FormRow Label="@CategoryLabel" Required For="ta-grade-level">
-                <FluentSelect TOption="TargetsAndAudienceOption" Id="ta-grade-level"
+                <FluentSelect TOption="TargetsAndAudienceOption" TValue="TargetsAndAudienceOption" Id="ta-grade-level"
                               Items="@Model.GradeLevelOptions"
-                              SelectedOption="@_selectedValue"
-                              SelectedOptionChanged="@OnValuePicked"
+                              Value="@_selectedValue"
+                              ValueChanged="@OnValuePicked"
                               OptionText="@(o => o?.Label ?? string.Empty)"
-                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                              OptionValueToString="@(o => o?.Value ?? string.Empty)"
                               Placeholder="Pick a grade level"
                               class="form-select--dialog" />
             </FormRow>
@@ -98,12 +99,12 @@
         else if (Model.Category == TargetsAndAudienceCategory.Streams)
         {
             <FormRow Label="@CategoryLabel" Required For="ta-stream">
-                <FluentSelect TOption="TargetsAndAudienceOption" Id="ta-stream"
+                <FluentSelect TOption="TargetsAndAudienceOption" TValue="TargetsAndAudienceOption" Id="ta-stream"
                               Items="@Model.StreamOptions"
-                              SelectedOption="@_selectedValue"
-                              SelectedOptionChanged="@OnValuePicked"
+                              Value="@_selectedValue"
+                              ValueChanged="@OnValuePicked"
                               OptionText="@(o => o?.Label ?? string.Empty)"
-                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                              OptionValueToString="@(o => o?.Value ?? string.Empty)"
                               Placeholder="Pick a stream"
                               class="form-select--dialog" />
             </FormRow>
@@ -111,12 +112,12 @@
         else
         {
             <FormRow Label="@CategoryLabel" Required For="ta-activity-group">
-                <FluentSelect TOption="TargetsAndAudienceOption" Id="ta-activity-group"
+                <FluentSelect TOption="TargetsAndAudienceOption" TValue="TargetsAndAudienceOption" Id="ta-activity-group"
                               Items="@Model.ActivityGroupOptions"
-                              SelectedOption="@_selectedValue"
-                              SelectedOptionChanged="@OnValuePicked"
+                              Value="@_selectedValue"
+                              ValueChanged="@OnValuePicked"
                               OptionText="@(o => o?.Label ?? string.Empty)"
-                              OptionValue="@(o => o?.Value ?? string.Empty)"
+                              OptionValueToString="@(o => o?.Value ?? string.Empty)"
                               Placeholder="Pick an activity group"
                               class="form-select--dialog" />
             </FormRow>
@@ -125,6 +126,7 @@
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Add" OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     /// <summary>One dropdown item for the category picker.</summary>

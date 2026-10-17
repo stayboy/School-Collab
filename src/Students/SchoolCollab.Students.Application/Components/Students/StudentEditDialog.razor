@@ -4,7 +4,6 @@
    and saves the whole student (profile + guardians + contacts) atomically via
    UpdateStudentWithLinkedDataAsync. Opens from the Students card kebab Edit
    action via ShowReadonlyDialogAsync. *@
-@implements IDialogContentComponent<DialogParameters>
 @using System.Net
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Students.Application.Services
@@ -19,6 +18,7 @@
    relative; height: 100%) for the shared <DialogDrawer>, which fills the
    dialog body content area exactly — between the title bar (above) and
    the actions bar (below). *@
+<DialogShellBody>
 <div class="student-edit-dialog-root @RootModifierClasses">
 @if (!_loaded)
 {
@@ -38,9 +38,9 @@ else
 {
     @if (_concurrencyConflict)
     {
-        <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+        <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-3">
             This student was changed by someone else. Reload to see the latest and retry.
-            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" OnClick="ReloadAsync">Reload</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Primary" Size="ButtonSize.Small" OnClick="ReloadAsync">Reload</FluentButton>
         </FluentMessageBar>
     }
     <StudentFormFields Model="_model"
@@ -102,29 +102,31 @@ else
     </DialogDrawer>
 }
 </div>
+</DialogShellBody>
 
 @code {
-    /// <summary>Key used in <see cref="Content"/> for the student being edited.
-    /// Exposed so callers (Detail.razor) set the same key they read here.</summary>
+    /// <summary>Key used in <c>DialogOptions.Parameters</c> for the student
+    /// being edited. Exposed so callers (Detail.razor) set the same key this
+    /// dialog binds to — the key MUST match the <c>[Parameter]</c> name
+    /// (FluentUI 5.x spreads the entries).</summary>
     public const string StudentIdKey = nameof(StudentId);
 
     /// <summary>
     /// The student being edited.
     ///
-    /// Read from <see cref="Content"/> (the <see cref="DialogParameters"/>
-    /// indexer) rather than a separate <c>[Parameter]</c>: FluentUI renders the
-    /// dialog content via <c>DynamicComponent</c> with only
-    /// <c>Parameters = { "Content": &lt;DialogParameters&gt; }</c> — it does NOT
-    /// spread <c>DialogParameters</c> indexer entries onto the component's
-    /// <c>[Parameter]</c> properties. So a separate <c>[Parameter] Guid StudentId</c>
-    /// is never set and would silently default to <see cref="Guid.Empty"/>
-    /// (an empty-guid edit load).
+    /// Supplied through <c>DialogOptions.Parameters[StudentIdKey]</c> and bound
+    /// to this typed <c>[Parameter]</c> (FluentUI 5.x spreads the entries onto
+    /// the component's parameters). An unset value would silently be
+    /// <see cref="Guid.Empty"/>, i.e. an empty-guid edit load —
+    /// Dialog_Parameters_AreDeclaredAndSuppliedByCallers is the guard that
+    /// keeps every caller passing it.
     /// </summary>
-    private Guid StudentId =>
-        Content is { } c ? c.TryGet<Guid>(StudentIdKey) : Guid.Empty;
+    [Parameter] public Guid StudentId { get; set; }
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+    /// <summary>The hosting dialog instance provided by the dialog host as a
+    /// cascading parameter. Nullable so unit tests that render the component
+    /// without a host do not NRE.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
 
     private readonly StudentFormModel _model = new();
     private bool _saving;
@@ -249,7 +251,7 @@ else
         {
             var request = _model.ToUpdateRequest();
             await Api.UpdateStudentWithLinkedDataAsync(StudentId, request);
-            if (Dialog is not null) await Dialog.CloseAsync(StudentId);
+            if (DialogInstance is not null) await DialogInstance.CloseAsync(StudentId);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
         {
@@ -275,7 +277,7 @@ else
         await LoadAsync();
     }
 
-    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    private Task CancelAsync() => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
 
     // --- Section-editor open/close orchestration ---
 
@@ -291,7 +293,7 @@ else
     }
 
     /// <summary>Opens the Contacts focused add form (blank) in the shared
-    /// drawer. Fired by the "Add contact" FluentAnchor on the Readonly
+    /// drawer. Fired by the "Add contact" FluentLink on the Readonly
     /// contacts summary.</summary>
     private Task OpenAddContactFormAsync()
     {
@@ -314,7 +316,7 @@ else
     }
 
     /// <summary>Opens the Guardians focused add form (blank) in the shared
-    /// drawer. Fired by the "Add guardian" FluentAnchor on the Readonly
+    /// drawer. Fired by the "Add guardian" FluentLink on the Readonly
     /// guardians summary.</summary>
     private Task OpenAddGuardianAsync()
     {

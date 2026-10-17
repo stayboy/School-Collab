@@ -28,6 +28,7 @@
 @inject StudentsApiClient Api
 @inject IDialogService DialogService
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -35,7 +36,7 @@
         <FormRow Label="Grade" For="grade-level-static-name">
             <div class="grade-static-row">
                 <span id="grade-level-static-name" class="grade-static-name">@Model.CurrentName</span>
-                <FluentButton Appearance="Appearance.Stealth"
+                <FluentButton Appearance="ButtonAppearance.Subtle"
                               IconStart="@(new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Edit())"
                               Title="Override the tenant display name for this grade"
                               aria-label="Override tenant name"
@@ -46,14 +47,14 @@
         </FormRow>
 
         <FormRow Label="Age range" AlignTop>
-            <FluentNumberField @bind-Value="Model.MinAge"
+            <FluentNumberInput @bind-Value="Model.MinAge"
                                Id="grade-level-min-age"
                                Min="0"
                                Max="150"
                                Placeholder="No minimum"
                                Style="flex:1; min-width:0" />
             <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">â€“</span>
-            <FluentNumberField @bind-Value="Model.MaxAge"
+            <FluentNumberInput @bind-Value="Model.MaxAge"
                                Id="grade-level-max-age"
                                Min="0"
                                Max="150"
@@ -80,24 +81,24 @@
                    components, so the binding fell into AdditionalAttributes — a stray
                    selectedvalues HTML attribute — and the picker neither showed nor
                    reported a selection.) *@
-                <FluentSelect TOption="TopicDto" Items="@_allTopics"
+                <FluentSelect TOption="TopicDto" TValue="string" Items="@_allTopics"
                               OptionText="@(s => s.Name)"
                               OptionValue="@(s => s.Id.ToString())"
                               Multiple="true"
-                              SelectedOptions="@SelectedTopicOptions"
-                              SelectedOptionsChanged="@OnSelectedTopicsChanged"
+                              SelectedItems="@SelectedTopicOptions"
+                              SelectedItemsChanged="@OnSelectedTopicsChanged"
                               Style="width: 100%; min-height: 160px;" />
             </FormRow>
         }
         else if (_allTopics.Length == 0)
         {
-            <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-3">
                 No topics exist yet.
             </FluentMessageBar>
         }
         else
         {
-            <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+            <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-3">
                 Could not load topics for this grade.
             </FluentMessageBar>
         }
@@ -109,6 +110,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 
 @code {
@@ -213,7 +215,7 @@
         _allTopics.Where(t => Model.TopicIds.Contains(t.Id));
 
     /// <summary>Writes the picker's option objects back to the ids field.</summary>
-    private void OnSelectedTopicsChanged(IEnumerable<TopicDto>? selected) =>
+    private void OnSelectedTopicsChanged(IEnumerable<TopicDto> selected) =>
         Model.TopicIds = (selected ?? []).Select(t => t.Id).ToList();
 
     private async Task OpenNameOverrideDialog()
@@ -238,7 +240,7 @@
                 CodedValueDto>(
                 CodedValueFormModel.ForOverride(_codedValue, _codedValue.IsOverridden),
                 title: "Override grade name",
-                size: DialogSize.Small);
+                size: DialogWidth.Small);
 
             if (updated is not null)
             {

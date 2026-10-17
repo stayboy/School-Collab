@@ -6,7 +6,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
-@inject IToastService Toast
+@inject INotificationService NotificationService
 @implements IDisposable
 
 <LandingPage TItem="EntityCodeRuleDto"
@@ -34,15 +34,15 @@
         <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Status">
             @if (context.IsActive)
             {
-                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Active</FluentBadge>
             }
             else
             {
-                <FluentBadge Appearance="Appearance.Neutral">Inactive</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled">Inactive</FluentBadge>
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Segments">
-            <FluentBadge Appearance="Appearance.Neutral">@context.Segments.Count</FluentBadge>
+            <FluentBadge Appearance="BadgeAppearance.Filled">@context.Segments.Count</FluentBadge>
         </TemplateColumn>
         <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Preview">
             <code>@EntityCodePreview.RenderFirst(context.Segments)</code>
@@ -135,12 +135,10 @@
     private async Task OnActivateAsync(EntityCodeRuleDto rule)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Activate '{rule.Code}'? This will deactivate any other active rule with the same code (e.g. another STUDENT_CODE rule).",
-            "Activate",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Activate");
+        if (!confirmed) return;
 
         try
         {
@@ -166,22 +164,20 @@
     private async Task OnDeleteAsync(EntityCodeRuleDto rule)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
             $"Delete '{rule.Code}'? This soft-deletes the rule; existing student/staff/assignment codes are preserved.",
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
+            "Delete");
+        if (!confirmed) return;
 
         try
         {
             await Api.DeleteAsync(rule.Id);
             if (_disposed) return;
-            Toast.ShowSuccess($"Rule '{rule.Code}' deleted.");
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != rule.Id).ToArray();
             }
+            await NotificationService.ShowSuccessToastAsync($"Rule '{rule.Code}' deleted.");
         }
         catch (KeyNotFoundException)
         {

@@ -71,10 +71,10 @@ public class CodedValueDropdownTests : BunitContext
         var cut = Render<CodedValueDropdown>(parameters => parameters
             .Add(p => p.Parent, CodedValueParent.Genders));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
         // Assert
-        cut.Find("fluent-select").Should().NotBeNull();
+        cut.Find("fluent-dropdown").Should().NotBeNull();
         handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/api/coded-values/by-parent?parentCode=GENDER");
     }
 
@@ -113,10 +113,15 @@ public class CodedValueDropdownTests : BunitContext
             .Add(p => p.SelectedId, typeId)
             .Add(p => p.SelectedIdChanged, EventCallback.Factory.Create<Guid?>(this, value => selectedId = value)));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
 
-        // Assert
-        cut.Find("fluent-select")?.GetAttribute("current-value")?.Should().Be(typeId.ToString());
+        // Assert: FluentUI 5.x no longer renders the bound value as a `current-value`
+        // attribute on the dropdown (that was the v4 <fluent-select> DOM); the selection
+        // is expressed on the resolved option instead — the pre-selected id resolves to
+        // the loaded item and that option alone renders as `selected`.
+        var selectedOptions = cut.FindAll("fluent-option").Where(o => o.HasAttribute("selected")).ToList();
+        selectedOptions.Should().ContainSingle("SelectedId resolves to exactly one loaded option");
+        selectedOptions[0].TextContent.Should().Contain("Essay");
         handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/api/coded-values/by-parent?parentCode=SUBJECT");
     }
 
@@ -148,7 +153,7 @@ public class CodedValueDropdownTests : BunitContext
         var cut = Render<CodedValueDropdown>(parameters => parameters
             .Add(p => p.Parent, CodedValueParent.Genders));
 
-        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        cut.WaitForState(() => cut.Find("fluent-dropdown") is not null);
         var initialRequestCount = handler.Requests.Count;
 
         // Act

@@ -29,12 +29,42 @@
 }
 
 /* Content row inside the badge; the right padding leaves a small gap before
-   the badge's dismiss button. */
+   the chip's dismiss button. */
 .chip-inner {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding-right: 8px;
+}
+
+/* Dismiss (remove) control. FluentBadge 5.0.1 dropped the built-in dismiss button
+   that 4.14.2 rendered from OnDismissClick / DismissTitle, so the chip renders its
+   own inside the pill — the .chip wrapper supplies the border, this is the button.
+   Sized and coloured after the badge-internal button it replaces. */
+.chip-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.chip-dismiss:hover {
+    color: var(--neutral-foreground-rest, #242424);
+    background: var(--neutral-fill-stealth-hover, rgba(0, 0, 0, 0.06));
+}
+
+.chip-dismiss:focus-visible {
+    outline: 2px solid var(--focus-stroke-outer, var(--accent-fill-rest));
+    outline-offset: 2px;
 }
 
 .chip-label {

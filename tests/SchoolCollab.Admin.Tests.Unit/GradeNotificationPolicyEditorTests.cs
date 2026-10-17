@@ -168,11 +168,14 @@ public class GradeNotificationPolicyEditorTests : BunitContext
             .Single(r => r.TextContent.Contains("Max notifications per sendout"));
         row.QuerySelector("fluent-button")!.Click();   // open the row's overflow kebab menu
 
-        // Re-query the menu items globally after the click: the row reference
-        // captured above is stale once the menu-open re-render runs.
-        cut.FindAll("fluent-menu-item")
+        // v5 renders EVERY row's kebab menu items in the DOM (the menu slot is no longer
+        // materialised on open), so re-query the ROW after the click and scope the search to
+        // that row's own menu — a global "Reset" match now hits one item per row.
+        cut.FindAll("tr.fluent-data-grid-row")
+            .Single(r => r.TextContent.Contains("Max notifications per sendout"))
+            .QuerySelectorAll("fluent-menu-item")
             .Single(i => i.TextContent.Trim().Equals("Reset", System.StringComparison.OrdinalIgnoreCase))
-            .Click();
+            .MenuItemClick();
 
         var put = handler.Calls.Should().Contain(c => c.Method == "PUT" && c.Url.Contains("notification-policy")).Which;
         put.Body.Should().Contain("\"maxNotifications\":null", "the reset clears the per-grade override for that field");
@@ -187,15 +190,10 @@ public class GradeNotificationPolicyEditorTests : BunitContext
             gradeBody: NoContent,
             gradeStatus: HttpStatusCode.NoContent);
 
-        var dialogRef = new Mock<IDialogReference>();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
-
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<NotificationPolicyFieldEditDialog, DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(
-                It.IsAny<DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        Services.AddSingleton(dialogMock.Object);
+            .Setup(d => d.ShowDialogAsync(typeof(NotificationPolicyFieldEditDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
 
         var cut = Render<GradeNotificationPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Max notifications per sendout"));
@@ -203,9 +201,13 @@ public class GradeNotificationPolicyEditorTests : BunitContext
         // The setting name is a hyperlink label that opens the edit dialog.
         var row = cut.FindAll("tr.fluent-data-grid-row")
             .Single(r => r.TextContent.Contains("Max notifications per sendout"));
-        row.QuerySelector("fluent-anchor")!.Click();
+        var link = row.QuerySelector("fluent-link.setting-label");
+        link.Should().NotBeNull("the setting name renders as the hypertext edit affordance");
 
-        dialogMock.Verify(d => d.ShowDialogAsync<NotificationPolicyFieldEditDialog, DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(
-            It.IsAny<DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(), It.IsAny<DialogParameters>()), Times.Once);
+        link!.Click();
+        dialogMock.Verify(
+            d => d.ShowDialogAsync(typeof(NotificationPolicyFieldEditDialog), It.IsAny<DialogOptions>()),
+            Times.Once,
+            "clicking the setting name opens the field edit dialog");
     }
 }

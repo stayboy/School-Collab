@@ -231,6 +231,33 @@ public class ActivityGroupsPageTests : BunitContext
     }
 
     /// <summary>
+    /// Q24 (Round A): v5 maps both v4 <c>Appearance.Accent</c> and <c>Appearance.Neutral</c> to
+    /// <c>BadgeAppearance.Filled</c>, so an Active chip and an Inactive one rendered identically.
+    /// The distinction rides on <c>BadgeColor</c> now (MigrationFluentBadge.md §Color): Success for
+    /// Active, Subtle for every other status. Covers both chips on this page — the group header's
+    /// Active/Inactive badge and the member row's status badge (MemberStatusColor). The header chip
+    /// lives in the <c>page-toolbar</c> SectionContent, so the page is hosted under the
+    /// <see cref="RolloverHost"/> toolbar outlet — a bare render drops it and would assert only the
+    /// member chip.
+    /// </summary>
+    [TestMethod]
+    public void DetailsPage_ActiveChips_CarryTheActiveColour()
+    {
+        RegisterWith(
+            ($"/activity-groups/{GroupId}/members", HttpStatusCode.OK, MembersJson()),
+            ($"/activity-groups/{GroupId}", HttpStatusCode.OK, GroupJson()));
+
+        var cut = Render<RolloverHost>(p => p.Add(x => x.GroupId, GroupId));
+        cut.WaitForState(() => cut.Markup.Contains("Alice Smith"), TimeSpan.FromSeconds(2));
+
+        var activeChips = cut.FindAll("fluent-badge").Where(b => b.TextContent.Trim() == "Active").ToList();
+
+        activeChips.Should().HaveCountGreaterThanOrEqualTo(2,
+            "the group header chip and the member status chip both read Active");
+        activeChips.Should().OnlyContain(b => b.GetAttribute("color") == "success");
+    }
+
+    /// <summary>
     /// B1 (AC-38): the Roll over button renders only for a non-OpenEnded active
     /// group. The button lives in the page-toolbar SectionContent, so the page
     /// is hosted under a component that provides the matching SectionOutlet.

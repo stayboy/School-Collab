@@ -13,7 +13,7 @@
     <div class="cq-list-head">
         <span class="cq-list-count">@Model.Questions.Count question(s)</span>
         <FluentButton Id="cq-add-question"
-                      Appearance="Appearance.Outline"
+                      Appearance="ButtonAppearance.Outline"
                       IconStart="@FluentIcons.Add"
                       OnClick="OnAddQuestionAsync">
             Add question
@@ -35,15 +35,15 @@
                     <span class="cq-qrow-position">#@(absoluteIndex + 1)</span>
                     @* QA-9/QA-12: a real anchor so the open target is keyboard reachable; the row
                        itself is NOT a button (a button nested in a clickable row is invalid). *@
-                    <FluentAnchor Appearance="Appearance.Hypertext"
+                    <FluentLink Appearance="LinkAppearance.Default"
                                   Href="#"
                                   Id="@($"cq-qrow-{absoluteIndex}-open")"
                                   Class="cq-qrow-open"
                                   Title="@(string.IsNullOrWhiteSpace(row.QuestionText) ? "Untitled question" : row.QuestionText)"
                                   OnClick="@(() => OpenEditAsync(absoluteIndex, row))">
                         @(string.IsNullOrWhiteSpace(row.QuestionText) ? "Untitled question" : row.QuestionText)
-                    </FluentAnchor>
-                    <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(row.Type)</FluentBadge>
+                    </FluentLink>
+                    <FluentBadge Appearance="BadgeAppearance.Filled">@EnumHelper.GetDescription(row.Type)</FluentBadge>
                     @* QA-16/D13: always in the DOM, revealed on hover / focus-within by CSS. *@
                     <span class="cq-qrow-actions" id="@($"cq-qrow-{absoluteIndex}-actions")">
                         <RowActionsMenu UseMenuService="false"
@@ -122,7 +122,7 @@
         var result = await DialogService.ShowShellDialogAsync<QuestionEditDialog, QuestionEditModel, QuestionEditResult>(
             QuestionEditModel.ForEdit(index, row, GradingFormat, StageInstructionMediaAsync, LoadInstructionMediaAsync),
             title: "Edit question",
-            size: DialogSize.Medium);
+            size: DialogWidth.Medium);
 
         if (result is null || index < 0 || index >= Model.Questions.Count)
         {

@@ -32,24 +32,25 @@ public class FluentTabStripBunitTests : BunitContext
         var cut = Render<FluentTabStrip>(p => p.AddChildContent(builder =>
         {
             builder.OpenComponent<FluentTab>(0);
-            builder.AddAttribute(1, "Label", "First");
+            builder.AddAttribute(1, "Header", "First");
             builder.AddAttribute(2, "ChildContent", (RenderFragment)(b => b.AddContent(0, "one")));
             builder.CloseComponent();
             builder.OpenComponent<FluentTab>(3);
-            builder.AddAttribute(4, "Label", "Second");
+            builder.AddAttribute(4, "Header", "Second");
             builder.AddAttribute(5, "ChildContent", (RenderFragment)(b => b.AddContent(0, "two")));
             builder.CloseComponent();
         }));
 
         cut.Find(".fluent-tab-strip").Should().NotBeNull("the container is the styling seam the css binds to");
-        cut.Find(".fluent-tab-strip fluent-tabs").Should().NotBeNull("the tabs are FluentUI's, untouched");
+        cut.Find(".fluent-tab-strip fluent-tablist").Should().NotBeNull(
+            "the tabs are FluentUI's, untouched — v5's FluentTabs renders a plain <div> host holding a fluent-tablist element (the v4 fluent-tabs tag no longer exists)");
 
         var tabs = cut.FindAll("fluent-tab");
         tabs.Should().HaveCount(2);
-        tabs[0].GetAttribute("aria-label").Should().Be("First", "the caller's labels pass through");
-        tabs[1].GetAttribute("aria-label").Should().Be("Second");
+        tabs[0].TextContent.Trim().Should().Be("First", "the caller's Header text passes through");
+        tabs[1].TextContent.Trim().Should().Be("Second");
 
-        var panels = cut.FindAll("fluent-tab-panel");
+        var panels = cut.FindAll("div[role='tabpanel']");
         panels.Should().HaveCount(2,
             "both panels render even for the inactive tab — FluentUI hides the inactive one in the BROWSER "
             + "via the web component (verified live), so tab content is never unmounted in bUnit either");

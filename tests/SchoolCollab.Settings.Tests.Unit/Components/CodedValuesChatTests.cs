@@ -42,9 +42,9 @@ public class AiChatTests : BunitContext
 
         cut.Find(".chat-heading").TextContent.Should().Be("✨ AI Assistant");
         // The Clear control now lives in the model-info row above the input
-        // area, rendered as a Hypertext FluentAnchor (not a button).
+        // area, rendered as a Hypertext FluentLink (not a button).
         cut.Find(".model-info").Should().NotBeNull();
-        cut.FindAll("fluent-anchor").Should().Contain(a => a.TextContent.Trim() == "Clear");
+        cut.FindAll("fluent-link").Should().Contain(a => a.TextContent.Trim() == "Clear");
     }
 
     [TestMethod]
@@ -59,7 +59,7 @@ public class AiChatTests : BunitContext
         // of "I type in the drawer and nothing happens" reports — users must
         // prompt from the inline InputOnly chat on the page, which mirrors
         // into this surface.
-        cut.FindAll("fluent-anchor").Should().Contain(a => a.TextContent.Trim() == "Clear");
+        cut.FindAll("fluent-link").Should().Contain(a => a.TextContent.Trim() == "Clear");
         cut.FindAll(".input-area").Should().BeEmpty();
         cut.FindAll("fluent-button").Should().NotContain(b => b.TextContent.Trim() == "Send");
     }
@@ -85,7 +85,7 @@ public class AiChatTests : BunitContext
         cut.FindAll(".chat-heading").Should().BeEmpty();
         cut.FindAll(".chat-intro").Should().BeEmpty();
         // Clear control should still render — HideHeader only affects the header.
-        cut.FindAll("fluent-anchor").Should().Contain(a => a.TextContent.Trim() == "Clear");
+        cut.FindAll("fluent-link").Should().Contain(a => a.TextContent.Trim() == "Clear");
     }
 
     [TestMethod]
@@ -106,7 +106,7 @@ public class AiChatTests : BunitContext
 
         cut.FindAll(".chat-heading").Should().BeEmpty();
         // InputOnly is the compact inline bar — no Clear control.
-        cut.FindAll("fluent-anchor").Should().BeEmpty();
+        cut.FindAll("fluent-link").Should().BeEmpty();
         // Input area is always rendered (except in InputOnly? no — even InputOnly has the input).
         cut.Find(".input-area").Should().NotBeNull();
     }

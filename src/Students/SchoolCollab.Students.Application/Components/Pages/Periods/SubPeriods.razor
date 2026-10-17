@@ -20,14 +20,14 @@
         }
         else if (!string.IsNullOrEmpty(_error))
         {
-            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
-            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/students/periods"))">Back</FluentButton>
+            <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
+            <FluentButton Appearance="ButtonAppearance.Default" OnClick="@(() => Nav.NavigateTo("/students/periods"))">Back</FluentButton>
         }
         else
         {
             <div class="title-row">
                 <h1 class="page-title">Sub-periods — @(_academicYear?.Name ?? "Academic Year")</h1>
-                <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="@(() => Nav.NavigateTo("/students/periods"))">Back</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Default" IconStart="@FluentIcons.ArrowLeft" OnClick="@(() => Nav.NavigateTo("/students/periods"))">Back</FluentButton>
             </div>
 
             <LandingPage TItem="PeriodDto"
@@ -47,7 +47,7 @@
                 <Columns>
                     <PropertyColumn TGridItem="PeriodDto" TProp="string" Property="@(x => x.Name)" Sortable="true" Title="Name" />
                     <TemplateColumn TGridItem="PeriodDto" Title="Type">
-                        <FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(context)</FluentBadge>
+                        <FluentBadge Appearance="BadgeAppearance.Filled">@GetKindLabel(context)</FluentBadge>
                     </TemplateColumn>
                     <TemplateColumn TGridItem="PeriodDto" Title="Start Date">
                         @context.StartDate.ToString("d")
@@ -56,14 +56,14 @@
                         @context.EndDate.ToString("d")
                     </TemplateColumn>
                     <TemplateColumn TGridItem="PeriodDto" Title="Status">
-                        <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
+                        <FluentBadge Appearance="@GetStatusAppearance(context.Status)" Color="@GetStatusColor(context.Status)">@context.Status</FluentBadge>
                     </TemplateColumn>
                 </Columns>
             </LandingPage>
         }
     </ChildContent>
     <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
 
@@ -109,13 +109,26 @@
         }
     }
 
-    private static Appearance GetStatusAppearance(string status) => status switch
+    // v5 FluentBadge carries colour outside Appearance (MigrationFluentBadge.md): the v4
+    // triad collapses — Neutral/Accent → Filled, Lightweight → Ghost — so the v4
+    // Accent(Active) / Neutral(everything else) distinction now lives in BadgeColor.
+    private static BadgeAppearance GetStatusAppearance(string status) => status switch
     {
-        "Draft"     => Appearance.Neutral,
-        "Active"    => Appearance.Accent,
-        "Completed" => Appearance.Outline,
-        "Archived"  => Appearance.Neutral,
-        _           => Appearance.Neutral
+        "Draft"     => BadgeAppearance.Filled,
+        "Active"    => BadgeAppearance.Filled,
+        "Completed" => BadgeAppearance.Ghost,
+        "Archived"  => BadgeAppearance.Filled,
+        _           => BadgeAppearance.Filled
+    };
+
+    // Active keeps its v4 Accent emphasis as the success colour; every other status keeps
+    // the v4 Neutral as the muted one. Completed is null: its v4 Outline look (now Ghost)
+    // carried no colour, and none is invented here.
+    private static BadgeColor? GetStatusColor(string status) => status switch
+    {
+        "Active"    => BadgeColor.Success,
+        "Completed" => null,
+        _           => BadgeColor.Subtle,
     };
 
     private static string GetKindLabel(PeriodDto period)

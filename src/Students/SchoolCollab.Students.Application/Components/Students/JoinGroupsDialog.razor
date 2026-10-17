@@ -14,10 +14,11 @@
 @inject StudentsApiClient Api
 @inject IFeatureFlagService FeatureFlags
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-            <FluentTextField @bind-Value="_search"
+            <FluentTextInput @bind-Value="_search"
                              Placeholder="Search available groups…" />
 
             @if (_loadingGroups)
@@ -26,7 +27,7 @@
             }
             else if (_availableGroups.Count == 0)
             {
-                <FluentMessageBar Intent="MessageIntent.Info">
+                <FluentMessageBar Intent="MessageBarIntent.Info">
                     No other groups are available to join right now.
                 </FluentMessageBar>
             }
@@ -42,12 +43,12 @@
                    components, so the binding fell into AdditionalAttributes — a stray
                    selectedvalues HTML attribute — and the picker neither showed nor
                    reported a selection.) *@
-                <FluentSelect TOption="ActivityGroupDto" Items="@_filteredGroups"
+                <FluentSelect TOption="ActivityGroupDto" TValue="string" Items="@_filteredGroups"
                               OptionText="@(g => GroupOptionText(g))"
                               OptionValue="@(g => g.Id.ToString())"
                               Multiple="true"
-                              SelectedOptions="@SelectedGroupOptions"
-                              SelectedOptionsChanged="@OnSelectedGroupsChanged" />
+                              SelectedItems="@SelectedGroupOptions"
+                              SelectedItemsChanged="@OnSelectedGroupsChanged" />
             }
         </FluentStack>
 
@@ -58,6 +59,7 @@
                            OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 
 @code {
@@ -88,7 +90,7 @@
     /// Writes the picker's option objects back to the model's ids field, preserving the
     /// groups the active search has filtered out of the picker's <c>Items</c>.
     /// </summary>
-    private void OnSelectedGroupsChanged(IEnumerable<ActivityGroupDto>? selected)
+    private void OnSelectedGroupsChanged(IEnumerable<ActivityGroupDto> selected)
     {
         // Hidden-selection preservation. FluentSelect renders only the search-filtered
         // _filteredGroups and reports only what it renders; if it re-derives its

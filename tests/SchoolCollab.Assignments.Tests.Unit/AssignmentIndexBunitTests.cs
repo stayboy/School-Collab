@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
 using Microsoft.AspNetCore.Components;
@@ -109,7 +110,8 @@ public class AssignmentIndexBunitTests : BunitContext
             });
 
         var cut = Render<IndexPage>();
-        cut.Markup.ToLower().Should().Contain("progress");
+        cut.Markup.ToLower().Should().Contain("fluent-spinner",
+            "v5 renders the loading indicator as <fluent-spinner>");
     }
 
     [TestMethod]
@@ -210,7 +212,7 @@ public class AssignmentIndexBunitTests : BunitContext
         // Expect would 404 the initial list GET served by the When stub above.
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/submit-for-approval")
             .Respond(HttpStatusCode.NoContent);
-        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
+        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).MenuItemClick();
         cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation());
     }
 
@@ -317,7 +319,7 @@ public class AssignmentIndexBunitTests : BunitContext
         // inside OnSubmitForApprovalAsync). With the POST backend stubbed
         // for success, the chip stays Pending after the call resolves.
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
+        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).MenuItemClick();
 
         cut.WaitForAssertion(() =>
             cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim())
@@ -350,7 +352,7 @@ public class AssignmentIndexBunitTests : BunitContext
                 .Should().Contain("Not submitted"));
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
+        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).MenuItemClick();
 
         // After the 500 the optimistic flip rolls back: chip must end up
         // at 'Not submitted' again. We do NOT pin a transient Pending
@@ -434,7 +436,7 @@ public class AssignmentIndexBunitTests : BunitContext
     {
         // P1-9 rework: selecting Scheduled must issue GET /assignments?status=
         // Scheduled and swap the grid to the filtered rows. Driven via the
-        // FluentSelect's public SelectedOptionChanged callback (the
+        // FluentSelect's public ValueChanged callback (the
         // TopicCreateDialogTests invoke precedent) because FluentSelect option
         // rendering is timing-sensitive under JSRuntimeMode.Loose.
         SetupListResponse([MakeRow(Guid.NewGuid(), "Draft HW", AssignmentStatusDto.Draft)]);
@@ -453,8 +455,8 @@ public class AssignmentIndexBunitTests : BunitContext
             .WithQueryString("status=Scheduled")
             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(scheduledOnly, _apiJsonOptions));
 
-        var select = cut.FindComponent<FluentSelect<IndexPage.StatusOption>>();
-        await cut.InvokeAsync(() => select.Instance.SelectedOptionChanged.InvokeAsync(
+        var select = cut.FindComponent<FluentSelect<IndexPage.StatusOption, IndexPage.StatusOption>>();
+        await cut.InvokeAsync(() => select.Instance.ValueChanged.InvokeAsync(
             IndexPage.StatusFilterOptions.Single(o => o.Value == 3)));
 
         cut.WaitForAssertion(() =>
@@ -481,7 +483,7 @@ public class AssignmentIndexBunitTests : BunitContext
             .Respond(HttpStatusCode.NoContent);
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Publish now").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Publish now").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -505,7 +507,7 @@ public class AssignmentIndexBunitTests : BunitContext
             .Respond(HttpStatusCode.InternalServerError);
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Publish now").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Publish now").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -531,7 +533,7 @@ public class AssignmentIndexBunitTests : BunitContext
             .Respond(HttpStatusCode.NoContent);
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Unpublish").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Unpublish").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -565,47 +567,41 @@ public class AssignmentIndexBunitTests : BunitContext
         items.Should().Contain("Duplicate");
     }
 
-    /// <summary>Replaces the registered <see cref="IDialogService"/> (the real
-    /// FluentUI one added by <c>AddFluentUIComponents</c>) with the mock so the
-    /// page's injection resolves it — <c>GetRequiredService</c> returns the
-    /// FIRST registration, so the real service must be removed, not shadowed.</summary>
-    private void ReplaceDialogService(Mock<IDialogService> dialogMock)
-    {
-        var existing = Services.Where(s => s.ServiceType == typeof(IDialogService)).ToList();
-        foreach (var s in existing) Services.Remove(s);
-        Services.AddSingleton(dialogMock.Object);
-    }
-
     /// <summary>Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves
     /// to <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at the
     /// requested outcome — the ResourcesSectionBunitTests /
-    /// AssignmentDetailBunitTests pattern.</summary>
-    private Mock<IDialogService> SetupConfirmDialogResult(bool confirmed)
+    /// AssignmentDetailBunitTests pattern. <see cref="FluentServiceMocks.RegisterDialogService"/>
+    /// replaces the real FluentUI registration (GetRequiredService returns the FIRST registration,
+    /// so it must be removed, not shadowed).</summary>
+    private Mock<DialogService> SetupConfirmDialogResult(bool confirmed)
     {
-        var dialogRef = new Mock<IDialogReference>();
         var result = confirmed
             ? DialogResult.Ok<object?>(null)
             : DialogResult.Cancel();
-        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(result));
-        var dialogMock = new Mock<IDialogService>();
+        var dialogMock = this.RegisterDialogService();
         dialogMock
-            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
-            .ReturnsAsync(dialogRef.Object);
-        ReplaceDialogService(dialogMock);
+            .Setup(d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(result);
         return dialogMock;
     }
 
-    /// <summary>Replaces the registered <see cref="IToastService"/> with a mock
-    /// so success toasts can be asserted directly.</summary>
-    private Mock<IToastService> ReplaceToastService()
-    {
-        var existing = Services.Where(s => s.ServiceType == typeof(IToastService)).ToList();
-        foreach (var s in existing) Services.Remove(s);
-        var mock = new Mock<IToastService>();
-        Services.AddSingleton(mock.Object);
-        return mock;
-    }
+    /// <summary>Renders the real toast surface — the same <c>&lt;FluentToastProvider /&gt;</c> both
+    /// app layouts put at the top of the shell — as its own root beside the page under test.
+    /// <para>FluentUI v5's <c>INotificationService</c> methods cannot be mocked (every member is
+    /// emitted <c>virtual final</c>) and throw <c>FluentServiceProviderException</c> when no provider
+    /// is in the hierarchy. The page's toast call sits inside the same <c>try</c> as the row mutation
+    /// it reports on (<c>Index.razor</c> <c>OnDeleteAsync</c> / <c>OnDuplicateAsync</c>), so a page
+    /// rendered without the provider silently skips that mutation and the toast can never be
+    /// observed. A separate root also keeps the toast text out of the page's own markup, so no page
+    /// assertion below can be satisfied by the toast (Q27).</para></summary>
+    private IRenderedComponent<FluentToastProvider> RenderToastSurface() =>
+        Render<FluentToastProvider>();
+
+    /// <summary>The toasts the provider has rendered: v5 renders each one as
+    /// <c>&lt;fluent-toast-b&gt;</c>, carrying the success/error semantics in its <c>intent</c>
+    /// attribute and the text in a <c>slot="title"</c> div.</summary>
+    private static IReadOnlyList<IElement> RenderedToasts(IRenderedComponent<FluentToastProvider> toasts) =>
+        toasts.FindAll("fluent-toast-b");
 
     // ── UI-tester rework P2 — the conditional Approval column's grid template
     //    (P2-1) and the search-aware row-action updates (P2-2) ───────────────
@@ -697,7 +693,7 @@ public class AssignmentIndexBunitTests : BunitContext
         }, TimeSpan.FromSeconds(15));
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).Click();
+        cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Submit for Approval")).MenuItemClick();
 
         cut.WaitForAssertion(() =>
             cut.FindAll("fluent-badge").Select(b => b.TextContent.Trim())
@@ -719,7 +715,12 @@ public class AssignmentIndexBunitTests : BunitContext
             MakeRow(Guid.NewGuid(), "Science Lab", AssignmentStatusDto.Draft, requiresApproval: true)
         ]);
         SetupConfirmDialogResult(confirmed: true);
-        ReplaceToastService();
+        // The delete reports through the real toast surface; without it the page's awaited
+        // ShowSuccessToastAsync throws inside OnDeleteAsync's try and the row is never
+        // removed. The provider is its OWN root, so the toast text (which contains the row
+        // title — "Assignment 'Math HW' deleted.") never reaches the page markup asserted
+        // below: the page's "Math HW" is the grid row alone (Q27).
+        RenderToastSurface();
 
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
@@ -729,7 +730,7 @@ public class AssignmentIndexBunitTests : BunitContext
             TimeSpan.FromSeconds(15));
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Delete").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Delete").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -773,7 +774,11 @@ public class AssignmentIndexBunitTests : BunitContext
                 };
             });
         SetupConfirmDialogResult(confirmed: true);
-        ReplaceToastService();
+        // The duplicate reports through the real toast surface; the page awaits the toast
+        // BEFORE the reload, so without a provider the reload never happens. The provider
+        // is its OWN root: the toast text ("…'Math HW (copy)'…") must not be able to
+        // satisfy the page assertion below (Q27).
+        RenderToastSurface();
 
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"), TimeSpan.FromSeconds(15));
@@ -782,7 +787,7 @@ public class AssignmentIndexBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().NotContain("(copy)"), TimeSpan.FromSeconds(15));
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -830,7 +835,7 @@ public class AssignmentIndexBunitTests : BunitContext
             });
 
         SetupConfirmDialogResult(confirmed: true);
-        var toastMock = ReplaceToastService();
+        var toasts = RenderToastSurface();
 
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
@@ -842,7 +847,7 @@ public class AssignmentIndexBunitTests : BunitContext
             .Respond(HttpStatusCode.Created, "application/json",
                 JsonSerializer.Serialize(new { id = newId }, _apiJsonOptions));
 
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -851,13 +856,12 @@ public class AssignmentIndexBunitTests : BunitContext
                 "a successful duplicate must reload the assignment list");
         }, TimeSpan.FromSeconds(15));
 
-        toastMock.Verify(
-            t => t.ShowSuccess(
-                It.Is<string>(s => s.Contains("duplicated", StringComparison.OrdinalIgnoreCase)),
-                It.IsAny<int?>(),
-                It.IsAny<string?>(),
-                It.IsAny<EventCallback<ToastResult>?>()),
-            Times.Once);
+        toasts.WaitForAssertion(() =>
+            RenderedToasts(toasts).Should().ContainSingle(
+                t => t.GetAttribute("intent") == "success"
+                     && t.TextContent.Contains("duplicated", StringComparison.OrdinalIgnoreCase),
+                "the successful duplicate surfaces a success toast to the user"),
+            TimeSpan.FromSeconds(15));
     }
 
     [TestMethod]
@@ -892,11 +896,10 @@ public class AssignmentIndexBunitTests : BunitContext
             TimeSpan.FromSeconds(15));
 
         OpenRowActionsAndReadItems(cut);
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").MenuItemClick();
 
         cut.WaitForAssertion(() => dialogMock.Verify(
-            d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
-                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+            d => d.ShowDialogAsync(typeof(ConfirmDialog), It.IsAny<DialogOptions>()),
             Times.Once));
 
         postCount.Should().Be(0, "declining the confirm dialog must not fire the duplicate POST");
@@ -910,7 +913,7 @@ public class AssignmentIndexBunitTests : BunitContext
         SetupListResponse([MakeRow(id, "Math HW", AssignmentStatusDto.Published)]);
 
         SetupConfirmDialogResult(confirmed: true);
-        var toastMock = ReplaceToastService();
+        var toasts = RenderToastSurface();
 
         var cut = Render<IndexPage>();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
@@ -921,7 +924,7 @@ public class AssignmentIndexBunitTests : BunitContext
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
             .Respond(HttpStatusCode.InternalServerError);
 
-        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").MenuItemClick();
 
         cut.WaitForAssertion(() =>
         {
@@ -930,9 +933,8 @@ public class AssignmentIndexBunitTests : BunitContext
                 "a failing duplicate POST must surface the error on the landing page");
         }, TimeSpan.FromSeconds(15));
 
-        toastMock.Verify(
-            t => t.ShowSuccess(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<EventCallback<ToastResult>?>()),
-            Times.Never);
+        RenderedToasts(toasts).Should().BeEmpty(
+            "a failing duplicate POST must not show the success toast");
     }
 
     /// <summary>Test host that renders the page-toolbar SectionOutlet so the

@@ -1,6 +1,10 @@
-<Router AppAssembly="typeof(global::Program).Assembly">
-    <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
-    </Found>
-</Router>
+@* v5 requires this cascade at the app root: it supplies LibraryConfiguration to every
+   FluentUI component in the tree (layouts, pages, providers). *@
+<FluentProviders>
+    <Router AppAssembly="typeof(global::Program).Assembly">
+        <Found Context="routeData">
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+    </Router>
+</FluentProviders>

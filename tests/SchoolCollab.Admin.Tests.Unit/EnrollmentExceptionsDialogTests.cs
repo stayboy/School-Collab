@@ -321,11 +321,14 @@ public class EnrollmentExceptionsDialogTests : BunitContext
             TopicName = SubjectName,
         };
 
-        await Services.GetRequiredService<IDialogService>().ShowDialogAsync<
-            EnrollmentExceptionsDialog,
-            DialogShellData<EnrollmentExceptionsDialog.EnrollmentExceptionsModel>>(
-            new DialogShellData<EnrollmentExceptionsDialog.EnrollmentExceptionsModel>(model),
-            DialogServiceExtensions.BuildShellParameters($"Enrollment exceptions — {SubjectName}", DialogSize.Large));
+        var options = DialogServiceExtensions.BuildShellOptions($"Enrollment exceptions — {SubjectName}", DialogWidth.Large);
+        options.Parameters[nameof(DialogShellBase<EnrollmentExceptionsDialog.EnrollmentExceptionsModel, EnrollmentExceptionsDialog.EnrollmentExceptionsResult>.Content)] =
+            new DialogShellData<EnrollmentExceptionsDialog.EnrollmentExceptionsModel>(model);
+
+        // FluentUI 5.x completes the show task only when the dialog CLOSES, so hold the task
+        // (the harness observes the open dialog through the provider, not the task).
+        _ = Services.GetRequiredService<IDialogService>()
+            .ShowDialogAsync(typeof(EnrollmentExceptionsDialog), options);
 
         provider.WaitForAssertion(() => provider.FindAll(".exceptions-section").Should().NotBeEmpty(
             "the dialog renders its list region before any assertion can read it"));
@@ -339,13 +342,13 @@ public class EnrollmentExceptionsDialogTests : BunitContext
     /// The add section's "Fill from" control — the CHOSEN period part (v5: decision 13
     /// reversed).
     /// </summary>
-    private static FluentSelect<EnrollmentExceptionsDialog.DivisionOption> DivisionPicker(
+    private static FluentSelect<EnrollmentExceptionsDialog.DivisionOption, EnrollmentExceptionsDialog.DivisionOption> DivisionPicker(
         IRenderedComponent<FluentDialogProvider> dialog) =>
-        dialog.FindComponent<FluentSelect<EnrollmentExceptionsDialog.DivisionOption>>().Instance;
+        dialog.FindComponent<FluentSelect<EnrollmentExceptionsDialog.DivisionOption, EnrollmentExceptionsDialog.DivisionOption>>().Instance;
 
     /// <summary>What the add section says the exception's part is.</summary>
     private static string DivisionLabel(IRenderedComponent<FluentDialogProvider> dialog) =>
-        DivisionPicker(dialog).SelectedOption?.Label ?? "<no selection>";
+        DivisionPicker(dialog).Value?.Label ?? "<no selection>";
 
     /// <summary>Chooses the part the exception will be expressed in, waiting for the tenant's
     /// periods to have widened the options first.</summary>
@@ -358,7 +361,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
             option = DivisionPicker(dialog).Items?.FirstOrDefault(o => o.Value == division);
             option.Should().NotBeNull($"the add section offers the {division} part it can write");
         });
-        return dialog.InvokeAsync(() => DivisionPicker(dialog).SelectedOptionChanged.InvokeAsync(option));
+        return dialog.InvokeAsync(() => DivisionPicker(dialog).ValueChanged.InvokeAsync(option));
     }
 
     /// <summary>
@@ -375,8 +378,16 @@ public class EnrollmentExceptionsDialogTests : BunitContext
     /// <summary>The positions ON OFFER, as the reader sees them — read off the rendered
     /// checkboxes rather than a bound list, because the option set IS the behaviour under test
     /// here (1st–4th plus any higher declared position).</summary>
+    /// <remarks>
+    /// v5's <c>FluentCheckbox</c> renders its label as a sibling <c>&lt;label slot="label"&gt;</c>
+    /// inside the wrapping <c>&lt;fluent-field&gt;</c> (the child content becomes the field's
+    /// LabelTemplate), so the box element itself carries no text — the v4 shape, where the label
+    /// was the box's own text content, is gone. Read the label off the box's parent field so the
+    /// assertion still reads what the user sees.
+    /// </remarks>
     private static string[] PositionLabels(IRenderedComponent<FluentDialogProvider> dialog) =>
-        [.. dialog.FindAll("fluent-checkbox").Select(r => r.TextContent.Trim())];
+        [.. dialog.FindAll("fluent-checkbox")
+            .Select(box => box.ParentElement?.QuerySelector("label")?.TextContent.Trim() ?? string.Empty)];
 
     /// <summary>Ticks the <paramref name="position"/>-th offered sequence (1-based) through its
     /// own ValueChanged — the same shape every other control in this file is driven with.</summary>
@@ -460,8 +471,8 @@ public class EnrollmentExceptionsDialogTests : BunitContext
     /// <summary>The reason input as a COMPONENT, so its own <c>Disabled</c> flag can be read. Found
     /// by its placeholder, because each <c>FluentDatePicker</c> renders an INTERNAL
     /// <c>FluentTextField</c> of its own.</summary>
-    private static FluentTextField ReasonFieldComponent(IRenderedComponent<FluentDialogProvider> dialog) =>
-        dialog.FindComponents<FluentTextField>().Single(f => f.Instance.Placeholder == "Why?").Instance;
+    private static FluentTextInput ReasonFieldComponent(IRenderedComponent<FluentDialogProvider> dialog) =>
+        dialog.FindComponents<FluentTextInput>().Single(f => f.Instance.Placeholder == "Why?").Instance;
 
     /// <summary>Types into the reason field through its own bound callback — the same shape every
     /// other control in this file is driven with.</summary>
@@ -490,15 +501,15 @@ public class EnrollmentExceptionsDialogTests : BunitContext
 
     /// <summary>One of the two ends of the range, by its own <c>Id</c> — the dialog renders two,
     /// so "the first picker" is an assumption no test here should make.</summary>
-    private static FluentDatePicker DatePicker(IRenderedComponent<FluentDialogProvider> dialog, string id) =>
-        dialog.FindComponents<FluentDatePicker>().Single(p => p.Instance.Id == id).Instance;
+    private static FluentDatePicker<System.DateTime?> DatePicker(IRenderedComponent<FluentDialogProvider> dialog, string id) =>
+        dialog.FindComponents<FluentDatePicker<System.DateTime?>>().Single(p => p.Instance.Id == id).Instance;
 
     /// <summary>The add panel's one free-text field (the optional reason), found in the DOM by its
     /// placeholder. NOT by component type: each <c>FluentDatePicker</c> renders an INTERNAL
     /// <c>FluentTextField</c> of its own, so a <c>FindComponent&lt;FluentTextField&gt;</c> lookup returns a
     /// date picker's inner field rather than this one.</summary>
     private static IElement ReasonField(IRenderedComponent<FluentDialogProvider> dialog) =>
-        dialog.Find("fluent-text-field[placeholder='Why?']");
+        dialog.Find("fluent-text-input[placeholder='Why?']");
 
     /// <summary>Asserts the element is a polite live region — the shape every state the dialog
     /// changes without a navigation has to carry.</summary>
@@ -1400,7 +1411,7 @@ public class EnrollmentExceptionsDialogTests : BunitContext
             "the ticked sequence was consumed by the write");
         DivisionLabel(harness.Dialog).Should().Be("Term",
             "for a group the reset is a no-op: FR-56 leaves exactly one part to fall back to");
-        harness.Dialog.WaitForAssertion(() => PositionBoxes(harness.Dialog).Select(b => b.Instance.Disabled)
+        harness.Dialog.WaitForAssertion(() => PositionBoxes(harness.Dialog).Select(b => b.Instance.Disabled ?? false)
             .Should().OnlyContain(disabled => disabled,
                 "and the form is gated again, so even the position v7 backs is disabled"));
         AddTrigger(harness.Dialog).Should().NotBeNull();

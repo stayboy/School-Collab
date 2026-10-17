@@ -8,6 +8,7 @@
 @using SchoolCollab.Assignments.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
 
+<DialogShellBody>
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
@@ -30,6 +31,7 @@
         <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Reassign" OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
+</DialogShellBody>
 
 @code {
     protected override string SubmitText => "Reassign";

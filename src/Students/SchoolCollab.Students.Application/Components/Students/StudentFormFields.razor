@@ -64,7 +64,7 @@
             <FormRow Label="Student number"
                      Required="@(!ReadOnlyStudentNumber)"
                      For="studentFormNumber">
-                <FluentTextField Id="studentFormNumber"
+                <FluentTextInput Id="studentFormNumber"
                                  @bind-Value="Model.StudentNumber"
                                  ReadOnly="@ReadOnlyStudentNumber"
                                  Required="@(!ReadOnlyStudentNumber)"
@@ -79,13 +79,13 @@
             <FormRow Label="Name"
                      Required
                      For="studentFormFirstName">
-                <FluentTextField Id="studentFormFirstName"
+                <FluentTextInput Id="studentFormFirstName"
                                  @bind-Value="Model.FirstName"
                                  Required
                                  Disabled="@AreProfileFieldsDisabled"
                                  Placeholder="First name"
                                  class="w-9" />
-                <FluentTextField @bind-Value="Model.LastName"
+                <FluentTextInput @bind-Value="Model.LastName"
                                  Required
                                  Disabled="@AreProfileFieldsDisabled"
                                  Placeholder="Last name"
@@ -115,7 +115,7 @@
             <FormRow Label="DOB/Gender"
                      Required
                      For="studentFormDob">
-                <FluentDatePicker Id="studentFormDob"
+                <FluentDatePicker TValue="DateTime?" Id="studentFormDob"
                                   Value="@DateOfBirthAsDateTime"
                                   ValueChanged="@OnDateOfBirthChanged"
                                   Required
@@ -195,7 +195,7 @@
 
     @if (!string.IsNullOrEmpty(ErrorMessage))
     {
-        <FluentMessageBar Intent="MessageIntent.Error" class="student-form-error">@ErrorMessage</FluentMessageBar>
+        <FluentMessageBar Intent="MessageBarIntent.Error" class="student-form-error">@ErrorMessage</FluentMessageBar>
     }
 
     @* Action row. The .form-actions CSS class draws the horizontal line
@@ -232,7 +232,7 @@
                              HorizontalAlignment="@(ActionsAlignment == StudentFormActionsAlignment.Right ? HorizontalAlignment.End : HorizontalAlignment.Start)">
                     @if (ShowCancel)
                     {
-                        <FluentButton Appearance="Appearance.Outline"
+                        <FluentButton Appearance="ButtonAppearance.Outline"
                                       OnClick="@OnCancel"
                                       Disabled="@(Submitting || AreProfileFieldsDisabled)"
                                       class="form-actions__button">
@@ -240,7 +240,7 @@
                         </FluentButton>
                     }
                     <FluentButton Type="ButtonType.Submit"
-                                  Appearance="Appearance.Accent"
+                                  Appearance="ButtonAppearance.Primary"
                                   Disabled="@(Submitting || AreProfileFieldsDisabled)"
                                   class="form-actions__button">
                         @(Submitting ? SubmittingLabel : SubmitLabel)
@@ -373,7 +373,7 @@
     // fields and the dialog action row are disabled while editing a section.
 
     /// <summary>When true, renders the Contacts / Guardians sections as Readonly
-    /// summaries with per-card Edit/Delete + an "Add" FluentAnchor (student-
+    /// summaries with per-card Edit/Delete + an "Add" FluentLink (student-
     /// edit-dialog UX). Default false - existing callers (Create.razor,
     /// Edit.razor, the wizard) keep the full always-editable editors.</summary>
     [Parameter] public bool SectionsReadonly { get; set; }
