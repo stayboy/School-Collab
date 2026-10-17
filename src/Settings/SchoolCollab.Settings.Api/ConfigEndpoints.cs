@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Settings.Api.Endpoints;
@@ -24,12 +23,7 @@ public static class ConfigEndpoints
 
         // Reads and writes (flags, audit, tenant overrides) are bearer-gated when OIDC is on;
         // open under TestAuth in dev.
-        if (oidcEnabled)
-        {
-            group.RequireAuthorization(policy => policy
-                .RequireAuthenticatedUser()
-                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
-        }
+        group.RequireAuthIfOidc(featureFlags);
 
         group
             .MapConfigFlagRoutes()

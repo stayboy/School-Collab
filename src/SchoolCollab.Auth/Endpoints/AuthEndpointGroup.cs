@@ -84,10 +84,7 @@ public static class AuthEndpointGroup
         // pipeline from public extensions and does not register the flag service (AddAuthAndTenancy
         // is part ii's addition); a MISSING service therefore means "gate on" — the production
         // posture — never "gate open".
-        if (featureFlags is null || !featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            adminGroup.RequireAuthorization(ConfigurePortalFacingAdminPolicy);
-        }
+        adminGroup.RequireAuthIfOidc(featureFlags, ConfigurePortalFacingAdminPolicy);
 
         adminGroup.MapAdminUserRoutes();
         adminGroup.MapAdminRoleRoutes();

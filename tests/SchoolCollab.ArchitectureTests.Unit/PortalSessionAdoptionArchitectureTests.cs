@@ -49,7 +49,12 @@ public class PortalSessionAdoptionArchitectureTests
     private const string GatewaySchemeOptIn =
         "AddAuthenticationSchemes(PortalSessionAuthenticationHandler.GatewaySchemeName)";
 
-    private const string BearerSchemeOptIn = "AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)";
+    /// <summary>
+    /// The round minimal-api-composition default gate — Bearer scheme + authenticated user — as the
+    /// three group-level call sites spell it. The reader/writer sub-groups use the policy overload
+    /// (<c>RequireAuthIfOidc(featureFlags, Require…)</c>) and so do NOT contribute to this count.
+    /// </summary>
+    private const string DefaultOidcGate = "RequireAuthIfOidc(featureFlags)";
     private static readonly string RepoRoot = FindRepoRoot();
 
     /// <summary>A resource-creation chain: <c>var portals = builder.AddUvicornApp("portals", …)</c>.
@@ -90,10 +95,14 @@ public class PortalSessionAdoptionArchitectureTests
                 "the policy stays self-sufficient for the routes it decorates (the disjunctive "
                 + "teacher ∨ staff ∨ user-admin ∨ platform-admin role set is its own requirement).");
 
-        var groupOptIns = Regex.Matches(endpoints, Regex.Escape(BearerSchemeOptIn)).Count;
-        groupOptIns.Should().Be(3,
-            "the three group-level Bearer opt-ins (the /assignments group and its two nested "
-            + "sub-groups) are untouched — only the reader policy moved to the gateway.");
+        // Round minimal-api-composition WP2 moved the Bearer opt-in into
+        // EndpointGroupAuthExtensions.RequireAuthIfOidc, so the per-file opt-in count is pinned
+        // through the helper's three default-overload call sites instead: the /assignments group
+        // and its two sibling groups (ward, activityGroups). It still pins that the reader/writer
+        // sub-groups did NOT each gain a Bearer-only gate of their own.
+        Regex.Matches(endpoints, Regex.Escape(DefaultOidcGate)).Count.Should().Be(3,
+            "the three group-level Bearer-scheme gates (the /assignments group and its two sibling "
+            + "groups) are untouched — only the reader policy moved to the gateway.");
     }
 
     [TestMethod]
@@ -134,7 +143,7 @@ public class PortalSessionAdoptionArchitectureTests
             "the writer policy restates the reader's four-role disjunction verbatim — two "
             + "disjunctions that can drift apart are exactly what the reader's P1-1 rework forbade.");
 
-        endpoints.Should().Contain("writerGroup.RequireAuthorization(RequireAssignmentWriter)",
+        endpoints.Should().Contain("writerGroup.RequireAuthIfOidc(featureFlags, RequireAssignmentWriter)",
             "the writer sub-group is where the policy lands (never the whole /assignments group, "
             + "whose widening would re-open every create/edit/publish write to the reader roles).");
 
@@ -142,8 +151,8 @@ public class PortalSessionAdoptionArchitectureTests
             "the writer sub-group maps the grade route — the policy and the route it decorates "
             + "must move together.");
 
-        Regex.Matches(endpoints, Regex.Escape(BearerSchemeOptIn)).Count.Should().Be(3,
-            "the writer sub-group must add NO group-level Bearer opt-in: the three the reader "
+        Regex.Matches(endpoints, Regex.Escape(DefaultOidcGate)).Count.Should().Be(3,
+            "the writer sub-group must add NO group-level Bearer gate of its own: the three the reader "
             + "guard pins stay unchanged.");
 
         // The route itself: mounted by the grade map, and gone from the general map.

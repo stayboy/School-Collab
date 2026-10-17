@@ -13,15 +13,10 @@ public static class AssignmentEndpoints
         // All assignment endpoints require an authenticated user and a resolved TenantContext
         var group = app.MapGroup("/assignments");
 
-        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            // ar-20 real-auth mode: assignments API groups authenticate via the bearer JWT
-            // scheme (Keycloak access tokens). DefaultScheme stays Cookie for the Admin/
-            // Families browser flows; this group opts into Bearer explicitly (decision 2/3).
-            group.RequireAuthorization(policy => policy
-                .RequireAuthenticatedUser()
-                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
-        }
+        // ar-20 real-auth mode: assignments API groups authenticate via the bearer JWT
+        // scheme (Keycloak access tokens). DefaultScheme stays Cookie for the Admin/
+        // Families browser flows; this group opts into Bearer explicitly (decision 2/3).
+        group.RequireAuthIfOidc(featureFlags);
 
         // ── Teacher-portal reads (round teacher-scope-auth D4 / [P1-1]) ──────────
         // The reader policy is applied to this NESTED SUB-GROUP — never to the whole
@@ -31,14 +26,11 @@ public static class AssignmentEndpoints
         // role claim at all; a group-wide policy would 403 all of them. The sub-group carries
         // exactly the seven GETs in the Covered table, mapped by MapAssignmentReaderRoutes.
         var readerGroup = group.MapGroup(string.Empty);
-        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            // [P1-2] the policy lands behind FEATURE:DisableOIDCAuth: with the flag ON there
-            // is no policy and today's behaviour is unchanged. Rollout prerequisite: assign
-            // teacher/staff (or an admin role) to every existing assignment-reading user in
-            // Keycloak BEFORE the flag is flipped, or the policy 403s them.
-            readerGroup.RequireAuthorization(RequireAssignmentReader);
-        }
+        // [P1-2] the policy lands behind FEATURE:DisableOIDCAuth: with the flag ON there
+        // is no policy and today's behaviour is unchanged. Rollout prerequisite: assign
+        // teacher/staff (or an admin role) to every existing assignment-reading user in
+        // Keycloak BEFORE the flag is flipped, or the policy 403s them.
+        readerGroup.RequireAuthIfOidc(featureFlags, RequireAssignmentReader);
         readerGroup.MapAssignmentReaderRoutes();
 
         // ── Teacher-portal grade write (round portal-submission-grade D1) ────────
@@ -49,12 +41,9 @@ public static class AssignmentEndpoints
         // The sub-group carries exactly the submission-grade POST, mapped by
         // MapAssignmentGradeRoutes.
         var writerGroup = group.MapGroup(string.Empty);
-        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            // Same P1-2 pattern as the reader: with the flag ON there is no policy and
-            // today's dev posture is unchanged for this route too.
-            writerGroup.RequireAuthorization(RequireAssignmentWriter);
-        }
+        // Same P1-2 pattern as the reader: with the flag ON there is no policy and
+        // today's dev posture is unchanged for this route too.
+        writerGroup.RequireAuthIfOidc(featureFlags, RequireAssignmentWriter);
         writerGroup.MapAssignmentGradeRoutes();
 
         group.MapAssignmentRoutes();
@@ -62,13 +51,7 @@ public static class AssignmentEndpoints
         // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
         // /students group so the resource path is GET /students/{studentId}/assignments
         // (not under /assignments). Same auth posture as the assignments group.
-        var wardGroup = app.MapGroup("/students");
-        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-        {
-            wardGroup.RequireAuthorization(policy => policy
-                .RequireAuthenticatedUser()
-                .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
-        }
+        var wardGroup = app.MapGroup("/students").RequireAuthIfOidc(featureFlags);
         wardGroup.MapWardAssignmentRoutes();
 
         // Phase 3 (spec activity-group-enrollment.md §7.3): assignment ↔ group
@@ -78,13 +61,7 @@ public static class AssignmentEndpoints
         // Students API's group route namespace.
         if (featureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
         {
-            var activityGroupsGroup = app.MapGroup("");
-            if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
-            {
-                activityGroupsGroup.RequireAuthorization(policy => policy
-                    .RequireAuthenticatedUser()
-                    .AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme));
-            }
+            var activityGroupsGroup = app.MapGroup("").RequireAuthIfOidc(featureFlags);
             activityGroupsGroup.MapActivityGroupLinkRoutes();
         }
 
