@@ -12,10 +12,15 @@ namespace SchoolCollab.ArchitectureTests.Unit;
 ///   <item>the API-to-API hop clients (<c>Assignments.Api/Program.cs</c>, <c>Students.Api/Program.cs</c>)
 ///        must attach <c>AddHttpMessageHandler&lt;BearerForwardingDelegatingHandler&gt;</c>, and the
 ///        <c>Assignments.Worker</c> client must NOT (the carved-out residual is pinned);</item>
-///   <item>every group the hops target must opt into the Bearer scheme — exactly five blocks in
-///        <c>StudentEndpoints.cs</c> and one per Settings.Api <c>*Endpoints.cs</c> file (the Settings
-///        flag-write and tenant-override routes carry no gate of their own — the <c>/api/config</c>
-///        group opt-in covers them);</item>
+///   <item>the Bearer opt-in lives in exactly ONE place — <c>EndpointGroupAuthExtensions.RequireAuthIfOidc</c>
+///        (<c>src/SchoolCollab.Core/Auth/</c>) — and every group the hops target reaches it with a
+///        counted call: five in <c>StudentEndpoints.cs</c>, five in <c>AssignmentEndpoints.cs</c> and one
+///        per Settings.Api <c>*Endpoints.cs</c> file (the Settings flag-write and tenant-override routes
+///        carry no gate of their own — the <c>/api/config</c> group policy covers them);</item>
+///   <item>no hand-rolled <c>if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))</c> guard
+///        survives in the migrated endpoint groups — a re-introduced block fails immediately;</item>
+///   <item><c>Endpoints/ConfigResolveRoutes.cs</c> is the pinned exemption: it takes a <c>bool</c>, not the
+///        flag service, so it keeps its inline gate and its own Bearer opt-in;</item>
 ///   <item>both <c>Assignments.Api</c> clients must carry <c>AllowAutoRedirect = false</c>
 ///        (row-7's discriminating source assertion — a scripted handler test cannot prove it).</item>
 /// </list>
@@ -30,7 +35,10 @@ public class BearerForwardingWiringArchitectureTests
     private const string HandlerFileName = "BearerForwardingDelegatingHandler.cs";
     private const string HandlerName = "BearerForwardingDelegatingHandler";
     private const string OptIn = "AddAuthenticationSchemes(AuthTenancyExtensions.BearerScheme)";
+    private const string Gate = "RequireAuthIfOidc(";
+    private const string HandRolledGuard = "if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))";
 
+    /// <summary>The nine Settings.Api orchestrators — one Bearer-gated group each.</summary>
     private static readonly string[] SettingsEndpointFiles =
     [
         "AssignmentAiPromptEndpoints.cs",
@@ -39,9 +47,20 @@ public class BearerForwardingWiringArchitectureTests
         "ConfigEndpoints.cs",
         "EntityCodeRuleEndpoints.cs",
         "NotificationPolicyEndpoints.cs",
+        "NotificationTemplateEndpoints.cs",
         "SignatureConsentTextEndpoints.cs",
         "TenantEndpoints.cs",
-        "Endpoints/ConfigResolveRoutes.cs", // ar-24 item 8: tenant-resolve read also receives Bearer
+    ];
+
+    /// <summary>The 12 files migrated onto <c>RequireAuthIfOidc</c> (spec minimal-api-composition §WP2).
+    /// The 13th guard site, <c>Endpoints/ConfigResolveRoutes.cs</c>, is the documented exemption — it takes a
+    /// <c>bool</c>, not the flag service, and is pinned by <c>ConfigResolveRoutes_KeepsItsInlineOidcGate</c>.</summary>
+    private static readonly string[] MigratedEndpointFiles =
+    [
+        "src/Students/SchoolCollab.Students.Api/StudentEndpoints.cs",
+        "src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs",
+        .. SettingsEndpointFiles.Select(file => $"src/Settings/SchoolCollab.Settings.Api/{file}"),
+        "src/SchoolCollab.Auth/Endpoints/AuthEndpointGroup.cs",
     ];
 
     [TestMethod]
@@ -69,22 +88,76 @@ public class BearerForwardingWiringArchitectureTests
     }
 
     [TestMethod]
-    public void BearerOptIn_PerGroup_StudentsAndSettings_NoRouteLevelFlagGate()
+    public void Helper_IsTheSingleBearerOptInWritePoint()
     {
-        var studentsEndpoints = Read("src", "Students", "SchoolCollab.Students.Api", "StudentEndpoints.cs");
+        // The opt-in moved into the helper, so the per-file assertions below could only ever say
+        // "zero" — which asserts nothing. Pinning the helper instead keeps the guard non-vacuous:
+        // deleting the opt-in from EndpointGroupAuthExtensions.cs fails here.
+        Count(Read("src", "SchoolCollab.Core", "Auth", "EndpointGroupAuthExtensions.cs"), OptIn).Should().Be(1,
+            "the helper is the single write-point for the Bearer opt-in; deleting it must fail this guard.");
+    }
 
-        OptInCount(studentsEndpoints).Should().Be(5,
-            "StudentEndpoints.cs has five conditional groups (students, activityGroups, guardians, contacts, teachers) each opting into Bearer.");
+    [TestMethod]
+    public void RequireAuthIfOidc_PerGroup_StudentsAssignmentsAndSettings()
+    {
+        Count(Read("src", "Students", "SchoolCollab.Students.Api", "StudentEndpoints.cs"), Gate).Should().Be(5,
+            "StudentEndpoints.cs has five conditional groups (students, activityGroups, guardians, contacts, teachers) each gated through RequireAuthIfOidc.");
+
+        Count(Read("src", "Assignments", "SchoolCollab.Assignments.Api", "AssignmentEndpoints.cs"), Gate).Should().Be(5,
+            "AssignmentEndpoints.cs gates five groups (assignments, reader, writer, ward, activityGroups) through RequireAuthIfOidc — "
+            + "the reader and writer sub-groups pass their gateway-scheme policy through the callback overload.");
 
         foreach (var settingsFile in SettingsEndpointFiles)
         {
-            OptInCount(Read("src", "Settings", "SchoolCollab.Settings.Api", settingsFile))
-                .Should().Be(1, $"{settingsFile} must opt its {settingsFile.Replace(".cs", "")} group into the Bearer scheme.");
+            Count(Read("src", "Settings", "SchoolCollab.Settings.Api", settingsFile), Gate).Should().Be(1,
+                $"{settingsFile} must gate its {settingsFile.Replace(".cs", "")} group through RequireAuthIfOidc.");
         }
 
+        // The Auth host's admin group keeps its "missing service means gate on" posture: the helper's
+        // policy overload treats a null IFeatureFlagService as gate-on, so no hand-rolled null check remains.
+        Count(Read("src", "SchoolCollab.Auth", "Endpoints", "AuthEndpointGroup.cs"), Gate).Should().Be(1,
+            "AuthEndpointGroup.cs must gate /auth/admin through RequireAuthIfOidc with its portal-facing admin policy.");
+    }
+
+    [TestMethod]
+    public void NoHandRolledOidcFlagGuard_InMigratedEndpoints()
+    {
+        // Non-vacuity floor: an empty or wrongly-rooted enumeration must fail rather than pass silently.
+        // 12 files carry the 20 migrated gate calls; the 13th guard site (Endpoints/ConfigResolveRoutes.cs)
+        // is the documented exemption and is pinned by its own test below.
+        MigratedEndpointFiles.Should().HaveCount(12, "the spec migrates 20 guard blocks across 12 files, with ConfigResolveRoutes exempt.");
+
+        foreach (var relativePath in MigratedEndpointFiles)
+        {
+            Count(Read(relativePath), HandRolledGuard).Should().Be(0,
+                $"{relativePath} must gate through RequireAuthIfOidc — a hand-rolled OIDC flag guard is the duplication this guard exists to stop.");
+
+            // A redundant second opt-in in a migrated file (a new sub-group pinning Bearer by hand, with no
+            // flag guard) would otherwise pass every other guard here — the pre-refactor per-file count caught it.
+            Count(Read(relativePath), OptIn).Should().Be(0,
+                $"{relativePath} must not carry its own Bearer opt-in — the helper owns the only one, and a hand-rolled addition would diverge from it silently.");
+        }
+    }
+
+    [TestMethod]
+    public void ConfigResolveRoutes_KeepsItsInlineOidcGate()
+    {
+        // Exemption (spec §WP2): ConfigResolveRoutes takes a bool, not the flag service, so it cannot use
+        // the helper — it keeps its own inline `if (oidcEnabled)` + Bearer opt-in and must not silently move.
+        var configResolveRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigResolveRoutes.cs");
+
+        Count(configResolveRoutes, OptIn).Should().Be(1,
+            "the tenant-scoped /api/features/{tenantId} read must keep its own Bearer opt-in — it is the documented exemption.");
+        Count(configResolveRoutes, Gate).Should().Be(0,
+            "ConfigResolveRoutes takes a bool, not IFeatureFlagService — adopting the helper there would need a signature change.");
+    }
+
+    [TestMethod]
+    public void ConfigRoutes_NoRouteLevelAdminPolicy()
+    {
         // The Settings flag-write and tenant-override routes carry NO route-level gate: the
-        // unsatisfiable "flag_admin" role policy is gone, and the /api/config group opt-in above
-        // is what makes those routes authenticated + bearer-eligible. These absence counts are the
+        // unsatisfiable "flag_admin" role policy is gone, and the /api/config group policy is what
+        // makes those routes authenticated + bearer-eligible. These absence counts are the
         // non-vacuity guard — re-adding a route-level gate must fail this test.
         var flagRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigFlagRoutes.cs");
         var overrideRoutes = Read("src", "Settings", "SchoolCollab.Settings.Api", "Endpoints", "ConfigTenantFlagOverrideRoutes.cs");
@@ -94,17 +167,13 @@ public class BearerForwardingWiringArchitectureTests
                 "the Settings host must register no flag_admin policy — the role policy was removed (owner ruling 2026-09-24).");
 
         Count(flagRoutes, "ApplyAdminPolicy").Should().Be(0,
-            "the flag write routes must not re-acquire a route-level admin policy; the /api/config group opt-in carries them.");
+            "the flag write routes must not re-acquire a route-level admin policy; the /api/config group policy carries them.");
         Count(overrideRoutes, "ApplyAdminPolicy").Should().Be(0,
-            "the tenant-override write routes must not re-acquire a route-level admin policy; the /api/config group opt-in carries them.");
+            "the tenant-override write routes must not re-acquire a route-level admin policy; the /api/config group policy carries them.");
         Count(flagRoutes, "RequireAuthorization").Should().Be(0,
-            "a route-level authorization call on a flag route would bypass the /api/config group opt-in and its Bearer scheme choice.");
+            "a route-level authorization call on a flag route would bypass the /api/config group policy and its Bearer scheme choice.");
         Count(overrideRoutes, "RequireAuthorization").Should().Be(0,
-            "a route-level authorization call on a tenant-override route would bypass the /api/config group opt-in and its Bearer scheme choice.");
-
-        // ConfigEndpoints.cs's single bearer opt-in — the /api/config group policy that now carries the
-        // flag-write and tenant-override routes — is already asserted by the SettingsEndpointFiles loop
-        // above (ConfigEndpoints.cs is in that array), so it is deliberately not asserted a second time.
+            "a route-level authorization call on a tenant-override route would bypass the /api/config group policy and its Bearer scheme choice.");
     }
 
     [TestMethod]
@@ -119,9 +188,6 @@ public class BearerForwardingWiringArchitectureTests
             + "claims reader's auth client — round portal-session-adoption D4, plan amendment "
             + "2026-10-05) must set AllowAutoRedirect = false.");
     }
-
-    private static int OptInCount(string source)
-        => Count(source, OptIn);
 
     private static int Count(string source, string needle)
     {
@@ -142,6 +208,10 @@ public class BearerForwardingWiringArchitectureTests
             ? File.ReadAllText(path)
             : throw new FileNotFoundException($"Expected source file not found under the repo: {string.Join('/', relative)}");
     }
+
+    /// <summary>Reads a repo-root-relative path (forward-slash form, as listed in the migrated-file array).</summary>
+    private static string Read(string repoRelativePath)
+        => Read(repoRelativePath.Split('/'));
 
     private static string FindRepoRoot()
     {

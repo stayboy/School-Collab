@@ -14,11 +14,22 @@
     <PackageReference Include="MSTest" />
     <PackageReference Include="NetArchTest.eNhancedEdition" />
     <PackageReference Include="FluentAssertions" />
+    <!-- OpenApiSurfaceArchitectureTests: a minimal in-process host per API host via TestServer
+         (Precedent: Assignments.Api.Tests.Unit/AssignmentDraftRoutesTests.StartHostAsync) plus
+         AddOpenApi() so the generated document can be read from /openapi/v1.json. Both packages
+         are already centrally managed for the API and integration-test projects; no new version. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+    <!-- OpenApiSurfaceArchitectureTests maps the three API hosts' own <Domain>Endpoints orchestrators
+         against a TestServer host — Program.cs is never started, so no Postgres/RabbitMQ is needed. -->
+    <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
+    <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />
+    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj" />
   </ItemGroup>
 </Project>
