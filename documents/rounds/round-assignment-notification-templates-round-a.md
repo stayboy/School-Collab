@@ -1,5 +1,5 @@
 Provider: Cline/clinepass (models: parent-as-worker = Cline agent; reviewer = `deepseek-v4.1-flash` — reviewer dispatch blocked by provider auth, see `## Review`) · **Tier 2, owner override** — this round carries an EF migration, a new contract surface and >4 files, none of which pass the Tier-2 file-level gates; the owner explicitly chose Light Tier 2 for Round A on 2026-10-17, recorded here per the skill's "there is no defined tier between 2 and 3" override clause.
-**Status:** in progress (uncommitted — awaiting owner commit instruction)
+**Status:** in progress — committed on `feat/notification-templates-round-a` (`9432ae97` prep, `8420358e` Round A); no push and no PR yet, awaiting instruction
 
 # Round A — assignment-notification-templates: template store (settings-db)
 
