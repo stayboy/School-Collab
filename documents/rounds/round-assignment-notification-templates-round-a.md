@@ -1,5 +1,5 @@
 Provider: Cline/clinepass (models: parent-as-worker = Cline agent; reviewer = `deepseek-v4.1-flash` — reviewer dispatch blocked by provider auth, see `## Review`) · **Tier 2, owner override** — this round carries an EF migration, a new contract surface and >4 files, none of which pass the Tier-2 file-level gates; the owner explicitly chose Light Tier 2 for Round A on 2026-10-17, recorded here per the skill's "there is no defined tier between 2 and 3" override clause.
-**Status:** in progress — committed on `feat/notification-templates-round-a` (4 commits: prep `9432ae97`, store `8420358e`, status `760061a1`, endpoint tests); held locally per D4 — no push, no PR
+**Status:** in review — PR #362 (https://github.com/stayboy/School-Collab/pull/362), 4 commits, all 5 CI checks green. D4 ("hold") was overridden by the owner's "push to stack pr" instruction; the branch is layer 1 of a `gh stack` train on `main`, so Round B becomes layer 2.
 
 # Round A — assignment-notification-templates: template store (settings-db)
 
@@ -217,7 +217,7 @@ Round B gate and branch state (settled 2026-10-17, second grill round):
 | D1 | Endpoint tests | **Accepted.** 9 wire tests committed as the round's fourth commit. |
 | D2 | Round B tier | **Full Tier 3**, overriding Round A's Tier 2. Round B `ALTER`s existing tables, rewrites the render path every send uses, adds a cross-context resolver, and carries two UI surfaces — the skill's "schema / endpoint / contract / multi-context risk" gate, with no machine check covering the render rewrite. |
 | D3 | Reviewer before Round B | **Hard prerequisite.** Round B does not start until a real reviewer run (`cline-pass/mimo-v2.6-flash`) is possible. Round A closed on parent-transcribed review, which is its weakest link and must not repeat on the round that alters production tables and the send path. |
-| D4 | Push / PR | **Hold.** No push, no PR. Cost: no clean-runner CI. |
+| D4 | Push / PR | **Superseded.** Originally "hold"; the owner then instructed "push to stack pr". Branch pushed as layer 1 of a `gh stack` train on `main`, PR #362 opened ready for review. |
 | D5 | Round B slicing (B1/B2/B3 boundaries) | Next round's frontier — downstream of D2, since slicing granularity follows the tier. |
 
 
