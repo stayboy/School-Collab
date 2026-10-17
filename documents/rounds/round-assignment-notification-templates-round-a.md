@@ -1,5 +1,5 @@
 Provider: Cline/clinepass (models: parent-as-worker = Cline agent; reviewer = `deepseek-v4.1-flash` — reviewer dispatch blocked by provider auth, see `## Review`) · **Tier 2, owner override** — this round carries an EF migration, a new contract surface and >4 files, none of which pass the Tier-2 file-level gates; the owner explicitly chose Light Tier 2 for Round A on 2026-10-17, recorded here per the skill's "there is no defined tier between 2 and 3" override clause.
-**Status:** in progress — committed on `feat/notification-templates-round-a` (`9432ae97` prep, `8420358e` Round A); no push and no PR yet, awaiting instruction
+**Status:** in progress — committed on `feat/notification-templates-round-a` (4 commits: prep `9432ae97`, store `8420358e`, status `760061a1`, endpoint tests); held locally per D4 — no push, no PR
 
 # Round A — assignment-notification-templates: template store (settings-db)
 
@@ -96,6 +96,11 @@ Defects found and fixed during the round (all caught before the build went green
 7. Wrong namespace imports (`SchoolCollab.Core.Abstractions` does not exist) and `ICommand<T>` used
    where `SchoolCollab.Core.CQRS.ICommand` is non-generic; plus removed `Id`/`TenantId` shadows that
    tripped CS0108 against `BaseTenantEntity`.
+8. **The route layer had no tests at all**, while spec §8 specifies "Settings **endpoint** tests" for
+   the audit row. The handler tests could not reach enum route binding, the 204-vs-200 get-one
+   contract, the WhatsApp 400 arm, or the required-reason 400 — all of which live in the route.
+   `NotificationTemplateRoutesTests` (9 wire tests, `AssignmentPolicyRoutesTests` harness, no
+   database) closes it.
 
 Verification:
 
@@ -103,6 +108,7 @@ Verification:
 |---|---|
 | `dotnet build SchoolCollab.slnx` | **0 errors** (310 pre-existing warnings) |
 | `dotnet test tests/SchoolCollab.Settings.Tests.Unit` | **592 passed, 0 failed** (13 new) |
+| `dotnet test tests/SchoolCollab.Settings.Api.Tests.Unit` | **24 passed, 0 failed** (9 new) |
 | `dotnet test tests/SchoolCollab.ArchitectureTests.Unit` | **116 passed, 0 failed** |
 | `dotnet ef migrations has-pending-model-changes` | no pending changes |
 | MAUI head | not required — `SchoolCollab.Admin.Shared` untouched by this round |
@@ -159,7 +165,8 @@ the AppHost parameter declaration S1 owed.
 | Gate | Command | Result |
 |---|---|---|
 | Build | `dotnet build SchoolCollab.slnx` | 0 errors |
-| Tests | `dotnet test tests/SchoolCollab.Settings.Tests.Unit` | 592 passed / 0 failed |
+| Tests (handlers) | `dotnet test tests/SchoolCollab.Settings.Tests.Unit` | 592 passed / 0 failed |
+| Tests (wire) | `dotnet test tests/SchoolCollab.Settings.Api.Tests.Unit` | 24 passed / 0 failed |
 | Architecture | `dotnet test tests/SchoolCollab.ArchitectureTests.Unit` | 116 passed / 0 failed |
 | Model/snapshot parity | `dotnet ef migrations has-pending-model-changes` | no pending changes |
 
@@ -201,7 +208,18 @@ Settled:
 | G3 | Audit ordering | **No sequence column.** Repo precedent: `FeatureFlagQueryHandlers.cs:73` orders audit by `OccurredAt` descending, and `FlagAuditEntry` has none. A column here would make template auditing diverge from flag auditing for no user-visible gain. |
 | G4 | `reason` on delete | **Required.** Aligned to the audited-delete precedent `ConfigFlagRoutes.cs:98` — `[FromQuery] string reason`, feeding the audit row. Blank now returns 400. |
 | G5 | `applicable/{gradeLevelId}` | **Stays deferred** to workstream 5. |
-| G6 | Reviewer | Open — see below. |
+| G6 | Reviewer | Account-level auth failure; see below. |
+
+Round B gate and branch state (settled 2026-10-17, second grill round):
+
+| # | Decision | Outcome |
+|---|---|---|
+| D1 | Endpoint tests | **Accepted.** 9 wire tests committed as the round's fourth commit. |
+| D2 | Round B tier | **Full Tier 3**, overriding Round A's Tier 2. Round B `ALTER`s existing tables, rewrites the render path every send uses, adds a cross-context resolver, and carries two UI surfaces — the skill's "schema / endpoint / contract / multi-context risk" gate, with no machine check covering the render rewrite. |
+| D3 | Reviewer before Round B | **Hard prerequisite.** Round B does not start until a real reviewer run (`cline-pass/mimo-v2.6-flash`) is possible. Round A closed on parent-transcribed review, which is its weakest link and must not repeat on the round that alters production tables and the send path. |
+| D4 | Push / PR | **Hold.** No push, no PR. Cost: no clean-runner CI. |
+| D5 | Round B slicing (B1/B2/B3 boundaries) | Next round's frontier — downstream of D2, since slicing granularity follows the tier. |
+
 
 **Reviewer status — account-level auth failure, not a model problem.** The registry
 (`.pi/skills/orchestrator-worker-reviewer/references/models.md`) does not list
