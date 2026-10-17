@@ -94,10 +94,7 @@ public static class <Domain>Endpoints
         this WebApplication app, IFeatureFlagService featureFlags)
     {
         var group = app.MapGroup("/<uri-prefix>");
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
-        {
-            group.RequireAuthorization();
-        }
+        group.RequireAuthIfOidc(featureFlags);
 
         group
             .Map<Specialty1>Routes()
@@ -108,6 +105,30 @@ public static class <Domain>Endpoints
     }
 }
 ```
+
+### The authorization guard (single write-point)
+
+Never hand-roll the flag check on a group. `RequireAuthIfOidc`
+(`src/SchoolCollab.Core/Auth/EndpointGroupAuthExtensions.cs`) is the one place that reads
+`FEATURE:DisableOIDCAuth` for a group policy, and it has two overloads:
+
+```csharp
+group.RequireAuthIfOidc(featureFlags);                            // authenticated user on the Bearer scheme (ar-24 opt-in)
+group.RequireAuthIfOidc(featureFlags, RequireSomePolicy);         // caller-supplied policy, e.g. a gateway-scheme role gate
+```
+
+- The **default** overload is the ar-24 receiving-side opt-in: it pins
+  `AuthTenancyExtensions.BearerScheme`, so an API group can accept a forwarded bearer token.
+- The **callback** overload is for policies that must *not* pin Bearer — the portal-session role gates
+  (`RequireAssignmentReader` / `RequireAssignmentWriter`) and the portal-facing admin policy all pin
+  `PortalSessionAuthenticationHandler.GatewaySchemeName`, which routes a portal session, a bearer caller
+  and a dev caller correctly through one policy.
+- A `null` flag service means **gate on** (the production posture) — never gate-open. That preserves the
+  endpoint-test hosts, which compose the pipeline from public extensions without registering the flag service.
+
+Guarded by `MinimalApiCompositionArchitectureTests` and `BearerForwardingWiringArchitectureTests`: the
+helper is the only file allowed to contain the Bearer opt-in, and no endpoint file may contain a
+hand-rolled `if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))` block.
 
 ### Specialty template
 
@@ -140,7 +161,7 @@ internal record Update<Specialty>Request(...);
 
 The refactor described in this document is a **source-layout change only**. It
 must not change any route URI, HTTP method, request shape, or response shape.
-All existing integration tests, `*.http` files, OpenAPI specs, and external
+All existing integration tests, OpenAPI specs and external callers
 callers (e.g. the `StudentsApiClient` in `SchoolCollab.Students.Admin`) must
 continue to work without modification.
 
@@ -161,13 +182,57 @@ When reviewing a new API or a PR that adds/changes endpoints, verify:
       only `MapGroup`, auth, and chained `Map*Routes()` calls.
 - [ ] `Program.cs` contains no request/response record DTOs (except `Program`
       itself for the integration-test `public partial class Program` marker).
+- [ ] The group's policy is applied through `RequireAuthIfOidc(...)`, and the file contains no
+      hand-rolled `if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))` block.
+- [ ] New or edited endpoints return `TypedResults` (`.Produces`-visible response types), not the
+      untyped `Results` factory. Existing `Results.*` sites are converted on touch — not swept.
 - [ ] No route URI in the source differs from the route URI listed in
       OpenAPI / `.http` files / external client code.
 - [ ] The `dotnet build` for the project succeeds with 0 errors and 0 new
       warnings.
 - [ ] The unit/integration smoke test for the project still passes.
 
-## 7. Worked Example: Students API
+## 7. Deferred and declined upstream recommendations
+
+Source: the `dotnet-webapi` skill (`dotnet/skills` → `plugins/dotnet-aspnetcore/skills/dotnet-webapi`,
+MIT), evaluated 2026-10-17 — `documents/specs/minimal-api-composition.md`.
+
+### 7.1 Deferred — ProblemDetails validation
+
+The skill prescribes data-annotation validation via an endpoint filter returning `ValidationProblem`
+(RFC 7807). Deferred 2026-10-17: the solution returns no `ProblemDetails` today and validates inside
+handlers (e.g. `ValidationException` in `AssignmentRoutes.cs`), so adopting the filter model is an API
+**error wire-shape** change and needs a human decision. Revisit as its own round with a client-
+compatibility inventory (`SchoolCollab.Admin.Shared` API clients, portal Python clients, bUnit/Playwright
+assertions).
+
+### 7.2 Declined — `.http` request artifacts
+
+Declined as a committed standard, permitted ad hoc, for four reasons:
+
+1. **Duplicate of a generated artifact.** Every API host already maps OpenAPI
+   (`AddOpenApi`/`MapOpenApi` in `Assignments.Api/Program.cs:210,271`, `Settings.Api/Program.cs:43,49`,
+   `Students.Api/Program.cs:85,94`), so a `.http` file is a hand-maintained copy that can only drift from
+   the generated document — silently, because nothing executes it.
+2. **No CI execution path.** The VS Code and JetBrains HTTP clients run in-IDE only; there is no
+   first-party runner, so a `.http` file cannot be a gate — and the repo's testing standard only counts
+   artifacts that can fail.
+3. **The need is already met executably.**
+   `tests/SchoolCollab.Assignments.Api.Tests.Unit/*RouteTests.cs` drive real HTTP pipelines
+   (reader/writer/portal-session policies, guardian token filter, guardian sign-off) through a minimal
+   TestServer host, and the Students/Settings integration + Playwright suites cover the rest.
+4. **Worst fit for this repo's hardest axis.** Every call needs a Keycloak bearer or portal-session
+   credential plus a tenant id, which `.http` can only satisfy by out-of-band token minting and a pinned
+   tenant — exactly what `TestAuthHandler`, the dev tenant switcher and `WebApplicationFactory` solve in code.
+
+Cheap repo-wide coverage comes instead from `OpenApiSurfaceArchitectureTests`, which asserts the mapped
+surface against the generated document and pins the count of operations that document a response schema
+(the current baseline is 0, because handlers still return untyped `Results.*` — raise that number
+deliberately when converting handlers).
+
+No `.http` file is committed, reviewed or counted as coverage. A throwaway one for a local probe is fine.
+
+## 8. Worked Example: Students API
 
 The canonical reference implementation is `SchoolCollab.Students.Api`. After
 applying this pattern the layout is:

@@ -203,6 +203,7 @@ instead of duplicating it.
 | Dropdowns & selects (wrappers, binding, width) | `.github/skills/dropdown-ui/SKILL.md` |
 | Fluent UI icons | `.github/skills/fluentui-icons/SKILL.md` |
 | Fluent UI component props | `.github/skills/fluentui-component-props/SKILL.md` |
+| Minimal-API composition (grouping, auth helper, typed results) | `.github/skills/minimal-api-composition/SKILL.md` + `documents/solution/endpoint-organization-pattern.md` |
 | Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
 | Coded values domain | `.github/skills/coded-values/SKILL.md` |
 | Azure AI OpenAI .NET | `.github/skills/azure-ai-openai-dotnet/SKILL.md` |
@@ -435,7 +436,16 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
   players, staging seams, JS modules) and name the reuse in the plan. Owner
   precedent 2026-10-12: a pill-playback round initially priced as Tier-3 endpoint
   work became a reuse of the recorder's own review player + a kept Blob URL.
-- **API Endpoint Grouping**: All API endpoints must be grouped using an extension method (e.g., `MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)`). Do not define routes inline in `Program.cs`. Authorization requirements on these groups should be conditional based on `IFeatureFlagService` (e.g., `FEATURE:DisableOIDCAuth`).
+- **API Endpoint Grouping** — two layers, full pattern and templates in
+  `documents/solution/endpoint-organization-pattern.md`: (1) a `<Domain>Endpoints` orchestrator,
+  `Map<Domain>Endpoints(this WebApplication app, IFeatureFlagService featureFlags)`, owns
+  `MapGroup(prefix)`, the flag-conditional authorization policy and the chained `Map*Routes()` calls;
+  (2) one `<Specialty>Routes.cs` per specialty, `Map<Specialty>Routes(this RouteGroupBuilder group)`,
+  maps relative paths only and never touches authorization or feature flags. Never define routes
+  inline in `Program.cs`. Apply a group's policy through `RequireAuthIfOidc(...)` — never a
+  hand-rolled `if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth)) { … }` block; enforced by
+  `MinimalApiCompositionArchitectureTests`. New or edited endpoints return `TypedResults`, not the
+  `Results` factory, so OpenAPI emits real response schemas.
 - **Feature Flags**: there are **two kinds**, each with exactly one write-point — read `documents/solution/feature-flag-workflow.md` before adding one.
   - **Runtime, mutable, tenant-overridable flags** (e.g. `FEATURE:EnableCodedValuesAiChat`) are owned by the central **Config service** (`settings-api` + `config-db`, admin UI `/config-flags`, audited, tenant-overridable) — **not** the AppHost.
   - **Deployment-time startup switches** (e.g. `FEATURE:DisableOIDCAuth`, `FEATURE:DisableKeycloakLoginUi` — read once at process start, so they can never be Config flags) live in the AppHost's `Parameters:` block (see `src/AppHost/SchoolCollab.AppHost/appsettings.json`) and are fanned out via `WithEnvironment("FeatureFlags__FEATURE__...", param)`, with the dev posture committed in the AppHost's own `appsettings.Development.json`.
