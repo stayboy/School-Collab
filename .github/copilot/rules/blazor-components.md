@@ -196,6 +196,35 @@ When the library version moves, sweep **attributes** as well as tags:
 Where v5 has **no** equivalent (badge dismissal, for example), author the affordance or report it as
 a named finding — never silently drop a working control.
 
+## `FluentProviders` is a sibling, never a wrapper — and a green suite does not prove the app boots
+
+`FluentProviders` (v5) renders **only** its own provider set — toast, dialog, tooltip and key-code —
+inside a `div`. It declares no `ChildContent` parameter, so any markup placed **inside** it is **discarded
+without a warning or an error**.
+
+- **Place it self-closing at the layout root**, immediately above the layout markup
+  (`<FluentLayout>` / the host's own layout root). Never around a `Router`, a `RouteView`, or any
+  other markup you expect to see rendered.
+- `FluentMessageBarProvider` is **not** part of `FluentProviders` — declare it separately
+  (it is the one provider the host still lists by name).
+- `<Router>` must stay the **root element** of every host's `Routes.razor`. Wrapping it in
+  `FluentProviders` — or in any v5-only component whose child contract you have not verified —
+  blanks **every page of the app** while the build, the component tests and the circuit all report
+  success. That happened on 2026-10-16 (FluentUI 4.14.2 → 5.0.1): all three hosts shipped blank and
+  nothing failed.
+
+**General check — a green component-test suite does not prove the app boots.** Every page test
+renders its component directly, so the whole suite stays green while `Routes.razor` renders nothing.
+When adding or moving a shell-level element, render the real `Routes` component and assert the
+**layout shell** appears (Admin guard:
+`tests/SchoolCollab.Admin.Tests.Unit/RoutesShellRenderTests.cs`, asserting `article.content`). Write
+acceptance criteria that test **placement**, not mere presence: “`<FluentProviders />` exists in
+`MainLayout.razor`” passes in the broken state, “the routed layout renders under `Routes`” does not.
+
+Before adopting one of these components, check its `P:` members in the installed XML (see the sweep
+above) — a parameter you pass that it does not declare is either swallowed or, with child markup,
+silently deleted.
+
 ## ShouldRender optimisation
 
 Override `ShouldRender()` on components that receive frequent external events but only

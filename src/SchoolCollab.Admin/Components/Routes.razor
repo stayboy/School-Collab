@@ -2,15 +2,14 @@
 @using SchoolCollab.Assignments.Application
 @using SchoolCollab.Students.Application
 
-@* v5 requires this cascade at the app root: it supplies LibraryConfiguration to every
-   FluentUI component in the tree (layouts, pages, providers). Wrapping the Router covers both
-   the routed content and Router's NotFoundPage path; the App.razor <HeadOutlet> stays outside. *@
-<FluentProviders>
-    <Router AppAssembly="typeof(global::Program).Assembly"
-            AdditionalAssemblies="new[] { typeof(SchoolCollab.Settings.Application.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Application.Components._Imports).Assembly, typeof(SchoolCollab.Students.Application.Components._Imports).Assembly }">
-        <Found Context="routeData">
-            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-            <FocusOnNavigate RouteData="routeData" Selector="h1" />
-        </Found>
-    </Router>
-</FluentProviders>
+@* The Router must stay the root element: FluentUI v5's <FluentProviders> has no ChildContent
+   parameter and renders only its own provider set, so wrapping the Router in it discards every
+   routed page (blank app, no error). The provider host lives at the layout root instead — see
+   Components/Layout/MainLayout.razor. *@
+<Router AppAssembly="typeof(global::Program).Assembly"
+        AdditionalAssemblies="new[] { typeof(SchoolCollab.Settings.Application.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Application.Components._Imports).Assembly, typeof(SchoolCollab.Students.Application.Components._Imports).Assembly }">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

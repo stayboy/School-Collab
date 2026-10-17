@@ -97,3 +97,79 @@ migration research record, not stale guidance.
   features. They are being committed in a standalone specs PR, deliberately outside the FluentUI train.
 - The `Mobile (MAUI)` CI job skips unless the repository variable `ENABLE_MAUI_CI` is `true`; the manual build is
   documented in `AGENTS.md` § Build verification. Enabling the gate is an owner decision (Q55).
+
+## G. Obsolete-enum usage still emitting `CS0618` (found 2026-10-16 while starting the dev loop)
+
+The v5.0.1 package keeps the old appearance/colour values as **obsolete** members, so a v4-era spelling still compiles and
+still renders — it just warns. A full non-incremental build shows the pattern in at least these shapes:
+
+- `Appearance.Accent` / `Appearance.Neutral` on `FluentButton` (`ActivityGroupDetails.razor:154`, `ActivityGroups.razor:126`,
+  `Students/Detail.razor:1029`) — obsolete in favour of `ButtonAppearance.Primary` / `.Default`.
+- `Color.Accent` on icons/badges (`TeacherEditDialog.razor:40,109`, `GuardianSetupWizard.razor:39,93,118,174`,
+  `GuardianGrid.razor:149`, `ResourcesSection.razor:36,82,136`) — obsolete in favour of `Primary`.
+
+This is a different defect class from the tables above: the attribute is **valid and works**, it is merely deprecated.
+So it is cosmetic/forward-compatibility work (a future v6 will likely remove the members), not a silent break — but it is
+the same *class* of risk, and the fix is mechanical (`ButtonAppearance.*` / `BadgeColor.*` / `Color.Primary`).
+
+**Why this matters for the rule:** `.github/copilot/rules/blazor-components.md` teaches the sweep for attributes that no
+longer exist. Its mirror image is this: attributes that still exist but are **obsolete**. A build with warnings visible is
+the detector — which is one more reason the warning count should be treated as signal here rather than noise.
+
+## H. `FluentWizard` receives step children directly — pre-existing defect, VERIFY before fixing
+
+Found 2026-10-16 by the Round C same-class sweep (Q68), and adjudicated by the parent as **pre-existing, not a v5
+regression** — which is why it was not fixed in Round C.
+
+`src/Students/SchoolCollab.Students.Application/Components/Pages/Guardians/GuardianSetupWizard.razor:26` places
+`<FluentWizardStep>` elements **directly** inside `<FluentWizard>`. The v5 API declares
+`[Parameter] public RenderFragment? Steps` whose own doc says *"Add WizardStep tags inside this tag"*, and the library's
+canonical example nests them as `<FluentWizard><Steps><FluentWizardStep …>`. `FluentWizard` declares no `ChildContent`.
+
+**This is not a v5 regression:** v4.14.2's `FluentWizard.razor` renders the same `@Steps` fragment
+(`<ol …>@Steps</ol>`), so our usage did not satisfy the API before the upgrade either. It is the same *shape* as the
+`FluentProviders` defect (children handed to a component that does not read them), which is exactly why the sweep surfaced
+it — but a different *cause*: ours predates the port.
+
+**Verify before fixing — one bUnit render of `GuardianSetupWizard` answers it.** Two outcomes are possible and they need
+different fixes: (a) the steps do not render at all (the stepper is empty, navigation dead) → wrap them in `<Steps>`;
+(b) Blazor captures the child content via `CaptureUnmatchedAttributes`/`AdditionalAttributes` and splats it, so the step
+*bodies* render while `_steps` stays empty and the stepper/navigation logic is still dead → the same `<Steps>` fix, but
+the symptom seen by the user is different. No bUnit test covers this component today; the only witness is
+`tests/SchoolCollab.Students.Tests.Playwright/Tests/GuardianAdminTests.cs`, which Round C did not run.
+
+## I. `ConfirmDialog`'s title is statically verified but untested (found 2026-10-16, Round C)
+
+The Round C UI-tester leg could not exercise delta 1 (does a confirm prompt render a title?) because **the dev tenant's lists
+are empty** — no rows, therefore no destructive buttons to press — even though `ShowConfirmDialogAsync` has **46 call sites**
+under `src/`. The chain is nevertheless correct **by inspection**: `ConfirmDialog.razor` wraps its body in
+`<DialogShellBody>`, which is literally `<FluentDialogBody>@ChildContent</FluentDialogBody>` — the only place v5 renders the
+dialog header/title slot and the close (X) — and `ShowConfirmDialogAsync`/`BuildShellOptions` set `Header.Title` and
+`CloseAction.Visible = true`.
+
+**Gap:** no test asserts any of that. A `ConfirmDialog` render test asserting the title reaches the DOM (the same
+"placement, not presence" shape as `RoutesShellRenderTests`) would convert a static claim into a tested one, and would
+have caught the original omission at build time. Low cost, real value.
+
+## J. Cosmetic `fluent-field` wrapper cluster (found 2026-10-16, Round C tester)
+
+Not visibly broken, deliberately deferred rather than re-opening form layout after the round's gates went green:
+
+- `fluent-field` wrappers still carry the legacy width classes (`w-4`, `w-9`, `coded-value-dropdown`, `fluent-datepicker`),
+  so the v5 wrapper's sizing is *additive* alongside the old classes rather than owning width.
+- 1–2 `fluent-field` wrappers per create form have `width: 0; height: 0` with only a `div` child — empty placeholders in the DOM.
+- No co-located label text inside `fluent-field` — several fields rely on the input's `placeholder` as their label, which is
+  also an accessibility weakness (a placeholder is not a label).
+
+The last item is the one worth promoting first: it is an a11y issue, not just tidiness.
+
+## K. The nav marks more than one item as the current page (found 2026-10-16, Round C tester)
+
+On `/students/create` **three** nav items carry `aria-current="page"`: `New Student` (`/students/create`, correct), plus
+`Students` and `All Students`, **both pointing at `/students`**. `aria-current="page"` should identify the current page only;
+marking a parent (or two entries sharing one href) is announced to screen readers as several "current page" items.
+
+Two observations bundled here: (1) active marking follows the href prefix, so a parent link stays "current" on child routes;
+(2) `/students` appears **twice** in the nav, which may be intentional (a category landing link plus a list link) but reads as a
+duplicate. Round C verified the nav renders, highlights the active item and carries `aria-current` — this is a refinement, not
+a break, which is why it is backlogged rather than fixed inside the repair round that touched the router.

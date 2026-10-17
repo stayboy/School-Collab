@@ -1,8 +1,10 @@
 ﻿@inherits LayoutComponentBase
 
 @* The dialog host every FluentUI <c>IDialogService</c> dialog renders into (the mobile card's
-   confirm-gated delete uses it). Without a provider the dialog service has nowhere to display. *@
-<FluentDialogProvider />
+   confirm-gated delete uses it). Without a provider the dialog service has nowhere to display.
+   Self-closing at the layout root: <c>FluentProviders</c> has no ChildContent parameter and
+   renders only its own provider set, so it must never wrap other markup. *@
+<FluentProviders />
 
 @* The layout root — the one element carrying THIS component's CSS-isolation scope, which is what
    makes MainLayout.razor.css able to own the host's safe-area insets: an element rendered by a child
