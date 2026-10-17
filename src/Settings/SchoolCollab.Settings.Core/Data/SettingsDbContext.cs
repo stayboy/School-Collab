@@ -46,6 +46,10 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     // ── Notification policy (global per-tenant default) ──
     public DbSet<TenantNotificationPolicy> TenantNotificationPolicies => Set<TenantNotificationPolicy>();
 
+    public DbSet<TenantNotificationTemplate> TenantNotificationTemplates => Set<TenantNotificationTemplate>();
+    public DbSet<TemplateConstraint> TemplateConstraints => Set<TemplateConstraint>();
+    public DbSet<TemplateAuditEntry> TemplateAuditEntries => Set<TemplateAuditEntry>();
+
     // ── Assignment policy (global per-tenant guardian-signature default, WS-C1) ──
     public DbSet<TenantAssignmentPolicy> TenantAssignmentPolicies => Set<TenantAssignmentPolicy>();
 
@@ -83,6 +87,7 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         typeof(User),
         typeof(FeatureFlag),
         typeof(FlagAuditEntry),
+        typeof(TemplateAuditEntry),
         typeof(OutboxMessage),
     ];
 
@@ -112,6 +117,11 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
 
         // Notification policy configuration (tenant-scoped)
         modelBuilder.ApplyConfiguration(new TenantNotificationPolicyConfiguration(() => CurrentTenantId));
+
+        // Notification template configuration (tenant-scoped)
+        modelBuilder.ApplyConfiguration(new TenantNotificationTemplateConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TemplateConstraintConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TemplateAuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new TenantAssignmentPolicyConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantSignatureConsentTextConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantAssignmentAiPromptConfiguration(() => CurrentTenantId));
