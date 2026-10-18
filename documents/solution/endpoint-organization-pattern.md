@@ -130,6 +130,30 @@ Guarded by `MinimalApiCompositionArchitectureTests` and `BearerForwardingWiringA
 helper is the only file allowed to contain the Bearer opt-in, and no endpoint file may contain a
 hand-rolled `if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))` block.
 
+### Typed responses (proven 2026-10-17 on the CodedValue suite)
+
+`TypedResults` **plus an explicit union return type** is what makes OpenAPI emit response schemas. Measured on 24
+converted endpoints: schemas appear with `TypedResults` alone — **no `.Produces<T>()` is needed**, and adding it
+only duplicates what the compiler infers.
+
+```csharp
+group.MapGet("/{id:guid}", async Task<Results<Ok<CodedValueDto>, NotFound>> (
+    Guid id, [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto?> handler, CancellationToken ct) =>
+    await handler.HandleAsync(new GetCodedValueById(id), ct) is { } dto
+        ? TypedResults.Ok(dto)
+        : TypedResults.NotFound());
+```
+
+- Annotate `Task<Results<…>>`; a ternary of `TypedResults` factories in a bare lambda still infers `IResult`.
+- **>3 arms → `Task<IResult>`** with a comment (`approve` is the sanctioned example).
+- **Anonymous payloads cannot be named in a union** — introduce an `internal sealed record` with the identical property
+  names and order (`IdResponse`, `MessageResponse`, `BulkCreateResponse`) so the JSON stays byte-identical, and assert
+  the body text in a test.
+- Preserve `Created` location strings verbatim; never introduce `ProblemDetails` while converting (§7.1).
+- `OpenApiSurfaceArchitectureTests` pins the count of operations documenting a schema per host — **19 of 66** for
+  Settings after the pilot (12 with a 200/201 body + 7 with only a 400/409 message body), Students 0 of 146. A 4xx arm
+  **with a payload counts**; raise the pin deliberately, to the measured value.
+
 ### Specialty template
 
 ```csharp

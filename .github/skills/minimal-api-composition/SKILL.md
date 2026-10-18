@@ -73,19 +73,43 @@ Pick the overload by **what the group must accept**, not by taste:
 `null` flag service means **gate on** (the endpoint-test hosts compose the pipeline without the flag
 service). Never "fix" a failing test by making `null` mean gate-open.
 
-## 3. Response typing
+## 3. Response typing — the proven pattern
 
-Return `TypedResults`, not the `Results` factory:
+Return `TypedResults` **with an explicit union return type**. `TypedResults` alone is enough: measured 2026-10-17 on
+24 converted endpoints, it emits real response schemas through `AddOpenApi` **without any `.Produces<T>()`**. Do not
+add `.Produces` metadata "to be safe" — it duplicates what the compiler already infers.
 
 ```csharp
-return result is null ? TypedResults.NotFound() : TypedResults.Ok(result);
+// 2 outcomes: annotate the lambda, success arm first
+group.MapGet("/{id:guid}", async Task<Results<Ok<CodedValueDto>, NotFound>> (
+    Guid id, [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto?> handler, CancellationToken ct) =>
+{
+    var result = await handler.HandleAsync(new GetCodedValueById(id), ct);
+    return result is null ? TypedResults.NotFound() : TypedResults.Ok(result);
+});
 ```
 
-Why it matters here: the untyped factory erases the response type, so `AddOpenApi` documents **no**
-response schema. Measured baseline 2026-10-17: 0 of 66 Settings operations and 0 of 146 Students
-operations documented a schema; `OpenApiSurfaceArchitectureTests` pins that 0 and tells you to raise the
-number deliberately. Scope rule: **new and touched endpoints only** — no sweep of the 558 legacy
-`Results.*` sites.
+Rules that cost a compile cycle if you learn them the hard way:
+
+- **`TypedResults` and the union must both be present.** `TypedResults.Ok(x)` in a bare lambda still infers `IResult`
+  in a ternary — `Ok<T>` and `NotFound` share no common struct type. Annotate `Task<Results<…>>`.
+- **More than 3 arms → fall back to `Task<IResult>`** and say why in a comment. `Results<…>` supports at most 8, but a
+  4-arm union stops being readable; the converted `approve` handler is the sanctioned example.
+- **An anonymous payload cannot appear in a union.** If a handler returns `new { ex.Message }` or `new { id }`, name the
+  payload first (`internal sealed record MessageResponse(string Message)`, `IdResponse(Guid Id)`) — keeping property
+  names and order exactly as the anonymous object had them so the JSON is byte-identical. Prove it with an assertion on
+  the body text, not by inspection.
+- **Preserve the `Created` location string** verbatim (`TypedResults.Created($"/api/…/{id}", new IdResponse(id))`).
+  A changed `Location` header is a wire change nobody notices until a client breaks.
+- **Never introduce `ProblemDetails`** while converting — error-shape work is a separate, human-gated decision
+  (`endpoint-organization-pattern.md` §7.1).
+
+**The pin.** `OpenApiSurfaceArchitectureTests` counts operations that document at least one response schema, per host,
+and pins the number. After the CodedValue pilot it is **19 of 66 Settings operations** (12 document a 200/201 body,
+7 a 400/409 message body only, 5 have no body at all), Students 0 of 146. A 409/400 arm **with a payload documents
+`content`** — do not assume 4xx arms are bodyless. Raise the pin deliberately in the PR that converts handlers, to the
+measured value, never to a predicted one. Scope rule: **new and touched endpoints only** — no sweep of the remaining
+legacy `Results.*` sites.
 
 ## 4. Errors and validation — do not import the upstream model
 
