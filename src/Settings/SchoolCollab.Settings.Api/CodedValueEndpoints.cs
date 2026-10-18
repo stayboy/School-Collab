@@ -21,7 +21,10 @@ public static class CodedValueEndpoints
         group.RequireAuthIfOidc(featureFlags);
 
         group
-            .MapCodedValueRoutes()
+            .MapCodedValueQueryRoutes()
+            .MapCodedValueCommandRoutes()
+            .MapCodedValueOverrideRoutes()
+            .MapCodedValueProvisionalRoutes()
             .MapCodedValueAttributeRoutes()
             .MapCodedValueAttributeDefinitionRoutes();
 

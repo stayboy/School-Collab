@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
@@ -13,7 +14,8 @@ public static class CodedValueAttributeRoutes
     {
         // ── Coded Value Attributes (per-key value set/remove) ───────────────────
 
-        group.MapPut("/{id:guid}/attributes/{key}", async (
+        group.MapPut("/{id:guid}/attributes/{key}",
+            async Task<Results<NoContent, NotFound, Conflict<MessageResponse>>> (
             Guid id,
             string key,
             [FromBody] AttributeValueRequest req,
@@ -23,19 +25,20 @@ public static class CodedValueAttributeRoutes
             try
             {
                 await handler.HandleAsync(new SetCodedValueAttribute(id, key, req.Value), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (CodedValueNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ConcurrencyException ex)
             {
-                return Results.Conflict(new { ex.Message });
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
         });
 
-        group.MapDelete("/{id:guid}/attributes/{key}", async (
+        group.MapDelete("/{id:guid}/attributes/{key}",
+            async Task<Results<NoContent, NotFound, Conflict<MessageResponse>>> (
             Guid id,
             string key,
             [FromServices] ICommandHandler<RemoveCodedValueAttribute> handler,
@@ -44,15 +47,15 @@ public static class CodedValueAttributeRoutes
             try
             {
                 await handler.HandleAsync(new RemoveCodedValueAttribute(id, key), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (CodedValueNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ConcurrencyException ex)
             {
-                return Results.Conflict(new { ex.Message });
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
         });
 
