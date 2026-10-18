@@ -39,25 +39,13 @@ public class SearchCodedValuesHandlerTests : IDisposable
     }
 
     [TestMethod]
-    public async Task HandleAsync_EmptySearchText_ReturnsEmptyArray()
+    public async Task HandleAsync_BlankSearchText_ReturnsEmptyArray()
     {
-        var result = await _handler.HandleAsync(new SearchCodedValues(""));
-
-        result.Should().BeEmpty();
-    }
-
-    [TestMethod]
-    public async Task HandleAsync_WhitespaceSearchText_ReturnsEmptyArray()
-    {
+        // One representative of the three former cases ("", "   ", null): IsNullOrWhiteSpace covers all
+        // three branches, and the HTTP boundary owns the contract test for a blank query
+        // (CodedValueQueryTests.Search_WithBlankText_Returns200EmptyArrayWithoutCallingTheHandler)
+        // — pruning round 2026-10-17, Q24.
         var result = await _handler.HandleAsync(new SearchCodedValues("   "));
-
-        result.Should().BeEmpty();
-    }
-
-    [TestMethod]
-    public async Task HandleAsync_NullSearchText_ReturnsEmptyArray()
-    {
-        var result = await _handler.HandleAsync(new SearchCodedValues(null!));
 
         result.Should().BeEmpty();
     }
@@ -65,8 +53,8 @@ public class SearchCodedValuesHandlerTests : IDisposable
     // Note: EF.Functions.ILike is PostgreSQL-specific and throws with the InMemory provider.
     // The search logic (pattern matching, parentId filtering, includeDisabled filtering)
     // is exercised in integration tests against a real PostgreSQL database.
-    // Unit tests verify the early-return logic for empty/whitespace/null input,
-    // and the constructor/DI wiring.
+    // This unit test verifies the early-return guard only; the HTTP-visible half of that guard
+    // lives in tests/SchoolCollab.Settings.Api.Tests.Unit/CodedValueQueryTests.cs.
 
     public void Dispose()
     {
