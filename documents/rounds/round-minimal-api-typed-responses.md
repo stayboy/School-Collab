@@ -1,6 +1,6 @@
 # Round — minimal-api-typed-responses
 
-**Status:** CLOSED — verified, **uncommitted** (no commit/PR per the repo gate)
+**Status:** CLOSED — verified; delivered on `feat/minimal-api-typed-responses`, PR #364
 **Tier:** 2 (light) · **Mode:** attended · **Provider:** clinepass · **Owner override:** Tier 2 for an endpoint/contract change, because the design was fully settled in spec D8–D15 and the contract delta is provably additive (D14)
 **Worker:** `cline-pass/deepseek-v4.1-flash` (`worker`) · **Reviewer:** `cline-pass/glm-5.3-flash` (`reviewer`, read-only) — substituted for the profile's `cline-pass/mimo-v2.6-flash`, absent from this session's registry; still ≠ the worker's model
 **Round base:** `8c135e57` (main). Dirty at round start: `documents/specs/minimal-api-typed-responses.md` untracked (the spec is the plan) and `documents/rounds/round-notification-templates-b1.md` — **another session's file, not this round's**, excluded from the patch.
@@ -81,5 +81,7 @@ body changed.
 2. `Assignments.Api` still cannot generate its OpenAPI document (`JsonException` on `System.Guid`) — pinned by
    `OpenApiSurfaceArchitectureTests`; its own round (parent spec §7.1).
 3. `AssignmentRoutes.cs` split (51 endpoints) remains deferred (parent spec D5).
-4. **Uncommitted** — nothing staged, no branch, no commit, no PR. The tree also contains another session's
-   `documents/rounds/round-notification-templates-b1.md`, which must not enter this round's commit.
+4. **Delivered** — three commits on `feat/minimal-api-typed-responses` (code split, tests, docs), opened as
+   PR [#364](https://github.com/stayboy/School-Collab/pull/364), not merged; this status line is the fourth
+   commit. The tree also contained another session's
+   `documents/rounds/round-notification-templates-b1.md`, which stayed out of this round's commits.
