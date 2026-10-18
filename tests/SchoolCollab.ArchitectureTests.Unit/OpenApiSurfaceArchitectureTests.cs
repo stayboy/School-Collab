@@ -47,15 +47,15 @@ public class OpenApiSurfaceArchitectureTests
     private const string DocumentPath = "/openapi/v1.json";
 
     /// <summary>
-    /// The measured baseline this round pins, per host: no operation in the repo documents a response
-    /// schema. Every handler returns the untyped <c>Results.*</c> factory (the repo has 0
-    /// <c>TypedResults</c> and 0 <c>.Produces&lt;T&gt;()</c> call sites), so OpenAPI emits
-    /// <c>responses: { "200": { description: … } }</c> and no <c>content</c>. Converting handlers is spec
-    /// decision D2 — new and touched endpoints only, never a sweep — so this pin must be raised
-    /// deliberately in the same PR that converts handlers; a conversion that leaves it at 0 means the pin
-    /// is stale.
+    /// The measured baseline each host pins: how many of its operations document a response schema
+    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>19 of 66</b> after the CodedValue
+    /// typed-response pilot (spec <c>minimal-api-typed-responses</c>); Students.Api measures
+    /// <b>0 of 146</b>, untouched by that pilot. Raise the number in the same PR that converts handlers —
+    /// a conversion that leaves it stale means the pin no longer describes the document.
     /// </summary>
-    private const int SchemaPin = 0;
+    private const int SettingsSchemaPin = 19;
+
+    private const int StudentsSchemaPin = 0;
 
     /// <summary>Strips an ASP.NET route constraint (<c>{id:guid}</c>) into the OpenAPI template (<c>{id}</c>).</summary>
     private static readonly Regex RouteConstraint = new(@"\{([^}:]+):[^}]*\}", RegexOptions.Compiled);
@@ -77,13 +77,15 @@ public class OpenApiSurfaceArchitectureTests
                 app.MapAssignmentPolicyEndpoints(flags);
                 app.MapSignatureConsentTextEndpoints(flags);
                 app.MapAssignmentAiPromptEndpoints(flags);
-            });
+            },
+            SettingsSchemaPin);
 
     [TestMethod]
     public async Task StudentsApi_DocumentCoversEveryMappedOperation()
         => await AssertDocumentCoversEveryMappedOperationAsync(
             "Students.Api",
-            app => app.MapStudentEndpoints(Flags(app)));
+            app => app.MapStudentEndpoints(Flags(app)),
+            StudentsSchemaPin);
 
     /// <summary>
     /// Assignments.Api cannot produce an OpenAPI document, so this test pins the defect instead of
@@ -137,7 +139,7 @@ public class OpenApiSurfaceArchitectureTests
     }
 
     private static async Task AssertDocumentCoversEveryMappedOperationAsync(
-        string hostName, Action<WebApplication> mapEndpoints)
+        string hostName, Action<WebApplication> mapEndpoints, int schemaPin)
     {
         await using var app = await StartHostAsync(mapEndpoints);
 
@@ -194,17 +196,17 @@ public class OpenApiSurfaceArchitectureTests
         operationsChecked.Should().BeGreaterThan(0,
             $"{hostName}'s document must contain at least one operation — otherwise the loop above asserted nothing");
 
-        // Debt ledger (spec D2/D7): measured 2026-10-17 at 0 of 66 operations for Settings.Api and 0 of 146
-        // for Students.Api. Raise the number in the same PR that converts handlers to TypedResults or chains
-        // .Produces<T>() — a conversion that leaves it at 0 means this pin is stale.
-        operationsWithSchema.Count.Should().Be(SchemaPin,
+        // Debt ledger (spec D2/D7). Raise the number in the same PR that converts handlers to TypedResults
+        // or chains .Produces<T>() — a conversion that leaves it stale means the pin is lying.
+        operationsWithSchema.Count.Should().Be(schemaPin,
             $"{hostName} documents a response schema for {operationsWithSchema.Count} of {operationsChecked} "
-            + "operations, but the pin records 0 (measured: 0 of 66 for Settings.Api, 0 of 146 for "
-            + "Students.Api). Every handler returns the untyped Results.* factory — the repo has 0 "
-            + "TypedResults and 0 .Produces<T>() call sites — so OpenAPI emits a response with a description "
-            + "and no content schema. Converting handlers is spec D2: new and touched endpoints only, never a "
-            + "sweep; raise this number deliberately in the same PR that converts handlers, because a "
-            + "conversion that leaves it at 0 means the pin is stale"
+            + $"operations, but the pin records {schemaPin}. Raise this number deliberately in the same PR "
+            + "that converts handlers, because a conversion that leaves it stale means the pin no longer "
+            + "describes the document. Raise it to the MEASURED count, never to a predicted one. Settings.Api "
+            + "(66 operations, measured 2026-10-17): 24 CodedValue operations converted — 12 document a "
+            + "200/201 body, 7 document a 400/409 message body only, and 5 return no body at all (recover, "
+            + "disable, enable, DELETE override, and the 4-arm approve kept on IResult) — so 12 + 7 = 19 of "
+            + "them document a schema. Students.Api was not converted and stays at 0 of 146"
             + (operationsWithSchema.Count > 0
                 ? $". First operations now documenting a schema: {string.Join("; ", operationsWithSchema.Take(3))}"
                 : string.Empty));
