@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
@@ -14,7 +15,8 @@ public static class CodedValueAttributeDefinitionRoutes
     {
         // ── Coded Value Attribute Definitions (per-key schema set/remove) ────────
 
-        group.MapPut("/{id:guid}/attribute-definitions/{key}", async (
+        group.MapPut("/{id:guid}/attribute-definitions/{key}",
+            async Task<Results<NoContent, NotFound, Conflict<MessageResponse>>> (
             Guid id,
             string key,
             [FromBody] AttributeDefinitionRequest req,
@@ -24,19 +26,20 @@ public static class CodedValueAttributeDefinitionRoutes
             try
             {
                 await handler.HandleAsync(new SetCodedValueAttributeDefinition(id, key, req.DisplayName, req.DataType, req.SourceCode, req.IsRequired, req.AllowMultiple, req.MinLength, req.MaxLength, req.RegexPattern), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (CodedValueNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ConcurrencyException ex)
             {
-                return Results.Conflict(new { ex.Message });
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
         });
 
-        group.MapDelete("/{id:guid}/attribute-definitions/{key}", async (
+        group.MapDelete("/{id:guid}/attribute-definitions/{key}",
+            async Task<Results<NoContent, NotFound, Conflict<MessageResponse>>> (
             Guid id,
             string key,
             [FromServices] ICommandHandler<RemoveCodedValueAttributeDefinition> handler,
@@ -45,15 +48,15 @@ public static class CodedValueAttributeDefinitionRoutes
             try
             {
                 await handler.HandleAsync(new RemoveCodedValueAttributeDefinition(id, key), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (CodedValueNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ConcurrencyException ex)
             {
-                return Results.Conflict(new { ex.Message });
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
         });
 
