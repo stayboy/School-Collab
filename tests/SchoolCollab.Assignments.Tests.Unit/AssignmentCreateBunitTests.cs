@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -295,15 +296,22 @@ public class AssignmentCreateBunitTests : BunitContext
     /// subject picker's options (and the derived signature default) follow.</summary>
     private static async Task AddGradeTargetAsync(IRenderedComponent<CreatePage> cut, string label)
     {
-        await cut.InvokeAsync(() =>
-        {
-            cut.Find("fluent-button[title='Add a target']").Click();
-            cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
-                .Single(m => m.Instance.AriaLabel == "Add a target")
-                .FindAll("fluent-menu-item")
-                .Single(i => i.TextContent.Trim() == "Add grade levels")
-                .MenuItemClick();
-        });
+        // Round B2c CI flake (2026-10-19, case-3 shape): v5 renders a FluentMenu's items only on the
+        // pass raised AFTER the kebab click, so reading them in the same statement chain let a loaded
+        // CI runner observe an empty menu — the click became a no-op, the dialog never opened and the
+        // wait below timed out with "Total render count across all components: 0". Click → settle →
+        // read (the AssignmentIndexBunitTests.OpenRowActionsAndReadItems shape, hardened there on
+        // 2026-10-06; this file kept the un-hardened form).
+        await cut.InvokeAsync(() => cut.Find("fluent-button[title='Add a target']").Click());
+
+        cut.WaitForAssertion(
+            () => TargetMenuItems(cut).Should().NotBeEmpty(
+                "the target menu renders its items on the pass after the kebab click"),
+            TimeSpan.FromSeconds(15));
+
+        await cut.InvokeAsync(() => TargetMenuItems(cut)
+            .Single(i => i.TextContent.Trim() == "Add grade levels")
+            .MenuItemClick());
 
         cut.WaitForAssertion(() =>
         {
@@ -314,6 +322,13 @@ public class AssignmentCreateBunitTests : BunitContext
                 "the grade target's effective subject list should have landed");
         }, DialogRoundTripBudget);
     }
+
+    /// <summary>The "Add a target" row-actions menu's items, read through the component that owns
+    /// them so the read is scoped to the right kebab (the file's pre-existing scoping).</summary>
+    private static IReadOnlyList<IElement> TargetMenuItems(IRenderedComponent<CreatePage> cut) =>
+        cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .Single(m => m.Instance.AriaLabel == "Add a target")
+            .FindAll("fluent-menu-item");
     /// <summary>Fills the Basics title through the bound text field's own callback — the create
     /// guards require a non-empty title before anything is posted.</summary>
     private static async Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title)
