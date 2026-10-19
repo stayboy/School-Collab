@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Admin.Shared.Components.RichText;
+using SchoolCollab.Core.RichText;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 

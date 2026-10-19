@@ -127,8 +127,12 @@ All three follow `.github/copilot/rules/ef-migrations.md`.
 - **`POST /assignments/{id}/deny`** — new; optional `Reason`.
 - Read DTOs (`AssignmentSummaryDto` / detail) gain `ApprovalReason`, `SubmittedAt`, `WindowExpiresAt`
   (derived); the policy endpoints (`GET/PUT /api/settings/assignment-policy`,
-  `GET/PUT /grade-levels/{id}/assignment-policy`) bind the fifth field with the Q7 range rule (non-positive ⇒ 400).
-- The grade-detail Assignment Policy card (`AssignmentPolicyEditor`) grows a fifth row, same editor dialog
+  `GET/PUT /grade-levels/{id}/assignment-policy`) bind the **new** field with the Q7 range rule (non-positive ⇒ 400).
+  Field-count note (2026-10-18): `AssignmentPolicyFields` has grown since this spec was written — it now
+  carries six members (`SignatureRequirement`, `RequiresApprovalBeforePublish`, `MaxPrimaryContacts`,
+  `MaxCopyContacts`, `MandatoryReview`, `ArchiveGraceDays`), so `ApprovalWindowDays` is the **seventh**,
+  not the fifth.
+- The grade-detail Assignment Policy card (`AssignmentPolicyEditor`) grows a row for the new field, same editor dialog
   pattern (§4 of `assignment-policy.md`).
 
 ## 6. Sweeps

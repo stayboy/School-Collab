@@ -56,7 +56,10 @@ public class BroadcasterRepublishTests
         db.Database.EnsureCreated();
 
         var broadcaster = new AssignmentNotificationBroadcaster(
-            db, new StubAddressResolver(), new RecordingPublisher(), TimeProvider.System,
+            db, new StubAddressResolver(), new RecordingPublisher(),
+            new NullNotificationTemplateResolver(), tenants,
+            Microsoft.Extensions.Options.Options.Create(new NotificationLinkOptions()),
+            TimeProvider.System,
             NullLogger<AssignmentNotificationBroadcaster>.Instance);
 
         return (db, broadcaster);
@@ -75,7 +78,7 @@ public class BroadcasterRepublishTests
 
         // First broadcast → one Queued Publish row.
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, [recipient]));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
         (await db.NotificationLogs.CountAsync()).Should().Be(1);
 
         // Simulate the Api drain delivering the row (attempt 1, terminal Sent).
@@ -86,7 +89,7 @@ public class BroadcasterRepublishTests
         // Republish with a refreshed deep-link token (the fresh F1-shaped re-broadcast).
         recipient.AttachDeepLink("tok-v2", DateTimeOffset.UtcNow.AddDays(7));
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, [recipient]));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
 
         // (c): still exactly ONE Publish row — the republish was an upsert in place.
         var rows = await db.NotificationLogs.ToListAsync();

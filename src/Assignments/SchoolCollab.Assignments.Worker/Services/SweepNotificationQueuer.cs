@@ -87,13 +87,13 @@ public static class SweepNotificationQueuer
                 {
                     var m = NotificationMessageBuilder.BuildReminderEmail(address, assignmentTitle, deepLinkToken!);
                     row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, m.Subject, m.BodyHtml, now);
+                        m.To, m.Subject, m.BodyHtml, null, now);
                 }
                 else
                 {
                     var m = NotificationMessageBuilder.BuildReminderSms(address, assignmentTitle, deepLinkToken!);
                     row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, NotificationMessageBuilder.BuildReminderSubject(assignmentTitle), m.Body, now);
+                        m.To, NotificationMessageBuilder.BuildReminderSubject(assignmentTitle), m.Body, null, now);
                 }
                 break;
             case NotificationKind.Completion:
@@ -101,13 +101,13 @@ public static class SweepNotificationQueuer
                 {
                     var m = NotificationMessageBuilder.BuildCompletionEmail(address, assignmentTitle, deepLinkToken!);
                     row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, m.Subject, m.BodyHtml, now);
+                        m.To, m.Subject, m.BodyHtml, null, now);
                 }
                 else
                 {
                     var m = NotificationMessageBuilder.BuildCompletionSms(address, assignmentTitle, deepLinkToken!);
                     row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, NotificationMessageBuilder.BuildCompletionSubject(assignmentTitle), m.Body, now);
+                        m.To, NotificationMessageBuilder.BuildCompletionSubject(assignmentTitle), m.Body, null, now);
                 }
                 break;
             case NotificationKind.Overdue:
@@ -115,13 +115,13 @@ public static class SweepNotificationQueuer
                 {
                     var m = NotificationMessageBuilder.BuildOverdueEmail(address, assignmentTitle, deepLinkToken!);
                     row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, m.Subject, m.BodyHtml, now);
+                        m.To, m.Subject, m.BodyHtml, null, now);
                 }
                 else
                 {
                     var m = NotificationMessageBuilder.BuildOverdueSms(address, assignmentTitle, deepLinkToken!);
                     row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, NotificationMessageBuilder.BuildOverdueSubject(assignmentTitle), m.Body, now);
+                        m.To, NotificationMessageBuilder.BuildOverdueSubject(assignmentTitle), m.Body, null, now);
                 }
                 break;
             default:
@@ -163,7 +163,7 @@ public static class SweepNotificationQueuer
         }
 
         var row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-            string.Empty, subject, string.Empty, now);
+            string.Empty, subject, string.Empty, null, now);
         row.MarkSkipped(reason, now);
         db.NotificationLogs.Add(row);
         await db.SaveChangesAsync(cancellationToken);

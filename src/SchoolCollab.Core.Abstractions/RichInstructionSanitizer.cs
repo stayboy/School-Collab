@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using Ganss.Xss;
 
-namespace SchoolCollab.Admin.Shared.Components.RichText;
+namespace SchoolCollab.Core.RichText;
 
 /// <summary>
 /// The ONE sanitiser for authored instruction HTML (§8.4 Q11/Q15, round <c>wysiwyg-instruction-editor</c>):
@@ -16,6 +16,11 @@ namespace SchoolCollab.Admin.Shared.Components.RichText;
 /// <para>Plain text is untouched (Q16): legacy instructions keep rendering exactly as before. A bare
 /// "&lt;" or "&gt;" is not markup, so the text survives — entity-encoded rather than dropped, which
 /// renders character-for-character what the author typed.</para>
+///
+/// <para>Round <c>notification-templates-b1</c>: relocated from
+/// <c>SchoolCollab.Admin.Shared/Components/RichText/</c> (Q-D) so the §3.12 render-time re-sanitize in
+/// <c>Assignments.Core</c> can call the SAME class — one sanitizer, two applications, no forked
+/// allow-list. The class is pure text logic; the component-library placement was historical.</para>
 /// </summary>
 public static class RichInstructionSanitizer
 {

@@ -160,14 +160,18 @@ public static class ContactRoutes
             Results.Ok(await handler.HandleAsync(new ListContactAuditEntries(
                 contactId, ownerType, ownerId, skip ?? 0, take ?? 50), ct)));
 
-        // Cross-BC resolver contract (spec §9 G5).
+        // Cross-BC resolver contract (spec §9 G5). `studentId` (round
+        // notification-templates-b1, §3.4) names the ward so the response's StudentName is the
+        // right one for a guardian linked to several students; omit it and the name degrades
+        // to null.
         group.MapGet("/subscribed", async (
             ContactOwnerType ownerType,
             Guid? ownerId,
             SubscriptionScope? scope,
+            Guid? studentId,
             [FromServices] IQueryHandler<ListSubscribedContacts, SubscribedContactDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListSubscribedContacts(ownerType, ownerId, scope), ct)));
+            Results.Ok(await handler.HandleAsync(new ListSubscribedContacts(ownerType, ownerId, scope, studentId), ct)));
 
         group.MapGet("/{id:guid}/subscription", async (
             Guid id,

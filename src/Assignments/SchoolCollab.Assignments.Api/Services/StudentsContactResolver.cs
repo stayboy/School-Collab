@@ -17,6 +17,10 @@ namespace SchoolCollab.Assignments.Api.Services;
 /// gone — publish resolves its students from the authored targets and refuses an empty set before
 /// reaching this resolver, so the by-grade path was dead. The teacher-cohort leg now runs once per
 /// distinct grade target (fail-open per grade).</para>
+/// <para>Round notification-templates-b1 (§3.4): the same <c>contacts/subscribed</c> response that
+/// carries a subscriber's channel/role now also carries <c>ContactName</c>/<c>StudentName</c>, which
+/// ride into <see cref="SubscriberInfo"/> — name enrichment costs no extra hop, and each name
+/// degrades to <see cref="string.Empty"/> when the Students side does not know it.</para>
 /// </summary>
 public sealed class StudentsContactResolver(
     IHttpClientFactory httpClientFactory,
@@ -80,8 +84,12 @@ public sealed class StudentsContactResolver(
             SubscribedContactDto[] contacts;
             try
             {
+                // The ward id rides the call (§3.4) so a guardian linked to several students
+                // gets the name of the ward THIS recipient row is for. Still one call — the
+                // name enrichment costs no extra hop.
+                var wardQuery = studentId is null ? string.Empty : $"&studentId={studentId}";
                 contacts = await client.GetFromJsonAsync<SubscribedContactDto[]>(
-                    $"contacts/subscribed?ownerType={(int)ownerType}&ownerId={ownerId}&scope={(int)request.Scope}",
+                    $"contacts/subscribed?ownerType={(int)ownerType}&ownerId={ownerId}&scope={(int)request.Scope}{wardQuery}",
                     cancellationToken)
                     ?? [];
             }
@@ -92,7 +100,10 @@ public sealed class StudentsContactResolver(
             }
 
             foreach (var c in contacts)
-                result.Add(new SubscriberInfo(c.Id, ownerType, ownerId, studentId, c.Channel, c.Role));
+                result.Add(new SubscriberInfo(
+                    c.Id, ownerType, ownerId, studentId, c.Channel, c.Role,
+                    ContactName: c.ContactName ?? string.Empty,
+                    StudentName: c.StudentName ?? string.Empty));
         }
 
         return result;

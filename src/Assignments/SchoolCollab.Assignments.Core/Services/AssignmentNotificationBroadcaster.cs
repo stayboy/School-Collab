@@ -1,11 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services.Delivery;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Notifications;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Services;
 
@@ -19,6 +21,12 @@ namespace SchoolCollab.Assignments.Core.Services;
 /// <see cref="NotificationLog"/> row (decision (e): one message per contact, not per
 /// ward and not per channel duplicate).
 ///
+/// <para>Round notification-templates-b1: rendering goes through the
+/// <see cref="INotificationTemplateResolver"/> (cross-context, fail-open to the built-in
+/// defaults) and the pure <see cref="NotificationTemplateRenderer"/>; the resolved
+/// template id is persisted on the row as the send-time record of what rendered. The
+/// resolver is called once per channel per broadcast, never per recipient.</para>
+///
 /// <para>Recipients without an unexpired deep-link token — or with no resolvable
 /// address — are recorded <see cref="NotificationDeliveryStatus.Skipped"/> with a
 /// reason and are never sent (decision (c)).</para>
@@ -27,6 +35,9 @@ public sealed class AssignmentNotificationBroadcaster(
     AssignmentsDbContext db,
     IContactAddressResolver addressResolver,
     IIntegrationEventPublisher publisher,
+    INotificationTemplateResolver templateResolver,
+    ITenantProvider tenantProvider,
+    IOptions<NotificationLinkOptions> linkOptions,
     TimeProvider timeProvider,
     ILogger<AssignmentNotificationBroadcaster> logger) : IAssignmentNotificationBroadcaster
 {
@@ -40,6 +51,11 @@ public sealed class AssignmentNotificationBroadcaster(
             cancellationToken);
 
         var now = timeProvider.GetUtcNow();
+        // One Settings read per channel per broadcast — never per recipient (§3.3's
+        // resolution posture; the resolver's fail-open contract yields null → built-in
+        // defaults). SchoolName comes from the tenant context, in-process (Q-C / §3.4).
+        var templateCache = new Dictionary<NotificationChannel, ResolvedNotificationTemplate?>();
+        var schoolName = tenantProvider.GetTenantContext().TenantName;
         foreach (var recipient in context.Recipients)
         {
             // E3 (ar-19): republish upsert-in-place. If a Publish row already exists
@@ -54,7 +70,7 @@ public sealed class AssignmentNotificationBroadcaster(
                     && x.Kind == NotificationKind.Publish,
                     cancellationToken);
 
-            var log = await QueueForRecipientAsync(existing, context, recipient, now, cancellationToken);
+            var log = await QueueForRecipientAsync(existing, context, recipient, templateCache, schoolName, now, cancellationToken);
             // An existing Publish row is already tracked (upserted in place above); only
             // brand-new rows are added — re-`Add`-ing a tracked row would force a second insert.
             if (db.Entry(log).State == EntityState.Detached)
@@ -77,6 +93,8 @@ public sealed class AssignmentNotificationBroadcaster(
         NotificationLog? existing,
         AssignmentPublishedContext context,
         AssignmentRecipient recipient,
+        Dictionary<NotificationChannel, ResolvedNotificationTemplate?> templateCache,
+        string schoolName,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -118,34 +136,57 @@ public sealed class AssignmentNotificationBroadcaster(
                 "no delivery address resolved", now);
         }
 
-        if (recipient.Channel == Students.Core.Domain.ContactChannel.Email)
+        // Resolve the tenant template for this channel once per broadcast (cache), then
+        // render — fail-open to the built-in defaults when the Settings read yields null.
+        var channel = (NotificationChannel)(int)recipient.Channel;
+        if (!templateCache.TryGetValue(channel, out var template))
         {
-            var message = NotificationMessageBuilder.BuildPublishEmail(address, context.Title, token!);
-            return QueueOrUpdate(existing, context, recipient, message.To, message.Subject, message.BodyHtml, now);
+            template = await templateResolver.ResolveAsync(
+                NotificationKind.Publish, channel, recipient.TenantId, cancellationToken);
+            templateCache[channel] = template;
         }
 
-        // SMS / WhatsApp share one text body (no provider in v1 — LogAndSkipSmsSender).
-        var sms = NotificationMessageBuilder.BuildPublishSms(address, context.Title, token!);
-        return QueueOrUpdate(existing, context, recipient, sms.To,
-            NotificationMessageBuilder.BuildPublishSubject(context.Title), sms.Body, now);
+        var tagValues = new NotificationTagValues
+        {
+            AssignmentTitle = context.Title,
+            Description = context.Description,
+            DueDate = context.DueDate,
+            Instructions = context.Instructions,
+            // §3.4 enrichment: names arrive on the recipient from the publish-time Students
+            // read; anything unresolved is string.Empty, so a missing name never fails the send.
+            ContactName = recipient.ContactDisplayName,
+            // §3.2 {{GuardianRole}}: the role rides the recipient row (Primary/CC); a
+            // student-owned recipient has no guardian link, so the role is null → empty.
+            GuardianRole = recipient.Role?.ToString() ?? string.Empty,
+            StudentName = recipient.StudentDisplayName,
+            SchoolName = schoolName,
+            Link = BuildLink(recipient.DeepLinkToken!),
+            LinkExpiry = recipient.DeepLinkExpiresAt,
+        };
+        var rendered = NotificationTemplateRenderer.Render(NotificationKind.Publish, channel, template, tagValues);
+        return QueueOrUpdate(existing, context, recipient, address, rendered, now);
     }
+
+    /// <summary>The recipient's link target: relative <c>/deeplink/{token}</c> by default;
+    /// absolute when the Families public base URL is configured (S1's AppHost parameter —
+    /// email clients cannot resolve relative links, so the deployment posture decides).</summary>
+    private string BuildLink(string token) => linkOptions.Value.BuildDeepLink(token);
 
     private static NotificationLog QueueOrUpdate(
         NotificationLog? existing,
         AssignmentPublishedContext context,
         AssignmentRecipient recipient,
         string toAddress,
-        string subject,
-        string bodyHtml,
+        RenderedMessage rendered,
         DateTimeOffset now)
     {
         // E3 (ar-19): existing Publish row → re-queue in place (freshest deep-link
         // payload wins); none → insert the standard Queued row. Single path — only
         // re-queue an already-existing row, otherwise the fresh row stands.
-        var log = ExistingOrNew(existing, context, recipient, toAddress, subject, bodyHtml, now);
+        var log = ExistingOrNew(existing, context, recipient, toAddress, rendered.Subject, rendered.Body, rendered.TemplateId, now);
         if (existing is not null)
         {
-            log.Requeue(toAddress, subject, bodyHtml, now);
+            log.Requeue(toAddress, rendered.Subject, rendered.Body, rendered.TemplateId, now);
         }
         return log;
     }
@@ -160,8 +201,9 @@ public sealed class AssignmentNotificationBroadcaster(
         DateTimeOffset now)
     {
         // Skipped rows never carry a rendered body — pass string.Empty so the persisted
-        // row stays empty; `reason` is recorded on FailureReason, not the body.
-        var log = ExistingOrNew(existing, context, recipient, toAddress, subject, string.Empty, now);
+        // row stays empty; `reason` is recorded on FailureReason, not the body. No
+        // TemplateId: the skip is a policy outcome, not a rendered message.
+        var log = ExistingOrNew(existing, context, recipient, toAddress, subject, string.Empty, templateId: null, now);
         // Existing or new, a skip re-stamps the same outcome (re-broadcast that is still
         // unroutable reuses the row, never a fresh insert).
         log.MarkSkipped(reason, now);
@@ -175,6 +217,7 @@ public sealed class AssignmentNotificationBroadcaster(
         string toAddress,
         string subject,
         string bodyHtml,
+        Guid? templateId,
         DateTimeOffset now)
     {
         if (existing is not null)
@@ -192,6 +235,7 @@ public sealed class AssignmentNotificationBroadcaster(
             toAddress,
             subject,
             bodyHtml,
+            templateId,
             now);
         return log;
     }

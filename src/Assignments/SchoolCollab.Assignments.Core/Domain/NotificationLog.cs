@@ -58,6 +58,14 @@ public sealed class NotificationLog : BaseTenantEntityWithAudit
     public string BodyHtml { get; private set; } = string.Empty;
 
     /// <summary>
+    /// The Settings template that rendered this payload (round notification-templates-b1,
+    /// spec §3.6): the send-time record of which template produced the message.
+    /// <see langword="null"/> = built-in default — including rows queued before templates
+    /// existed, which were rendered by the then-current default (audit-accurate).
+    /// </summary>
+    public Guid? TemplateId { get; private set; }
+
+    /// <summary>
     /// Queues a notification with its already-rendered payload. The row starts
     /// <see cref="NotificationDeliveryStatus.Queued"/> with <c>Attempt = 0</c> and is
     /// immediately due (<paramref name="now"/>).
@@ -72,6 +80,7 @@ public sealed class NotificationLog : BaseTenantEntityWithAudit
         string toAddress,
         string subject,
         string bodyHtml,
+        Guid? templateId,
         DateTimeOffset now)
     {
         var log = new NotificationLog(tenantId)
@@ -87,6 +96,7 @@ public sealed class NotificationLog : BaseTenantEntityWithAudit
             ToAddress = toAddress,
             Subject = subject,
             BodyHtml = bodyHtml,
+            TemplateId = templateId,
         };
         return log;
     }
@@ -136,7 +146,7 @@ public sealed class NotificationLog : BaseTenantEntityWithAudit
     /// index. Transitions a previously <c>Skipped</c> row back to <c>Queued</c> — the
     /// republish decision is a fresh queued decision, so a skip whose address now
     /// resolves is deliberately revived.</summary>
-    public void Requeue(string toAddress, string subject, string bodyHtml, DateTimeOffset now)
+    public void Requeue(string toAddress, string subject, string bodyHtml, Guid? templateId, DateTimeOffset now)
     {
         Attempt = 0;
         DeliveryStatus = NotificationDeliveryStatus.Queued;
@@ -146,6 +156,7 @@ public sealed class NotificationLog : BaseTenantEntityWithAudit
         ToAddress = toAddress;
         Subject = subject;
         BodyHtml = bodyHtml;
+        TemplateId = templateId;
         UpdatedAt = now;
     }
 }

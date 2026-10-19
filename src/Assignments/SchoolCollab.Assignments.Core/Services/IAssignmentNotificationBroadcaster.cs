@@ -18,9 +18,16 @@ public interface IAssignmentNotificationBroadcaster
 /// <summary>Context for a publish broadcast (spec §4.6). The recipient set is
 /// already deduplicated by contact (one <see cref="AssignmentRecipient"/> per
 /// subscribed contact); v1.1 will expand this into per-contact consolidated
-/// notifications listing the affected wards.</summary>
+/// notifications listing the affected wards.
+/// <para>Round notification-templates-b1 (Q-E): the assignment-content fields the
+/// renderer's tag values need ride the existing in-process record — the publish handler
+/// already holds the entity, so widening adds zero extra reads. The outbox integration
+/// event keeps its own (smaller) shape.</para></summary>
 public sealed record AssignmentPublishedContext(
     Guid AssignmentId,
     string Title,
     DateTimeOffset PublishedAt,
+    string? Description,
+    DateTimeOffset? DueDate,
+    string? Instructions,
     IReadOnlyList<AssignmentRecipient> Recipients);

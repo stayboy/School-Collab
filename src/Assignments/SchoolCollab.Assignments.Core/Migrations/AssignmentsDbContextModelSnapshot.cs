@@ -957,6 +957,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("character varying(512)")
                         .HasColumnName("subject");
 
+                    b.Property<Guid?>("TemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("template_id");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");

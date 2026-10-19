@@ -68,7 +68,14 @@ public sealed class PublishAssignmentCommandHandler(
         var broadcastRecipients = NotificationRecipientFilter.Apply(
             recipients, effectivePolicy, assignmentPolicy);
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, broadcastRecipients),
+            new AssignmentPublishedContext(
+                assignment.Id,
+                assignment.Title,
+                assignment.PublishedAt ?? assignment.UpdatedAt,
+                assignment.Description,
+                assignment.DueDate,
+                assignment.Instructions,
+                broadcastRecipients),
             cancellationToken);
 
         await repository.UpdateAsync(assignment, cancellationToken);
@@ -184,6 +191,9 @@ public sealed class PublishAssignmentCommandHandler(
                 var recipient = AssignmentRecipient.Create(
                     tenantId, assignment.Id, s.OwnerType, s.OwnerId, s.StudentId,
                     s.ContactId, s.Channel, s.Role, notifyOnBroadcast: true, subscriptionActive: true);
+                // §3.4: enrichment names ride the in-process recipient into the broadcaster's
+                // render; empty when the Students response did not carry them.
+                recipient.AttachDisplayNames(s.ContactName, s.StudentName);
                 // WS-E1 (ar-14-deep-links): a new recipient ALWAYS mints a deep-link
                 // token at publish, independent of the EnableDeepLinks flag.
                 var fresh = minter.Mint(recipient, linkValidityDays, DateTimeOffset.UtcNow);
@@ -204,6 +214,7 @@ public sealed class PublishAssignmentCommandHandler(
                 }
                 existing.MarkSubscribed(true);
                 submissionRepository.Update(existing);
+                existing.AttachDisplayNames(s.ContactName, s.StudentName);
                 recipients.Add(existing);
             }
         }

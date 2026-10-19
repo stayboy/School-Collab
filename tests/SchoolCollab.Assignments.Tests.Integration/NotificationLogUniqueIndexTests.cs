@@ -83,5 +83,6 @@ public sealed class NotificationLogUniqueIndexTests
             "guardian@example.com",
             kind == NotificationKind.Publish ? "New assignment" : "Reminder",
             body,
+            null,
             DateTimeOffset.UtcNow);
 }

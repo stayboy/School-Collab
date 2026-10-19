@@ -20,6 +20,10 @@ public interface IContactResolver
 /// context. <see cref="StudentId"/> ties the contact back to the student it
 /// concerns (the ward), which drives both the per-contact recipient row and the
 /// per-(assignment, student) guardian submission gate.
+/// <para><see cref="ContactName"/> / <see cref="StudentName"/> are the spec §3.4 enrichment
+/// names (round notification-templates-b1): they arrive on the same Students response, and
+/// each degrades to <see cref="string.Empty"/> when the name is absent — a name that cannot
+/// be resolved never fails the publish.</para>
 /// </summary>
 public sealed record SubscriberInfo(
     Guid ContactId,
@@ -27,7 +31,9 @@ public sealed record SubscriberInfo(
     Guid OwnerId,
     Guid? StudentId,
     ContactChannel Channel,
-    GuardianRole? Role);
+    GuardianRole? Role,
+    string ContactName = "",
+    string StudentName = "");
 
 /// <summary>
 /// Request to resolve publish recipients. Provide an explicit <see cref="StudentIds"/> roster
