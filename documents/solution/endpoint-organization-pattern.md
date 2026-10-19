@@ -150,9 +150,11 @@ group.MapGet("/{id:guid}", async Task<Results<Ok<CodedValueDto>, NotFound>> (
   names and order (`IdResponse`, `MessageResponse`, `BulkCreateResponse`) so the JSON stays byte-identical, and assert
   the body text in a test.
 - Preserve `Created` location strings verbatim; never introduce `ProblemDetails` while converting (§7.1).
-- `OpenApiSurfaceArchitectureTests` pins the count of operations documenting a schema per host — **19 of 66** for
-  Settings after the pilot (12 with a 200/201 body + 7 with only a 400/409 message body), Students 0 of 146. A 4xx arm
-  **with a payload counts**; raise the pin deliberately, to the measured value.
+- `OpenApiSurfaceArchitectureTests` pins the count of operations documenting a schema per host — Settings is now
+  **complete at 50 of 66** (24 pilot + 28 with a 200/201 body + 3 with only a 400/409 message body), Students 0 of 146.
+  A 4xx arm **with a payload counts**; a handler declared `IResult` documents **nothing** (so the >3-arm fallback costs
+  that operation its schema); and `TypedResults.Json(value, statusCode:)` documents nothing either — `BadRequest(value)`
+  is wire-identical at 400 and does. Raise the pin deliberately, to the measured value.
 
 ### Specialty template
 

@@ -105,11 +105,22 @@ Rules that cost a compile cycle if you learn them the hard way:
   (`endpoint-organization-pattern.md` §7.1).
 
 **The pin.** `OpenApiSurfaceArchitectureTests` counts operations that document at least one response schema, per host,
-and pins the number. After the CodedValue pilot it is **19 of 66 Settings operations** (12 document a 200/201 body,
-7 a 400/409 message body only, 5 have no body at all), Students 0 of 146. A 409/400 arm **with a payload documents
-`content`** — do not assume 4xx arms are bodyless. Raise the pin deliberately in the PR that converts handlers, to the
-measured value, never to a predicted one. Scope rule: **new and touched endpoints only** — no sweep of the remaining
+and pins the number. Settings is now **complete at 50 of 66** (24 pilot + 28 with a 200/201 body + 3 whose only body is a
+400/409 message); the remaining 16 document nothing — 5 from the pilot and 11 this round, of which 9 genuinely have no
+body and 2 are 4-arm handlers kept on `IResult`. Raise the pin deliberately in the PR that converts handlers, to the
+measured value, never a predicted one. Scope rule: **new and touched endpoints only** — no sweep of the remaining
 legacy `Results.*` sites.
+
+Rules that cost a compile cycle or a wrong pin:
+
+- A **4xx arm with a payload documents `content`** — do not assume 4xx arms are bodyless.
+- A handler declared **`IResult` documents nothing**, however many typed arms it builds internally. That is the price of
+the >3-arm fallback, and it is why those operations never count.
+- **`TypedResults.Json(value, statusCode: n)` does not document its response** (`JsonHttpResult<T>` carries no metadata).
+  When the envelope is a plain JSON object, `TypedResults.BadRequest(value)` is wire-identical at 400 and *does*
+  document it — prefer it unless you genuinely need custom `JsonSerializerOptions`.
+- Two distinct 4xx envelopes exist in this host: `{"message":…}` (`MessageResponse`) and `{"error":…}`
+  (`ErrorResponse`). Do not normalise one into the other when naming payloads — the key is the wire contract.
 
 ## 4. Errors and validation — do not import the upstream model
 
