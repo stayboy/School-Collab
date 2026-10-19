@@ -161,7 +161,52 @@ jobs:
         working-directory: src/SchoolCollab.AuthPortal
         run: uv run pytest
 
+  mobile-changes:
+    # PATH FILTER (owner, 2026-10-18 — Q52 option (b)). The MAUI job costs ~10 minutes on
+    # windows-latest and the mobile project is not feature-ready, so it now runs ONLY when a
+    # change can plausibly break the Blazor Hybrid head. This filter job costs seconds and always
+    # reports, so the `Mobile (MAUI)` check name stays stable — no required-check edits, and no
+    # third-party path-filter action. Fail-open: an unresolvable base runs the real build.
+    name: Mobile change filter
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect mobile-relevant changes
+        id: filter
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_BASE_SHA:-}" ]; then
+            base="$PR_BASE_SHA"
+          else
+            base="${PUSH_BEFORE_SHA:-}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "Base commit unresolvable — running the mobile build (fail-open)."
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" "$GITHUB_SHA" || true)
+          echo "Changed files:"; echo "$changed"
+          # The mobile head, every shared component it consumes, central package/build pins (a
+          # version bump is exactly how the FluentUI 5.0.1 break reached the head), and this
+          # workflow itself.
+          if echo "$changed" | grep -Eq '^(src/Mobile/|src/SchoolCollab\.Admin\.Shared/|Directory\.Packages\.props$|Directory\.Build\.props$|\.github/workflows/ci\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   mobile:
+    needs: mobile-changes
     # DISABLED (owner, 2026-10-10) — skipped until the mobile work stabilises. The job is NOT
     # deleted on purpose: the notes below are the record of what it builds and why, and the
     # spec's acceptance item ("the `mobile` CI job exists") stays true while it is skipped.
@@ -171,7 +216,8 @@ jobs:
     # RE-ENABLE, no code change needed:
     #     gh variable set ENABLE_MAUI_CI --body true
     # Unset, empty, or any other value = skipped. Delete this gate once the mobile work is stable.
-    if: ${{ vars.ENABLE_MAUI_CI == 'true' }}
+    # Since 2026-10-18 it ALSO needs a mobile-relevant change to have been detected (Q52 (b)).
+    if: ${{ vars.ENABLE_MAUI_CI == 'true' && needs.mobile-changes.outputs.relevant == 'true' }}
 
     # The Blazor Hybrid head cannot build on ubuntu — its TFMs are device platforms — and it is
     # deliberately absent from SchoolCollab.slnx, so `build-and-test` never sees it. This job
