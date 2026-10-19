@@ -1,6 +1,6 @@
 # Round — minimal-api-typed-responses-settings
 
-**Status:** CLOSED — verified, **uncommitted** (no commit/PR per the repo gate)
+**Status:** CLOSED — verified; delivered on `feat/minimal-api-typed-responses-settings`, PR #365
 **Tier:** 2 (light) · **Mode:** attended · **Provider:** clinepass · **Owner override:** Tier 2 for an endpoint/contract change — the pattern and its traps were measured and reviewed in PR #364; this round repeats that template over 42 routes (spec D22)
 **Worker:** `cline-pass/deepseek-v4.1-flash` (`worker`) · **Reviewer:** `cline-pass/glm-5.3-flash` (`reviewer`, read-only) — profile substitute (`cline-pass/mimo-v2.6-flash` absent from the registry); still ≠ the worker's model
 **Round base:** `4fb36f28` (main, after PR #364). Dirty at start: the spec (the plan) plus two **other-session** round docs, never staged.
@@ -79,5 +79,6 @@ which cannot carry response types.
 3. Schema-*content* assertions were deferred until this round landed — the document is now stable enough to pin
    `CodedValueDto`'s properties; not done here.
 4. P2-4: `OpenApiSurfaceArchitectureTests` does not assert `operationsChecked == 66`.
-5. **Uncommitted** — nothing staged, no branch, no commit, no PR. The tree also carries two other-session round docs
-   (`round-notification-templates-b1.md`, `plan-review-b1.packet.md`) that must not enter this round's commit.
+5. **Delivered** on branch `feat/minimal-api-typed-responses-settings`, PR #365 (three commits: code, tests, docs+artifacts).
+   The tree also carries two other-session round docs (`round-notification-templates-b1.md`, `plan-review-b1.packet.md`)
+   that must never be staged — they did not enter any commit on this branch.
