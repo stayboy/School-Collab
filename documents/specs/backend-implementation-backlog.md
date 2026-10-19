@@ -546,3 +546,22 @@ Sprint 7 (integration + verification) runs after Sprints 1–6.
 | Sprint 5 — Assignment↔Group + Publish | Sprint 5 — Assignments UI |
 | Sprint 6 — Subject/Topic Bridge Alignment | Sprint 4 — Subject/Topic Alignment |
 | Sprint 7 — Integration + Verification | Sprint 6 — Verification & Polish |
+
+---
+
+## Dependency advisories — deferred (2026-10-19)
+
+`dotnet build` surfaces five NuGet advisories. The two that reach **production** were closed by the
+2026-10-19 bump — `System.Security.Cryptography.Xml` 10.0.10 → 10.0.13, plus a direct
+`System.Security.Cryptography.Pkcs` 10.0.13 reference in `Assignments.Core` lifting MailKit 4.18's
+transitive floor. The remainder hang off **tooling and test** packages, where an override is a
+compatibility gamble against the versions the parent was compiled with:
+
+| Package | Advisory | Pulled by | Why deferred |
+|---|---|---|---|
+| `SSH.NET` 2025.1.0 | high ×2 (`GHSA-mggc-4xg6-vcxf`, `GHSA-q939-rpr3-3284`) | `Testcontainers` 4.12.0 → the three integration-test projects | Test-only; needs a Testcontainers release carrying a patched SSH.NET. **P2** |
+| `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 | high | AppHost / Core.Tests.Unit | Native sqlite blob for local AppHost tooling; bump rides the Aspire/SQLite parent. **P2** |
+| `MessagePack` 2.5.302 | moderate | `Aspire.Hosting` 13.5.4 → StreamJsonRpc 2.25.29 | AppHost-only RPC serialization; rides the next Aspire bump. **P2** |
+
+Re-derive the chains with `dotnet nuget why <project.csproj> <package>` before acting — parents
+re-ship and this table is a snapshot, not a contract. None has a production call path.

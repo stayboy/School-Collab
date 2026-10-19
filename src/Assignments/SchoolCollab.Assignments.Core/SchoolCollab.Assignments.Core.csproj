@@ -17,6 +17,8 @@
   <ItemGroup>
     <PackageReference Include="EFCore.NamingConventions" />
     <PackageReference Include="MailKit" />
+    <!-- Lifts MailKit's transitive Pkcs 10.0.0 to the patched 10.0.13 (see Directory.Packages.props). -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
