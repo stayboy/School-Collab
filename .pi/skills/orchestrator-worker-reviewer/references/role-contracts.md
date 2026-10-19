@@ -112,11 +112,18 @@ repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
    secrets, CPM/version rules: is the plan's in/out boundary honest, and does
    its expected-files list stay inside it?
 3. **Acceptance honesty** — would each test the plan calls "discriminating"
-   actually fail against the pre-fix code? Name every one that cannot fail.
+   actually fail against the pre-fix code? Name every one that cannot fail. A test is
+   *proved* discriminating only when it has been run against the pre-fix base and failed;
+   anything less is an opinion, and "acceptance honesty: ok" is not evidence.
 4. **Security posture** — auth schemes, claim handling, token validation,
    credential handling, tenant isolation: any hole in the planned approach?
 5. **Pinned decisions** — does the plan contradict a decision the owner pinned,
    or silently re-open something declared out of scope?
+6. **Artifact vs source (2026-10-18)** — when the round delivers a *copy* of an existing file
+   (a doc layer, a wire mirror, a relocated type), verify the committed bytes against the source
+   they came from. A brief or plan describing the artefact is a claim, not evidence: a doc layer
+   once shipped stale reviewer rows that contradicted its own headline because the copy was
+   trusted instead of diffed.
 
 Return ONLY:
 
