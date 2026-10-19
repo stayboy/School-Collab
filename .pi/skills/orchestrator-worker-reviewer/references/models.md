@@ -92,13 +92,13 @@ before every dispatch — a stale local store can still list a model the provide
    **per-mode model sets** above (solo / light / Tier 3), owner-overridden
    2026-09-16; the pi-profile reviewer default was replaced 2026-09-22 and
    **Option A was applied 2026-09-22**). Light and Tier 3 now run the SAME set:
-   worker `ollama-cloud/deepseek-v4.1-flash:1017`, orchestrator `glm-5.3-flash`, reviewer
-   `glm-5.3-flash` (owner 2026-10-18), acceptance `deepseek-v4-pro:0813` — the verifier never
+   worker `ollama-cloud/deepseek-v4.1-flash:1017`, orchestrator `glm-5.3-flash`, diff reviewer
+   `deepseek-v4-pro:0813` (owner 2026-10-18), acceptance `deepseek-v4-pro:0813` — the verifier never
    shares the implementer's model, and acceptance is independent of both. Tier 3 differs only by the UI tester and the
-   full-round `glm-5.3:cloud` plan-review; lean rounds skip the accept-run. **Plan-review (step 2b):** full rounds run
-   `glm-5.3:cloud`; lean rounds run the **reviewer seat** (`glm-5.3-flash`) —
-   **the plan gate must never share the worker's model** (owner 2026-10-17, superseding the
-   2026-09-24 "worker's model" exception; reviewer seat re-ruled 2026-10-18). Either is subject to a user-named override (item 1). **Acceptance (step 5)** is its own seat: `ollama-cloud/deepseek-v4-pro:0813` on the pi profile (owner 2026-10-18), so acceptance is independent of worker and reviewer.
+   plan-review, which runs `glm-5.3:cloud` on **every** tier (owner 2026-10-18); lean rounds skip the accept-run.
+   **Plan-review (step 2b):** `glm-5.3:cloud` on every tier, lean and full alike —
+   **the plan gate must never share the worker's model, and never drops to the fast generalist**
+   (owner 2026-10-18, superseding the 2026-10-17 lean-on-reviewer-seat ruling). Subject to a user-named override (item 1). **Acceptance (step 5)** is its own seat: `ollama-cloud/deepseek-v4-pro:0813` on the pi profile (owner 2026-10-18), so acceptance is independent of worker and reviewer.
 5. **Cline**: always `clinepass` (cannot resolve `ollama` ids) — an exception,
    not an override.
 
@@ -167,7 +167,7 @@ agent definitions via `agent: "<name>"` (builtin
 |---|---|
 | 1 | Worker model only — no orchestrator/reviewer/tester models at all |
 | 2 | Worker + reviewer code specialist |
-| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **full → `glm-5.3:cloud`**, lean → the **reviewer seat `glm-5.3-flash`** — never the worker's model (owner 2026-10-17; reviewer seat re-ruled 2026-10-18). Pi-profile worker pinned to `ollama-cloud/deepseek-v4.1-flash:1017`; acceptance seat `ollama-cloud/deepseek-v4-pro:0813` |
+| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **`glm-5.3:cloud` on every tier**, lean and full alike — never the worker's model (owner 2026-10-18). Pi-profile worker pinned to `ollama-cloud/deepseek-v4.1-flash:1017`; acceptance seat `ollama-cloud/deepseek-v4-pro:0813` |
 
 Rationale: tiers exist to keep simple tasks cheap — never pay for model
 round-trips (or roles) a task does not need.
