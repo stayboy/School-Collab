@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
@@ -17,16 +18,17 @@ public static class NotificationPolicyRoutes
     public static RouteGroupBuilder MapNotificationPolicyRoutes(this RouteGroupBuilder group)
     {
         // ── Get the tenant's global default policy (null when unset) ──
-        group.MapGet("/notification-policy", async (
+        group.MapGet("/notification-policy", async Task<Results<Ok<TenantNotificationPolicyDto>, NoContent>> (
             [FromServices] IQueryHandler<GetTenantNotificationPolicy, TenantNotificationPolicyDto?> handler,
             CancellationToken ct) =>
         {
             var policy = await handler.HandleAsync(GetTenantNotificationPolicy.Instance, ct);
-            return policy is null ? Results.NoContent() : Results.Ok(policy);
+            return policy is null ? TypedResults.NoContent() : TypedResults.Ok(policy);
         });
 
         // ── Upsert (create or replace) the tenant's global default policy ──
-        group.MapPut("/notification-policy", async (
+        group.MapPut("/notification-policy",
+            async Task<Results<Ok<TenantNotificationPolicyDto>, BadRequest<MessageResponse>>> (
             [FromBody] UpsertNotificationPolicyRequest req,
             [FromServices] ICommandHandler<UpsertTenantNotificationPolicy, TenantNotificationPolicyDto> handler,
             CancellationToken ct) =>
@@ -42,9 +44,9 @@ public static class NotificationPolicyRoutes
                     req.LinkValidityDays,
                     req.SendoutTimeOfDay,
                     req.SendoutIntervalMinutes), ct);
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
-            catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
+            catch (ArgumentOutOfRangeException ex) { return TypedResults.BadRequest(new MessageResponse(ex.Message)); }
         });
 
         return group;

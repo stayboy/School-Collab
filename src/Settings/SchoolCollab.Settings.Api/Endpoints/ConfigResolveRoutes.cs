@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.CQRS;
@@ -17,17 +18,17 @@ public static class ConfigResolveRoutes
 {
     public static WebApplication MapConfigResolveRoutes(this WebApplication app, bool oidcEnabled)
     {
-        app.MapGet("/api/features/global", async (
+        app.MapGet("/api/features/global", async Task<Ok<ResolvedFlagDto[]>> (
             [FromServices] IQueryHandler<ResolveFlagsForTenant, ResolvedFlagDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ResolveFlagsForTenant(TenantId: null), ct)))
+            TypedResults.Ok(await handler.HandleAsync(new ResolveFlagsForTenant(TenantId: null), ct)))
             .AllowAnonymous();
 
-        var tenantRead = app.MapGet("/api/features/{tenantId:guid}", async (
+        var tenantRead = app.MapGet("/api/features/{tenantId:guid}", async Task<Ok<ResolvedFlagDto[]>> (
             Guid tenantId,
             [FromServices] IQueryHandler<ResolveFlagsForTenant, ResolvedFlagDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ResolveFlagsForTenant(tenantId), ct)));
+            TypedResults.Ok(await handler.HandleAsync(new ResolveFlagsForTenant(tenantId), ct)));
 
         if (oidcEnabled)
         {

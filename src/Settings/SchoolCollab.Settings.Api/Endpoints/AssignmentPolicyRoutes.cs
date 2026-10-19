@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.AssignmentPolicies;
@@ -18,18 +19,19 @@ public static class AssignmentPolicyRoutes
     public static RouteGroupBuilder MapAssignmentPolicyRoutes(this RouteGroupBuilder group)
     {
         // ── Get the tenant's default (204 when unset — caller applies built-in defaults) ──
-        group.MapGet("/assignment-policy", async (
+        group.MapGet("/assignment-policy", async Task<Results<Ok<TenantAssignmentPolicyDto>, NoContent>> (
             [FromServices] IQueryHandler<GetTenantAssignmentPolicy, TenantAssignmentPolicyDto?> handler,
             CancellationToken ct) =>
         {
             var policy = await handler.HandleAsync(GetTenantAssignmentPolicy.Instance, ct);
-            return policy is null ? Results.NoContent() : Results.Ok(policy);
+            return policy is null ? TypedResults.NoContent() : TypedResults.Ok(policy);
         });
 
         // ── Upsert (create or replace) the tenant's default ──
         // A non-positive contact cap is rejected by the handler (Q7) and mapped to
         // 400 here; every other failure stays a 500.
-        group.MapPut("/assignment-policy", async (
+        group.MapPut("/assignment-policy",
+            async Task<Results<Ok<TenantAssignmentPolicyDto>, BadRequest<MessageResponse>>> (
             [FromBody] UpsertAssignmentPolicyRequest req,
             [FromServices] ICommandHandler<UpsertTenantAssignmentPolicy, TenantAssignmentPolicyDto> handler,
             CancellationToken ct) =>
@@ -44,9 +46,9 @@ public static class AssignmentPolicyRoutes
                         req.MaxCopyContacts,
                         req.MandatoryReview,
                         req.ArchiveGraceDays), ct);
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
-            catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
+            catch (ArgumentOutOfRangeException ex) { return TypedResults.BadRequest(new MessageResponse(ex.Message)); }
         });
 
         return group;

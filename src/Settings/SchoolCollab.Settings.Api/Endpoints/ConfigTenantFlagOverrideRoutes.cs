@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
@@ -12,17 +13,19 @@ public static class ConfigTenantFlagOverrideRoutes
     public static RouteGroupBuilder MapConfigTenantOverrideRoutes(this RouteGroupBuilder group)
     {
         // ── List tenant overrides for a flag ──
-        group.MapGet("/flags/{key}/overrides", async (
+        group.MapGet("/flags/{key}/overrides",
+            async Task<Results<Ok<TenantFlagOverrideDto[]>, NotFound>> (
             string key,
             [FromServices] IQueryHandler<ListTenantOverrides, TenantFlagOverrideDto[]> handler,
             CancellationToken ct) =>
         {
-            try { return Results.Ok(await handler.HandleAsync(new ListTenantOverrides(key), ct)); }
-            catch (KeyNotFoundException) { return Results.NotFound(); }
+            try { return TypedResults.Ok(await handler.HandleAsync(new ListTenantOverrides(key), ct)); }
+            catch (KeyNotFoundException) { return TypedResults.NotFound(); }
         });
 
         // ── Upsert a tenant override ──
-        group.MapPut("/flags/{key}/overrides/{tenantId:guid}", async (
+        group.MapPut("/flags/{key}/overrides/{tenantId:guid}",
+            async Task<Results<Ok<TenantFlagOverrideDto>, BadRequest<MessageResponse>, NotFound>> (
             string key,
             Guid tenantId,
             [FromBody] UpsertOverrideRequest req,
@@ -33,22 +36,23 @@ public static class ConfigTenantFlagOverrideRoutes
             {
                 var result = await handler.HandleAsync(
                     new UpsertTenantFlagOverride(key, tenantId, req.IsEnabled, req.Reason, req.EffectiveFrom, req.EffectiveTo), ct);
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
-            catch (KeyNotFoundException) { return Results.NotFound(); }
-            catch (ArgumentException ex) { return Results.BadRequest(new { ex.Message }); }
+            catch (KeyNotFoundException) { return TypedResults.NotFound(); }
+            catch (ArgumentException ex) { return TypedResults.BadRequest(new MessageResponse(ex.Message)); }
         });
 
         // ── Delete a tenant override ──
-        group.MapDelete("/flags/{key}/overrides/{tenantId:guid}", async (
+        group.MapDelete("/flags/{key}/overrides/{tenantId:guid}",
+            async Task<Results<NoContent, NotFound>> (
             string key,
             Guid tenantId,
             [FromQuery] string reason,
             [FromServices] ICommandHandler<DeleteTenantFlagOverride> handler,
             CancellationToken ct) =>
         {
-            try { await handler.HandleAsync(new DeleteTenantFlagOverride(key, tenantId, reason), ct); return Results.NoContent(); }
-            catch (KeyNotFoundException) { return Results.NotFound(); }
+            try { await handler.HandleAsync(new DeleteTenantFlagOverride(key, tenantId, reason), ct); return TypedResults.NoContent(); }
+            catch (KeyNotFoundException) { return TypedResults.NotFound(); }
         });
 
         return group;
