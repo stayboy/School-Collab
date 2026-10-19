@@ -18,11 +18,12 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) |
 |---|---|---|
 | Orchestrator | `ollama-cloud/glm-5.3-flash` (owner 2026-09-22, **Option A**) | `cline-pass/glm-5.3` |
-| Worker | `ollama-cloud/deepseek-v4.1-flash` (owner 2026-09-22, **Option A**) | `cline-pass/deepseek-v4.1-flash` (owner 2026-10-05 **latest**, lean rounds — supersedes the same day's interim `glm-5.3-flash` ruling, which itself superseded `deepseek-v4-flash`; full rounds: `cline-pass/deepseek-v4-flash`) |
-| Reviewer | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the current reviewer direction; the seat lives on the **ollama-cloud** provider, whose `~/.pi/provider-cache.json` carries the bare `deepseek-v4-pro:0813`; the `:cloud` in the ruling is that provider's tag form). Default/fallback remains `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | **`cline-pass/mimo-v2.6-flash` is ABSENT from the provider registry (verified 2026-10-18)** — provider `cline` carries only `xiaomi/mimo-v2.6-flash`/`-pro`/`-ultraspeed`, `xiaomi/mimo-v2.5`/`-pro` and `cline-free/mimo-v2.6-flash`, so the bare id never resolves; a clinepass round must substitute a verified id. The 2026-10-05 ruling that named it, and the interim 2026-10-17 same-id-as-worker dispatch, are superseded |
-| Plan reviewer (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
+| Worker | `ollama-cloud/deepseek-v4.1-flash:1017` (owner 2026-10-18 — **suffix pinned**; the bare `deepseek-v4.1-flash` is ambiguous in the registry) | `cline-pass/deepseek-v4.1-flash` (owner 2026-10-05 **latest**, lean rounds — supersedes the same day's interim `glm-5.3-flash` ruling, which itself superseded `deepseek-v4-flash`; full rounds: `cline-pass/deepseek-v4-flash`) |
+| Reviewer (diff review) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the seat for every tier with a reviewer gate; different family from the orchestrator, so the gate is never the author) | **no dispatchable id** — `cline-pass/mimo-v2.6-flash` is **absent from the provider registry** (verified 2026-10-18: provider `cline` lists only `xiaomi/mimo-v2.6-flash`/`-pro`), so it must not be dispatched, and `cline/deepseek/deepseek-v4-pro-0813` is a different seat that returns `insufficient_credits`. The seat runs on the **pi profile only** |
+| Plan reviewer (**every tier**) | `ollama/glm-5.3:cloud` (owner 2026-10-18 — lean included; the plan gate no longer drops to the reviewer seat) | `cline-pass/glm-5.3` |
+| **Acceptance** (Tiers 1–3) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — a dispatched pass on its own seat, independent of worker and reviewer) | unchanged: `cline-pass/glm-5.3` full rounds · parent-transcribed on lean |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
-| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22 — pinned; **under Option A this coincides with the Tier-3 reviewer, so an escalated rework and its verifier share a model — the light tier already does this by design, and the owner has not ruled**); otherwise the round's reviewer model | the round's reviewer model |
+| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22 — pinned; distinct from the diff-review seat `deepseek-v4-pro:0813`, so an escalated rework and its verifier never share a model); otherwise the round's reviewer model | the round's reviewer model |
 | Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
 
 **Opting into clinepass from pi:** pass `clinepass/cline-pass/<id>` in every
@@ -34,33 +35,34 @@ header. **Pick one provider per round; never mix providers mid-round.**
 
 | Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
 |---|---|---|---|---|
-| **Solo** | the single agent plans + implements + checks its own work | — | — | ask the user first (solo rule below) |
-| **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `kimi-k2.7-code` | the reviewer/orchestrator **must differ** from the worker's model — **Option A: Tier 3 now uses this same set** |
-| **Tier 3** | `deepseek-v4.1-flash` | `glm-5.3-flash` | `kimi-k2.7-code` | **Option A (owner 2026-09-22): identical to the light tier** + UI tester `minimax-m3`; **plan-review on full rounds = `glm-5.3:cloud`** (lean = the reviewer model); **escalator = `kimi-k2.7-code`** (pinned — coincides with the reviewer) |
+| **Solo** | the single agent plans + implements + checks its own work — default `ollama-cloud/deepseek-v4.1-flash:1017` | — | — | ask the user first (solo rule below) |
+| **Light (Tiers 1–2)** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` (if dispatched) | **`deepseek-v4-pro:0813`** | the reviewer/orchestrator **must differ** from the worker's model (owner 2026-10-18: diff-review seat = `deepseek-v4-pro:0813`); acceptance seat `deepseek-v4-pro:0813`; plan gate, when one runs, = `glm-5.3:cloud` |
+| **Tier 3** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` | **`deepseek-v4-pro:0813`** | + UI tester `minimax-m3`; **plan-review on every tier = `glm-5.3:cloud`** (owner 2026-10-18); **escalator = `kimi-k2.7-code`** (pinned); acceptance seat `deepseek-v4-pro:0813` |
 
 Clinepass equivalents: light worker `cline-pass/deepseek-v4.1-flash`, light
-orchestrator/reviewer `cline-pass/glm-5.3-flash` (ollama profile:
-`ollama-cloud/deepseek-v4.1-flash` and `ollama-cloud/glm-5.3-flash`).
+orchestrator `cline-pass/glm-5.3-flash`; the **diff reviewer has no dispatchable
+clinepass id** — see the reviewer row (ollama profile:
+`ollama-cloud/deepseek-v4.1-flash:1017` and `ollama-cloud/deepseek-v4-pro:0813`).
 Tier 3 **lean** uses the standard Tier-3 ladder unchanged — only the
 accept-run is skipped (SKILL.md § "Tier 3 lean") — **with the owner rulings of
 2026-10-05 (latest wins): the clinepass lean worker is `cline-pass/deepseek-v4.1-flash`**
 (superseding the same day's interim `glm-5.3-flash` ruling, which itself superseded
-`deepseek-v4-flash`), **and the reviewer — plan-review and diff-review
-alike — is `ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the seat lives on the
-**ollama-cloud** provider, whose cache carries the bare `deepseek-v4-pro:0813`; the `:cloud`
-in the ruling is that provider's tag form. The cline id `cline/deepseek/deepseek-v4-pro-0813`
-is a different seat — it is not the owner-named one and must not be dispatched).
-The previously named
+`deepseek-v4-flash`), **and the reviewer — plan-review and diff-review alike — is
+`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18), with the plan gate on
+`ollama/glm-5.3:cloud` on **every** tier. The seat lives on the **ollama-cloud**
+provider, whose catalog carries the bare `deepseek-v4-pro:0813`; the `:cloud` in an
+earlier ruling is that provider's tag form. The previously named
 `cline-pass/mimo-v2.6-flash` is **absent from the provider registry** (verified
-2026-10-18: provider `cline` lists only `xiaomi/mimo-v2.6-flash`/`-pro`, not the
-bare id), so it must not be dispatched; the verifier stays distinct from the
+2026-10-18), so it must not be dispatched; the verifier stays distinct from the
 implementer.
 
 **Solo rule:** a solo round is ONE agent doing everything — planner, implementer,
 and its own acceptance check — the same single-agent shape as a light round's
 worker. Before running solo, **always ask the user whether to use the current
 session model**; use it only on their yes, otherwise fall back to the skill's
-solo default **`glm-5.3-flash`**. Record which one was used on round-doc line 1.
+solo default **`ollama-cloud/deepseek-v4.1-flash:1017`** (owner 2026-10-18 — the
+suffix-pinned worker id; the `glm-5.3-flash` fallback is retired). Record which
+one was used on round-doc line 1.
 Solo never dispatches an orchestrator or reviewer of its own.
 
 Resolve ids at dispatch time with `subagent({ action: "models" })` and copy exact
@@ -69,7 +71,7 @@ drifted historically (the `ollama-cloud` provider hosts the modern ids) — veri
 the ids rather than assuming them. **Removed model (owner 2026-09-25):** `deepseek-v4-flash:0731` has been **removed by
 the ollama provider** and must no longer be dispatched on any seat — it was already retired
 from the worker seat by Option A (2026-09-22), and the git/gh-execution delegate model named
-in `AGENTS.md` moved to `ollama-cloud/deepseek-v4.1-flash` with it. Historical round docs may
+in `AGENTS.md` moved to `ollama-cloud/deepseek-v4.1-flash:1017` with it. Historical round docs may
 still name it — they record what ran; never rewrite them. **Known trap (2026-09-22, retained
 for its lesson):** its pi-profile id spelled a **COLON** before `0731`
 (`ollama-cloud/deepseek-v4-flash:0731`); the hyphenated `deepseek-v4-flash-0731` was the
@@ -90,12 +92,13 @@ before every dispatch — a stale local store can still list a model the provide
    **per-mode model sets** above (solo / light / Tier 3), owner-overridden
    2026-09-16; the pi-profile reviewer default was replaced 2026-09-22 and
    **Option A was applied 2026-09-22**). Light and Tier 3 now run the SAME set:
-   worker `deepseek-v4.1-flash`, orchestrator `glm-5.3-flash`, reviewer
-   `kimi-k2.7-code` — deliberately different models so the verifier never
-   shares the implementer's model. Tier 3 differs only by the UI tester and the
-   full-round `glm-5.3:cloud` plan-review; lean rounds skip the accept-run. **Plan-review (step 2b):** full rounds run
-   `glm-5.3:cloud`, lean rounds run **`deepseek-v4.1-flash`** (owner 2026-09-24 — the worker's model, an explicit guardrail exception; the diff review stays on the round's reviewer model, `kimi-k2.7-code`); either is subject to a
-   user-named override (item 1).
+   worker `ollama-cloud/deepseek-v4.1-flash:1017`, orchestrator `glm-5.3-flash`, diff reviewer
+   `deepseek-v4-pro:0813` (owner 2026-10-18), acceptance `deepseek-v4-pro:0813` — the verifier never
+   shares the implementer's model, and acceptance is independent of both. Tier 3 differs only by the UI tester and the
+   plan-review, which runs `glm-5.3:cloud` on **every** tier (owner 2026-10-18); lean rounds skip the accept-run.
+   **Plan-review (step 2b):** `glm-5.3:cloud` on every tier, lean and full alike —
+   **the plan gate must never share the worker's model, and never drops to the fast generalist**
+   (owner 2026-10-18, superseding the 2026-10-17 lean-on-reviewer-seat ruling). Subject to a user-named override (item 1). **Acceptance (step 5)** is its own seat: `ollama-cloud/deepseek-v4-pro:0813` on the pi profile (owner 2026-10-18), so acceptance is independent of worker and reviewer.
 5. **Cline**: always `clinepass` (cannot resolve `ollama` ids) — an exception,
    not an override.
 
@@ -134,8 +137,9 @@ Cline cannot resolve pi's `ollama/<id>:cloud` ids — its session provider is
 ## Escalation ladder (build-escalation pattern, SKILL.md step 3)
 
 When a worker pass times out / stalls / hangs: the escalation EXECUTOR is the
-round's reviewer model (Tier 3 full: `kimi-k2.7-code`, pinned by owner
-2026-09-22 — not derived from the reviewer), dispatched through a write-capable shell
+ESCALATOR model (Tier 3 full: `kimi-k2.7-code`, pinned by owner
+2026-09-22 — not derived from the reviewer; since 2026-10-18 the reviewer is
+`glm-5.3-flash`, so escalator and verifier are distinct), dispatched through a write-capable shell
 (`worker`/`delegate` — never the read-only `reviewer` shell), and the escalated
 work is then statically re-verified by the HIGHER model **of the same profile**
 (`ollama/glm-5.3:cloud`, or `clinepass/cline-pass/glm-5.3`).
@@ -163,7 +167,7 @@ agent definitions via `agent: "<name>"` (builtin
 |---|---|
 | 1 | Worker model only — no orchestrator/reviewer/tester models at all |
 | 2 | Worker + reviewer code specialist |
-| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **full → `glm-5.3:cloud`**, lean → **`deepseek-v4.1-flash`** (owner 2026-09-24) |
+| 3 | Full defaults above (stronger substitutes allowed per the substitution rule); lean rounds use the same ladder — only the accept-run is skipped. The reviewer runs **twice**: plan-review (step 2b, before the worker) then diff-review. Plan-review model: **`glm-5.3:cloud` on every tier**, lean and full alike — never the worker's model (owner 2026-10-18). Pi-profile worker pinned to `ollama-cloud/deepseek-v4.1-flash:1017`; acceptance seat `ollama-cloud/deepseek-v4-pro:0813` |
 
 Rationale: tiers exist to keep simple tasks cheap — never pay for model
 round-trips (or roles) a task does not need.
@@ -172,8 +176,8 @@ round-trips (or roles) a task does not need.
 
 Round doc line 1 records which provider ran the round, e.g.:
 
-- `Provider: pi (models: kimi-k2.7-code, deepseek-v4.1-flash, glm-5.3-flash, minimax-m3)`
-- `Provider: pi, full Tier 3, Option A (models: glm-5.3-flash orchestrator, glm-5.3 plan-review, deepseek-v4.1-flash worker, kimi-k2.7-code reviewer, kimi-k2.7-code escalator, minimax-m3 tester)`
+- `Provider: pi (models: glm-5.3-flash reviewer/orchestrator, ollama-cloud/deepseek-v4.1-flash:1017 worker, ollama-cloud/deepseek-v4-pro:0813 acceptance, minimax-m3 tester)`
+- `Provider: pi, full Tier 3, Option A (models: glm-5.3-flash orchestrator, glm-5.3 plan-review, ollama-cloud/deepseek-v4.1-flash:1017 worker, kimi-k2.7-code reviewer, kimi-k2.7-code escalator, minimax-m3 tester)`
 - `Provider: pi/clinepass (models: glm-5.3, deepseek-v4-flash-0731, deepseek-v4.1-flash, minimax-m3)`
 - `Provider: Cline/clinepass (models: glm-5.3, deepseek-v4-flash, kimi-k2.7-code, minimax-m3)`
 

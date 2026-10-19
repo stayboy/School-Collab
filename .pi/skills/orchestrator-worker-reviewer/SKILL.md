@@ -1,6 +1,6 @@
 ---
 name: orchestrator-worker-reviewer
-description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, acceptance is written by the orchestrator or transcribed by the parent on lean no-UI rounds, and a UI tester bug-hunts delivered UI work when the UI trigger fires. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes (do those solo).
+description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, acceptance is always written by the plan's author (orchestrator on full rounds, the parent on light/lean rounds) and is a gate on every tier before work is reported complete, and a UI tester bug-hunts delivered UI work when the UI trigger fires. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes (do those solo).
 ---
 
 # Orchestrator-Worker-Reviewer (with UI Tester) — tiered
@@ -34,18 +34,64 @@ Cost rules that apply to every round (speed + token budget):
 - **One round doc + one diff artifact** — hand-offs pass paths, not payloads;
   the plan is the single source of truth for worker and reviewer.
 
+- **Acceptance is a gate on every tier** — no round, pass or layer is reported as
+  completed, handed over, or marked done before its `## Acceptance` section
+  exists: every criterion the plan wrote, checked one by one against the diff and
+  the parent's authoritative build/test numbers. Work without an acceptance is
+  **unaccepted work** — the same posture as "an empty reviewer verdict means no
+  review". The accepting seat is always the **plan's author** (§ "Acceptance is a
+  gate in every tier"), never the worker, reviewer or tester.
+
 ## Tiers
 
 | Tier | Use when | Child runs | Acceptance |
 |---|---|---|---|
 | 0 | Trivial non-behavioural change (typo, comment, config tweak) | 0 — do not invoke this skill | solo, per `AGENTS.md` |
-| 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | parent: scope check + authoritative build/test + transcribed verdict |
-| 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | parent adjudicates REVIEW + transcribes verdict |
-| 3 | Feature rounds; anything carrying schema / endpoint / contract / multi-context risk; anything failing the Tier-1 checklist for a NON-UI reason | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR parent-transcribed acceptance (**lean**, no-UI rounds) + UI tester when the UI trigger fires | orchestrator writes the verdict, or the parent transcribes it on lean rounds (+ tester-scope handover when the tester fires) |
+| 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | **Plan-author acceptance after the work**: the parent checks every plan criterion against the diff + authoritative build/test and transcribes the verdict |
+| 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | **Plan-author acceptance after the work**: the parent adjudicates REVIEW, then checks every plan criterion against the diff + build/test and transcribes the verdict |
+| 3 | Feature rounds; anything carrying schema / endpoint / contract / multi-context risk; anything failing the Tier-1 checklist for a NON-UI reason | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR plan-author acceptance by the parent (**lean**, no-UI rounds) + UI tester when the UI trigger fires | the orchestrator (full) or the parent as plan author (lean) writes the verdict after checking every criterion — always before the round is reported complete (+ tester-scope handover when the tester fires) |
 
 Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
 When starting a feature or fix, offer the user the menu (solo / light round /
 full four-agent) per repo `AGENTS.md` — do not default silently.
+
+### Acceptance is a gate in every tier (owner rule, 2026-10-17)
+
+Every tier and mode — **solo**, 1, 2, 3-lean, 3-full — ends with a written
+acceptance **before** the work is passed on as completed. "Completed" without an
+acceptance section is unaccepted work, exactly as an empty reviewer verdict is
+"no review".
+
+- **Who accepts.** The **plan's author owns the verdict** — the parent on Tiers 1–2
+  and Tier 3 lean, the orchestrator on Tier 3 full. Since the owner ruling of
+  2026-10-18 the acceptance is also a **dispatched pass on its own seat**
+  (`ollama-cloud/deepseek-v4-pro:0813` on the pi profile) for Tiers 1–3: the seat
+  verifies the criterion-by-criterion checklist against the diff and the parent's
+  authoritative numbers, and the plan's author signs the verdict. The gate is
+  therefore model-independent of both the worker and the reviewer — the lean cut
+  removes the UI tester, not the acceptance run. Clinepass is unchanged
+  (`cline-pass/glm-5.3` on full rounds; parent-transcribed on lean). **Solo**:
+  the single agent accepts its own work (mode definition) and may opt into the
+  acceptance seat when the owner asks. Never the worker, the reviewer, or the
+  tester. Acceptance is the author's own
+  gate, so it is never self-congratulatory: it is a per-criterion check against
+  evidence, not a restatement of the WORKER REPORT.
+- **What it checks.** Each criterion the plan wrote, one by one, with evidence —
+  the diff (file:line) or the named test — plus the parent's **authoritative**
+  build/test numbers (child-reported numbers are discarded). A criterion the diff
+  does not evidence is **not met**, however plausible the worker's prose sounds.
+- **Outcomes.** ACCEPTED (verdict CLOSED) · REWORK (bounded loop, procedure step
+  7) · RESIDUALS (grill the owner before the verdict, procedure step 5). The
+  acceptance section records which, plus any accepted residuals verbatim.
+- **Disagreement between seats (owner 2026-10-18).** When two reviewer seats
+  disagree, the parent adjudicates against the source and the acceptance records
+  the disagreement **plus the evidence that resolved it** (Round B1: one seat
+  called the tests vacuous, the other called them honest-but-wrong-vocabulary; the
+  pre-fix base settled it for the second). A verdict that silently picks a side
+  without recording the split is not an acceptance.
+- **Pass-on rule.** A round reports to the owner, or a layer hands to the next
+  layer (a stack layer, a follow-up round), **only with its acceptance written**.
+  Anything else is reported as "unaccepted" or "parked" — never as done.
 
 ### Tier-1 eligibility checklist (ALL must hold)
 
@@ -63,7 +109,7 @@ dialog size/height, icon or button placement, grid columns, column order, labels
 tooltips, spacing — carries no schema, endpoint, contract or multi-context logic.
 Even though the deterministic UI trigger fires (the changed-file list contains
 `.razor`/`.css`), such work runs **Solo (preferred, with the pinned model
-`ollama-cloud/deepseek-v4.1-flash`) or Light (Tier 1–2)** and **never Tier 3**.
+`ollama-cloud/deepseek-v4.1-flash:1017`) or Light (Tier 1–2)** and **never Tier 3**.
 The UI tester exists to bug-hunt delivered UI *behaviour*; it is not a reason to
 promote a presentation tweak to a four-agent round.
 
@@ -96,12 +142,17 @@ runs** (procedure step 2b). The plan is the round's most load-bearing artifact
 and a defect in it is the cheapest defect to fix; a diff-review alone cannot
 catch an unworkable premise.
 
-**Plan-review model per sub-mode:** on **Tier 3 full**
-the plan gate runs on the round's **higher model** — `ollama/glm-5.3:cloud` on the
-pi profile, `cline-pass/glm-5.3` on clinepass — because it is the
-highest-leverage review in the round. On **Tier 3
-lean** it runs on **`ollama-cloud/kimi-k2.7-code`** — **the diff reviewer's model**: the plan gate must **never** share the worker's model, because the plan is the round's most load-bearing artifact and its reviewer must not be its implementer. Lean therefore runs the plan gate and the diff review on one independent model (`kimi-k2.7-code`; clinepass: `cline-pass/mimo-v2.6-flash`) facing a `deepseek-v4.1-flash` worker (`cline-pass/deepseek-v4.1-flash` on clinepass — owner 2026-10-05, latest). Both use
-the read-only `reviewer` shell; a user-named model still wins (precedence item 1).
+**Plan-review model: identical on every tier (owner 2026-10-18).** The plan gate
+runs on the round's **higher model** — `ollama/glm-5.3:cloud` on the pi profile,
+`cline-pass/glm-5.3` on clinepass — for **lean and full alike**. The plan is the
+round's most load-bearing artifact and its gate the highest-leverage review in the
+round, so it never shares the worker's model and never drops to the fast
+generalist. The **diff review** runs on the reviewer seat,
+`ollama-cloud/deepseek-v4-pro:0813` (no dispatchable clinepass id — see the seat
+table) facing an
+`ollama-cloud/deepseek-v4.1-flash:1017` worker (`cline-pass/deepseek-v4.1-flash` —
+owner 2026-10-05, latest). Both use the read-only `reviewer` shell; a user-named
+model still wins (precedence item 1).
 
 **Hand rule: lean drops the accept-run, never the plan-run.** The
 orchestrator-plan pass is what separates Tier 3 from a stretched Tier 2 — it is
@@ -117,6 +168,16 @@ checklist only on file-level gates (migration, contracts, new project, diff
 size) with its design fully settled may be run at Tier 2 as an explicit
 **owner override**, recorded as a deviation on round-doc line 1; if the
 design is open, the round is Tier 3.
+
+**Light (Tier 1–2) and Tier 3 lean share the acceptance seat, not the rigour.**
+Since the 2026-10-17 owner rule both end with the **plan's author** writing the
+verdict after the work (the parent — the plan author on those tiers — instead of
+a separate orchestrator-accept run). They stay distinct in what precedes
+acceptance: Tier 3 lean runs the **mandatory plan-review gate before the
+worker** and an orchestrator-authored plan, and allows ≤2 reviewer iterations;
+Tier 2 has **no plan gate**, a ≤1 iteration bound and a diff-only reviewer. Do
+not collapse Tier 2 into "lean" — that would silently drop the plan gate, the
+round's most load-bearing artifact.
 
 ### Mid-round escalation
 
@@ -177,14 +238,23 @@ mid-round. Both profiles below are supported options; resolve the exact ids at
 dispatch time with `subagent({ action: "models" })` and copy `provider/id`
 verbatim (the `ollama*` ids have drifted historically — verify, don't assume).
 
+**Pin the worker id WITH its build suffix (owner, 2026-10-18).** The pi-profile
+worker is **`ollama-cloud/deepseek-v4.1-flash:1017`** — never the suffix-less
+`deepseek-v4.1-flash`. The registry carries several v4.1-flash builds
+(`…-1017`, `…:batch`, plus the clinepass variant), so a bare id is not unique and
+a dispatch can silently land on a different build than the round recorded. Treat
+a looser or missing suffix as a dispatch error to fix, exactly like an omitted
+`model` field.
+
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) | Tiers |
 |---|---|---|---|
 | Orchestrator | `ollama-cloud/glm-5.3-flash` | `cline-pass/glm-5.3` | 3 only |
-| Worker | `ollama-cloud/deepseek-v4.1-flash` | `cline-pass/deepseek-v4.1-flash` (lean, owner 2026-10-05 **latest** — supersedes the same day's `glm-5.3-flash` interim; full: `cline-pass/deepseek-v4-flash`) | 1–3 |
-| Reviewer | `ollama-cloud/kimi-k2.7-code` (both tiers) | `cline-pass/mimo-v2.6-flash` (owner 2026-10-05) | 2–3 |
-| **Plan reviewer** (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 3 full only; **lean rounds run `kimi-k2.7-code` — the diff reviewer's model; the plan gate must never share the worker's model** |
+| Worker | `ollama-cloud/deepseek-v4.1-flash:1017` | `cline-pass/deepseek-v4.1-flash` (lean, owner 2026-10-05 **latest** — supersedes the same day's `glm-5.3-flash` interim; full: `cline-pass/deepseek-v4-flash`) | 1–3 |
+| Reviewer (diff review) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the seat for every tier with a reviewer gate) | no dispatchable id — `cline-pass/mimo-v2.6-flash` is absent from the provider registry (verified 2026-10-18); the seat runs on the pi profile only | 2–3 |
+| **Plan reviewer** (every tier with a plan gate) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | 1–3 — **lean no longer self-gates on the reviewer seat** (owner 2026-10-18) |
+| **Acceptance** (Tiers 1–3) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — a dispatched pass on its own seat, model-independent from worker and reviewer) | unchanged (see the acceptance section): `cline-pass/glm-5.3` full rounds · parent-transcribed on lean | 1–3 |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
-| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (pinned — this is also the Tier-3 reviewer, so an escalated rework and its verifier share a model, as the light tier already does by design); otherwise the round's reviewer model | the round's reviewer model | on block |
+| Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (pinned; distinct from the diff-review seat `deepseek-v4-pro:0813`, so an escalated rework and its verifier never share a model); otherwise the round's reviewer model | the round's reviewer model | on block |
 | Higher-model re-verify | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` | on escalation |
 
 From pi, opt into the clinepass profile for a round by passing
@@ -195,16 +265,18 @@ every role's `runs.run` — and record that choice in the round doc header.
 
 | Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
 |---|---|---|---|---|
-| **Solo** | the single agent does plan + implement + check itself | — | — | ask the user first (see the solo rule) |
-| **Light (Tiers 1–2)** | `deepseek-v4.1-flash` | `glm-5.3-flash` (if dispatched) | `kimi-k2.7-code` | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model. **Option A: Tier 3 now uses this same set** |
-| **Tier 3** | `deepseek-v4.1-flash` | `glm-5.3-flash` | `kimi-k2.7-code` | **Option A: the role set is now IDENTICAL to the light tier** — Tier 3 adds the UI tester `minimax-m3` and, on full rounds, the plan-review on `glm-5.3:cloud`; **on lean rounds the plan gate runs the diff reviewer's model, `kimi-k2.7-code` — never the worker's model**. **escalator = `kimi-k2.7-code`** (pinned — coincides with the reviewer; see the role table) |
+| **Solo** | the single agent does plan + implement + check itself — default `ollama-cloud/deepseek-v4.1-flash:1017` | — | — | ask the user first: session model only on their yes (see the solo rule) |
+| **Light (Tiers 1–2)** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` (if dispatched) | **`deepseek-v4-pro:0813`** | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model (owner 2026-10-18: the diff-review seat is `deepseek-v4-pro:0813`). Acceptance seat: `deepseek-v4-pro:0813` |
+| **Tier 3** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` | **`deepseek-v4-pro:0813`** | Tier 3 adds the UI tester `minimax-m3` and the plan-review on `glm-5.3:cloud` on **every** tier, lean and full alike (owner 2026-10-18 — lean no longer runs the plan gate on the reviewer seat). **escalator = `kimi-k2.7-code`** (pinned, distinct from the diff-review seat). Acceptance seat: `deepseek-v4-pro:0813` |
 
 **Solo rule:** a solo round is ONE agent doing everything (planner, implementer
 and its own acceptance check) — the same shape as a light round's worker. Before
 running solo, **always ask the user whether to use the current session model**;
 use the session model only on their yes, otherwise fall back to the skill's solo
-default **`glm-5.3-flash`**. Record the choice (session model or default) on
-round-doc line 1.
+default **`ollama-cloud/deepseek-v4.1-flash:1017`** (owner 2026-10-18 — the same
+suffix-pinned worker id; the earlier `glm-5.3-flash` fallback is retired, so a
+solo round and a dispatched worker round now share one implementer id). Record
+the choice (session model or default) on round-doc line 1.
 
 **Defaults and overrides — precedence, highest first:**
 
@@ -216,10 +288,11 @@ round-doc line 1.
    rounds — the earlier decision carries forward).
 4. **The skill default: the pi `ollama` profile** in the table above, per tier —
    subject to the **per-mode model sets** below it (solo / light / Tier 3). Light
-   and Tier 3 run the SAME role set: worker `deepseek-v4.1-flash`, orchestrator
-   `glm-5.3-flash`, reviewer `kimi-k2.7-code` — deliberately different models, so
-   the verifier never shares the implementer's model. Tier 3 differs only by
-   adding the UI tester and, on full rounds, the `glm-5.3:cloud` plan-review.
+   and Tier 3 run the SAME role set: worker `ollama-cloud/deepseek-v4.1-flash:1017`, orchestrator
+   `glm-5.3-flash`, diff reviewer `deepseek-v4-pro:0813` (owner 2026-10-18), acceptance
+   `deepseek-v4-pro:0813` — the verifier never shares the implementer's model, and
+   acceptance is independent of both. Tier 3 differs only by
+   adding the UI tester and the `glm-5.3:cloud` plan-review, which runs on every tier.
 5. **Cline is the exception, not an override** — Cline cannot resolve `ollama`
    ids, so it always uses the `clinepass` profile.
 
@@ -331,9 +404,9 @@ the tester never derives or expands its own scope.
    maximum, counted as the plan-review iteration. Fold the answers into `## Plan` as
    pinned decisions before the reviewer re-reads the revised sections; the worker is
    still never dispatched on a plan with an open P1.
-   **Model:** Tier 3 **full** → `ollama/glm-5.3:cloud` (`cline-pass/glm-5.3`);
-   Tier 3 **lean** → **`ollama-cloud/kimi-k2.7-code`** (the diff reviewer's model — see the plan-review sub-mode note). Read-only `reviewer` shell in
-   both cases; a user-named model wins.
+   **Model:** `ollama/glm-5.3:cloud` on **every tier**, lean and full alike (`cline-pass/glm-5.3`) —
+   owner 2026-10-18; lean no longer runs the plan gate on the reviewer seat. Read-only `reviewer` shell;
+   a user-named model wins.
 3. **Worker run.** Task = worker contract + the plan inline + expected files +
    round-doc path (the worker does not edit it). The worker implements, runs
    build + affected tests, returns WORKER REPORT. The parent persists the
@@ -342,8 +415,8 @@ the tester never derives or expands its own scope.
    out, stalls, or hangs mid-round (30-min cap, runaway shell command, repeated
    build failures it cannot recover from), the parent interrupts it and
    re-dispatches the SAME pass scope as an ESCALATION PASS on
-   the round's reviewer model (Tier 3: `kimi-k2.7-code`, pinned — coincides with
-   the Tier-3 reviewer) — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
+   the ESCALATOR model (Tier 3: `kimi-k2.7-code`, pinned; since 2026-10-18 distinct
+   from the diff-review seat `deepseek-v4-pro:0813`) — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
    agent; the `reviewer` agent shell is read-only by design and cannot
    execute passes) — which reconciles the on-disk state first, then
    completes the blocked pass. Subsequent worker passes revert to the worker
@@ -400,19 +473,27 @@ the tester never derives or expands its own scope.
      scanner — always include it). A parent verification run that exceeds the time box
      is parked the same way (interrupt, probe with the `grill-me` skill, park) — see step 3.
    - (b) Tiers 2–3: dispatch the static reviewer with the plan + patch path +
-     WORKER REPORT; the reviewer returns the REVIEW block. Tier 1 has no
+     WORKER REPORT; the reviewer returns the REVIEW block. **Brief requirements
+     (owner 2026-10-18):** name the binding spec sections by path (a plan can drift from
+     its spec — plan-conformance alone misses it); on high-risk rounds (send path,
+     migration, wire contract) dispatch a **second, cross-family CROSS-CHECK** seat with the
+     owner-named seat authoritative and both verdicts transcribed; state that findings
+     cite the patch, never the WORKER REPORT's prose. Tier 1 has no
      reviewer — the parent does the scope check itself (diff-stat vs plan
      scope; unrelated deletions/reformatting are findings).
 
    Never start a build while a child may still write to the working tree
    (MSB3027 file locks). The static reviewer is safe to run in parallel
    precisely because it never builds.
-5. **Accept.** Tiers 1–2: the parent adjudicates findings and transcribes the
-   verdict into `## Acceptance` (criteria checklist, build/test numbers, P1
-   list or CLOSED, residual P2s). Tier 3 full: the orchestrator-accept run
-   receives the REVIEW block + the parent's build/test numbers and writes
-   `## Acceptance`. Tier 3 **lean** (no-UI rounds): the parent transcribes the
-   acceptance itself, on the reviewer's verdict plus its own authoritative pass.
+5. **Accept — the plan author's gate, on every tier.** Tiers 1–2 and Tier 3
+   **lean**: the parent (the plan's author) adjudicates findings, then checks
+   **every plan criterion** against the diff + its own authoritative build/test
+   numbers and transcribes the verdict into `## Acceptance` (criteria checklist
+   with file:line or test-name evidence, build/test numbers, P1 list or CLOSED,
+   residual P2s). Tier 3 full: the orchestrator-accept run receives the REVIEW
+   block + the parent's build/test numbers and writes `## Acceptance` the same
+   way. No tier reports the work as completed before that section exists (see
+   "Acceptance is a gate in every tier").
    When the verdict is CLOSED and the UI trigger fires,
    the acceptance also appends the tester-scope handover.
    **Residual grill (acceptance).** When the verdict would be anything other than a
@@ -573,7 +654,9 @@ the tester never derives or expands its own scope.
    in the round doc.
 4. The round doc exists with tier-appropriate sections filled and an explicit
    verdict (CLOSED, PARKED with the follow-up reference, or remaining P1s listed), plus
-   the provider/models header.
+   the provider/models header — and a written `## Acceptance` section produced by the
+   plan's author before anything was reported as completed (no acceptance ⇒ unaccepted
+   work, never "done").
 5. No P1 findings remain unaddressed, or the user explicitly accepted the
    residuals. Loop bounds respected (Tier 2 reviewer loop ≤1; Tier 3 reviewer
    ≤2, tester ≤2).

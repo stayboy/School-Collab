@@ -46,8 +46,8 @@ lives in `references/models.md` and is binding there by reference.
 | 3 | Seat coverage and order | **All seats, author/gate first** — orchestrator-plan author, plan-review gate, then worker, diff-review, UI tester | Author/gate is where the corpus shows the leverage |
 | 4 | First move | **Citation discipline:** a plan that asserts a fact must cite `file:line`; the gate reddens uncited claims | A step-2b review criterion, not a model change — effective from the next orchestrator round |
 | 5 | Author escalation | **Risk-based from a named trigger list, never by default** | The trigger list is in §"The policy" item 4 |
-| 6 | The gate tier | **Keep the gate tier**; trial lean (Tier 2) rounds only after citation discipline is in effect | The gate is the proven instrument (5/5) — trading it for tokens trades the brake for the accelerator |
-| 7 | Gate vs author diversity | **The gate must differ from the author in family or clearly-bigger tier — never the same id at the same size** | **Amended while grounding this round:** the stub's letter said "family"; the standing Option-A pairing (author `glm-5.3-flash`, Tier-3-full gate `glm-5.3`) is *same family, bigger tier* — and produced the corpus's recorded author-side catch (the split-review P1). The rule encodes the intent — no effective self-review — not the letter |
+| 6 | The gate tier | **Keep the gate tier**; trial lean (Tier 2) rounds only after citation discipline is in effect | The gate is the proven instrument (5/5) — trading it for tokens trades the brake for the accelerator. **Amended 2026-10-18 (owner):** the plan gate runs on `ollama/glm-5.3:cloud` on **every tier, lean included** — lean no longer self-gates on the reviewer seat |
+| 7 | Gate vs author diversity | **The gate must differ from the author in family or clearly-bigger tier — never the same id at the same size** | **Amended while grounding this round:** the stub's letter said "family"; the standing Option-A pairing (author `glm-5.3-flash`, Tier-3-full gate `glm-5.3`) is *same family, bigger tier* — and produced the corpus's recorded author-side catch (the split-review P1). The rule encodes the intent — no effective self-review — not the letter. **Amended 2026-10-18 (owner):** a reviewer seat of `glm-5.3-flash` made the **diff gate the author** (same id as the orchestrator). The diff gate moved to `ollama-cloud/deepseek-v4-pro:0813` — different family, plausibly bigger tier — and the plan gate stayed `glm-5.3:cloud` |
 | 8 | Ledger | **`documents/solution/round-runner-model-ledger.md`**, one row per tiered round: seats→models, gate P1s by severity, iterations, rework cause | Seeded with the 2026-10-03→05 portal arc; earlier rounds stay authoritative on their round-doc line 1 |
 | 9 | Split and cadence | **This spec holds policy; `references/models.md` holds operational ids.** Re-evaluate on **two consecutive rounds with ≥2 rework iterations each**, or after **5 rounds** regardless | A re-evaluation is a grill round argued from the ledger — ids churn in `models.md`, policy changes here |
 
@@ -69,9 +69,9 @@ lives in `references/models.md` and is binding there by reference.
    iterations in the same area; (iv) a round whose previous plan failed its gate. On a
    trigger, escalate the author seat one step for that round and record the trigger in the
    round doc.
-5. **Keep the gate (Q6).** The plan-review gate stays on full rounds. Trial lean (Tier 2)
-   rounds only once citation discipline is in effect, and count them in the ledger like any
-   other row.
+5. **Keep the gate (Q6).** The plan-review gate runs on **every tier that has a plan gate**,
+   lean included, on `ollama/glm-5.3:cloud` (owner 2026-10-18). Trial lean (Tier 2) rounds only
+   once citation discipline is in effect, and count them in the ledger like any other row.
 6. **One provider per round** — recorded on round-doc line 1, never mixed mid-round except the
    per-role cross-provider override the user names (precedence item 1). Operational detail
    stays in `references/models.md`.

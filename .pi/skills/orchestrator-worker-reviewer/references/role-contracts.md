@@ -35,12 +35,42 @@ Verify the worker's diff (read `diffs-<slug>.patch` plus the changed files'
 surrounding code) against the plan. Include the best-coding-practices check:
 (1) **no overwrites** — the diff must not rewrite or delete pre-existing code
 outside the plan's scope (unrelated deletions/reformatting/"improvements" are
-findings); (2) **repo skills honored** — where an installed skill applies to
-the touched surface (`dotnet-best-practices`, `dialog-ui`,
-`blazor-css-isolation`, `fluentui-*`), the implementation must follow it;
+findings); (2) **repo rules and skills honored** — the mandatory set below
+applies by touched surface, and the parent's brief names the applicable rows;
 (3) **readability** — naming matches repo conventions, minimal focused diff,
 no dead or duplicated code. P1 for destructive overwrites or ignored mandated
-skills; P2 for readability nits. Return ONLY:
+rules/skills; P2 for readability nits.
+
+**Mandatory rule/skill set by touched surface** (the parent includes the
+applicable rows in the reviewer brief; the reviewer must NAME any applicable row
+it was not given rather than silently skip it):
+
+| Touched surface | Must be checked against |
+|---|---|
+| Always (any C#/Razor) | `.github/copilot/rules/dotnet-best-practices.md` + `.github/skills/dotnet-best-practices/SKILL.md`, `.github/copilot/rules/testing.md` |
+| EF Core migrations / entity configs | `.github/copilot/rules/ef-migrations.md` |
+| Minimal-API endpoints, route groups, `TypedResults` | `dotnet-webapi`, `.github/skills/minimal-api-composition/SKILL.md`, `documents/solution/endpoint-organization-pattern.md` |
+| `.razor` / `.razor.css` / component params / lifecycle | `.github/copilot/rules/blazor-components.md` + the matching Blazor skills (`author-component`, `collect-user-input`, `support-prerendering`, `coordinate-components`, `fetch-and-send-data`, `plan-ui-change`) |
+| Dialogs / dropdowns / icons / FluentUI props | `.github/skills/dialog-ui`, `dropdown-ui`, `fluentui-icons`, `fluentui-component-props` |
+| JS interop / collocated `.razor.js` | `use-js-interop` + the JS-interop section of `blazor-components.md` |
+| New bounded context | `.github/skills/bounded-context/SKILL.md` |
+| Configuration, flags, AppHost parameters | `.github/copilot/rules/configuration-documentation.md` + `documents/solution/feature-flag-workflow.md` |
+
+**Brief requirements the parent must satisfy (owner, 2026-10-18)** — the reviewer must NAME any
+omission in its report rather than silently proceed:
+
+- **The binding spec sections by path.** Plan-conformance alone cannot catch a plan that has drifted
+  from its spec: in Round B1 the plan's tag vocabulary had silently diverged from §3.2, and only a
+  reviewer reading the spec literally caught it.
+- **A second, cross-family reviewer as a CROSS-CHECK on high-risk rounds** (send path, migration, wire
+  contract). The owner-named seat is authoritative and both verdicts are transcribed onto the round doc —
+  never blended. B1's evidence: the cross-check alone found the Worker-host DI gap and the
+  vacuous-vs-spec test suite; the authoritative seat alone found the raw-substitution gap, the
+  `NotSupportedException` hole and the capped `{{Description}}`.
+- **The WORKER REPORT is context, never evidence.** Every finding cites a diff line; none may rest on
+  the worker's prose.
+
+Return ONLY:
 
     REVIEW
     Verdict: PASS | P1 | P2-only

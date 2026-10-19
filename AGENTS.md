@@ -239,7 +239,7 @@ the user wants to choose explicitly:
    Tier 2. Small-to-medium behavioural fixes.
 3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
    round doc, **the plan is independently reviewed before implementation** (skill
-   step 2b — on full rounds by `glm-5.3:cloud`), worker implements, reviewer
+   step 2b — on every tier by `glm-5.3:cloud`), worker implements, reviewer
    statically verifies, orchestrator accepts and hands over UI-tester scope, UI
    tester bug-hunts delivered UI. No-UI rounds run **lean** (skill § "Tier 3
    lean"): the parent transcribes acceptance and no UI tester is dispatched — the
@@ -545,9 +545,11 @@ user instruction):
 commit (and the related PR/stack steps per this policy), the mechanical
 git/gh execution — staging the named change set, the commit, `gh stack`
 unstack/init/submit, and `gh pr` operations — is delegated to a lightweight
-subagent running `ollama-cloud/deepseek-v4.1-flash` (pi provider; Cline
-equivalent: `cline-pass/deepseek-v4.1-flash`; owner 2026-09-25 — replaces
-`deepseek-v4-flash:0731`, removed by the ollama provider). The parent agent shows and
+subagent running `ollama-cloud/deepseek-v4.1-flash:1017` (pi provider; Cline
+equivalent: `cline-pass/deepseek-v4.1-flash`; owner 2026-10-18 — the worker id is
+pinned **with its build suffix** because the registry carries several
+v4.1-flash builds and a bare id is ambiguous; supersedes the 2026-09-25
+suffix-less spelling). The parent agent shows and
 confirms the change set, then hands the execution to that agent. Every gate
 in this policy (explicit authorization for each action, the change-set
 review, `SCHOOLCOLLAB_ALLOW_PUSH=1` for pushes, no merge without
