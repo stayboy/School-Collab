@@ -19,5 +19,9 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="bunit" />
     <PackageReference Include="RichardSzalay.MockHttp" />
+    <!-- WS1 (round notification-templates-b2a): route-level tests for the public /l/{code} short
+         link use the same minimal in-process TestServer harness as the Assignments.Api route tests;
+         the package is centrally managed (CPM unchanged). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
 </Project>

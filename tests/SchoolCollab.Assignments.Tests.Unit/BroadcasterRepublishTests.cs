@@ -74,7 +74,7 @@ public class BroadcasterRepublishTests
         var recipient = AssignmentRecipient.Create(
             TenantId, AssignmentId, ContactOwnerType.Guardian, Guid.NewGuid(), StudentId,
             ContactId, ContactChannel.Email, GuardianRole.Primary, notifyOnBroadcast: true, subscriptionActive: true);
-        recipient.AttachDeepLink("tok-v1", DateTimeOffset.UtcNow.AddDays(7));
+        recipient.AttachDeepLink("tok-v1", DateTimeOffset.UtcNow.AddDays(7), shortLinkCode: null);
 
         // First broadcast → one Queued Publish row.
         await broadcaster.BroadcastPublishedAsync(
@@ -87,7 +87,7 @@ public class BroadcasterRepublishTests
         await db.SaveChangesAsync();
 
         // Republish with a refreshed deep-link token (the fresh F1-shaped re-broadcast).
-        recipient.AttachDeepLink("tok-v2", DateTimeOffset.UtcNow.AddDays(7));
+        recipient.AttachDeepLink("tok-v2", DateTimeOffset.UtcNow.AddDays(7), shortLinkCode: null);
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
 

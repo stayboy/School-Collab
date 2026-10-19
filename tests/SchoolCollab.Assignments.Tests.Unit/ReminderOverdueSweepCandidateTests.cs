@@ -7,6 +7,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.DTOs;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Assignments.Core.Services.Delivery;
 using SchoolCollab.Assignments.Worker.Services;
 using SchoolCollab.Core.Tenancy;
@@ -255,11 +256,18 @@ public class ReminderOverdueSweepCandidateTests
         {
             await SweepNotificationQueuer.QueueAsync(
                 _db, new NoAddressResolver(), NullLogger.Instance, TimeProvider.System,
+                InertRenderDependencies(),
                 tenantId, _assignmentId, "Math", _recipientId, _contactId,
                 ContactOwnerType.Guardian, Guid.Empty, NotificationChannel.Email,
                 deepLinkToken: null, deepLinkExpiresAt: null,
                 NotificationKind.Reminder, CancellationToken.None);
         }
+
+        /// <summary>Round b2a: the pass-scoped render inputs — inert here (the assertions are about
+        /// which tenant the skip row lands in, before any template is read).</summary>
+        private static SweepRenderDependencies InertRenderDependencies() =>
+            new(new NullNotificationTemplateResolver(), new NotificationLinkOptions(),
+                new Dictionary<(NotificationKind, NotificationChannel), ResolvedNotificationTemplate?>());
     }
 
     private sealed class NoAddressResolver : IContactAddressResolver

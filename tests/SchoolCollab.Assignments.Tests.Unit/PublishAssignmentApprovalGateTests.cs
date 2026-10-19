@@ -60,7 +60,7 @@ public class PublishAssignmentApprovalGateTests
         return new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, contactResolver,
             topicLookup, targetResolver, tenantProvider, broadcaster, policyResolver, assignmentPolicyResolver,
-            featureFlags, new FakeDeepLinkTokenMinter(), cache,
+            featureFlags, new FakeDeepLinkTokenMinter(), new NullNotificationTemplateResolver(), cache,
             NullLogger<PublishAssignmentCommandHandler>.Instance);
     }
 

@@ -2,7 +2,9 @@ using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.DeepLinks;
 
 namespace SchoolCollab.Assignments.Core.Data.Configurations;
 
@@ -31,6 +33,18 @@ internal sealed class AssignmentRecipientConfiguration : TenantEntityTypeConfigu
         // Length accommodates the DataProtection ciphertext (+ JSON payload overhead).
         builder.Property(x => x.DeepLinkToken).HasMaxLength(4096);
         builder.Property(x => x.DeepLinkExpiresAt);
+
+        // Round notification-templates-b2a (§3.6, Q61): the SMS/WhatsApp short-link code. The
+        // column takes DeepLinkConstants.ShortLinkCodeLength (the length the Families landing
+        // validates), so it can never truncate a minted code. The index is GLOBAL (no TenantId) and
+        // FILTERED to non-null rows, because the public /l/{code} resolution is unauthenticated and
+        // cross-tenant: a per-tenant index would let two tenants share a code and resolve to an
+        // arbitrary one, while the filter keeps every pre-feature / email row (all null) out of it.
+        builder.Property(x => x.ShortLinkCode).HasMaxLength(DeepLinkConstants.ShortLinkCodeLength);
+        builder.HasIndex(x => x.ShortLinkCode)
+            .IsUnique()
+            .HasFilter("\"short_link_code\" IS NOT NULL")
+            .HasDatabaseName("ux_assignment_recipients_short_link_code");
 
         // One recipient row per contact per assignment (spec §4.6 / §5).
         builder.HasIndex(x => new { x.TenantId, x.AssignmentId, x.ContactId })

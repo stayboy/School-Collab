@@ -141,6 +141,14 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("numeric(5,2)")
                         .HasColumnName("pass_score");
 
+                    b.Property<Guid?>("PublishEmailTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("publish_email_template_id");
+
+                    b.Property<Guid?>("PublishSmsTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("publish_sms_template_id");
+
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("published_at");
@@ -365,6 +373,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("role");
 
+                    b.Property<string>("ShortLinkCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("short_link_code");
+
                     b.Property<bool>("SubscriptionActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -385,6 +398,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_assignment_recipients");
+
+                    b.HasIndex("ShortLinkCode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_assignment_recipients_short_link_code")
+                        .HasFilter("\"short_link_code\" IS NOT NULL");
 
                     b.HasIndex("AssignmentId", "OwnerId")
                         .HasDatabaseName("ix_assignment_recipients_assignment_owner");

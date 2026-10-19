@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Features;
+using SchoolCollab.Core.Notifications;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain;
 
@@ -23,6 +25,7 @@ public sealed class PublishAssignmentCommandHandler(
     IAssignmentPolicyResolver assignmentPolicyResolver,
     IFeatureFlagService featureFlags,
     IDeepLinkTokenMinter minter,
+    INotificationTemplateResolver templateResolver,
     HybridCache cache,
     ILogger<PublishAssignmentCommandHandler> logger) : ICommandHandler<PublishAssignmentCommand>
 {
@@ -49,9 +52,14 @@ public sealed class PublishAssignmentCommandHandler(
         var approvalRequired = assignmentPolicy.RequiresApprovalBeforePublish
             || await featureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, cancellationToken);
 
-        assignment.Publish(approvalRequired);
-
         var tenantId = tenantProvider.GetTenantContext().TenantId;
+
+        // §3.7 (WS4): validate + stamp the author's template selection BEFORE the publish state
+        // change, so a rejected explicit stamp (400) leaves the assignment exactly as it was —
+        // neither published nor carrying a partial stamp.
+        await ApplyTemplateSelectionAsync(assignment, command, tenantId, cancellationToken);
+
+        assignment.Publish(approvalRequired);
 
         // WS-E1 (ar-14-deep-links): resolve the effective policy BEFORE persisting
         // recipients so each minted deep-link token can carry the resolved
@@ -65,8 +73,11 @@ public sealed class PublishAssignmentCommandHandler(
         // Effective-policy resolution (notification-delivery-plan.md §3): drop blocked
         // channels, apply preferred-channel order, cap each guardian role at the
         // assignment policy's contact caps (D4) and cap the sendout at MaxNotifications.
+        // Round b2a (§3.8): the publisher's per-sendout medium restriction is applied INSIDE
+        // this filter — after the ContactIds subset filter above and before the caps — and a
+        // blocked channel still wins (the request narrows, never widens).
         var broadcastRecipients = NotificationRecipientFilter.Apply(
-            recipients, effectivePolicy, assignmentPolicy);
+            recipients, effectivePolicy, assignmentPolicy, command.Channels);
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(
                 assignment.Id,
@@ -195,9 +206,9 @@ public sealed class PublishAssignmentCommandHandler(
                 // render; empty when the Students response did not carry them.
                 recipient.AttachDisplayNames(s.ContactName, s.StudentName);
                 // WS-E1 (ar-14-deep-links): a new recipient ALWAYS mints a deep-link
-                // token at publish, independent of the EnableDeepLinks flag.
-                var fresh = minter.Mint(recipient, linkValidityDays, DateTimeOffset.UtcNow);
-                recipient.AttachDeepLink(fresh.Token, fresh.ExpiresAt);
+                // token at publish, independent of the EnableDeepLinks flag. Round b2a §3.6:
+                // an SMS/WhatsApp recipient mints its short-link code in the same call.
+                await AttachDeepLinkAsync(recipient, s.Channel, linkValidityDays, cancellationToken);
                 submissionRepository.Add(recipient);
                 recipients.Add(recipient);
             }
@@ -209,8 +220,14 @@ public sealed class PublishAssignmentCommandHandler(
                     existing.DeepLinkExpiresAt is null ||
                     existing.DeepLinkExpiresAt <= DateTimeOffset.UtcNow)
                 {
-                    var refreshed = minter.Mint(existing, linkValidityDays, DateTimeOffset.UtcNow);
-                    existing.AttachDeepLink(refreshed.Token, refreshed.ExpiresAt);
+                    await AttachDeepLinkAsync(existing, s.Channel, linkValidityDays, cancellationToken);
+                }
+                // Round b2a §3.6/Q64: an SMS/WhatsApp row written before short links existed keeps
+                // its unexpired token and gains only the missing code — the same ensure-mint the
+                // E3 sweeps perform at render time.
+                else if (CarriesShortLink(s.Channel) && string.IsNullOrWhiteSpace(existing.ShortLinkCode))
+                {
+                    existing.EnsureShortLinkCode(await MintShortLinkCodeAsync(cancellationToken));
                 }
                 existing.MarkSubscribed(true);
                 submissionRepository.Update(existing);
@@ -237,4 +254,109 @@ public sealed class PublishAssignmentCommandHandler(
 
         return recipients;
     }
+
+    /// <summary>
+    /// §3.7 selection lifecycle (round notification-templates-b2a, WS4/WS5). A request stamp is the
+    /// author's explicit choice and must name this tenant's live Publish template for that channel —
+    /// anything else is a <see cref="NotificationTemplateSelectionInvalidException"/> the route maps
+    /// to 400, never a silent fallback. A null request stamp means <b>reuse</b>: the stored stamp
+    /// survives untouched.
+    /// <para>An unreadable Settings slot (outage, timeout) accepts the stamp as-is: §3.3's fail-open
+    /// outranks the 400 — a template outage must never block a publish — so the stamp is only
+    /// rejected when the live slot was actually read and disagrees. A stale <b>stored</b> stamp is
+    /// never validated here for the same reason (a transient outage must not erase the author's
+    /// choice); the render path resolves the slot independently, so a deleted stamp degrades to the
+    /// live template or the built-in default and the persisted <c>NotificationLog.TemplateId</c>
+    /// records what actually rendered (§3.9).</para>
+    /// </summary>
+    private async Task ApplyTemplateSelectionAsync(
+        Assignment assignment, PublishAssignmentCommand command, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var emailId = command.PublishEmailTemplateId is { } requestedEmail
+            ? await ValidateRequestedStampAsync(NotificationChannel.Email, requestedEmail, tenantId, cancellationToken)
+            : assignment.PublishEmailTemplateId;
+        var smsId = command.PublishSmsTemplateId is { } requestedSms
+            ? await ValidateRequestedStampAsync(NotificationChannel.SMS, requestedSms, tenantId, cancellationToken)
+            : assignment.PublishSmsTemplateId;
+
+        if (emailId != assignment.PublishEmailTemplateId || smsId != assignment.PublishSmsTemplateId)
+        {
+            assignment.StampPublishTemplates(emailId, smsId);
+        }
+    }
+
+    /// <summary>Validates one explicit request stamp against the slot's live template (see
+    /// <see cref="ApplyTemplateSelectionAsync"/>). Three-way result:
+    /// <list type="bullet">
+    /// <item><description><see cref="NotificationTemplateSlotState.NotSet"/>: no live template is
+    /// configured for this channel, so the stamp cannot be validated and a
+    /// <see cref="NotificationTemplateSelectionInvalidException"/> is thrown (400).</description></item>
+    /// <item><description><see cref="NotificationTemplateSlotState.Unreadable"/>: the Settings read
+    /// failed (outage, timeout, or unparseable response). §3.3 fail-open outranks validation,
+    /// so the stamp is accepted and persisted as-is and a warning is logged.</description></item>
+    /// <item><description><see cref="NotificationTemplateSlotState.Found"/>: the live template was
+    /// read; the stamp must exactly match its id, otherwise a
+    /// <see cref="NotificationTemplateSelectionInvalidException"/> is thrown (400).</description></item>
+    /// </list>
+    /// Returns the stamp so the caller keeps it.</summary>
+    private async Task<Guid> ValidateRequestedStampAsync(
+        NotificationChannel channel, Guid templateId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var read = await templateResolver.ReadSlotAsync(
+            NotificationKind.Publish, channel, tenantId, cancellationToken);
+
+        switch (read.State)
+        {
+            case NotificationTemplateSlotState.NotSet:
+                throw new NotificationTemplateSelectionInvalidException(
+                    $"The selected {channel} template '{templateId}' is not this tenant's live Publish "
+                    + "template for that channel. Reload the publish options and choose again.");
+
+            case NotificationTemplateSlotState.Unreadable:
+                logger.LogWarning(
+                    "Skipping {Channel} Publish template validation for '{TemplateId}' because the Settings "
+                    + "template read failed; the stamp will be persisted as-is",
+                    channel, templateId);
+                return templateId;
+
+            case NotificationTemplateSlotState.Found:
+                if (read.Slot!.TemplateId != templateId)
+                {
+                    throw new NotificationTemplateSelectionInvalidException(
+                        $"The selected {channel} template '{templateId}' is not this tenant's live Publish "
+                        + "template for that channel. Reload the publish options and choose again.");
+                }
+                return templateId;
+
+            default:
+                throw new InvalidOperationException($"Unexpected template slot state {read.State}.");
+        }
+    }
+
+    /// <summary>
+    /// Stamps the deep link for one recipient (round b2a §3.6): the token, its expiry and — for the
+    /// SMS/WhatsApp channels only — the short-link code, in ONE call, so a plain-text recipient can
+    /// never hold a token without a code or a code without a token. Email keeps the full
+    /// <c>/deeplink/{token}</c>. A republish re-mint reuses an existing code: the code resolves to
+    /// this row (its validity is the row's expiry), so only a missing one is minted.
+    /// </summary>
+    private async Task AttachDeepLinkAsync(
+        AssignmentRecipient recipient, ContactChannel channel, int? linkValidityDays, CancellationToken cancellationToken)
+    {
+        var minted = minter.Mint(recipient, linkValidityDays, DateTimeOffset.UtcNow);
+        var shortLinkCode = CarriesShortLink(channel)
+            ? recipient.ShortLinkCode ?? await MintShortLinkCodeAsync(cancellationToken)
+            : null;
+        recipient.AttachDeepLink(minted.Token, minted.ExpiresAt, shortLinkCode);
+    }
+
+    /// <summary>Mints a globally unused short-link code (§3.6, Q61) through the one shared
+    /// generator/validator (the sweeps' ensure-mint uses the same loop).</summary>
+    private Task<string> MintShortLinkCodeAsync(CancellationToken cancellationToken) =>
+        ShortLinkCodes.MintUniqueAsync(submissionRepository.ShortLinkCodeExistsAsync, cancellationToken);
+
+    /// <summary>Whether this channel's messages carry a short link — SMS and WhatsApp do, email keeps
+    /// the full deep link (§3.2/§3.6).</summary>
+    private static bool CarriesShortLink(ContactChannel channel) =>
+        channel is ContactChannel.SMS or ContactChannel.WhatsApp;
 }

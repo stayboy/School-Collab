@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.AssignmentPolicies;
@@ -14,6 +15,9 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 /// unchanged) and the two per-role contact caps (D4) with the Q7 non-positive ⇒ uncapped branch.
 /// Bucketing keys on <see cref="AssignmentRecipient.OwnerType"/>; student-owned rows carry no
 /// guardian role by construction and are exempt from both caps.
+/// <para>Round notification-templates-b2a (§3.8) adds the per-sendout medium restriction:
+/// PerPolicy / EmailOnly / SmsOnly (= SMS + WhatsApp), applied after the blocked-channel filter and
+/// before the caps, and never able to unblock a channel the tenant blocked.</para>
 /// </summary>
 [TestClass]
 public class NotificationRecipientFilterTests
@@ -65,8 +69,9 @@ public class NotificationRecipientFilterTests
     private static IReadOnlyList<AssignmentRecipient> Apply(
         IReadOnlyList<AssignmentRecipient> recipients,
         EffectiveNotificationPolicy policy,
-        EffectiveAssignmentPolicy? assignmentPolicy = null) =>
-        NotificationRecipientFilter.Apply(recipients, policy, assignmentPolicy ?? AssignmentPolicy());
+        EffectiveAssignmentPolicy? assignmentPolicy = null,
+        PublishChannel? channels = null) =>
+        NotificationRecipientFilter.Apply(recipients, policy, assignmentPolicy ?? AssignmentPolicy(), channels);
 
     [TestMethod]
     public void Empty_recipients_returns_empty()
@@ -283,5 +288,106 @@ public class NotificationRecipientFilterTests
     public void Caps_are_ignored_when_the_recipient_set_is_empty()
     {
         Apply([], Policy(), AssignmentPolicy(maxPrimary: 1, maxCopy: 1)).Should().BeEmpty();
+    }
+
+    // ── §3.8 per-sendout medium restriction (round notification-templates-b2a) ──────────────────
+
+    /// <summary>One recipient per channel, in the input order the filter re-sorts.</summary>
+    private static AssignmentRecipient[] OneOfEachChannel() =>
+    [
+        Guardian(ContactChannel.Email, GuardianRole.Primary, 1),
+        Guardian(ContactChannel.SMS, GuardianRole.Primary, 2),
+        Guardian(ContactChannel.WhatsApp, GuardianRole.CC, 3),
+    ];
+
+    [TestMethod]
+    public void PerPolicy_KeepsEveryChannel()
+    {
+        Apply(OneOfEachChannel(), Policy(), channels: PublishChannel.PerPolicy).Should().HaveCount(3);
+    }
+
+    [TestMethod]
+    public void NullRestriction_KeepsEveryChannel()
+    {
+        // An absent request field is PerPolicy — the pre-b2a behaviour must not change.
+        Apply(OneOfEachChannel(), Policy(), channels: null).Should().HaveCount(3);
+    }
+
+    [TestMethod]
+    public void EmailOnly_DropsSmsAndWhatsApp()
+    {
+        // Discriminating: without the §3.8 restriction every channel survives.
+        var result = Apply(OneOfEachChannel(), Policy(), channels: PublishChannel.EmailOnly);
+
+        result.Should().ContainSingle().Which.Channel.Should().Be(ContactChannel.Email);
+    }
+
+    [TestMethod]
+    public void SmsOnly_KeepsSmsAndWhatsApp_DropsEmail()
+    {
+        // §3.8: "SMS only" is SMS **+** WhatsApp — WhatsApp is a paid plain-text channel too.
+        var result = Apply(OneOfEachChannel(), Policy(), channels: PublishChannel.SmsOnly);
+
+        result.Should().HaveCount(2);
+        result.Select(r => r.Channel).Should().BeEquivalentTo([ContactChannel.SMS, ContactChannel.WhatsApp]);
+    }
+
+    [TestMethod]
+    public void BlockedChannels_StillWin_UnderEmailOnly()
+    {
+        // Regression guard (this posture predates §3.8): a tenant-blocked email channel stays
+        // blocked — the request only ever NARROWS, it can never unblock.
+        var result = Apply(
+            OneOfEachChannel(),
+            Policy(blocked: [NotificationChannel.Email]),
+            channels: PublishChannel.EmailOnly);
+
+        result.Should().BeEmpty("email-only cannot resurrect a blocked email channel");
+    }
+
+    [TestMethod]
+    public void BlockedChannels_StillWin_UnderSmsOnly()
+    {
+        var result = Apply(
+            OneOfEachChannel(),
+            Policy(blocked: [NotificationChannel.SMS]),
+            channels: PublishChannel.SmsOnly);
+
+        result.Should().ContainSingle().Which.Channel.Should().Be(ContactChannel.WhatsApp,
+            "the request narrows to the plain-text channels; the blocked one is already gone");
+    }
+
+    [TestMethod]
+    public void Restriction_IsAppliedBeforeTheSendoutCap()
+    {
+        // Discriminating for the filter ORDER (§3.8 + D5): with MaxNotifications = 1 the cap must
+        // count what the sendout will actually use. If the cap ran first it would keep the email row
+        // (the preferred-channel order puts email last, so it survives the take when it is the only
+        // row left after narrowing) — narrowing first keeps the SMS row instead.
+        var email = Guardian(ContactChannel.Email, GuardianRole.Primary, 1);
+        var sms = Guardian(ContactChannel.SMS, GuardianRole.Primary, 2);
+
+        var result = Apply(
+            [email, sms],
+            Policy(preferred: [NotificationChannel.Email, NotificationChannel.SMS], maxNotifications: 1),
+            channels: PublishChannel.SmsOnly);
+
+        result.Should().ContainSingle().Which.Should().Be(sms,
+            "the medium restriction runs before MaxNotifications, so the cap counts plain-text rows");
+        result.Should().NotContain(email);
+    }
+
+    [TestMethod]
+    public void Restriction_PreservesThePreferredChannelOrder()
+    {
+        var sms = Guardian(ContactChannel.SMS, GuardianRole.Primary, 1);
+        var whatsApp = Guardian(ContactChannel.WhatsApp, GuardianRole.CC, 2);
+
+        var result = Apply(
+            [whatsApp, sms],
+            Policy(preferred: [NotificationChannel.WhatsApp, NotificationChannel.SMS]),
+            channels: PublishChannel.SmsOnly);
+
+        result.Should().ContainInOrder(whatsApp, sms);
     }
 }

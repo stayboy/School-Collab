@@ -23,4 +23,20 @@ public sealed class NullNotificationTemplateResolver : INotificationTemplateReso
         Guid tenantId,
         CancellationToken cancellationToken = default)
         => Task.FromResult<ResolvedNotificationTemplate?>(null);
+
+    /// <inheritdoc />
+    public Task<NotificationTemplateSlot?> ResolveSlotAsync(
+        NotificationKind kind,
+        NotificationChannel channel,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<NotificationTemplateSlot?>(null);
+
+    /// <inheritdoc />
+    public Task<NotificationTemplateSlotRead> ReadSlotAsync(
+        NotificationKind kind,
+        NotificationChannel channel,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new NotificationTemplateSlotRead(NotificationTemplateSlotState.NotSet, null));
 }

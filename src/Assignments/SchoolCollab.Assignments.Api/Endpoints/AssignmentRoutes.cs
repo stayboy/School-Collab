@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using System.Security.Claims;
@@ -30,6 +31,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQu
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentAuthoringChildren;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetNotificationFailures;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetPublishOptions;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsForReview;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
@@ -717,7 +719,11 @@ public static class AssignmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new PublishAssignmentCommand(id, req?.ContactIds), ct);
+                // Round notification-templates-b2a: the per-sendout medium restriction (§3.8) and
+                // the author's template stamps (§3.7) ride the command; null stamps mean "reuse the
+                // stored selection".
+                await handler.HandleAsync(new PublishAssignmentCommand(
+                    id, req?.ContactIds, req?.Channels, req?.PublishEmailTemplateId, req?.PublishSmsTemplateId), ct);
                 return Results.NoContent();
             }
             catch (AssignmentNotFoundException)
@@ -727,6 +733,12 @@ public static class AssignmentRoutes
             // WS-A2 / spec §7 Q2: the typed approval guard surfaces as 400
             // so the UI can render the inline error.
             catch (AssignmentApprovalRequiredException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // Round b2a (§3.7 / WS5): an explicit template stamp that does not name the tenant's
+            // live template for its channel is the caller's mistake — 400, never a silent fallback.
+            catch (NotificationTemplateSelectionInvalidException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }
@@ -994,6 +1006,25 @@ public static class AssignmentRoutes
             [FromServices] IQueryHandler<GetNotificationFailures, NotificationFailureDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new GetNotificationFailures(id), ct)));
+
+        // Round notification-templates-b2a (§3.7 / WS5): the publish dialog's pre-select source —
+        // each stamped channel's live template (+ display-only constraints), the effective policy's
+        // channels and the assignment's stored stamps. Read-only and tenant-scoped: a foreign
+        // assignment is a 404. TypedResponses carry the real response schema.
+        group.MapGet("/{id:guid}/publish-options", async Task<Results<Ok<PublishOptionsDto>, NotFound>> (
+            Guid id,
+            [FromServices] IQueryHandler<GetPublishOptions, PublishOptionsDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                return TypedResults.Ok(await handler.HandleAsync(new GetPublishOptions(id), ct));
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return TypedResults.NotFound();
+            }
+        });
 
         // WS-E1 (ar-14-deep-links): idempotent first-visit deep-link stamp, invoked
         // server-side by the Families landing. Marks the recipient OpenedAt at most

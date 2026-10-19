@@ -1,10 +1,13 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
+using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Assignments.Core.Services.Delivery;
+using SchoolCollab.Core.Notifications;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Worker.Services;
@@ -92,6 +95,12 @@ public sealed class ReminderSweepService(
         var policyResolver = scope.ServiceProvider.GetRequiredService<INotificationPolicyResolver>();
         var addressResolver = scope.ServiceProvider.GetRequiredService<IContactAddressResolver>();
         var timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+        // Round notification-templates-b2a (WS3): the B1 render path (resolver → renderer) plus the
+        // channel-aware link composer, shared by every recipient of this pass through one cache.
+        var render = new SweepRenderDependencies(
+            scope.ServiceProvider.GetRequiredService<INotificationTemplateResolver>(),
+            scope.ServiceProvider.GetRequiredService<IOptions<NotificationLinkOptions>>().Value,
+            new Dictionary<(NotificationKind, NotificationChannel), ResolvedNotificationTemplate?>());
 
         var reminderCandidates = await repository.ListReminderSweepCandidatesAsync(cancellationToken);
         if (reminderCandidates.Count > 0)
@@ -101,7 +110,7 @@ public sealed class ReminderSweepService(
 
             var sentReady = await ReminderSweeper.QueueRemindersAsync(
                 reminderCandidates, logStateMap, db, tenantAccessor, policyResolver,
-                addressResolver, timeProvider, logger, cancellationToken);
+                addressResolver, render, timeProvider, logger, cancellationToken);
             logger.LogInformation("Reminder sweep queued {Queued} reminder(s) for {Total} candidate(s)",
                 sentReady, reminderCandidates.Count);
         }
@@ -110,7 +119,7 @@ public sealed class ReminderSweepService(
         if (completionCandidates.Count > 0)
         {
             var completions = await ReminderSweeper.QueueCompletionsAsync(
-                completionCandidates, db, tenantAccessor, addressResolver,
+                completionCandidates, db, tenantAccessor, addressResolver, render,
                 timeProvider, logger, cancellationToken);
             logger.LogInformation("Completion sweep queued {Queued} completion(s) for {Total} candidate(s)",
                 completions, completionCandidates.Count);

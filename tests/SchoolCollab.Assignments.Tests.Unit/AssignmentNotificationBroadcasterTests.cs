@@ -107,7 +107,7 @@ public class AssignmentNotificationBroadcasterTests
 
         if (token is not null)
         {
-            recipient.AttachDeepLink(token, expiresAt ?? DateTimeOffset.UtcNow.AddDays(7));
+            recipient.AttachDeepLink(token, expiresAt ?? DateTimeOffset.UtcNow.AddDays(7), shortLinkCode: null);
         }
 
         return recipient;
@@ -120,6 +120,19 @@ public class AssignmentNotificationBroadcasterTests
         public Task<ResolvedNotificationTemplate?> ResolveAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default) =>
             Task.FromResult<ResolvedNotificationTemplate?>(new ResolvedNotificationTemplate(Guid.NewGuid(), subject, body));
+
+        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
+            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<NotificationTemplateSlot?>(
+                new NotificationTemplateSlot(Guid.NewGuid(), kind, channel, subject, body, []));
+
+        public async Task<NotificationTemplateSlotRead> ReadSlotAsync(
+            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            var slot = await ResolveSlotAsync(kind, channel, tenantId, cancellationToken);
+            return new NotificationTemplateSlotRead(
+                slot is null ? NotificationTemplateSlotState.NotSet : NotificationTemplateSlotState.Found, slot);
+        }
     }
 
     private static EffectiveNotificationPolicy Policy(
@@ -347,6 +360,21 @@ public class AssignmentNotificationBroadcasterTests
             NotificationKind kind, NotificationChannel channel, Guid tenantId,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<ResolvedNotificationTemplate?>(template);
+
+        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
+            NotificationKind kind, NotificationChannel channel, Guid tenantId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<NotificationTemplateSlot?>(new NotificationTemplateSlot(
+                template.TemplateId, kind, channel, template.Subject, template.Body, []));
+
+        public async Task<NotificationTemplateSlotRead> ReadSlotAsync(
+            NotificationKind kind, NotificationChannel channel, Guid tenantId,
+            CancellationToken cancellationToken = default)
+        {
+            var slot = await ResolveSlotAsync(kind, channel, tenantId, cancellationToken);
+            return new NotificationTemplateSlotRead(
+                slot is null ? NotificationTemplateSlotState.NotSet : NotificationTemplateSlotState.Found, slot);
+        }
     }
 
     private static (AssignmentsDbContext db, AssignmentNotificationBroadcaster broadcaster) BuildWithTemplate(

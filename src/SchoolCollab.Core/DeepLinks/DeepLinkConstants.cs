@@ -20,4 +20,19 @@ public static class DeepLinkConstants
     /// <summary>Built-in link validity (days) when the effective notification
     /// policy has no <c>LinkValidityDays</c> configured.</summary>
     public const int DefaultValidityDays = 7;
+
+    /// <summary>
+    /// The public short-link path prefix (round notification-templates-b2a, spec §3.6): the
+    /// Assignments API composes a plain-text recipient's link as <c>{base}/l/{code}</c> and the
+    /// Families host serves that route. Shared here, next to the deep-link constants, because both
+    /// hosts must agree on it and Families references only the shared kernel.
+    /// </summary>
+    public const string ShortLinkPathPrefix = "/l/";
+
+    /// <summary>
+    /// The short-link code length in characters (96 bits of <c>RandomNumberGenerator</c> entropy
+    /// rendered base64url). The Assignments side mints and indexes to this length; the Families
+    /// landing rejects a code of any other shape before spending a cross-service round trip.
+    /// </summary>
+    public const int ShortLinkCodeLength = 16;
 }
