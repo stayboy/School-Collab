@@ -331,6 +331,11 @@ section below.
   The `-m:1 -p:BuildInParallel=false` flags are **not** optional: the default parallel build exhausts
   memory on this machine and has repeatedly killed the agent process (~`0xC0000409`) instead of
   reporting a compile error.
+  **The CI `Mobile (MAUI)` job is informational only (owner 2026-10-18).** It is path-filtered to
+  `src/Mobile/**`, `SchoolCollab.Admin.Shared/**`, the two `Directory.*.props` pins and `ci.yml`, and
+  it is **not** a gate to wait on: never let it block or delay a round report (it takes ~10 minutes)
+  and surface a failure as a note, not a blocker. The mobile head is not feature-ready — this local
+  build, not the CI job, is the shared-component tripwire.
 - **Fast UI-iteration loop (hot reload):** for local visual iteration, prefer IDE hot
   reload (human) or a detached `dotnet watch` on the AppHost (agent) over the
   kill→build→restart cycle — markup/CSS/method-body edits then apply in place and

@@ -33,6 +33,11 @@ Cost rules that apply to every round (speed + token budget):
   source of truth.
 - **One round doc + one diff artifact** — hand-offs pass paths, not payloads;
   the plan is the single source of truth for worker and reviewer.
+- **Policy travels separately** — a round's commit never carries `.pi/skills/**`,
+  `AGENTS.md` or `documents/specs/**` edits; they ship as their own doc layer
+  (2026-10-18: a feature branch that swept a `models.md` seat edit into its code
+  commit then conflicted with the doc layer carrying the same ruling, and the
+  layer had to supersede the feature PR's copy).
 
 - **Acceptance is a gate on every tier** — no round, pass or layer is reported as
   completed, handed over, or marked done before its `## Acceptance` section
@@ -178,6 +183,10 @@ worker** and an orchestrator-authored plan, and allows ≤2 reviewer iterations;
 Tier 2 has **no plan gate**, a ≤1 iteration bound and a diff-only reviewer. Do
 not collapse Tier 2 into "lean" — that would silently drop the plan gate, the
 round's most load-bearing artifact.
+**Size alone no longer earns Tier 2 (owner 2026-10-18).** The diff gate runs
+`deepseek-v4-pro:0813` on Tiers 2–3, so a change that qualifies *only* on size is
+**solo** — Tier 2 is for contained behavioural work where an independent diff gate
+earns its cost.
 
 ### Mid-round escalation
 

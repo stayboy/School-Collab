@@ -51,6 +51,13 @@ not treat a bug fix as complete when it only changes production code.
    add the smallest test that covers the fixed behaviour and explain the trade-off in
    the PR description.
 
+   **Proof, not claim (2026-10-18).** "Should fail against the buggy code" is a claim until it
+   is executed: run the new test against the **pre-fix revision** (stash the fix, or check out
+   the base commit) and confirm it fails there, then record that check in the PR or round doc.
+   A test that passes on both sides is not a regression test — it describes the fix's
+   vocabulary, not its behaviour. B1 shipped a suite that asserted the *pre-fix* tag names and
+   passed against the very code it was meant to guard.
+
 2. **Run the relevant test project after the fix.** At minimum, run the test project
    that owns the changed production code before committing. If the fix crosses projects,
    run all affected test projects.
