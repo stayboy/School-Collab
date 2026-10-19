@@ -333,3 +333,33 @@ contains **migrations**, which always reach a human unless the owner pre-authori
 **Round start deferred by the owner to 18:00 (2026-10-15)**; start from base `cec3c952` per the round
 skill's step 0 (`git rev-parse HEAD` + the dirty-tree file list — the two untracked spec files ride the
 round and are committed only on explicit instruction).
+## 10. As-built status (recorded 2026-10-18, after Round B1 acceptance)
+
+**Round A** — PR #362, merged as `d3328320`: template store (`TenantNotificationTemplate`),
+`TemplateConstraint` + dimension enum, `TemplateAuditEntry` + recorder, Settings endpoints, the
+settings-db migration, 9 wire tests.
+
+**Round B1** — accepted 2026-10-18 (Tier 3 lean), branch `feat/notification-templates-b1`, base
+`4fb36f28`, round doc `documents/rounds/round-notification-templates-b1.md`:
+
+- **Delivered:** the ten-tag §3.2 vocabulary (`All` in spec order, Round-A aliases honoured);
+  pure renderer with channel-appropriate escaping (`{{Instructions}}`/`{{Description}}` stay authored
+  markup, body re-sanitized); `{{Description}}` renders the full value (the 120-char cap now lives only
+  in the built-in preview body); `{{GuardianName}}`, `{{GuardianRole}}`, `{{StudentName}}`,
+  `{{SchoolName}}`, `{{LinkExpiry}}` all resolve with degrade-to-empty semantics; name enrichment rides
+  the existing subscription read (no second hop); `NotificationLog.TemplateId` (nullable; null =
+  built-in default); **one** built-in default source (`NotificationMessageBuilder`, 4 kinds × 2
+  channels) that the renderer delegates to; `INotificationTemplateResolver` in `Assignments.Core` with a
+  Core-local wire mirror (no `Settings.Core` reference) registered on **both** hosts after
+  `AddAssignmentsCore`; fail-open covers 204/500/timeout/non-JSON-200 while genuine cancellation still
+  propagates; the sanitizer was relocated to `SchoolCollab.Core.Abstractions` (one copy, no new project
+  reference).
+- **Deferred, with owner workstreams:** SMS/WhatsApp short links (`/l/{code}`) → **B2 (WS3)**; publish
+  stamps + `GET /assignments/{id}/publish-options` + the medium restriction → **B2 (WS4)**; E3 sweep
+  resolver wiring → **B2 (WS6)**; `families-public-base-url` fan-out + the `documents/configuration.md`
+  §2/§11 rows → **B2**; editor page, publish dialog, grade-detail card, `NotificationTemplateApiClient`
+  → **B3 (WS5)**.
+- **Carried residual:** the older `AssignmentPolicyResolver` still catches only `HttpRequestException`
+  (the same hardening gap closed here for templates) — later round.
+- **Slicing correction:** §9's original "one round" recommendation was superseded by the adopted
+  **A → B1 → B2 → B3** cut. The round docs are the record; this spec keeps the contract only.
