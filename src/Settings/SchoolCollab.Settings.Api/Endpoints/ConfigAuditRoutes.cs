@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
@@ -10,7 +11,7 @@ public static class ConfigAuditRoutes
 {
     public static RouteGroupBuilder MapConfigAuditRoutes(this RouteGroupBuilder group)
     {
-        group.MapGet("/audit", async (
+        group.MapGet("/audit", async Task<Ok<FlagAuditEntryDto[]>> (
             [FromQuery] string? key,
             [FromQuery] Guid? tenantId,
             [FromQuery] DateTimeOffset? from,
@@ -19,7 +20,7 @@ public static class ConfigAuditRoutes
             [FromQuery] int? take,
             [FromServices] IQueryHandler<ListAuditEntries, FlagAuditEntryDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListAuditEntries(key, tenantId, from, to, skip ?? 0, take ?? 50), ct)));
+            TypedResults.Ok(await handler.HandleAsync(new ListAuditEntries(key, tenantId, from, to, skip ?? 0, take ?? 50), ct)));
 
         return group;
     }

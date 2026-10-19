@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
@@ -17,18 +18,19 @@ public static class SignatureConsentTextRoutes
     public static RouteGroupBuilder MapSignatureConsentTextRoutes(this RouteGroupBuilder group)
     {
         // ── Get the tenant's consent text (204 when unset — caller falls back to the embedded default) ──
-        group.MapGet("/signature-consent-text", async (
+        group.MapGet("/signature-consent-text", async Task<Results<Ok<TenantSignatureConsentTextDto>, NoContent>> (
             [FromServices] IQueryHandler<GetTenantSignatureConsentText, TenantSignatureConsentTextDto?> handler,
             CancellationToken ct) =>
         {
             var text = await handler.HandleAsync(GetTenantSignatureConsentText.Instance, ct);
-            return text is null ? Results.NoContent() : Results.Ok(text);
+            return text is null ? TypedResults.NoContent() : TypedResults.Ok(text);
         });
 
         // ── Upsert (create or replace) the tenant's consent text ──
         // The 4000-character cap throws a typed ArgumentException — mapped to
         // 400 with the message so the admin page can surface it.
-        group.MapPut("/signature-consent-text", async (
+        group.MapPut("/signature-consent-text",
+            async Task<Results<Ok<TenantSignatureConsentTextDto>, BadRequest<ErrorResponse>>> (
             [FromBody] UpsertTenantSignatureConsentTextRequest req,
             [FromServices] ICommandHandler<UpsertTenantSignatureConsentText, TenantSignatureConsentTextDto> handler,
             CancellationToken ct) =>
@@ -37,11 +39,14 @@ public static class SignatureConsentTextRoutes
             {
                 var result = await handler.HandleAsync(
                     new UpsertTenantSignatureConsentText(req.ConsentText), ct);
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
             catch (ArgumentException ex)
             {
-                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+                // {"error":…}, not {"message":…} — the key this route has always emitted. TypedResults.BadRequest<T>
+                // is wire-identical to the Json(…, statusCode: 400) it replaces (400, application/json, same body and
+                // the app's JsonOptions) and, unlike JsonHttpResult<T>, it documents the 400 schema (round review F).
+                return TypedResults.BadRequest(new ErrorResponse(ex.Message));
             }
         });
 

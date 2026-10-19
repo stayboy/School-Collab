@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Settings.Core.CQRS.Tenants.Commands.SetDefaultTenant;
@@ -33,13 +34,13 @@ public static class TenantRoutes
     {
         // List every tenant (global registry) for the dev tenant switcher dropdown.
         // IsDefault on each row tells the portal which tenant it should fall back to.
-        group.MapGet("/", async (
+        group.MapGet("/", async Task<Ok<TenantDto[]>> (
             [FromServices] IQueryHandler<ListTenants, TenantDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListTenants(), ct)));
+            TypedResults.Ok(await handler.HandleAsync(new ListTenants(), ct)));
 
         // Designate the platform's default tenant for the admin portal.
-        group.MapPut("/{id:guid}/default", async (
+        group.MapPut("/{id:guid}/default", async Task<Results<NoContent, NotFound>> (
             Guid id,
             [FromServices] ICommandHandler<SetDefaultTenant> handler,
             CancellationToken ct) =>
@@ -47,26 +48,28 @@ public static class TenantRoutes
             try
             {
                 await handler.HandleAsync(new SetDefaultTenant(id), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (TenantNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
         });
 
         // The caller's own recorded preference. Always 200: a missing preference is the
         // documented "none recorded" state (null DefaultTenantId), not a 404 — the portal
         // then falls through to the platform default.
-        group.MapGet("/me/default", async (
+        group.MapGet("/me/default", async Task<Ok<UserTenantPreferenceDto>> (
             ClaimsPrincipal user,
             [FromServices] IQueryHandler<GetUserDefaultTenant, UserTenantPreferenceDto> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new GetUserDefaultTenant(SubjectOf(user)), ct)));
+            TypedResults.Ok(await handler.HandleAsync(new GetUserDefaultTenant(SubjectOf(user)), ct)));
 
         // Record or clear the caller's own preference. A null TenantId clears it; Guid.Empty
         // records an explicit preference for the system / no-tenant context.
-        group.MapPut("/me/default", async (
+        // Four outcome arms — NoContent, Unauthorized, NotFound, BadRequest<MessageResponse> — which a
+        // Results<…> union would not keep readable, so this stays IResult by decision D19.
+        group.MapPut("/me/default", async Task<IResult> (
             ClaimsPrincipal user,
             [FromBody] SetUserDefaultTenantRequest req,
             [FromServices] ICommandHandler<SetUserDefaultTenant> handler,
@@ -78,21 +81,21 @@ public static class TenantRoutes
                 // No principal ⇒ nothing to key a preference to. The OIDC branch of
                 // MapTenantEndpoints already requires authentication; this covers the
                 // TestAuth-off/dev edge and any future anonymous mount.
-                return Results.Unauthorized();
+                return TypedResults.Unauthorized();
             }
 
             try
             {
                 await handler.HandleAsync(new SetUserDefaultTenant(subject, req.TenantId), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (TenantNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { ex.Message });
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
             }
         });
 

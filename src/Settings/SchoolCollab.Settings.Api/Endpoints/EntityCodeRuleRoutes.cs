@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.EntityCodes;
@@ -19,36 +20,36 @@ public static class EntityCodeRuleRoutes
     public static RouteGroupBuilder MapEntityCodeRuleRoutes(this RouteGroupBuilder group)
     {
         // List all rules (with segments).
-        group.MapGet("/", async (
+        group.MapGet("/", async Task<Ok<List<EntityCodeRuleDto>>> (
             [FromServices] IEntityCodeRuleRepository repository,
             CancellationToken ct) =>
         {
             var rules = await repository.ListAsync(ct);
-            return Results.Ok(rules.Select(EntityCodeRuleDto.FromRule).ToList());
+            return TypedResults.Ok(rules.Select(EntityCodeRuleDto.FromRule).ToList());
         });
 
         // Get a rule by id (with segments), ignoring soft-delete.
-        group.MapGet("/{id:guid}", async (
+        group.MapGet("/{id:guid}", async Task<Results<Ok<EntityCodeRuleDto>, NotFound>> (
             Guid id,
             [FromServices] IEntityCodeRuleRepository repository,
             CancellationToken ct) =>
         {
             var rule = await repository.GetByIdAsync(id, ct);
-            return rule is null ? Results.NotFound() : Results.Ok(EntityCodeRuleDto.FromRule(rule));
+            return rule is null ? TypedResults.NotFound() : TypedResults.Ok(EntityCodeRuleDto.FromRule(rule));
         });
 
         // Get a rule by Code (for the generator lookup path; returns 404 if inactive/deleted).
-        group.MapGet("/by-code/{code}", async (
+        group.MapGet("/by-code/{code}", async Task<Results<Ok<EntityCodeRuleDto>, NotFound>> (
             string code,
             [FromServices] IEntityCodeRuleRepository repository,
             CancellationToken ct) =>
         {
             var rule = await repository.GetActiveByCodeAsync(code, ct);
-            return rule is null ? Results.NotFound() : Results.Ok(EntityCodeRuleDto.FromRule(rule));
+            return rule is null ? TypedResults.NotFound() : TypedResults.Ok(EntityCodeRuleDto.FromRule(rule));
         });
 
         // Create a new rule with segments.
-        group.MapPost("/", async (
+        group.MapPost("/", async Task<Results<Created<IdResponse>, BadRequest<MessageResponse>, Conflict<MessageResponse>>> (
             [FromBody] CreateEntityCodeRule command,
             [FromServices] ICommandHandler<CreateEntityCodeRule, Guid> handler,
             CancellationToken ct) =>
@@ -56,20 +57,22 @@ public static class EntityCodeRuleRoutes
             try
             {
                 var id = await handler.HandleAsync(command, ct);
-                return Results.Created($"/api/entity-code-rules/{id}", new { id });
+                return TypedResults.Created($"/api/entity-code-rules/{id}", new IdResponse(id));
             }
             catch (EntityCodeRuleCodeConflictException ex)
             {
-                return Results.Conflict(new { ex.Message });
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { ex.Message });
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
             }
         });
 
         // Update an existing rule (replace-all segments).
-        group.MapPut("/{id:guid}", async (
+        // Four outcome arms — NoContent, NotFound, BadRequest<MessageResponse>, Conflict<MessageResponse> —
+        // which a Results<…> union would not keep readable, so this stays IResult by decision D19.
+        group.MapPut("/{id:guid}", async Task<IResult> (
             Guid id,
             [FromBody] UpdateEntityCodeRuleRequest req,
             [FromServices] ICommandHandler<UpdateEntityCodeRule> handler,
@@ -79,24 +82,24 @@ public static class EntityCodeRuleRoutes
             {
                 await handler.HandleAsync(
                     new UpdateEntityCodeRule(id, req.Name, req.Description, req.IsActive, req.Segments), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (EntityCodeRuleNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { ex.Message });
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
             }
             catch (ConcurrencyException ex)
             {
-                return Results.Conflict(new { ex.Message });
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
         });
 
         // Soft-delete a rule.
-        group.MapDelete("/{id:guid}", async (
+        group.MapDelete("/{id:guid}", async Task<Results<NoContent, NotFound>> (
             Guid id,
             [FromServices] ICommandHandler<DeleteEntityCodeRule> handler,
             CancellationToken ct) =>
@@ -104,16 +107,16 @@ public static class EntityCodeRuleRoutes
             try
             {
                 await handler.HandleAsync(new DeleteEntityCodeRule(id), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (EntityCodeRuleNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
         });
 
         // Activate a rule (deactivates any other active rule with the same Code).
-        group.MapPost("/{id:guid}/activate", async (
+        group.MapPost("/{id:guid}/activate", async Task<Results<NoContent, NotFound>> (
             Guid id,
             [FromServices] ICommandHandler<ActivateEntityCodeRule> handler,
             CancellationToken ct) =>
@@ -121,11 +124,11 @@ public static class EntityCodeRuleRoutes
             try
             {
                 await handler.HandleAsync(new ActivateEntityCodeRule(id), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (EntityCodeRuleNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
         });
 
@@ -133,14 +136,15 @@ public static class EntityCodeRuleRoutes
         // Returns the current tenant's override rows for the given rule. The
         // rule itself is loaded once so the DTO can carry the per-row
         // SegmentIndex without a second round-trip on the client.
-        group.MapGet("/{id:guid}/overrides", async (
+        group.MapGet("/{id:guid}/overrides",
+            async Task<Results<Ok<List<TenantEntityCodeRuleOverrideDto>>, NotFound>> (
             Guid id,
             [FromServices] IEntityCodeRuleRepository ruleRepository,
             [FromServices] ITenantEntityCodeRuleOverrideRepository overrideRepository,
             CancellationToken ct) =>
         {
             var rule = await ruleRepository.GetByIdAsync(id, ct);
-            if (rule is null) return Results.NotFound();
+            if (rule is null) return TypedResults.NotFound();
 
             var rows = await overrideRepository.ListForRuleAsync(id, ct);
             var indexBySegmentId = rule.Segments.ToDictionary(s => s.Id, s => s.Index);
@@ -148,12 +152,13 @@ public static class EntityCodeRuleRoutes
                 .Where(r => indexBySegmentId.ContainsKey(r.EntityCodeSegmentId))
                 .Select(r => TenantEntityCodeRuleOverrideDto.FromOverride(r, indexBySegmentId[r.EntityCodeSegmentId]))
                 .ToList();
-            return Results.Ok(dtos);
+            return TypedResults.Ok(dtos);
         });
 
         // Replaces the current tenant's full override set on the rule
         // (atomic — single transaction, full overwrite).
-        group.MapPut("/{id:guid}/overrides", async (
+        group.MapPut("/{id:guid}/overrides",
+            async Task<Results<NoContent, BadRequest<MessageResponse>, NotFound>> (
             Guid id,
             [FromBody] ReplaceOverridesRequest req,
             [FromServices] ICommandHandler<ReplaceEntityCodeRuleOverrides> handler,
@@ -163,19 +168,19 @@ public static class EntityCodeRuleRoutes
             {
                 await handler.HandleAsync(
                     new ReplaceEntityCodeRuleOverrides(id, req.Overrides), ct);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (EntityCodeRuleNotFoundException)
             {
-                return Results.NotFound();
+                return TypedResults.NotFound();
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { ex.Message });
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { ex.Message });
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
             }
         });
 
@@ -183,7 +188,8 @@ public static class EntityCodeRuleRoutes
         // dialog's "regenerate template code" button). Advances the rule's
         // sequence state, so the caller should use the returned code directly
         // (not regenerate again on create).
-        group.MapPost("/generate", async (
+        group.MapPost("/generate",
+            async Task<Results<Ok<GeneratedCodeResponse>, NotFound<MessageResponse>>> (
             [FromBody] GenerateCodeRequest req,
             [FromServices] IEntityCodeGenerator generator,
             CancellationToken ct) =>
@@ -191,11 +197,12 @@ public static class EntityCodeRuleRoutes
             try
             {
                 var code = await generator.GenerateWithNameAsync(req.RuleCode, req.NameHint, ct);
-                return Results.Ok(new { code });
+                return TypedResults.Ok(new GeneratedCodeResponse(code));
             }
             catch (EntityCodeRuleNotFoundException)
             {
-                return Results.NotFound(new { Message = $"No active entity-code rule '{req.RuleCode}'." });
+                return TypedResults.NotFound(
+                    new MessageResponse($"No active entity-code rule '{req.RuleCode}'."));
             }
         });
 
@@ -213,3 +220,6 @@ internal record UpdateEntityCodeRuleRequest(
 
 internal record ReplaceOverridesRequest(
     IReadOnlyList<EntityCodeRuleOverrideInput> Overrides);
+
+/// <summary>200 body of <c>POST /api/entity-code-rules/generate</c> — exactly one <c>code</c> property.</summary>
+internal sealed record GeneratedCodeResponse(string Code);

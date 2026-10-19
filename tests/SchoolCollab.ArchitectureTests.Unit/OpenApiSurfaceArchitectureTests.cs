@@ -48,12 +48,13 @@ public class OpenApiSurfaceArchitectureTests
 
     /// <summary>
     /// The measured baseline each host pins: how many of its operations document a response schema
-    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>19 of 66</b> after the CodedValue
-    /// typed-response pilot (spec <c>minimal-api-typed-responses</c>); Students.Api measures
-    /// <b>0 of 146</b>, untouched by that pilot. Raise the number in the same PR that converts handlers —
-    /// a conversion that leaves it stale means the pin no longer describes the document.
+    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>50 of 66</b> after both typed-response
+    /// rounds complete (spec <c>minimal-api-typed-responses</c> pilot + <c>-settings</c> follow-up;
+    /// measured 2026-10-18 from the generated document); Students.Api measures <b>0 of 146</b>, untouched
+    /// by either round. Raise the number in the same PR that converts handlers — a conversion that
+    /// leaves it stale means the pin no longer describes the document.
     /// </summary>
-    private const int SettingsSchemaPin = 19;
+    private const int SettingsSchemaPin = 50;
 
     private const int StudentsSchemaPin = 0;
 
@@ -203,10 +204,18 @@ public class OpenApiSurfaceArchitectureTests
             + $"operations, but the pin records {schemaPin}. Raise this number deliberately in the same PR "
             + "that converts handlers, because a conversion that leaves it stale means the pin no longer "
             + "describes the document. Raise it to the MEASURED count, never to a predicted one. Settings.Api "
-            + "(66 operations, measured 2026-10-17): 24 CodedValue operations converted — 12 document a "
-            + "200/201 body, 7 document a 400/409 message body only, and 5 return no body at all (recover, "
-            + "disable, enable, DELETE override, and the 4-arm approve kept on IResult) — so 12 + 7 = 19 of "
-            + "them document a schema. Students.Api was not converted and stays at 0 of 146"
+            + "(66 operations, measured 2026-10-18): the complete split is 24 CodedValue-pilot operations "
+            + "(converted in PR #364, 19 of them documented a schema then), 28 operations whose 200/201 body "
+            + "now documents a schema, 5 whose only body is a 400/409 message and 9 with no body at all — "
+            + "24 + 28 + 5 + 9 = 66. Of those 5 message-only operations 3 document the 400 content "
+            + "(PUT config/flags/{key}, PUT entity-code-rules/{id}/overrides, DELETE notification-templates/"
+            + "{kind}/{channel}) and 2 are the four-arm handlers kept on IResult (PUT entity-code-rules/{id}, "
+            + "PUT tenants/me/default), which document no schema at all — a declared IResult return type loses "
+            + "the arm types, exactly as the pilot's four-arm approve did. So 19 + 28 + 3 = 50 of them document "
+            + "a schema, and the 66 - 50 = 16 remaining operations document none: 5 from the pilot (recover, disable, "
+            + "enable, DELETE override, the 4-arm approve) and this round's 11 (the 9 genuinely body-less routes plus "
+            + "the two 4-arm handlers kept on IResult, which cannot carry response types). Students.Api was not "
+            + "converted and stays at 0 of 146"
             + (operationsWithSchema.Count > 0
                 ? $". First operations now documenting a schema: {string.Join("; ", operationsWithSchema.Take(3))}"
                 : string.Empty));
