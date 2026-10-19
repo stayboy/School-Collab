@@ -18,6 +18,16 @@ public interface ISubmissionRepository
     void Update(AssignmentRecipient recipient);
     Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
 
+    /// <summary>Round notification-templates-b2a (spec §3.6, Q61) — whether any recipient row already
+    /// carries <paramref name="code"/> as its short-link code. The check is <b>global</b> (across
+    /// tenants): the code is a credential the unauthenticated <c>/l/{code}</c> route resolves with no
+    /// tenant to scope by, which is why the unique index is global too. The publish path's mint loop
+    /// and the sweeps' ensure-mint loop both go through <c>ShortLinkCodes.MintUniqueAsync</c>, so the
+    /// collision posture is this one predicate. Default <see langword="false"/> keeps existing fake
+    /// repositories valid (the <c>ListSubmissionsForReviewAsync</c> default-method precedent).</summary>
+    Task<bool> ShortLinkCodeExistsAsync(string code, CancellationToken ct = default)
+        => Task.FromResult(false);
+
     // Gates
     Task<GuardianSubmissionGate?> GetGateAsync(Guid gateId, CancellationToken ct = default);
     Task<GuardianSubmissionGate?> GetGateByAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);

@@ -10,11 +10,32 @@ using SchoolCollab.Students.Core.Domain;
 namespace SchoolCollab.Assignments.Worker.Services;
 
 /// <summary>
+/// Round notification-templates-b2a (WS3) — the pass-scoped render inputs every queued recipient of
+/// one sweep pass shares: the tenant template resolver, the link composer and a per-pass template
+/// cache, so a pass reads each (kind, channel) slot from Settings <b>once</b> rather than once per
+/// recipient (the broadcaster's "never per recipient" posture, §3.3).
+/// </summary>
+public sealed record SweepRenderDependencies(
+    INotificationTemplateResolver TemplateResolver,
+    NotificationLinkOptions LinkOptions,
+    IDictionary<(NotificationKind Kind, NotificationChannel Channel), ResolvedNotificationTemplate?> TemplateCache);
+
+/// <summary>
 /// Shared render + queue step for the E3 sweeps (reminder / completion / overdue).
 /// Mirrors the broadcaster's queue-time posture (decision (b)/(c)): the destination
 /// address is resolved once and rendered into the <see cref="NotificationLog"/> row at
 /// queue time; a recipient with no unexpired deep-link token or no resolvable address is
 /// recorded <see cref="NotificationDeliveryStatus.Skipped"/> and never sent.
+///
+/// <para>Round notification-templates-b2a (WS3): rendering goes through the SAME B1 path the
+/// publish flow uses — <see cref="INotificationTemplateResolver"/> (fail-open) →
+/// <see cref="NotificationTemplateRenderer"/> (built-in defaults when no template is set) — so an
+/// edited Reminder/Completion/Overdue template renders here exactly as Publish does, and the
+/// resolved template id is persisted on the row (null = built-in default). Links are composed
+/// through <see cref="NotificationLinkOptions.BuildDeepLink"/>, so an SMS/WhatsApp sweep message
+/// carries the short link. A plain-text recipient whose row predates short links is
+/// <b>ensure-minted</b> here (§3.6 / Q64): the code is added to the same row in the same
+/// transaction, idempotently.</para>
 /// </summary>
 public static class SweepNotificationQueuer
 {
@@ -29,6 +50,7 @@ public static class SweepNotificationQueuer
         IContactAddressResolver addressResolver,
         ILogger logger,
         TimeProvider timeProvider,
+        SweepRenderDependencies render,
         Guid tenantId,
         Guid assignmentId,
         string assignmentTitle,
@@ -78,59 +100,89 @@ public static class SweepNotificationQueuer
             return false;
         }
 
-        var isEmail = channel == NotificationChannel.Email;
-        NotificationLog row;
-        switch (kind)
+        // The sweeps own exactly the three E3 kinds; anything else is a sweep bug, not a message.
+        if (kind is not (NotificationKind.Reminder or NotificationKind.Completion or NotificationKind.Overdue))
         {
-            case NotificationKind.Reminder:
-                if (isEmail)
-                {
-                    var m = NotificationMessageBuilder.BuildReminderEmail(address, assignmentTitle, deepLinkToken!);
-                    row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, m.Subject, m.BodyHtml, null, now);
-                }
-                else
-                {
-                    var m = NotificationMessageBuilder.BuildReminderSms(address, assignmentTitle, deepLinkToken!);
-                    row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, NotificationMessageBuilder.BuildReminderSubject(assignmentTitle), m.Body, null, now);
-                }
-                break;
-            case NotificationKind.Completion:
-                if (isEmail)
-                {
-                    var m = NotificationMessageBuilder.BuildCompletionEmail(address, assignmentTitle, deepLinkToken!);
-                    row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, m.Subject, m.BodyHtml, null, now);
-                }
-                else
-                {
-                    var m = NotificationMessageBuilder.BuildCompletionSms(address, assignmentTitle, deepLinkToken!);
-                    row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, NotificationMessageBuilder.BuildCompletionSubject(assignmentTitle), m.Body, null, now);
-                }
-                break;
-            case NotificationKind.Overdue:
-                if (isEmail)
-                {
-                    var m = NotificationMessageBuilder.BuildOverdueEmail(address, assignmentTitle, deepLinkToken!);
-                    row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, m.Subject, m.BodyHtml, null, now);
-                }
-                else
-                {
-                    var m = NotificationMessageBuilder.BuildOverdueSms(address, assignmentTitle, deepLinkToken!);
-                    row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
-                        m.To, NotificationMessageBuilder.BuildOverdueSubject(assignmentTitle), m.Body, null, now);
-                }
-                break;
-            default:
-                throw new NotificationKindNotSupportedException($"No message template for notification kind {kind}.");
+            throw new NotificationKindNotSupportedException($"No message template for notification kind {kind}.");
         }
+
+        var shortLinkCode = await EnsureShortLinkCodeAsync(db, channel, recipientId, cancellationToken);
+
+        var template = await ResolveTemplateAsync(render, kind, channel, tenantId, cancellationToken);
+        var tags = new NotificationTagValues
+        {
+            AssignmentTitle = assignmentTitle,
+            // The sweep candidate read carries no description/instructions/names (§3.4 enrichment is
+            // a publish-path concern), so those tags degrade to empty exactly as an unresolved
+            // publish-name does; the link and its expiry ARE known here.
+            Link = render.LinkOptions.BuildDeepLink(deepLinkToken!, channel, shortLinkCode),
+            LinkExpiry = deepLinkExpiresAt,
+        };
+        var rendered = NotificationTemplateRenderer.Render(kind, channel, template, tags);
+
+        var row = NotificationLog.Queue(tenantId, assignmentId, recipientId, contactId, channel, kind,
+            address, rendered.Subject, rendered.Body, rendered.TemplateId, now);
 
         db.NotificationLogs.Add(row);
         await db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// §3.6 / Q64 ensure-mint: an SMS/WhatsApp recipient whose row predates short links gets a code
+    /// minted onto it, idempotently (an existing code is never replaced, and the same transaction
+    /// persists it with the queued row). Email recipients keep the full deep link and load no row.
+    /// Returns the code the message's link is composed from.
+    /// </summary>
+    private static async Task<string?> EnsureShortLinkCodeAsync(
+        AssignmentsDbContext db, NotificationChannel channel, Guid recipientId, CancellationToken ct)
+    {
+        if (channel == NotificationChannel.Email)
+        {
+            return null;
+        }
+
+        var recipient = await db.AssignmentRecipients
+            .FirstOrDefaultAsync(x => x.Id == recipientId, ct);
+
+        // The candidate read came from this same table inside the tenant context established by the
+        // sweeper; a missing row means the recipient vanished between read and dispatch — the link
+        // then degrades to the full deep link rather than failing the queue.
+        if (recipient is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(recipient.ShortLinkCode))
+        {
+            recipient.EnsureShortLinkCode(await ShortLinkCodes.MintUniqueAsync(
+                (candidate, token) => db.AssignmentRecipients
+                    .IgnoreQueryFilters(["Tenant"])
+                    .AnyAsync(x => x.ShortLinkCode == candidate, token),
+                ct));
+        }
+
+        return recipient.ShortLinkCode;
+    }
+
+    /// <summary>One Settings read per (kind, channel) per sweep pass — the broadcaster's cache
+    /// posture, held in <see cref="SweepRenderDependencies.TemplateCache"/>.</summary>
+    private static async Task<ResolvedNotificationTemplate?> ResolveTemplateAsync(
+        SweepRenderDependencies render,
+        NotificationKind kind,
+        NotificationChannel channel,
+        Guid tenantId,
+        CancellationToken ct)
+    {
+        var key = (kind, channel);
+        if (render.TemplateCache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var resolved = await render.TemplateResolver.ResolveAsync(kind, channel, tenantId, ct);
+        render.TemplateCache[key] = resolved;
+        return resolved;
     }
 
     /// <summary>Persists a terminal <c>Skipped</c> row for the given

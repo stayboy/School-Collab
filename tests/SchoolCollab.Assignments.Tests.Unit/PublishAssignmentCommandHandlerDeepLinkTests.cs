@@ -7,6 +7,7 @@ using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.DeepLinks;
@@ -26,6 +27,9 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 ///   <item>republish RE-MINTS when the token is absent or expired;</item>
 ///   <item>minting is independent of the FEATURE:EnableDeepLinks flag (OFF still mints).</item>
 /// </list>
+/// Round notification-templates-b2a (§3.6, Q61/Q64) adds the short-link code to the same seam:
+/// minted together with the token for SMS/WhatsApp only, reused across a token re-mint,
+/// ensure-minted onto a pre-feature SMS row, and collision-re-rolled before anything is stored.
 /// Uses the real <see cref="DeepLinkTokenMinter"/> (with a passthrough protector) for
 /// expiry assertions and a counting <see cref="IDeepLinkTokenMinter"/> for reuse/re-mint.
 /// </summary>
@@ -68,7 +72,7 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
             assignmentRepo, submissionRepo, contactResolver,
             topicLookup, targetResolver, tenantProvider, broadcaster, policyResolver,
             new FakeAssignmentPolicyResolver(),
-            flags ?? new FakeFeatureFlagService(), minter, cache,
+            flags ?? new FakeFeatureFlagService(), minter, new NullNotificationTemplateResolver(), cache,
             NullLogger<PublishAssignmentCommandHandler>.Instance);
     }
 
@@ -161,7 +165,7 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
     {
         var existing = AssignmentRecipient.Create(TenantId, NewAssignment().Id, ContactOwnerType.Student,
             StudentId, StudentId, ContactStudent, ContactChannel.Email, null, true, true);
-        existing.AttachDeepLink("unexpired-token", DateTimeOffset.UtcNow.AddDays(3));
+        existing.AttachDeepLink("unexpired-token", DateTimeOffset.UtcNow.AddDays(3), shortLinkCode: null);
         var seeding = new FakeSubmissionRepository();
         seeding.Seed(existing);
 
@@ -180,7 +184,7 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
     {
         var existing = AssignmentRecipient.Create(TenantId, NewAssignment().Id, ContactOwnerType.Student,
             StudentId, StudentId, ContactStudent, ContactChannel.Email, null, true, true);
-        existing.AttachDeepLink("expired-token", DateTimeOffset.UtcNow.AddDays(-1));
+        existing.AttachDeepLink("expired-token", DateTimeOffset.UtcNow.AddDays(-1), shortLinkCode: null);
         var seeding = new FakeSubmissionRepository();
         seeding.Seed(existing);
 
@@ -213,6 +217,136 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
         existing.DeepLinkExpiresAt.Should().NotBeNull();
     }
 
+    // ── WS1 (round notification-templates-b2a §3.6): short-link minting at publish ──────
+
+    private static readonly Guid ContactSms = Guid.Parse("00000000-0000-0000-0000-000000000031");
+
+    private static SubscriberInfo SmsSubscriber =>
+        new(ContactSms, ContactOwnerType.Student, StudentId, StudentId, ContactChannel.SMS, null);
+
+    [TestMethod]
+    public void NewSmsRecipient_MintsTokenAndShortLinkCode_Together()
+    {
+        // Discriminating (§3.6): the code is minted ONLY for the plain-text channels, in the same
+        // call as the token — a token without a code (or a code without a token) is impossible.
+        var submissionRepo = new FakeSubmissionRepository();
+        var handler = NewHandler(submissionRepo, new FakeNotificationPolicyResolver(),
+            new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider())),
+            subscribers: [SmsSubscriber]);
+
+        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
+
+        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
+        recipient.DeepLinkToken.Should().NotBeNullOrWhiteSpace();
+        recipient.ShortLinkCode.Should().NotBeNullOrWhiteSpace();
+        recipient.ShortLinkCode!.Length.Should().Be(DeepLinkConstants.ShortLinkCodeLength);
+    }
+
+    [TestMethod]
+    public void NewWhatsAppRecipient_MintsShortLinkCode()
+    {
+        var whatsApp = new SubscriberInfo(ContactSms, ContactOwnerType.Student, StudentId, StudentId,
+            ContactChannel.WhatsApp, null);
+        var submissionRepo = new FakeSubmissionRepository();
+        var handler = NewHandler(submissionRepo, new FakeNotificationPolicyResolver(),
+            new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider())),
+            subscribers: [whatsApp]);
+
+        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
+
+        submissionRepo.Added.Should().ContainSingle().Subject.ShortLinkCode.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public void NewEmailRecipient_GetsNoShortLinkCode()
+    {
+        // The other direction of the atomicity contract: email keeps the full /deeplink/{token}.
+        var submissionRepo = new FakeSubmissionRepository();
+        var handler = NewHandler(submissionRepo, new FakeNotificationPolicyResolver(),
+            new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider())));
+
+        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
+
+        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
+        recipient.DeepLinkToken.Should().NotBeNullOrWhiteSpace();
+        recipient.ShortLinkCode.Should().BeNull("the email channel keeps the full deep link");
+    }
+
+    [TestMethod]
+    public void Republish_KeepsTheExistingCode_WhenTheTokenIsReMinted()
+    {
+        var assignment = NewAssignment();
+        var existing = AssignmentRecipient.Create(TenantId, assignment.Id, ContactOwnerType.Student,
+            StudentId, StudentId, ContactSms, ContactChannel.SMS, null, true, true);
+        existing.AttachDeepLink("expired-token", DateTimeOffset.UtcNow.AddDays(-1), "AbCdEfGh12345678");
+        var seeding = new FakeSubmissionRepository();
+        seeding.Seed(existing);
+
+        var handler = NewHandler(seeding, new FakeNotificationPolicyResolver(),
+            new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider())),
+            subscribers: [SmsSubscriber]);
+
+        handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)).GetAwaiter().GetResult();
+
+        existing.DeepLinkToken.Should().NotBe("expired-token", "the token was re-minted");
+        existing.ShortLinkCode.Should().Be("AbCdEfGh12345678",
+            "the code resolves to this row, so a token re-mint keeps it rather than orphaning the old code");
+    }
+
+    [TestMethod]
+    public void Republish_EnsureMintsCode_ForAPreFeatureSmsRowWithAnUnexpiredToken()
+    {
+        // Q64's ensure-mint at the publish seam: rows written before short links existed hold a
+        // live token but no code, and a republish must fill the gap without re-minting the token.
+        var assignment = NewAssignment();
+        var existing = AssignmentRecipient.Create(TenantId, assignment.Id, ContactOwnerType.Student,
+            StudentId, StudentId, ContactSms, ContactChannel.SMS, null, true, true);
+        existing.AttachDeepLink("unexpired-token", DateTimeOffset.UtcNow.AddDays(3), shortLinkCode: null);
+        var seeding = new FakeSubmissionRepository();
+        seeding.Seed(existing);
+        var recording = new RecordingMinter();
+        var handler = NewHandler(seeding, new FakeNotificationPolicyResolver(), recording,
+            subscribers: [SmsSubscriber]);
+
+        handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)).GetAwaiter().GetResult();
+
+        existing.DeepLinkToken.Should().Be("unexpired-token", "the unexpired token must not be re-minted");
+        recording.CallCount.Should().Be(0);
+        existing.ShortLinkCode.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public void Mint_CollisionsAreReRolled_BeforeACodeIsStored()
+    {
+        // §3.6 "collision ⇒ re-roll": two candidates are reported taken, so the stored code is the
+        // third one the generator produced — never a duplicate the global index would reject.
+        var submissionRepo = new FakeSubmissionRepository { TakenCalls = 2 };
+        var handler = NewHandler(submissionRepo, new FakeNotificationPolicyResolver(),
+            new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider())),
+            subscribers: [SmsSubscriber]);
+
+        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
+
+        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
+        submissionRepo.CheckedCodes.Should().HaveCount(3, "two collisions force two re-rolls");
+        recipient.ShortLinkCode.Should().Be(submissionRepo.CheckedCodes[2]);
+        submissionRepo.CheckedCodes.Take(2).Should().NotContain(recipient.ShortLinkCode!);
+    }
+
+    [TestMethod]
+    public void Mint_ExhaustedReRolls_ThrowsTheTypedCollisionException()
+    {
+        // Every candidate taken ⇒ a named failure, never a duplicate written to the index.
+        var assignment = NewAssignment();
+        var submissionRepo = new FakeSubmissionRepository { TakenCalls = int.MaxValue };
+        var handler = NewHandler(submissionRepo, new FakeNotificationPolicyResolver(),
+            new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider())),
+            subscribers: [SmsSubscriber]);
+
+        FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
+            .Should().ThrowAsync<ShortLinkCodeCollisionException>();
+    }
+
     // ── Fakes (handler construction) ─────────────────────────────────────────
 
     private sealed class RecordingMinter : IDeepLinkTokenMinter
@@ -230,7 +364,20 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
         public List<AssignmentRecipient> Added { get; } = new();
         private AssignmentRecipient? _existing;
 
+        /// <summary>Round b2a: every candidate code the mint loop asked about, in order.</summary>
+        public List<string> CheckedCodes { get; } = new();
+
+        /// <summary>How many of the first <see cref="CheckedCodes"/> the repository reports as taken
+        /// (0 = nothing collides; int.MaxValue = every candidate collides).</summary>
+        public int TakenCalls { get; init; }
+
         public void Seed(AssignmentRecipient recipient) => _existing = recipient;
+
+        public Task<bool> ShortLinkCodeExistsAsync(string code, CancellationToken ct = default)
+        {
+            CheckedCodes.Add(code);
+            return Task.FromResult(CheckedCodes.Count <= TakenCalls);
+        }
 
         public Task<AssignmentRecipient?> GetRecipientAsync(Guid assignmentId, Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_existing);

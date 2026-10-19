@@ -40,6 +40,17 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
     public DateTimeOffset? DeepLinkExpiresAt { get; private set; }
 
     /// <summary>
+    /// Round notification-templates-b2a (spec §3.6, Q61) — the short link this recipient's
+    /// SMS/WhatsApp message carries, resolving publicly to <see cref="DeepLinkToken"/> via
+    /// <c>/l/{code}</c>. Minted only for the plain-text channels (email keeps the full
+    /// <c>/deeplink/{token}</c>) and <b>globally unique</b> — the resolution route is
+    /// unauthenticated and cross-tenant, so a tenant-scoped unique index would let two tenants
+    /// share a code and resolve to an arbitrary one. Null on email rows, and on SMS/WhatsApp rows
+    /// written before the feature (the sweeps ensure-mint those).
+    /// </summary>
+    public string? ShortLinkCode { get; private set; }
+
+    /// <summary>
     /// Round notification-templates-b1 (§3.4): the notified contact's display name, carried
     /// <b>in process only</b> from the publish-time Students read so the renderer's
     /// <c>{{GuardianName}}</c> tag carries a real value. Never persisted — the recipient row
@@ -111,11 +122,31 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
 
     /// <summary>WS-E1 (ar-14-deep-links) — stamps the deep-link token (minted)
     /// and its expiry, or refreshes both on a republish re-mint. Additive; touches
-    /// only the deep-link columns plus the audit timestamp.</summary>
-    public void AttachDeepLink(string token, DateTimeOffset expiresAt)
+    /// only the deep-link columns plus the audit timestamp.
+    /// <para>Round notification-templates-b2a (§3.6): the short-link code is stamped in the
+    /// <b>same</b> call as the token, so an SMS/WhatsApp row can never hold a token without a
+    /// code or a code without a token. <paramref name="shortLinkCode"/> is null exactly for the
+    /// email channel, which keeps the full deep link.</para></summary>
+    public void AttachDeepLink(string token, DateTimeOffset expiresAt, string? shortLinkCode)
     {
         DeepLinkToken = token;
         DeepLinkExpiresAt = expiresAt;
+        ShortLinkCode = shortLinkCode;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Round notification-templates-b2a (§3.6, Q64) — ensure-mints the short-link code onto
+    /// an SMS/WhatsApp recipient that predates the feature: its token already exists and is
+    /// unexpired, so only the code is missing. Idempotent — an existing code is never replaced.</summary>
+    public void EnsureShortLinkCode(string code)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        if (!string.IsNullOrWhiteSpace(ShortLinkCode))
+        {
+            return;
+        }
+
+        ShortLinkCode = code;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

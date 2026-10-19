@@ -305,22 +305,9 @@ public class NotificationTemplateRendererTests
         }
     }
 
-    // ── §8: base URL — set ⇒ absolute, unset ⇒ relative ──
-
-    [TestMethod]
-    public void BuildDeepLink_UnsetBaseUrl_IsRelative()
-    {
-        new NotificationLinkOptions().BuildDeepLink("tok-1")
-            .Should().Be("/deeplink/tok-1");
-    }
-
-    [TestMethod]
-    public void BuildDeepLink_SetBaseUrl_IsAbsolute_TrailingSlashNormalised()
-    {
-        new NotificationLinkOptions { PublicBaseUrl = "https://families.example.com/" }
-            .BuildDeepLink("tok-1")
-            .Should().Be("https://families.example.com/deeplink/tok-1");
-    }
+    // ── §8: base URL — set ⇒ absolute, unset ⇒ relative; and the channel-driven short link
+    //        (round notification-templates-b2a, §3.6). The full matrix lives in
+    //        NotificationLinkOptionsTests. ──
 
     // ── {{DueDate}} rendering ──
 

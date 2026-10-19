@@ -56,7 +56,7 @@ public class AssignmentApprovalPolicyReconciliationTests
             new StubTopicAssignmentLookup(),
             new FakeAssignmentTargetResolver { StudentIds = [StudentId] },
             new StubTenantProvider(TenantId), new StubBroadcaster(),
-            new FakeNotificationPolicyResolver(), policyResolver, flags, new FakeDeepLinkTokenMinter(),
+            new FakeNotificationPolicyResolver(), policyResolver, flags, new FakeDeepLinkTokenMinter(), new NullNotificationTemplateResolver(),
             new StubHybridCache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
     private static ScheduleAssignmentCommandHandler NewScheduleHandler(

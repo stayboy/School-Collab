@@ -72,6 +72,7 @@ public static class ReminderSweeper
         ITenantContextAccessor tenantAccessor,
         INotificationPolicyResolver policyResolver,
         IContactAddressResolver addressResolver,
+        SweepRenderDependencies render,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken cancellationToken = default)
@@ -105,7 +106,7 @@ public static class ReminderSweeper
                             policy.MaxReminders))
                         {
                             var ok = await SweepNotificationQueuer.QueueAsync(
-                                db, addressResolver, logger, timeProvider,
+                                db, addressResolver, logger, timeProvider, render,
                                 candidate.TenantId, candidate.AssignmentId, candidate.Title,
                                 candidate.RecipientId, candidate.ContactId,
                                 candidate.OwnerType, candidate.OwnerId, candidate.Channel,
@@ -139,6 +140,7 @@ public static class ReminderSweeper
         AssignmentsDbContext db,
         ITenantContextAccessor tenantAccessor,
         IContactAddressResolver addressResolver,
+        SweepRenderDependencies render,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken cancellationToken = default)
@@ -172,7 +174,7 @@ public static class ReminderSweeper
                         }
 
                         var ok = await SweepNotificationQueuer.QueueAsync(
-                            db, addressResolver, logger, timeProvider,
+                            db, addressResolver, logger, timeProvider, render,
                             candidate.TenantId, candidate.AssignmentId, candidate.Title,
                             candidate.RecipientId, candidate.ContactId,
                             candidate.OwnerType, candidate.OwnerId, candidate.Channel,

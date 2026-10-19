@@ -16,6 +16,16 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
     public Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) =>
         db.AssignmentRecipients.Where(r => r.AssignmentId == assignmentId).ExecuteDeleteAsync(ct);
 
+    /// <summary>Round notification-templates-b2a (§3.6, Q61) — the global short-link code check behind
+    /// <c>ShortLinkCodes.MintUniqueAsync</c>. <c>IgnoreQueryFilters</c> is the sanctioned cross-tenant
+    /// read (the <c>NotificationDispatchService</c>/sweep-read posture): a code minted for tenant A must
+    /// be visible to tenant B's mint or the two would share it, and the public <c>/l/{code}</c> route
+    /// cannot tenant-scope the lookup that hits this same index.</summary>
+    public Task<bool> ShortLinkCodeExistsAsync(string code, CancellationToken ct = default) =>
+        db.AssignmentRecipients
+            .IgnoreQueryFilters(["Tenant"])
+            .AnyAsync(r => r.ShortLinkCode == code, ct);
+
     public Task<GuardianSubmissionGate?> GetGateAsync(Guid gateId, CancellationToken ct = default) =>
         db.GuardianSubmissionGates.FirstOrDefaultAsync(g => g.Id == gateId, ct);
 

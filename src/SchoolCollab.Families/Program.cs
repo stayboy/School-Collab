@@ -95,6 +95,10 @@ builder.Services.AddScoped<SchoolCollab.Core.DeepLinks.DeepLinkProtector>();
 // /deeplink landing (unprotect → tenant flag → OpenedAt stamp → redirect target).
 builder.Services.AddScoped<SchoolCollab.Families.DeepLinks.DeepLinkLandingService>();
 
+// Round notification-templates-b2a (§3.6, Q61): the public /l/{code} short-link landing — resolves
+// the code through the tenant-less resolver client and redirects into the /deeplink landing above.
+builder.Services.AddScoped<SchoolCollab.Families.DeepLinks.ShortLinkLandingService>();
+
 // WS-F3 (ar-15-signoff-relocation, decision (e)/step 5): the Families-side certificate
 // download orchestration for the guardian sign page (client bytes + the host's own
 // fileDownload.js module — the Admin C3 service is RCL-scoped and not reachable here).
@@ -152,6 +156,8 @@ if (!disableOIDC)
 // WS-E1 (ar-14-deep-links): the repo's first public token-auth route group — mapped
 // OUTSIDE the razor-components mapping (which is RequireAuthorization-gated when OIDC
 // is on) so the /deeplink landing is reachable without a pre-existing identity.
+// Round notification-templates-b2a (§3.6, Q61) adds the public /l/{code} short-link group
+// inside the same entry point (DeepLinkEndpoints maps both), so this is the single call.
 app.MapDeepLinkEndpoints();
 
 app.Run();

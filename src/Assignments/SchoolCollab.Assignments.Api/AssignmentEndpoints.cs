@@ -10,6 +10,11 @@ public static class AssignmentEndpoints
 {
     public static WebApplication MapAssignmentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)
     {
+        // Round notification-templates-b2a (§3.6, Q61): the public, anonymous, cross-tenant short-link
+        // resolution group the Families host's /l/{code} route reads. Mapped at the root (not under
+        // /assignments) so the code itself is the credential, exactly like /guardian above.
+        app.MapGroup("/short-links").MapShortLinkResolutionRoutes();
+
         // All assignment endpoints require an authenticated user and a resolved TenantContext
         var group = app.MapGroup("/assignments");
 

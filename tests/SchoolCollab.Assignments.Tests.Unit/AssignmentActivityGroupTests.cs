@@ -80,7 +80,7 @@ public class AssignmentActivityGroupTests
                notificationPolicyResolver ?? new FakeNotificationPolicyResolver(),
                assignmentPolicyResolver ?? new FakeAssignmentPolicyResolver(),
                new FakeFeatureFlagService(),
-               new FakeDeepLinkTokenMinter(),
+               new FakeDeepLinkTokenMinter(), new NullNotificationTemplateResolver(),
                new FakeHybridCache(),
                NullLogger<PublishAssignmentCommandHandler>.Instance);
     }
@@ -339,7 +339,7 @@ public class AssignmentActivityGroupTests
             new FakeNotificationPolicyResolver(),
             new FakeAssignmentPolicyResolver(),
             new FakeFeatureFlagService(),
-            new FakeDeepLinkTokenMinter(),
+            new FakeDeepLinkTokenMinter(), new NullNotificationTemplateResolver(),
             new FakeHybridCache(),
             NullLogger<PublishAssignmentCommandHandler>.Instance);
 

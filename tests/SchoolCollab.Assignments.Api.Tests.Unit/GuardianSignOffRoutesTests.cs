@@ -102,7 +102,7 @@ public class GuardianSignOffRoutesTests
         var recipient = AssignmentRecipient.Create(TenantId, AssignmentId, ContactOwnerType.Guardian, GuardianId,
             StudentId, ContactId, ContactChannel.Email, GuardianRole.Primary, true, true);
         // The filter cross-checks the AUTHORITATIVE stored expiry on the recipient row.
-        recipient.AttachDeepLink("stored-deep-link-token", DateTimeOffset.UtcNow.AddDays(7));
+        recipient.AttachDeepLink("stored-deep-link-token", DateTimeOffset.UtcNow.AddDays(7), shortLinkCode: null);
         return recipient;
     }
 

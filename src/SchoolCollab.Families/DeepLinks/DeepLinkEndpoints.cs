@@ -10,11 +10,11 @@ namespace SchoolCollab.Families.DeepLinks;
 /// <c>RequireAuthorization</c>'d when OIDC is on) and with NO
 /// <c>RequireAuthorization</c>: the bearer token in the URL is itself the
 /// credential. A valid link (flag on) signs the guardian into a cookie principal
-/// carrying <c>tenant_id</c> (bridged to <see cref="SchoolCollab.Core.Tenancy.ITenantProvider"/>
-/// by <see cref="SchoolCollab.Core.Auth.TenantClaimsTransformation"/>) and redirects to the
-/// ward surface; an expired / tampered / dark-launch-false link redirects to the
-/// friendly <c>LinkExpired</c> page (the flow emits a 302 → 200 redirect to that page) —
-/// never a raw error.
+/// carrying <c>tenant_id</c> (bridged to <see cref="SchoolCollab.Core.Tenancy.ITenantProvider"/>)
+/// and redirects to the ward surface; an expired / tampered / dark-launch-false link redirects to
+/// the friendly <c>LinkExpired</c> page (the flow emits a 302 → 200 redirect to that page) —
+/// never a raw error. Round notification-templates-b2a adds the sibling public
+/// <c>/l/{code}</c> short link that resolves to this group's route.
 /// </summary>
 public static class DeepLinkEndpoints
 {
@@ -43,6 +43,11 @@ public static class DeepLinkEndpoints
                 result.TenantId, result.RedirectUrl);
             return Results.Redirect(result.RedirectUrl!);
         });
+
+        // Round notification-templates-b2a (§3.6, Q61): the public /l/{code} short-link landing,
+        // in the SAME no-auth posture as /deeplink above — the code is the credential. Mapped here
+        // rather than in Program.cs so both public route groups live in one place.
+        app.MapGroup(ShortLinkRoutes.GroupPrefix).MapShortLinkRoutes();
 
         return app;
     }

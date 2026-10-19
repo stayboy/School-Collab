@@ -160,17 +160,19 @@ public sealed class AssignmentNotificationBroadcaster(
             GuardianRole = recipient.Role?.ToString() ?? string.Empty,
             StudentName = recipient.StudentDisplayName,
             SchoolName = schoolName,
-            Link = BuildLink(recipient.DeepLinkToken!),
+            Link = BuildLink(recipient.DeepLinkToken!, channel, recipient.ShortLinkCode),
             LinkExpiry = recipient.DeepLinkExpiresAt,
         };
         var rendered = NotificationTemplateRenderer.Render(NotificationKind.Publish, channel, template, tagValues);
         return QueueOrUpdate(existing, context, recipient, address, rendered, now);
     }
 
-    /// <summary>The recipient's link target: relative <c>/deeplink/{token}</c> by default;
-    /// absolute when the Families public base URL is configured (S1's AppHost parameter —
-    /// email clients cannot resolve relative links, so the deployment posture decides).</summary>
-    private string BuildLink(string token) => linkOptions.Value.BuildDeepLink(token);
+    /// <summary>The recipient's link target (round notification-templates-b2a, spec §3.6):
+    /// <c>{base}/l/{code}</c> for an SMS/WhatsApp recipient with a minted code and a configured
+    /// base URL, otherwise the relative-or-absolute <c>/deeplink/{token}</c>.
+    /// </summary>
+    private string BuildLink(string token, NotificationChannel channel, string? shortLinkCode) =>
+        linkOptions.Value.BuildDeepLink(token, channel, shortLinkCode);
 
     private static NotificationLog QueueOrUpdate(
         NotificationLog? existing,

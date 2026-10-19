@@ -23,6 +23,11 @@ namespace SchoolCollab.Assignments.Core.Services;
 /// template outage can never block a publish. A per-request 5-second timeout bounds the
 /// cross-context read so a hung Settings service delays a publish by at most one
 /// resolution.</para>
+///
+/// <para>Round notification-templates-b2a: the one HTTP read is projected two ways —
+/// <see cref="ResolveAsync"/> for the render path (id/subject/body) and
+/// <see cref="ResolveSlotAsync"/> for the publish-options/selection surface (adds the slot's
+/// constraint metadata, display-only until the B2c matcher exists).</para>
 /// </summary>
 public sealed class HttpNotificationTemplateResolver(
     IHttpClientFactory httpClientFactory,
@@ -38,6 +43,30 @@ public sealed class HttpNotificationTemplateResolver(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
+        var slot = await ResolveSlotAsync(kind, channel, tenantId, cancellationToken);
+        return slot is null
+            ? null
+            : new ResolvedNotificationTemplate(slot.TemplateId, slot.Subject, slot.Body);
+    }
+
+    /// <inheritdoc />
+    public async Task<NotificationTemplateSlot?> ResolveSlotAsync(
+        NotificationKind kind,
+        NotificationChannel channel,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var read = await ReadSlotAsync(kind, channel, tenantId, cancellationToken);
+        return read.State == NotificationTemplateSlotState.Found ? read.Slot : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<NotificationTemplateSlotRead> ReadSlotAsync(
+        NotificationKind kind,
+        NotificationChannel channel,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
         var settings = httpClientFactory.CreateClient("settings-api");
         try
         {
@@ -47,17 +76,32 @@ public sealed class HttpNotificationTemplateResolver(
             var response = await settings.GetAsync(
                 $"api/settings/notification-templates/{kind}/{channel}", timeoutCts.Token);
 
-            // 204 = no tenant template set ⇒ built-in defaults apply (not a failure).
+            // 204 = no tenant template set ⇒ not a Settings outage.
             if (response.StatusCode == HttpStatusCode.NoContent)
             {
-                return null;
+                return new NotificationTemplateSlotRead(NotificationTemplateSlotState.NotSet, null);
             }
 
             response.EnsureSuccessStatusCode();
             var payload = await response.Content.ReadFromJsonAsync<TenantNotificationTemplatePayload>(timeoutCts.Token);
-            return payload is null
-                ? null
-                : new ResolvedNotificationTemplate(payload.Id, payload.Subject, payload.Body);
+            if (payload is null)
+            {
+                logger.LogWarning(
+                    "Settings returned an empty {Kind}/{Channel} notification-template payload; treating as unreadable",
+                    kind, channel);
+                return new NotificationTemplateSlotRead(NotificationTemplateSlotState.Unreadable, null);
+            }
+
+            var slot = new NotificationTemplateSlot(
+                payload.Id,
+                kind,
+                channel,
+                payload.Subject,
+                payload.Body,
+                payload.Constraints?
+                    .Select(c => new NotificationTemplateConstraint(c.Dimension, c.Value))
+                    .ToList() ?? []);
+            return new NotificationTemplateSlotRead(NotificationTemplateSlotState.Found, slot);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -65,7 +109,7 @@ public sealed class HttpNotificationTemplateResolver(
             logger.LogWarning(
                 "Timed out resolving the {Kind}/{Channel} notification template; using built-in defaults",
                 kind, channel);
-            return null;
+            return new NotificationTemplateSlotRead(NotificationTemplateSlotState.Unreadable, null);
         }
         catch (OperationCanceledException)
         {
@@ -75,27 +119,34 @@ public sealed class HttpNotificationTemplateResolver(
             or InvalidOperationException
             or System.Text.Json.JsonException
             // ReadFromJsonAsync throws NotSupportedException when a 200 carries a non-JSON
-            // content type (a gateway/HTML error page): §3.3's fail-open covers "garbage", not
-            // just outages — it must not escape as a thrown exception that aborts the publish.
+            // content type (a gateway/HTML error page): fail-open covers "garbage", not just outages.
             or NotSupportedException)
         {
             logger.LogWarning(
                 ex,
                 "Failed to resolve the {Kind}/{Channel} notification template; using built-in defaults",
                 kind, channel);
-            return null;
+            return new NotificationTemplateSlotRead(NotificationTemplateSlotState.Unreadable, null);
         }
     }
 
     /// <summary>
-    /// The wire mirror of the Settings template read — exactly the three fields the render
-    /// path consumes. A local mirror, not <c>Settings.Core</c>'s DTO, because Assignments.Core
-    /// holds no cross-context reference to Settings (the <c>TenantNotificationPolicyPayload</c>
-    /// precedent); <c>Kind</c> and <c>Channel</c> are the request's own URL keys and are not
-    /// re-read from the payload.
+    /// The wire mirror of the Settings template read — the three fields the render path consumes
+    /// plus the constraint list the publish-options surface displays. A local mirror, not
+    /// <c>Settings.Core</c>'s DTO, because Assignments.Core holds no cross-context reference to
+    /// Settings (the <c>TenantNotificationPolicyPayload</c> precedent); <c>Kind</c> and
+    /// <c>Channel</c> are the request's own URL keys and are not re-read from the payload, and
+    /// each constraint's dimension stays a string (the wire enum name) for the same reason.
     /// </summary>
     internal sealed record TenantNotificationTemplatePayload(
         [property: JsonPropertyName("id")] Guid Id,
         [property: JsonPropertyName("subject")] string? Subject,
-        [property: JsonPropertyName("body")] string Body);
+        [property: JsonPropertyName("body")] string Body,
+        [property: JsonPropertyName("constraints")]
+        IReadOnlyList<TenantNotificationTemplateConstraintPayload>? Constraints);
+
+    /// <summary>One constraint row from the Settings template payload (display-only mirror).</summary>
+    internal sealed record TenantNotificationTemplateConstraintPayload(
+        [property: JsonPropertyName("dimension")] string Dimension,
+        [property: JsonPropertyName("value")] string Value);
 }

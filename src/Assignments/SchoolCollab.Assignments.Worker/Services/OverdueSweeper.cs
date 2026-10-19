@@ -25,6 +25,7 @@ public static class OverdueSweeper
         AssignmentsDbContext db,
         ITenantContextAccessor tenantAccessor,
         IContactAddressResolver addressResolver,
+        SweepRenderDependencies render,
         TimeProvider timeProvider,
         ILogger logger,
         CancellationToken cancellationToken = default)
@@ -58,7 +59,7 @@ public static class OverdueSweeper
                         }
 
                         var ok = await SweepNotificationQueuer.QueueAsync(
-                            db, addressResolver, logger, timeProvider,
+                            db, addressResolver, logger, timeProvider, render,
                             candidate.TenantId, candidate.AssignmentId, candidate.Title,
                             candidate.RecipientId, candidate.ContactId,
                             candidate.OwnerType, candidate.OwnerId, candidate.Channel,

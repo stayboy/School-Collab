@@ -687,6 +687,41 @@ public enum PublishChannel
     SmsOnly = 2
 }
 
+/// <summary>Round notification-templates-b2a (spec §3.6) — the public short-link resolution read:
+/// the contact-scoped deep-link token a code stands for. Carries the token and nothing else.</summary>
+public record ShortLinkResolutionDto(string DeepLinkToken);
+
+/// <summary>Round notification-templates-b2a (spec §3.7 / §3.8) — everything the publish dialog needs
+/// to pre-select: each stamped slot's live template, the effective policy's channel configuration,
+/// and the assignment's stored stamps. The client's pre-select source is
+/// <c>stored stamp ?? live template</c>; with the applicability matcher deferred (B2c) there is no
+/// ordering or specificity to report here.
+/// <para><see cref="Channels"/> carries the two <b>stamped</b> slots — Email and SMS — because §3.7
+/// pins exactly two stamp columns; WhatsApp has its own template row, but is not author-selectable
+/// in v1.</para></summary>
+public record PublishOptionsDto(
+    IReadOnlyList<PublishChannelOptionsDto> Channels,
+    IReadOnlyList<ContactChannelDto> PolicyPreferredChannelOrder,
+    IReadOnlyList<ContactChannelDto> PolicyBlockedChannels,
+    Guid? PublishEmailTemplateId,
+    Guid? PublishSmsTemplateId);
+
+/// <summary>One stamped channel slot (round notification-templates-b2a, WS5).
+/// <see cref="TemplateId"/>/<see cref="Subject"/>/<see cref="Constraints"/> describe the tenant's
+/// single live template for the slot — all null/empty when none is configured, in which case the
+/// built-in default applies. <see cref="Constraints"/> is display-only metadata.</summary>
+public record PublishChannelOptionsDto(
+    NotificationKindDto Kind,
+    ContactChannelDto Channel,
+    Guid? TemplateId,
+    string? Subject,
+    IReadOnlyList<PublishTemplateConstraintDto> Constraints);
+
+/// <summary>One constraint dimension on a template, as the publish dialog displays it
+/// (round notification-templates-b2a, WS5): the dimension's wire enum name (e.g. <c>GradeLevel</c>)
+/// and its value (e.g. <c>Grade 3</c>). Display-only until the B2c matcher consumes it.</summary>
+public record PublishTemplateConstraintDto(string Dimension, string Value);
+
 public record ReviewAssignmentRequest(
     /// <summary>
     /// Teacher attribution for the review. From ar-20 this field is <b>server-ignored

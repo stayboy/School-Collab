@@ -88,6 +88,13 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.ApprovedBy);
         builder.Property(x => x.ApprovedAt);
 
+        // ── Round notification-templates-b2a (§3.7): the author's publish template stamps ──
+        // Cross-context Settings ids with no FK (the ids point into settings-db) and no index:
+        // nothing queries by them — they ride the single-row assignment read the publish and
+        // publish-options paths already perform.
+        builder.Property(x => x.PublishEmailTemplateId);
+        builder.Property(x => x.PublishSmsTemplateId);
+
         // ── R4 (CP-5/D23): the authoring context picks ─────────────────────────
         // Two Npgsql first-class `uuid[]` arrays (no owned entity, no converter, no join
         // table) — the picks are an opaque id set with no per-row metadata, and a join

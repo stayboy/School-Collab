@@ -74,7 +74,7 @@ public class GuardianTokenEndpointFilterTests
         // carry the deep link the publish handler would have attached.
         if (expiresAt is { } expiry)
         {
-            recipient.AttachDeepLink("stored-deep-link-token", expiry);
+            recipient.AttachDeepLink("stored-deep-link-token", expiry, shortLinkCode: null);
         }
         return recipient;
     }

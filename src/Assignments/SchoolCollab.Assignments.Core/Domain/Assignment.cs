@@ -111,6 +111,21 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public Guid? ApprovedBy { get; private set; }
     /// <summary>The UTC moment an approval was granted.</summary>
     public DateTimeOffset? ApprovedAt { get; private set; }
+    /// <summary>
+    /// Round notification-templates-b2a (spec §3.7) — the email template the <b>author</b>
+    /// selected for this assignment's publishes, stamped when they confirm a selection. A
+    /// cross-context Settings id (no FK across contexts). <see langword="null"/> = no author
+    /// choice: publish falls back to the tenant's single live Publish/Email template and then to
+    /// the built-in default. A stamp whose template was deleted or belongs to another tenant
+    /// degrades the same way — it never blocks a publish (§3.7).
+    /// </summary>
+    public Guid? PublishEmailTemplateId { get; private set; }
+
+    /// <summary>Round notification-templates-b2a (spec §3.7) — the SMS template the author
+    /// selected, same stamping and degradation contract as
+    /// <see cref="PublishEmailTemplateId"/>. The SMS stamp covers the plain-text sendout (SMS +
+    /// WhatsApp): the spec pins exactly two stamp columns.</summary>
+    public Guid? PublishSmsTemplateId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -590,6 +605,19 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         PublishedAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentPublishedEvent(Id, Title));
+    }
+
+    /// <summary>
+    /// Round notification-templates-b2a (spec §3.7) — records the author's publish template
+    /// selection for both channels. A null argument is the fail-closed "no author choice"
+    /// state (fall back to the tenant's live template, then the built-in default), so the caller
+    /// decides reuse-vs-clear and this method only stores what it is given.
+    /// </summary>
+    public void StampPublishTemplates(Guid? emailTemplateId, Guid? smsTemplateId)
+    {
+        PublishEmailTemplateId = emailTemplateId;
+        PublishSmsTemplateId = smsTemplateId;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void Unpublish()
