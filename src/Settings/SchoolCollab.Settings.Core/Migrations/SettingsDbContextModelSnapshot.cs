@@ -1103,7 +1103,6 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasName("pk_tenant_notification_templates");
 
                     b.HasIndex("TenantId", "Kind", "Channel")
-                        .IsUnique()
                         .HasDatabaseName("ix_tenant_notification_templates_tenant_kind_channel")
                         .HasFilter("is_deleted = false");
 

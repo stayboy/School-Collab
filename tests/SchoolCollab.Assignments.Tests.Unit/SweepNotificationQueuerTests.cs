@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,6 +32,9 @@ public class SweepNotificationQueuerTests
     private static readonly Guid ContactId = Guid.Parse("00000000-0000-0000-0000-000000000004");
     private static readonly Guid RecipientId = Guid.Parse("00000000-0000-0000-0000-000000000005");
     private static readonly Guid TemplateId = Guid.Parse("e0000000-0000-0000-0000-00000000000e");
+    private static readonly Guid GradeId = Guid.Parse("00000000-0000-0000-0000-0000000000f1");
+
+    private static readonly DateTimeOffset TemplateCreatedAt = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
 
     private static (AssignmentsDbContext Db, TenantProvider Tenants) BuildDb()
     {
@@ -57,19 +60,35 @@ public class SweepNotificationQueuerTests
         return r;
     }
 
-    private static AssignmentRecipient EmailRecipientWithToken()
+    private static AssignmentRecipient EmailRecipientWithToken(Guid? assignmentId = null)
     {
         var r = AssignmentRecipient.Create(
-            TenantId, AssignmentId, ContactOwnerType.Guardian, RecipientId, RecipientId,
+            TenantId, assignmentId ?? AssignmentId, ContactOwnerType.Guardian, RecipientId, RecipientId,
             ContactId, ContactChannel.Email, role: null,
             notifyOnBroadcast: true, subscriptionActive: true);
         r.AttachDeepLink("deep-token", DateTimeOffset.UtcNow.AddDays(7), shortLinkCode: null);
         return r;
     }
 
+    /// <summary>
+    /// Seeds a published-window assignment targeting one grade on a topic (type Digital) — the
+    /// dimensions the sweep's pure evaluation intersects candidates against.
+    /// </summary>
+    private static Assignment SeedAssignment(AssignmentsDbContext db)
+    {
+        var assignment = Assignment.Create(
+            "Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents, TopicId, null, null, TeacherId).WithTenant(TenantId);
+        assignment.SetTargets([(TargetKind.GradeLevel, (Guid?)GradeId)], TenantId);
+        db.Assignments.Add(assignment);
+        db.SaveChanges();
+        return assignment;
+    }
+
     private static SweepRenderDependencies Dependencies(INotificationTemplateResolver resolver) =>
         new(resolver, new NotificationLinkOptions { PublicBaseUrl = "http://localhost" },
-            new Dictionary<(NotificationKind, NotificationChannel), ResolvedNotificationTemplate?>());
+            new Dictionary<(NotificationKind, NotificationChannel), NotificationTemplateCandidatesRead>(),
+            new Dictionary<Guid, AssignmentTemplateContext>());
 
     private sealed class FixedAddressResolver(string address) : IContactAddressResolver
     {
@@ -86,8 +105,9 @@ public class SweepNotificationQueuerTests
         db.AssignmentRecipients.Add(recipient);
         await db.SaveChangesAsync();
 
-        var resolver = new FixedTemplateResolver(new ResolvedNotificationTemplate(
-            TemplateId, "Reminder: {{AssignmentTitle}}", "<p>Reminder: {{AssignmentTitle}}</p>"));
+        var resolver = new FixedTemplateResolver(new NotificationTemplateCandidate(
+            TemplateId, "Reminder: {{AssignmentTitle}}", "<p>Reminder: {{AssignmentTitle}}</p>", [],
+            new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero)));
 
         await SweepNotificationQueuer.QueueAsync(
             db, new FixedAddressResolver("guardian@example.com"), NullLogger.Instance, TimeProvider.System,
@@ -170,23 +190,71 @@ public class SweepNotificationQueuerTests
             "the rendered email link keeps the full deep-link token");
     }
 
-    private sealed class FixedTemplateResolver(ResolvedNotificationTemplate template) : INotificationTemplateResolver
+    /// <summary>
+    /// Round notification-templates-b2c — the E3 sweeps stay <b>pure evaluation</b> (no stamps): the
+    /// most specific <b>applicable</b> candidate renders and its id is recorded, and nothing applicable
+    /// falls to the built-in default. These are the "sweeps most-specific" half of the selection
+    /// matrix; the stamped half lives in the broadcaster tests.
+    /// </summary>
+    [TestMethod]
+    public async Task PureEvaluation_SelectsTheMostSpecificApplicableCandidate_AndRecordsItsId()
     {
-        public Task<ResolvedNotificationTemplate?> ResolveAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default)
-            => Task.FromResult<ResolvedNotificationTemplate?>(template);
+        var (db, _) = BuildDb();
+        var assignment = SeedAssignment(db);
+        var recipient = EmailRecipientWithToken(assignment.Id);
+        db.AssignmentRecipients.Add(recipient);
+        await db.SaveChangesAsync();
 
-        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default)
-            => Task.FromResult<NotificationTemplateSlot?>(
-                new NotificationTemplateSlot(template.TemplateId, kind, channel, template.Subject, template.Body, []));
+        var unconstrained = new NotificationTemplateCandidate(
+            Guid.NewGuid(), "Default: {{AssignmentTitle}}", "<p>default</p>", [], TemplateCreatedAt);
+        var constrained = new NotificationTemplateCandidate(
+            Guid.NewGuid(), "Grade: {{AssignmentTitle}}", "<p>grade</p>",
+            [new NotificationTemplateConstraint("GradeLevel", GradeId.ToString("D"))], TemplateCreatedAt);
 
-        public async Task<NotificationTemplateSlotRead> ReadSlotAsync(
+        await SweepNotificationQueuer.QueueAsync(
+            db, new FixedAddressResolver("guardian@example.com"), NullLogger.Instance, TimeProvider.System,
+            Dependencies(new FixedTemplateResolver(unconstrained, constrained)), TenantId, assignment.Id, "Math",
+            recipient.Id, ContactId, ContactOwnerType.Guardian, RecipientId, NotificationChannel.Email,
+            recipient.DeepLinkToken, recipient.DeepLinkExpiresAt,
+            NotificationKind.Reminder, CancellationToken.None);
+
+        var row = await db.NotificationLogs.SingleAsync();
+        row.TemplateId.Should().Be(constrained.TemplateId, "the most specific applicable candidate wins without a stamp");
+        row.BodyHtml.Should().Be("<p>grade</p>");
+    }
+
+    [TestMethod]
+    public async Task PureEvaluation_WithNothingApplicable_UsesTheBuiltInDefault()
+    {
+        var (db, _) = BuildDb();
+        var assignment = SeedAssignment(db);
+        var recipient = EmailRecipientWithToken(assignment.Id);
+        db.AssignmentRecipients.Add(recipient);
+        await db.SaveChangesAsync();
+
+        var otherGrade = new NotificationTemplateCandidate(
+            Guid.NewGuid(), "Other grade", "<p>other</p>",
+            [new NotificationTemplateConstraint("GradeLevel", Guid.NewGuid().ToString("D"))], TemplateCreatedAt);
+
+        await SweepNotificationQueuer.QueueAsync(
+            db, new FixedAddressResolver("guardian@example.com"), NullLogger.Instance, TimeProvider.System,
+            Dependencies(new FixedTemplateResolver(otherGrade)), TenantId, assignment.Id, "Math",
+            recipient.Id, ContactId, ContactOwnerType.Guardian, RecipientId, NotificationChannel.Email,
+            recipient.DeepLinkToken, recipient.DeepLinkExpiresAt,
+            NotificationKind.Reminder, CancellationToken.None);
+
+        var row = await db.NotificationLogs.SingleAsync();
+        row.TemplateId.Should().BeNull("a constrained candidate the assignment cannot satisfy never renders");
+        row.Subject.Should().NotBeNullOrWhiteSpace();
+    }
+
+    private sealed class FixedTemplateResolver(params NotificationTemplateCandidate[] candidates)
+        : INotificationTemplateResolver
+    {
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            var slot = await ResolveSlotAsync(kind, channel, tenantId, cancellationToken);
-            return new NotificationTemplateSlotRead(
-                slot is null ? NotificationTemplateSlotState.NotSet : NotificationTemplateSlotState.Found, slot);
-        }
+            => Task.FromResult(candidates.Length == 0
+                ? NotificationTemplateCandidatesRead.NotSet
+                : NotificationTemplateCandidatesRead.Found(candidates));
     }
 }

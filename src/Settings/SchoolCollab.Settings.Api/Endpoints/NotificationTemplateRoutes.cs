@@ -3,20 +3,25 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Notifications;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.CreateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenantNotificationTemplate;
-using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpsertTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
 using SchoolCollab.Settings.Core.Domain;
+using SchoolCollab.Settings.Core.Domain.Exceptions;
 using SchoolCollab.Settings.Core.DTOs;
 
 namespace SchoolCollab.Settings.Api.Endpoints;
 
 /// <summary>
-/// Notification-template store endpoints (spec §5, workstream 1). One row per tenant
-/// per kind × channel; an absent row means the built-in default applies.
-/// Every mutation writes a <c>TemplateAuditEntry</c> (spec §3.9).
+/// Notification-template store endpoints (spec §5, workstream 1; round notification-templates-b2c
+/// re-shaped the writer). A tenant holds several live templates per kind × channel: the one with an
+/// empty constraint set is the tenant default, each constrained one is a candidate for the
+/// applicability matcher. Mutations are therefore addressed by <b>id</b> — the (kind, channel)-keyed
+/// upsert could not tell two candidates apart. Every mutation writes a <c>TemplateAuditEntry</c>
+/// (spec §3.9).
 /// </summary>
 public static class NotificationTemplateRoutes
 {
@@ -36,7 +41,9 @@ public static class NotificationTemplateRoutes
             return TypedResults.Ok(templates);
         });
 
-        // ── One row; 204 = unset (built-in default applies) ──
+        // ── The tenant DEFAULT row for one kind × channel; 204 = unset (built-in default applies).
+        // Round b2c: with candidates in the store, a context-less read can only mean the default row —
+        // the handler filters on an empty constraint set instead of assuming one row per slot.
         group.MapGet("/notification-templates/{kind}/{channel}",
             async Task<Results<Ok<TenantNotificationTemplateDto>, NoContent>> (
             NotificationTemplateKind kind,
@@ -48,32 +55,66 @@ public static class NotificationTemplateRoutes
             return template is null ? TypedResults.NoContent() : TypedResults.Ok(template);
         });
 
-        // ── Upsert (create or replace) + audit row ──
-        group.MapPut("/notification-templates/{kind}/{channel}",
-            async Task<Results<Ok<TenantNotificationTemplateDto>, BadRequest<MessageResponse>>> (
-            NotificationTemplateKind kind,
-            NotificationChannel channel,
-            [FromBody] UpsertTenantNotificationTemplateRequest req,
-            [FromServices] ICommandHandler<UpsertTenantNotificationTemplate, TenantNotificationTemplateDto> handler,
+        // ── Create one candidate row (the default included, when the slot has none) ──
+        // 200, not 201: the store exposes no single-row-by-id GET to point a Location header at, and
+        // the response body already carries the new id.
+        group.MapPost("/notification-templates",
+            async Task<Results<Ok<TenantNotificationTemplateDto>, BadRequest<MessageResponse>, Conflict<MessageResponse>>> (
+            [FromBody] CreateTenantNotificationTemplateRequest req,
+            [FromServices] ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto> handler,
             CancellationToken ct) =>
         {
             try
             {
                 var result = await handler.HandleAsync(
-                    new UpsertTenantNotificationTemplate(kind, channel, req, req.Reason), ct);
+                    new CreateTenantNotificationTemplate(req, req.Reason), ct);
                 return TypedResults.Ok(result);
             }
-            catch (ArgumentException ex) { return TypedResults.BadRequest(new MessageResponse(ex.Message)); }
+            catch (TenantNotificationTemplateConflictException ex)
+            {
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
+            }
+            catch (ArgumentException ex)
+            {
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
+            }
         });
 
-        // ── Reset to the built-in default (audited) ──
+        // ── Replace one candidate row, by id ──
+        group.MapPut("/notification-templates/{id:guid}",
+            async Task<Results<Ok<TenantNotificationTemplateDto>, NotFound<MessageResponse>, BadRequest<MessageResponse>, Conflict<MessageResponse>>> (
+            Guid id,
+            [FromBody] UpdateTenantNotificationTemplateRequest req,
+            [FromServices] ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(
+                    new UpdateTenantNotificationTemplate(id, req, req.Reason), ct);
+                return TypedResults.Ok(result);
+            }
+            catch (TenantNotificationTemplateNotFoundException ex)
+            {
+                return TypedResults.NotFound(new MessageResponse(ex.Message));
+            }
+            catch (TenantNotificationTemplateConflictException ex)
+            {
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
+            }
+            catch (ArgumentException ex)
+            {
+                return TypedResults.BadRequest(new MessageResponse(ex.Message));
+            }
+        });
+
+        // ── Tombstone one candidate row, by id (audited) ──
         // `reason` is REQUIRED and bound explicitly from the query string, matching the
         // audited-delete precedent at ConfigFlagRoutes.MapDelete("/flags/{key}", …).
         // A reset is audited, so the audit row must carry the operator's own words.
-        group.MapDelete("/notification-templates/{kind}/{channel}",
-            async Task<Results<NoContent, BadRequest<MessageResponse>>> (
-            NotificationTemplateKind kind,
-            NotificationChannel channel,
+        group.MapDelete("/notification-templates/{id:guid}",
+            async Task<Results<NoContent, BadRequest<MessageResponse>, NotFound<MessageResponse>>> (
+            Guid id,
             [FromQuery] string reason,
             [FromServices] ICommandHandler<DeleteTenantNotificationTemplate> handler,
             CancellationToken ct) =>
@@ -82,11 +123,21 @@ public static class NotificationTemplateRoutes
                 return TypedResults.BadRequest(
                     new MessageResponse("A reason is required to reset a notification template."));
 
-            await handler.HandleAsync(new DeleteTenantNotificationTemplate(kind, channel, reason), ct);
-            return TypedResults.NoContent();
+            try
+            {
+                await handler.HandleAsync(new DeleteTenantNotificationTemplate(id, reason), ct);
+                return TypedResults.NoContent();
+            }
+            catch (TenantNotificationTemplateNotFoundException ex)
+            {
+                return TypedResults.NotFound(new MessageResponse(ex.Message));
+            }
         });
 
-        // ── Audit trail for this template, most recent first (spec §3.9) ──
+        // ── Audit trail for one kind × channel, most recent first (spec §3.9) ──
+        // Stays keyed: the admin page shows a merged per-slot stream (the config-flags per-key
+        // precedent), and the audit rows carry the template id if per-candidate attribution is ever
+        // needed.
         group.MapGet("/notification-templates/{kind}/{channel}/audit",
             async Task<Ok<IReadOnlyList<TemplateAuditEntryDto>>> (
             NotificationTemplateKind kind,

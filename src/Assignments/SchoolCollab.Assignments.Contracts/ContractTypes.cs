@@ -691,11 +691,13 @@ public enum PublishChannel
 /// the contact-scoped deep-link token a code stands for. Carries the token and nothing else.</summary>
 public record ShortLinkResolutionDto(string DeepLinkToken);
 
-/// <summary>Round notification-templates-b2a (spec §3.7 / §3.8) — everything the publish dialog needs
-/// to pre-select: each stamped slot's live template, the effective policy's channel configuration,
+/// <summary>Round notification-templates-b2a/b2c (spec §3.7 / §3.8) — everything the publish dialog needs
+/// to pre-select: each stamped slot's applicable templates, the effective policy's channel configuration,
 /// and the assignment's stored stamps. The client's pre-select source is
-/// <c>stored stamp ?? live template</c>; with the applicability matcher deferred (B2c) there is no
-/// ordering or specificity to report here.
+/// <c>stored stamp ?? first applicable candidate</c>; the first entry of
+/// <see cref="PublishChannelOptionsDto.Templates"/> is what the server would render for this assignment
+/// (most specific applicable; the tenant default on a tie), so "most specific pre-selects" and "a tie
+/// pre-selects the default" both fall out of the evaluator's order.
 /// <para><see cref="Channels"/> carries the two <b>stamped</b> slots — Email and SMS — because §3.7
 /// pins exactly two stamp columns; WhatsApp has its own template row, but is not author-selectable
 /// in v1.</para></summary>
@@ -706,20 +708,31 @@ public record PublishOptionsDto(
     Guid? PublishEmailTemplateId,
     Guid? PublishSmsTemplateId);
 
-/// <summary>One stamped channel slot (round notification-templates-b2a, WS5).
+/// <summary>One stamped channel slot (rounds notification-templates-b2a/b2c).
 /// <see cref="TemplateId"/>/<see cref="Subject"/>/<see cref="Constraints"/> describe the tenant's
-/// single live template for the slot — all null/empty when none is configured, in which case the
-/// built-in default applies. <see cref="Constraints"/> is display-only metadata.</summary>
+/// <b>default</b> template for the slot — the unconstrained row, mirroring the narrowed
+/// <c>GET notification-templates/{kind}/{channel}</c> — and are null/empty when none exists, in which
+/// case the built-in default applies. <see cref="Templates"/> is the ordered list of applicable
+/// candidates for <b>this assignment</b> (most specific first): the picker's source.</summary>
 public record PublishChannelOptionsDto(
     NotificationKindDto Kind,
     ContactChannelDto Channel,
     Guid? TemplateId,
     string? Subject,
-    IReadOnlyList<PublishTemplateConstraintDto> Constraints);
+    IReadOnlyList<PublishTemplateConstraintDto> Constraints,
+    IReadOnlyList<PublishTemplateCandidateDto> Templates);
+
+/// <summary>One selectable template candidate (round notification-templates-b2c, spec §3.7): its id, the
+/// constraint summary the picker shows, and whether it is the tenant default (the only entry with no
+/// constraints). The order of the containing list is the evaluator's — most specific first.</summary>
+public record PublishTemplateCandidateDto(
+    Guid TemplateId,
+    IReadOnlyList<PublishTemplateConstraintDto> Constraints,
+    bool IsDefault);
 
 /// <summary>One constraint dimension on a template, as the publish dialog displays it
 /// (round notification-templates-b2a, WS5): the dimension's wire enum name (e.g. <c>GradeLevel</c>)
-/// and its value (e.g. <c>Grade 3</c>). Display-only until the B2c matcher consumes it.</summary>
+/// and its value (e.g. <c>Grade 3</c>).</summary>
 public record PublishTemplateConstraintDto(string Dimension, string Value);
 
 public record ReviewAssignmentRequest(

@@ -32,9 +32,12 @@ internal sealed class TenantNotificationTemplateConfiguration
         builder.Property(x => x.Subject).HasMaxLength(500);
         builder.Property(x => x.Body).IsRequired().HasMaxLength(4000);
 
-        // One template per tenant per kind × channel.
+        // Several live templates per tenant per kind × channel (round notification-templates-b2c):
+        // an empty constraint set is the tenant default and each constrained row is a candidate for
+        // the applicability matcher (spec §3.1.1/Q15). NON-unique — it is a lookup index now, not the
+        // one-row invariant; the "one unconstrained default" rule is enforced in the create/update
+        // handlers because no database constraint can express "at most one row with no children".
         builder.HasIndex(x => new { x.TenantId, x.Kind, x.Channel })
-            .IsUnique()
             .HasDatabaseName("ix_tenant_notification_templates_tenant_kind_channel")
             .HasFilter("is_deleted = false");
 

@@ -18,13 +18,14 @@ using static SchoolCollab.Assignments.Tests.Unit.PublishAssignmentCommandHandler
 namespace SchoolCollab.Assignments.Tests.Unit;
 
 /// <summary>
-/// Round notification-templates-b2a (spec §3.7 / §8) — the publish template-selection lifecycle:
-/// an explicit request stamp is validated against the tenant's single live Publish template for its
-/// channel and stamped on the assignment; a null request stamp <b>reuses</b> the stored one; and a
-/// stored stamp that no longer validates degrades without blocking the publish.
-/// <para>In B2a there is exactly one live template per (tenant, kind, channel) — the applicability
-/// matcher is B2c — so "valid stamp" and "the slot's live template" are the same id. What these
-/// tests pin is the <b>lifecycle</b>: validation, persistence, reuse and degradation.</para>
+/// Rounds notification-templates-b2a/b2c (spec §3.7 / §8) — the publish template-selection
+/// lifecycle: an explicit request stamp is validated against the channel's live Publish
+/// <b>candidates</b> and stamped on the assignment; a null request stamp <b>reuses</b> the stored one;
+/// and a stored stamp that no longer validates degrades without blocking the publish.
+/// <para>Round b2c: the gate is <b>existence</b> — a stamp naming a live candidate is accepted even
+/// when the assignment's dimensions never intersect it, because applicability is the dialog's
+/// pre-select guidance, not a 400. What these tests pin is the <b>lifecycle</b>: validation,
+/// persistence, reuse and degradation.</para>
 /// </summary>
 [TestClass]
 public class PublishAssignmentTemplateStampTests
@@ -110,6 +111,33 @@ public class PublishAssignmentTemplateStampTests
     }
 
     // ── validation: explicit stamps only, and only when the slot is readable ────────────────
+
+    /// <summary>
+    /// Round b2c: a stamp naming a <b>live but non-applicable</b> candidate is <b>accepted</b>. The
+    /// assignment targets all students and the candidate is constrained to one grade, so the matcher
+    /// would never pick it — but existence is the only gate (§3.7): applicability is the dialog's
+    /// pre-select guidance, not a 400.
+    /// </summary>
+    [TestMethod]
+    public async Task ExplicitStamp_NamingALiveButNonApplicableCandidate_IsAccepted()
+    {
+        var assignment = NewAssignment();
+        var constrained = new SlotOnlyTemplateResolver(
+            new Dictionary<NotificationChannel, Guid> { [NotificationChannel.Email] = LiveEmail },
+            constraints: new Dictionary<NotificationChannel, NotificationTemplateConstraint[]>
+            {
+                [NotificationChannel.Email] =
+                    [new NotificationTemplateConstraint("GradeLevel", Guid.NewGuid().ToString("D"))],
+            });
+        var handler = NewHandler(assignment, constrained);
+
+        await handler.HandleAsync(new PublishAssignmentCommand(
+            assignment.Id, PublishEmailTemplateId: LiveEmail));
+
+        assignment.Status.Should().Be(AssignmentStatus.Published);
+        assignment.PublishEmailTemplateId.Should().Be(LiveEmail,
+            "a live stamp is accepted even when the assignment's dimensions never intersect it");
+    }
 
     [TestMethod]
     public async Task ExplicitStamp_ThatIsNotTheLiveTemplate_IsRejected_400()
@@ -374,81 +402,53 @@ internal static class PublishAssignmentCommandHandlerDeepLinkTestsFakes
     }
 
     /// <summary>The tenant's live Publish slots — the dictionary is the Found reality, the
-    /// unreadable set is the Unreadable (Settings-outage) reality, and any other channel is NotSet.</summary>
+    /// unreadable set is the Unreadable (Settings-outage) reality, and any other channel is NotSet.
+    /// <paramref name="constraints"/> optionally constrains one channel's single candidate (the
+    /// "live but not applicable" case, which validation must still accept).</summary>
     internal sealed class SlotOnlyTemplateResolver : INotificationTemplateResolver
     {
         private readonly Dictionary<NotificationChannel, Guid> _liveSlots;
         private readonly HashSet<NotificationChannel> _unreadableChannels;
+        private readonly Dictionary<NotificationChannel, NotificationTemplateConstraint[]> _constraints;
 
         public SlotOnlyTemplateResolver(
             Dictionary<NotificationChannel, Guid> liveSlots,
-            HashSet<NotificationChannel>? unreadableChannels = null)
+            HashSet<NotificationChannel>? unreadableChannels = null,
+            Dictionary<NotificationChannel, NotificationTemplateConstraint[]>? constraints = null)
         {
             _liveSlots = liveSlots;
             _unreadableChannels = unreadableChannels ?? [];
+            _constraints = constraints ?? [];
         }
 
-        public Task<ResolvedNotificationTemplate?> ResolveAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId,
-            CancellationToken cancellationToken = default)
-        {
-            var slot = ResolveSlotAsync(kind, channel, tenantId, cancellationToken).Result;
-            return Task.FromResult<ResolvedNotificationTemplate?>(
-                slot is null ? null : new ResolvedNotificationTemplate(slot.TemplateId, slot.Subject, slot.Body));
-        }
-
-        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId,
             CancellationToken cancellationToken = default)
         {
             if (_unreadableChannels.Contains(channel))
-                return Task.FromResult<NotificationTemplateSlot?>(null);
+            {
+                return Task.FromResult(NotificationTemplateCandidatesRead.Unreadable);
+            }
 
             return Task.FromResult(_liveSlots.TryGetValue(channel, out var id)
-                ? new NotificationTemplateSlot(id, kind, channel, "Live subject", "<p>live</p>", [])
-                : null);
-        }
-
-        public Task<NotificationTemplateSlotRead> ReadSlotAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId,
-            CancellationToken cancellationToken = default)
-        {
-            if (_unreadableChannels.Contains(channel))
-                return Task.FromResult(new NotificationTemplateSlotRead(NotificationTemplateSlotState.Unreadable, null));
-
-            var slot = ResolveSlotAsync(kind, channel, tenantId, cancellationToken).Result;
-            return Task.FromResult(slot is null
-                ? new NotificationTemplateSlotRead(NotificationTemplateSlotState.NotSet, null)
-                : new NotificationTemplateSlotRead(NotificationTemplateSlotState.Found, slot));
+                ? NotificationTemplateCandidatesRead.Found(
+                    [new NotificationTemplateCandidate(id, "Live subject", "<p>live</p>",
+                        _constraints.TryGetValue(channel, out var constraints) ? constraints : [],
+                        DateTimeOffset.UnixEpoch)])
+                : NotificationTemplateCandidatesRead.NotSet);
         }
     }
 
     /// <summary>A resolver that exists only to prove genuine caller cancellation still propagates
-    /// through the new discriminated read instead of being swallowed as Unreadable.</summary>
+    /// through the candidate read instead of being swallowed as Unreadable.</summary>
     internal sealed class CancellingTemplateResolver : INotificationTemplateResolver
     {
-        public Task<ResolvedNotificationTemplate?> ResolveAsync(
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<ResolvedNotificationTemplate?>(null);
-        }
-
-        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<NotificationTemplateSlot?>(null);
-        }
-
-        public Task<NotificationTemplateSlotRead> ReadSlotAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new NotificationTemplateSlotRead(NotificationTemplateSlotState.NotSet, null));
+            return Task.FromResult(NotificationTemplateCandidatesRead.NotSet);
         }
     }
 }

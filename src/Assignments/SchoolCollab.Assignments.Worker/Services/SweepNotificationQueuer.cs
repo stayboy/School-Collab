@@ -10,15 +10,20 @@ using SchoolCollab.Students.Core.Domain;
 namespace SchoolCollab.Assignments.Worker.Services;
 
 /// <summary>
-/// Round notification-templates-b2a (WS3) — the pass-scoped render inputs every queued recipient of
-/// one sweep pass shares: the tenant template resolver, the link composer and a per-pass template
-/// cache, so a pass reads each (kind, channel) slot from Settings <b>once</b> rather than once per
-/// recipient (the broadcaster's "never per recipient" posture, §3.3).
+/// Round notification-templates-b2a/b2c (WS3) — the pass-scoped render inputs every queued recipient of
+/// one sweep pass shares: the tenant template resolver, the link composer and two per-pass caches, so a
+/// pass reads each (kind, channel) candidate set from Settings <b>once</b> and each assignment's
+/// evaluation dimensions <b>once per assignment</b>, never once per recipient (the broadcaster's "never
+/// per recipient" posture, §3.3).
 /// </summary>
+/// <param name="CandidateCache">(kind, channel) → the unordered candidate read for this pass.</param>
+/// <param name="DimensionsCache">assignment id → the assignment's template dimensions, loaded on the
+/// first recipient of that assignment in this pass.</param>
 public sealed record SweepRenderDependencies(
     INotificationTemplateResolver TemplateResolver,
     NotificationLinkOptions LinkOptions,
-    IDictionary<(NotificationKind Kind, NotificationChannel Channel), ResolvedNotificationTemplate?> TemplateCache);
+    IDictionary<(NotificationKind Kind, NotificationChannel Channel), NotificationTemplateCandidatesRead> CandidateCache,
+    IDictionary<Guid, AssignmentTemplateContext> DimensionsCache);
 
 /// <summary>
 /// Shared render + queue step for the E3 sweeps (reminder / completion / overdue).
@@ -108,7 +113,10 @@ public static class SweepNotificationQueuer
 
         var shortLinkCode = await EnsureShortLinkCodeAsync(db, channel, recipientId, cancellationToken);
 
-        var template = await ResolveTemplateAsync(render, kind, channel, tenantId, cancellationToken);
+        // "Sweeps stay pure evaluation" (round b2c): no stamps here — the applicable candidate for this
+        // assignment, or the built-in default.
+        var template = await ResolveTemplateAsync(
+            render, db, kind, channel, tenantId, assignmentId, cancellationToken);
         var tags = new NotificationTagValues
         {
             AssignmentTitle = assignmentTitle,
@@ -165,24 +173,88 @@ public static class SweepNotificationQueuer
         return recipient.ShortLinkCode;
     }
 
-    /// <summary>One Settings read per (kind, channel) per sweep pass — the broadcaster's cache
-    /// posture, held in <see cref="SweepRenderDependencies.TemplateCache"/>.</summary>
+    /// <summary>
+    /// One Settings read per (kind, channel) per pass and one dimensions read per assignment per pass
+    /// (the broadcaster's cache posture, held in <see cref="SweepRenderDependencies"/>), then the same
+    /// pure <see cref="NotificationTemplateEvaluator"/> the publish path uses. Returns
+    /// <see langword="null"/> — the built-in default — when nothing is configured, nothing applies, or
+    /// the Settings read failed (fail-open, §3.3).
+    /// </summary>
     private static async Task<ResolvedNotificationTemplate?> ResolveTemplateAsync(
         SweepRenderDependencies render,
+        AssignmentsDbContext db,
         NotificationKind kind,
         NotificationChannel channel,
         Guid tenantId,
+        Guid assignmentId,
         CancellationToken ct)
     {
         var key = (kind, channel);
-        if (render.TemplateCache.TryGetValue(key, out var cached))
+        if (!render.CandidateCache.TryGetValue(key, out var read))
+        {
+            read = await render.TemplateResolver.ReadCandidatesAsync(kind, channel, tenantId, ct);
+            render.CandidateCache[key] = read;
+        }
+
+        if (read.State != NotificationTemplateSlotState.Found)
+        {
+            return null;
+        }
+
+        var dimensions = await GetDimensionsAsync(render, db, assignmentId, ct);
+        return NotificationTemplateEvaluator.Select(read.Candidates, dimensions)?.ToResolved();
+    }
+
+    /// <summary>
+    /// The assignment's evaluation dimensions, loaded once per assignment per pass. The sweeper calls
+    /// this queuer once per (assignment, recipient, channel) candidate, so an uncached read would be one
+    /// query per message; the tenant filter is the sweeper's own explicit-tenant scope — no
+    /// <c>IgnoreQueryFilters</c>. A vanished assignment degrades to <see cref="AssignmentTemplateContext.Empty"/>:
+    /// only the tenant default then applies, and the message still queues.
+    /// </summary>
+    private static async Task<AssignmentTemplateContext> GetDimensionsAsync(
+        SweepRenderDependencies render,
+        AssignmentsDbContext db,
+        Guid assignmentId,
+        CancellationToken ct)
+    {
+        if (render.DimensionsCache.TryGetValue(assignmentId, out var cached))
         {
             return cached;
         }
 
-        var resolved = await render.TemplateResolver.ResolveAsync(kind, channel, tenantId, ct);
-        render.TemplateCache[key] = resolved;
-        return resolved;
+        // Projected as three SCALAR collections (the shape ListReminderSweepCandidatesAsync already
+        // proves translates on Npgsql) rather than a collection of tuples — this query runs against
+        // Postgres in the worker, where a collection-projecting-a-composite is a translation risk.
+        var row = await db.Assignments
+            .AsNoTracking()
+            .Where(a => a.Id == assignmentId)
+            .Select(a => new
+            {
+                a.TopicId,
+                a.AssignmentType,
+                GradeLevelIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+                StreamIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.Stream && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+                ActivityGroupIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.ActivityGroup && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var dimensions = row is null
+            ? AssignmentTemplateContext.Empty
+            : AssignmentTemplateContext.Create(
+                row.GradeLevelIds, row.StreamIds, row.ActivityGroupIds, row.TopicId, row.AssignmentType);
+
+        render.DimensionsCache[assignmentId] = dimensions;
+        return dimensions;
     }
 
     /// <summary>Persists a terminal <c>Skipped</c> row for the given

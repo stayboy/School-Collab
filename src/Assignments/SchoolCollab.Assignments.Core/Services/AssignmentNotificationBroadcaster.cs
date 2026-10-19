@@ -27,6 +27,11 @@ namespace SchoolCollab.Assignments.Core.Services;
 /// template id is persisted on the row as the send-time record of what rendered. The
 /// resolver is called once per channel per broadcast, never per recipient.</para>
 ///
+/// <para>Round notification-templates-b2c: a tenant holds several candidates per slot, so the
+/// resolver now returns the whole set and the broadcaster picks one — stamp-first, then
+/// <see cref="NotificationTemplateEvaluator"/> (see <see cref="SelectTemplateAsync"/>). The winner's
+/// id is the <c>NotificationLog.TemplateId</c>; null means the built-in default rendered.</para>
+///
 /// <para>Recipients without an unexpired deep-link token — or with no resolvable
 /// address — are recorded <see cref="NotificationDeliveryStatus.Skipped"/> with a
 /// reason and are never sent (decision (c)).</para>
@@ -52,7 +57,7 @@ public sealed class AssignmentNotificationBroadcaster(
 
         var now = timeProvider.GetUtcNow();
         // One Settings read per channel per broadcast — never per recipient (§3.3's
-        // resolution posture; the resolver's fail-open contract yields null → built-in
+        // resolution posture; the resolver's fail-open contract yields an unreadable read → built-in
         // defaults). SchoolName comes from the tenant context, in-process (Q-C / §3.4).
         var templateCache = new Dictionary<NotificationChannel, ResolvedNotificationTemplate?>();
         var schoolName = tenantProvider.GetTenantContext().TenantName;
@@ -136,13 +141,12 @@ public sealed class AssignmentNotificationBroadcaster(
                 "no delivery address resolved", now);
         }
 
-        // Resolve the tenant template for this channel once per broadcast (cache), then
-        // render — fail-open to the built-in defaults when the Settings read yields null.
+        // Resolve the tenant template for this channel once per broadcast (cache), then render —
+        // fail-open to the built-in defaults when the Settings read yields nothing.
         var channel = (NotificationChannel)(int)recipient.Channel;
         if (!templateCache.TryGetValue(channel, out var template))
         {
-            template = await templateResolver.ResolveAsync(
-                NotificationKind.Publish, channel, recipient.TenantId, cancellationToken);
+            template = await SelectTemplateAsync(context, channel, recipient.TenantId, cancellationToken);
             templateCache[channel] = template;
         }
 
@@ -165,6 +169,48 @@ public sealed class AssignmentNotificationBroadcaster(
         };
         var rendered = NotificationTemplateRenderer.Render(NotificationKind.Publish, channel, template, tagValues);
         return QueueOrUpdate(existing, context, recipient, address, rendered, now);
+    }
+
+    /// <summary>
+    /// Render-time selection for one channel (round notification-templates-b2c, spec §3.7/Q15/Q67),
+    /// <b>stamp-first</b>:
+    /// <list type="number">
+    /// <item>A live stamp naming one of this channel's candidates renders <b>that</b> template — the
+    /// republish reuses the author's choice, exactly what §3.7 promises.</item>
+    /// <item>A cleared, deleted or foreign stamp falls through to evaluation over the candidates
+    /// (<see cref="NotificationTemplateEvaluator"/>) — most specific applicable, else the tenant
+    /// default.</item>
+    /// <item>Nothing applicable, no candidates, or an unreadable Settings read ⇒
+    /// <see langword="null"/> and the built-in default renders (§3.3 fail-open: a template outage
+    /// never blocks a publish).</item>
+    /// </list>
+    /// Applicability is deliberately <b>not</b> re-checked for a stamped candidate: the stamp is the
+    /// author's explicit choice and the dialog's pre-select guidance, not a gate (§3.7).
+    /// </summary>
+    private async Task<ResolvedNotificationTemplate?> SelectTemplateAsync(
+        AssignmentPublishedContext context,
+        NotificationChannel channel,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var read = await templateResolver.ReadCandidatesAsync(
+            NotificationKind.Publish, channel, tenantId, cancellationToken);
+
+        if (read.State != NotificationTemplateSlotState.Found)
+        {
+            return null;
+        }
+
+        var stamped = channel == NotificationChannel.Email
+            ? context.PublishEmailTemplateId
+            : context.PublishSmsTemplateId;
+
+        var winner = stamped is { } stamp
+            ? read.Candidates.FirstOrDefault(c => c.TemplateId == stamp)
+                ?? NotificationTemplateEvaluator.Select(read.Candidates, context.Dimensions)
+            : NotificationTemplateEvaluator.Select(read.Candidates, context.Dimensions);
+
+        return winner?.ToResolved();
     }
 
     /// <summary>The recipient's link target (round notification-templates-b2a, spec §3.6):

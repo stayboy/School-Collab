@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -263,11 +263,12 @@ public class ReminderOverdueSweepCandidateTests
                 NotificationKind.Reminder, CancellationToken.None);
         }
 
-        /// <summary>Round b2a: the pass-scoped render inputs — inert here (the assertions are about
+        /// <summary>Rounds b2a/b2c: the pass-scoped render inputs — inert here (the assertions are about
         /// which tenant the skip row lands in, before any template is read).</summary>
         private static SweepRenderDependencies InertRenderDependencies() =>
             new(new NullNotificationTemplateResolver(), new NotificationLinkOptions(),
-                new Dictionary<(NotificationKind, NotificationChannel), ResolvedNotificationTemplate?>());
+                new Dictionary<(NotificationKind, NotificationChannel), NotificationTemplateCandidatesRead>(),
+                new Dictionary<Guid, AssignmentTemplateContext>());
     }
 
     private sealed class NoAddressResolver : IContactAddressResolver

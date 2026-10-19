@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -10,12 +10,14 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Notifications;
 using SchoolCollab.Settings.Api.Endpoints;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.CreateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenantNotificationTemplate;
-using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpsertTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
 using SchoolCollab.Settings.Core.Domain;
+using SchoolCollab.Settings.Core.Domain.Exceptions;
 using SchoolCollab.Settings.Core.DTOs;
 
 namespace SchoolCollab.Settings.Api.Tests.Unit;
@@ -28,8 +30,9 @@ namespace SchoolCollab.Settings.Api.Tests.Unit;
 /// <para>
 /// What this file covers that the handler tests cannot: <b>enum route binding</b>
 /// (<c>{kind}</c>/<c>{channel}</c> travel as names — a wrong or missing parse is a silent
-/// 404/400 at runtime with every unit test still green), the 204-vs-200 get-one contract,
-/// the 400 arm for a rejected channel, and the required-reason 400 on reset.
+/// 404/400 at runtime with every unit test still green), the by-id writer shape (round
+/// notification-templates-b2c: <c>POST</c>, <c>PUT /{id}</c>, <c>DELETE /{id}</c>), the 204-vs-200
+/// get-one contract, the 409 conflict arm, and the required-reason 400 on the audited tombstone.
 /// </para>
 /// </summary>
 [TestClass]
@@ -44,7 +47,7 @@ public class NotificationTemplateRoutesTests
         NotificationChannel channel = NotificationChannel.Email) =>
         new(TemplateId, kind, channel, "Subject for {{Title}}", "Body for {{Title}}",
             [new TemplateConstraintDto(Guid.NewGuid(), TemplateConstraintDimension.GradeLevel, "Grade 3")],
-            DateTimeOffset.UnixEpoch);
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1));
 
     // ── Stubs ──────────────────────────────────────────────────────────────
 
@@ -69,29 +72,58 @@ public class NotificationTemplateRoutesTests
         }
     }
 
-    private sealed class CapturingUpsertHandler : ICommandHandler<UpsertTenantNotificationTemplate, TenantNotificationTemplateDto>
+    private sealed class CapturingCreateHandler : ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto>
     {
-        public UpsertTenantNotificationTemplate? Last { get; private set; }
+        public CreateTenantNotificationTemplate? Last { get; private set; }
 
         public Task<TenantNotificationTemplateDto> HandleAsync(
-            UpsertTenantNotificationTemplate command, CancellationToken ct = default)
+            CreateTenantNotificationTemplate command, CancellationToken ct = default)
         {
             Last = command;
-            return Task.FromResult(SampleDto(command.Kind, command.Channel));
+            return Task.FromResult(SampleDto(command.Request.Kind, command.Request.Channel));
         }
     }
 
     /// <summary>Reproduces the domain's WhatsApp guard so the route's 400 arm is reached.</summary>
-    private sealed class ChannelGuardingUpsertHandler : ICommandHandler<UpsertTenantNotificationTemplate, TenantNotificationTemplateDto>
+    private sealed class ChannelGuardingCreateHandler
+        : ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto>
     {
         public Task<TenantNotificationTemplateDto> HandleAsync(
-            UpsertTenantNotificationTemplate command, CancellationToken ct = default)
+            CreateTenantNotificationTemplate command, CancellationToken ct = default)
         {
-            if (command.Channel == NotificationChannel.WhatsApp)
+            if (command.Request.Channel == NotificationChannel.WhatsApp)
                 throw new ArgumentOutOfRangeException(nameof(command), "WhatsApp is not a template channel");
 
-            return Task.FromResult(SampleDto(command.Kind, command.Channel));
+            return Task.FromResult(SampleDto(command.Request.Kind, command.Request.Channel));
         }
+    }
+
+    /// <summary>Reproduces the tenant-default invariant so the route's 409 arm is reached.</summary>
+    private sealed class ConflictingCreateHandler
+        : ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto>
+    {
+        public Task<TenantNotificationTemplateDto> HandleAsync(
+            CreateTenantNotificationTemplate command, CancellationToken ct = default) =>
+            throw new TenantNotificationTemplateConflictException("A default Publish/Email template already exists.");
+    }
+
+    private sealed class CapturingUpdateHandler : ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto>
+    {
+        public UpdateTenantNotificationTemplate? Last { get; private set; }
+
+        public Task<TenantNotificationTemplateDto> HandleAsync(
+            UpdateTenantNotificationTemplate command, CancellationToken ct = default)
+        {
+            Last = command;
+            return Task.FromResult(SampleDto());
+        }
+    }
+
+    private sealed class MissingUpdateHandler : ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto>
+    {
+        public Task<TenantNotificationTemplateDto> HandleAsync(
+            UpdateTenantNotificationTemplate command, CancellationToken ct = default) =>
+            throw new TenantNotificationTemplateNotFoundException(command.TemplateId);
     }
 
     private sealed class CapturingDeleteHandler : ICommandHandler<DeleteTenantNotificationTemplate>
@@ -118,7 +150,8 @@ public class NotificationTemplateRoutesTests
     private static async Task<(WebApplication App, HttpClient Client)> StartAsync(
         IReadOnlyList<TenantNotificationTemplateDto>? all = null,
         TenantNotificationTemplateDto? single = null,
-        ICommandHandler<UpsertTenantNotificationTemplate, TenantNotificationTemplateDto>? upsert = null,
+        ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto>? create = null,
+        ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto>? update = null,
         ICommandHandler<DeleteTenantNotificationTemplate>? delete = null,
         IReadOnlyList<TemplateAuditEntryDto>? audit = null,
         GetOneHandler? getOneSpy = null)
@@ -131,7 +164,8 @@ public class NotificationTemplateRoutesTests
             new GetAllHandler(all ?? []));
         builder.Services.AddSingleton<IQueryHandler<GetTenantNotificationTemplate, TenantNotificationTemplateDto?>>(
             getOneSpy ?? new GetOneHandler(single));
-        builder.Services.AddSingleton(upsert ?? new CapturingUpsertHandler());
+        builder.Services.AddSingleton(create ?? new CapturingCreateHandler());
+        builder.Services.AddSingleton(update ?? new CapturingUpdateHandler());
         builder.Services.AddSingleton(delete ?? new CapturingDeleteHandler());
         builder.Services.AddSingleton<IQueryHandler<GetTemplateAuditEntries, IReadOnlyList<TemplateAuditEntryDto>>>(
             new StubAuditHandler(audit ?? []));
@@ -161,9 +195,10 @@ public class NotificationTemplateRoutesTests
     }
 
     [TestMethod]
-    public async Task GetOne_Returns204WhenNoTemplateIsConfigured()
+    public async Task GetOne_Returns204WhenNoDefaultRowIsConfigured()
     {
-        // Spec §5: "204 = unset (built-in default applies)".
+        // Spec §5: "204 = unset (built-in default applies)"; round b2c narrows this read to the
+        // tenant DEFAULT row, so constrained-only slots also answer 204.
         var (app, client) = await StartAsync(single: null);
         await using (app)
         {
@@ -191,45 +226,103 @@ public class NotificationTemplateRoutesTests
         }
     }
 
-    // ── Put ────────────────────────────────────────────────────────────────
+    // ── Post (create) ──────────────────────────────────────────────────────
 
     [TestMethod]
-    public async Task Put_BindsTheRouteEnumsAndTheBody()
+    public async Task Post_BindsTheBodyAndPassesTheReason()
     {
-        var upsert = new CapturingUpsertHandler();
-        var (app, client) = await StartAsync(upsert: upsert);
+        var create = new CapturingCreateHandler();
+        var (app, client) = await StartAsync(create: create);
         await using (app)
         {
-            var response = await client.PutAsync($"{BaseUrl}/Reminder/Email", Json("""
+            // The Settings host registers no JsonStringEnumConverter, so a client sends the enum's
+            // numeric value in a BODY (route values still bind by name, as the tests above pin):
+            // kind 1 = Reminder, channel 0 = Email.
+            var response = await client.PostAsync(BaseUrl, Json("""
+                {"kind":1,"channel":0,"subject":"Reminder: {{Title}}","body":"Due {{DueDate}}","constraints":[],"reason":"tweak"}
+                """));
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            create.Last.Should().NotBeNull();
+            create.Last!.Request.Kind.Should().Be(NotificationTemplateKind.Reminder);
+            create.Last.Request.Channel.Should().Be(NotificationChannel.Email);
+            create.Last.Request.Body.Should().Be("Due {{DueDate}}");
+            create.Last.Reason.Should().Be("tweak");
+        }
+    }
+
+    [TestMethod]
+    public async Task Post_Returns400WhenTheHandlerRejectsTheChannel()
+    {
+        // The domain rejects WhatsApp (spec §2 routes WhatsApp at the SMS body); the
+        // route catches ArgumentException — of which ArgumentOutOfRangeException is one.
+        var (app, client) = await StartAsync(create: new ChannelGuardingCreateHandler());
+        await using (app)
+        {
+            // channel 2 = WhatsApp (the only value the domain rejects).
+            var response = await client.PostAsync(BaseUrl, Json("""
+                {"kind":0,"channel":2,"subject":null,"body":"Publish: {{Title}}","constraints":[]}
+                """));
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("WhatsApp",
+                "the 400 must come from the domain guard, not from body binding");
+        }
+    }
+
+    [TestMethod]
+    public async Task Post_Returns409WhenASecondDefaultRowWouldExist()
+    {
+        // Round b2c WS2: an empty constraint set IS the tenant default, so a second one conflicts.
+        var (app, client) = await StartAsync(create: new ConflictingCreateHandler());
+        await using (app)
+        {
+            var response = await client.PostAsync(BaseUrl, Json("""
+                {"kind":0,"channel":0,"subject":null,"body":"Body","constraints":[]}
+                """));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("default");
+        }
+    }
+
+    // ── Put (by id) ────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public async Task Put_BindsTheIdAndTheBody()
+    {
+        var update = new CapturingUpdateHandler();
+        var (app, client) = await StartAsync(update: update);
+        await using (app)
+        {
+            var response = await client.PutAsync($"{BaseUrl}/{TemplateId}", Json("""
                 {"subject":"Reminder: {{Title}}","body":"Due {{DueDate}}","constraints":[],"reason":"tweak"}
                 """));
 
             response.StatusCode.Should().Be(HttpStatusCode.OK);
-            upsert.Last.Should().NotBeNull();
-            upsert.Last!.Kind.Should().Be(NotificationTemplateKind.Reminder);
-            upsert.Last.Channel.Should().Be(NotificationChannel.Email);
-            upsert.Last.Request.Body.Should().Be("Due {{DueDate}}");
-            upsert.Last.Request.Reason.Should().Be("tweak");
+            update.Last.Should().NotBeNull();
+            update.Last!.TemplateId.Should().Be(TemplateId);
+            update.Last.Request.Body.Should().Be("Due {{DueDate}}");
+            update.Last.Reason.Should().Be("tweak");
         }
     }
 
     [TestMethod]
-    public async Task Put_Returns400WhenTheHandlerRejectsTheChannel()
+    public async Task Put_Returns404WhenTheRowIsAbsent()
     {
-        // The domain rejects WhatsApp (spec §2 routes WhatsApp at the SMS body); the
-        // route catches ArgumentException — of which ArgumentOutOfRangeException is one.
-        var (app, client) = await StartAsync(upsert: new ChannelGuardingUpsertHandler());
+        var (app, client) = await StartAsync(update: new MissingUpdateHandler());
         await using (app)
         {
-            var response = await client.PutAsync($"{BaseUrl}/Publish/WhatsApp", Json("""
-                {"body":"Publish: {{Title}}","constraints":[]}
+            var response = await client.PutAsync($"{BaseUrl}/{TemplateId}", Json("""
+                {"body":"Body","constraints":[]}
                 """));
 
-            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+                "the tenant query filter makes a foreign row indistinguishable from an absent one");
         }
     }
 
-    // ── Delete / reset ─────────────────────────────────────────────────────
+    // ── Delete / reset (by id) ─────────────────────────────────────────────
 
     [TestMethod]
     public async Task Delete_WithoutAReason_Returns400AndDoesNotCallTheHandler()
@@ -238,7 +331,7 @@ public class NotificationTemplateRoutesTests
         var (app, client) = await StartAsync(delete: delete);
         await using (app)
         {
-            var response = await client.DeleteAsync($"{BaseUrl}/Publish/Email");
+            var response = await client.DeleteAsync($"{BaseUrl}/{TemplateId}");
 
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
                 "a reset is audited, so the audit row must carry an operator reason "
@@ -254,7 +347,7 @@ public class NotificationTemplateRoutesTests
         var (app, client) = await StartAsync(delete: delete);
         await using (app)
         {
-            var response = await client.DeleteAsync($"{BaseUrl}/Publish/Email?reason=%20%20");
+            var response = await client.DeleteAsync($"{BaseUrl}/{TemplateId}?reason=%20%20");
 
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             delete.Last.Should().BeNull();
@@ -262,26 +355,25 @@ public class NotificationTemplateRoutesTests
     }
 
     [TestMethod]
-    public async Task Delete_WithAReason_Returns204AndPassesItToTheHandler()
+    public async Task Delete_WithAReason_Returns204AndPassesIdAndReasonToTheHandler()
     {
         var delete = new CapturingDeleteHandler();
         var (app, client) = await StartAsync(delete: delete);
         await using (app)
         {
-            var response = await client.DeleteAsync($"{BaseUrl}/Completion/SMS?reason=reset%20after%20review");
+            var response = await client.DeleteAsync($"{BaseUrl}/{TemplateId}?reason=reset%20after%20review");
 
             response.StatusCode.Should().Be(HttpStatusCode.NoContent);
             delete.Last.Should().NotBeNull();
-            delete.Last!.Kind.Should().Be(NotificationTemplateKind.Completion);
-            delete.Last.Channel.Should().Be(NotificationChannel.SMS);
+            delete.Last!.TemplateId.Should().Be(TemplateId);
             delete.Last.Reason.Should().Be("reset after review");
         }
     }
 
-    // ── Audit ──────────────────────────────────────────────────────────────
+    // ── Audit (stays keyed) ────────────────────────────────────────────────
 
     [TestMethod]
-    public async Task GetAudit_Returns200AndTheEntries()
+    public async Task GetAudit_Returns200AndTheEntries_ForAKindAndChannel()
     {
         var entry = new TemplateAuditEntryDto(
             Guid.NewGuid(), TemplateChangeKind.Updated,
