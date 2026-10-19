@@ -63,7 +63,7 @@ public class AssignmentNotificationBroadcasterTests
     }
 
     private static (AssignmentsDbContext db, AssignmentNotificationBroadcaster broadcaster, RecordingPublisher publisher) Build(
-        string database, Dictionary<Guid, string> addresses)
+        string database, Dictionary<Guid, string> addresses, INotificationTemplateResolver? templateResolver = null)
     {
         var services = new ServiceCollection();
         services.AddTenancy();
@@ -77,17 +77,33 @@ public class AssignmentNotificationBroadcasterTests
 
         var publisher = new RecordingPublisher();
         var broadcaster = new AssignmentNotificationBroadcaster(
-            db, new StubAddressResolver(addresses), publisher, TimeProvider.System,
+            db, new StubAddressResolver(addresses), publisher,
+            templateResolver ?? new NullNotificationTemplateResolver(), tenants,
+            Microsoft.Extensions.Options.Options.Create(new NotificationLinkOptions()),
+            TimeProvider.System,
             NullLogger<AssignmentNotificationBroadcaster>.Instance);
 
         return (db, broadcaster, publisher);
     }
 
-    private static AssignmentRecipient Recipient(Guid contactId, ContactChannel channel, string? token, DateTimeOffset? expiresAt = null)
+    /// <summary>Minimal in-process tenant context for broadcaster construction — the
+    /// broadcaster only reads <see cref="TenantContext.TenantName"/> for SchoolName.</summary>
+    private sealed class FixedTenantProvider : ITenantProvider
+    {
+        public TenantContext GetTenantContext() => new(TenantId, "SchoolA", TenantType.School);
+    }
+
+    private static AssignmentRecipient Recipient(
+        Guid contactId,
+        ContactChannel channel,
+        string? token,
+        DateTimeOffset? expiresAt = null,
+        ContactOwnerType ownerType = ContactOwnerType.Guardian,
+        GuardianRole? role = GuardianRole.Primary)
     {
         var recipient = AssignmentRecipient.Create(
-            TenantId, AssignmentId, ContactOwnerType.Guardian, Guid.NewGuid(), StudentId,
-            contactId, channel, GuardianRole.Primary, notifyOnBroadcast: true, subscriptionActive: true);
+            TenantId, AssignmentId, ownerType, Guid.NewGuid(), StudentId,
+            contactId, channel, role, notifyOnBroadcast: true, subscriptionActive: true);
 
         if (token is not null)
         {
@@ -95,6 +111,15 @@ public class AssignmentNotificationBroadcasterTests
         }
 
         return recipient;
+    }
+
+    /// <summary>A resolver that always yields one template — proves which tag VALUES the
+    /// broadcaster assembles, where the fail-open default would only render its own text.</summary>
+    private sealed class FixedTemplateResolver(string? subject, string body) : INotificationTemplateResolver
+    {
+        public Task<ResolvedNotificationTemplate?> ResolveAsync(
+            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ResolvedNotificationTemplate?>(new ResolvedNotificationTemplate(Guid.NewGuid(), subject, body));
     }
 
     private static EffectiveNotificationPolicy Policy(
@@ -142,7 +167,7 @@ public class AssignmentNotificationBroadcasterTests
             recipients, Policy(blocked: [NotificationChannel.WhatsApp]), UncappedAssignmentPolicy());
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, filtered));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, filtered));
 
         var rows = await db.NotificationLogs.ToListAsync();
         rows.Should().HaveCount(2);
@@ -183,11 +208,48 @@ public class AssignmentNotificationBroadcasterTests
             recipients, Policy(maxNotifications: 1), UncappedAssignmentPolicy());
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, filtered));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, filtered));
 
         var rows = await db.NotificationLogs.ToListAsync();
         rows.Should().ContainSingle();
         rows[0].ContactId.Should().Be(first);
+    }
+
+    /// <summary>
+    /// §3.2 tag values: <c>{{GuardianName}}</c>/<c>{{GuardianRole}}</c> come off the recipient
+    /// row (enriched name + guardian link role), and a student-owned recipient — which has no
+    /// guardian link — degrades the role to the empty string rather than failing the send.
+    /// </summary>
+    [TestMethod]
+    public async Task GuardianNameAndRole_ComeFromTheRecipient_EmptyForStudentOwned()
+    {
+        var contactGuardian = Guid.NewGuid();
+        var contactStudent = Guid.NewGuid();
+        var (db, broadcaster, _) = Build(
+            nameof(GuardianNameAndRole_ComeFromTheRecipient_EmptyForStudentOwned),
+            new Dictionary<Guid, string>
+            {
+                [contactGuardian] = "guardian@example.com",
+                [contactStudent] = "student@example.com",
+            },
+            new FixedTemplateResolver(null, "{{GuardianName}}|{{GuardianRole}}"));
+
+        var guardianRecipient = Recipient(contactGuardian, ContactChannel.Email, "tok-guardian");
+        guardianRecipient.AttachDisplayNames("Mrs Dlamini", "Thabo Dlamini");
+        var studentRecipient = Recipient(
+            contactStudent, ContactChannel.Email, "tok-student",
+            ownerType: ContactOwnerType.Student, role: null);
+
+        await broadcaster.BroadcastPublishedAsync(
+            new AssignmentPublishedContext(
+                AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null,
+                NotificationRecipientFilter.Apply(
+                    [guardianRecipient, studentRecipient], Policy(), UncappedAssignmentPolicy())));
+
+        var rows = await db.NotificationLogs.ToListAsync();
+        rows.Single(r => r.ContactId == contactGuardian).BodyHtml.Should().Be("Mrs Dlamini|Primary");
+        rows.Single(r => r.ContactId == contactStudent).BodyHtml.Should().Be("|",
+            "a student-owned recipient has no guardian link — the role degrades to empty, never fails");
     }
 
     [TestMethod]
@@ -200,7 +262,7 @@ public class AssignmentNotificationBroadcasterTests
         var recipients = new[] { Recipient(contactNoToken, ContactChannel.Email, token: null) };
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
@@ -222,7 +284,7 @@ public class AssignmentNotificationBroadcasterTests
         };
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
@@ -239,7 +301,7 @@ public class AssignmentNotificationBroadcasterTests
         var recipients = new[] { Recipient(contactUnknown, ContactChannel.Email, "tok-unknown") };
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
@@ -257,7 +319,10 @@ public class AssignmentNotificationBroadcasterTests
             new Dictionary<Guid, string> { [contact] = "guardian@example.com" });
 
         var broadcaster = new AssignmentNotificationBroadcaster(
-            db, new CancellingAddressResolver(), new RecordingPublisher(), TimeProvider.System,
+            db, new CancellingAddressResolver(), new RecordingPublisher(),
+            new NullNotificationTemplateResolver(), new FixedTenantProvider(),
+            Microsoft.Extensions.Options.Options.Create(new NotificationLinkOptions()),
+            TimeProvider.System,
             NullLogger<AssignmentNotificationBroadcaster>.Instance);
 
         var recipients = new[] { Recipient(contact, ContactChannel.Email, "tok-cancel") };
@@ -266,11 +331,100 @@ public class AssignmentNotificationBroadcasterTests
         // silently lose the notification. It propagates, and nothing is persisted (review P2).
         await FluentActions
             .Awaiting(() => broadcaster.BroadcastPublishedAsync(
-                new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, recipients),
+                new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients),
                 cts.Token))
             .Should().ThrowAsync<OperationCanceledException>();
 
         (await db.NotificationLogs.ToListAsync()).Should().BeEmpty(
             "a cancelled publish must not persist a Skipped row");
+    }
+
+    /// <summary>Returns one fixed tenant template — the enrichment tests need a body that
+    /// actually consumes the name tags.</summary>
+    private sealed class StubTemplateResolver(ResolvedNotificationTemplate template) : INotificationTemplateResolver
+    {
+        public Task<ResolvedNotificationTemplate?> ResolveAsync(
+            NotificationKind kind, NotificationChannel channel, Guid tenantId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<ResolvedNotificationTemplate?>(template);
+    }
+
+    private static (AssignmentsDbContext db, AssignmentNotificationBroadcaster broadcaster) BuildWithTemplate(
+        string database, Dictionary<Guid, string> addresses, ResolvedNotificationTemplate template)
+    {
+        var services = new ServiceCollection();
+        services.AddTenancy();
+        services.AddDbContext<AssignmentsDbContext>(o => o.UseInMemoryDatabase(database));
+        var provider = services.BuildServiceProvider();
+
+        var db = provider.GetRequiredService<AssignmentsDbContext>();
+        var tenants = (TenantProvider)provider.GetRequiredService<ITenantProvider>();
+        tenants.SetTenant(new TenantContext(TenantId, "SchoolA", TenantType.School));
+        db.Database.EnsureCreated();
+
+        var broadcaster = new AssignmentNotificationBroadcaster(
+            db, new StubAddressResolver(addresses), new RecordingPublisher(),
+            new StubTemplateResolver(template), tenants,
+            Microsoft.Extensions.Options.Options.Create(new NotificationLinkOptions()),
+            TimeProvider.System,
+            NullLogger<AssignmentNotificationBroadcaster>.Instance);
+
+        return (db, broadcaster);
+    }
+
+    /// <summary>
+    /// Round B1 (§3.4): the enrichment names the publish handler attaches to the recipient reach
+    /// the renderer as real tag values — the assertion the whole name-widening exists for.
+    /// </summary>
+    [TestMethod]
+    public async Task EnrichmentNames_RenderIntoTheContactAndStudentTags()
+    {
+        var contact = Guid.NewGuid();
+        var templateId = Guid.NewGuid();
+        var (db, broadcaster) = BuildWithTemplate(
+            nameof(EnrichmentNames_RenderIntoTheContactAndStudentTags),
+            new Dictionary<Guid, string> { [contact] = "guardian@example.com" },
+            new ResolvedNotificationTemplate(
+                templateId, "Update for {{ContactName}}",
+                "<p>{{StudentName}} has a new assignment.</p>"));
+
+        var recipient = Recipient(contact, ContactChannel.Email, "tok-enriched");
+        recipient.AttachDisplayNames("Mrs Mensah", "Ada Mensah");
+
+        await broadcaster.BroadcastPublishedAsync(
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
+
+        var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
+        row.Subject.Should().Be("Update for Mrs Mensah");
+        row.BodyHtml.Should().Contain("Ada Mensah");
+        row.TemplateId.Should().Be(templateId, "the resolved template is the send-time record");
+    }
+
+    /// <summary>
+    /// Round B1 (§3.4): a recipient whose names were never resolved (the enrichment degrade path)
+    /// still renders — the tags substitute to <see cref="string.Empty"/> rather than staying
+    /// literal or failing the broadcast.
+    /// </summary>
+    [TestMethod]
+    public async Task MissingEnrichmentNames_DegradeToEmpty_AndTheBroadcastStillQueues()
+    {
+        var contact = Guid.NewGuid();
+        var (db, broadcaster) = BuildWithTemplate(
+            nameof(MissingEnrichmentNames_DegradeToEmpty_AndTheBroadcastStillQueues),
+            new Dictionary<Guid, string> { [contact] = "guardian@example.com" },
+            new ResolvedNotificationTemplate(
+                Guid.NewGuid(), "Update for {{ContactName}}",
+                "<p>{{StudentName}} has a new assignment.</p>"));
+
+        var recipient = Recipient(contact, ContactChannel.Email, "tok-unenriched");
+        recipient.ContactDisplayName.Should().BeEmpty("nothing has enriched this recipient");
+
+        await broadcaster.BroadcastPublishedAsync(
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
+
+        var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
+        row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
+        row.Subject.Should().Be("Update for ", "an unresolved name is empty, not a literal tag");
+        row.BodyHtml.Should().NotContain("StudentName");
     }
 }

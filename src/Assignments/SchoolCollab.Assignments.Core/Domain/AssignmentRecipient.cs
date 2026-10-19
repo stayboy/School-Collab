@@ -1,6 +1,7 @@
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace SchoolCollab.Assignments.Core.Domain;
 
@@ -37,6 +38,22 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
     // (assignment, contact) recipient row — re-minted/reused on republish.
     public string? DeepLinkToken { get; private set; }
     public DateTimeOffset? DeepLinkExpiresAt { get; private set; }
+
+    /// <summary>
+    /// Round notification-templates-b1 (§3.4): the notified contact's display name, carried
+    /// <b>in process only</b> from the publish-time Students read so the renderer's
+    /// <c>{{GuardianName}}</c> tag carries a real value. Never persisted — the recipient row
+    /// stores ids, and the name degrades to <see cref="string.Empty"/> when enrichment did not
+    /// resolve it.
+    /// </summary>
+    [NotMapped]
+    public string ContactDisplayName { get; private set; } = string.Empty;
+
+    /// <summary>The ward student's display name for this recipient (the renderer's
+    /// <c>{{StudentName}}</c>), in process only — same enrichment contract as
+    /// <see cref="ContactDisplayName"/>.</summary>
+    [NotMapped]
+    public string StudentDisplayName { get; private set; } = string.Empty;
 
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -100,5 +117,14 @@ public sealed class AssignmentRecipient : ITenantEntity, IEntity, IAuditableEnti
         DeepLinkToken = token;
         DeepLinkExpiresAt = expiresAt;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Round notification-templates-b1 (§3.4) — carries the enrichment names the
+    /// renderer needs onto the in-process recipient. Transient (see
+    /// <see cref="ContactDisplayName"/>): never persisted, never part of a save.</summary>
+    public void AttachDisplayNames(string contactName, string studentName)
+    {
+        ContactDisplayName = contactName;
+        StudentDisplayName = studentName;
     }
 }

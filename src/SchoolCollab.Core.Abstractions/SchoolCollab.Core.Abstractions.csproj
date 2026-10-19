@@ -6,4 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Round notification-templates-b1 (Q-D): the RichInstructionSanitizer relocation needs the
+         allow-list sanitiser here. Version is centrally pinned in Directory.Packages.props — no
+         Version attribute (CPM). -->
+    <PackageReference Include="HtmlSanitizer" />
+  </ItemGroup>
+
 </Project>

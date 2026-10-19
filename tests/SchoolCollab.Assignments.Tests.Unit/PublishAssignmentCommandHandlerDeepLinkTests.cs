@@ -52,11 +52,12 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
         FakeSubmissionRepository submissionRepo,
         FakeNotificationPolicyResolver policyResolver,
         IDeepLinkTokenMinter minter,
-        IFeatureFlagService? flags = null)
+        IFeatureFlagService? flags = null,
+        IReadOnlyList<SubscriberInfo>? subscribers = null)
     {
         var assignment = NewAssignment();
         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
-        var contactResolver = new FakeContactResolver([Subscriber]);
+        var contactResolver = new FakeContactResolver(subscribers ?? [Subscriber]);
         var topicLookup = new FakeTopicAssignmentLookup();
         var targetResolver = new FakeAssignmentTargetResolver { StudentIds = [StudentId] };
         var tenantProvider = new FakeTenantProvider(TenantId);
@@ -116,6 +117,43 @@ public class PublishAssignmentCommandHandlerDeepLinkTests
         handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
 
         submissionRepo.Added.Should().ContainSingle().Subject.DeepLinkToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// Round B1 (§3.4): the resolver's enrichment names ride <see cref="SubscriberInfo"/> onto the
+    /// recipient, which is how they reach the broadcaster's tag values. A missing name leaves the
+    /// recipient property empty instead of failing the publish.
+    /// </summary>
+    [TestMethod]
+    public void EnrichmentNames_FromTheContactResolver_RideOntoTheRecipient()
+    {
+        var submissionRepo = new FakeSubmissionRepository();
+        var policy = new FakeNotificationPolicyResolver();
+        var minter = new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider()));
+        var handler = NewHandler(submissionRepo, policy, minter, subscribers:
+            [Subscriber with { ContactName = "Mrs Mensah", StudentName = "Ada Mensah" }]);
+
+        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
+
+        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
+        recipient.ContactDisplayName.Should().Be("Mrs Mensah");
+        recipient.StudentDisplayName.Should().Be("Ada Mensah");
+    }
+
+    [TestMethod]
+    public void MissingEnrichmentNames_LeaveTheRecipientNamesEmpty()
+    {
+        var submissionRepo = new FakeSubmissionRepository();
+        var policy = new FakeNotificationPolicyResolver();
+        var minter = new DeepLinkTokenMinter(new DeepLinkProtector(new PassthroughProvider()));
+        // The default Subscriber carries no names — the enrichment-degrade posture (§3.4).
+        var handler = NewHandler(submissionRepo, policy, minter);
+
+        handler.HandleAsync(new PublishAssignmentCommand(NewAssignment().Id)).GetAwaiter().GetResult();
+
+        var recipient = submissionRepo.Added.Should().ContainSingle().Subject;
+        recipient.ContactDisplayName.Should().BeEmpty();
+        recipient.StudentDisplayName.Should().BeEmpty();
     }
 
     [TestMethod]

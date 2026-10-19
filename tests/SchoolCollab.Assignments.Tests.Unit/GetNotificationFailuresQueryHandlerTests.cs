@@ -44,7 +44,7 @@ public class GetNotificationFailuresQueryHandlerTests
         var log = NotificationLog.Queue(
             tenantId, AssignmentId, Guid.NewGuid(), contactId,
             NotificationChannel.Email, NotificationKind.Publish,
-            "guardian@example.com", "New assignment", "<p>body</p>", now);
+            "guardian@example.com", "New assignment", "<p>body</p>", null, now);
 
         switch (status)
         {

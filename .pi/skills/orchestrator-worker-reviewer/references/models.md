@@ -19,7 +19,7 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 |---|---|---|
 | Orchestrator | `ollama-cloud/glm-5.3-flash` (owner 2026-09-22, **Option A**) | `cline-pass/glm-5.3` |
 | Worker | `ollama-cloud/deepseek-v4.1-flash` (owner 2026-09-22, **Option A**) | `cline-pass/deepseek-v4.1-flash` (owner 2026-10-05 **latest**, lean rounds — supersedes the same day's interim `glm-5.3-flash` ruling, which itself superseded `deepseek-v4-flash`; full rounds: `cline-pass/deepseek-v4-flash`) |
-| Reviewer | `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | `cline-pass/mimo-v2.6-flash` (owner 2026-10-05) |
+| Reviewer | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the current reviewer direction; the seat lives on the **ollama-cloud** provider, whose `~/.pi/provider-cache.json` carries the bare `deepseek-v4-pro:0813`; the `:cloud` in the ruling is that provider's tag form). Default/fallback remains `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22, **Option A — both tiers**) | **`cline-pass/mimo-v2.6-flash` is ABSENT from the provider registry (verified 2026-10-18)** — provider `cline` carries only `xiaomi/mimo-v2.6-flash`/`-pro`/`-ultraspeed`, `xiaomi/mimo-v2.5`/`-pro` and `cline-free/mimo-v2.6-flash`, so the bare id never resolves; a clinepass round must substitute a verified id. The 2026-10-05 ruling that named it, and the interim 2026-10-17 same-id-as-worker dispatch, are superseded |
 | Plan reviewer (Tier 3 **full**) | `ollama/glm-5.3:cloud` | `cline-pass/glm-5.3` |
 | UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
 | Escalator (blocked-pass rework) | Tier 3: `ollama-cloud/kimi-k2.7-code` (owner 2026-09-22 — pinned; **under Option A this coincides with the Tier-3 reviewer, so an escalated rework and its verifier share a model — the light tier already does this by design, and the owner has not ruled**); otherwise the round's reviewer model | the round's reviewer model |
@@ -45,8 +45,15 @@ Tier 3 **lean** uses the standard Tier-3 ladder unchanged — only the
 accept-run is skipped (SKILL.md § "Tier 3 lean") — **with the owner rulings of
 2026-10-05 (latest wins): the clinepass lean worker is `cline-pass/deepseek-v4.1-flash`**
 (superseding the same day's interim `glm-5.3-flash` ruling, which itself superseded
-`deepseek-v4-flash`), **and the clinepass reviewer — plan-review and diff-review
-alike — is `cline-pass/mimo-v2.6-flash`**; the verifier stays distinct from the
+`deepseek-v4-flash`), **and the reviewer — plan-review and diff-review
+alike — is `ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the seat lives on the
+**ollama-cloud** provider, whose cache carries the bare `deepseek-v4-pro:0813`; the `:cloud`
+in the ruling is that provider's tag form. The cline id `cline/deepseek/deepseek-v4-pro-0813`
+is a different seat — it is not the owner-named one and must not be dispatched).
+The previously named
+`cline-pass/mimo-v2.6-flash` is **absent from the provider registry** (verified
+2026-10-18: provider `cline` lists only `xiaomi/mimo-v2.6-flash`/`-pro`, not the
+bare id), so it must not be dispatched; the verifier stays distinct from the
 implementer.
 
 **Solo rule:** a solo round is ONE agent doing everything — planner, implementer,

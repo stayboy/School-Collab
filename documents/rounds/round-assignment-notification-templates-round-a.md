@@ -1,5 +1,5 @@
 Provider: Cline/clinepass (models: parent-as-worker = Cline agent; reviewer = `deepseek-v4.1-flash` — reviewer dispatch blocked by provider auth, see `## Review`) · **Tier 2, owner override** — this round carries an EF migration, a new contract surface and >4 files, none of which pass the Tier-2 file-level gates; the owner explicitly chose Light Tier 2 for Round A on 2026-10-17, recorded here per the skill's "there is no defined tier between 2 and 3" override clause.
-**Status:** in review — PR #362 (https://github.com/stayboy/School-Collab/pull/362), 4 commits, all 5 CI checks green. D4 ("hold") was overridden by the owner's "push to stack pr" instruction; the branch is layer 1 of a `gh stack` train on `main`, so Round B becomes layer 2.
+**Status:** **CLOSED — PR #362 (merged as `d3328320`, squash; branch deleted).** The gh-stack "layer 2" expectation was later superseded — `gh stack` could not create the server-side stack object on this repo (merge reported "not submitted" after a successful submit), so B1 is an ordinary branch off `main`, merged with `gh pr merge --squash --delete-branch`.
 
 # Round A — assignment-notification-templates: template store (settings-db)
 

@@ -72,14 +72,18 @@ public class NotificationDispatchServiceTests
         return (db, dispatcher, sender);
     }
 
-    private static NotificationLog QueuedEmail(DateTimeOffset dueAt) =>
-        NotificationLog.Queue(
+    private static NotificationLog QueuedEmail(DateTimeOffset dueAt)
+    {
+        var message = NotificationMessageBuilder.BuildPublishEmail("guardian@example.com", "Math homework", "tok-1");
+        return NotificationLog.Queue(
             TenantId, AssignmentId, RecipientId, ContactId,
             NotificationChannel.Email, NotificationKind.Publish,
-            "guardian@example.com",
-            NotificationMessageBuilder.BuildPublishSubject("Math homework"),
-            NotificationMessageBuilder.BuildPublishHtml("Math homework", "tok-1"),
+            message.To,
+            message.Subject,
+            message.BodyHtml,
+            null,
             dueAt);
+    }
 
     [TestMethod]
     public async Task DueQueuedRow_IsSentAndMarkedSentWithTimestamp()

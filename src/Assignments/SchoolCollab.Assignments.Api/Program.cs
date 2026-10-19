@@ -173,6 +173,14 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureCons
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAiPromptPolicyResolver,
     SchoolCollab.Assignments.Api.Services.AiPromptPolicyResolver>();
 
+// Round notification-templates-b1: the tenant template resolver — overrides the Core
+// NullNotificationTemplateResolver default (later registration wins), so the broadcaster
+// resolves tenant templates cross-context; fail-open to built-in defaults on outage.
+// The implementation lives in Assignments.Core (the relocated-NotificationPolicyResolver
+// precedent) so the Assignments.Worker registers the SAME class for the E3 sweeps.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationTemplateResolver,
+    SchoolCollab.Assignments.Core.Services.HttpNotificationTemplateResolver>();
+
 // Student directory port for the sign-off surfaces (WS-C1 / spec §5 + §7 Q5):
 // ward names + guardian links from the Students API.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IStudentDirectory,

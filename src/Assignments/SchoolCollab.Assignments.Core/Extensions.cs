@@ -60,6 +60,18 @@ public static class Extensions
         // sender otherwise) + the store-driven dispatch drain.
         services.AddAssignmentNotificationDelivery(configuration);
         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
+        // Round notification-templates-b1: the Families public base URL for absolute deep
+        // links. The AppHost fans the `families-public-base-url` parameter out to this
+        // host as Families__PublicBaseUrl (documents/configuration.md §2/§11); absent ⇒
+        // relative links (fail-closed).
+        services.Configure<SchoolCollab.Assignments.Core.Services.NotificationLinkOptions>(
+            configuration.GetSection(SchoolCollab.Assignments.Core.Services.NotificationLinkOptions.SectionName));
+        // Round notification-templates-b1: the resolver SEAM registers here so both hosts
+        // that build the broadcaster (Api and Worker — both call AddAssignmentsCore) get a
+        // container that can construct it. The HTTP implementation itself is registered by
+        // each host on its own `settings-api` named client (Assignments.Api/Program.cs,
+        // Assignments.Worker/Program.cs) — Core has no HttpClient wiring.
+        services.AddSingleton<SchoolCollab.Assignments.Core.Services.INotificationTemplateResolver, SchoolCollab.Assignments.Core.Services.NullNotificationTemplateResolver>();
         // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /
         // InstantGraded submissions. Handler seam — the engine itself is
         // pure (no DbContext, no clock) and consumed by the submission

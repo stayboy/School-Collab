@@ -40,6 +40,12 @@ builder.Services.AddCrossModuleHttpClient("settings-api", "https+http://settings
 builder.Services.AddCrossModuleHttpClient("students-api", "https+http://students-api", propagateTenant: false);
 builder.Services.AddScoped<INotificationPolicyResolver, NotificationPolicyResolver>();
 builder.Services.AddScoped<IContactAddressResolver, StudentsContactAddressResolver>();
+// Round notification-templates-b1 (§3.3/§6): the tenant template resolver on the same
+// settings-api client, so an edited Reminder/Completion/Overdue template actually takes
+// effect in the sweeps. Registered after AddAssignmentsCore, whose
+// NullNotificationTemplateResolver is the fallback — later registration wins; fail-open to
+// the built-in defaults on a Settings outage (a template read never blocks a sweep).
+builder.Services.AddScoped<INotificationTemplateResolver, HttpNotificationTemplateResolver>();
 
 // Subscribe to the assignments exchange; the published handler kicks one reminder sweep
 // pass immediately after publish (idempotent by construction).
