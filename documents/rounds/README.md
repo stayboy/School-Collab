@@ -37,6 +37,21 @@ specs that remain the source of truth**.
 - Round docs and patches are **ephemeral residue**: once a round's durable
   outcomes are folded into the feature spec in `documents/specs/`, this whole
   folder is **safe to bulk-trash**.
+- **Trash cadence (owner, optimisation round Q105).** The folder grows by two
+  files per round (117 docs + 117 patches at the time of writing). Keep, and
+  trash the rest **when an arc closes** (its PRs merged, its outcomes folded
+  into `documents/specs/`):
+
+  | Keep | Why |
+  |---|---|
+  | every round whose PR/stack is still **open** | a reviewer may still need its frozen patch |
+  | the **last 2 closed** rounds | the arc's most recent evidence, still being cited |
+  | any round named as **PARKED** | `resume-interrupted-orchestrator-round` needs it |
+
+  Everything else goes in one bulk delete, in its own commit — never mixed with a
+  round's own change set. Keep committing the patch while you keep the doc: the
+  frozen patch is what let the diff gate work statically, and (c) "stop
+  committing patches" was considered and rejected (Q105).
 - **Never** write durable specs here — durable specs belong in
   `documents/specs/`.
 - The workflow and this policy are defined in

@@ -5,6 +5,14 @@
 > `documents/specs/subject-to-topic-polymorphism.md` (bridge model)
 > Last updated: 2026-08-27
 
+## Symptom
+
+An assignment publishes "successfully" and a student who should have received it did not
+(or a student outside the intended topic did). No error is logged, the publish response is
+`200`, and the assignment looks correct in the admin UI — because the FR-58 check
+**failed open** rather than blocking the publish. The only observable is the wrong set of
+recipients, discovered later by a teacher.
+
 ## What FR-58 does
 
 When an assignment is published, `PublishAssignmentCommandHandler` calls
