@@ -374,6 +374,17 @@ the tester never derives or expands its own scope.
    the tier + provider + models in the round doc header, plus the round base
    (`git rev-parse HEAD`; if the tree is dirty at round start, also record
    `git diff --name-only` so the round diff can be isolated).
+   **Two standing rules before you dispatch anything:** (a) **briefs carry
+   paths, not content**, and no seat re-opens a file it already read this session
+   (`references/role-contracts.md` § "Brief discipline"); (b) if the round starts
+   from a **symptom** rather than a task — "it hangs", "the page is blank",
+   "`main` is red" — route to the matching runbook first:
+   `grep -l '^## Symptom' documents/runbooks/*.md` (every runbook carries that
+   block; guarded by `RunbookSymptomRouterTests`). Run its 2-minute discriminator
+   **before** diagnosing; if none matches, say so explicitly, diagnose, and record
+   the new symptom family as a runbook — never re-burn a documented hunt (two
+   30-minute UI hunts ran without consulting `aspire-apphost-silent-hang.md`,
+   2026-10-20).
 1. **Setup (once per session).** Resolve model ids (pi:
    `subagent({ action: "models" })` — choose the round's provider profile there).
    Cline:

@@ -5,6 +5,22 @@ Paste-in prompts for the four Cline teammates, and the prefix of each pi
 from disk, not the skill. The structured blocks below are the ONLY report
 formats each role may return.
 
+## Brief discipline (every seat, every tier — owner rule, optimisation round Q101)
+
+**A brief carries paths, not content.** Every hand-off names files and sections
+(`documents/specs/x.md` §3.2, `diffs-<slug>.patch:120-240`, the plan's
+`## Plan` section in `round-<slug>.md`) and never pastes their bodies. A child
+handed the plan inline does not read the round doc; a child handed the path
+reads what the parent actually wrote.
+
+**No seat re-opens a file it has already read this session.** Re-reading the
+same spec, rule file, plan or patch is the largest tool category in this repo's
+measured history (`Files tracked`, 4599 events — larger than every git
+operation combined). When a fact is needed twice, quote it once into the round
+doc and cite the doc from then on; when a detail is uncertain, re-read the *one*
+region, never the whole file. This binds the parent above all — it is the seat
+that reads the most.
+
 ## Orchestrator (Tier 3 runs it; in Tiers 1–2 the parent acts as orchestrator)
 
 Document owner. Read the source specs/review docs, write the `## Plan` section
