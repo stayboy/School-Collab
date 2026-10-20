@@ -401,16 +401,18 @@ public class AssignmentLifecycleTests
     [TestMethod]
     public void Reject_FromPending_ClearsStamps()
     {
+        // Round assignment-approval-workflow: SubmitForApproval is now legal only from null /
+        // Rejected (a resubmit while Pending would reset the approval window), so "approved then
+        // resubmitted" is no longer reachable — the approve stamps cannot coexist with Pending.
         var assignment = NewAssignment();
         assignment.SubmitForApproval();
-        assignment.Approve(Guid.NewGuid());
-        assignment.SubmitForApproval(); // back to Pending
 
         assignment.Reject(Guid.NewGuid());
 
         assignment.ApprovalStatus.Should().Be(ApprovalStatus.Rejected);
         assignment.ApprovedBy.Should().BeNull();
         assignment.ApprovedAt.Should().BeNull();
+        assignment.SubmittedAt.Should().BeNull();
         assignment.DomainEvents.OfType<AssignmentRejectedEvent>().Should().ContainSingle();
     }
 

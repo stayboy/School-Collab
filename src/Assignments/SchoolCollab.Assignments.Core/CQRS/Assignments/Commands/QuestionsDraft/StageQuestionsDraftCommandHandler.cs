@@ -29,6 +29,10 @@ public sealed class StageQuestionsDraftCommandHandler(
         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.AssignmentId);
 
+        // Round assignment-approval-workflow (spec §3.2, Q9): staging a new question set — a held
+        // authoring write path, so it refuses while the row awaits an approval decision.
+        assignment.EnsureNotAwaitingApproval();
+
         // Validate-first: an invalid draft must never enter the blob (FR-252). The format decides
         // whether the questions must define response kinds (Q1(ii)) — an auto-scored assignment's
         // generated draft carries none, by construction.

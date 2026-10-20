@@ -53,6 +53,13 @@ public interface IAssignmentRepository
     Task<List<AssignmentOverdueSweepCandidate>> ListOverdueSweepCandidatesAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
         => Task.FromResult(new List<AssignmentOverdueSweepCandidate>());
 
+    /// <summary>Round assignment-approval-workflow — sanctioned cross-tenant candidate read for the
+    /// approval sweep: assignments that are BOTH <see cref="ApprovalStatus.Pending"/> and
+    /// <see cref="AssignmentStatus.Draft"/>, with their derived policy-scope grade, submission stamp
+    /// and due date. Default empty (existing fake repositories in tests remain valid).</summary>
+    Task<List<AssignmentApprovalSweepCandidate>> ListPendingApprovalSweepCandidatesAsync(CancellationToken ct = default)
+        => Task.FromResult(new List<AssignmentApprovalSweepCandidate>());
+
     /// <summary>E3 (ar-19) — sanctioned cross-tenant aggregate of per-recipient reminder
     /// log state (last non-terminal <c>Queued</c>/<c>Sent</c>/<c>Skipped</c> reminder +
     /// non-terminal reminder count) for the <c>ReminderSweeper</c> cadence +

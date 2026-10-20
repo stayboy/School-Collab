@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.Services;
@@ -75,13 +76,15 @@ public sealed class ListAssignmentsQueryHandler(
                     log.LogWarning(ex, "Feature flag resolution failed; defaulting approval to OFF");
                 }
 
-                // Round drop-primary-grade: the approval map is keyed on each row's DERIVED
+                // Round drop-primary-grade: the policy map is keyed on each row's DERIVED
                 // policy-scope grade — one distinct grade target ⇒ that grade, otherwise the
                 // tenant default (<see cref="AssignmentPolicyScope.DeriveGrade"/>). The map
                 // resolves once per DISTINCT grade per page, exactly as it did per authored score.
-                var approvalByGrade = await ResolveApprovalByGradeAsync(
+                // Round assignment-approval-workflow (§3.3): the map carries the whole effective
+                // policy, so the approval gate AND the approval window come from ONE cached resolve.
+                var policyByGrade = await ResolvePolicyByGradeAsync(
                     summaries.Select(s => AssignmentPolicyScope.DeriveGrade(s.TargetGradeIds)),
-                    hybridCache, tenant, policyResolver, flagOn, ct);
+                    hybridCache, tenant, policyResolver, ct);
 
                 return summaries.Select(s => new AssignmentSummaryDto(
                     s.Id,
@@ -104,6 +107,12 @@ public sealed class ListAssignmentsQueryHandler(
                     (ApprovalStatusDto?)s.ApprovalStatus,
                     s.ApprovedBy,
                     s.ApprovedAt,
+                    // Round assignment-approval-workflow (spec §3.1/§3.3, WS5): the decision reason,
+                    // the submission stamp and the DERIVED window expiry (null when no window is
+                    // configured, so the Index countdown renders only when there is one).
+                    ApprovalReason: s.ApprovalReason,
+                    SubmittedAt: s.SubmittedAt,
+                    WindowExpiresAt: ApprovalWindow.ExpiresAt(s.SubmittedAt, policyByGrade[GradeKey(AssignmentPolicyScope.DeriveGrade(s.TargetGradeIds))].ApprovalWindowDays),
                     // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
                     // attempt cap projected alongside the existing
                     // lifecycle fields.
@@ -121,7 +130,8 @@ public sealed class ListAssignmentsQueryHandler(
                     PublishedAt: s.PublishedAt,
                     // D3 / Q6: the server-derived approval gate for this row, keyed on the row's
                     // DERIVED policy-scope grade (the map was built from the same derivation).
-                    RequiresApproval: approvalByGrade[GradeKey(AssignmentPolicyScope.DeriveGrade(s.TargetGradeIds))],
+                    RequiresApproval: policyByGrade[GradeKey(AssignmentPolicyScope.DeriveGrade(s.TargetGradeIds))]
+                        .RequiresApprovalBeforePublish || flagOn,
                     // INS-1/INS-2 (assignment-authoring-compartments §9): student-facing
                     // text — must be mapped or every list read drops it.
                     Instructions: s.Instructions,
@@ -158,20 +168,20 @@ public sealed class ListAssignmentsQueryHandler(
 
     /// <summary>
     /// Resolves, per <b>distinct</b> derived policy-scope grade in the page (a null grade resolves
-    /// the tenant default only), whether approval is required: the cached effective policy's
-    /// <c>RequiresApprovalBeforePublish</c> OR'd with the already-resolved flag value.
+    /// the tenant default only), the effective assignment policy — the cached value the approval
+    /// gate (<c>RequiresApprovalBeforePublish</c>, still OR'd with the already-resolved flag at the
+    /// projection) and the approval window (<c>ApprovalWindowDays</c>) both read.
     /// </summary>
-    private static async Task<Dictionary<string, bool>> ResolveApprovalByGradeAsync(
+    private static async Task<Dictionary<string, SchoolCollab.Core.AssignmentPolicies.EffectiveAssignmentPolicy>> ResolvePolicyByGradeAsync(
         IEnumerable<Guid?> gradeLevelIds,
         HybridCache cache,
         Guid tenantId,
         IAssignmentPolicyResolver policyResolver,
-        bool featureFlagOn,
         CancellationToken ct)
     {
         // Keyed by the same grade sentinel the policy cache key uses, because a null grade is a
-        // legitimate key here and Dictionary<Guid?, bool> rejects a null key.
-        var approvalByGrade = new Dictionary<string, bool>();
+        // legitimate key here and Dictionary<Guid?, EffectiveAssignmentPolicy> rejects a null key.
+        var policyByGrade = new Dictionary<string, SchoolCollab.Core.AssignmentPolicies.EffectiveAssignmentPolicy>();
 
         foreach (var gradeLevelId in gradeLevelIds.Distinct())
         {
@@ -187,10 +197,10 @@ public sealed class ListAssignmentsQueryHandler(
                 tags: ["assignments"],
                 cancellationToken: ct);
 
-            approvalByGrade[GradeKey(gradeLevelId)] = policy.RequiresApprovalBeforePublish || featureFlagOn;
+            policyByGrade[GradeKey(gradeLevelId)] = policy;
         }
 
-        return approvalByGrade;
+        return policyByGrade;
     }
 
     /// <summary>Per-(tenant, grade) effective-policy cache key; <c>none</c> is the sentinel for a

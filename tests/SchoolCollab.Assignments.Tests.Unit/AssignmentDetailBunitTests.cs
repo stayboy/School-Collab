@@ -174,7 +174,7 @@ public class AssignmentDetailBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "[]");
     }
 
-    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null, bool requiresApproval = false) =>
+    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false, DateTimeOffset? publishedAt = null, bool requiresApproval = false, string? approvalReason = null, DateTimeOffset? submittedAt = null, DateTimeOffset? windowExpiresAt = null) =>
         new(
             Id: Guid.NewGuid(),
             Title: "Math HW",
@@ -202,6 +202,11 @@ public class AssignmentDetailBunitTests : BunitContext
             // Q6 / D3: the server-derived approval gate the Detail panel reads (the read
             // handler ORs the effective policy with FEATURE:RequireAssignmentApproval).
             RequiresApproval: requiresApproval,
+            // Round assignment-approval-workflow (spec §3.1/§3.3): the decision reason, the submission
+            // stamp and the server-derived window expiry the approval panel renders.
+            ApprovalReason: approvalReason,
+            SubmittedAt: submittedAt,
+            WindowExpiresAt: windowExpiresAt,
             PublishedAt: publishedAt ?? (status is AssignmentStatusDto.Published
                 or AssignmentStatusDto.Scheduled
                 or AssignmentStatusDto.Closed
@@ -509,15 +514,28 @@ public class AssignmentDetailBunitTests : BunitContext
             "declining must not reload the assignment either — only the initial loads fired");
     }
 
+    /// <summary>Round assignment-approval-workflow (spec §3.6): Reject now opens the shell reason
+    /// dialog instead of a confirm box, so the decision carries the approver's optional note. The
+    /// mock follows the ScheduleDialog pattern — <c>ShowShellDialogAsync</c> resolves to
+    /// <c>ShowDialogAsync(typeof(TDialog), DialogOptions)</c> and the dialog Result carries a
+    /// <see cref="DialogShellResult{TResult}"/> the extension unwraps.</summary>
+    private void SetupReasonDialogResult(string? reason)
+    {
+        var payload = new DialogShellResult<ApprovalDecisionReasonDialog.ReasonResult>(
+            new ApprovalDecisionReasonDialog.ReasonResult(reason));
+        var dialogMock = this.RegisterDialogService();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Ok<object?>(payload));
+    }
+
     [TestMethod]
-    public void Detail_RequiresApproval_Pending_RejectClicked_UserConfirms_PostsReject()
+    public void Detail_RequiresApproval_Pending_RejectClicked_ReasonGiven_PostsRejectWithTheReason()
     {
         var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
         SetupGetAssignment(dto);
-        SetupConfirmDialogResult(confirmed: true);
+        SetupReasonDialogResult("Add the rubric");
 
-        // The body assertion pins the Guid.Empty approver placeholder
-        // (decision (f) / spec §7 Q2 identity posture).
         var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
 
         cut.WaitForAssertion(() =>
@@ -528,7 +546,7 @@ public class AssignmentDetailBunitTests : BunitContext
         // the same constraint), and the initial GETs must hit the When
         // backends first.
         _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/reject")
-            .WithContent(JsonSerializer.Serialize(new RejectAssignmentRequest(Guid.Empty), _apiJsonOptions))
+            .WithContent(JsonSerializer.Serialize(new RejectAssignmentRequest(Guid.Empty, "Add the rubric"), _apiJsonOptions))
             .Respond(HttpStatusCode.NoContent);
 
         cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Reject").Click();
@@ -539,6 +557,105 @@ public class AssignmentDetailBunitTests : BunitContext
             _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
                 "the page reloads the assignment after the reject POST succeeds");
         }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_RequiresApproval_Pending_RejectDialogCancelled_PostsNothing()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
+        SetupGetAssignment(dto);
+        var dialogMock = this.RegisterDialogService();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
+
+        var rejectPosts = 0;
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/reject")
+            .Respond(_ => { rejectPosts++; return new HttpResponseMessage(HttpStatusCode.NoContent); });
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Reject"));
+
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Reject").Click();
+
+        cut.WaitForAssertion(() => dialogMock.Verify(
+            d => d.ShowDialogAsync(typeof(ApprovalDecisionReasonDialog), It.IsAny<DialogOptions>()),
+            Times.Once));
+
+        rejectPosts.Should().Be(0, "cancelling the reason dialog must not record a decision");
+    }
+
+    [TestMethod]
+    public void Detail_RequiresApproval_Pending_RendersDeny()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending, requiresApproval: true);
+        SetupGetAssignment(dto);
+        SetupReasonDialogResult("Out of scope");
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Deny"),
+            TimeSpan.FromSeconds(15));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/deny")
+            .WithContent(JsonSerializer.Serialize(new DenyAssignmentRequest(Guid.Empty, "Out of scope"), _apiJsonOptions))
+            .Respond(HttpStatusCode.NoContent);
+
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Deny").Click();
+
+        cut.WaitForAssertion(() => _mockHttp.VerifyNoOutstandingExpectation(), TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_Pending_WithAWindow_RendersTheCountdown()
+    {
+        var expiresAt = DateTimeOffset.UtcNow.AddDays(2);
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Pending,
+            requiresApproval: true, submittedAt: DateTimeOffset.UtcNow.AddDays(-1), windowExpiresAt: expiresAt);
+        SetupGetAssignment(dto);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("left"),
+            TimeSpan.FromSeconds(15));
+        cut.Markup.Should().NotContain("Approval window expired");
+    }
+
+    [TestMethod]
+    public void Detail_Rejected_WithAStaleWindow_RendersTheReasonButNoCountdown()
+    {
+        // Reject/Deny/auto-return clear SubmittedAt, so WindowExpiresAt is null on the wire; this
+        // pins the panel's own gate — the countdown is Pending-only even if a stale value arrived.
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Rejected,
+            requiresApproval: true, approvalReason: "Add the rubric",
+            windowExpiresAt: DateTimeOffset.UtcNow.AddDays(-30));
+        SetupGetAssignment(dto);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Reason: Add the rubric"),
+            TimeSpan.FromSeconds(15));
+        cut.Markup.Should().NotContain("left", "the countdown renders ONLY while Pending");
+        cut.Markup.Should().NotContain("Approval window expired");
+    }
+
+    [TestMethod]
+    public void Detail_Denied_ShowsTheDeniedChipAndReason()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft, approvalStatus: ApprovalStatusDto.Denied,
+            requiresApproval: true, approvalReason: "Out of scope for this term");
+        SetupGetAssignment(dto);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Denied"), TimeSpan.FromSeconds(15));
+        cut.Markup.Should().Contain("Reason: Out of scope for this term");
+        cut.Markup.Should().NotContain("Submit for Approval",
+            "Denied is terminal — the resubmit button must not be offered");
+        cut.FindAll("fluent-button").Should().NotContain(b => b.TextContent.Trim() == "Approve");
     }
 
     // ── Schedule dialog POST flow (decision (k) binding coverage) ──

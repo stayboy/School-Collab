@@ -937,6 +937,134 @@ public class AssignmentIndexBunitTests : BunitContext
             "a failing duplicate POST must not show the success toast");
     }
 
+    // ── Round assignment-approval-workflow (spec §3.4/§3.6, Q10–Q12) ─────
+
+    /// <summary>One row with the approval fields the new column, filter and warn badge read.</summary>
+    private static AssignmentSummaryDto MakeApprovalRow(Guid id, string title, AssignmentStatusDto status,
+        ApprovalStatusDto? approvalStatus, bool requiresApproval = true, DateTimeOffset? dueDate = null,
+        DateTimeOffset? windowExpiresAt = null, string? approvalReason = null) =>
+        new(
+            id, title, null, AssignmentTypeDto.Digital,
+            GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
+            Guid.NewGuid(), "Math", status,
+            dueDate, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            AvailableFromUtc: null, ArchiveGraceDays: 30,
+            ApprovalStatus: approvalStatus,
+            RequiresApproval: requiresApproval,
+            ApprovalReason: approvalReason,
+            WindowExpiresAt: windowExpiresAt);
+
+    [TestMethod]
+    public void Index_StatusFilter_OffersAnAwaitingApprovalOption()
+    {
+        // Spec §3.5: the filter is how a blocked Pending row (including a Scheduled one the
+        // publish sweep skips) is visible instead of silent. Its value is NOT an
+        // AssignmentStatus — approval state is not a status dimension the route filters on.
+        IndexPage.StatusFilterOptions.Should().Contain(o =>
+            o.Value == IndexPage.AwaitingApprovalFilterValue && o.Label == "Awaiting approval");
+    }
+
+    [TestMethod]
+    public async Task Index_AwaitingApprovalFilter_KeepsOnlyPendingRows()
+    {
+        var pendingId = Guid.NewGuid();
+        var otherId = Guid.NewGuid();
+        SetupListResponse([
+            MakeApprovalRow(pendingId, "Awaiting HW", AssignmentStatusDto.Scheduled, ApprovalStatusDto.Pending),
+            MakeApprovalRow(otherId, "Approved HW", AssignmentStatusDto.Draft, ApprovalStatusDto.Approved)
+        ]);
+
+        var cut = Render<StatusFilterHost>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Awaiting HW"));
+
+        var select = cut.FindComponent<FluentSelect<IndexPage.StatusOption, IndexPage.StatusOption>>();
+        await cut.InvokeAsync(() => select.Instance.ValueChanged.InvokeAsync(
+            IndexPage.StatusFilterOptions.Single(o => o.Value == IndexPage.AwaitingApprovalFilterValue)));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Awaiting HW");
+            cut.Markup.Should().NotContain("Approved HW",
+                "the filter selects rows whose approval state is Pending — nothing else");
+        });
+    }
+
+    [TestMethod]
+    public async Task Index_ScheduledPendingRow_ShowsTheApprovalChip()
+    {
+        // §3.5's "blocked but silent" row: previously the chip rendered only on Draft rows, so a
+        // Scheduled assignment stuck awaiting approval showed nothing at all.
+        SetupListResponse([MakeApprovalRow(Guid.NewGuid(), "Blocked HW", AssignmentStatusDto.Scheduled, ApprovalStatusDto.Pending)]);
+
+        var cut = Render<IndexPage>();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Blocked HW");
+            cut.Markup.Should().Contain("Pending", "an approval state renders on any status carrying one");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public async Task Index_PendingRowWithinADay_ShowsTheExpiringHint()
+    {
+        SetupListResponse([MakeApprovalRow(Guid.NewGuid(), "Expiring HW", AssignmentStatusDto.Draft,
+            ApprovalStatusDto.Pending, windowExpiresAt: DateTimeOffset.UtcNow.AddHours(2))]);
+
+        var cut = Render<IndexPage>();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("expiring"), TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public async Task Index_DraftWithAPassedDueDate_ShowsTheWarnOnlyBadge_AndKeepsItADraft()
+    {
+        // Spec §3.4 row 3 / Q12: the author's private workspace never auto-destructs and no state
+        // changes — the badge IS the feature.
+        SetupListResponse([MakeApprovalRow(Guid.NewGuid(), "Overdue HW", AssignmentStatusDto.Draft,
+            approvalStatus: null, requiresApproval: false, dueDate: DateTimeOffset.UtcNow.AddDays(-2))]);
+
+        var cut = Render<IndexPage>();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Due date passed");
+            cut.Markup.Should().Contain("Draft", "the row's status is untouched — the badge is a warning only");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public async Task Index_PendingRowActions_OfferOnlyDuplicate_BecauseTheRowIsHeld()
+    {
+        // The hold makes submit / publish / delete refuse while Pending, so offering them would be
+        // six guaranteed 409/400s. Duplicate stays: the documented escape hatch.
+        SetupListResponse([MakeApprovalRow(Guid.NewGuid(), "Held HW", AssignmentStatusDto.Draft, ApprovalStatusDto.Pending)]);
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Held HW"), TimeSpan.FromSeconds(15));
+
+        var items = OpenRowActionsAndReadItems(cut);
+
+        items.Should().Contain("Duplicate");
+        items.Should().NotContain("Delete");
+        items.Should().NotContain("Submit for Approval");
+        items.Should().NotContain("Publish");
+    }
+
+    [TestMethod]
+    public async Task Index_DeniedRowActions_OfferDuplicateAndDelete_ButNeverSubmitOrPublish()
+    {
+        SetupListResponse([MakeApprovalRow(Guid.NewGuid(), "Denied HW", AssignmentStatusDto.Draft, ApprovalStatusDto.Denied)]);
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Denied HW"), TimeSpan.FromSeconds(15));
+
+        var items = OpenRowActionsAndReadItems(cut);
+
+        items.Should().Contain("Duplicate");
+        items.Should().Contain("Delete");
+        items.Should().NotContain("Submit for Approval", "Denied is terminal — a resubmit can never succeed");
+        items.Should().NotContain("Publish");
+    }
+
     /// <summary>Test host that renders the page-toolbar SectionOutlet so the
     /// Index page's status-filter FluentSelect renders in bUnit — the
     /// ActivityGroupsPageTests RolloverHost precedent. Without the outlet the

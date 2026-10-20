@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.Services;
@@ -109,6 +110,12 @@ public sealed class GetAssignmentByIdQueryHandler(
                     (ApprovalStatusDto?)assignment.ApprovalStatus,
                     assignment.ApprovedBy,
                     assignment.ApprovedAt,
+                    // Round assignment-approval-workflow (spec §3.1/§3.3, WS5): the decision reason,
+                    // the submission stamp and the DERIVED window expiry. Must be mapped or the
+                    // detail surface silently loses them (the WindowExpiresAt tests catch it).
+                    ApprovalReason: assignment.ApprovalReason,
+                    SubmittedAt: assignment.SubmittedAt,
+                    WindowExpiresAt: ApprovalWindow.ExpiresAt(assignment.SubmittedAt, policy.ApprovalWindowDays),
                     // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
                     // attempt cap projected alongside the existing
                     // lifecycle fields.

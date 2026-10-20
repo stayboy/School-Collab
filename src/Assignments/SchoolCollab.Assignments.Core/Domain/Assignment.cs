@@ -105,6 +105,20 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// <c>FEATURE:RequireAssignmentApproval</c> flag is on (the two are
     /// OR'd for one release — D3, documents/solution/assignment-policy-fields.md).</summary>
     public ApprovalStatus? ApprovalStatus { get; private set; }
+    /// <summary>Round assignment-approval-workflow (spec §3.1) — the UTC moment the current
+    /// submission for approval was made, stamped by <see cref="SubmitForApproval"/> and cleared by
+    /// <see cref="Reject"/> / <see cref="Deny"/>. The approval window's expiry is derived from it
+    /// (<c>SubmittedAt + effective ApprovalWindowDays</c>); a returned row therefore never carries
+    /// a stale, long-expired window.</summary>
+    public DateTimeOffset? SubmittedAt { get; private set; }
+    /// <summary>Round assignment-approval-workflow (spec §3.1, Q10) — the approver's optional
+    /// free-form reason for the current <see cref="ApprovalStatus.Rejected"/> /
+    /// <see cref="ApprovalStatus.Denied"/> decision, shown to the author. Null when no reason was
+    /// given; cleared by the next <see cref="SubmitForApproval"/>.</summary>
+    public string? ApprovalReason { get; private set; }
+    /// <summary>The longest approval reason the column accepts — the configuration uses the same
+    /// constant, so the domain guard and the schema cannot drift.</summary>
+    public const int ApprovalReasonMaxLength = 500;
     /// <summary>The id of the user who approved the assignment.
     /// Cleared on <see cref="Reject"/>. Null until the assignment is
     /// approved.</summary>
@@ -686,14 +700,25 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     }
 
     /// <summary>Submits a Draft assignment for approval (spec §7 Q2).
-    /// Any other status is a programming error — the API surface
-    /// routes this only from Draft rows.</summary>
+    /// Only a never-submitted or <see cref="ApprovalStatus.Rejected"/> row is submittable: a
+    /// <see cref="ApprovalStatus.Denied"/> row is terminal, and resubmitting a
+    /// <see cref="ApprovalStatus.Pending"/> or <see cref="ApprovalStatus.Approved"/> row would
+    /// re-stamp <see cref="SubmittedAt"/> and silently reset the approval window (spec §3.1/§3.4).
+    /// Stamps <see cref="SubmittedAt"/> and clears the previous decision's reason.</summary>
     public void SubmitForApproval()
     {
         if (Status != AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be submitted for approval.");
+        if (ApprovalStatus == Domain.ApprovalStatus.Denied)
+            throw new AssignmentApprovalStateException(
+                "A denied assignment cannot be submitted again; duplicate it to start a new draft.");
+        if (ApprovalStatus is not (null or Domain.ApprovalStatus.Rejected))
+            throw new AssignmentApprovalStateException(
+                "Only an unsubmitted or rejected assignment can be submitted for approval.");
 
         ApprovalStatus = Domain.ApprovalStatus.Pending;
+        SubmittedAt = DateTimeOffset.UtcNow;
+        ApprovalReason = null;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentApprovalSubmittedEvent(Id, Title));
     }
@@ -717,21 +742,78 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         _domainEvents.Add(new AssignmentApprovedEvent(Id, approverId));
     }
 
-    /// <summary>Rejects a pending assignment (spec §7 Q2). Same posture
-    /// as <see cref="Approve"/>; clears any prior stamps because the
-    /// row is now terminal until the teacher edits and re-submits.</summary>
-    public void Reject(Guid approverId)
+    /// <summary>Rejects a pending assignment (spec §7 Q2 / §3.1) — "sent back for redo": the row
+    /// becomes editable and resubmittable again. Same posture as <see cref="Approve"/>; clears any
+    /// prior stamps because the row is now terminal until the teacher edits and re-submits, records
+    /// the approver's optional <paramref name="reason"/> and clears <see cref="SubmittedAt"/> so a
+    /// returned row carries no stale approval window.</summary>
+    public void Reject(Guid approverId, string? reason = null)
     {
         if (approverId == Guid.Empty)
             throw new ArgumentException("Approver is required.", nameof(approverId));
         if (ApprovalStatus != Domain.ApprovalStatus.Pending)
             throw new InvalidOperationException("Only pending assignments can be rejected.");
 
+        // Validate the reason BEFORE mutating: an over-long reason must leave the row untouched.
+        var normalizedReason = NormalizeReason(reason);
+
         ApprovalStatus = Domain.ApprovalStatus.Rejected;
         ApprovedBy = null;
         ApprovedAt = null;
+        SubmittedAt = null;
+        ApprovalReason = normalizedReason;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentRejectedEvent(Id, approverId));
+    }
+
+    /// <summary>Denies a pending assignment (round assignment-approval-workflow / spec §3.1, Q10) —
+    /// the <b>terminal</b> decision: the pending-approval edit hold is released, but the row can
+    /// never be resubmitted (<see cref="SubmitForApproval"/>) or published / scheduled (the existing
+    /// <c>ApprovalStatus != Approved</c> guards). Duplicating it is the escape hatch. Records the
+    /// approver's optional <paramref name="reason"/> and clears <see cref="SubmittedAt"/>.</summary>
+    public void Deny(Guid approverId, string? reason = null)
+    {
+        if (approverId == Guid.Empty)
+            throw new ArgumentException("Approver is required.", nameof(approverId));
+        if (ApprovalStatus != Domain.ApprovalStatus.Pending)
+            throw new InvalidOperationException("Only pending assignments can be denied.");
+
+        // Validate the reason BEFORE mutating (the Reject contract).
+        var normalizedReason = NormalizeReason(reason);
+
+        ApprovalStatus = Domain.ApprovalStatus.Denied;
+        ApprovedBy = null;
+        ApprovedAt = null;
+        SubmittedAt = null;
+        ApprovalReason = normalizedReason;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>The pending-approval edit hold (round assignment-approval-workflow / spec §3.2, Q9):
+    /// every authoring write path calls this after loading the row, so a <see cref="ApprovalStatus.Pending"/>
+    /// assignment cannot be changed under review. Released only by Approve / Reject / Deny.
+    /// </summary>
+    public void EnsureNotAwaitingApproval()
+    {
+        if (ApprovalStatus == Domain.ApprovalStatus.Pending)
+            throw new AssignmentPendingApprovalException(Id);
+    }
+
+    /// <summary>Trims an optional decision reason and maps blank text to null, so "no reason" has
+    /// exactly one representation on the row.</summary>
+    private static string? NormalizeReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return null;
+        }
+
+        var trimmed = reason.Trim();
+        if (trimmed.Length > ApprovalReasonMaxLength)
+            throw new ArgumentException(
+                $"The approval reason must be at most {ApprovalReasonMaxLength} characters.", nameof(reason));
+
+        return trimmed;
     }
 
     /// <summary>

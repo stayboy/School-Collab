@@ -1,9 +1,11 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Assignments.Api.Services;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Tenancy;
@@ -79,7 +81,68 @@ public class ScheduledPublishSweeperTests
         recorder.Commands.Should().BeEmpty();
     }
 
+    // ── Round assignment-approval-workflow (spec §3.5, Q12): the awaiting-approval skip ──
+
+    [TestMethod]
+    public async Task PublishDueAsync_AwaitingApproval_IsSkippedAtInfoLevel_NotErrorLogged()
+    {
+        var logger = new CapturingLogger();
+        var handler = new AwaitingApprovalHandler();
+        var tenants = new RecordingTenantAccessor();
+        var candidates = new[] { new AssignmentSweepCandidate(Guid.NewGuid(), TenantA) };
+
+        var processed = await ScheduledPublishSweeper.PublishDueAsync(
+            candidates, handler, tenants, logger);
+
+        processed.Should().Be(0, "the unapproved row was not published");
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error,
+            "an unapproved scheduled row is an expected posture — error-logging it every 15 minutes forever is the bug");
+        logger.Entries.Should().Contain(e =>
+                e.Level == LogLevel.Information && e.Message.Contains("awaiting approval"),
+            "the skip is counted and reported once per pass");
+    }
+
+    [TestMethod]
+    public async Task PublishDueAsync_AnyOtherFailure_StaysAnError()
+    {
+        var logger = new CapturingLogger();
+        var tenants = new RecordingTenantAccessor();
+        var candidates = new[] { new AssignmentSweepCandidate(Guid.NewGuid(), TenantA) };
+
+        await ScheduledPublishSweeper.PublishDueAsync(
+            candidates, new RecordingHandler { ThrowOnFirstCall = true }, tenants, logger);
+
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Error,
+            "every other exception keeps today's error handling");
+    }
+
     // ── Fakes ───────────────────────────────────────────────────────────
+
+    private sealed class AwaitingApprovalHandler : ICommandHandler<PublishAssignmentCommand>
+    {
+        public Task HandleAsync(PublishAssignmentCommand command, CancellationToken cancellationToken = default) =>
+            Task.FromException(new AssignmentApprovalRequiredException(
+                "This assignment requires approval before it can be published."));
+    }
+
+    /// <summary>A logger that keeps what was written, with levels — the observable for "info, not
+    /// error" and for the counted summary line.</summary>
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => new NoopScope();
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
+
+        private sealed class NoopScope : IDisposable
+        {
+            public void Dispose() { }
+        }
+    }
 
     private sealed class RecordingHandler : ICommandHandler<PublishAssignmentCommand>
     {

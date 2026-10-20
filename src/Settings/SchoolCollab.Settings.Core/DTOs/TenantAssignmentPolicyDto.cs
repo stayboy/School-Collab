@@ -15,4 +15,8 @@ public sealed record TenantAssignmentPolicyDto(
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
     bool? MandatoryReview = null,
-    int? ArchiveGraceDays = null);
+    int? ArchiveGraceDays = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3): the approval window in days;
+    /// null = no deadline (the built-in default). Non-positive is rejected at the write seam and
+    /// treated as "no window" by the consumers.</summary>
+    int? ApprovalWindowDays = null);

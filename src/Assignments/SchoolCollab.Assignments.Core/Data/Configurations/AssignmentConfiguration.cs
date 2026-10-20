@@ -87,6 +87,10 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.ApprovalStatus);
         builder.Property(x => x.ApprovedBy);
         builder.Property(x => x.ApprovedAt);
+        // Round assignment-approval-workflow (spec §3.1): the submission stamp the approval window
+        // is derived from, and the approver's optional Reject/Deny reason. Both additive-nullable.
+        builder.Property(x => x.SubmittedAt);
+        builder.Property(x => x.ApprovalReason).HasMaxLength(Assignment.ApprovalReasonMaxLength);
 
         // ── Round notification-templates-b2a (§3.7): the author's publish template stamps ──
         // Cross-context Settings ids with no FK (the ids point into settings-db) and no index:

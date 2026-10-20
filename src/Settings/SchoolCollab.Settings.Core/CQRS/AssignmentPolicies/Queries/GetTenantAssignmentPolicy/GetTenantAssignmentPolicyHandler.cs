@@ -32,6 +32,7 @@ public sealed class GetTenantAssignmentPolicyHandler(SettingsDbContext db)
             policy.MaxPrimaryContacts,
             policy.MaxCopyContacts,
             policy.MandatoryReview,
-            policy.ArchiveGraceDays);
+            policy.ArchiveGraceDays,
+            policy.ApprovalWindowDays);
     }
 }

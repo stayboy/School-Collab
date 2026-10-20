@@ -15,4 +15,7 @@ public sealed record UpsertTenantAssignmentPolicy(
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
     bool? MandatoryReview = null,
-    int? ArchiveGraceDays = null) : ICommand;
+    int? ArchiveGraceDays = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3, Q7): the approval window in days;
+    /// null = no deadline, a non-positive value is rejected with 400.</summary>
+    int? ApprovalWindowDays = null) : ICommand;

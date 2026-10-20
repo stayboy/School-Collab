@@ -159,4 +159,47 @@ public class GradeAssignmentPolicyHandlerTests
         result.MaxCopyContacts.Should().BeNull();
         result.SignatureRequirement.Should().Be(SignatureRequirementMode.Mandatory);
     }
+
+    // ── Round assignment-approval-workflow (spec §3.3, Q7): the approval window ────
+
+    [TestMethod]
+    public async Task Upsert_RoundTripsTheApprovalWindow()
+    {
+        using var s = new StudentsTestScope("gap-upsert-window");
+        var gradeId = await SeedGradeAsync(s);
+
+        await NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, null, true, null, null, ApprovalWindowDays: 4));
+
+        var result = await NewGet(s).HandleAsync(new GetGradeAssignmentPolicy(gradeId));
+
+        result!.ApprovalWindowDays.Should().Be(4, "the seventh field round-trips on the grade override too");
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithZeroApprovalWindow_Throws400AndPersistsNothing()
+    {
+        using var s = new StudentsTestScope("gap-upsert-window-zero");
+        var gradeId = await SeedGradeAsync(s);
+
+        var act = () => NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, null, null, null, null, ApprovalWindowDays: 0));
+
+        var ex = await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        ex.Which.ParamName.Should().Be("ApprovalWindowDays", "Q7 applies verbatim at both write paths");
+        (await s.Db.GradeAssignmentPolicies.CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithNegativeApprovalWindow_Throws400()
+    {
+        using var s = new StudentsTestScope("gap-upsert-window-negative");
+        var gradeId = await SeedGradeAsync(s);
+
+        var act = () => NewUpsert(s).HandleAsync(new UpsertGradeAssignmentPolicy(
+            gradeId, null, null, null, null, ApprovalWindowDays: -2));
+
+        (await act.Should().ThrowAsync<ArgumentOutOfRangeException>())
+            .Which.ParamName.Should().Be("ApprovalWindowDays");
+    }
 }

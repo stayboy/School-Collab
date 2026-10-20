@@ -14,7 +14,7 @@ namespace SchoolCollab.Settings.Core.CQRS.AssignmentPolicies.Commands.UpsertTena
 /// when absent (WS-C1 / spec §7 Q1). The two contact caps are validated here (owner
 /// decision Q7): a non-positive cap is rejected rather than stored, because the
 /// recipient filter can only treat it as "uncapped" and a silent no-op cap is worse
-/// than a rejected write. Null stays "unset".
+/// than a rejected write. The approval window follows the same Q7 rule. Null stays "unset".
 /// </summary>
 public sealed class UpsertTenantAssignmentPolicyHandler(
     SettingsDbContext db,
@@ -24,6 +24,7 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
         UpsertTenantAssignmentPolicy command, CancellationToken ct = default)
     {
         GuardContactCaps(command.MaxPrimaryContacts, command.MaxCopyContacts);
+        GuardApprovalWindow(command.ApprovalWindowDays);
 
         var tenantId = tenantProvider.GetTenantContext().TenantId;
 
@@ -37,7 +38,8 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
                 command.MaxPrimaryContacts,
                 command.MaxCopyContacts,
                 command.MandatoryReview,
-                command.ArchiveGraceDays);
+                command.ArchiveGraceDays,
+                command.ApprovalWindowDays);
             policy = existing;
         }
         else
@@ -49,7 +51,8 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
                 command.MaxPrimaryContacts,
                 command.MaxCopyContacts,
                 command.MandatoryReview,
-                command.ArchiveGraceDays);
+                command.ArchiveGraceDays,
+                command.ApprovalWindowDays);
             db.TenantAssignmentPolicies.Add(policy);
         }
 
@@ -61,7 +64,24 @@ public sealed class UpsertTenantAssignmentPolicyHandler(
             policy.MaxPrimaryContacts,
             policy.MaxCopyContacts,
             policy.MandatoryReview,
-            policy.ArchiveGraceDays);
+            policy.ArchiveGraceDays,
+            policy.ApprovalWindowDays);
+    }
+
+    /// <summary>
+    /// Q7 range rule for the approval window (round assignment-approval-workflow / spec §3.3): a
+    /// non-positive window is rejected rather than stored — a stored zero would mean "expires
+    /// immediately" to a naive consumer, and every pending assignment would be returned on the next
+    /// sweep tick.
+    /// </summary>
+    private static void GuardApprovalWindow(int? approvalWindowDays)
+    {
+        if (approvalWindowDays is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(UpsertTenantAssignmentPolicy.ApprovalWindowDays), approvalWindowDays,
+                "The approval window must be a positive number of days (null = no window).");
+        }
     }
 
     /// <summary>

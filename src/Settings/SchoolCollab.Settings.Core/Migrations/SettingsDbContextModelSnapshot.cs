@@ -698,6 +698,10 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<int?>("ApprovalWindowDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_window_days");
+
                     b.Property<int?>("ArchiveGraceDays")
                         .HasColumnType("integer")
                         .HasColumnName("archive_grace_days");

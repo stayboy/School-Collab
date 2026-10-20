@@ -4,7 +4,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using RichardSzalay.MockHttp;
-using SchoolCollab.Assignments.Api.Services;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.AssignmentPolicies;
 using SchoolCollab.Settings.Core.DTOs;
 using SchoolCollab.Students.Core.DTOs;

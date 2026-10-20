@@ -288,4 +288,30 @@ public class EffectiveAssignmentPolicyResolverTests
                 && !p.MandatoryReviewFromOverride
                 && p.ArchiveGraceDaysFromOverride);
     }
+
+    // ── Round assignment-approval-workflow (spec §3.3): the approval window ──
+
+    [TestMethod]
+    public void Resolve_ApprovalWindow_GradeOverrideWins_AndFlagsItsSource()
+    {
+        var tenant = new AssignmentPolicyFields { ApprovalWindowDays = 10 };
+
+        var inherited = Resolver.Resolve(tenant, gradeOverride: null);
+        inherited.ApprovalWindowDays.Should().Be(10, "an unset grade field inherits the tenant default");
+        inherited.ApprovalWindowDaysFromOverride.Should().BeFalse();
+
+        var overridden = Resolver.Resolve(tenant, new AssignmentPolicyFields { ApprovalWindowDays = 3 });
+        overridden.ApprovalWindowDays.Should().Be(3, "the grade override wins, like every other field");
+        overridden.ApprovalWindowDaysFromOverride.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void Resolve_ApprovalWindow_UnsetEverywhere_IsNull_SoNoDeadlineIsInvented()
+    {
+        var resolved = Resolver.Resolve(tenantDefault: null, gradeOverride: null);
+
+        resolved.ApprovalWindowDays.Should().BeNull(
+            "the built-in default is no window — a fail-open resolve can never invent a deadline");
+        resolved.ApprovalWindowDaysFromOverride.Should().BeFalse();
+    }
 }

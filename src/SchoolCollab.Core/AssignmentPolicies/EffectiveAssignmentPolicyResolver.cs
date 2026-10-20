@@ -37,11 +37,13 @@ public sealed class EffectiveAssignmentPolicyResolver : IEffectiveAssignmentPoli
             MaxCopyContacts: gradeOverride?.MaxCopyContacts ?? tenant.MaxCopyContacts,
             MandatoryReview: requiresSignature ? true : policyReview,
             ArchiveGraceDays: gradeOverride?.ArchiveGraceDays ?? tenant.ArchiveGraceDays,
+            ApprovalWindowDays: gradeOverride?.ApprovalWindowDays ?? tenant.ApprovalWindowDays,
             SignatureRequirementFromOverride: gradeOverride?.SignatureRequirement is not null,
             RequiresApprovalBeforePublishFromOverride: gradeOverride?.RequiresApprovalBeforePublish is not null,
             MaxPrimaryContactsFromOverride: gradeOverride?.MaxPrimaryContacts is not null,
             MaxCopyContactsFromOverride: gradeOverride?.MaxCopyContacts is not null,
             MandatoryReviewFromOverride: gradeOverride?.MandatoryReview is not null,
-            ArchiveGraceDaysFromOverride: gradeOverride?.ArchiveGraceDays is not null);
+            ArchiveGraceDaysFromOverride: gradeOverride?.ArchiveGraceDays is not null,
+            ApprovalWindowDaysFromOverride: gradeOverride?.ApprovalWindowDays is not null);
     }
 }

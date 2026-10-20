@@ -30,6 +30,10 @@ internal sealed class WardAssignmentProjectionRepository(AssignmentsDbContext db
                 a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
                 a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
+                // Round assignment-approval-workflow (spec §3.1): projected for the same reason as
+                // PublishedAt below — an unprojected stamp would silently report every row as
+                // never-submitted.
+                a.SubmittedAt, a.ApprovalReason,
                 a.PassScore, a.MaxAttempts,
                 a.RequiresSignature,
                 a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount,

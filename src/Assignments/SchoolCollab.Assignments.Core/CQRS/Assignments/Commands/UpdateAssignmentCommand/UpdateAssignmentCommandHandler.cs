@@ -30,6 +30,10 @@ public sealed class UpdateAssignmentCommandHandler(
         var assignment = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.Id);
 
+        // Round assignment-approval-workflow (spec §3.2, Q9): the canonical authoring save — a held
+        // authoring write path, so it refuses while the row awaits an approval decision.
+        assignment.EnsureNotAwaitingApproval();
+
         // Validate ALL inbound child collections BEFORE mutating the aggregate so a
         // FR-252 violation never leaves the aggregate with a partial replacement.
         if (command.Questions is { Count: > 0 })

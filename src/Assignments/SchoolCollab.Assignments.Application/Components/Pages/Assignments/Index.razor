@@ -53,18 +53,35 @@
                 : BadgeAppearance.Ghost)">
                 @context.Status
             </FluentBadge>
+            @* Round assignment-approval-workflow (spec §3.4 row 3, Q12): a DRAFT whose due date has
+               passed is WARN-ONLY — the author's private workspace never auto-destructs and no state
+               changes; the badge is the whole feature. *@
+            @if (context.Status == AssignmentStatusDto.Draft && context.DueDate is { } draftDue && draftDue <= DateTimeOffset.UtcNow)
+            {
+                <FluentBadge Appearance="BadgeAppearance.Ghost" class="ms-1"
+                             Title="The due date passed. A draft is never auto-returned — edit it or delete it yourself.">
+                    Due date passed
+                </FluentBadge>
+            }
         </TemplateColumn>
         @* Q6 / D3 — the Approval column is driven by the SERVER-derived RequiresApproval on
            each row (the effective policy OR'd with the assignment-approval runtime feature
            flag), not by a client-side flag read. The column appears when any loaded row carries
-           it, so flag-OFF tenants see exactly today's grid. *@
+           it, so flag-OFF tenants see exactly today's grid. Round assignment-approval-workflow: the
+           chip renders for ANY status carrying an approval state — a Scheduled+Pending row is the
+           §3.5 "blocked but silent" case the filter exists to surface. *@
         @if (AnyApprovalRequired)
         {
             <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Approval">
-                @if (context.Status == AssignmentStatusDto.Draft)
+                @* A Draft always shows its approval state — including "Not submitted", which is the
+                   cue that the row is waiting on the author. Any OTHER status shows the chip only
+                   when it actually carries an approval state: that is what surfaces the §3.5
+                   "Scheduled but blocked, silently skipped by the publish sweep" row. *@
+                @if (context.ApprovalStatus is not null || context.Status == AssignmentStatusDto.Draft)
                 {
-                    <FluentBadge Appearance="@ApprovalChipAppearance(context.ApprovalStatus)">
-                        @ApprovalChipText(context.ApprovalStatus)
+                    <FluentBadge Appearance="@ApprovalChipAppearance(context.ApprovalStatus)"
+                                 Title="@ApprovalChipTitle(context)">
+                        @ApprovalChipText(context.ApprovalStatus)@ExpiringSuffix(context)
                     </FluentBadge>
                 }
             </TemplateColumn>
@@ -121,8 +138,13 @@
     private LandingGridSettings GridSettings =>
         AnyApprovalRequired ? _gridSettingsWithApproval : _gridSettingsNoApproval;
 
-    // Status filter (WS-A2 / spec §3.5 — adds Scheduled + Archived).
+    // Status filter (WS-A2 / spec §3.5 — adds Scheduled + Archived). Round
+    // assignment-approval-workflow (spec §3.5, Q12) adds "Awaiting approval": a value that is NOT an
+    // AssignmentStatus — it selects every row whose approval state is Pending (a Pending Draft, and
+    // the Scheduled+Pending row the publish sweep skips silently), filtered client-side because
+    // approval state is not a status dimension the list route can filter on.
     public record StatusOption(int? Value, string Label);
+    public const int AwaitingApprovalFilterValue = -1;
     public static readonly StatusOption[] StatusFilterOptions =
     [
         new(null, "All"),
@@ -130,7 +152,8 @@
         new(1, "Published"),
         new(2, "Closed"),
         new(3, "Scheduled"),
-        new(4, "Archived")
+        new(4, "Archived"),
+        new(AwaitingApprovalFilterValue, "Awaiting approval")
     ];
     private StatusOption? _selectedStatus;
 
@@ -183,6 +206,7 @@
 
     private async Task<AssignmentSummaryDto[]?> LoadAssignmentsAsync(CancellationToken ct)
     {
+        var awaitingApprovalOnly = _selectedStatus?.Value == AwaitingApprovalFilterValue;
         AssignmentStatusDto? statusFilter = _selectedStatus?.Value switch
         {
             0 => AssignmentStatusDto.Draft,
@@ -192,7 +216,10 @@
             4 => AssignmentStatusDto.Archived,
             _ => null
         };
-        return await Api.ListAsync(statusFilter, ct);
+        var items = await Api.ListAsync(statusFilter, ct);
+        return awaitingApprovalOnly && items is not null
+            ? items.Where(a => a.ApprovalStatus == ApprovalStatusDto.Pending).ToArray()
+            : items;
     }
 
     // UI-tester rework P2: DisplayItems renders the search result set while a search is
@@ -392,6 +419,7 @@
         ApprovalStatusDto.Pending => "Pending",
         ApprovalStatusDto.Approved => "Approved",
         ApprovalStatusDto.Rejected => "Rejected",
+        ApprovalStatusDto.Denied => "Denied",
         _ => "—"
     };
 
@@ -401,8 +429,36 @@
         ApprovalStatusDto.Pending => BadgeAppearance.Filled,
         ApprovalStatusDto.Approved => BadgeAppearance.Filled,
         ApprovalStatusDto.Rejected => BadgeAppearance.Filled,
+        ApprovalStatusDto.Denied => BadgeAppearance.Filled,
         _ => BadgeAppearance.Ghost
     };
+
+    /// <summary>Round assignment-approval-workflow (spec §3.6): the expiring-window hint. Only a
+    /// Pending row with a projected expiry can be expiring; the suffix appears inside the day before
+    /// expiry (and reads "expiring" while the sweep has not run yet), so the approver sees urgency in
+    /// the list rather than discovering it on Detail.</summary>
+    private static string ExpiringSuffix(AssignmentSummaryDto row)
+    {
+        if (row.ApprovalStatus != ApprovalStatusDto.Pending || row.WindowExpiresAt is not { } expiresAt)
+        {
+            return string.Empty;
+        }
+
+        return expiresAt - DateTimeOffset.UtcNow <= TimeSpan.FromDays(1) ? " · expiring" : string.Empty;
+    }
+
+    /// <summary>The chip's tooltip: the decision reason when there is one, else the window expiry.</summary>
+    private static string? ApprovalChipTitle(AssignmentSummaryDto row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.ApprovalReason))
+        {
+            return $"Reason: {row.ApprovalReason}";
+        }
+
+        return row.ApprovalStatus == ApprovalStatusDto.Pending && row.WindowExpiresAt is { } expiresAt
+            ? $"Approval window expires {expiresAt.ToLocalTime():g}"
+            : null;
+    }
 
     private IReadOnlyList<RowAction> BuildAssignmentActions(AssignmentSummaryDto a)
     {
@@ -411,6 +467,41 @@
         {
             case AssignmentStatusDto.Draft:
                 actions.Add(RowAction.Navigate("Edit", $"/assignments/{a.Id}/edit", FluentIcons.Edit));
+                // Round assignment-approval-workflow (spec §3.1–§3.2): the approval state now gates the
+                // row's actions — Pending is held (submit/publish/delete would all be refused), and
+                // Denied is terminal (submit and publish can never succeed again). Duplicate stays
+                // available in both: it is the documented escape hatch (a fresh Draft, no approval
+                // state).
+                if (a.ApprovalStatus == ApprovalStatusDto.Pending)
+                {
+                    actions.Add(RowAction.Callback(
+                        "Duplicate",
+                        () => OnDuplicateAsync(a.Id, a.Title),
+                        FluentIcons.DocumentCopy,
+                        destructive: true,
+                        confirmMessage: $"Duplicate assignment '{a.Title}'? This creates a new draft copy."));
+                    actions.Add(RowAction.Separator());
+                    break;
+                }
+
+                if (a.ApprovalStatus == ApprovalStatusDto.Denied)
+                {
+                    actions.Add(RowAction.Callback(
+                        "Duplicate",
+                        () => OnDuplicateAsync(a.Id, a.Title),
+                        FluentIcons.DocumentCopy,
+                        destructive: true,
+                        confirmMessage: $"Duplicate assignment '{a.Title}'? A denied assignment cannot be resubmitted; a copy starts fresh."));
+                    actions.Add(RowAction.Separator());
+                    actions.Add(RowAction.Callback(
+                        "Delete",
+                        () => OnDeleteAsync(a.Id, a.Title),
+                        FluentIcons.Delete,
+                        destructive: true,
+                        confirmMessage: $"Delete assignment '{a.Title}'? This cannot be undone."));
+                    break;
+                }
+
                 // Q6 / D3: the row action reads the server-derived approval requirement
                 // (effective policy OR flag) — an already-APPROVED Draft must keep the Publish
                 // action so a reviewer cannot silently revoke an approval (SubmitForApproval

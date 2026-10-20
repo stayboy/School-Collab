@@ -292,7 +292,8 @@ public static class GradeLevelRoutes
                     req.MaxPrimaryContacts,
                     req.MaxCopyContacts,
                     req.MandatoryReview,
-                    req.ArchiveGraceDays), ct);
+                    req.ArchiveGraceDays,
+                    req.ApprovalWindowDays), ct);
                 return Results.Ok(result);
             }
             catch (GradeLevelNotFoundException) { return Results.NotFound(); }
@@ -331,6 +332,9 @@ internal record UpsertGradeAssignmentPolicyRequest(
     int? MaxCopyContacts,
     bool? MandatoryReview = null,
     int? ArchiveGraceDays = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3, Q7): the approval window in days;
+    /// null = inherit, non-positive ⇒ 400.</summary>
+    int? ApprovalWindowDays = null,
     bool? RequiresSignatureDefault = null)
 {
     /// <summary>

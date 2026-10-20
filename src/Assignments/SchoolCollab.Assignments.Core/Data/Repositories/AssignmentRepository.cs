@@ -34,6 +34,10 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
                 a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
+                // Round assignment-approval-workflow (spec §3.1): the submission stamp the approval
+                // window is derived from + the approver's reason. Must be projected or every row
+                // reports "never submitted" and loses its reason.
+                a.SubmittedAt, a.ApprovalReason,
                 // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
                 // cap projected alongside the existing lifecycle fields
                 // so the contract DTOs (and the wire) see the latest draft
@@ -84,6 +88,44 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
     }
 
     public void DetectChanges() => Db.ChangeTracker.DetectChanges();
+
+    /// <summary>Sanctioned cross-tenant read for the approval sweep (round
+    /// <c>assignment-approval-workflow</c> / spec §3.4, §6). Returns assignments that are BOTH
+    /// <see cref="ApprovalStatus.Pending"/> AND <see cref="AssignmentStatus.Draft"/> — the status filter
+    /// is load-bearing: <c>Assignment.Close()</c> lets a pending row reach <c>Closed</c>, and
+    /// auto-returning a row that can be neither edited (<c>:297</c>) nor resubmitted (<c>:694</c>) would
+    /// be a trap. Projects the grade-target ids so the policy-scope grade can be derived in memory
+    /// (the reminder sweep's <c>PolicyGradeId</c> precedent) — without it a per-grade
+    /// <c>ApprovalWindowDays</c> override would never apply in the sweep.</summary>
+    public async Task<List<AssignmentApprovalSweepCandidate>> ListPendingApprovalSweepCandidatesAsync(CancellationToken ct = default)
+    {
+        var rows = await Db.Assignments
+            .IgnoreQueryFilters(TenantFilterTag)
+            .AsNoTracking()
+            .Where(a => a.ApprovalStatus == ApprovalStatus.Pending
+                && a.Status == AssignmentStatus.Draft)
+            .Select(a => new
+            {
+                a.Id,
+                a.Title,
+                a.TenantId,
+                GradeTargetIds = a.Targets
+                    .Where(t => t.Kind == TargetKind.GradeLevel && t.RefId.HasValue)
+                    .Select(t => t.RefId!.Value)
+                    .ToList(),
+                a.SubmittedAt,
+                a.DueDate
+            })
+            .ToListAsync(ct);
+
+        return rows.Select(x => new AssignmentApprovalSweepCandidate(
+            x.Id,
+            x.Title,
+            x.TenantId,
+            AssignmentPolicyScope.DeriveGrade(x.GradeTargetIds),
+            x.SubmittedAt,
+            x.DueDate)).ToList();
+    }
 
     /// <summary>E3 (ar-19) — published, non-archived assignments joined to their
     /// subscribed, broadcast-enabled recipients whose ward is <b>unsigned</b>

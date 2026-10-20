@@ -31,6 +31,11 @@ public static class ActivityGroupLinkRoutes
                 return Results.NoContent();
             }
             catch (AssignmentNotFoundException) { return Results.NotFound(); }
+            // Round assignment-approval-workflow (spec §3.2): the reviewed audience is held.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
             catch (ArgumentException ex) { return Results.Json(new { ex.Message }, statusCode: 422); }
         });
 

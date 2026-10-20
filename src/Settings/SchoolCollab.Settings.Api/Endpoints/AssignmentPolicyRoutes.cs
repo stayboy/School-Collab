@@ -45,7 +45,8 @@ public static class AssignmentPolicyRoutes
                         req.MaxPrimaryContacts,
                         req.MaxCopyContacts,
                         req.MandatoryReview,
-                        req.ArchiveGraceDays), ct);
+                        req.ArchiveGraceDays,
+                        req.ApprovalWindowDays), ct);
                 return TypedResults.Ok(result);
             }
             catch (ArgumentOutOfRangeException ex) { return TypedResults.BadRequest(new MessageResponse(ex.Message)); }
@@ -72,6 +73,9 @@ public static class AssignmentPolicyRoutes
         int? MaxCopyContacts,
         bool? MandatoryReview = null,
         int? ArchiveGraceDays = null,
+        /// <summary>Round assignment-approval-workflow (spec §3.3, Q7): the approval window in
+        /// days; null = no window, non-positive ⇒ 400.</summary>
+        int? ApprovalWindowDays = null,
         bool? RequiresSignatureDefault = null)
     {
         /// <summary>

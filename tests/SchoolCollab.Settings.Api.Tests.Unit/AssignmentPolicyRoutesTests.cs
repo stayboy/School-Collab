@@ -71,6 +71,25 @@ public class AssignmentPolicyRoutesTests
         }
     }
 
+    /// <summary>Upsert stub that reproduces the real handler's Q7 approval-window guard, so the route's
+    /// 400 arm is reached for the new field.</summary>
+    private sealed class WindowGuardingUpsertHandler
+        : ICommandHandler<UpsertTenantAssignmentPolicy, TenantAssignmentPolicyDto>
+    {
+        public Task<TenantAssignmentPolicyDto> HandleAsync(
+            UpsertTenantAssignmentPolicy command, CancellationToken ct = default)
+        {
+            if (command.ApprovalWindowDays is <= 0)
+                throw new ArgumentOutOfRangeException(
+                    nameof(command.ApprovalWindowDays), command.ApprovalWindowDays, "non-positive window");
+
+            return Task.FromResult(new TenantAssignmentPolicyDto(
+                command.SignatureRequirement, command.RequiresApprovalBeforePublish,
+                command.MaxPrimaryContacts, command.MaxCopyContacts,
+                command.MandatoryReview, command.ArchiveGraceDays, command.ApprovalWindowDays));
+        }
+    }
+
     private static async Task<(WebApplication App, HttpClient Client)> StartAsync(
         ICommandHandler<UpsertTenantAssignmentPolicy, TenantAssignmentPolicyDto> upsert,
         TenantAssignmentPolicyDto? getResult = null)
@@ -170,6 +189,30 @@ public class AssignmentPolicyRoutesTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         upsert.Last!.MaxPrimaryContacts.Should().Be(2);
         upsert.Last.MaxCopyContacts.Should().Be(4);
+    }
+
+    // ── Round assignment-approval-workflow (spec §3.3, Q7): the approval window ─────
+
+    [TestMethod]
+    [DataRow("""{"approvalWindowDays":0}""")]
+    [DataRow("""{"approvalWindowDays":-2}""")]
+    public async Task Put_WithANonPositiveApprovalWindow_Returns400(string json)
+    {
+        var response = await PutAsync(new WindowGuardingUpsertHandler(), json);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "Q7 applies verbatim to the approval window — a stored zero would expire every pending row");
+    }
+
+    [TestMethod]
+    public async Task Put_WithAnApprovalWindow_BindsIt()
+    {
+        var upsert = new CapturingUpsertHandler();
+
+        var response = await PutAsync(upsert, """{"requiresApprovalBeforePublish":true,"approvalWindowDays":7}""");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        upsert.Last!.ApprovalWindowDays.Should().Be(7, "the seventh policy field binds on the wire");
     }
 
     [TestMethod]
