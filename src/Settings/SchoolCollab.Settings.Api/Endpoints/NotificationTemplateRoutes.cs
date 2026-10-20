@@ -6,6 +6,7 @@ using SchoolCollab.Core.Notifications;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.CreateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetApplicableNotificationTemplates;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
@@ -38,6 +39,21 @@ public static class NotificationTemplateRoutes
             CancellationToken ct) =>
         {
             var templates = await handler.HandleAsync(new GetTenantNotificationTemplates(), ct);
+            return TypedResults.Ok(templates);
+        });
+
+        // ── The templates that CAN apply to one grade (grade-detail card, spec §3.11).
+        // Mapped ahead of "/notification-templates/{kind}/{channel}" because that pattern matches this
+        // URL too ("applicable" and the guid would bind to {kind}/{channel}): pattern precedence — a
+        // literal segment beats a parameter — is what actually selects this route, so the ordering is
+        // belt-and-braces. The paired resolution test pins both halves of that split.
+        group.MapGet("/notification-templates/applicable/{gradeLevelId:guid}",
+            async Task<Ok<ApplicableNotificationTemplatesDto>> (
+            Guid gradeLevelId,
+            [FromServices] IQueryHandler<GetApplicableNotificationTemplates, ApplicableNotificationTemplatesDto> handler,
+            CancellationToken ct) =>
+        {
+            var templates = await handler.HandleAsync(new GetApplicableNotificationTemplates(gradeLevelId), ct);
             return TypedResults.Ok(templates);
         });
 

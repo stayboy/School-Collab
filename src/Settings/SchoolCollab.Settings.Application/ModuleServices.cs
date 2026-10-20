@@ -79,6 +79,14 @@ public static class ModuleServices
             client.BaseAddress = new Uri("https+http://settings-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
 
+        // NotificationTemplateApiClient (notification-template store CRUD + the grade-detail
+        // applicability read) — same settings-api base address. TenantNotificationTemplate is a
+        // STRICT tenant entity: reads/writes MUST resolve the selected tenant or they hit the wrong
+        // tenant (same symptom class as the clients above). Spec §5 / §3.11, round B3a.
+        services.AddHttpClient<NotificationTemplateApiClient>(client =>
+            client.BaseAddress = new Uri("https+http://settings-api"))
+            .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+
         // SignatureConsentTextApiClient (tenant-level guardian sign-off consent
         // text) — same pattern. TenantSignatureConsentText is a STRICT tenant
         // entity: reads/writes MUST resolve the selected tenant or they hit the
