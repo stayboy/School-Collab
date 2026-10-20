@@ -109,3 +109,17 @@ Evidence gathered by the parent between attempts:
 **Consequence, stated plainly:** the round's UI evidence is the **12 bUnit dialog tests** (markup-level: warning bar vs empty-list note, rendered option order, stored-stamp pre-select, blocked-channel annotation, both-blocked disable, medium-excluded slot) plus the acceptance pass. **No real-browser proof exists** that the dialog renders with its assets, that the pickers appear at a sane width, or that the footer stays reachable.
 
 **Before merge, one of these must happen:** (a) the owner runs the probe via the dev hot-reload loop (`documents/runbooks/dev-loop-hot-reload.md`) and confirms the five behaviours listed above in a browser, or (b) the round is merged with this gap explicitly accepted and the browser pass scheduled as a follow-up on the B2b layer. It must not be silently treated as verified.
+
+### Parent-side probe attempt (Q71 (a), 2026-10-19, after a full AppHost stop/restart)
+
+Owner instructed a full kill of the AppHost processes and ports, then a restart. What the restart produced:
+
+- `dotnet run --project src/AppHost/SchoolCollab.AppHost` starts; **only the Aspire dashboard** ever logs `Now listening on: https://localhost:17160`.
+- The AppHost log stops at 84 lines with dashboard output and **no per-resource startup line at all**.
+- DCP **proxy listeners bind** the launch-profile ports (`7300` https / `5300` http for `SchoolCollab.Admin`, plus 5199/5243/5400/5450/5460/5700/7199/7400/7450/7460), and a raw TCP connect to `7300` succeeds — but **every HTTP(S) request returns `000`** (connection accepted, then closed with no response), i.e. the proxy is up and the app behind it is not.
+- 23 `dotnet` processes alive, docker resources healthy (`postgres` 4 days; `keycloak`/`cache`/`pgadmin`/`mailpit` recreated by the AppHost).
+- No error, exception or migration line appears in the AppHost's stdout.
+
+**Reading:** the ports answering nothing while DCP proxies bind is the signature of services that never start — consistent with the earlier hunt's observation that `MigrationService` reported `Exited` and with a `WaitForCompletion(migration)` gate in front of the apps. The AppHost's stdout does not carry the resource logs, so the failing resource has to be read from the dashboard (still running at `https://localhost:17160`) or by running the migrator standalone.
+
+**Conclusion for this round:** the real-browser probe **still did not complete**, now with a reproducible blocker rather than a timeout: services never become reachable through the DCP proxies. Next diagnostic step, if the owner wants the browser pass: run `SchoolCollab.MigrationService` standalone against the dev postgres (the repo's own `run-migration-service-standalone` skill) and fix/report the migration failure, then re-run the probe. The AppHost was left running so the dashboard can show which resource is stuck.
