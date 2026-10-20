@@ -22,7 +22,12 @@ public interface IAssignmentNotificationBroadcaster
 /// <para>Round notification-templates-b1 (Q-E): the assignment-content fields the
 /// renderer's tag values need ride the existing in-process record — the publish handler
 /// already holds the entity, so widening adds zero extra reads. The outbox integration
-/// event keeps its own (smaller) shape.</para></summary>
+/// event keeps its own (smaller) shape.</para>
+/// <para>Round notification-templates-b2c (spec §3.7): the broadcaster has no DbContext, so the
+/// template-selection inputs ride the record too — the assignment's live stamps (the author's
+/// explicit choice, reused on republish) and its <see cref="AssignmentTemplateContext">evaluation
+/// dimensions</see> (target kinds, topic, assignment type), both populated by the publish handler
+/// from the entity it already holds.</para></summary>
 public sealed record AssignmentPublishedContext(
     Guid AssignmentId,
     string Title,
@@ -30,4 +35,7 @@ public sealed record AssignmentPublishedContext(
     string? Description,
     DateTimeOffset? DueDate,
     string? Instructions,
-    IReadOnlyList<AssignmentRecipient> Recipients);
+    IReadOnlyList<AssignmentRecipient> Recipients,
+    AssignmentTemplateContext Dimensions,
+    Guid? PublishEmailTemplateId = null,
+    Guid? PublishSmsTemplateId = null);

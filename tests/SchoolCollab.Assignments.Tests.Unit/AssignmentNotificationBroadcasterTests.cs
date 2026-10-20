@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -113,27 +113,25 @@ public class AssignmentNotificationBroadcasterTests
         return recipient;
     }
 
-    /// <summary>A resolver that always yields one template — proves which tag VALUES the
+    /// <summary>A resolver that always yields one unconstrained candidate — proves which tag VALUES the
     /// broadcaster assembles, where the fail-open default would only render its own text.</summary>
     private sealed class FixedTemplateResolver(string? subject, string body) : INotificationTemplateResolver
     {
-        public Task<ResolvedNotificationTemplate?> ResolveAsync(
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<ResolvedNotificationTemplate?>(new ResolvedNotificationTemplate(Guid.NewGuid(), subject, body));
-
-        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<NotificationTemplateSlot?>(
-                new NotificationTemplateSlot(Guid.NewGuid(), kind, channel, subject, body, []));
-
-        public async Task<NotificationTemplateSlotRead> ReadSlotAsync(
-            NotificationKind kind, NotificationChannel channel, Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            var slot = await ResolveSlotAsync(kind, channel, tenantId, cancellationToken);
-            return new NotificationTemplateSlotRead(
-                slot is null ? NotificationTemplateSlotState.NotSet : NotificationTemplateSlotState.Found, slot);
-        }
+            Task.FromResult(NotificationTemplateCandidatesRead.Found(
+                [Candidate(subject, body)]));
     }
+
+    /// <summary>One unconstrained (tenant-default) candidate with a fresh id.</summary>
+    private static NotificationTemplateCandidate Candidate(
+        string? subject,
+        string body,
+        Guid? id = null,
+        DateTimeOffset? createdAt = null,
+        params NotificationTemplateConstraint[] constraints) =>
+        new(id ?? Guid.NewGuid(), subject, body, constraints,
+            createdAt ?? new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
 
     private static EffectiveNotificationPolicy Policy(
         NotificationChannel[]? blocked = null, int? maxNotifications = null) =>
@@ -180,7 +178,7 @@ public class AssignmentNotificationBroadcasterTests
             recipients, Policy(blocked: [NotificationChannel.WhatsApp]), UncappedAssignmentPolicy());
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, filtered));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, filtered, AssignmentTemplateContext.Empty));
 
         var rows = await db.NotificationLogs.ToListAsync();
         rows.Should().HaveCount(2);
@@ -221,7 +219,7 @@ public class AssignmentNotificationBroadcasterTests
             recipients, Policy(maxNotifications: 1), UncappedAssignmentPolicy());
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, filtered));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, filtered, AssignmentTemplateContext.Empty));
 
         var rows = await db.NotificationLogs.ToListAsync();
         rows.Should().ContainSingle();
@@ -257,7 +255,8 @@ public class AssignmentNotificationBroadcasterTests
             new AssignmentPublishedContext(
                 AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null,
                 NotificationRecipientFilter.Apply(
-                    [guardianRecipient, studentRecipient], Policy(), UncappedAssignmentPolicy())));
+                    [guardianRecipient, studentRecipient], Policy(), UncappedAssignmentPolicy()),
+                AssignmentTemplateContext.Empty));
 
         var rows = await db.NotificationLogs.ToListAsync();
         rows.Single(r => r.ContactId == contactGuardian).BodyHtml.Should().Be("Mrs Dlamini|Primary");
@@ -275,7 +274,7 @@ public class AssignmentNotificationBroadcasterTests
         var recipients = new[] { Recipient(contactNoToken, ContactChannel.Email, token: null) };
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients, AssignmentTemplateContext.Empty));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
@@ -297,7 +296,7 @@ public class AssignmentNotificationBroadcasterTests
         };
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients, AssignmentTemplateContext.Empty));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
@@ -314,7 +313,7 @@ public class AssignmentNotificationBroadcasterTests
         var recipients = new[] { Recipient(contactUnknown, ContactChannel.Email, "tok-unknown") };
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients, AssignmentTemplateContext.Empty));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Skipped);
@@ -344,7 +343,9 @@ public class AssignmentNotificationBroadcasterTests
         // silently lose the notification. It propagates, and nothing is persisted (review P2).
         await FluentActions
             .Awaiting(() => broadcaster.BroadcastPublishedAsync(
-                new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients),
+                new AssignmentPublishedContext(
+                    AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, recipients,
+                    AssignmentTemplateContext.Empty),
                 cts.Token))
             .Should().ThrowAsync<OperationCanceledException>();
 
@@ -352,29 +353,36 @@ public class AssignmentNotificationBroadcasterTests
             "a cancelled publish must not persist a Skipped row");
     }
 
-    /// <summary>Returns one fixed tenant template — the enrichment tests need a body that
-    /// actually consumes the name tags.</summary>
+    /// <summary>Returns one fixed candidate — the enrichment tests need a body that actually consumes
+    /// the name tags.</summary>
     private sealed class StubTemplateResolver(ResolvedNotificationTemplate template) : INotificationTemplateResolver
     {
-        public Task<ResolvedNotificationTemplate?> ResolveAsync(
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<ResolvedNotificationTemplate?>(template);
+            Task.FromResult(NotificationTemplateCandidatesRead.Found(
+                [Candidate(template.Subject, template.Body, template.TemplateId)]));
+    }
 
-        public Task<NotificationTemplateSlot?> ResolveSlotAsync(
+    /// <summary>A resolver reporting the Settings read failed (outage/timeout) — the fail-open path.</summary>
+    private sealed class UnreadableTemplateResolver : INotificationTemplateResolver
+    {
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<NotificationTemplateSlot?>(new NotificationTemplateSlot(
-                template.TemplateId, kind, channel, template.Subject, template.Body, []));
+            Task.FromResult(NotificationTemplateCandidatesRead.Unreadable);
+    }
 
-        public async Task<NotificationTemplateSlotRead> ReadSlotAsync(
+    /// <summary>A resolver over an explicit candidate list — the selection tests' input.</summary>
+    private sealed class CandidateTemplateResolver(params NotificationTemplateCandidate[] candidates)
+        : INotificationTemplateResolver
+    {
+        public Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
             NotificationKind kind, NotificationChannel channel, Guid tenantId,
-            CancellationToken cancellationToken = default)
-        {
-            var slot = await ResolveSlotAsync(kind, channel, tenantId, cancellationToken);
-            return new NotificationTemplateSlotRead(
-                slot is null ? NotificationTemplateSlotState.NotSet : NotificationTemplateSlotState.Found, slot);
-        }
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(candidates.Length == 0
+                ? NotificationTemplateCandidatesRead.NotSet
+                : NotificationTemplateCandidatesRead.Found(candidates));
     }
 
     private static (AssignmentsDbContext db, AssignmentNotificationBroadcaster broadcaster) BuildWithTemplate(
@@ -420,7 +428,7 @@ public class AssignmentNotificationBroadcasterTests
         recipient.AttachDisplayNames("Mrs Mensah", "Ada Mensah");
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient], AssignmentTemplateContext.Empty));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.Subject.Should().Be("Update for Mrs Mensah");
@@ -448,11 +456,132 @@ public class AssignmentNotificationBroadcasterTests
         recipient.ContactDisplayName.Should().BeEmpty("nothing has enriched this recipient");
 
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient]));
+            new AssignmentPublishedContext(AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null, [recipient], AssignmentTemplateContext.Empty));
 
         var row = (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
         row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
         row.Subject.Should().Be("Update for ", "an unresolved name is empty, not a literal tag");
         row.BodyHtml.Should().NotContain("StudentName");
+    }
+
+    // ── round notification-templates-b2c: render-time selection (stamp-first, then evaluation) ──────
+
+    private static readonly Guid GradeId = Guid.Parse("00000000-0000-0000-0000-0000000000f1");
+
+    /// <summary>An assignment targeting one grade, with a topic — the dimensions the matcher reads.</summary>
+    private static AssignmentTemplateContext GradeDimensions() =>
+        AssignmentTemplateContext.Create(
+            [GradeId], [], [], topicId: Guid.NewGuid(), assignmentType: AssignmentType.Digital);
+
+    /// <summary>Broadcasts one email recipient through <paramref name="resolver"/> and returns the row.</summary>
+    private static async Task<NotificationLog> BroadcastOneEmailAsync(
+        string database,
+        INotificationTemplateResolver resolver,
+        AssignmentTemplateContext dimensions,
+        Guid? emailStamp = null)
+    {
+        var contact = Guid.NewGuid();
+        var (db, broadcaster, _) = Build(
+            database, new Dictionary<Guid, string> { [contact] = "guardian@example.com" }, resolver);
+
+        await broadcaster.BroadcastPublishedAsync(
+            new AssignmentPublishedContext(
+                AssignmentId, "Math homework", DateTimeOffset.UtcNow, null, null, null,
+                [Recipient(contact, ContactChannel.Email, "tok-select")], dimensions, emailStamp));
+
+        return (await db.NotificationLogs.ToListAsync()).Should().ContainSingle().Subject;
+    }
+
+    /// <summary>
+    /// §3.7 republish reuse: a stamp naming a live candidate renders <b>that</b> template even when a
+    /// more specific one also applies. Discriminating — evaluation alone would pick the constrained
+    /// candidate, so only stamp-first can produce the default's body.
+    /// </summary>
+    [TestMethod]
+    public async Task StampedCandidate_RendersTheStamp_NotTheMostSpecificMatch()
+    {
+        var stamped = Candidate("Stamped subject", "<p>stamped</p>");
+        var constrained = Candidate("Constrained subject", "<p>constrained</p>",
+            constraints: [new NotificationTemplateConstraint("GradeLevel", GradeId.ToString("D"))]);
+
+        var row = await BroadcastOneEmailAsync(
+            nameof(StampedCandidate_RendersTheStamp_NotTheMostSpecificMatch),
+            new CandidateTemplateResolver(stamped, constrained),
+            GradeDimensions(),
+            emailStamp: stamped.TemplateId);
+
+        row.TemplateId.Should().Be(stamped.TemplateId, "the author's stamp is the send-time record");
+        row.BodyHtml.Should().Be("<p>stamped</p>");
+    }
+
+    /// <summary>A cleared stamp is "no author choice": the most specific applicable candidate wins.</summary>
+    [TestMethod]
+    public async Task NoStamp_SelectsTheMostSpecificApplicableCandidate()
+    {
+        var unconstrained = Candidate("Default subject", "<p>default</p>");
+        var constrained = Candidate("Constrained subject", "<p>constrained</p>",
+            constraints: [new NotificationTemplateConstraint("GradeLevel", GradeId.ToString("D"))]);
+
+        var row = await BroadcastOneEmailAsync(
+            nameof(NoStamp_SelectsTheMostSpecificApplicableCandidate),
+            new CandidateTemplateResolver(unconstrained, constrained),
+            GradeDimensions());
+
+        row.TemplateId.Should().Be(constrained.TemplateId);
+        row.BodyHtml.Should().Be("<p>constrained</p>");
+    }
+
+    /// <summary>
+    /// A deleted or foreign stamp is history, not a request (§3.7): it matches no candidate, so the
+    /// render falls to evaluation — and the recorded id is the template that actually rendered.
+    /// </summary>
+    [TestMethod]
+    public async Task DeadStamp_FallsToEvaluation_AndRecordsTheWinner()
+    {
+        var unconstrained = Candidate("Default subject", "<p>default</p>");
+        var constrained = Candidate("Constrained subject", "<p>constrained</p>",
+            constraints: [new NotificationTemplateConstraint("GradeLevel", GradeId.ToString("D"))]);
+
+        var row = await BroadcastOneEmailAsync(
+            nameof(DeadStamp_FallsToEvaluation_AndRecordsTheWinner),
+            new CandidateTemplateResolver(unconstrained, constrained),
+            GradeDimensions(),
+            emailStamp: Guid.NewGuid());
+
+        row.TemplateId.Should().Be(constrained.TemplateId,
+            "a stamp that names nothing live degrades to the matcher, never to the stamp");
+        row.BodyHtml.Should().Be("<p>constrained</p>");
+    }
+
+    /// <summary>Nothing applicable and no default ⇒ the built-in default, with a null template id.</summary>
+    [TestMethod]
+    public async Task NothingApplicable_RendersTheBuiltInDefault_WithNoTemplateId()
+    {
+        var otherGrade = Candidate("Other grade", "<p>other</p>",
+            constraints: [new NotificationTemplateConstraint("GradeLevel", Guid.NewGuid().ToString("D"))]);
+
+        var row = await BroadcastOneEmailAsync(
+            nameof(NothingApplicable_RendersTheBuiltInDefault_WithNoTemplateId),
+            new CandidateTemplateResolver(otherGrade),
+            GradeDimensions(),
+            emailStamp: Guid.NewGuid());
+
+        row.TemplateId.Should().BeNull("the built-in default has no stored template id");
+        row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
+        row.BodyHtml.Should().NotBeEmpty();
+    }
+
+    /// <summary>§3.3 fail-open: an unreadable Settings read renders the built-in default, never blocks.</summary>
+    [TestMethod]
+    public async Task UnreadableSettings_RendersTheBuiltInDefault_AndStillQueues()
+    {
+        var row = await BroadcastOneEmailAsync(
+            nameof(UnreadableSettings_RendersTheBuiltInDefault_AndStillQueues),
+            new UnreadableTemplateResolver(),
+            GradeDimensions());
+
+        row.DeliveryStatus.Should().Be(NotificationDeliveryStatus.Queued);
+        row.TemplateId.Should().BeNull();
+        row.BodyHtml.Should().NotBeEmpty();
     }
 }

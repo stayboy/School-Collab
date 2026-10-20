@@ -78,6 +78,9 @@ public sealed class PublishAssignmentCommandHandler(
         // blocked channel still wins (the request narrows, never widens).
         var broadcastRecipients = NotificationRecipientFilter.Apply(
             recipients, effectivePolicy, assignmentPolicy, command.Channels);
+        // Round b2c (§3.7/Q15): the broadcaster has no DbContext, so the selection inputs ride the
+        // context — the assignment's live stamps (validated above) and its evaluation dimensions,
+        // both projected from the entity already in hand (zero extra reads).
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(
                 assignment.Id,
@@ -86,7 +89,10 @@ public sealed class PublishAssignmentCommandHandler(
                 assignment.Description,
                 assignment.DueDate,
                 assignment.Instructions,
-                broadcastRecipients),
+                broadcastRecipients,
+                AssignmentTemplateContext.FromAssignment(assignment),
+                assignment.PublishEmailTemplateId,
+                assignment.PublishSmsTemplateId),
             cancellationToken);
 
         await repository.UpdateAsync(assignment, cancellationToken);
@@ -256,18 +262,18 @@ public sealed class PublishAssignmentCommandHandler(
     }
 
     /// <summary>
-    /// §3.7 selection lifecycle (round notification-templates-b2a, WS4/WS5). A request stamp is the
-    /// author's explicit choice and must name this tenant's live Publish template for that channel —
-    /// anything else is a <see cref="NotificationTemplateSelectionInvalidException"/> the route maps
-    /// to 400, never a silent fallback. A null request stamp means <b>reuse</b>: the stored stamp
-    /// survives untouched.
-    /// <para>An unreadable Settings slot (outage, timeout) accepts the stamp as-is: §3.3's fail-open
+    /// §3.7 selection lifecycle (rounds notification-templates-b2a/b2c). A request stamp is the
+    /// author's explicit choice and must name one of this tenant's live Publish <b>candidates</b> for
+    /// that channel — anything else is a <see cref="NotificationTemplateSelectionInvalidException"/> the
+    /// route maps to 400, never a silent fallback. A null request stamp means <b>reuse</b>: the stored
+    /// stamp survives untouched.
+    /// <para>An unreadable Settings read (outage, timeout) accepts the stamp as-is: §3.3's fail-open
     /// outranks the 400 — a template outage must never block a publish — so the stamp is only
-    /// rejected when the live slot was actually read and disagrees. A stale <b>stored</b> stamp is
-    /// never validated here for the same reason (a transient outage must not erase the author's
-    /// choice); the render path resolves the slot independently, so a deleted stamp degrades to the
-    /// live template or the built-in default and the persisted <c>NotificationLog.TemplateId</c>
-    /// records what actually rendered (§3.9).</para>
+    /// rejected when the live candidates were actually read and none matches. A stale <b>stored</b>
+    /// stamp is never validated here for the same reason (a transient outage must not erase the
+    /// author's choice); the render path resolves the candidates independently, so a deleted stamp
+    /// degrades to evaluation (or the built-in default) and the persisted
+    /// <c>NotificationLog.TemplateId</c> records what actually rendered (§3.9).</para>
     /// </summary>
     private async Task ApplyTemplateSelectionAsync(
         Assignment assignment, PublishAssignmentCommand command, Guid tenantId, CancellationToken cancellationToken)
@@ -285,32 +291,34 @@ public sealed class PublishAssignmentCommandHandler(
         }
     }
 
-    /// <summary>Validates one explicit request stamp against the slot's live template (see
+    /// <summary>Validates one explicit request stamp against the channel's live candidates (see
     /// <see cref="ApplyTemplateSelectionAsync"/>). Three-way result:
     /// <list type="bullet">
-    /// <item><description><see cref="NotificationTemplateSlotState.NotSet"/>: no live template is
+    /// <item><description><see cref="NotificationTemplateSlotState.NotSet"/>: no live candidate is
     /// configured for this channel, so the stamp cannot be validated and a
     /// <see cref="NotificationTemplateSelectionInvalidException"/> is thrown (400).</description></item>
     /// <item><description><see cref="NotificationTemplateSlotState.Unreadable"/>: the Settings read
     /// failed (outage, timeout, or unparseable response). §3.3 fail-open outranks validation,
     /// so the stamp is accepted and persisted as-is and a warning is logged.</description></item>
-    /// <item><description><see cref="NotificationTemplateSlotState.Found"/>: the live template was
-    /// read; the stamp must exactly match its id, otherwise a
-    /// <see cref="NotificationTemplateSelectionInvalidException"/> is thrown (400).</description></item>
+    /// <item><description><see cref="NotificationTemplateSlotState.Found"/>: the stamp must name one of
+    /// the live candidates, otherwise a
+    /// <see cref="NotificationTemplateSelectionInvalidException"/> is thrown (400). <b>Existence only</b> —
+    /// applicability is the dialog's pre-select guidance, never a 400 gate, so a live-but-not-applicable
+    /// stamp is accepted (§3.7).</description></item>
     /// </list>
     /// Returns the stamp so the caller keeps it.</summary>
     private async Task<Guid> ValidateRequestedStampAsync(
         NotificationChannel channel, Guid templateId, Guid tenantId, CancellationToken cancellationToken)
     {
-        var read = await templateResolver.ReadSlotAsync(
+        var read = await templateResolver.ReadCandidatesAsync(
             NotificationKind.Publish, channel, tenantId, cancellationToken);
 
         switch (read.State)
         {
             case NotificationTemplateSlotState.NotSet:
                 throw new NotificationTemplateSelectionInvalidException(
-                    $"The selected {channel} template '{templateId}' is not this tenant's live Publish "
-                    + "template for that channel. Reload the publish options and choose again.");
+                    $"The selected {channel} template '{templateId}' is not one of this tenant's live Publish "
+                    + "templates for that channel. Reload the publish options and choose again.");
 
             case NotificationTemplateSlotState.Unreadable:
                 logger.LogWarning(
@@ -320,16 +328,17 @@ public sealed class PublishAssignmentCommandHandler(
                 return templateId;
 
             case NotificationTemplateSlotState.Found:
-                if (read.Slot!.TemplateId != templateId)
+                if (!read.Candidates.Any(c => c.TemplateId == templateId))
                 {
                     throw new NotificationTemplateSelectionInvalidException(
-                        $"The selected {channel} template '{templateId}' is not this tenant's live Publish "
-                        + "template for that channel. Reload the publish options and choose again.");
+                        $"The selected {channel} template '{templateId}' is not one of this tenant's live Publish "
+                        + "templates for that channel. Reload the publish options and choose again.");
                 }
                 return templateId;
 
             default:
-                throw new InvalidOperationException($"Unexpected template slot state {read.State}.");
+                throw new NotificationTemplateSelectionInvalidException(
+                    $"The selected {channel} template '{templateId}' could not be validated.");
         }
     }
 

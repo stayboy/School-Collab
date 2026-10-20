@@ -86,12 +86,14 @@ public sealed class OverdueSweepService(
         var tenantAccessor = scope.ServiceProvider.GetRequiredService<ITenantContextAccessor>();
         var addressResolver = scope.ServiceProvider.GetRequiredService<IContactAddressResolver>();
         var timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
-        // Round notification-templates-b2a (WS3): the B1 render path (resolver → renderer) plus the
-        // channel-aware link composer, shared by every recipient of this pass through one cache.
+        // Round notification-templates-b2a/b2c (WS3): the B1 render path (resolver → renderer) plus the
+        // channel-aware link composer, shared by every recipient of this pass through two caches — the
+        // per-(kind, channel) candidate read and the per-assignment evaluation dimensions.
         var render = new SweepRenderDependencies(
             scope.ServiceProvider.GetRequiredService<INotificationTemplateResolver>(),
             scope.ServiceProvider.GetRequiredService<IOptions<NotificationLinkOptions>>().Value,
-            new Dictionary<(NotificationKind, NotificationChannel), ResolvedNotificationTemplate?>());
+            new Dictionary<(NotificationKind, NotificationChannel), NotificationTemplateCandidatesRead>(),
+            new Dictionary<Guid, AssignmentTemplateContext>());
 
         var candidates = await repository.ListOverdueSweepCandidatesAsync(
             timeProvider.GetUtcNow(), cancellationToken);

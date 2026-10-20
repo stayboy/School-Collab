@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -44,6 +44,7 @@ public class SettingsResponsePayloadTests
     private const string SettingsUrl = "/api/settings";
 
     private static readonly Guid CreatedId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid DeletedTemplateId = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
     private const string RenameRejected = "Name is required.";
     private const string PromptRejected = "The system prompt exceeds the 4000-character limit.";
@@ -268,13 +269,18 @@ public class SettingsResponsePayloadTests
         }
     }
 
+    /// <summary>
+    /// Round b2c re-pinned this on the by-id DELETE: the audited tombstone is addressed by template
+    /// id, and the reason guard still runs before the handler and still writes a MessageResponse.
+    /// </summary>
     [TestMethod]
     public async Task ResetNotificationTemplate_400_WritesTheRequiredReasonMessage()
     {
         var (app, client) = await StartAsync();
         await using (app)
         {
-            var response = await client.DeleteAsync($"{SettingsUrl}/notification-templates/Publish/Email?reason=%20");
+            var response = await client.DeleteAsync(
+                $"{SettingsUrl}/notification-templates/{DeletedTemplateId}?reason=%20");
 
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await response.Content.ReadAsStringAsync()).Should().Be(

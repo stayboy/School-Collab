@@ -7,7 +7,9 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenan
 
 /// <summary>
 /// Loads all notification templates for the current tenant via the tenant query
-/// filter. Constraints are eagerly loaded.
+/// filter. Constraints are eagerly loaded. This is also the cross-context candidate read (round
+/// notification-templates-b2c): the Assignments side filters it to one (kind, channel) and hands the
+/// rows to its applicability matcher, so there is no second Settings route for candidates.
 /// </summary>
 public sealed class GetTenantNotificationTemplatesHandler(SettingsDbContext db)
     : IQueryHandler<GetTenantNotificationTemplates, IReadOnlyList<TenantNotificationTemplateDto>>
@@ -24,7 +26,7 @@ public sealed class GetTenantNotificationTemplatesHandler(SettingsDbContext db)
             .Select(t => new TenantNotificationTemplateDto(
                 t.Id, t.Kind, t.Channel, t.Subject, t.Body,
                 t.Constraints.Select(c => new TemplateConstraintDto(c.Id, c.Dimension, c.Value)).ToList(),
-                t.UpdatedAt))
+                t.CreatedAt, t.UpdatedAt))
             .ToList();
     }
 }

@@ -1,15 +1,10 @@
 using SchoolCollab.Core.CQRS;
-using SchoolCollab.Core.Notifications;
-using SchoolCollab.Settings.Core.Domain;
 
 namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenantNotificationTemplate;
 
 /// <summary>
-/// Deletes (soft-deletes, reverts to built-in default) the current tenant's
-/// notification template for <see cref="Kind"/> × <see cref="Channel"/>.
-/// Writes a <see cref="Domain.TemplateAuditEntry"/>.
+/// Tombstones one notification template addressed by id (round notification-templates-b2c) — the
+/// candidate disappears from selection and the tenant falls back to the default (or the built-in
+/// default). Writes a <see cref="Domain.TemplateAuditEntry"/>, which is why the reason is required.
 /// </summary>
-public sealed record DeleteTenantNotificationTemplate(
-    NotificationTemplateKind Kind,
-    NotificationChannel Channel,
-    string Reason) : ICommand;
+public sealed record DeleteTenantNotificationTemplate(Guid TemplateId, string Reason) : ICommand;

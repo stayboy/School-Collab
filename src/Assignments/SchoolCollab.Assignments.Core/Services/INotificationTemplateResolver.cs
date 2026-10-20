@@ -4,91 +4,86 @@ using SchoolCollab.Core.Notifications;
 namespace SchoolCollab.Assignments.Core.Services;
 
 /// <summary>
-/// Resolves the tenant's notification template for a (kind, channel) pair cross-context
-/// from the Settings service (spec §3.3, round notification-templates-b1). <b>Fail-open</b>:
-/// any Settings outage, non-success response or unparseable payload returns
-/// <see langword="null"/> — a template outage must never block a publish; the renderer
-/// falls back to the built-in defaults (§3.3). Mirrors the <c>IAssignmentPolicyResolver</c>
-/// posture (named client, explicit timeout, fail-open by contract).
+/// Reads the tenant's notification-template <b>candidates</b> for a (kind, channel) pair cross-context
+/// from the Settings service (spec §3.1.1/§3.3, rounds notification-templates-b1/b2c). A tenant holds
+/// several live templates per slot — one unconstrained tenant default plus any number of
+/// constraint-scoped rows — so the read returns the whole set and the ordering belongs to
+/// <see cref="NotificationTemplateEvaluator"/> (which alone knows the assignment's dimensions).
+/// <b>Fail-open</b>: any Settings outage, non-success response or unparseable payload returns
+/// <see cref="NotificationTemplateSlotState.Unreadable"/> with an empty list — a template outage must
+/// never block a publish; the renderer falls back to the built-in defaults (§3.3).
 /// </summary>
 public interface INotificationTemplateResolver
 {
     /// <summary>
-    /// Resolves the tenant override template, or <see langword="null"/> when none is set
-    /// or the Settings read fails (fail-open). <paramref name="tenantId"/> scopes the lookup.
+    /// Reads the tenant's live candidates for <paramref name="kind"/> × <paramref name="channel"/>,
+    /// <b>unordered</b>. <paramref name="tenantId"/> scopes the lookup.
     /// </summary>
-    Task<ResolvedNotificationTemplate?> ResolveAsync(
-        NotificationKind kind,
-        NotificationChannel channel,
-        Guid tenantId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// The same single-slot read as <see cref="ResolveAsync"/>, without discarding the
-    /// constraint metadata (round notification-templates-b2a, WS5): the publish-options surface
-    /// shows a slot's constraints <b>as display-only text</b>, and the publish path validates an
-    /// explicit author stamp against the slot's id. The render path keeps using
-    /// <see cref="ResolveAsync"/> — one HTTP read, one fail-open filter, two projections.
-    /// </summary>
-    Task<NotificationTemplateSlot?> ResolveSlotAsync(
-        NotificationKind kind,
-        NotificationChannel channel,
-        Guid tenantId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Discriminated single-slot read (round notification-templates-b2a final fix): tells the
-    /// caller whether the tenant has no template set, the slot was found, or the Settings read
-    /// failed (outage/timeout/unparseable). The publish path needs this to fail-open on Settings
-    /// problems without rejecting an explicit stamp when no live template exists.
-    /// </summary>
-    Task<NotificationTemplateSlotRead> ReadSlotAsync(
+    Task<NotificationTemplateCandidatesRead> ReadCandidatesAsync(
         NotificationKind kind,
         NotificationChannel channel,
         Guid tenantId,
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>Discriminant for <see cref="NotificationTemplateSlotRead"/>.</summary>
+/// <summary>Discriminant for <see cref="NotificationTemplateCandidatesRead"/>.</summary>
 public enum NotificationTemplateSlotState
 {
-    /// <summary>The tenant has no template configured for this (kind, channel).</summary>
+    /// <summary>The tenant has no template configured for this (kind, channel) — no candidates.</summary>
     NotSet,
 
     /// <summary>The Settings read failed; callers should fail-open and not block the operation.</summary>
     Unreadable,
 
-    /// <summary>A live, parseable template slot was returned.</summary>
+    /// <summary>At least one live, parseable candidate was returned.</summary>
     Found
 }
 
-/// <summary>The result of <see cref="INotificationTemplateResolver.ReadSlotAsync"/>:
-/// a state plus the slot (only meaningful when <see cref="State"/> is
-/// <see cref="NotificationTemplateSlotState.Found"/>).</summary>
-public sealed record NotificationTemplateSlotRead(NotificationTemplateSlotState State, NotificationTemplateSlot? Slot);
+/// <summary>
+/// The result of <see cref="INotificationTemplateResolver.ReadCandidatesAsync"/>: a state plus the
+/// candidate rows (empty unless <see cref="State"/> is <see cref="NotificationTemplateSlotState.Found"/>).
+/// </summary>
+public sealed record NotificationTemplateCandidatesRead(
+    NotificationTemplateSlotState State,
+    IReadOnlyList<NotificationTemplateCandidate> Candidates)
+{
+    /// <summary>The tenant has no template for the slot.</summary>
+    public static NotificationTemplateCandidatesRead NotSet { get; } = new(NotificationTemplateSlotState.NotSet, []);
 
-/// <summary>A tenant template as resolved from Settings: its id (persisted on the
-/// <c>NotificationLog</c> row as the send-time record of what rendered) plus the authored
-/// subject (email only — §5: subject ignored for SMS) and body (HTML for email, plain
-/// text for SMS/WhatsApp).</summary>
-public sealed record ResolvedNotificationTemplate(Guid TemplateId, string? Subject, string Body);
+    /// <summary>The Settings read failed — fail open to the built-in default.</summary>
+    public static NotificationTemplateCandidatesRead Unreadable { get; } = new(NotificationTemplateSlotState.Unreadable, []);
+
+    /// <summary>A non-empty candidate set, unordered.</summary>
+    public static NotificationTemplateCandidatesRead Found(IReadOnlyList<NotificationTemplateCandidate> candidates) =>
+        new(NotificationTemplateSlotState.Found, candidates);
+}
 
 /// <summary>
-/// The full single-slot read (round notification-templates-b2a, WS5): the render fields plus
-/// the slot's identity and constraint metadata. Constraints are <b>display-only</b> here — with
-/// the applicability matcher deferred to B2c there is exactly one live template per
-/// (tenant, kind, channel), so nothing orders or filters on them yet.
+/// One tenant template as read from Settings (round notification-templates-b2c): its id (persisted on
+/// the <c>NotificationLog</c> row as the send-time record of what rendered), the authored subject
+/// (email only — §5: subject ignored for SMS) and body (HTML for email, plain text for SMS/WhatsApp),
+/// its constraint set (the applicability input, spec §3.1.1) and <see cref="CreatedAt"/> (Q67's
+/// tie-break — <c>UpdatedAt</c> moves on edit and would be non-deterministic).
 /// </summary>
-public sealed record NotificationTemplateSlot(
+public sealed record NotificationTemplateCandidate(
     Guid TemplateId,
-    NotificationKind Kind,
-    NotificationChannel Channel,
     string? Subject,
     string Body,
-    IReadOnlyList<NotificationTemplateConstraint> Constraints);
+    IReadOnlyList<NotificationTemplateConstraint> Constraints,
+    DateTimeOffset CreatedAt)
+{
+    /// <summary>The display/render projection of this candidate.</summary>
+    public ResolvedNotificationTemplate ToResolved() => new(TemplateId, Subject, Body);
+}
+
+/// <summary>
+/// A tenant template as the render path consumes it: its id plus the authored subject and body.
+/// </summary>
+public sealed record ResolvedNotificationTemplate(Guid TemplateId, string? Subject, string Body);
 
 /// <summary>One constraint dimension on a template, as the Settings wire carries it. The
 /// dimension travels as a <b>string</b> (its wire enum name, e.g. <c>GradeLevel</c>) because
 /// Assignments.Core holds no cross-context reference to Settings.Core — the
-/// <c>TenantNotificationPolicyPayload</c> local-mirror precedent.</summary>
+/// <c>TenantNotificationPolicyPayload</c> local-mirror precedent. An unrecognised dimension is
+/// simply one the assignment never intersects, so it degrades to "not applicable", never an error.</summary>
 public sealed record NotificationTemplateConstraint(string Dimension, string Value);

@@ -10,9 +10,9 @@ using SchoolCollab.Core.Tenancy;
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetPublishOptions;
 
 /// <summary>
-/// The publish dialog's pre-select source (round notification-templates-b2a, spec §3.7 / WS5):
-/// per stamped channel, the tenant's single live Publish template plus its display-only constraint
-/// metadata, the effective policy's channel configuration, and the assignment's stored stamps.
+/// The publish dialog's pre-select source (round notification-templates-b2a/b2c, spec §3.7 / WS5):
+/// per stamped channel, the assignment's ordered applicable template candidates, the tenant default
+/// row, the effective policy's channel configuration, and the assignment's stored stamps.
 /// Tenant-scoped — a foreign assignment is an <see cref="AssignmentNotFoundException"/> (404).
 /// </summary>
 public sealed record GetPublishOptions(Guid AssignmentId) : IQuery<PublishOptionsDto>;
@@ -44,22 +44,42 @@ public sealed class GetPublishOptionsHandler(
         var policy = await policyResolver.ResolveEffectiveAsync(
             tenantId, AssignmentPolicyScope.DeriveGrade(assignment), cancellationToken);
 
+        // The assignment's own dimensions decide applicability; it is already in hand (no extra read).
+        var dimensions = AssignmentTemplateContext.FromAssignment(assignment);
+
         var channels = new List<PublishChannelOptionsDto>(StampedSlots.Length);
         foreach (var (channel, dto) in StampedSlots)
         {
-            // Fail-open (§3.3): an unreadable Settings slot offers no template — the dialog then
+            // Fail-open (§3.3): an unreadable Settings read offers no template — the dialog then
             // shows the built-in default for that channel, which is exactly what would render.
-            var slot = await templateResolver.ResolveSlotAsync(
+            var read = await templateResolver.ReadCandidatesAsync(
                 NotificationKind.Publish, channel, tenantId, cancellationToken);
+            var candidates = read.Candidates;
+
+            // The ordered APPLICABLE list — the evaluator's order is the pre-select order
+            // (most specific first; the tenant default wins a tie).
+            var applicable = NotificationTemplateEvaluator.Rank(candidates, dimensions);
+
+            // The legacy single-slot fields stay meaningful by pinning them to the tenant DEFAULT
+            // row (the unconstrained one), mirroring the narrowed GET …/{kind}/{channel}.
+            var defaultRow = candidates.FirstOrDefault(c => c.Constraints.Count == 0);
 
             channels.Add(new PublishChannelOptionsDto(
                 NotificationKindDto.Publish,
                 dto,
-                slot?.TemplateId,
-                slot?.Subject,
-                slot?.Constraints
+                defaultRow?.TemplateId,
+                defaultRow?.Subject,
+                defaultRow?.Constraints
                     .Select(c => new PublishTemplateConstraintDto(c.Dimension, c.Value))
-                    .ToList() ?? []));
+                    .ToList() ?? [],
+                applicable
+                    .Select(c => new PublishTemplateCandidateDto(
+                        c.TemplateId,
+                        c.Constraints
+                            .Select(constraint => new PublishTemplateConstraintDto(constraint.Dimension, constraint.Value))
+                            .ToList(),
+                        IsDefault: c.Constraints.Count == 0))
+                    .ToList()));
         }
 
         return new PublishOptionsDto(
