@@ -168,9 +168,10 @@ out-of-round observation for the parent. Return ONLY:
 
 ## Reviewer — plan-review pass (Tier 3, BEFORE the worker is dispatched)
 
-**Model:** Tier 3 **full** → `glm-5.3:cloud` (`cline-pass/glm-5.3`, owner default
-2026-09-18); Tier 3 **lean** → the round's reviewer model. Read-only `reviewer`
-shell either way; a user-named model wins.
+**Model:** `ollama/glm-5.3:cloud` on **every tier**, lean and full alike
+(`cline-pass/glm-5.3`) — owner 2026-10-18; lean no longer drops the plan gate to
+the reviewer seat. Read-only `reviewer` shell either way; a user-named model
+wins.
 
 Same read-only reviewer, different target: the **plan**, not a diff. Read the
 round doc's `## Plan` plus the code/spec seams it cites — and nothing else (no
