@@ -7,6 +7,7 @@ Two scripts, one purpose: remove the mechanical repetition from a
 |---|---|---|
 | `gates.sh` | Runs the CI-parity local gate: restore, Release build, then CI's exact `--filter` legs (unit, integration, cross-module wiring), the MAUI head with its non-optional serial flags, and both Python portal suites. Prints an explicit **NOT checked here** list. | It does not claim to *be* CI. Anything it skipped is named. |
 | `deliver.sh` | Stages an explicitly-named path set, proves nothing else was staged, refuses policy-layer paths, shows the change set, commits, stops. | No push, no PR, no merge. Push belongs to `SCHOOLCOLLAB_ALLOW_PUSH=1`, the PR body is authored judgement, and a script cannot know whether a merge was authorized. |
+| `wait-ci.sh` | Waits for a PR's checks or a workflow run **once**, under a hard `timeout`, and prints one verdict line. | No `sleep` loop, no polling cadence to guess, and no way to lose the wait to an aborted call. Exit 0 green · 1 failed · 3 timed out. |
 
 ## Why `gates.sh` mirrors filters instead of enumerating projects
 
@@ -48,6 +49,9 @@ scripts/round/deliver.sh --message /tmp/msg.txt -- src tests documents/rounds/ro
 scripts/round/gates.sh                # everything, including the MAUI head and both portals
 scripts/round/gates.sh --no-maui      # fast .NET loop; "NOT checked" names the head instead
 scripts/round/gates.sh --no-portals   # no uv on this machine
+
+scripts/round/wait-ci.sh --pr 385                      # block once, one line, 30-min ceiling
+scripts/round/wait-ci.sh --run 39419888474 --timeout 600
 ```
 
 `gates.sh` needs `uv` for the portal legs; without it they are listed as **not checked**
