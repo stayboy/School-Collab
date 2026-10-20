@@ -171,6 +171,27 @@ public class GradeLevelDetailPageTests : BunitContext
             ["displayOrder"] = 0,
         };
 
+    /// <summary>
+    /// The grade-detail notification-templates card's payload (spec §3.11, round
+    /// notification-templates-b3b): all eight authorable slots, empty. The card owns its own
+    /// FluentCard + read; this fixture only has to answer it so the page's other assertions stay
+    /// about the page.
+    /// </summary>
+    private const string EmptyApplicableTemplatesJson = """
+        {
+          "slots": [
+            { "kind": 0, "channel": 0, "templates": [] },
+            { "kind": 0, "channel": 1, "templates": [] },
+            { "kind": 1, "channel": 0, "templates": [] },
+            { "kind": 1, "channel": 1, "templates": [] },
+            { "kind": 2, "channel": 0, "templates": [] },
+            { "kind": 2, "channel": 1, "templates": [] },
+            { "kind": 3, "channel": 0, "templates": [] },
+            { "kind": 3, "channel": 1, "templates": [] }
+          ]
+        }
+        """;
+
     private (ScriptedHandler Handler, Guid GradeId) Register(
         Guid gradeId,
         string gradeJson,
@@ -215,6 +236,12 @@ public class GradeLevelDetailPageTests : BunitContext
         // Guardian Signature editor: no tenant default / no grade override.
         handler.Map("GET", "/api/settings/assignment-policy", HttpStatusCode.NoContent, "");
         handler.Map("GET", $"/students/grade-levels/{gradeId}/assignment-policy", HttpStatusCode.NoContent, "");
+        // Notification-templates card (spec §3.11): eight empty slots.
+        handler.Map(
+            "GET",
+            $"/api/settings/notification-templates/applicable/{gradeId}",
+            HttpStatusCode.OK,
+            EmptyApplicableTemplatesJson);
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         Services.AddSingleton<AuthenticationStateProvider>(auth);
@@ -227,6 +254,7 @@ public class GradeLevelDetailPageTests : BunitContext
         Services.AddSingleton<IContactsClient>(api);
         Services.AddSingleton(new NotificationPolicyApiClient(http));
         Services.AddSingleton(new AssignmentPolicyApiClient(http));
+        Services.AddSingleton(new NotificationTemplateApiClient(http));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
         return (handler, gradeId);

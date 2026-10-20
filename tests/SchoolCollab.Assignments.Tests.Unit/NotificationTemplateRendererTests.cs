@@ -135,6 +135,45 @@ public class NotificationTemplateRendererTests
         rendered.Body.Should().NotContain("{{DescriptionExcerpt}}");
     }
 
+    [TestMethod]
+    public void Canonicalize_MapsAllThreeRoundAAliases_AndLeavesUnknownTagsAlone()
+    {
+        // Round b3b (Q90a) moved the tag set to SchoolCollab.Core.Notifications so the Settings
+        // editor can offer the chips; this pins the canonicalization table the move carried with it.
+        NotificationTemplateTags.Canonicalize("AssignmentTitle").Should().Be(NotificationTemplateTags.Title);
+        NotificationTemplateTags.Canonicalize("DescriptionExcerpt").Should().Be(NotificationTemplateTags.Description);
+        NotificationTemplateTags.Canonicalize("ContactName").Should().Be(NotificationTemplateTags.GuardianName);
+        NotificationTemplateTags.Canonicalize("title").Should().Be(NotificationTemplateTags.Title,
+            "matching is case-insensitive");
+        NotificationTemplateTags.Canonicalize("NoSuchTag").Should().Be("NoSuchTag",
+            "an unknown tag is returned unchanged, so it stays literal at render time");
+    }
+
+    [TestMethod]
+    public void AliasAuthoredTemplate_RendersByteIdenticallyToTheCanonicalSpellings()
+    {
+        // The Q90a move must be behaviour-free: the Round-A spelling renders exactly what the §3.2
+        // spelling renders, in the subject and the body, on a content- and escape-sensitive payload.
+        var tags = Tags(description: "Read the chapter & answer Q4");
+        var aliasTemplate = new ResolvedNotificationTemplate(
+            Guid.NewGuid(),
+            "Hi {{AssignmentTitle}}",
+            "<p>{{DescriptionExcerpt}} — {{ContactName}}</p>");
+        var canonicalTemplate = new ResolvedNotificationTemplate(
+            aliasTemplate.TemplateId,
+            "Hi {{Title}}",
+            "<p>{{Description}} — {{GuardianName}}</p>");
+
+        var alias = NotificationTemplateRenderer.Render(
+            NotificationKind.Publish, NotificationChannel.Email, aliasTemplate, tags);
+        var canonical = NotificationTemplateRenderer.Render(
+            NotificationKind.Publish, NotificationChannel.Email, canonicalTemplate, tags);
+
+        alias.Subject.Should().Be(canonical.Subject);
+        alias.Body.Should().Be(canonical.Body);
+        alias.TemplateId.Should().Be(canonical.TemplateId);
+    }
+
     // ── §3.2: {{Description}} is the FULL value; the 120-char cap is preview-only ──
 
     [TestMethod]

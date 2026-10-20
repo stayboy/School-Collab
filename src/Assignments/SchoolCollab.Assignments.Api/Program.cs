@@ -8,11 +8,13 @@ using SchoolCollab.Assignments.Api.Endpoints;
 using SchoolCollab.Assignments.Api.Services;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
+using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.DeepLinks;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Core.Http;
+using SchoolCollab.Core.Notifications;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,6 +66,12 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // registered only in a test host hides the live gap.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationKindDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ContactChannelDto>());
+    // Round notification-templates-b3b: the Settings editor's live-preview request carries the
+    // template kind × channel, and this feature travels both as NAMES (the b2c/b3a precedent -
+    // "Reminder"/"SMS"). Registered on the REAL host options block for the ar-15/ar-18 reason:
+    // a converter that exists only in a test host hides the live 400 from every unit test.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationKind>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<NotificationChannel>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")

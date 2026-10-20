@@ -59,6 +59,10 @@ public class ProgramJsonEnumConverterTests
             "the failures read side serializes NotificationKindDto — without this registration the live wire form is a number");
         optionsBlock.Should().Contain("JsonStringEnumConverter<ContactChannelDto>",
             "the failures read side serializes ContactChannelDto — without this registration the live wire form is a number");
+        optionsBlock.Should().Contain("JsonStringEnumConverter<NotificationKind>",
+            "the b3b template preview request binds its kind by NAME (\"Reminder\"), so the converter must sit on the REAL host block");
+        optionsBlock.Should().Contain("JsonStringEnumConverter<NotificationChannel>",
+            "the b3b template preview request binds its channel by NAME (\"SMS\"), so the converter must sit on the REAL host block");
     }
 
     [TestMethod]

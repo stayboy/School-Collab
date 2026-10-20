@@ -23,6 +23,11 @@ public static class AssignmentEndpoints
         // Families browser flows; this group opts into Bearer explicitly (decision 2/3).
         group.RequireAuthIfOidc(featureFlags);
 
+        // Round notification-templates-b3b: the Settings editor's live preview (spec §3.10). A
+        // literal-segment specialty, so it can never collide with "/{id:guid}" in
+        // MapAssignmentRoutes; it inherits this group's prefix and policy unchanged.
+        group.MapNotificationTemplatePreviewRoutes();
+
         // ── Teacher-portal reads (round teacher-scope-auth D4 / [P1-1]) ──────────
         // The reader policy is applied to this NESTED SUB-GROUP — never to the whole
         // /assignments group. The group also serves the Families ward/guardian routes, the

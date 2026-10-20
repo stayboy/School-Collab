@@ -12,9 +12,13 @@
        <FluentTabStrip>
            <FluentTab Header="First">…</FluentTab>
            <FluentTab Header="Second">…</FluentTab>
-       </FluentTabStrip> *@
+       </FluentTabStrip>
+
+   Optional two-way <c>ActiveTabId</c> pass-through (round notification-templates-b3b): the chrome
+   stays FluentUI's, and a caller that must KNOW which tab is active (the template editor loads the
+   selected slot) binds it exactly as it would on <FluentTabs>. Omitted, the strip behaves as before. *@
 <div class="fluent-tab-strip">
-    <FluentTabs>
+    <FluentTabs ActiveTabId="@ActiveTabId" ActiveTabIdChanged="@ActiveTabIdChanged">
         @ChildContent
     </FluentTabs>
 </div>
@@ -22,4 +26,14 @@
 @code {
     /// <summary>The tab set — <c>FluentTab</c> elements, rendered through the chrome untouched.</summary>
     [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+
+    /// <summary>
+    /// The id of the active <c>FluentTab</c> (its <c>Id</c>), forwarded to <c>FluentTabs</c>. Set it
+    /// with <c>@bind-ActiveTabId</c> when the caller's state depends on which tab is showing;
+    /// leaving it null keeps FluentUI's own first-tab default.
+    /// </summary>
+    [Parameter] public string? ActiveTabId { get; set; }
+
+    /// <summary>Two-way binder for <see cref="ActiveTabId"/>.</summary>
+    [Parameter] public EventCallback<string?> ActiveTabIdChanged { get; set; }
 }
