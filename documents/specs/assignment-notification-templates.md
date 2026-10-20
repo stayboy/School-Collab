@@ -363,3 +363,46 @@ settings-db migration, 9 wire tests.
   (the same hardening gap closed here for templates) — later round.
 - **Slicing correction:** §9's original "one round" recommendation was superseded by the adopted
   **A → B1 → B2 → B3** cut. The round docs are the record; this spec keeps the contract only.
+
+**Round B2a** — accepted 2026-10-19 (Tier 3 lean), PR #372, merged as `58b8d173`, round doc
+`documents/rounds/round-notification-templates-b2a.md`:
+
+- **Delivered:** short links end-to-end — `AssignmentRecipient.ShortLinkCode` (nullable, **global**
+  filtered unique index, 16-char CSPRNG codes with collision re-roll), minted only for SMS/WhatsApp
+  recipients atomically with the token, `NotificationLinkOptions.BuildDeepLink` channel-driven so email
+  always keeps `/deeplink/{token}`, anonymous **cross-tenant** resolution via a single-row
+  `IgnoreQueryFilters` lookup returning only the token, Families `GET /l/{code}` → 302 →
+  `/deeplink/{token}` with unknown/expired landing on the existing LinkExpired page, the code never
+  logged; the **medium restriction** enforced at both previously-inert seams (route → command →
+  handler), inside `NotificationRecipientFilter` after the `ContactIds` subset and before the caps,
+  blocked channels still winning; E3 sweep kinds rendered through the template path with `TemplateId`
+  recorded both ways, **ensure-mint** giving pre-existing SMS recipients a code at render time;
+  `Assignment.PublishEmailTemplateId`/`PublishSmsTemplateId` + migration with the full lifecycle
+  (request-null = reuse; cleared → live template → built-in default; deleted/foreign degrades and never
+  blocks publish); `GET /assignments/{id}/publish-options` (`TypedResults`, tenant-scoped, 404 foreign);
+  both `AssignmentPolicyResolver` and `NotificationPolicyResolver` widened to the fail-open contract
+  (Q49) with genuine cancellation propagating.
+- **Discriminated slot read (spec §3.3 + §3.8/§5 both hold):** `NotificationTemplateSlotState`
+  {`NotSet`, `Unreadable`, `Found`} — a Settings outage accepts an explicit stamp with a warning
+  (fail-open, §3.3) while a genuine `NotSet` or `Found` mismatch returns the typed 400.
+- **Deviations from §3.6, recorded (Q61):** short links live on the recipient row (not a separate
+  `ShortLink` table) with 16-char URL-safe codes (not 10-char Crockford-base32); the deviation exists
+  because the code mirrors the token row's expiry with no join on the public resolution path.
+- **Corrections of B1's own residual list:** `families-public-base-url` was **already complete** (Round
+  A: `AddParameter`, fan-out, both appsettings rows, both `configuration.md` rows); the publish request
+  fields (`Channels`, both stamp ids) **existed on the wire but were inert** at two seams — the route
+  dropped them and the handler ignored them — so "medium restriction" and "stamps" were enforcement
+  work, not contract work.
+- **Q16 amendment (2026-10-19, Q67):** for the equal-specificity **non-default** tie the spec was
+  silent; the deterministic rule is **default first, then the oldest `CreatedAt`** — `UpdatedAt` moves
+  on every edit, so it would silently change the winner whenever an unrelated field is edited.
+- **Slicing correction (Q63):** B2 split into **B2a → B2c → B2b** — Round A's unique index on
+  `(TenantId, Kind, Channel)` filtered `is_deleted = false` permits one live template per slot, so the
+  §3.1.1 matcher has no substrate; relaxing the index **requires** converting the Upsert writer to
+  create/update-by-id in the same round (`SingleOrDefaultAsync` on the natural key throws the moment a
+  second candidate exists), and the matcher moves to **B2c** with the settings-db index, the
+  candidates-with-constraints read and the publish-time evaluation. The publish dialog is **B2b**;
+  the editor page, the grade-detail applicability card and `NotificationTemplateApiClient` stay **B3**.
+- **Deferred, with owner workstreams:** the §3.1.1 evaluation + settings-db index relaxation +
+  candidates read + writer identity → **B2c**; the publish dialog → **B2b**; editor page,
+  grade-detail card, `NotificationTemplateApiClient` → **B3**.
