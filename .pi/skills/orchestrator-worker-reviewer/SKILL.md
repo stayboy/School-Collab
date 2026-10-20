@@ -384,7 +384,12 @@ the tester never derives or expands its own scope.
    **before** diagnosing; if none matches, say so explicitly, diagnose, and record
    the new symptom family as a runbook — never re-burn a documented hunt (two
    30-minute UI hunts ran without consulting `aspire-apphost-silent-hang.md`,
-   2026-10-20).
+   2026-10-20). (c) **Never sleep in a tool call.** Wait for CI with
+   `scripts/round/wait-ci.sh --pr <n>` (one call, one line, hard timeout); dispatch
+   seats `async` and let the wake bring you back; block only when the next action needs
+   the result in this turn. A seat's per-command budget is ~90 s — `gates.sh` is the
+   parent's tool, never a worker's — and a seat that is waiting should be reporting
+   instead. Full rules: `references/role-contracts.md` § "Waiting discipline".
 1. **Setup (once per session).** Resolve model ids (pi:
    `subagent({ action: "models" })` — choose the round's provider profile there).
    Cline:
