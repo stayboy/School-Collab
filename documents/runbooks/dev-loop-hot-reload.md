@@ -1,5 +1,13 @@
 # Dev loop: hot reload & watch (UI iteration without restarts)
 
+## Symptom
+
+You changed a `.razor`, `.razor.css` or collocated `.razor.js` file and the running app
+disagrees with the code: markup is stale, the browser sits on "Attempting to reconnect",
+the change appears only after a full kill-and-restart, or a control renders but does
+nothing. The build is green and the tests pass, so the code and the *process* have parted
+ways — this runbook is about the process.
+
 Adopted 2026-10-12 via an owner grill round (all decisions: runbook + AGENTS.md pointer,
 docs-only enablement — no config or profile flips). Every claim marked *observed* was
 exercised live on this repo (SDK 10.0.401, Aspire 13.5.4, Windows) on 2026-10-12.

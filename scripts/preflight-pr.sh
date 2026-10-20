@@ -16,6 +16,8 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -90,21 +92,16 @@ ok "Pushed ${CURRENT_BRANCH}"
 
 # --- Step 4: Local build & test ---
 if [[ "$SKIP_TESTS" == "false" ]]; then
-    step "Running local build & tests"
-    dotnet restore --quiet 2>/dev/null
-    if dotnet build --no-restore --configuration Release 2>/dev/null; then
-        ok "Build succeeded"
+    step "Running the CI-parity gate (scripts/round/gates.sh)"
+    # ONE definition of "green". `gates.sh` mirrors ci.yml's filter legs (unit, integration,
+    # cross-module wiring), always includes the repo-wide architecture scanner, carries the
+    # non-optional MAUI serial flags, runs both Python portal suites, and prints an explicit
+    # "NOT checked here" list. Do NOT inline a second, weaker build/test leg here: a local loop
+    # over a hand-picked subset of projects is false confidence (optimisation round, Q103).
+    if "$REPO_ROOT/scripts/round/gates.sh"; then
+        ok "gates.sh green"
     else
-        fail "Build failed — fix errors before continuing"
-    fi
-
-    if dotnet test --no-build --configuration Release \
-         --filter "FullyQualifiedName~Tests.Unit" \
-         --logger "trx;LogFileName=preflight-unit.trx" \
-         --results-directory ./test-results 2>/dev/null; then
-        ok "Unit tests passed"
-    else
-        fail "Unit tests failed — fix before continuing"
+        fail "gates.sh failed — fix errors before continuing"
     fi
 else
     step "Skipping local build & tests (--skip-tests)"

@@ -2,6 +2,19 @@
 
 Owner-facing procedure. Written 2026-10-10 after a post-merge CI question exposed the gap it closes.
 
+## Symptom
+
+Two shapes, easy to confuse:
+
+- **`main` is red** — every open PR shows the *same* failing check although its own diff is
+  unrelated, and green-looking branches pile up behind one bad commit.
+- **A PR never starts** — the check sits at "Expected — waiting for status to be reported", or
+  the PR waits in a merge queue that this repository does not actually have.
+
+If neither matches, the failure is not this family: see
+`documents/runbooks/aspire-apphost-silent-hang.md` for the startup-hang family (and its own
+"Related failure mode" branches).
+
 ## The gap this closes
 
 `main` receives **squash** merges. A squash is a *new* commit: the PR's checks ran against the branch
