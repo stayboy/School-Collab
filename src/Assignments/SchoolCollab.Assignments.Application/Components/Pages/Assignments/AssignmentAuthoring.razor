@@ -3730,7 +3730,9 @@
     // ── Lifecycle actions ────────────────────────────────────────────────────
 
     /// <summary>UX-6: the publish-time choices are captured in the confirm dialog (replacing
-    /// the wizard's Review step) — contact limiting lives in <c>PublishDialog</c>.</summary>
+    /// the wizard's Review step) — contact limiting, the medium and the template picks live in
+    /// <c>PublishDialog</c>. The options read is fail-open: an outage still opens the dialog (no
+    /// pickers, per policy) and publishes without stamps.</summary>
     private async Task PublishAsync()
     {
         if (_item is null) return;
@@ -3740,16 +3742,27 @@
 
         try
         {
+            // The options read never throws (its own failure classes return null), so it rides
+            // alongside the contacts read instead of gating the dialog on a second round trip.
+            var optionsTask = Api.GetPublishOptionsAsync(_item.Id, ct);
             var contacts = await StudentsApi.ListSubscribedContactsAsync(
                 ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct) ?? [];
-            var model = new PublishFormModel(contacts.ToList(), $"Audience: {DerivedAudienceText}", _item.MandatoryReview);
+            var options = await optionsTask;
+            var model = new PublishFormModel(
+                contacts.ToList(), $"Audience: {DerivedAudienceText}", _item.MandatoryReview, options);
 
             var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
                 model, title: "Publish assignment", size: DialogWidth.Medium);
 
             if (result is null) return; // cancelled
 
-            await Api.PublishAsync(_item.Id, result.ContactIds, ct);
+            await Api.PublishAsync(
+                _item.Id,
+                result.ContactIds,
+                result.Channels,
+                result.PublishEmailTemplateId,
+                result.PublishSmsTemplateId,
+                ct);
             await ReloadAsync();
             await Changed.InvokeAsync();
         }

@@ -148,6 +148,59 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 Content = new StringContent(
                     JsonSerializer.Serialize(_activityGroups, _apiJsonOptions), Encoding.UTF8, "application/json")
             });
+
+        // Round notification-templates-b2b: the publish dialog's options read. Registered here
+        // (first-match ordering) against the mutable body, so a test can flip it to the outage
+        // case — or to its own shaped candidates — without re-registering the matcher.
+        SetPublishOptionsBaseline();
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/publish-options")
+            .Respond(_ => _publishOptionsBody is null
+                ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(_publishOptionsBody, Encoding.UTF8, "application/json")
+                });
+    }
+
+    /// <summary>Round notification-templates-b2b — the <c>/publish-options</c> body the page's
+    /// fail-open read returns; <c>null</c> makes the stub answer 500 (the outage case).</summary>
+    private string? _publishOptionsBody;
+
+    /// <summary>The email candidate the baseline options body lists FIRST — the pick a confirmed
+    /// dialog choice carries through to the publish request.</summary>
+    private Guid _publishOptionsEmailCandidate;
+
+    private void SetPublishOptionsBaseline() =>
+        (_publishOptionsBody, _publishOptionsEmailCandidate) = PublishOptionsBody();
+
+    /// <summary>The shipped <see cref="PublishOptionsDto"/> shape: two stamped slots, the email slot
+    /// carrying one applicable constraint plus the tenant default, the SMS slot its default only.</summary>
+    private (string Body, Guid EmailCandidate) PublishOptionsBody()
+    {
+        var emailCandidate = Guid.NewGuid();
+        var emailDefault = Guid.NewGuid();
+        var smsDefault = Guid.NewGuid();
+        var options = new PublishOptionsDto(
+            [
+                new PublishChannelOptionsDto(
+                    NotificationKindDto.Publish, ContactChannelDto.Email, emailDefault, "New task", [],
+                    [
+                        new PublishTemplateCandidateDto(
+                            emailCandidate,
+                            [new PublishTemplateConstraintDto("GradeLevel", "Grade 3")],
+                            IsDefault: false),
+                        new PublishTemplateCandidateDto(emailDefault, [], IsDefault: true),
+                    ]),
+                new PublishChannelOptionsDto(
+                    NotificationKindDto.Publish, ContactChannelDto.SMS, smsDefault, null, [],
+                    [new PublishTemplateCandidateDto(smsDefault, [], IsDefault: true)]),
+            ],
+            [ContactChannelDto.Email, ContactChannelDto.SMS],
+            [],
+            PublishEmailTemplateId: null,
+            PublishSmsTemplateId: null);
+
+        return (JsonSerializer.Serialize(options, _apiJsonOptions), emailCandidate);
     }
 
     /// <summary>Activity groups the students API offers to the picker. Mutable so a test can
@@ -2293,14 +2346,25 @@ public class AssignmentAuthoringBunitTests : BunitContext
     /// <c>ShowDialogAsync(typeof(PublishDialog), DialogOptions)</c>, and the
     /// dialog Result carries the <see cref="DialogShellResult{TResult}"/> the extension unwraps into
     /// the typed result (the <c>AssignmentDetailBunitTests</c> schedule-dialog pattern).
+    /// <para><paramref name="capturedModels"/>, when supplied, records the form model the page built —
+    /// the seam that proves what the dialog was handed (the dialog's own markup is never rendered
+    /// here, so its pre-select is asserted in <c>PublishDialogBunitTests</c> instead).</para>
     /// </summary>
-    private void RegisterPublishDialog()
+    private void RegisterPublishDialog(List<PublishFormModel>? capturedModels = null, PublishResult? result = null)
     {
-        var payload = new DialogShellResult<PublishResult>(new PublishResult(null));
+        var payload = new DialogShellResult<PublishResult>(result ?? new PublishResult(null));
 
         var dialogMock = this.RegisterDialogService();
         dialogMock
             .Setup(d => d.ShowDialogAsync(typeof(PublishDialog), It.IsAny<DialogOptions>()))
+            .Callback<Type, DialogOptions>((_, options) =>
+            {
+                if (options.Parameters.TryGetValue("Content", out var content)
+                    && content is DialogShellData<PublishFormModel> data)
+                {
+                    capturedModels?.Add(data.Model);
+                }
+            })
             .ReturnsAsync(DialogResult.Ok<object?>(payload));
     }
 
@@ -2500,6 +2564,101 @@ public class AssignmentAuthoringBunitTests : BunitContext
                 "P1: the dirty→read-only transition leaves nothing to lose, so the listener must be " +
                 "detached rather than left to prompt on a clean page");
         }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── round notification-templates-b2b: the publish dialog's medium + template picks ──
+
+    /// <summary>
+    /// Round notification-templates-b2b (spec §3.7/§3.8): the page fetches the publish options
+    /// alongside the contacts and hands them to the dialog, then forwards the confirmed picks to the
+    /// publish request. Asserted on the two observable seams — the dialog model the page built and
+    /// the request body it posted.
+    /// <para>The success half is the discriminating one for the wiring: pre-round the client posted
+    /// <see cref="PublishAssignmentRequest"/> with the default <c>Channels</c>/stamp values, so the
+    /// picked ids could never reach the wire.</para>
+    /// </summary>
+    [TestMethod]
+    public async Task Publish_ForwardsTheDialogsMediumAndTemplatePicks()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed*")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        string? publishBody = null;
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/publish")
+            .With(req =>
+            {
+                publishBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.NoContent);
+
+        var models = new List<PublishFormModel>();
+        var pickedEmail = _publishOptionsEmailCandidate;
+        var pickedSms = Guid.NewGuid();
+        RegisterPublishDialog(models, new PublishResult(
+            null, PublishChannel.SmsOnly, pickedEmail, pickedSms));
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+        cut.Find("#authoring-primary-action").Click();
+
+        cut.WaitForAssertion(() => publishBody.Should().NotBeNull(), TimeSpan.FromSeconds(15));
+
+        models.Should().ContainSingle("the publish flow opens the dialog once");
+        models[0].Options.Should().NotBeNull(
+            "the successful options read reaches the dialog, so its pickers can pre-select");
+        models[0].Options!.Channels.Select(c => c.Channel).Should()
+            .Equal([ContactChannelDto.Email, ContactChannelDto.SMS],
+                "the dialog receives the server's slots verbatim");
+
+        var body = JsonDocument.Parse(publishBody!).RootElement;
+        body.GetProperty("channels").GetInt32().Should().Be((int)PublishChannel.SmsOnly,
+            "the confirmed medium rides the publish request");
+        body.GetProperty("publishEmailTemplateId").GetGuid().Should().Be(pickedEmail,
+            "the confirmed email pick is stamped onto the request");
+        body.GetProperty("publishSmsTemplateId").GetGuid().Should().Be(pickedSms,
+            "the confirmed SMS pick is stamped onto the request");
+    }
+
+    /// <summary>
+    /// Round notification-templates-b2b — an options outage must never block publishing: the read
+    /// fails open to <c>null</c>, the dialog gets no pickers (its own warning bar is asserted in
+    /// <c>PublishDialogBunitTests</c>, since this harness mocks the dialog away) and the publish posts
+    /// no stamps, per policy.
+    /// </summary>
+    [TestMethod]
+    public async Task Publish_OptionsReadFails_PostsNoStamps()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Draft);
+        _publishOptionsBody = null; // the stub now answers 500 — the fail-open outage case
+        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed*")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+        string? publishBody = null;
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/publish")
+            .With(req =>
+            {
+                publishBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.NoContent);
+
+        var models = new List<PublishFormModel>();
+        RegisterPublishDialog(models);
+
+        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
+        cut.Find("#authoring-primary-action").Click();
+
+        cut.WaitForAssertion(() => publishBody.Should().NotBeNull(), TimeSpan.FromSeconds(15));
+
+        models.Should().ContainSingle();
+        models[0].Options.Should().BeNull("a failed options read hands the dialog nothing to pre-select");
+
+        var body = JsonDocument.Parse(publishBody!).RootElement;
+        body.GetProperty("publishEmailTemplateId").ValueKind.Should().Be(JsonValueKind.Null);
+        body.GetProperty("publishSmsTemplateId").ValueKind.Should().Be(JsonValueKind.Null);
+        body.GetProperty("channels").GetInt32().Should().Be((int)PublishChannel.PerPolicy,
+            "the dialog's default medium travels even when the options read failed");
     }
 
     // ── §17 item 1: a lifecycle action re-reads the persisted set ─────────
