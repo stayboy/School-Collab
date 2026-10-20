@@ -52,6 +52,17 @@ specs that remain the source of truth**.
   round's own change set. Keep committing the patch while you keep the doc: the
   frozen patch is what let the diff gate work statically, and (c) "stop
   committing patches" was considered and rejected (Q105).
+- **Record the wait cost (owner, optimisation round Q113).** Three numbers at round
+  close, beside the gate results — they are what would have caught the 919k-token
+  worker timeout while it was happening instead of afterwards:
+
+  | Number | How to read it |
+  |---|---|
+  | **wait calls** | tool calls whose entire output was a status line — more than one per round means a loop crept back in |
+  | **commands over 90 s** | the seat-level budget; anything over it inside a *seat* is a design smell, not bad luck |
+  | **per-seat tokens** | the worker/reviewer/tester totals; a seat that costs more than the round's code is worth is a waiting or re-reading problem |
+
+  Non-blocking, like the Q107 baseline: the numbers are read at close, not enforced.
 - **Never** write durable specs here — durable specs belong in
   `documents/specs/`.
 - The workflow and this policy are defined in

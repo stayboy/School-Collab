@@ -21,6 +21,47 @@ doc and cite the doc from then on; when a detail is uncertain, re-read the *one*
 region, never the whole file. This binds the parent above all — it is the seat
 that reads the most.
 
+**Output discipline (the same rule, on the way back).** Any command that can exceed
+~20 lines gets `-v q --nologo`, a `tail`/`grep` filter, a log file with a one-line
+verdict, or a `ctx_*` tool. `scripts/round/gates.sh` is the model: full output to
+`test-results/gates/*.log`, five lines to the terminal. Unfiltered build and test logs
+are the second-largest way context is spent after re-reads.
+
+## Waiting discipline (every seat, every tier — optimisation round Q108/Q110/Q112)
+
+**No sleeps in a tool call.** A `while …; do sleep 60; …; done` loop bills a line of
+context per iteration, guesses a cadence, and — worst of all — returns **nothing at all**
+if the call is aborted (a 5-minute abort on 2026-10-20 lost five minutes of waiting and
+produced no verdict). The three legitimate shapes are:
+
+| Need | Shape |
+|---|---|
+| CI / a workflow run | `scripts/round/wait-ci.sh --pr <n>` — one call, one line, hard timeout |
+| a subagent | dispatch it **async**, then return control; the native wake brings you back |
+| provider or detached work without a wake | `bg_wait` |
+
+**Per-command budget inside a seat: ~90 s.** If a build, test or network call cannot
+finish inside that, the seat **reports the block** — it never retries in a loop and never
+sleeps on it. The one carve-out is explicit: the full `scripts/round/gates.sh` (~6 min) is
+the **parent's or the human's** tool, never a worker's; a worker runs build + *affected*
+tests, which is what its contract already says. A worker that finds itself waiting is a
+worker that should be reporting.
+
+**Block only when the next action needs the result in this turn.** Anything over ~2
+minutes returns control instead: the async wake is free and survives a compaction, while
+a blocked call does not.
+
+**Auto-merge is off.** `gh pr merge --auto` and any per-layer auto-merge pre-authorise a
+merge that the owner's word is supposed to authorise, and on a **stack** they are worse
+than useless: an upper layer's base is the layer below, so auto-merging it folds that
+layer's squash *into* the lower one and the train loses its ordered history. A hands-off
+train is `gh stack merge --yes --squash` — one command, whole train, atomic, on your word.
+Note the naming trap: **`gh stack submit --auto` is not auto-merge** — it means "skip the
+editor and auto-generate the titles" (`--open` = ready-for-review). Enabling merge must be
+the owner's instruction, never a side-effect of submitting. If the owner wants native
+auto-merge anyway, it is allowed on the **bottom layer only** and the round doc records
+`Auto-merge: owner-authorised (<date>, bottom layer only)`.
+
 ## Orchestrator (Tier 3 runs it; in Tiers 1–2 the parent acts as orchestrator)
 
 Document owner. Read the source specs/review docs, write the `## Plan` section

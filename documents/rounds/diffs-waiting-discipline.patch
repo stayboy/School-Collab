@@ -1,0 +1,281 @@
+diff --git a/.pi/skills/orchestrator-worker-reviewer/SKILL.md b/.pi/skills/orchestrator-worker-reviewer/SKILL.md
+index a7784970..2508ae62 100644
+--- a/.pi/skills/orchestrator-worker-reviewer/SKILL.md
++++ b/.pi/skills/orchestrator-worker-reviewer/SKILL.md
+@@ -384,7 +384,12 @@ the tester never derives or expands its own scope.
+    **before** diagnosing; if none matches, say so explicitly, diagnose, and record
+    the new symptom family as a runbook — never re-burn a documented hunt (two
+    30-minute UI hunts ran without consulting `aspire-apphost-silent-hang.md`,
+-   2026-10-20).
++   2026-10-20). (c) **Never sleep in a tool call.** Wait for CI with
++   `scripts/round/wait-ci.sh --pr <n>` (one call, one line, hard timeout); dispatch
++   seats `async` and let the wake bring you back; block only when the next action needs
++   the result in this turn. A seat's per-command budget is ~90 s — `gates.sh` is the
++   parent's tool, never a worker's — and a seat that is waiting should be reporting
++   instead. Full rules: `references/role-contracts.md` § "Waiting discipline".
+ 1. **Setup (once per session).** Resolve model ids (pi:
+    `subagent({ action: "models" })` — choose the round's provider profile there).
+    Cline:
+diff --git a/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md b/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md
+index b50894e2..46a06f4e 100644
+--- a/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md
++++ b/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md
+@@ -21,6 +21,47 @@ doc and cite the doc from then on; when a detail is uncertain, re-read the *one*
+ region, never the whole file. This binds the parent above all — it is the seat
+ that reads the most.
+ 
++**Output discipline (the same rule, on the way back).** Any command that can exceed
++~20 lines gets `-v q --nologo`, a `tail`/`grep` filter, a log file with a one-line
++verdict, or a `ctx_*` tool. `scripts/round/gates.sh` is the model: full output to
++`test-results/gates/*.log`, five lines to the terminal. Unfiltered build and test logs
++are the second-largest way context is spent after re-reads.
++
++## Waiting discipline (every seat, every tier — optimisation round Q108/Q110/Q112)
++
++**No sleeps in a tool call.** A `while …; do sleep 60; …; done` loop bills a line of
++context per iteration, guesses a cadence, and — worst of all — returns **nothing at all**
++if the call is aborted (a 5-minute abort on 2026-10-20 lost five minutes of waiting and
++produced no verdict). The three legitimate shapes are:
++
++| Need | Shape |
++|---|---|
++| CI / a workflow run | `scripts/round/wait-ci.sh --pr <n>` — one call, one line, hard timeout |
++| a subagent | dispatch it **async**, then return control; the native wake brings you back |
++| provider or detached work without a wake | `bg_wait` |
++
++**Per-command budget inside a seat: ~90 s.** If a build, test or network call cannot
++finish inside that, the seat **reports the block** — it never retries in a loop and never
++sleeps on it. The one carve-out is explicit: the full `scripts/round/gates.sh` (~6 min) is
++the **parent's or the human's** tool, never a worker's; a worker runs build + *affected*
++tests, which is what its contract already says. A worker that finds itself waiting is a
++worker that should be reporting.
++
++**Block only when the next action needs the result in this turn.** Anything over ~2
++minutes returns control instead: the async wake is free and survives a compaction, while
++a blocked call does not.
++
++**Auto-merge is off.** `gh pr merge --auto` and any per-layer auto-merge pre-authorise a
++merge that the owner's word is supposed to authorise, and on a **stack** they are worse
++than useless: an upper layer's base is the layer below, so auto-merging it folds that
++layer's squash *into* the lower one and the train loses its ordered history. A hands-off
++train is `gh stack merge --yes --squash` — one command, whole train, atomic, on your word.
++Note the naming trap: **`gh stack submit --auto` is not auto-merge** — it means "skip the
++editor and auto-generate the titles" (`--open` = ready-for-review). Enabling merge must be
++the owner's instruction, never a side-effect of submitting. If the owner wants native
++auto-merge anyway, it is allowed on the **bottom layer only** and the round doc records
++`Auto-merge: owner-authorised (<date>, bottom layer only)`.
++
+ ## Orchestrator (Tier 3 runs it; in Tiers 1–2 the parent acts as orchestrator)
+ 
+ Document owner. Read the source specs/review docs, write the `## Plan` section
+diff --git a/documents/rounds/README.md b/documents/rounds/README.md
+index 6ad1d6f5..b360a288 100644
+--- a/documents/rounds/README.md
++++ b/documents/rounds/README.md
+@@ -52,6 +52,17 @@ specs that remain the source of truth**.
+   round's own change set. Keep committing the patch while you keep the doc: the
+   frozen patch is what let the diff gate work statically, and (c) "stop
+   committing patches" was considered and rejected (Q105).
++- **Record the wait cost (owner, optimisation round Q113).** Three numbers at round
++  close, beside the gate results — they are what would have caught the 919k-token
++  worker timeout while it was happening instead of afterwards:
++
++  | Number | How to read it |
++  |---|---|
++  | **wait calls** | tool calls whose entire output was a status line — more than one per round means a loop crept back in |
++  | **commands over 90 s** | the seat-level budget; anything over it inside a *seat* is a design smell, not bad luck |
++  | **per-seat tokens** | the worker/reviewer/tester totals; a seat that costs more than the round's code is worth is a waiting or re-reading problem |
++
++  Non-blocking, like the Q107 baseline: the numbers are read at close, not enforced.
+ - **Never** write durable specs here — durable specs belong in
+   `documents/specs/`.
+ - The workflow and this policy are defined in
+diff --git a/documents/rounds/round-waiting-discipline.md b/documents/rounds/round-waiting-discipline.md
+new file mode 100644
+index 00000000..dff8368c
+--- /dev/null
++++ b/documents/rounds/round-waiting-discipline.md
+@@ -0,0 +1,67 @@
++# Round — waiting discipline (harness layer 2)
++
++**Status:** CLOSED — pending PR
++**Mode:** attended · policy layer, no runtime surface
++**Base:** `chore/agent-harness-optimisation` @ `262ed139` (layer 1 = PR #385)
++**Branch:** `chore/waiting-discipline`
++**Decisions:** grill Q108–Q113 (2026-10-20); Q111 as amended for stacked PRs
++
++## Plan
++
++Layer 1 shipped the *input* side of context discipline (briefs carry paths; no re-reads).
++This layer is the **waiting** side, and the measurement says the ordering was wrong in a
++useful way: the largest wait burn was never the parent's poll loop.
++
++| Where the wait happens | Mechanism | Observed cost |
++|---|---|---|
++| **inside a seat** (worker sleeping / retrying) | the child re-sends its whole context every turn | **919k tokens** — the B2c worker that died in its own gate at the 30-minute cap |
++| parent poll loop | `sleep 60` + a status line per iteration | ~25 tok/iteration, **plus** a 5-minute abort that returned nothing |
++| unbounded command output | full build/test logs | context-mode already keeps 215 KB out of context |
++
++The 30-minute subagent cap bounds **wall-clock, not tokens** — it permitted a 919k burn
++without ever being violated. That is the finding this layer exists to fix.
++
++## Implementation
++
++| Path | Change |
++|---|---|
++| `scripts/round/wait-ci.sh` | new — one call, one line, hard `timeout`; `--pr` / `--run`; exit 0 green · 1 failed · 3 timed out |
++| `scripts/round/README.md` | the third script, and why a `sleep` loop is the wrong primitive |
++| `references/role-contracts.md` | § **Output discipline** (the brief rule, on the way back) and § **Waiting discipline** (no sleeps; ~90 s per-command budget with the `gates.sh` carve-out; block only when the turn needs it; auto-merge off, with the stack hazard and the `submit --auto` naming trap) |
++| `SKILL.md` step 0 | the same three rules, in the dispatch checklist |
++| `documents/rounds/README.md` | Q113's three numbers at round close |
++
++**Not built, deliberately:** a mechanical sleep-detector. Prompts are not testable, and a
++token watchdog belongs in the harness rather than this repo — Q108(c) was rejected on that
++basis rather than on effort.
++
++## Verification
++
++| Check | Result |
++|---|---|
++| `bash -n scripts/round/wait-ci.sh` | clean |
++| `wait-ci.sh --help` | usage only, exit 0 |
++| `wait-ci.sh` against a **merged** PR / bogus id | exit 1 with the failing name, not a hang |
++| `gates.sh` (layer 1) unaffected | scripts/docs only; no test project touched |
++| Architecture suite | unchanged at 142 (no test edits this layer) |
++
++**Measured on the round that produced this layer:** the 7-iteration poll loop it replaces
++cost ~200 tokens and one aborted call; the two `--watch` calls that replaced it cost ~40
++tokens and both returned a verdict. Same information, one third the context, and it
++survives an interruption.
++
++## Acceptance
++
++Accepted by inspection against Q108–Q113. Every item is a file, a printed line, or a rule
++with a number in it; no branch of the tree is left assumed. The auto-merge paragraph carries
++the owner's amended answer for **stacked** PRs: atomic and per-PR auto-merge do not coexist,
++an upper layer's base is the layer below (so auto-merging it folds layers together), and the
++hands-off path is `gh stack merge --yes --squash` on the owner's word.
++
++## Follow-ups
++
++- **Q100** — the parallel-worker fan-out edits are *still* uncommitted in `.pi/skills/`;
++  they now depend on two sections that shipped after they were written (brief discipline,
++  waiting discipline) and need their own decision.
++- The Q113 numbers need a full round to prove themselves; the residuals round will be the
++  first one that can carry them.
+diff --git a/scripts/round/README.md b/scripts/round/README.md
+index cd98d3f2..7bb0989a 100644
+--- a/scripts/round/README.md
++++ b/scripts/round/README.md
+@@ -7,6 +7,7 @@ Two scripts, one purpose: remove the mechanical repetition from a
+ |---|---|---|
+ | `gates.sh` | Runs the CI-parity local gate: restore, Release build, then CI's exact `--filter` legs (unit, integration, cross-module wiring), the MAUI head with its non-optional serial flags, and both Python portal suites. Prints an explicit **NOT checked here** list. | It does not claim to *be* CI. Anything it skipped is named. |
+ | `deliver.sh` | Stages an explicitly-named path set, proves nothing else was staged, refuses policy-layer paths, shows the change set, commits, stops. | No push, no PR, no merge. Push belongs to `SCHOOLCOLLAB_ALLOW_PUSH=1`, the PR body is authored judgement, and a script cannot know whether a merge was authorized. |
++| `wait-ci.sh` | Waits for a PR's checks or a workflow run **once**, under a hard `timeout`, and prints one verdict line. | No `sleep` loop, no polling cadence to guess, and no way to lose the wait to an aborted call. Exit 0 green · 1 failed · 3 timed out. |
+ 
+ ## Why `gates.sh` mirrors filters instead of enumerating projects
+ 
+@@ -48,6 +49,9 @@ scripts/round/deliver.sh --message /tmp/msg.txt -- src tests documents/rounds/ro
+ scripts/round/gates.sh                # everything, including the MAUI head and both portals
+ scripts/round/gates.sh --no-maui      # fast .NET loop; "NOT checked" names the head instead
+ scripts/round/gates.sh --no-portals   # no uv on this machine
++
++scripts/round/wait-ci.sh --pr 385                      # block once, one line, 30-min ceiling
++scripts/round/wait-ci.sh --run 39419888474 --timeout 600
+ ```
+ 
+ `gates.sh` needs `uv` for the portal legs; without it they are listed as **not checked**
+diff --git a/scripts/round/wait-ci.sh b/scripts/round/wait-ci.sh
+new file mode 100644
+index 00000000..921f4d54
+--- /dev/null
++++ b/scripts/round/wait-ci.sh
+@@ -0,0 +1,88 @@
++#!/usr/bin/env bash
++# wait-ci.sh — ONE call, ONE line, never a sleep loop.
++#
++# WHY
++#   A `while ...; do sleep 60; gh pr checks; done` loop bills a line of context per
++#   iteration, cannot be interrupted without losing everything it waited for (a 5-minute
++#   abort returns NOTHING), and drifts when the next poll cadence is guessed. GitHub's
++#   `--watch` mode already blocks until the checks settle; the only things it lacks are a
++#   hard timeout and a bounded verdict, which is what this wrapper adds.
++#
++# USAGE
++#   scripts/round/wait-ci.sh --pr <number> [--timeout <seconds>]
++#   scripts/round/wait-ci.sh --run <run-id> [--timeout <seconds>]
++#
++#   --timeout   hard ceiling, default 1800 (30 min). On expiry the command is killed and
++#               the exit code is 3, so a caller can distinguish "still running" from "red".
++#
++# EXIT
++#   0  every check passed (skipped/path-filtered checks do not count as failures)
++#   1  at least one check failed   — the failing names are printed
++#   3  timed out before the checks settled
++#   2  usage error
++#
++# CONTEXT BUDGET: at most three lines of output, regardless of how long CI takes.
++# This is the parent's tool. A worker never waits on CI — it runs build + affected tests.
++
++set -uo pipefail
++
++TARGET_KIND=""
++TARGET=""
++TIMEOUT=1800
++while [[ $# -gt 0 ]]; do
++    case "$1" in
++        --pr)      TARGET_KIND=pr;  TARGET="$2"; shift 2 ;;
++        --run)     TARGET_KIND=run; TARGET="$2"; shift 2 ;;
++        --timeout) TIMEOUT="$2"; shift 2 ;;
++        -h|--help) sed -n '3,26p' "${BASH_SOURCE[0]}"; exit 0 ;;
++        *) echo "Unknown option: $1" >&2; exit 2 ;;
++    esac
++done
++[[ -n "$TARGET_KIND" && -n "$TARGET" ]] || { echo "usage: wait-ci.sh --pr <n> | --run <id> [--timeout s]" >&2; exit 2; }
++
++LOG="$(mktemp)"
++trap 'rm -f "$LOG"' EXIT
++
++if [[ "$TARGET_KIND" == "pr" ]]; then
++    timeout "$TIMEOUT" gh pr checks "$TARGET" --watch --interval 60 >"$LOG" 2>&1
++    rc=$?
++    LABEL="PR #$TARGET"
++else
++    timeout "$TIMEOUT" gh run watch "$TARGET" --exit-status --interval 30 >"$LOG" 2>&1
++    rc=$?
++    LABEL="run $TARGET"
++fi
++
++# timeout(1) exits 124 when it kills the child.
++if [[ $rc -eq 124 ]]; then
++    printf '%s: TIMEOUT after %ss — still not settled; re-run this call to keep waiting\n' "$LABEL" "$TIMEOUT"
++    exit 3
++fi
++
++pass=$(grep -c $'\tpass\t'     "$LOG" || true)
++fail=$(grep -c $'\tfail\t'     "$LOG" || true)
++skip=$(grep -c $'\tskipping\t' "$LOG" || true)
++pend=$(grep -c $'\tpending\t'  "$LOG" || true)
++
++if [[ "$fail" -gt 0 ]]; then
++    printf '%s: FAILED — %s pass, %s fail, %s skipped\n' "$LABEL" "$pass" "$fail" "$skip"
++    grep $'\tfail\t' "$LOG" | awk -F'\t' '{printf "  ✖ %s\n", $1}' | head -10
++    exit 1
++fi
++
++# A PR with no checks at all is NOT green — the same trap as `dotnet test | grep failed`
++# printing `failed: 0` for "Zero tests ran". Verified 2026-10-20: a bogus PR id reported
++# "GREEN — 0 pass" before this guard existed.
++if [[ "$pass" -eq 0 && "$skip" -eq 0 ]]; then
++    printf '%s: NO CHECKS FOUND — refusing to report green\n' "$LABEL"
++    head -5 "$LOG" | sed 's/^/  /'
++    exit 1
++fi
++
++if [[ "$pend" -gt 0 ]]; then
++    printf '%s: %s pass, %s pending, %s skipped — not settled (no failures yet)\n' "$LABEL" "$pass" "$pend" "$skip"
++    exit 3
++fi
++
++printf '%s: GREEN — %s pass, %s skipped (path-filtered)\n' "$LABEL" "$pass" "$skip"
++exit 0
