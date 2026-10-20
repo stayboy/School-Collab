@@ -296,22 +296,26 @@ public class AssignmentCreateBunitTests : BunitContext
     /// subject picker's options (and the derived signature default) follow.</summary>
     private static async Task AddGradeTargetAsync(IRenderedComponent<CreatePage> cut, string label)
     {
-        // Round B2c CI flake (2026-10-19, case-3 shape): v5 renders a FluentMenu's items only on the
-        // pass raised AFTER the kebab click, so reading them in the same statement chain let a loaded
-        // CI runner observe an empty menu — the click became a no-op, the dialog never opened and the
-        // wait below timed out with "Total render count across all components: 0". Click → settle →
-        // read (the AssignmentIndexBunitTests.OpenRowActionsAndReadItems shape, hardened there on
-        // 2026-10-06; this file kept the un-hardened form).
-        await cut.InvokeAsync(() => cut.Find("fluent-button[title='Add a target']").Click());
+        // Flake fix (2026-10-20): stop driving the kebab → menu-item CLICK. A v5 FluentMenu renders its
+        // items only on the pass raised AFTER the kebab click, so a loaded CI runner could click an item
+        // whose handler was no longer live — the dialog never opened and the wait below timed out with
+        // "Total render count across all components: 0". That happened twice on CI (runs 39334990288 and
+        // 39391404628) while the class passed 10/10 locally, and the Linux repro harness cannot execute
+        // these tests at all, so no further timing patch could be justified. The action is DATA on the
+        // menu (RowActionsMenu.Actions → RowAction.OnClick), so invoking it directly exercises the real
+        // handler and the mocked dialog while deleting the lazy-render window entirely. What this stops
+        // covering — "this action is reachable through the kebab" — is owned by RowActionsMenuTests at
+        // the component level, not by this page test.
+        var menu = cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
+            .Single(m => m.Instance.AriaLabel == "Add a target");
+        var addGradeLevels = menu.Instance.Actions.Single(a => a.Label == "Add grade levels");
 
-        cut.WaitForAssertion(
-            () => TargetMenuItems(cut).Should().NotBeEmpty(
-                "the target menu renders its items on the pass after the kebab click"),
-            TimeSpan.FromSeconds(15));
+        // The direct call must not bypass the affordance's own precondition: a disabled action is a
+        // no-op in the UI, and this test would then be asserting on a state the product refuses.
+        addGradeLevels.Disabled.Should().BeFalse(
+            "the grade-level target action must be enabled on a loaded create surface");
 
-        await cut.InvokeAsync(() => TargetMenuItems(cut)
-            .Single(i => i.TextContent.Trim() == "Add grade levels")
-            .MenuItemClick());
+        await cut.InvokeAsync(() => addGradeLevels.OnClick());
 
         cut.WaitForAssertion(() =>
         {
@@ -322,13 +326,6 @@ public class AssignmentCreateBunitTests : BunitContext
                 "the grade target's effective subject list should have landed");
         }, DialogRoundTripBudget);
     }
-
-    /// <summary>The "Add a target" row-actions menu's items, read through the component that owns
-    /// them so the read is scoped to the right kebab (the file's pre-existing scoping).</summary>
-    private static IReadOnlyList<IElement> TargetMenuItems(IRenderedComponent<CreatePage> cut) =>
-        cut.FindComponents<SchoolCollab.Admin.Shared.Components.RowActionsMenu>()
-            .Single(m => m.Instance.AriaLabel == "Add a target")
-            .FindAll("fluent-menu-item");
     /// <summary>Fills the Basics title through the bound text field's own callback — the create
     /// guards require a non-empty title before anything is posted.</summary>
     private static async Task SetTitleAsync(IRenderedComponent<CreatePage> cut, string title)
