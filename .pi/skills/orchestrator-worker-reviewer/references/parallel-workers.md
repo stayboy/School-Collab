@@ -5,7 +5,8 @@ slice, instead of one worker for the whole plan. **Worker role only** — the
 plan, plan review, freeze, review, acceptance, tester, rework and escalation
 steps run unchanged; this file changes only how workers are dispatched,
 isolated and integrated. Adopted 2026-10-19 via grill rounds (owner settled
-Q1–Q16).
+Q1–Q16). Design record — why these rules, and which alternatives were
+rejected: `documents/solution/parallel-worker-fan-out.md`.
 
 ## When it fires (eligibility — mechanical, dispatch-time)
 
@@ -18,8 +19,8 @@ partition into ≥2 slices of ~10+ files):
 1. The plan's expected-files list partitions into **≥2 slices**: pairwise
    file-disjoint, none dropped, none in two slices (the same set-diff gate as
    the review split).
-2. Each slice is **≥~10 expected files** (provisional — calibrate together
-   with the concurrency cap below).
+2. Each slice is **≥~10 expected files** (provisional — revisit after the first
+   qualifying round; the concurrency default is 2 regardless, see below).
 3. The seam scan (below) finds no unresolved cross-slice coupling.
 
 ## Slicing and seams (L1–L2)
@@ -38,12 +39,14 @@ partition into ≥2 slices of ~10+ files):
 
 ## Dispatch and isolation (L3–L4)
 
-- **≤2 concurrent building workers** (provisional — calibrate on the first
-  qualifying real round; record memory/build behavior in that round's doc
-  before treating 2 as settled). 3+ concurrent slots only for non-building
-  slices (docs/research). Rationale: the OOM history — a default parallel
-  build has killed the agent process (`0xC0000409`), and each worktree build
-  is a *full* build, heavier than the incremental builds that history records.
+- **2 concurrent building workers by default; a user-named count wins** (record
+  it on round-doc line 1). The owner ruling is the only mechanism that changes
+  the default — the first qualifying round records memory/build behavior as
+  *evidence*, not as a gate on the number. 3+ concurrent slots only for
+  non-building slices (docs/research). Rationale: the OOM history — a default
+  parallel build has killed the agent process (`0xC0000409`), and each worktree
+  build is a *full* build, heavier than the incremental builds that history
+  records.
 - **Persistent per-slot worktrees** (e.g. `School-Collab-wa`, `School-Collab-wb`),
   created once and reused across rounds — matching the repo's existing
   multi-worktree practice. Retained incremental build state offsets the
