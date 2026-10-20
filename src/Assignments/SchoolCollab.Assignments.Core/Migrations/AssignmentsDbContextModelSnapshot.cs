@@ -34,6 +34,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("character varying(4000)")
                         .HasColumnName("ai_prompt_override");
 
+                    b.Property<string>("ApprovalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("approval_reason");
+
                     b.Property<int?>("ApprovalStatus")
                         .HasColumnType("integer")
                         .HasColumnName("approval_status");
@@ -172,6 +177,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0)
                         .HasColumnName("status");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
 
                     b.Property<int>("TargetAudienceType")
                         .ValueGeneratedOnAdd()

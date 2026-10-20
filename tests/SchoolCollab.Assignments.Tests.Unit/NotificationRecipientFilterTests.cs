@@ -62,9 +62,11 @@ public class NotificationRecipientFilterTests
         new(SignatureRequirementMode.Disabled, RequiresApprovalBeforePublish: false,
             MaxPrimaryContacts: maxPrimary, MaxCopyContacts: maxCopy,
             MandatoryReview: null, ArchiveGraceDays: null,
+            ApprovalWindowDays: null,
             SignatureRequirementFromOverride: false, RequiresApprovalBeforePublishFromOverride: false,
             MaxPrimaryContactsFromOverride: false, MaxCopyContactsFromOverride: false,
-            MandatoryReviewFromOverride: false, ArchiveGraceDaysFromOverride: false);
+            MandatoryReviewFromOverride: false, ArchiveGraceDaysFromOverride: false,
+            ApprovalWindowDaysFromOverride: false);
 
     private static IReadOnlyList<AssignmentRecipient> Apply(
         IReadOnlyList<AssignmentRecipient> recipients,

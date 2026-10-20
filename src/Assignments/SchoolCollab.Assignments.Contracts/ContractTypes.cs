@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 
 namespace SchoolCollab.Assignments.Contracts;
 
@@ -18,12 +19,15 @@ public enum AssignmentStatusDto
 /// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.ApprovalStatus</c>
 /// (spec §7 Q2). The wire surface is <c>null</c> when the assignment has
 /// not been submitted for approval yet. Serializes as the string
-/// name (Pending / Approved / Rejected).</summary>
+/// name (Pending / Approved / Rejected / Denied).</summary>
 public enum ApprovalStatusDto
 {
     Pending = 0,
     Approved = 1,
-    Rejected = 2
+    Rejected = 2,
+    /// <summary>Mirror of <c>ApprovalStatus.Denied</c> — the terminal denial (round
+    /// assignment-approval-workflow / spec §3.1).</summary>
+    Denied = 3
 }
 
 public enum AssignmentTypeDto
@@ -226,6 +230,17 @@ public record AssignmentSummaryDto(
     Guid? ApprovedBy = null,
     /// <summary>The UTC moment an approval was granted.</summary>
     DateTimeOffset? ApprovedAt = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.1): the approver's optional reason for
+    /// the current Rejected/Denied decision. Null on any other state.</summary>
+    string? ApprovalReason = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.1): the UTC moment the current
+    /// submission for approval was made (cleared on Reject/Deny).</summary>
+    DateTimeOffset? SubmittedAt = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3): <c>SubmittedAt + the effective
+    /// ApprovalWindowDays</c>, derived server-side through the existing per-(tenant, grade)
+    /// effective-policy cache. Null when the row is not awaiting approval or no window is
+    /// configured — a fail-open resolve never invents a deadline.</summary>
+    DateTimeOffset? WindowExpiresAt = null,
     /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
     /// Null = no pass/fail signal.</summary>
     decimal? PassScore = null,
@@ -386,11 +401,19 @@ public record ScheduleAssignmentRequest(DateTimeOffset AvailableFromUtc);
 /// no shape change.</summary>
 public record ApproveAssignmentRequest(Guid ApproverId);
 
-/// <summary>Reject a pending assignment (spec §7 Q2). See
+/// <summary>Reject a pending assignment (spec §7 Q2) — sent back for redo. See
 /// <see cref="ApproveAssignmentRequest"/> for the identity posture —
 /// <see cref="RejectAssignmentRequest.ApproverId"/> is server-ignored when a
-/// <c>teacher_id</c> claim is present (ar-20).</summary>
-public record RejectAssignmentRequest(Guid ApproverId);
+/// <c>teacher_id</c> claim is present (ar-20). <see cref="Reason"/> is the approver's optional
+/// free-form note, stored on the row and shown to the author (round assignment-approval-workflow /
+/// spec §3.1, Q10); it is omitted from the payload when null, so a caller that sends no reason
+/// produces exactly the pre-round body.</summary>
+public record RejectAssignmentRequest(Guid ApproverId, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
+
+/// <summary>Deny a pending assignment (round assignment-approval-workflow / spec §3.1, Q10) — the
+/// terminal decision. Same identity posture as <see cref="RejectAssignmentRequest"/>;
+/// <see cref="Reason"/> is optional and omitted from the payload when null.</summary>
+public record DenyAssignmentRequest(Guid ApproverId, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
 
 /// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
 public record NewQuestionOptionDto(string OptionText, bool IsCorrect);

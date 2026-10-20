@@ -80,6 +80,18 @@
                             <div class="mt-2">
                                 <FluentBadge Appearance="@ApprovalBadgeAppearance()">@ApprovalStatusText()</FluentBadge>
 
+                                @* Round assignment-approval-workflow (spec §3.6): the window countdown
+                                   renders ONLY while Pending. Reject / Deny / the sweep's auto-return all
+                                   clear SubmittedAt, so a returned row can never show a stale,
+                                   long-expired countdown. *@
+                                @if (_item.ApprovalStatus == ApprovalStatusDto.Pending && _item.WindowExpiresAt is { } expiresAt)
+                                {
+                                    <FluentBadge Appearance="BadgeAppearance.Ghost" class="ms-2"
+                                                 Title="@($"Approval window expires {expiresAt.ToLocalTime():g}")">
+                                        @WindowCountdownText(expiresAt)
+                                    </FluentBadge>
+                                }
+
                                 @if (_item.Status == AssignmentStatusDto.Draft && (_item.ApprovalStatus is null || _item.ApprovalStatus == ApprovalStatusDto.Rejected))
                                 {
                                     <FluentButton Appearance="ButtonAppearance.Primary" OnClick="OnSubmitForApprovalAsync" Disabled="@_submittingForApproval" class="ms-2">
@@ -95,8 +107,20 @@
                                     <FluentButton Appearance="ButtonAppearance.Outline" OnClick="OnRejectAsync" Disabled="@_actingOnApproval" class="ms-2">
                                         @(_actingOnApproval ? "Working…" : "Reject")
                                     </FluentButton>
+                                    @* Round assignment-approval-workflow (spec §3.1, Q10): Deny is the
+                                       TERMINAL decision — the hold is released but the row can never be
+                                       resubmitted or published, so the copy says so before the click. *@
+                                    <FluentButton Appearance="ButtonAppearance.Outline" OnClick="OnDenyAsync" Disabled="@_actingOnApproval" class="ms-2"
+                                                  Title="Deny this assignment — terminal; the author must duplicate it to continue">
+                                        @(_actingOnApproval ? "Working…" : "Deny")
+                                    </FluentButton>
                                 }
                             </div>
+                            @* The approver's decision reason, surfaced to the author (Q10). *@
+                            @if (!string.IsNullOrWhiteSpace(_item.ApprovalReason))
+                            {
+                                <p class="muted mt-2">Reason: @_item.ApprovalReason</p>
+                            }
                             @if (!string.IsNullOrEmpty(_approvalError))
                             {
                                 <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2">@_approvalError</FluentMessageBar>
@@ -415,18 +439,38 @@
         ApprovalStatusDto.Pending => "Pending",
         ApprovalStatusDto.Approved => "Approved",
         ApprovalStatusDto.Rejected => "Rejected",
+        ApprovalStatusDto.Denied => "Denied",
         _ => "—"
     };
+
+    /// <summary>Round assignment-approval-workflow (spec §3.6): the pending-window countdown. A
+    /// passed expiry still renders (as "expired") because the sweep may not have run yet — hide it
+    /// and the author sees a Pending row with no explanation of why nothing happens.</summary>
+    private static string WindowCountdownText(DateTimeOffset expiresAt)
+    {
+        var remaining = expiresAt - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            return "Approval window expired";
+        }
+
+        return remaining.TotalDays >= 1
+            ? $"{(int)remaining.TotalDays}d {remaining.Hours}h left"
+            : $"{remaining.Hours}h {remaining.Minutes}m left";
+    }
 
     // WS-A2 deviation from decision (j): BadgeAppearance offers only Filled / Ghost, so Pending
     // shares Filled with Rejected (both "submitted, not yet approved" — text distinguishes).
     // Approved keeps the Filled success fill and "Not submitted" stays the muted Ghost.
+    // Round assignment-approval-workflow: Denied shares Rejected's Filled fill (both are a decision on
+    // the row) — the chip TEXT is what tells "redo" from "terminal".
     private BadgeAppearance ApprovalBadgeAppearance() => _item?.ApprovalStatus switch
     {
         null => BadgeAppearance.Ghost,
         ApprovalStatusDto.Pending => BadgeAppearance.Filled,
         ApprovalStatusDto.Approved => BadgeAppearance.Filled,
         ApprovalStatusDto.Rejected => BadgeAppearance.Filled,
+        ApprovalStatusDto.Denied => BadgeAppearance.Filled,
         _ => BadgeAppearance.Ghost
     };
 
@@ -495,15 +539,27 @@
     private async Task OnRejectAsync()
     {
         if (_item is null) return;
-        if (!await DialogService.ShowConfirmDialogAsync($"Reject assignment '{_item.Title}'?", primaryText: "Reject"))
-            return;
+
+        // Round assignment-approval-workflow (spec §3.6, Q10): Reject collects the approver's OPTIONAL
+        // reason in a shell dialog (the shared dialog conventions), then sends the decision.
+        var decision = await DialogService.ShowShellDialogAsync<ApprovalDecisionReasonDialog,
+            ApprovalDecisionReasonDialog.ReasonFormModel,
+            ApprovalDecisionReasonDialog.ReasonResult>(
+            new ApprovalDecisionReasonDialog.ReasonFormModel(
+                "Reject assignment",
+                $"Reject '{_item.Title}' and send it back to the author for redo?",
+                "Reject"),
+            $"Reject '{_item.Title}'",
+            DialogWidth.Small);
+        if (decision is null) return;
+
         _actingOnApproval = true;
         _approvalError = null;
         var ct = _loadCts?.Token ?? CancellationToken.None;
 
         try
         {
-            await Api.RejectAsync(Id, await GetActingTeacherIdAsync(), ct);
+            await Api.RejectAsync(Id, await GetActingTeacherIdAsync(), decision.Reason, ct);
             _item = await Api.GetByIdAsync(Id, ct);
         }
         catch (OperationCanceledException) { }
@@ -511,6 +567,47 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to reject assignment {AssignmentId}", Id);
+            _approvalError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _actingOnApproval = false;
+        }
+    }
+
+    /// <summary>Round assignment-approval-workflow (spec §3.1/§3.6, Q10): Deny is the terminal
+    /// decision. The dialog collects the optional reason; the copy states that the row cannot be
+    /// resubmitted, so the approver knows the escape hatch is a duplicate.</summary>
+    private async Task OnDenyAsync()
+    {
+        if (_item is null) return;
+
+        var decision = await DialogService.ShowShellDialogAsync<ApprovalDecisionReasonDialog,
+            ApprovalDecisionReasonDialog.ReasonFormModel,
+            ApprovalDecisionReasonDialog.ReasonResult>(
+            new ApprovalDecisionReasonDialog.ReasonFormModel(
+                "Deny assignment",
+                $"Deny '{_item.Title}'? A denied assignment is final — the author must duplicate it to "
+                + "continue. Both decisions are shown to the author with your reason.",
+                "Deny"),
+            $"Deny '{_item.Title}'",
+            DialogWidth.Small);
+        if (decision is null) return;
+
+        _actingOnApproval = true;
+        _approvalError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            await Api.DenyAsync(Id, await GetActingTeacherIdAsync(), decision.Reason, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to deny assignment {AssignmentId}", Id);
             _approvalError = ex.Message;
         }
         finally

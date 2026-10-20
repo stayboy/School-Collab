@@ -35,6 +35,13 @@ public record AssignmentSummary(
     /// <summary>WS-A2 (spec §7 Q2): when an approval was granted.
     /// Cleared on <see cref="Assignment.Reject"/>.</summary>
     DateTimeOffset? ApprovedAt = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.1): the UTC moment the current
+    /// submission for approval was made; cleared on Reject/Deny. Projected so the read handlers can
+    /// derive <c>WindowExpiresAt</c>.</summary>
+    DateTimeOffset? SubmittedAt = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.1, Q10): the approver's optional reason
+    /// for the current Rejected/Denied decision. Null when no reason was given.</summary>
+    string? ApprovalReason = null,
     /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
     /// Null = no pass/fail signal.</summary>
     decimal? PassScore = null,

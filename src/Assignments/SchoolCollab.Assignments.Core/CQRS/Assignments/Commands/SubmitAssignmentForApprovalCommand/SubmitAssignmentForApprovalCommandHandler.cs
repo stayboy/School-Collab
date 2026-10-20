@@ -21,6 +21,10 @@ public sealed class SubmitAssignmentForApprovalCommandHandler(
         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.AssignmentId);
 
+        // Round assignment-approval-workflow (spec §3.2, Q9): a resubmit — a held
+        // authoring write path, so it refuses while the row awaits an approval decision.
+        assignment.EnsureNotAwaitingApproval();
+
         assignment.SubmitForApproval();
 
         await repository.UpdateAsync(assignment, cancellationToken);

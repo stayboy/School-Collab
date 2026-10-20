@@ -1,0 +1,48 @@
+@* Round assignment-approval-workflow (spec §3.6, Q10) — the approval-decision reason dialog.
+   Detail.razor opens it for BOTH Reject ("sent back for redo") and Deny (terminal): the reason is
+   OPTIONAL (the author sees it, an approver need not explain), so an empty box is a valid submit and
+   returns a null reason. Dumb dialog by design — it performs no side effect; the hosting page issues
+   the decision with the returned reason. *@
+@inherits DialogShellBase<ApprovalDecisionReasonDialog.ReasonFormModel, ApprovalDecisionReasonDialog.ReasonResult>
+@namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+
+<DialogShellBody>
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <p class="dialog-hint">
+            @Model.Prompt
+        </p>
+
+        <FormRow Label="Reason" Help="Optional — shown to the author.">
+            <FluentTextArea @bind-Value="Model.Reason" class="full-width ta-lines-3"
+                            Placeholder="Why? (optional)" />
+        </FormRow>
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="@Model.SubmitText"
+                           SavingText="Saving..." OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+</DialogShellBody>
+
+@code {
+    /// <summary>Dialog inputs: which decision is being taken (for the copy + button verb only).</summary>
+    public sealed class ReasonFormModel(string title, string prompt, string submitText)
+    {
+        public string Title { get; } = title;
+        public string Prompt { get; } = prompt;
+        public string SubmitText { get; } = submitText;
+
+        /// <summary>The approver's optional free-form reason. Whitespace is treated as "no reason".</summary>
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>The decision payload: the trimmed reason, or null when the approver typed nothing.</summary>
+    public sealed record ReasonResult(string? Reason);
+
+    protected override Task<ReasonResult?> SubmitAsync(ReasonFormModel model) =>
+        Task.FromResult<ReasonResult?>(new ReasonResult(
+            string.IsNullOrWhiteSpace(model.Reason) ? null : model.Reason.Trim()));
+}

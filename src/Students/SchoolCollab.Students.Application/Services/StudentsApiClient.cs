@@ -2261,7 +2261,10 @@ public sealed record UpsertGradeAssignmentPolicyRequest(
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
     bool? MandatoryReview = null,
-    int? ArchiveGraceDays = null);
+    int? ArchiveGraceDays = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3, Q7): the approval window in days;
+    /// null = inherit / no deadline, non-positive ⇒ 400.</summary>
+    int? ApprovalWindowDays = null);
 
 /// <summary>
 /// <b>Legacy request shape (Round A only).</b> The pre-widening PUT body was the single

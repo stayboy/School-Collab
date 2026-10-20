@@ -1,12 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
-using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.AssignmentPolicies;
-using SchoolCollab.Settings.Core.DTOs;
 using SchoolCollab.Students.Core.DTOs;
 
-namespace SchoolCollab.Assignments.Api.Services;
+namespace SchoolCollab.Assignments.Core.Services;
 
 /// <summary>
 /// HTTP-backed <see cref="IAssignmentPolicyResolver"/>
@@ -16,15 +14,29 @@ namespace SchoolCollab.Assignments.Api.Services;
 /// <see cref="EffectiveAssignmentPolicyResolver"/>. Named clients <c>settings-api</c> +
 /// <c>students-api</c> resolve through Aspire service discovery.
 ///
+/// <para><b>Round <c>assignment-approval-workflow</c> — relocated from Assignments.Api into
+/// Assignments.Core</b> (the <see cref="NotificationPolicyResolver"/> relocation precedent): the
+/// approval sweep lives in Assignments.Worker, which references ServiceDefaults + Core only, so
+/// the Worker could not resolve the effective <c>ApprovalWindowDays</c> while the only
+/// implementation was Api-resident. Both hosts register this same class on their own named clients
+/// (Assignments.Api/Program.cs and Assignments.Worker/Program.cs) — Core has no HttpClient
+/// wiring.</para>
+///
+/// <para><b>No cross-context reference.</b> Assignments.Core does not reference Settings.Core (repo
+/// rule: no expanded cross-context references), so the tenant-default payload is deserialized into
+/// the local <see cref="TenantAssignmentPolicyPayload"/> wire mirror rather than the Settings DTO.
+/// The per-grade override uses the Students.Core DTO, which Core already references.</para>
+///
 /// <para>Any fetch failure degrades gracefully to "nothing configured" (unset tenant ⇒
 /// <c>null</c>; failed / absent grade row ⇒ inherit), so the built-in defaults
-/// (<see cref="SignatureRequirementMode.Disabled"/>, no approval requirement, uncapped) apply and
-/// neither the create wizard nor a publish is blocked by policy — the fail-open posture of the
-/// resolver it replaces. For the two resolved write-seam fields that posture is explicit: a
-/// degraded fetch leaves <c>MandatoryReview</c> <see langword="null"/> (the write seam keeps today's
-/// mandatory-review default) and <c>ArchiveGraceDays</c> <see langword="null"/> (the write seam keeps
-/// the built-in 30-day retention floor) — degradation never turns a stricter policy ON and never
-/// silently zeroes the archive window.</para>
+/// (<see cref="SignatureRequirementMode.Disabled"/>, no approval requirement, uncapped, no approval
+/// window) apply and neither the create wizard nor a publish is blocked by policy — the fail-open
+/// posture of the resolver it replaces. For the resolved write-seam fields that posture is
+/// explicit: a degraded fetch leaves <c>MandatoryReview</c> <see langword="null"/> (the write seam
+/// keeps today's mandatory-review default), <c>ArchiveGraceDays</c> <see langword="null"/> (the
+/// write seam keeps the built-in 30-day retention floor) and <c>ApprovalWindowDays</c>
+/// <see langword="null"/> (no deadline — a failed resolve can never invent an approval window and
+/// so can never auto-return a pending assignment).</para>
 ///
 /// <para><b>Q49 hardening (round notification-templates-b2a).</b> Both fetches carry an explicit
 /// 5-second wall clock and widen to the template resolver's fail-open contract (timeout, non-JSON
@@ -69,8 +81,8 @@ public sealed class AssignmentPolicyResolver(
                 return null;
             }
             response.EnsureSuccessStatusCode();
-            var dto = await response.Content.ReadFromJsonAsync<TenantAssignmentPolicyDto>(timeoutCts.Token);
-            return dto is null ? null : ToFields(dto);
+            var payload = await response.Content.ReadFromJsonAsync<TenantAssignmentPolicyPayload>(timeoutCts.Token);
+            return payload is null ? null : ToFields(payload);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -135,14 +147,15 @@ public sealed class AssignmentPolicyResolver(
         or System.Text.Json.JsonException
         or NotSupportedException;
 
-    private static AssignmentPolicyFields ToFields(TenantAssignmentPolicyDto dto) => new()
+    private static AssignmentPolicyFields ToFields(TenantAssignmentPolicyPayload payload) => new()
     {
-        SignatureRequirement = dto.SignatureRequirement,
-        RequiresApprovalBeforePublish = dto.RequiresApprovalBeforePublish,
-        MaxPrimaryContacts = dto.MaxPrimaryContacts,
-        MaxCopyContacts = dto.MaxCopyContacts,
-        MandatoryReview = dto.MandatoryReview,
-        ArchiveGraceDays = dto.ArchiveGraceDays,
+        SignatureRequirement = payload.SignatureRequirement,
+        RequiresApprovalBeforePublish = payload.RequiresApprovalBeforePublish,
+        MaxPrimaryContacts = payload.MaxPrimaryContacts,
+        MaxCopyContacts = payload.MaxCopyContacts,
+        MandatoryReview = payload.MandatoryReview,
+        ArchiveGraceDays = payload.ArchiveGraceDays,
+        ApprovalWindowDays = payload.ApprovalWindowDays,
     };
 
     private static AssignmentPolicyFields ToFields(GradeAssignmentPolicyDto dto) => new()
@@ -153,5 +166,20 @@ public sealed class AssignmentPolicyResolver(
         MaxCopyContacts = dto.MaxCopyContacts,
         MandatoryReview = dto.MandatoryReview,
         ArchiveGraceDays = dto.ArchiveGraceDays,
+        ApprovalWindowDays = dto.ApprovalWindowDays,
     };
 }
+
+/// <summary>Round <c>assignment-approval-workflow</c> — local wire mirror of the Settings API's
+/// tenant assignment-policy payload, kept inside Assignments.Core so the relocated
+/// <see cref="AssignmentPolicyResolver"/> does not depend on Settings.Core (no new cross-context
+/// reference, the <c>TenantNotificationPolicyPayload</c> precedent). Property names match the
+/// Settings DTO's JSON shape.</summary>
+public sealed record TenantAssignmentPolicyPayload(
+    SignatureRequirementMode? SignatureRequirement,
+    bool? RequiresApprovalBeforePublish,
+    int? MaxPrimaryContacts,
+    int? MaxCopyContacts,
+    bool? MandatoryReview,
+    int? ArchiveGraceDays,
+    int? ApprovalWindowDays);

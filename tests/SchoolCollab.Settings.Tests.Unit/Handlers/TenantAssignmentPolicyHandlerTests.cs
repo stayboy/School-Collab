@@ -72,6 +72,7 @@ public class TenantAssignmentPolicyHandlerTests
         result.MaxCopyContacts.Should().Be(4);
         result.MandatoryReview.Should().BeTrue("the guardian-review field round-trips (D3)");
         result.ArchiveGraceDays.Should().Be(45, "the archive window round-trips (D5)");
+        result.ApprovalWindowDays.Should().BeNull("unset in this call — the window is null by default");
     }
 
     [TestMethod]
@@ -171,5 +172,55 @@ public class TenantAssignmentPolicyHandlerTests
         result.MaxPrimaryContacts.Should().BeNull("null stays unset — it is not a non-positive cap");
         result.MaxCopyContacts.Should().BeNull();
         result.SignatureRequirement.Should().Be(SignatureRequirementMode.Optional);
+    }
+
+    // ── Round assignment-approval-workflow (spec §3.3, Q7): the approval window ────
+
+    [TestMethod]
+    public async Task Upsert_RoundTripsTheApprovalWindow()
+    {
+        AsTenant(TenantA);
+        await _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
+            null, true, null, null, ApprovalWindowDays: 5));
+
+        var result = await _getHandler.HandleAsync(GetTenantAssignmentPolicy.Instance);
+
+        result!.ApprovalWindowDays.Should().Be(5, "the seventh policy field round-trips like the rest");
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithZeroApprovalWindow_Throws400AndPersistsNothing()
+    {
+        AsTenant(TenantA);
+
+        var act = () => _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
+            null, null, null, null, ApprovalWindowDays: 0));
+
+        var ex = await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        ex.Which.ParamName.Should().Be("ApprovalWindowDays", "Q7: a non-positive window would mean 'expires immediately'");
+        (await _db.TenantAssignmentPolicies.CountAsync()).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithNegativeApprovalWindow_Throws400()
+    {
+        AsTenant(TenantA);
+
+        var act = () => _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
+            null, null, null, null, ApprovalWindowDays: -3));
+
+        (await act.Should().ThrowAsync<ArgumentOutOfRangeException>())
+            .Which.ParamName.Should().Be("ApprovalWindowDays");
+    }
+
+    [TestMethod]
+    public async Task Upsert_WithNullApprovalWindow_StoresNoWindow()
+    {
+        AsTenant(TenantA);
+
+        var result = await _upsertHandler.HandleAsync(new UpsertTenantAssignmentPolicy(
+            null, null, null, null, ApprovalWindowDays: null));
+
+        result.ApprovalWindowDays.Should().BeNull("null is the built-in default — no deadline");
     }
 }

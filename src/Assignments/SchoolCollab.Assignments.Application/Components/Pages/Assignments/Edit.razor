@@ -1,4 +1,6 @@
 @page "/assignments/{Id:guid}/edit"
+@using SchoolCollab.Assignments.Contracts
+@inject AssignmentsApiClient Api
 
 @*
     Thin host (R1): the edit surface IS the shared compartmentalized
@@ -6,12 +8,48 @@
     View internally when the assignment is no longer Draft/Scheduled (UX-9/UX-11), so this
     host never tests the status itself and Edit reaches full parity with Create —
     question editor, AI generation, resources and scoring (D5).
+
+    Round assignment-approval-workflow (spec §3.2/§3.6): while the row is Pending, the
+    server-side edit hold refuses every save with 409. The host therefore reads the row itself
+    (one extra read, deliberately — the component exposes no state callback) and renders the
+    LOCK BANNER, so the author is told why before hitting a failed save.
 *@
 
 <PageTitle>Edit Assignment</PageTitle>
+
+@if (_approvalStatus == ApprovalStatusDto.Pending)
+{
+    <FluentMessageBar Intent="MessageBarIntent.Warning" Class="mb-3" Title="Locked — pending approval">
+        This assignment is awaiting an approver's decision, so it cannot be changed right now.
+        Editing unlocks when it is approved, rejected (sent back for redo) or denied.
+        @if (_windowExpiresAt is { } expiresAt)
+        {
+            <span> The approval window expires @expiresAt.ToLocalTime().ToString("g").</span>
+        }
+    </FluentMessageBar>
+}
 
 <AssignmentAuthoring Mode="AssignmentAuthoringMode.Edit" Id="Id" />
 
 @code {
     [Parameter] public Guid Id { get; set; }
+
+    private ApprovalStatusDto? _approvalStatus;
+    private DateTimeOffset? _windowExpiresAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Best-effort: the banner is an aid, never a gate — a failed read leaves the authoring
+        // component to report its own error rather than blocking the page.
+        try
+        {
+            var item = await Api.GetByIdAsync(Id);
+            _approvalStatus = item?.ApprovalStatus;
+            _windowExpiresAt = item?.WindowExpiresAt;
+        }
+        catch (Exception)
+        {
+            _approvalStatus = null;
+        }
+    }
 }

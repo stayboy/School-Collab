@@ -41,6 +41,10 @@ public sealed class LinkAssignmentGroupsHandler(
         var assignment = await assignmentRepository.GetAsync(command.AssignmentId, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.AssignmentId);
 
+        // Round assignment-approval-workflow (spec §3.2, Q9): changing the reviewed audience — a held
+        // authoring write path, so it refuses while the row awaits an approval decision.
+        assignment.EnsureNotAwaitingApproval();
+
         var requestedIds = command.ActivityGroupIds.Distinct().ToArray();
 
         // FR-21/EC-11: resolve groups in the caller's tenant. Missing ids (group

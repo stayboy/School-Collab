@@ -165,10 +165,12 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationP
 // Effective assignment-policy resolver (documents/solution/assignment-policy-fields.md §5):
 // reads the tenant default (Settings API) + grade override (Students API) and merges them into
 // the effective policy, replacing the single-boolean signature-default resolver.
-// Same named clients as the
-// notification resolver above.
+// Round assignment-approval-workflow: the implementation moved to Assignments.Core (the
+// NotificationPolicyResolver relocation precedent) because the approval sweep in
+// Assignments.Worker must resolve the effective ApprovalWindowDays, and the Worker references
+// Core only. Both hosts register this SAME class on their own named clients.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentPolicyResolver,
-    SchoolCollab.Assignments.Api.Services.AssignmentPolicyResolver>();
+    SchoolCollab.Assignments.Core.Services.AssignmentPolicyResolver>();
 
 // Guardian sign-off consent language (WS-C1/C2 / spec §3.2 line 53): tenant
 // consent-text override from the Settings API, fail-open to the embedded

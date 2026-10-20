@@ -374,12 +374,23 @@ public sealed class AssignmentsApiClient
         (await _http.PostAsJsonAsync($"/assignments/{id}/approve", new ApproveAssignmentRequest(approverId), _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 
-    /// <summary>Reject a pending assignment. <paramref name="approverId"/>
-    /// is the identity placeholder — wired to auth in a later phase.</summary>
-    public async Task RejectAsync(Guid id, Guid approverId, CancellationToken ct = default)
+    /// <summary>Reject a pending assignment — sent back for redo. <paramref name="approverId"/>
+    /// is the identity placeholder — wired to auth in a later phase.
+    /// <paramref name="reason"/> is the approver's optional note, stored on the row and shown to
+    /// the author (round assignment-approval-workflow / spec §3.1, Q10).</summary>
+    public async Task RejectAsync(Guid id, Guid approverId, string? reason = null, CancellationToken ct = default)
     {
         _logger.LogInformation("Rejecting assignment {AssignmentId}", id);
-        (await _http.PostAsJsonAsync($"/assignments/{id}/reject", new RejectAssignmentRequest(approverId), _jsonOptions, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/assignments/{id}/reject", new RejectAssignmentRequest(approverId, reason), _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Deny a pending assignment — the terminal decision (round
+    /// assignment-approval-workflow / spec §3.1, Q10). Releases the edit hold; the row can never be
+    /// resubmitted or published, so duplicating it is the author's way forward.</summary>
+    public async Task DenyAsync(Guid id, Guid approverId, string? reason = null, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Denying assignment {AssignmentId}", id);
+        (await _http.PostAsJsonAsync($"/assignments/{id}/deny", new DenyAssignmentRequest(approverId, reason), _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 
     public async Task ReviewAsync(Guid id, ReviewAssignmentRequest req, CancellationToken ct = default)

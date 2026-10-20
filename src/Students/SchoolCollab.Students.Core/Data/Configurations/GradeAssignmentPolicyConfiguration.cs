@@ -39,6 +39,8 @@ internal sealed class GradeAssignmentPolicyConfiguration
         builder.Property(x => x.MaxCopyContacts);
         builder.Property(x => x.MandatoryReview);
         builder.Property(x => x.ArchiveGraceDays);
+        // Round assignment-approval-workflow (spec §3.3): the approval window in days.
+        builder.Property(x => x.ApprovalWindowDays);
 
         // One policy row per (tenant, grade); cascade-delete with the grade.
         builder.HasOne<GradeLevel>()

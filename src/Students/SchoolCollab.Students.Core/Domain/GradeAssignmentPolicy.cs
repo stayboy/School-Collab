@@ -54,6 +54,13 @@ public sealed class GradeAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowVe
     /// </summary>
     public int? ArchiveGraceDays { get; private set; }
 
+    /// <summary>
+    /// Grade-level override of the approval window in days (round
+    /// <c>assignment-approval-workflow</c> / spec §3.3, Q11). Null = inherit the tenant default;
+    /// an unset chain means no deadline.
+    /// </summary>
+    public int? ApprovalWindowDays { get; private set; }
+
     public uint RowVersion { get; private set; }
 
     /// <summary>
@@ -67,7 +74,8 @@ public sealed class GradeAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowVe
         int? maxPrimaryContacts = null,
         int? maxCopyContacts = null,
         bool? mandatoryReview = null,
-        int? archiveGraceDays = null)
+        int? archiveGraceDays = null,
+        int? approvalWindowDays = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new GradeAssignmentPolicy
@@ -81,6 +89,7 @@ public sealed class GradeAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowVe
             MaxCopyContacts = maxCopyContacts,
             MandatoryReview = mandatoryReview,
             ArchiveGraceDays = archiveGraceDays,
+            ApprovalWindowDays = approvalWindowDays,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -96,7 +105,8 @@ public sealed class GradeAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowVe
         int? maxPrimaryContacts,
         int? maxCopyContacts,
         bool? mandatoryReview,
-        int? archiveGraceDays)
+        int? archiveGraceDays,
+        int? approvalWindowDays = null)
     {
         SignatureRequirement = signatureRequirement;
         RequiresApprovalBeforePublish = requiresApprovalBeforePublish;
@@ -104,6 +114,7 @@ public sealed class GradeAssignmentPolicy : BaseTenantEntityWithAudit, IHasRowVe
         MaxCopyContacts = maxCopyContacts;
         MandatoryReview = mandatoryReview;
         ArchiveGraceDays = archiveGraceDays;
+        ApprovalWindowDays = approvalWindowDays;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 }

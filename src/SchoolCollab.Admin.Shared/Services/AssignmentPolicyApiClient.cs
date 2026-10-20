@@ -20,7 +20,11 @@ public sealed record TenantAssignmentPolicyDto(
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
     bool? MandatoryReview = null,
-    int? ArchiveGraceDays = null)
+    int? ArchiveGraceDays = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3): the approval window in days; null
+    /// = no deadline. Non-positive is rejected at the write seam and treated as "no window" by the
+    /// consumers.</summary>
+    int? ApprovalWindowDays = null)
 {
     /// <summary>
     /// <b>Legacy-input compatibility (Round A only).</b> Derived from
@@ -42,7 +46,10 @@ public sealed record UpsertAssignmentPolicyRequest(
     int? MaxPrimaryContacts,
     int? MaxCopyContacts,
     bool? MandatoryReview = null,
-    int? ArchiveGraceDays = null);
+    int? ArchiveGraceDays = null,
+    /// <summary>Round assignment-approval-workflow (spec §3.3, Q7): the approval window in days;
+    /// null = no window, non-positive ⇒ 400.</summary>
+    int? ApprovalWindowDays = null);
 
 /// <summary>
 /// <b>Legacy request shape (Round A only).</b> The pre-widening PUT body was the single

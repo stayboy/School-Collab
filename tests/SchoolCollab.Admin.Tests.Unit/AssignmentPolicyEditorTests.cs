@@ -121,13 +121,15 @@ public class AssignmentPolicyEditorTests : BunitContext
         cut.Markup.Should().Contain("Grade override");
         cut.Markup.Should().Contain("Actions");
 
-        // Every one of the six policy fields is a row.
+        // Every one of the SEVEN policy fields is a row (the seventh is the approval window,
+        // round assignment-approval-workflow §3.3).
         cut.Markup.Should().Contain("Guardian signature");
         cut.Markup.Should().Contain("Approval before publish");
         cut.Markup.Should().Contain("Max primary guardian contacts per sendout");
         cut.Markup.Should().Contain("Max copy guardian contacts per sendout");
         cut.Markup.Should().Contain("Guardian review before submit");
         cut.Markup.Should().Contain("Archive grace window (days)");
+        cut.Markup.Should().Contain("Approval window (days)");
 
         // Global column = the tenant default; grade column = the override where one exists.
         cut.Markup.Should().Contain("Optional", "the tenant signature requirement is rendered");
@@ -137,7 +139,7 @@ public class AssignmentPolicyEditorTests : BunitContext
 
         // Each row exposes the kebab with Edit + Reset.
         var triggers = cut.FindAll("fluent-button[title^='Actions for']");
-        triggers.Count.Should().Be(6, "one kebab per policy field");
+        triggers.Count.Should().Be(7, "one kebab per policy field");
         triggers.First().Click();
         cut.FindAll("fluent-menu-item").Should().Contain(i => i.TextContent.Trim() == "Edit");
         cut.FindAll("fluent-menu-item").Should().Contain(i => i.TextContent.Trim() == "Reset");
@@ -155,8 +157,8 @@ public class AssignmentPolicyEditorTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Inherit global"));
 
-        // Five of the six fields inherit (only MaxPrimaryContacts is overridden) ⇒ five badges.
-        cut.FindAll(".inherit-badge").Count.Should().Be(5,
+        // Six of the SEVEN fields inherit (only MaxPrimaryContacts is overridden) ⇒ six badges.
+        cut.FindAll(".inherit-badge").Count.Should().Be(6,
             "every field without a grade override shows the Inherit global badge");
     }
 
@@ -171,7 +173,7 @@ public class AssignmentPolicyEditorTests : BunitContext
         var cut = Render<AssignmentPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mandatory (locked)"));
-        cut.FindAll(".inherit-badge").Count.Should().Be(6, "a 204 grade read means every field inherits");
+        cut.FindAll(".inherit-badge").Count.Should().Be(7, "a 204 grade read means every field inherits");
     }
 
     /// <summary>
@@ -277,4 +279,53 @@ public class AssignmentPolicyEditorTests : BunitContext
                 .Should().Contain(mb => mb.Instance.Intent == MessageBarIntent.Error,
                     "a failed policy load must surface an error rather than looking like an empty policy"));
     }
+
+    /// <summary>
+    /// Round <c>assignment-approval-workflow</c> (spec §3.3/§5): the approval window is the SEVENTH
+    /// policy field and it must be reachable from this editor — a field the resolver reads but no
+    /// editor can write is dead configuration. Global value + grade override both render, and the
+    /// row opens the shared edit dialog like every other field.
+    /// </summary>
+    [TestMethod]
+    public void Grid_shows_the_approval_window_field_WithBothScopes()
+    {
+        var (_, gradeId) = Register(
+            tenantBody: RawTenantJson(approvalWindowDays: 7),
+            gradeBody: RawGradeJson(approvalWindowDays: 3));
+
+        var dialogMock = this.RegisterDialogService();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync(typeof(AssignmentPolicyFieldEditDialog), It.IsAny<DialogOptions>()))
+            .ReturnsAsync(DialogResult.Cancel());
+
+        var cut = Render<AssignmentPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Approval window (days)"));
+
+        var row = cut.FindAll("tr.fluent-data-grid-row")
+            .Single(r => r.TextContent.Contains("Approval window (days)"));
+        row.TextContent.Should().Contain("7", "the tenant default window renders in the Global column");
+        row.TextContent.Should().Contain("3", "the grade override window renders in the Grade column");
+
+        row.QuerySelector("fluent-link.setting-label")!.Click();
+        dialogMock.Verify(
+            d => d.ShowDialogAsync(typeof(AssignmentPolicyFieldEditDialog), It.IsAny<DialogOptions>()),
+            Times.Once,
+            "the new row uses the same editor-dialog pattern as every other field");
+    }
+
+    private static string RawTenantJson(int? approvalWindowDays) =>
+        System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["requiresApprovalBeforePublish"] = true,
+            ["approvalWindowDays"] = approvalWindowDays,
+        });
+
+    private static string RawGradeJson(int? approvalWindowDays) =>
+        System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["gradeLevelId"] = Guid.NewGuid(),
+            ["approvalWindowDays"] = approvalWindowDays,
+            ["updatedAt"] = DateTimeOffset.UnixEpoch,
+        });
 }

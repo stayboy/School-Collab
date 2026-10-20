@@ -57,13 +57,15 @@ public class AssignmentEffectivePolicyRouteTests
     private static EffectiveAssignmentPolicy PolicyWith(
         SignatureRequirementMode signature = SignatureRequirementMode.Disabled,
         bool? mandatoryReview = null,
-        int? archiveGraceDays = null) =>
+        int? archiveGraceDays = null,
+        int? approvalWindowDays = null) =>
         new EffectiveAssignmentPolicyResolver().Resolve(
             tenantDefault: new AssignmentPolicyFields
             {
                 SignatureRequirement = signature,
                 MandatoryReview = mandatoryReview,
                 ArchiveGraceDays = archiveGraceDays,
+                ApprovalWindowDays = approvalWindowDays,
             },
             gradeOverride: null);
 
@@ -112,12 +114,14 @@ public class AssignmentEffectivePolicyRouteTests
               "maxCopyContacts": null,
               "mandatoryReview": true,
               "archiveGraceDays": null,
+              "approvalWindowDays": null,
               "signatureRequirementFromOverride": false,
               "requiresApprovalBeforePublishFromOverride": false,
               "maxPrimaryContactsFromOverride": false,
               "maxCopyContactsFromOverride": false,
               "mandatoryReviewFromOverride": false,
-              "archiveGraceDaysFromOverride": false
+              "archiveGraceDaysFromOverride": false,
+              "approvalWindowDaysFromOverride": false
             }
             """.Replace(" ", string.Empty).Replace("\n", string.Empty).Replace("\r", string.Empty));
 
@@ -133,6 +137,19 @@ public class AssignmentEffectivePolicyRouteTests
             "an explicit policy review value is reported as stored");
         body.Should().Contain("\"archiveGraceDays\":45");
         body.Should().Contain("\"signatureRequirement\":\"Disabled\"");
+    }
+
+    /// <summary>Round assignment-approval-workflow (§3.3): the seventh policy field travels on the
+    /// route like every other field, and unset stays <c>null</c> — the built-in "no deadline".</summary>
+    [TestMethod]
+    public async Task EffectivePolicy_ReportsTheApprovalWindow()
+    {
+        var configured = await GetEffectivePolicyBodyAsync(PolicyWith(approvalWindowDays: 6));
+        configured.Should().Contain("\"approvalWindowDays\":6");
+
+        var unset = await GetEffectivePolicyBodyAsync(PolicyWith());
+        unset.Should().Contain("\"approvalWindowDays\":null",
+            "an unset window must cross the wire as null, never as a number");
     }
 
     [TestMethod]

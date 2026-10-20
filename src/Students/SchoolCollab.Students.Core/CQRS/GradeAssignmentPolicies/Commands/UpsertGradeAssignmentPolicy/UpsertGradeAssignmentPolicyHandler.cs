@@ -25,6 +25,7 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
         UpsertGradeAssignmentPolicy command, CancellationToken ct = default)
     {
         GuardContactCaps(command.MaxPrimaryContacts, command.MaxCopyContacts);
+        GuardApprovalWindow(command.ApprovalWindowDays);
 
         // Reject overrides for grades that don't exist in this tenant.
         var gradeExists = await db.GradeLevels.AnyAsync(x => x.Id == command.GradeLevelId, ct);
@@ -47,7 +48,8 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
                 command.MaxPrimaryContacts,
                 command.MaxCopyContacts,
                 command.MandatoryReview,
-                command.ArchiveGraceDays);
+                command.ArchiveGraceDays,
+                command.ApprovalWindowDays);
             policy = existing;
         }
         else
@@ -60,7 +62,8 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
                 command.MaxPrimaryContacts,
                 command.MaxCopyContacts,
                 command.MandatoryReview,
-                command.ArchiveGraceDays);
+                command.ArchiveGraceDays,
+                command.ApprovalWindowDays);
             db.GradeAssignmentPolicies.Add(policy);
         }
 
@@ -74,7 +77,24 @@ public sealed class UpsertGradeAssignmentPolicyHandler(
             policy.MaxCopyContacts,
             policy.MandatoryReview,
             policy.ArchiveGraceDays,
-            policy.UpdatedAt);
+            policy.UpdatedAt,
+            policy.ApprovalWindowDays);
+    }
+
+    /// <summary>
+    /// Q7 range rule for the approval window (round assignment-approval-workflow / spec §3.3): a
+    /// non-positive window is rejected rather than stored — a stored zero would mean "expires
+    /// immediately" to a naive consumer, and every pending assignment would be returned on the next
+    /// sweep tick.
+    /// </summary>
+    private static void GuardApprovalWindow(int? approvalWindowDays)
+    {
+        if (approvalWindowDays is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(UpsertGradeAssignmentPolicy.ApprovalWindowDays), approvalWindowDays,
+                "The approval window must be a positive number of days (null = inherit).");
+        }
     }
 
     /// <summary>

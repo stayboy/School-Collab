@@ -9,8 +9,8 @@ using SchoolCollab.Assignments.Core.Domain.Exceptions;
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RejectAssignmentCommand;
 
 /// <summary>Handles <see cref="RejectAssignmentCommand"/> (WS-A2 /
-/// spec §7 Q2). The domain method clears any prior approve stamps
-/// and raises <c>AssignmentRejectedEvent</c>. Mirrors the
+/// spec §7 Q2). The domain method clears any prior approve stamps, records the approver's optional
+/// reason and clears the submission stamp, and raises <c>AssignmentRejectedEvent</c>. Mirrors the
 /// <c>CloseAssignmentCommandHandler</c> shape.</summary>
 public sealed class RejectAssignmentCommandHandler(
     IAssignmentRepository repository,
@@ -31,7 +31,7 @@ public sealed class RejectAssignmentCommandHandler(
             ?? (await IsRealAuthAsync(cancellationToken)
                 ? throw new MissingTeacherPrincipalException(nameof(RejectAssignmentCommand))
                 : command.ApproverId);
-        assignment.Reject(approverId);
+        assignment.Reject(approverId, command.Reason);
 
         await repository.UpdateAsync(assignment, cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);

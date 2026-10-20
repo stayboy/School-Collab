@@ -2,7 +2,7 @@ using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Assignments.Api.Services;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.AssignmentPolicies;
 
 namespace SchoolCollab.Assignments.Api.Tests.Unit;

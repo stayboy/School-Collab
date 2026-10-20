@@ -36,6 +36,10 @@ public sealed class RegenerateAttachmentExtractionCommandHandler(
         var assignment = await repository.GetAsync(command.AssignmentId, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.AssignmentId);
 
+        // Round assignment-approval-workflow (spec §3.2, Q9): re-extracting the reviewed attachment text — a held
+        // authoring write path, so it refuses while the row awaits an approval decision.
+        assignment.EnsureNotAwaitingApproval();
+
         var attachment = assignment.Attachments.SingleOrDefault(a => a.Id == command.AttachmentId)
             ?? throw new AttachmentNotFoundException(command.AttachmentId);
 

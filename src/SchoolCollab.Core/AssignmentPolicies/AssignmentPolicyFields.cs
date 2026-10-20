@@ -40,6 +40,15 @@ public sealed record AssignmentPolicyFields
     /// </summary>
     public int? ArchiveGraceDays { get; init; }
 
+    /// <summary>
+    /// The approval window in days (round <c>assignment-approval-workflow</c> / spec §3.3, Q11): how
+    /// long a submitted assignment may sit pending before the approval sweep returns it for redo.
+    /// Null = no deadline — the built-in default, so a failed (fail-open) resolve can never invent
+    /// one. A non-positive value is rejected by both write seams (Q7) and treated as "no window" by
+    /// the consumers (<see cref="ApprovalWindow.EffectiveDays"/>).
+    /// </summary>
+    public int? ApprovalWindowDays { get; init; }
+
     /// <summary>A policy with every field null ("nothing configured").</summary>
     public static AssignmentPolicyFields Empty { get; } = new();
 }

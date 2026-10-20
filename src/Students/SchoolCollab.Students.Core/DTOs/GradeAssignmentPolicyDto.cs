@@ -18,7 +18,11 @@ public sealed record GradeAssignmentPolicyDto(
     int? MaxCopyContacts,
     bool? MandatoryReview,
     int? ArchiveGraceDays,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    /// <summary>Round assignment-approval-workflow (spec §3.3, Q11): the grade's approval window in
+    /// days; null = inherit / no deadline. Non-positive is rejected at the write seam and treated
+    /// as "no window" by the consumers.</summary>
+    int? ApprovalWindowDays = null)
 {
     /// <summary>
     /// <b>Legacy-input compatibility (Round A only).</b> The pre-widening wire shape carried the

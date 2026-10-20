@@ -11,6 +11,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CloseAssignmentCom
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.DeleteAssignmentCommand;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.DenyAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.DuplicateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RejectAssignmentCommand;
@@ -364,6 +365,11 @@ public static class AssignmentRoutes
             {
                 return Results.NotFound();
             }
+            // Round assignment-approval-workflow (spec §3.2): the staged blob is authored content.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
             catch (AssignmentQuestionValidationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
@@ -390,6 +396,11 @@ public static class AssignmentRoutes
             {
                 return Results.NotFound();
             }
+            // Round assignment-approval-workflow (spec §3.2): confirming would change the reviewed questions.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
             catch (InvalidQuestionsDraftException ex)
             {
                 return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
@@ -409,6 +420,11 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+            // Round assignment-approval-workflow (spec §3.2): dropping the staged blob is authored content.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
             }
             catch (InvalidQuestionsDraftException ex)
             {
@@ -685,6 +701,11 @@ public static class AssignmentRoutes
             {
                 return Results.BadRequest(new { ex.Message });
             }
+            catch (AssignmentPendingApprovalException ex)
+            {
+                // Round assignment-approval-workflow (spec §3.2): the pending-approval edit hold.
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
             catch (ConcurrencyException ex)
             {
                 return Results.Conflict(new { ex.Message });
@@ -704,6 +725,11 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+            // Round assignment-approval-workflow (spec §3.2): deleting the row under review is held.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
             }
             catch (InvalidOperationException ex)
             {
@@ -802,6 +828,19 @@ public static class AssignmentRoutes
             {
                 return Results.NotFound();
             }
+            // Round assignment-approval-workflow (spec §3.2/§3.4): a resubmit while the row is
+            // still Pending would re-stamp SubmittedAt and reset the approval window.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
+            // Round assignment-approval-workflow (spec §3.1): a Denied row is terminal and a Pending /
+            // Approved one cannot be resubmitted — the caller's mistake, so 400 with the rule's own
+            // message (the AssignmentApprovalRequiredException mapping).
+            catch (AssignmentApprovalStateException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
             catch (InvalidOperationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
@@ -845,7 +884,8 @@ public static class AssignmentRoutes
             }
         });
 
-        // WS-A2 / spec §7 Q2: reject a pending assignment.
+        // WS-A2 / spec §7 Q2: reject a pending assignment (sent back for redo). Round
+        // assignment-approval-workflow: the body carries the approver's optional reason.
         group.MapPost("/{id:guid}/reject", async (
             Guid id,
             [FromBody] RejectAssignmentRequest req,
@@ -854,7 +894,7 @@ public static class AssignmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new RejectAssignmentCommand(id, req.ApproverId), ct);
+                await handler.HandleAsync(new RejectAssignmentCommand(id, req.ApproverId, req.Reason), ct);
                 return Results.NoContent();
             }
             catch (AssignmentNotFoundException)
@@ -871,6 +911,43 @@ public static class AssignmentRoutes
             }
             // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
             catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+        });
+
+        // Round assignment-approval-workflow (spec §3.1/§5, Q10): deny a pending assignment — the
+        // terminal decision. Publishes nothing by itself; the author duplicates the row to continue.
+        group.MapPost("/{id:guid}/deny", async (
+            Guid id,
+            [FromBody] DenyAssignmentRequest req,
+            [FromServices] ICommandHandler<DenyAssignmentCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new DenyAssignmentCommand(id, req.ApproverId, req.Reason), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // ar-20: real-auth rejection — no usable teacher_id claim ⇒ 403 (never a 500).
+            catch (MissingTeacherPrincipalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+            }
+            // ar-24: cross-tenant rejection — foreign-tenant approver ⇒ 403 (never a 500).
+            catch (TeacherTenantMismatchException ex)
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
             }
@@ -1482,6 +1559,11 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+            // Round assignment-approval-workflow (spec §3.2): the extracted text is the reviewed content.
+            catch (AssignmentPendingApprovalException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
             }
             catch (AttachmentNotFoundException)
             {

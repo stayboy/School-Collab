@@ -39,6 +39,11 @@ builder.Services.AddAssignmentsCore(builder.Configuration);
 builder.Services.AddCrossModuleHttpClient("settings-api", "https+http://settings-api", propagateTenant: false);
 builder.Services.AddCrossModuleHttpClient("students-api", "https+http://students-api", propagateTenant: false);
 builder.Services.AddScoped<INotificationPolicyResolver, NotificationPolicyResolver>();
+// Round assignment-approval-workflow (WS4): the relocated effective assignment-policy resolver,
+// so the approval sweep resolves the same effective ApprovalWindowDays the read surfaces project.
+// Registered AFTER AddAssignmentsCore on the same two named clients the notification resolver
+// uses (the Api host registers the identical Core class in its Program.cs).
+builder.Services.AddScoped<IAssignmentPolicyResolver, AssignmentPolicyResolver>();
 builder.Services.AddScoped<IContactAddressResolver, StudentsContactAddressResolver>();
 // Round notification-templates-b1 (§3.3/§6): the tenant template resolver on the same
 // settings-api client, so an edited Reminder/Completion/Overdue template actually takes
@@ -60,6 +65,9 @@ builder.Services.AddRabbitMqSubscriber(
 builder.Services.AddSingleton<ReminderSweepService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ReminderSweepService>());
 builder.Services.AddHostedService<OverdueSweepService>();
+// Round assignment-approval-workflow (WS4, spec §3.4): the approval-window sweep. Returns a pending
+// assignment for redo when its window expires or its due date passes.
+builder.Services.AddHostedService<ApprovalSweepService>();
 
 var host = builder.Build();
 host.Run();

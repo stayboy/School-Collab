@@ -18,6 +18,10 @@ public sealed class DeleteAssignmentCommandHandler(
         var assignment = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.Id);
 
+        // Round assignment-approval-workflow (spec §3.2, Q9): deleting the row under review — a held
+        // authoring write path, so it refuses while the row awaits an approval decision.
+        assignment.EnsureNotAwaitingApproval();
+
         if (assignment.Status != Domain.AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be deleted.");
 

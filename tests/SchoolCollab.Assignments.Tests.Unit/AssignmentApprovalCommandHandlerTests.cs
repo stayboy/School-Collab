@@ -127,19 +127,23 @@ public class AssignmentApprovalCommandHandlerTests
     [TestMethod]
     public async Task Reject_Pending_ClearsStamps()
     {
+        // Round assignment-approval-workflow: SubmitForApproval is legal only from null / Rejected
+        // (Pending and Approved are refused so the approval window cannot be reset), so the old
+        // "approve then resubmit" arrangement is gone. The handler's contract is unchanged: the
+        // domain clears the approve stamps and the submission stamp on the way back to Rejected.
         var assignment = NewAssignment();
         assignment.SubmitForApproval();
-        assignment.Approve(ApproverId);
-        assignment.SubmitForApproval(); // back to Pending
         var repo = new FakeAssignmentRepository { Assignment = assignment };
         var handler = new RejectAssignmentCommandHandler(repo, new FakeHybridCache(), new FakeCurrentUser(), new FakeFeatureFlagService { IsEnabledValue = true },
             NullLogger<RejectAssignmentCommandHandler>.Instance);
 
-        await handler.HandleAsync(new RejectAssignmentCommand(assignment.Id, ApproverId));
+        await handler.HandleAsync(new RejectAssignmentCommand(assignment.Id, ApproverId, "Needs a rubric"));
 
         assignment.ApprovalStatus.Should().Be(ApprovalStatus.Rejected);
         assignment.ApprovedBy.Should().BeNull();
         assignment.ApprovedAt.Should().BeNull();
+        assignment.SubmittedAt.Should().BeNull();
+        assignment.ApprovalReason.Should().Be("Needs a rubric");
     }
 
     [TestMethod]
