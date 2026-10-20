@@ -1,4 +1,4 @@
-namespace SchoolCollab.Assignments.Core.Domain;
+namespace SchoolCollab.Core.Notifications;
 
 /// <summary>
 /// Template tag vocabulary — spec §3.2 read literally: dot-free PascalCase, <b>ten</b> tags,
@@ -9,6 +9,11 @@ namespace SchoolCollab.Assignments.Core.Domain;
 /// <c>ContactName</c>) survive as render aliases — see <see cref="Aliases"/> — so a template
 /// authored against the earlier vocabulary still renders; <see cref="All"/> carries the spec
 /// set only, because the editor's tag chips read it.</para>
+/// <para>Round <c>notification-templates-b3b</c> (Q90a) moved this set here from
+/// <c>Assignments.Core/Domain</c>: it is this feature's cross-context vocabulary beside
+/// <see cref="NotificationChannel"/>, so the Settings editor can offer the chips without a
+/// reference to Assignments and the renderer keeps its canonical spelling. The class is
+/// zero-dependency and static — the move changes no wire and no behaviour.</para>
 /// </summary>
 public static class NotificationTemplateTags
 {

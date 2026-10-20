@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.AI.Chat.Services;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Http;
 
 namespace SchoolCollab.Settings.Application;
 
@@ -86,6 +87,28 @@ public static class ModuleServices
         services.AddHttpClient<NotificationTemplateApiClient>(client =>
             client.BaseAddress = new Uri("https+http://settings-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+
+        // NotificationTemplatePreviewClient (the template editor's live preview, spec §3.10) —
+        // CROSS-MODULE: admin → assignments-api, the one host that owns the renderer
+        // (NotificationTemplateRenderer lives in Assignments.Core, which Settings may not
+        // reference; a second substituter in the UI is the drift class §3.10 forbids). The Admin
+        // host already carries .WithReference(assignmentsApi) (AppHost/Program.cs:566), so no
+        // AppHost change is needed. The explicit ~5 s timeout is the degradation budget: a dead
+        // preview shows the editor's inline "preview unavailable" in seconds, not after the 100 s
+        // HttpClient default. It is an enrichment read only — a failure never blocks save.
+        services.AddCrossModuleHttpClient<NotificationTemplatePreviewClient>(
+                "https+http://assignments-api", propagateTenant: true)
+            .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(5));
+
+        // StudentsLookupClient (the constraint editor's grade-level / activity-group / topic
+        // pickers, spec §3.10) — CROSS-MODULE read: admin → students-api. The matcher compares
+        // assignment target reference ids (grade-level id, topic id, activity-group id), which the
+        // Settings codebook cannot produce, so the pickers must read them from their owning
+        // context. An enrichment read under adr-cross-module-calls.md: the editor degrades to an
+        // inline error + raw-value rendering when it fails. The Admin host already carries
+        // .WithReference(studentsApi) (AppHost/Program.cs:567).
+        services.AddCrossModuleHttpClient<StudentsLookupClient>(
+            "https+http://students-api", propagateTenant: true);
 
         // SignatureConsentTextApiClient (tenant-level guardian sign-off consent
         // text) — same pattern. TenantSignatureConsentText is a STRICT tenant

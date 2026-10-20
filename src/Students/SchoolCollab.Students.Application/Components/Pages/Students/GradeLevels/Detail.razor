@@ -228,6 +228,13 @@
                             </div>
                             <AssignmentPolicyEditor GradeLevelId="@Id" />
                         </FluentCard>
+
+                        @* ── Notification templates card (spec §3.11, round notification-templates-b3b) ────
+                           Read-only applicability inventory; every edit lives on the one management
+                           surface, which the card's "Manage templates" link opens pre-filtered to
+                           this grade. The card owns its FluentCard + title, so this page's delta is
+                           the single component invocation below. *@
+                        <NotificationTemplatesCard GradeLevelId="@Id" />
                     }
                 </ChildContent>
                 <Fallback>

@@ -1,0 +1,128 @@
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.Notifications
+@inject NotificationTemplateApiClient Api
+@inject ILogger<NotificationTemplatesCard> Logger
+
+@* Notification-templates card on grade detail (spec §3.11, round notification-templates-b3b):
+   the third member of the grade's notification-configuration trio, beside Notification & Delivery
+   and Assignment Policy. READ-ONLY — every edit lives on the one management surface
+   (/notification-templates, spec §3.10), which the "Manage templates" link opens pre-filtered to
+   this grade so a grade-specific template is one click away. A failed load renders inside the card
+   and never takes the page down. *@
+
+<FluentCard class="detail-card">
+    <div class="notification-title">
+        <FluentIcon Icon="@(Icons.Regular.Size20.Document)" />
+        <h3>Notification templates</h3>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="spinner-container"><FluentSpinner /></div>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageBarIntent.Error">@_error</FluentMessageBar>
+    }
+    else
+    {
+        <p class="text-muted">
+            Tenant templates whose constraints can apply to this grade. The tenant default is marked;
+            every other constraint on a template is shown as written.
+        </p>
+
+        @foreach (var slot in _slots)
+        {
+            <div class="mt-3" data-slot="@($"{slot.Kind}-{slot.Channel}")">
+                <h4>@slot.Kind.ToString() · @ChannelLabel(slot.Channel)</h4>
+                @if (slot.Templates.Count == 0)
+                {
+                    <p class="text-muted">The built-in default applies.</p>
+                }
+                else
+                {
+                    <FluentStack Orientation="Orientation.Vertical">
+                        @foreach (var template in slot.Templates)
+                        {
+                            <FluentStack Orientation="Orientation.Horizontal">
+                                @if (template.IsDefault)
+                                {
+                                    <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Success">Default</FluentBadge>
+                                }
+                                <span class="text-muted">@ConstraintSummary(template)</span>
+                            </FluentStack>
+                        }
+                    </FluentStack>
+                }
+            </div>
+        }
+
+        <div class="mt-3">
+            <FluentLink Href="@($"/notification-templates?grade={GradeLevelId:D}")">Manage templates</FluentLink>
+        </div>
+    }
+</FluentCard>
+
+@code {
+    /// <summary>The grade whose applicability is shown (the page's own route id).</summary>
+    [Parameter] public Guid GradeLevelId { get; set; }
+
+    private ApplicableTemplateSlotDto[] _slots = [];
+    private bool _loading = true;
+    private string? _error;
+    private Guid? _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The host page re-renders often (dialogs, card refreshes); the card's data only changes
+        // when the grade does, so a value guard keeps the read off that path.
+        if (_loadedFor == GradeLevelId)
+            return;
+
+        _loadedFor = GradeLevelId;
+        _loading = true;
+        _error = null;
+        try
+        {
+            var applicable = await Api.GetApplicableAsync(GradeLevelId);
+            _slots = applicable.Slots.ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away — not a card error.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load notification templates for grade {GradeLevelId}", GradeLevelId);
+            _error = $"Notification templates could not be loaded: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string ConstraintSummary(ApplicableTemplateDto template) =>
+        template.Constraints.Count == 0
+            ? "No constraints — applies to every send in this slot"
+            : string.Join(" · ", template.Constraints.Select(c => $"{Label(c.Dimension)}: {c.Display}"));
+
+    private static string Label(TemplateConstraintDimension dimension) => dimension switch
+    {
+        TemplateConstraintDimension.GradeLevel => "Grade level",
+        TemplateConstraintDimension.Stream => "Stream",
+        TemplateConstraintDimension.ActivityGroup => "Activity group",
+        TemplateConstraintDimension.Subject => "Subject",
+        TemplateConstraintDimension.AssignmentType => "Assignment type",
+        _ => dimension.ToString(),
+    };
+
+    private static string ChannelLabel(NotificationChannel channel) => channel switch
+    {
+        NotificationChannel.Email => "Email",
+        NotificationChannel.SMS => "SMS",
+        _ => channel.ToString(),
+    };
+}

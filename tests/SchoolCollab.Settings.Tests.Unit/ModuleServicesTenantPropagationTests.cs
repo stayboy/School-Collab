@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Notifications;
 using SchoolCollab.Settings.Application;
 
 namespace SchoolCollab.Settings.Tests.Unit;
@@ -34,7 +35,7 @@ public class ModuleServicesTenantPropagationTests
         public Task SetAppliedDefaultTenantIdAsync(Guid? tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    private sealed class CapturingHandler : HttpMessageHandler
+    private sealed class CapturingHandler(string responseBody = "[]") : HttpMessageHandler
     {
         public HttpRequestMessage? LastRequest { get; private set; }
 
@@ -44,7 +45,7 @@ public class ModuleServicesTenantPropagationTests
             LastRequest = request;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("[]", System.Text.Encoding.UTF8, "application/json"),
+                Content = new StringContent(responseBody, System.Text.Encoding.UTF8, "application/json"),
             });
         }
     }
@@ -95,5 +96,36 @@ public class ModuleServicesTenantPropagationTests
         capture.LastRequest.Should().NotBeNull();
         capture.LastRequest!.Headers.Contains("x-tenant-id").Should()
             .BeFalse("no dev tenant selected -> the propagation handler must not stamp a default/empty tenant");
+    }
+
+    [TestMethod]
+    public async Task AddSettingsModule_RegistersTheTemplateEditorClients_AndThePreviewPropagatesTheTenant()
+    {
+        // Round notification-templates-b3b: the editor page injects both clients, and the grade
+        // card depends on the template client this module registers. The Admin host composes the
+        // Settings module, so a missing registration is a runtime page failure with no compile
+        // signal — this pins the composition AND the tenant propagation the preview needs to render
+        // the right tenant's send.
+        var tenantId = Guid.NewGuid();
+        var capture = new CapturingHandler("""{ "subject": "s", "body": "b" }""");
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.TryAddSingleton<IDevTenantSelection>(new StubSelection(tenantId));
+        services.AddSettingsModule();
+        services.ConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.PrimaryHandler = capture));
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<StudentsLookupClient>().Should().NotBeNull();
+
+        var preview = provider.GetRequiredService<NotificationTemplatePreviewClient>();
+        await preview.PreviewAsync(NotificationTemplateKind.Publish, NotificationChannel.Email, null, "body");
+
+        capture.LastRequest!.RequestUri!.AbsolutePath.Should()
+            .Be("/assignments/notification-templates/preview",
+                "the preview runs on the one host that owns the renderer");
+        capture.LastRequest.Headers.GetValues("x-tenant-id").Should()
+            .ContainSingle().Which.Should().Be(tenantId.ToString());
     }
 }
