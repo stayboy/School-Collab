@@ -1,0 +1,235 @@
+@page "/notification-templates"
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Core.Notifications
+@using SchoolCollab.Core.RichText
+@inject NotificationTemplateApiClient Api
+@inject IDialogService DialogService
+@inject ILogger<Index> Logger
+
+@*
+   Notification-template landing (redesign spec §3.2): the repo''s landing shape — the shared wrapper (which
+   IS the entity grid), a create action in the standard place, and a row kebab for secondary actions.
+
+   Columns: the kind banner, the preferred mode of contact, the template itself (linked), the constraint
+   count (a link opening the ONE read-only constraints dialog; a "Tenant default" badge at zero) and the
+   last change. The OWNER column and the Adopt / Publish-portal-wide actions arrive with the hybrid store
+   (W3): until the DTO can tell System from tenant, a column or an action would be a half-truth.
+*@
+<PageTitle>Notification Templates</PageTitle>
+
+<LandingPage TItem="TenantNotificationTemplateDto"
+             Title="Notification Templates"
+             CreateLabel="+ New Template"
+             CreateRoute="@CreateHref"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@DisplayItems"
+             Error="@_error"
+             Loading="@_loading"
+             GridSettings="@_gridSettings"
+             SearchText="@_search"
+             SearchTextChanged="@OnSearchChanged"
+             SearchPlaceholder="Search templates…"
+             RowActions="@BuildRowActions"
+             RowActionsAriaLabel="Template actions"
+             RowActionsUseMenuService="false">
+    <ToolbarFilters>
+        <span class="template-filter">
+            <DropdownComponent TItem="FilterOption" TValue="string"
+                               Items="KindFilterOptions"
+                               SelectedValue="_kindFilter"
+                               SelectedValueChanged="OnKindFilterChanged"
+                               OptionText="@(o => o.Label)"
+                               OptionValue="@(o => o.Value)"
+                               AriaLabel="Filter by type" />
+        </span>
+        <span class="template-filter">
+            <DropdownComponent TItem="FilterOption" TValue="string"
+                               Items="ModeFilterOptions"
+                               SelectedValue="_modeFilter"
+                               SelectedValueChanged="OnModeFilterChanged"
+                               OptionText="@(o => o.Label)"
+                               OptionValue="@(o => o.Value)"
+                               AriaLabel="Filter by contact mode" />
+        </span>
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Type" SortBy="@_sortByKind" Sortable="true">
+            <NotificationTemplateKindBanner Kind="context.Kind" />
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Contact mode" SortBy="@_sortByChannel" Sortable="true">
+            @ModeLabel(context.Channel)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Template" SortBy="@_sortByTitle" Sortable="true">
+            <FluentLink Appearance="LinkAppearance.Default" Href="@($"/notification-templates/{context.Id:D}")">
+                @TitleOf(context)
+            </FluentLink>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Constraints" SortBy="@_sortByConstraintCount" Sortable="true">
+            @if (context.Constraints.Count == 0)
+            {
+                <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Success">Tenant default</FluentBadge>
+            }
+            else
+            {
+                <FluentButton Appearance="ButtonAppearance.Subtle"
+                              Class="template-constraints-link"
+                              Title="View every constraint on this template"
+                              OnClick="@(() => OpenConstraintsAsync(context))">
+                    @ConstraintCountLabel(context)
+                </FluentButton>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Updated" SortBy="@_sortByUpdatedAt" Sortable="true">
+            @context.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
+
+@code {
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(110px,1fr) 120px minmax(220px,2fr) minmax(120px,1fr) 160px",
+    };
+
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByKind =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Kind);
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByChannel =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Channel);
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByTitle =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Subject);
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByConstraintCount =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Constraints.Count);
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByUpdatedAt =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.UpdatedAt);
+
+    public sealed record FilterOption(string Value, string Label);
+
+    private static readonly FilterOption[] KindFilterOptions =
+    [
+        new(string.Empty, "All types"),
+        .. Enum.GetValues<NotificationTemplateKind>().Select(k => new FilterOption(k.ToString(), k.ToString())),
+    ];
+
+    private static readonly FilterOption[] ModeFilterOptions =
+    [
+        new(string.Empty, "All contact modes"),
+        new(NotificationChannel.Email.ToString(), "Email"),
+        new(NotificationChannel.SMS.ToString(), "SMS"),
+        new(NotificationChannel.WhatsApp.ToString(), "WhatsApp"),
+    ];
+
+    /// <summary>The grade-detail deep link (spec §3.11): filters the rows and travels into Create.</summary>
+    [SupplyParameterFromQuery(Name = "grade")]
+    public string? Grade { get; set; }
+
+    private TenantNotificationTemplateDto[]? _items;
+    private bool _loading = true;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _kindFilter = string.Empty;
+    private string _modeFilter = string.Empty;
+    private Guid? _gradeFilter;
+
+    private string CreateHref => _gradeFilter is { } grade
+        ? $"/notification-templates/create?grade={grade:D}"
+        : "/notification-templates/create";
+
+    private string CurrentEmptyMessage =>
+        _items is { Length: > 0 }
+            ? "No templates match the current filter."
+            : "No notification templates. The built-in defaults apply until one is created.";
+
+    /// <summary>The rows after the filters and the search — the grid''s source.</summary>
+    /// <summary>The rows after the filters and the search — the grid''s source (the pure filter seam).</summary>
+    private TenantNotificationTemplateDto[] DisplayItems =>
+        _items is null
+            ? []
+            : TemplateLandingFilter.Apply(_items, _gradeFilter, _kindFilter, _modeFilter, _search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Guid.TryParse(Grade, out var grade) && grade != Guid.Empty)
+            _gradeFilter = grade;
+
+        try
+        {
+            _items = (await Api.ListAsync()).ToArray();
+            _error = null;
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load notification templates");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OnKindFilterChanged(string? value)
+    {
+        _kindFilter = value ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnModeFilterChanged(string? value)
+    {
+        _modeFilter = value ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchChanged(string? value)
+    {
+        _search = value?.Trim() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// One action in W1 (Open) — row actions render as the labelled single-button form. Adopt /
+    /// Publish portal-wide / Reset join it with the store work (W3) and the reason dialog (W2).
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildRowActions(TenantNotificationTemplateDto row) =>
+    [
+        RowAction.Navigate("Open", $"/notification-templates/{row.Id:D}"),
+    ];
+
+    private static string ModeLabel(NotificationChannel channel) => channel switch
+    {
+        NotificationChannel.Email => "Email",
+        NotificationChannel.SMS => "SMS",
+        NotificationChannel.WhatsApp => "WhatsApp",
+        _ => channel.ToString(),
+    };
+
+    private static string TitleOf(TenantNotificationTemplateDto row)
+    {
+        if (!string.IsNullOrWhiteSpace(row.Subject))
+            return row.Subject!;
+
+        var plain = RichInstructionSanitizer.ToPlainText(row.Body);
+        if (string.IsNullOrWhiteSpace(plain))
+            return "(empty body)";
+
+        return plain.Length <= 80 ? plain : plain[..80] + "…";
+    }
+
+    private static string ConstraintCountLabel(TenantNotificationTemplateDto row) =>
+        row.Constraints.Count == 1 ? "1 constraint" : $"{row.Constraints.Count} constraints";
+
+    /// <summary>The ONE read-only constraints dialog (spec §3.6/§3.8), shared with the detail panel.</summary>
+    private async Task OpenConstraintsAsync(TenantNotificationTemplateDto row)
+    {
+        await DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
+            $"{row.Kind} · {ModeLabel(row.Channel)}",
+            new Dictionary<string, object?>
+            {
+                [TemplateConstraintsDialog.ConstraintsKey] = row.Constraints,
+                [TemplateConstraintsDialog.TemplateLabelKey] = TitleOf(row),
+            });
+    }
+}

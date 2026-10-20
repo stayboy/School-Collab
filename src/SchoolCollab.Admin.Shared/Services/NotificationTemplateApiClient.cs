@@ -175,6 +175,21 @@ public sealed class NotificationTemplateApiClient(HttpClient http)
     }
 
     /// <summary>
+    /// One template by id, or <see langword="null"/> on <c>404</c> (unknown or outside the caller''s
+    /// scope — the server does not distinguish the two). The per-template detail route''s read.
+    /// </summary>
+    public async Task<TenantNotificationTemplateDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync($"{BasePath}/{id:D}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content
+            .ReadFromJsonAsync<TenantNotificationTemplateDto>(cancellationToken: ct);
+    }
+
+    /// <summary>
     /// The current tenant's <b>default</b> row for <paramref name="kind"/> × <paramref name="channel"/>
     /// — the row with no constraints — or <see langword="null"/> on <c>204</c> (unset; the built-in
     /// default applies, spec §5).

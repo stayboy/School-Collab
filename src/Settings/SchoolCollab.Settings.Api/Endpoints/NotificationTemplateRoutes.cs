@@ -9,6 +9,7 @@ using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenan
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetApplicableNotificationTemplates;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplateById;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
@@ -55,6 +56,20 @@ public static class NotificationTemplateRoutes
         {
             var templates = await handler.HandleAsync(new GetApplicableNotificationTemplates(gradeLevelId), ct);
             return TypedResults.Ok(templates);
+        });
+
+        // ── One row by id (redesign spec §5 — the per-template detail page's read). A row outside the
+        // caller's scope is a 404, never a 403: a 403 would confirm that a foreign row exists.
+        group.MapGet("/notification-templates/{id:guid}",
+            async Task<Results<Ok<TenantNotificationTemplateDto>, NotFound<MessageResponse>>> (
+            Guid id,
+            [FromServices] IQueryHandler<GetTenantNotificationTemplateById, TenantNotificationTemplateDto?> handler,
+            CancellationToken ct) =>
+        {
+            var template = await handler.HandleAsync(new GetTenantNotificationTemplateById(id), ct);
+            return template is null
+                ? TypedResults.NotFound(new MessageResponse($"Notification template '{id}' was not found."))
+                : TypedResults.Ok(template);
         });
 
         // ── The tenant DEFAULT row for one kind × channel; 204 = unset (built-in default applies).

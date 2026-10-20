@@ -65,7 +65,41 @@ Spec: `documents/specs/notification-template-authoring-redesign.md` — source o
 
 ## Worker Report
 
-_pending — filled by the parent from the worker's inline report._
+**W1 — implemented (2026-10-20).**
+
+- **`PanelSection` relocated** to `SchoolCollab.Admin.Shared/Components/` (markup + css, class names and the
+  full-width rule untouched). One markup consumer (`AssignmentAuthoring.razor`) already imported that
+  namespace; `AssignmentAuthoringBunitTests` passes unchanged (**116/116**).
+- **`NotificationTemplateKindBanner`** — four `BadgeColor` variants (Publish `Brand`, Reminder `Warning`,
+  Completion `Success`, Overdue `Danger`), `data-kind` seam, no literal colours.
+- **Landing** (`Index.razor`, route `/notification-templates`) — `LandingPage`/`EntityGrid` with type banner,
+  contact-mode label, linked subject/excerpt, constraint count (link → the one read-only dialog; badge at
+  zero) and Updated; type + mode filters; type/mode/owner: owner deferred (below); row action Open.
+  Filtering extracted to **`TemplateLandingFilter`** (pure seam) after the toolbar proved unreachable in the
+  bUnit host (SectionContent renders only against a live outlet; a routed page inside a test host rendered an
+  empty tree). The rule is asserted directly instead of through a dropdown that only forwards to it.
+- **`TemplateConstraintsDialog`** — the shared read-only list, opened from the count link, values resolved by
+  the new **`TemplateConstraintLookups`** (one vocabulary shared with the editor).
+- **`TemplateEditor`** + `TemplateFormModel` + `TemplateEditorMode` — the two-column layout
+  (`minmax(0,1fr) minmax(320px,460px)`, stacks at 1400px), left "Message" section with the two dropdowns,
+  subject, rich/text body, tag chips and length guidance; right rail with `PanelSection` **Constraints**
+  (dismissible staged chips) above `PanelSection` **Preview** (real render path, degraded note). Save posts
+  the whole draft once; SMS/WhatsApp bodies are never sanitized (the old page's rule, kept).
+- **`Create.razor`** — `?grade=` prefill, enabled dropdowns, create-then-navigate to the new id.
+- **API** — `GET /api/settings/notification-templates/{id:guid}` (`TypedResults`, 404) + `GetByIdAsync`.
+- **Deleted** the tabbed page and its 9-test suite (behaviours re-homed: preview/length/chips/conflict → W2).
+
+**Gates:** Settings.Application / Settings.Api / Admin host / Admin test project / Assignments.Application /
+**mobile head** builds — all 0 errors. W1 suites **16/16**; `Settings.Api.Tests.Unit` **48/48**
+(2 new by-id tests); `AssignmentAuthoringBunitTests` **116/116**. **Pending:** the full solution build and the
+full `Admin.Tests.Unit` run both exceed the 30 s command cap and are deferred to the W4 acceptance gate.
+
+**Deviations (recorded):** (1) the **Owner column and owner filter** are deferred to W3 — the DTO cannot tell
+System from tenant until the hybrid store lands, and a column that says "tenant" for every row would lie;
+(2) Adopt / Publish-portal-wide / Reset row actions are deferred to W3/W2 for the same reason plus the reason
+prompt; (3) the **Preview panel shipped in W1** rather than W2 (it is part of the editor shell and the old
+suite's preview assertions had to land somewhere); (4) a system-scope session's create path is not yet
+special-cased — W3 owns scope.
 
 ## Review
 

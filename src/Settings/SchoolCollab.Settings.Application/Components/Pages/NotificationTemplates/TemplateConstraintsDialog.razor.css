@@ -1,0 +1,35 @@
+.template-constraints-dialog__subject {
+    margin: 0 0 8px;
+    font-weight: 600;
+}
+
+.template-constraints-dialog__loading {
+    display: flex;
+    justify-content: center;
+    padding: 24px 0;
+}
+
+.template-constraints-dialog__empty {
+    margin: 0;
+}
+
+.constraint-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.constraint-list__item {
+    display: grid;
+    grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #e1e1e1;
+}
+
+.constraint-list__dimension {
+    color: var(--neutral-foreground-hint, #616161);
+}

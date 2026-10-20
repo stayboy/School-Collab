@@ -1,0 +1,47 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@*
+   Kind banner (redesign spec §3.13) — the ONE place the four notification kinds get a colour, so the
+   landing grid and the detail header cannot drift apart.
+
+   The colour is the library's semantic set (`BadgeColor`), never a literal hex: a hardcoded surface
+   ignores the light/dark tokens every other container resolves through (the PanelSection lesson,
+   round targets-panel-kebab). The badge is STRETCHED by our css into the banner the grid column draws;
+   its own appearance stays `Filled` so the colour carries the meaning.
+
+   `data-kind` is the shared assertion seam: rows, header and tests all address the kind by value.
+*@
+<span class="kind-banner" data-kind="@Kind">
+    <FluentBadge Class="kind-banner__badge"
+                 Appearance="BadgeAppearance.Filled"
+                 Color="@Colour">
+        <FluentIcon Value="@Glyph" Slot="start" />
+        @Kind
+    </FluentBadge>
+</span>
+
+@code {
+    /// <summary>The notification kind this banner stands for.</summary>
+    [Parameter, EditorRequired] public NotificationTemplateKind Kind { get; set; }
+
+    /// <summary>The agreed semantic colour per kind (spec §3.13).</summary>
+    private BadgeColor Colour => Kind switch
+    {
+        NotificationTemplateKind.Publish => BadgeColor.Brand,
+        NotificationTemplateKind.Reminder => BadgeColor.Warning,
+        NotificationTemplateKind.Completion => BadgeColor.Success,
+        NotificationTemplateKind.Overdue => BadgeColor.Danger,
+        _ => BadgeColor.Subtle,
+    };
+
+    /// <summary>The glyph naming the EVENT, not the channel: published, due date, done, late.</summary>
+    private static Icon GlyphFor(NotificationTemplateKind kind) => kind switch
+    {
+        NotificationTemplateKind.Publish => FluentIcons.ArrowExportUp,
+        NotificationTemplateKind.Reminder => FluentIcons.Calendar,
+        NotificationTemplateKind.Completion => FluentIcons.CheckmarkCircleFilled,
+        NotificationTemplateKind.Overdue => new Icons.Regular.Size16.Warning(),
+        _ => FluentIcons.Info,
+    };
+
+    private Icon Glyph => GlyphFor(Kind);
+}

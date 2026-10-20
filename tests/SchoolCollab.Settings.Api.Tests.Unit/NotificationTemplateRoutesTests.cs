@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -15,6 +15,7 @@ using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenan
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplateById;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplates;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
@@ -81,6 +82,20 @@ public class NotificationTemplateRoutesTests
         {
             Last = command;
             return Task.FromResult(SampleDto(command.Request.Kind, command.Request.Channel));
+        }
+    }
+
+    /// <summary>Stub for the by-id read (redesign spec §5), mirroring <see cref="GetOneHandler"/>.</summary>
+    private sealed class GetByIdHandler(TenantNotificationTemplateDto? result)
+        : IQueryHandler<GetTenantNotificationTemplateById, TenantNotificationTemplateDto?>
+    {
+        public GetTenantNotificationTemplateById? Last { get; private set; }
+
+        public Task<TenantNotificationTemplateDto?> HandleAsync(
+            GetTenantNotificationTemplateById query, CancellationToken ct = default)
+        {
+            Last = query;
+            return Task.FromResult(result);
         }
     }
 
@@ -154,7 +169,8 @@ public class NotificationTemplateRoutesTests
         ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto>? update = null,
         ICommandHandler<DeleteTenantNotificationTemplate>? delete = null,
         IReadOnlyList<TemplateAuditEntryDto>? audit = null,
-        GetOneHandler? getOneSpy = null)
+        GetOneHandler? getOneSpy = null,
+        GetByIdHandler? getByIdSpy = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -164,6 +180,8 @@ public class NotificationTemplateRoutesTests
             new GetAllHandler(all ?? []));
         builder.Services.AddSingleton<IQueryHandler<GetTenantNotificationTemplate, TenantNotificationTemplateDto?>>(
             getOneSpy ?? new GetOneHandler(single));
+        builder.Services.AddSingleton<IQueryHandler<GetTenantNotificationTemplateById, TenantNotificationTemplateDto?>>(
+            getByIdSpy ?? new GetByIdHandler(null));
         builder.Services.AddSingleton(create ?? new CapturingCreateHandler());
         builder.Services.AddSingleton(update ?? new CapturingUpdateHandler());
         builder.Services.AddSingleton(delete ?? new CapturingDeleteHandler());
@@ -223,6 +241,36 @@ public class NotificationTemplateRoutesTests
             spy.Last.Should().NotBeNull();
             spy.Last!.Kind.Should().Be(NotificationTemplateKind.Overdue);
             spy.Last.Channel.Should().Be(NotificationChannel.SMS);
+        }
+    }
+
+    // ── Get by id (redesign spec §5) ───────────────────────────────────────
+
+    [TestMethod]
+    public async Task GetById_Returns200AndTheRow()
+    {
+        var spy = new GetByIdHandler(SampleDto());
+        var (app, client) = await StartAsync(getByIdSpy: spy);
+        await using (app)
+        {
+            var response = await client.GetAsync($"{BaseUrl}/{TemplateId:D}");
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("Body for {{Title}}");
+            spy.Last.Should().NotBeNull();
+            spy.Last!.Id.Should().Be(TemplateId);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetById_Returns404WhenTheRowIsNotVisible()
+    {
+        var (app, client) = await StartAsync(getByIdSpy: new GetByIdHandler(null));
+        await using (app)
+        {
+            var response = await client.GetAsync($"{BaseUrl}/{TemplateId:D}");
+
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
     }
 
