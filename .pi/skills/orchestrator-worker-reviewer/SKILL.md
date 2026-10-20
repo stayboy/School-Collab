@@ -204,6 +204,10 @@ a light tier through. Record escalations in the round doc.
   structured blocks inline and the parent persists them into the doc.
 - Round-doc format, line-1 provider/model traceability, and the ephemerality
   rules live in `documents/rounds/README.md` and `references/models.md`.
+- **Fan-out provenance (opt-in).** A round that dispatches parallel workers
+  records it on round-doc line 1 as `Workers: parallel (slices: A, B)` — the
+  slice ids, comma-separated. Mechanics: step 3's fan-out variant and
+  `references/parallel-workers.md`.
 
 ## Unattended rounds (owner-opted)
 
@@ -569,7 +573,9 @@ the tester never derives or expands its own scope.
   subagents dispatched into the same checkout are NOT isolated by their paths
   happening to be disjoint: their edits land in one shared diff that cannot be
   attributed to either run, and a reviewer cannot diff it at all. Run writers
-  sequentially, or give each its own git worktree (`worktree: true`). The design
+  sequentially, or give each its own git worktree (`worktree: true`) — for the
+  sanctioned opt-in arrangement, per-slice worktrees under the fan-out variant
+  (`references/parallel-workers.md`). The design
   record - plan, spec, round doc - is the **orchestrator's** own artifact; delegating
   it both breaks ownership and manufactures the concurrent-writer case. Verified
   2026-10-07 (round `targets-dialog-picked-zone`): an implementation `worker` and a
