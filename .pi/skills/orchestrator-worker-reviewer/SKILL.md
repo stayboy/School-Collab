@@ -436,6 +436,21 @@ the tester never derives or expands its own scope.
    round-doc path (the worker does not edit it). The worker implements, runs
    build + affected tests, returns WORKER REPORT. The parent persists the
    report into the doc.
+    **Parallel-worker fan-out variant (opt-in, criterion-gated).** When the
+    plan's expected-files list partitions into ≥2 file-disjoint, seam-free
+    slices (each ≥~10 files, provisional) — a mechanical dispatch-time check,
+    **not a tier gate**; any tier may qualify, self-selection does the tiering —
+    the parent may fan the worker run out to N parallel workers, one per slice,
+    each isolated in its own git worktree, **only with the owner's opt-in**
+    recorded on round-doc line 1 (`Workers: parallel (slices: A, B)`). Workers
+    run build + unit tests only (never Testcontainers integration tests) and
+    leave work uncommitted; the parent integrates the slice patches at the
+    recorded base, and step 4 below freezes one combined patch unchanged.
+    Full mechanics, guards and the independence layers:
+    `references/parallel-workers.md`. Every other step — plan, plan review,
+    freeze, review, acceptance, tester, rework, escalation — runs byte-for-byte
+    as written.
+
    **Build-escalation pattern (worker block rule):** when a worker pass times
    out, stalls, or hangs mid-round (30-min cap, runaway shell command, repeated
    build failures it cannot recover from), the parent interrupts it and

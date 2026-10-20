@@ -86,6 +86,20 @@ the specs the plan cites. Return ONLY:
     Tests: <project: n passed, m failed | "not run" + why>
     Deviations from plan: <none | one line each>
 
+**Fan-out variant (parallel slice dispatch — see `parallel-workers.md`):**
+when your brief pins a slice worktree, your scope is the slice's file list
+verbatim — never edit outside the slice, never touch the round tree or any
+other worktree, never run git. Run build + **unit tests only** (no
+Testcontainers integration tests — the parent's merged-tree pass owns those)
+and leave the worktree dirty (uncommitted). Prefix the report:
+
+    WORKER REPORT
+    Slice: <slice id> — worktree: <pinned path>
+    Changed files: <path list, ⊆ the slice's list>
+    Build: <"0 errors" | "n errors" + one-line detail each>
+    Tests: <project: n passed, m failed | "not run" + why>   (unit tests only)
+    Deviations from plan: <none | one line each>
+
 ## Reviewer (static — never builds, never tests, never writes files)
 
 Verify the worker's diff (read `diffs-<slug>.patch` plus the changed files'
