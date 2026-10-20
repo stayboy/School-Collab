@@ -18,7 +18,7 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 | Role | pi `ollama` profile (long-standing default) | `clinepass` profile (option) |
 |---|---|---|
 | Orchestrator | `ollama-cloud/glm-5.3-flash` (owner 2026-09-22, **Option A**) | `cline-pass/glm-5.3` |
-| Worker | `ollama-cloud/deepseek-v4.1-flash:1017` (owner 2026-10-18 — **suffix pinned**; the bare `deepseek-v4.1-flash` is ambiguous in the registry) | `cline-pass/deepseek-v4.1-flash` (owner 2026-10-05 **latest**, lean rounds — supersedes the same day's interim `glm-5.3-flash` ruling, which itself superseded `deepseek-v4-flash`; full rounds: `cline-pass/deepseek-v4-flash`) |
+| Worker | `ollama-cloud/deepseek-v4.1-flash:1017` (owner 2026-10-18 — **suffix pinned**; the bare `deepseek-v4.1-flash` is ambiguous in the registry) | `cline-pass/deepseek-v4.1-flash` (owner 2026-10-05 **latest**, lean and full rounds alike — supersedes the same day's interim `glm-5.3-flash` ruling; the older `deepseek-v4-flash` it replaced is **deprecated on ClinePass** as of 2026-10-19, so it must not be dispatched) |
 | Reviewer (diff review) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — the seat for every tier with a reviewer gate; different family from the orchestrator, so the gate is never the author) | **no dispatchable id** — `cline-pass/mimo-v2.6-flash` is **absent from the provider registry** (verified 2026-10-18: provider `cline` lists only `xiaomi/mimo-v2.6-flash`/`-pro`), so it must not be dispatched, and `cline/deepseek/deepseek-v4-pro-0813` is a different seat that returns `insufficient_credits`. The seat runs on the **pi profile only** |
 | Plan reviewer (**every tier**) | `ollama/glm-5.3:cloud` (owner 2026-10-18 — lean included; the plan gate no longer drops to the reviewer seat) | `cline-pass/glm-5.3` |
 | **Acceptance** (Tiers 1–3) | **`ollama-cloud/deepseek-v4-pro:0813`** (owner 2026-10-18 — a dispatched pass on its own seat, independent of worker and reviewer) | unchanged: `cline-pass/glm-5.3` full rounds · parent-transcribed on lean |
@@ -28,7 +28,7 @@ a static setting, and no profile is mandatory. Two profiles are supported:
 
 **Opting into clinepass from pi:** pass `clinepass/cline-pass/<id>` in every
 role's `runs.run` `model` field for that round (e.g.
-`clinepass/cline-pass/deepseek-v4-flash-0731`), and record it in the round-doc
+`clinepass/cline-pass/deepseek-v4.1-flash`), and record it in the round-doc
 header. **Pick one provider per round; never mix providers mid-round.**
 
 ### Per-mode model sets (owner overrides 2026-09-16)
@@ -117,16 +117,19 @@ is NOT the skill default: the child then inherits the current session model (one
 id, on whatever provider the session is using), collapsing every role onto it.
 Treat an omitted `model` as a dispatch error to fix, not a fallback.
 
-## clinepass profile — verified ids (2026-09-16, `pi-clinepass` catalog)
+## clinepass profile — verified ids (2026-10-19, ClinePass catalog)
 
-`glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `deepseek-v4-flash-0731`,
-`deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4.1-flash`,
-`kimi-k2.7-code`, `kimi-k2.6`, `kimi-k3`, `minimax-m3`, `minimax-m2.6-pro`,
+`glm-5.3`, `glm-5.3-flash`, `deepseek-v4-pro`, `deepseek-v4.1-flash`,
+`kimi-k3`, `minimax-m3`,
 `mimo-v2.5`/`-pro`, `qwen3.8-max`, `qwen3.7-max`, `qwen3.7-plus`.
 
+**Deprecated on ClinePass (2026-10-19, docs.cline.bot) — do not dispatch:**
+`glm-5.2`, `deepseek-v4-flash` (bare id and `-0731`), `kimi-k2.6`,
+`kimi-k2.7-code`.
+
 Role mapping under this profile: orchestrator `glm-5.3`, worker
-`deepseek-v4-flash-0731`, reviewer `deepseek-v4.1-flash` (owner override
-2026-09-15; otherwise `kimi-k2.7-code`), UI tester `minimax-m3`, higher-model
+`deepseek-v4.1-flash`, reviewer `deepseek-v4.1-flash` (owner override
+2026-09-15; otherwise `kimi-k3`), UI tester `minimax-m3`, higher-model
 re-verify `glm-5.3`.
 
 ## Cline profile
@@ -138,8 +141,8 @@ Cline cannot resolve pi's `ollama/<id>:cloud` ids — its session provider is
 
 When a worker pass times out / stalls / hangs: the escalation EXECUTOR is the
 ESCALATOR model (Tier 3 full: `kimi-k2.7-code`, pinned by owner
-2026-09-22 — not derived from the reviewer; since 2026-10-18 the reviewer is
-`glm-5.3-flash`, so escalator and verifier are distinct), dispatched through a write-capable shell
+2026-09-22 — not derived from the reviewer; since 2026-10-18 the diff-review seat is
+`deepseek-v4-pro:0813` and the plan gate is `glm-5.3:cloud`, so escalator and verifier are distinct), dispatched through a write-capable shell
 (`worker`/`delegate` — never the read-only `reviewer` shell), and the escalated
 work is then statically re-verified by the HIGHER model **of the same profile**
 (`ollama/glm-5.3:cloud`, or `clinepass/cline-pass/glm-5.3`).
@@ -152,7 +155,7 @@ Substitute only when a listed id is unavailable, and **within the same tier**
 
 - `cline-pass/kimi-k3` — stronger reviewer
 - `cline-pass/deepseek-v4-pro` — stronger worker
-- `cline-pass/glm-5.2`, `cline-pass/kimi-k2.6`
+- `cline-pass/glm-5.3-flash`
 - `cline-pass/qwen3.8-max`, `cline-pass/qwen3.7-max`, `cline-pass/qwen3.7-plus`
 - `cline-pass/mimo-v2.5-pro`, `cline-pass/mimo-v2.5`
 
@@ -178,7 +181,7 @@ Round doc line 1 records which provider ran the round, e.g.:
 
 - `Provider: pi (models: glm-5.3-flash reviewer/orchestrator, ollama-cloud/deepseek-v4.1-flash:1017 worker, ollama-cloud/deepseek-v4-pro:0813 acceptance, minimax-m3 tester)`
 - `Provider: pi, full Tier 3, Option A (models: glm-5.3-flash orchestrator, glm-5.3 plan-review, ollama-cloud/deepseek-v4.1-flash:1017 worker, kimi-k2.7-code reviewer, kimi-k2.7-code escalator, minimax-m3 tester)`
-- `Provider: pi/clinepass (models: glm-5.3, deepseek-v4-flash-0731, deepseek-v4.1-flash, minimax-m3)`
-- `Provider: Cline/clinepass (models: glm-5.3, deepseek-v4-flash, kimi-k2.7-code, minimax-m3)`
+- `Provider: pi/clinepass (models: glm-5.3, deepseek-v4.1-flash, deepseek-v4-pro, minimax-m3)`
+- `Provider: Cline/clinepass (models: glm-5.3, deepseek-v4.1-flash, kimi-k3, minimax-m3)`
 
 so build/test numbers and findings can be traced to the driving models.

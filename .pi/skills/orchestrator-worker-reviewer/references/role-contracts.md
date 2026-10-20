@@ -86,6 +86,20 @@ the specs the plan cites. Return ONLY:
     Tests: <project: n passed, m failed | "not run" + why>
     Deviations from plan: <none | one line each>
 
+**Fan-out variant (parallel slice dispatch — see `parallel-workers.md`):**
+when your brief pins a slice worktree, your scope is the slice's file list
+verbatim — never edit outside the slice, never touch the round tree or any
+other worktree, never run git. Run build + **unit tests only** (no
+Testcontainers integration tests — the parent's merged-tree pass owns those)
+and leave the worktree dirty (uncommitted). Prefix the report:
+
+    WORKER REPORT
+    Slice: <slice id> — worktree: <pinned path>
+    Changed files: <path list, ⊆ the slice's list>
+    Build: <"0 errors" | "n errors" + one-line detail each>
+    Tests: <project: n passed, m failed | "not run" + why>   (unit tests only)
+    Deviations from plan: <none | one line each>
+
 ## Reviewer (static — never builds, never tests, never writes files)
 
 Verify the worker's diff (read `diffs-<slug>.patch` plus the changed files'
@@ -154,9 +168,10 @@ out-of-round observation for the parent. Return ONLY:
 
 ## Reviewer — plan-review pass (Tier 3, BEFORE the worker is dispatched)
 
-**Model:** Tier 3 **full** → `glm-5.3:cloud` (`cline-pass/glm-5.3`, owner default
-2026-09-18); Tier 3 **lean** → the round's reviewer model. Read-only `reviewer`
-shell either way; a user-named model wins.
+**Model:** `ollama/glm-5.3:cloud` on **every tier**, lean and full alike
+(`cline-pass/glm-5.3`) — owner 2026-10-18; lean no longer drops the plan gate to
+the reviewer seat. Read-only `reviewer` shell either way; a user-named model
+wins.
 
 Same read-only reviewer, different target: the **plan**, not a diff. Read the
 round doc's `## Plan` plus the code/spec seams it cites — and nothing else (no
