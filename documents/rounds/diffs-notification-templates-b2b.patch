@@ -1,0 +1,1382 @@
+diff --git a/documents/rounds/round-notification-templates-b2b.md b/documents/rounds/round-notification-templates-b2b.md
+new file mode 100644
+index 00000000..0595eee6
+--- /dev/null
++++ b/documents/rounds/round-notification-templates-b2b.md
+@@ -0,0 +1,111 @@
++# Round B2b — notification templates: the publish dialog
++
++**Status:** PLANNING · Mode: Tier 3 **full** (UI — a UI tester bug-hunts the delivered dialog) · Provider: **pi**
++Orchestrator/plan: `ollama-cloud/glm-5.3-flash` · Plan gate: `ollama/glm-5.3:cloud` ·
++Worker: `ollama-cloud/deepseek-v4.1-flash:1017` · Diff gate: `ollama-cloud/deepseek-v4-pro:0813` ·
++Acceptance: `deepseek-v4-pro:0813` · UI tester: `minimax-m3`
++Branch: `feat/notification-templates-b2b` off **`feat/notification-templates-b2c`** (layer 2 of stack #375) · Stack: this is **layer 3**
++Spec: `documents/specs/assignment-notification-templates.md` §3.7 (Q16 picker + stamps), §3.8 (Q19 medium), §10 as-built (**B2a only** — the B2c contract facts this plan leans on live in `ContractTypes.cs:693-736` and `documents/rounds/round-notification-templates-b2c.md`)
++Skills the plan must follow: `.github/skills/dialog-ui/SKILL.md`, `.github/skills/dropdown-ui/SKILL.md`, `input-width-scale`, `fluentui-component-props`, `fluentui-icons`
++
++Owner rulings folded: **Q63** (B2b = publish dialog, after B2c) · **Q68** (ordering B2c → B2b → B3) · **Q16** (picker pre-selects most-specific; a tie pre-selects the default; the confirmed choice is stamped) · **Q19** (medium radio: Per policy / Email only / SMS only).
++
++## Substrate inventory (taken before planning)
++
++| Question | Answer found | Consequence |
++|---|---|---|
++| Does the dialog exist, and what does it carry? | `PublishDialog.razor` + `PublishDialogTypes.cs`: `PublishFormModel(Contacts, AudienceSummary, MandatoryReview)` → `PublishResult(ContactIds)` | WS2/WS3 add medium + per-channel template picks to the model and result |
++| Does the client send `Channels`/stamps today? | **No** — `AssignmentsApiClient.PublishAsync(id, contactIds)` posts `new PublishAssignmentRequest(contactIds)`, leaving `Channels`/both ids at their defaults (`AssignmentsApiClient.cs:258-262`). The shared `_jsonOptions` are `JsonSerializerDefaults.Web` **with no ignore condition**, so those three fields go on the wire as **explicit nulls** today | WS1 extends the client — the last inert seam of the B2a wire. **No serializer change**: flipping `WhenWritingNull` on the shared options would change the shape of every request this client sends |
++| Is there a `publish-options` client method? | **No** — only the API endpoint (`AssignmentRoutes.cs:1014`) | WS1 adds `GetPublishOptionsAsync` |
++| Is the contract ready? | **Yes, fully** — `PublishOptionsDto` (channels + `PolicyPreferredChannelOrder` + `PolicyBlockedChannels` + both stored stamps), `PublishChannelOptionsDto.Templates` (**ordered**, most specific first), `PublishTemplateCandidateDto(TemplateId, Constraints, IsDefault)`, `PublishTemplateConstraintDto(Dimension, Value)` — `ContractTypes.cs:704-736`. `ContractTypes.cs:693-696` already pins the client's pre-select source: **"stored stamp ?? first applicable candidate"** | **no contract change this round** |
++| Where are the call sites? | `AssignmentAuthoring.razor:3734` `PublishAsync()` (method) → posts at `:3752` with `ct` **positionally**; **`Index.razor:228`** `await Api.PublishAsync(id)` — the row-action quick publish, one-arg overload, null body (→ per-policy + stamp reuse), dialog-less | WS3 wires the dialog path; **`Index.razor:228` keeps working unchanged**. (The mobile client has its own `MobileAssignmentsApiClient.PublishAsync` and never calls this class — untouched by construction.) |
++| Medium enum? | `PublishChannel { PerPolicy = 0, EmailOnly, SmsOnly }` (`ContractTypes.cs:680-690`), SMS-only = SMS **+ WhatsApp** per Q19 | radio group maps 1:1, no new enum |
++| Is medium enforcement already server-side? | **Yes** — B2a WS2 enforces at the route and inside `NotificationRecipientFilter`, blocked channels winning | this round is **presentation only**; no server change |
++| Dialog + dropdown conventions? | `DialogShellBase<TModel,TResult>` + `DialogShellFooter`, no nested dialogs (`.github/skills/dialog-ui/SKILL.md`); `.github/skills/dropdown-ui/SKILL.md` is the goto for selects — its wrapper table says "parent already holds a list of domain DTOs" ⇒ `DropdownComponent`, and it carries the v5 binding facts (`TValue` required, `@bind-Value`, tests target `fluent-dropdown` + `selected`) | follow them exactly |
++| Where do dialog bUnit tests live? | **`tests/SchoolCollab.Assignments.Tests.Unit/`** — `QuestionEditDialogBunitTests.cs`, `MaterialEditDialogBunitTests.cs`, `TargetsAndAudienceDialogTests.cs`, and the existing `RegisterPublishDialog` scaffolding at `AssignmentAuthoringBunitTests.cs:2291-2303` | WS4 tests land **there**, next to the scaffolding (Admin.Tests.Unit compiles but is the wrong home) |
++
++## Workstreams
++
++**WS1 — the client seam (`AssignmentsApiClient`).**
++1. `GetPublishOptionsAsync(Guid id, CancellationToken)` → `PublishOptionsDto?`. **Fail-open contract, pinned to the B1/B2a taxonomy:** a non-success status (204/404/500), a timeout, a non-JSON 200, **and a thrown transport failure (`HttpRequestException`, or a `TaskCanceledException` that is not the caller's token)** all log and return `null`; a genuine caller cancellation still propagates. An options outage must never block publishing.
++2. A **new overload** — not optional params on the existing signature, because `AssignmentAuthoring.razor:3752` passes `ct` positionally: `PublishAsync(Guid id, IReadOnlyList<Guid>? contactIds, PublishChannel? channels, Guid? emailTemplateId, Guid? smsTemplateId, CancellationToken ct = default)`. It puts the three fields on `PublishAssignmentRequest`; the two existing overloads stay byte-identical (the one-arg `Index.razor:228` quick publish and the mobile client keep their null body).
++3. **No serializer change.** `_jsonOptions` keeps writing explicit nulls — the wire shape every existing request already has.
++
++**WS2 — the dialog (`PublishDialog.razor` + `PublishDialogTypes.cs`).**
++1. **Medium radio group** (Q19): *Per policy* (default), *Email only*, *SMS only*, bound to `PublishChannel`. Blocked channels from `PolicyBlockedChannels` are **annotated, never disabled** — all three states stay selectable, because the server's blocked channels still win ("Email only" on a tenant-blocked email reads *blocked by policy — stays blocked* beside it). The radio is disabled **only** when both channel groups (email, and SMS/WhatsApp) are blocked, with the footer explaining that publishing reaches no one by those channels.
++2. **Template picker per stamped slot** (Email, SMS — the two stamp columns; WhatsApp is not author-selectable in v1): a `DropdownComponent` per slot (`.github/skills/dropdown-ui/SKILL.md` — the parent already holds the list, so there is no async-load window; the wrapper table's "parent already holds a list of domain DTOs" case), listing that slot's `Templates` **verbatim in the order received** (the evaluator's: most specific first, tie → default), with `OptionText` = the constraint summary plus the *Tenant default* marker on the `IsDefault` entry. **Pre-select rule (`ContractTypes.cs:693-696`: "stored stamp ?? first applicable candidate")**: the slot's **stored stamp** (`PublishOptionsDto.PublishEmailTemplateId` / `PublishSmsTemplateId`) when it appears in that slot's `Templates`, otherwise the **first entry** — an unpublish→republish reuses the author's confirmed choice instead of silently overwriting it, and a **stale stamp absent from `Templates` is never sent** (an explicit non-live stamp 400s, `AssignmentRoutes.cs:739-744`): it falls back to the first entry. When `Templates` is empty the slot shows a read-only note ("No templates configured — the built-in default will be used") and nothing is stamped. A slot whose channel is excluded by the chosen medium is disabled but **keeps its selection**.
++3. `PublishFormModel` carries `Options` + the two selections (+ the medium); `PublishResult` gains `PublishChannel Channels`, `Guid? PublishEmailTemplateId`, `Guid? PublishSmsTemplateId` **with defaults** (the `PublishAssignmentRequest` shape), so the existing construction sites keep compiling — `RegisterPublishDialog` at `AssignmentAuthoringBunitTests.cs:2299` (`new PublishResult(null)`) is the one that is **not** otherwise rewritten this round.
++4. Width/labels/icons follow `input-width-scale`, `fluentui-component-props`, `fluentui-icons`.
++
++**WS3 — wiring (`AssignmentAuthoring.razor`).**
++1. `PublishAsync()` fetches `GetPublishOptionsAsync` alongside the contacts; on `null` the dialog still opens with **no pickers** and *Per policy*, with a warning message bar ("Template options are unavailable right now — publishing continues with policy defaults.") — an outage must never look like a normal dialog, and never like "no templates configured" (that note belongs to a *successful* read with empty `Templates`).
++2. Forward `result.Channels` / both stamp ids to the **new** `Api.PublishAsync` overload.
++3. Nothing else on the page changes: no new section, no new page state, no persistence. `Index.razor:228`'s one-arg quick publish is untouched.
++
++**WS4 — tests (bUnit + wire).**
++- **Dialog (bUnit, `tests/SchoolCollab.Assignments.Tests.Unit` — beside `RegisterPublishDialog`, `AssignmentAuthoringBunitTests.cs:2291-2303`; render `PublishDialog` **directly**, the `QuestionEditDialogBunitTests` pattern)**: first candidate pre-selected when no stamp is stored (kills "select the default" and "select the last"); **a stored stamp that is not the first candidate pre-selects the stored one** (the P1 case — kills the stamp-overwriting bug); **a stale stamp absent from `Templates` falls back to the first entry and is never sent**; **the rendered option order equals the server's order verbatim** (the direct kill for re-sorting — the pre-select alone is vacuous here because Q67's default-first tie makes an IsDefault-first re-sort look identical), with a fixture where a plausible re-sort would change the winner; empty `Templates` ⇒ note shown + null stamp in the result; **`Options` null ⇒ the warning bar renders and no pickers appear** (the Risks section's load-bearing case — it must live here, because a page test mocks the dialog and can never render its markup); blocked channel **annotated while the option stays selectable**, and the radio disabled only when both channel groups are blocked, with the footer explanation; a medium-excluded slot is disabled **and keeps its selection**; the `IsDefault` entry renders the *Tenant default* marker and a constraint summary; confirmed result carries the picked ids + medium; cancel returns `null` (regression guard — it passes today).
++- **Client (wire)** — beside the existing `AssignmentsApiClientInstructionMediaTests` precedent (stub handler + real client), i.e. also in `Assignments.Tests.Unit`: the new overload's body carries `channels` + both ids, and the null case is asserted **as explicit JSON nulls** (today's shape — no serializer change); `GetPublishOptionsAsync` GETs `/assignments/{id}/publish-options`, returns `null` on a non-success status **and on a thrown transport failure**, and propagates a genuine cancellation; the one-arg `PublishAsync` still posts a null body (guards `Index.razor:228`).
++- **Page**: options `null` ⇒ publishing posts null stamps (the warning-bar half belongs to the Dialog set above — a page test intercepts `ShowDialogAsync` and never renders the dialog's markup).
++
++## Explicitly NOT in this round
++
++The editor page, grade-detail applicability card and `NotificationTemplateApiClient` (**B3**); `applicable/{gradeLevelId}` suggestions (B3); any server-side change (medium + stamps are enforced since B2a/B2c); the mobile publish surface; per-recipient template splitting (deferred).
++
++## Contract / migration / secrets
++
++No contract change (consumes B2c's shipped DTOs); no migration; no secrets. The only wire behaviour that changes is that the desktop publish request now actually **fills** fields that already exist.
++
++**Plan-review history:** iteration 1 — **REWORK** (1 P1, 6 P2, zero open decisions) → folded: the picker's **stored-stamp pre-select** (`ContractTypes.cs:693-696` "stored stamp ?? first applicable candidate"; a stale stamp never sent), the fail-open taxonomy pinned (transport throws included), the **new overload** (existing signatures keep `ct` positionally; `Index.razor:228` named as an untouched consumer), `DropdownComponent` per the dropdown skill, WS4 moved to `Assignments.Tests.Unit` beside `RegisterPublishDialog`, the wire test restated as **explicit nulls**, the radio "annotate, never disable the option", the missing assertions added (stored stamp, medium-excluded slot, `IsDefault` label, both-blocked footer, outage warning bar), and the citation slips corrected (§12 does not exist; §10 is B2a-only). Iteration 2 — **REWORK** (1 P1, 3 P2) — **the ≤2 bound is spent**; folded: the outage warning-bar assertion moved into the **Dialog** set (a page test mocks the dialog and can never render its markup — the one assertion that could not fail), the stamp-400 citation corrected to `AssignmentRoutes.cs:739-744`, `PublishResult`'s new fields given **defaults** plus the one unre written construction site named (`AssignmentAuthoringBunitTests.cs:2299`), the re-sort test pinned to **rendered option order** (the pre-select alone is vacuous under Q67's default-first tie), and the wire tests homed beside `AssignmentsApiClientInstructionMediaTests`. No third gate run — the round proceeds to the worker on the owner's "go onto next", per the ≤2 bound rule.
++
++## Risks
++
++- **Fail-open vs. silent degradation**: an options outage must show the warning, never a bare dialog that looks normal (a teacher who picked nothing must know why).
++- **Re-sorting in the UI**: the dialog must render `Templates` verbatim; sorting by constraint count in the component would silently undo the Q67 tie rule the server just implemented.
++- **Radio vs. blocked channels**: "Email only" with email blocked must not read as a way to force email — the annotation is part of the acceptance criteria, not decoration.
++
++## Verification
++
++`dotnet build SchoolCollab.slnx` 0 errors · `SchoolCollab.Assignments.Tests.Unit` (dialog bUnit + page + client wire — one project run covers all three) · `SchoolCollab.ArchitectureTests.Unit`.
++UI verification beyond bUnit: the UI tester runs the real app per `school-collab-ui-smoke-probe` (bUnit loose mode masks missing assets and circuits).
++
++## Acceptance — ACCEPTED (2026-10-19, `deepseek-v4-pro:0813`)
++
++Criterion-by-criterion over the working-tree diff + named tests; no criterion accepted on narrative.
++
++| Criterion | Evidence |
++|---|---|
++| WS1 fail-open across every class + new overload + unchanged overloads | `AssignmentsApiClient.cs:232-240` catch filter (`HttpRequestException`/`JsonException`/`NotSupportedException` + `OperationCanceledException && !ct.IsCancellationRequested`); `:301-320` new overload; `:294-299` pre-existing overloads byte-identical; `_jsonOptions` untouched. Wire tests: 204/404/500, non-JSON 200, thrown transport, bare-OCE **timeout**, cancellation propagation, explicit nulls, one-arg `"null"` body |
++| WS2 medium radio | `PublishDialog.razor:41-74` — `EmailGroupBlocked`/`SmsGroupBlocked` (SMS **and** WhatsApp)/`AllChannelGroupsBlocked`; `BlockedChannel_IsAnnotated_WhileTheOptionStaysSelectable`, `BothChannelGroupsBlocked_DisablesTheRadioGroup_WithTheFooterExplanation` |
++| WS2 picker: verbatim order, stored-stamp pre-select, stale never sent | `PublishDialog.razor:86-157` passes `Templates` verbatim (no sort); `PreSelect` (`:249-259`) = `storedStamp ?? candidates[0]`; `StaleStamp_FallsBackToTheFirstEntry_AndIsNeverSent`, `RenderedOptionOrder_EqualsTheServersOrder_Verbatim` (default **last** in the fixture — non-vacuous), `StoredStamp_ThatIsNotTheFirstCandidate_IsPreSelected` (the P1 kill) |
++| WS2 empty `Templates` vs `Options` null | `:90-96`/`:120-126` (note) vs `:27-34` (warning bar); `EmptyTemplates_ShowTheReadOnlyNote_AndStampNothing`, `OptionsNull_RendersTheWarningBar_AndNoPickers` |
++| WS2 medium-excluded slot; `IsDefault` marker + summary | `EmailSlotDisabled`/`SmsSlotDisabled` (`:206-211`); `MediumExcludedSlot_IsDisabled_AndKeepsItsSelection`; `TemplateOptionText` (`:213-225`) + its test |
++| WS3 wiring | `AssignmentAuthoring.razor:3745-3762` — `optionsTask` launched, awaited after contacts; forwards medium + both stamps; `Publish_ForwardsTheDialogsMediumAndTemplatePicks`, `Publish_OptionsReadFails_PostsNoStamps`; `Index.razor:228` untouched |
++| Records | `PublishDialogTypes.cs:42-47` defaults keep `new PublishResult(null)` (`AssignmentAuthoringBunitTests.cs:2355`) compiling |
++| Tests | 12 dialog bUnit + 9 wire + 2 page, mapped 1:1 to WS4; timeout / cancellation / rendered-order / stale-stamp / outage-bar each pin a branch that fails pre-change |
++| Hygiene | diff = 4 `.Application` src files + 1 test + 2 new test files; `ContractTypes.cs` untouched; no `.Api`/`.Core`/migration; no secrets; no `.pi/skills`/`AGENTS.md`/specs; `models.json` untracked-only; `DialogShellBase`/`DialogShellFooter` + `DropdownComponent`/`FieldWidth.W9` per the skills |
++
++**Untested / undiscriminating:** none load-bearing. (One sub-assertion was case-vacuous — `NotContain("No templates configured")` against a lowercase note — **fixed in-round** to `NotContainEquivalentOf`.) `Cancel_ReturnsNull` and `Publish_OneArgumentOverload_StillPostsANullBody` are honestly labelled regression guards.
++
++**Deviations recorded:** none outstanding (the worker's seven were all adjudicated **accept** by the diff gate).
++
++**Gate trail:** plan gate REWORK ×2 (1 P1 + 6 P2, then 1 P1 + 3 P2; bound spent, folded, no third run) → worker → diff gate **PASS** (2 P2: the `TaskCanceledException`→`OperationCanceledException` narrowness and the untested timeout branch — **both closed by the parent**, +1 test) → acceptance **ACCEPTED**.
++
++**Patterns to carry forward:** (1) a fail-open filter keys on the **base `OperationCanceledException` gated by `!ct.IsCancellationRequested`** — `TaskCanceledException` misses stream-read timeouts and the page's own `catch (OperationCanceledException)` then swallows them silently; (2) a picker's correctness hinges on **rendered option order**, not the pre-select — a default-first tie makes the pre-select assertion vacuous.
++
++## Verification (measured)
++
++`dotnet build SchoolCollab.slnx` **0 errors** · Assignments.Tests.Unit **1299/0** · Architecture **129/0** · Admin.Tests.Unit **699/0**.
++
++## UI verification — NOT COMPLETED (recorded honestly)
++
++Two delegated real-browser hunts (`minimax-m3`, per `school-collab-ui-smoke-probe`) were attempted and **both timed out at the 30-minute cap during app bring-up**; neither produced a bug report.
++
++Evidence gathered by the parent between attempts:
++- Aspire dashboard `https://localhost:17160/` answered **302** — the AppHost starts and `dotnet watch` loads all 27 projects.
++- Docker resources were up (`postgres`, `keycloak`, `cache`, `mailpit`, `pgadmin`).
++- The Admin app's port is **not fixed** and must be discovered from the running process or the AppHost log; the first attempt hung on an un-timeout'd `curl`, the second one still exhausted its budget.
++- `MigrationService` reported `Exited` in the AppHost log — the app may come up with an unmigrated database, which would make an empty-data dialog look like a broken one.
++
++**Consequence, stated plainly:** the round's UI evidence is the **12 bUnit dialog tests** (markup-level: warning bar vs empty-list note, rendered option order, stored-stamp pre-select, blocked-channel annotation, both-blocked disable, medium-excluded slot) plus the acceptance pass. **No real-browser proof exists** that the dialog renders with its assets, that the pickers appear at a sane width, or that the footer stays reachable.
++
++**Before merge, one of these must happen:** (a) the owner runs the probe via the dev hot-reload loop (`documents/runbooks/dev-loop-hot-reload.md`) and confirms the five behaviours listed above in a browser, or (b) the round is merged with this gap explicitly accepted and the browser pass scheduled as a follow-up on the B2b layer. It must not be silently treated as verified.
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+index 166d8d31..9349510a 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentAuthoring.razor
+@@ -3730,7 +3730,9 @@
+     // ── Lifecycle actions ────────────────────────────────────────────────────
+ 
+     /// <summary>UX-6: the publish-time choices are captured in the confirm dialog (replacing
+-    /// the wizard's Review step) — contact limiting lives in <c>PublishDialog</c>.</summary>
++    /// the wizard's Review step) — contact limiting, the medium and the template picks live in
++    /// <c>PublishDialog</c>. The options read is fail-open: an outage still opens the dialog (no
++    /// pickers, per policy) and publishes without stamps.</summary>
+     private async Task PublishAsync()
+     {
+         if (_item is null) return;
+@@ -3740,16 +3742,27 @@
+ 
+         try
+         {
++            // The options read never throws (its own failure classes return null), so it rides
++            // alongside the contacts read instead of gating the dialog on a second round trip.
++            var optionsTask = Api.GetPublishOptionsAsync(_item.Id, ct);
+             var contacts = await StudentsApi.ListSubscribedContactsAsync(
+                 ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct) ?? [];
+-            var model = new PublishFormModel(contacts.ToList(), $"Audience: {DerivedAudienceText}", _item.MandatoryReview);
++            var options = await optionsTask;
++            var model = new PublishFormModel(
++                contacts.ToList(), $"Audience: {DerivedAudienceText}", _item.MandatoryReview, options);
+ 
+             var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
+                 model, title: "Publish assignment", size: DialogWidth.Medium);
+ 
+             if (result is null) return; // cancelled
+ 
+-            await Api.PublishAsync(_item.Id, result.ContactIds, ct);
++            await Api.PublishAsync(
++                _item.Id,
++                result.ContactIds,
++                result.Channels,
++                result.PublishEmailTemplateId,
++                result.PublishSmsTemplateId,
++                ct);
+             await ReloadAsync();
+             await Changed.InvokeAsync();
+         }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialog.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialog.razor
+index 62d5ad95..ce8507d3 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialog.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialog.razor
+@@ -1,4 +1,7 @@
+-@* Assignment publish dialog (spec §12). *@
++@* Assignment publish dialog (spec §12) — the publish-time choices: the contact subset (§8), the
++   per-sendout medium (§3.8 / Q19) and the per-channel template pick (§3.7 / Q16).
++   Medium and template ids are per-publish only; the template ids are stamped on the assignment
++   server-side, which is what makes unpublish → republish reuse the author's confirmed choice. *@
+ @inherits DialogShellBase<PublishFormModel, PublishResult>
+ @using SchoolCollab.Admin.Shared.Components.Dialogs
+ @using Microsoft.FluentUI.AspNetCore.Components
+@@ -19,6 +22,121 @@
+             </FluentMessageBar>
+         }
+ 
++        @* §3.8/§3.7: an options outage is NOT "no templates configured" — the read failed, so the
++           dialog stamps nothing and says so (fail-open: publishing still proceeds, per policy). *@
++        @if (Model.Options is null)
++        {
++            <div id="cq-publish-options-unavailable" class="mb-3">
++                <FluentMessageBar Intent="MessageBarIntent.Warning">
++                    Template options are unavailable right now — publishing continues with policy defaults.
++                </FluentMessageBar>
++            </div>
++        }
++        else
++        {
++            @* Q19 medium radio. A blocked channel is ANNOTATED, never disabled: the server's blocked
++               channels still win, so "Email only" on a tenant-blocked email stays selectable and
++               reads as "blocked by policy — stays blocked". The group is disabled only when every
++               channel is blocked (then the sendout reaches no one by either medium). *@
++            <div id="cq-publish-medium" class="mb-3">
++                <span class="dialog-hint">Send via</span>
++                <FluentRadioGroup TValue="PublishChannel"
++                                  Name="cq-publish-medium-radio"
++                                  @bind-Value="Model.Channel"
++                                  Disabled="@AllChannelGroupsBlocked">
++                    <FluentRadio Value="PublishChannel.PerPolicy">Per policy</FluentRadio>
++                    <FluentRadio Value="PublishChannel.EmailOnly">
++                        Email only
++                        @if (EmailGroupBlocked)
++                        {
++                            <span class="muted" id="cq-publish-medium-email-blocked">
++                                — blocked by policy, stays blocked
++                            </span>
++                        }
++                    </FluentRadio>
++                    <FluentRadio Value="PublishChannel.SmsOnly">
++                        SMS only
++                        @if (SmsGroupBlocked)
++                        {
++                            <span class="muted" id="cq-publish-medium-sms-blocked">
++                                — blocked by policy, stays blocked
++                            </span>
++                        }
++                    </FluentRadio>
++                </FluentRadioGroup>
++                @if (AllChannelGroupsBlocked)
++                {
++                    <p class="muted" id="cq-publish-medium-all-blocked">
++                        The notification policy blocks email, SMS and WhatsApp, so this sendout reaches
++                        no one — publishing still records it.
++                    </p>
++                }
++            </div>
++
++            <div id="cq-publish-templates">
++                @if (EmailSlot is { } emailSlot)
++                {
++                    <div id="cq-publish-template-email" class="mb-3">
++                        @if (emailSlot.Templates.Count == 0)
++                        {
++                            <p class="dialog-hint" id="cq-publish-template-email-empty">
++                                Email template: no templates configured — the built-in default will be used.
++                            </p>
++                        }
++                        else
++                        {
++                            @* The candidates render in the order received (the evaluator's: most
++                               specific first, the tenant default on a tie). Never re-sort here — a
++                               client-side sort would silently undo the server's tie rule. *@
++                            <DropdownComponent TItem="PublishTemplateCandidateDto" TValue="Guid?"
++                                               Items="@emailSlot.Templates"
++                                               @bind-SelectedValue="Model.EmailTemplateId"
++                                               OptionText="@TemplateOptionText"
++                                               OptionValue="@(c => (Guid?)c.TemplateId)"
++                                               Label="Email template"
++                                               Disabled="@EmailSlotDisabled"
++                                               Width="FieldWidth.W9" />
++                            @if (EmailSlotDisabled)
++                            {
++                                <p class="muted" id="cq-publish-template-email-excluded">
++                                    Not sent — the medium above excludes email.
++                                </p>
++                            }
++                        }
++                    </div>
++                }
++
++                @if (SmsSlot is { } smsSlot)
++                {
++                    <div id="cq-publish-template-sms" class="mb-3">
++                        @if (smsSlot.Templates.Count == 0)
++                        {
++                            <p class="dialog-hint" id="cq-publish-template-sms-empty">
++                                SMS template: no templates configured — the built-in default will be used.
++                            </p>
++                        }
++                        else
++                        {
++                            <DropdownComponent TItem="PublishTemplateCandidateDto" TValue="Guid?"
++                                               Items="@smsSlot.Templates"
++                                               @bind-SelectedValue="Model.SmsTemplateId"
++                                               OptionText="@TemplateOptionText"
++                                               OptionValue="@(c => (Guid?)c.TemplateId)"
++                                               Label="SMS template"
++                                               Disabled="@SmsSlotDisabled"
++                                               Width="FieldWidth.W9" />
++                            @if (SmsSlotDisabled)
++                            {
++                                <p class="muted" id="cq-publish-template-sms-excluded">
++                                    Not sent — the medium above excludes SMS and WhatsApp.
++                                </p>
++                            }
++                        }
++                    </div>
++                }
++            </div>
++        }
++
+         <FluentCheckbox @bind-Value="Model.LimitSelection" Label="Limit to specific contacts" class="mb-3" />
+ 
+         @if (Model.LimitSelection)
+@@ -49,11 +167,78 @@
+     protected override string SubmitText => "Publish";
+     protected override string SavingText => "Publishing...";
+ 
++    /// <summary>The Email slot of the publish-options read (null only when the read failed or the
++    /// server sent no Email slot).</summary>
++    private PublishChannelOptionsDto? EmailSlot => SlotFor(ContactChannelDto.Email);
++
++    /// <summary>The SMS slot — the second stamped column (WhatsApp shares its body).</summary>
++    private PublishChannelOptionsDto? SmsSlot => SlotFor(ContactChannelDto.SMS);
++
++    private PublishChannelOptionsDto? SlotFor(ContactChannelDto channel) =>
++        Model.Options?.Channels.FirstOrDefault(slot => slot.Channel == channel);
++
++    /// <summary>The policy's blocked channels, empty when the read failed.</summary>
++    private IReadOnlyList<ContactChannelDto> BlockedChannels =>
++        Model.Options?.PolicyBlockedChannels ?? [];
++
++    /// <summary>Email is blocked, so the Email-only medium reaches no one (annotated, not disabled —
++    /// the server's blocked channels win).</summary>
++    private bool EmailGroupBlocked => BlockedChannels.Contains(ContactChannelDto.Email);
++
++    /// <summary>The SMS medium covers SMS + WhatsApp (§3.8 / Q19), so it is blocked only when BOTH
++    /// are — with one of them open the medium still delivers.</summary>
++    private bool SmsGroupBlocked =>
++        BlockedChannels.Contains(ContactChannelDto.SMS) && BlockedChannels.Contains(ContactChannelDto.WhatsApp);
++
++    /// <summary>No medium reaches anyone: the only state in which the radio group is disabled.</summary>
++    private bool AllChannelGroupsBlocked => EmailGroupBlocked && SmsGroupBlocked;
++
++    /// <summary>The chosen medium excludes the Email slot (disabled, but its selection is kept).</summary>
++    private bool EmailSlotDisabled => Model.Channel == PublishChannel.SmsOnly;
++
++    /// <summary>The chosen medium excludes the SMS/WhatsApp slot (disabled, selection kept).</summary>
++    private bool SmsSlotDisabled => Model.Channel == PublishChannel.EmailOnly;
++
++    /// <summary>One candidate's display text: the constraint summary the server sent, plus the
++    /// tenant-default marker on the unconstrained entry (spec §3.7 / Q16).</summary>
++    private static string TemplateOptionText(PublishTemplateCandidateDto candidate)
++    {
++        var summary = string.Join(" · ", candidate.Constraints.Select(c => $"{c.Dimension}: {c.Value}"));
++        if (candidate.IsDefault)
++        {
++            return summary.Length == 0 ? "Tenant default" : $"{summary} · Tenant default";
++        }
++
++        return summary.Length == 0 ? "No constraints" : summary;
++    }
++
+     protected override void OnModelInitialized(PublishFormModel model)
+     {
+         model.Selections = model.Contacts
+             .Select(c => new ContactSelection(c))
+             .ToList();
++
++        // spec §3.7 / ContractTypes.cs:693-696 — the pre-select source is
++        // "stored stamp ?? first applicable candidate": the author's confirmed choice survives
++        // unpublish → republish, and a STALE stamp (a template deleted, or no longer applicable to
++        // this assignment) is never sent — it falls back to the first entry, which is what the
++        // server would render for this assignment anyway.
++        model.EmailTemplateId = PreSelect(model.Options?.PublishEmailTemplateId, EmailSlot?.Templates);
++        model.SmsTemplateId = PreSelect(model.Options?.PublishSmsTemplateId, SmsSlot?.Templates);
++    }
++
++    /// <summary>The stored stamp when the server still offers it, else the FIRST candidate in the
++    /// received order (never a re-sort), else nothing (the built-in default renders).</summary>
++    private static Guid? PreSelect(Guid? storedStamp, IReadOnlyList<PublishTemplateCandidateDto>? candidates)
++    {
++        if (candidates is null || candidates.Count == 0)
++        {
++            return null;
++        }
++
++        return storedStamp is { } stamp && candidates.Any(c => c.TemplateId == stamp)
++            ? stamp
++            : candidates[0].TemplateId;
+     }
+ 
+     protected override Task<PublishResult?> SubmitAsync(PublishFormModel model)
+@@ -76,6 +261,10 @@
+             contactIds = selected;
+         }
+ 
+-        return Task.FromResult<PublishResult?>(new PublishResult(contactIds));
++        return Task.FromResult<PublishResult?>(new PublishResult(
++            contactIds,
++            model.Channel,
++            model.EmailTemplateId,
++            model.SmsTemplateId));
+     }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialogTypes.cs b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialogTypes.cs
+index 6205b453..b1d1bd53 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialogTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/PublishDialogTypes.cs
+@@ -1,17 +1,36 @@
++using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Students.Core.DTOs;
+ 
+ namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+ 
+-/// <summary>Form state for the assignment publish dialog (spec §12).</summary>
++/// <summary>Form state for the assignment publish dialog (spec §12, §3.7, §3.8).</summary>
++/// <param name="Contacts">The resolved subscribed contacts the author may limit the sendout to.</param>
++/// <param name="AudienceSummary">The derived audience line shown at the top of the dialog.</param>
++/// <param name="MandatoryReview">Whether the effective policy requires guardian review.</param>
++/// <param name="Options">The <c>GET /assignments/{id}/publish-options</c> read — the medium's blocked
++/// channels and each stamped slot's ordered candidates. <c>null</c> when that read failed (fail-open):
++/// the dialog then stamps nothing and publishes per policy.</param>
+ public sealed record PublishFormModel(
+     IReadOnlyList<SubscribedContactDto> Contacts,
+     string AudienceSummary,
+-    bool MandatoryReview)
++    bool MandatoryReview,
++    PublishOptionsDto? Options = null)
+ {
+     public bool LimitSelection { get; set; }
+ 
+     /// <summary>Mutable per-contact selection (FluentCheckbox binds to IsSelected).</summary>
+     public List<ContactSelection> Selections { get; set; } = new();
++
++    /// <summary>The per-sendout medium (spec §3.8 / Q19). Default: apply the policy.</summary>
++    public PublishChannel Channel { get; set; } = PublishChannel.PerPolicy;
++
++    /// <summary>The confirmed Email template, pre-selected in <c>OnModelInitialized</c> from the
++    /// assignment's stored stamp (falling back to the first applicable candidate). <c>null</c> = the
++    /// built-in default renders — nothing is stamped.</summary>
++    public Guid? EmailTemplateId { get; set; }
++
++    /// <summary>The confirmed SMS template (and WhatsApp's, which shares the SMS body).</summary>
++    public Guid? SmsTemplateId { get; set; }
+ }
+ 
+ /// <summary>One subscribed contact plus its checkbox state.</summary>
+@@ -20,5 +39,11 @@ public sealed record ContactSelection(SubscribedContactDto Contact)
+     public bool IsSelected { get; set; }
+ }
+ 
+-/// <summary>Result returned when the teacher confirms publish (spec §8/§12).</summary>
+-public sealed record PublishResult(IReadOnlyList<Guid>? ContactIds);
++/// <summary>Result returned when the teacher confirms publish (spec §8/§12, §3.7/§3.8).
++/// The template ids carry only picks that appeared in the server's own candidate list, so a stale
++/// stamp can never reach the request.</summary>
++public sealed record PublishResult(
++    IReadOnlyList<Guid>? ContactIds,
++    PublishChannel Channels = PublishChannel.PerPolicy,
++    Guid? PublishEmailTemplateId = null,
++    Guid? PublishSmsTemplateId = null);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+index dfbbe5a1..7e88a806 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+@@ -205,6 +205,46 @@ public sealed class AssignmentsApiClient
+         return await response.Content.ReadFromJsonAsync<RecipientPreviewDto>(_jsonOptions, ct);
+     }
+ 
++    /// <summary>
++    /// The publish dialog's pre-select source (rounds notification-templates-b2a/b2c, spec §3.7):
++    /// each stamped slot's ordered applicable candidates, the effective policy's channel
++    /// configuration and the assignment's stored stamps.
++    /// <para><b>Fail-open on every failure class</b>: a non-success status, a timeout, a
++    /// non-JSON (or empty) 200 and a thrown transport failure all log and return <c>null</c> — an
++    /// options outage must never block publishing, which then continues with policy defaults. A
++    /// genuine caller cancellation (<paramref name="ct"/> requested) still propagates.</para>
++    /// </summary>
++    public async Task<PublishOptionsDto?> GetPublishOptionsAsync(Guid id, CancellationToken ct = default)
++    {
++        _logger.LogDebug("Reading publish options for assignment {AssignmentId}", id);
++        try
++        {
++            var response = await _http.GetAsync($"/assignments/{id}/publish-options", ct);
++            if (!response.IsSuccessStatusCode)
++            {
++                _logger.LogWarning(
++                    "Publish options read for assignment {AssignmentId} failed with {Status}; publishing continues with policy defaults",
++                    id, response.StatusCode);
++                return null;
++            }
++
++            return await response.Content.ReadFromJsonAsync<PublishOptionsDto>(_jsonOptions, ct);
++        }
++        catch (Exception ex) when (
++            ex is HttpRequestException or JsonException or NotSupportedException
++            // Broader than TaskCanceledException deliberately: a timeout can surface as a bare
++            // OperationCanceledException (e.g. from the stream read), and the repo's fail-open
++            // resolvers catch the same base type. A genuine caller cancellation is excluded so it
++            // still propagates.
++            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
++        {
++            _logger.LogWarning(ex,
++                "Publish options read for assignment {AssignmentId} failed; publishing continues with policy defaults",
++                id);
++            return null;
++        }
++    }
++
+     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)
+     {
+         _logger.LogInformation("Creating assignment with title {Title}", req.Title);
+@@ -261,6 +301,31 @@ public sealed class AssignmentsApiClient
+         (await _http.PostAsJsonAsync($"/assignments/{id}/publish", new PublishAssignmentRequest(contactIds), _jsonOptions, ct)).EnsureSuccessStatusCode();
+     }
+ 
++    /// <summary>
++    /// Publishes with the dialog's confirmed choices (round notification-templates-b2b, spec
++    /// §3.7/§3.8): the per-sendout medium and the two stamped template ids. A separate overload
++    /// because the two-argument form's <c>ct</c> is passed positionally by its callers, and both
++    /// existing overloads keep their null-body behaviour (the row-action quick publish reuses the
++    /// assignment's stored stamps).
++    /// <para><paramref name="emailTemplateId"/>/<paramref name="smsTemplateId"/> carry only ids the
++    /// server itself offered as candidates — a stale stamp is never sent (the route rejects a
++    /// non-live id).</para>
++    /// </summary>
++    public async Task PublishAsync(
++        Guid id,
++        IReadOnlyList<Guid>? contactIds,
++        PublishChannel? channels,
++        Guid? emailTemplateId,
++        Guid? smsTemplateId,
++        CancellationToken ct = default)
++    {
++        _logger.LogInformation(
++            "Publishing assignment {AssignmentId} to {Count} selected contacts, medium {Channels}, email template {EmailTemplateId}, SMS template {SmsTemplateId}",
++            id, contactIds?.Count ?? 0, channels, emailTemplateId, smsTemplateId);
++        var request = new PublishAssignmentRequest(contactIds, channels, emailTemplateId, smsTemplateId);
++        (await _http.PostAsJsonAsync($"/assignments/{id}/publish", request, _jsonOptions, ct)).EnsureSuccessStatusCode();
++    }
++
+     public async Task UnpublishAsync(Guid id, CancellationToken ct = default)
+     {
+         _logger.LogInformation("Unpublishing assignment {AssignmentId}", id);
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+index 4eb1e926..c90cc4fc 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentAuthoringBunitTests.cs
+@@ -148,6 +148,59 @@ public class AssignmentAuthoringBunitTests : BunitContext
+                 Content = new StringContent(
+                     JsonSerializer.Serialize(_activityGroups, _apiJsonOptions), Encoding.UTF8, "application/json")
+             });
++
++        // Round notification-templates-b2b: the publish dialog's options read. Registered here
++        // (first-match ordering) against the mutable body, so a test can flip it to the outage
++        // case — or to its own shaped candidates — without re-registering the matcher.
++        SetPublishOptionsBaseline();
++        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/*/publish-options")
++            .Respond(_ => _publishOptionsBody is null
++                ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
++                : new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(_publishOptionsBody, Encoding.UTF8, "application/json")
++                });
++    }
++
++    /// <summary>Round notification-templates-b2b — the <c>/publish-options</c> body the page's
++    /// fail-open read returns; <c>null</c> makes the stub answer 500 (the outage case).</summary>
++    private string? _publishOptionsBody;
++
++    /// <summary>The email candidate the baseline options body lists FIRST — the pick a confirmed
++    /// dialog choice carries through to the publish request.</summary>
++    private Guid _publishOptionsEmailCandidate;
++
++    private void SetPublishOptionsBaseline() =>
++        (_publishOptionsBody, _publishOptionsEmailCandidate) = PublishOptionsBody();
++
++    /// <summary>The shipped <see cref="PublishOptionsDto"/> shape: two stamped slots, the email slot
++    /// carrying one applicable constraint plus the tenant default, the SMS slot its default only.</summary>
++    private (string Body, Guid EmailCandidate) PublishOptionsBody()
++    {
++        var emailCandidate = Guid.NewGuid();
++        var emailDefault = Guid.NewGuid();
++        var smsDefault = Guid.NewGuid();
++        var options = new PublishOptionsDto(
++            [
++                new PublishChannelOptionsDto(
++                    NotificationKindDto.Publish, ContactChannelDto.Email, emailDefault, "New task", [],
++                    [
++                        new PublishTemplateCandidateDto(
++                            emailCandidate,
++                            [new PublishTemplateConstraintDto("GradeLevel", "Grade 3")],
++                            IsDefault: false),
++                        new PublishTemplateCandidateDto(emailDefault, [], IsDefault: true),
++                    ]),
++                new PublishChannelOptionsDto(
++                    NotificationKindDto.Publish, ContactChannelDto.SMS, smsDefault, null, [],
++                    [new PublishTemplateCandidateDto(smsDefault, [], IsDefault: true)]),
++            ],
++            [ContactChannelDto.Email, ContactChannelDto.SMS],
++            [],
++            PublishEmailTemplateId: null,
++            PublishSmsTemplateId: null);
++
++        return (JsonSerializer.Serialize(options, _apiJsonOptions), emailCandidate);
+     }
+ 
+     /// <summary>Activity groups the students API offers to the picker. Mutable so a test can
+@@ -2293,14 +2346,25 @@ public class AssignmentAuthoringBunitTests : BunitContext
+     /// <c>ShowDialogAsync(typeof(PublishDialog), DialogOptions)</c>, and the
+     /// dialog Result carries the <see cref="DialogShellResult{TResult}"/> the extension unwraps into
+     /// the typed result (the <c>AssignmentDetailBunitTests</c> schedule-dialog pattern).
++    /// <para><paramref name="capturedModels"/>, when supplied, records the form model the page built —
++    /// the seam that proves what the dialog was handed (the dialog's own markup is never rendered
++    /// here, so its pre-select is asserted in <c>PublishDialogBunitTests</c> instead).</para>
+     /// </summary>
+-    private void RegisterPublishDialog()
++    private void RegisterPublishDialog(List<PublishFormModel>? capturedModels = null, PublishResult? result = null)
+     {
+-        var payload = new DialogShellResult<PublishResult>(new PublishResult(null));
++        var payload = new DialogShellResult<PublishResult>(result ?? new PublishResult(null));
+ 
+         var dialogMock = this.RegisterDialogService();
+         dialogMock
+             .Setup(d => d.ShowDialogAsync(typeof(PublishDialog), It.IsAny<DialogOptions>()))
++            .Callback<Type, DialogOptions>((_, options) =>
++            {
++                if (options.Parameters.TryGetValue("Content", out var content)
++                    && content is DialogShellData<PublishFormModel> data)
++                {
++                    capturedModels?.Add(data.Model);
++                }
++            })
+             .ReturnsAsync(DialogResult.Ok<object?>(payload));
+     }
+ 
+@@ -2502,6 +2566,101 @@ public class AssignmentAuthoringBunitTests : BunitContext
+         }, TimeSpan.FromSeconds(15));
+     }
+ 
++    // ── round notification-templates-b2b: the publish dialog's medium + template picks ──
++
++    /// <summary>
++    /// Round notification-templates-b2b (spec §3.7/§3.8): the page fetches the publish options
++    /// alongside the contacts and hands them to the dialog, then forwards the confirmed picks to the
++    /// publish request. Asserted on the two observable seams — the dialog model the page built and
++    /// the request body it posted.
++    /// <para>The success half is the discriminating one for the wiring: pre-round the client posted
++    /// <see cref="PublishAssignmentRequest"/> with the default <c>Channels</c>/stamp values, so the
++    /// picked ids could never reach the wire.</para>
++    /// </summary>
++    [TestMethod]
++    public async Task Publish_ForwardsTheDialogsMediumAndTemplatePicks()
++    {
++        var dto = MakeDto(AssignmentStatusDto.Draft);
++        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed*")
++            .Respond(HttpStatusCode.OK, "application/json", "[]");
++        string? publishBody = null;
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/publish")
++            .With(req =>
++            {
++                publishBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
++                return true;
++            })
++            .Respond(HttpStatusCode.NoContent);
++
++        var models = new List<PublishFormModel>();
++        var pickedEmail = _publishOptionsEmailCandidate;
++        var pickedSms = Guid.NewGuid();
++        RegisterPublishDialog(models, new PublishResult(
++            null, PublishChannel.SmsOnly, pickedEmail, pickedSms));
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++        cut.Find("#authoring-primary-action").Click();
++
++        cut.WaitForAssertion(() => publishBody.Should().NotBeNull(), TimeSpan.FromSeconds(15));
++
++        models.Should().ContainSingle("the publish flow opens the dialog once");
++        models[0].Options.Should().NotBeNull(
++            "the successful options read reaches the dialog, so its pickers can pre-select");
++        models[0].Options!.Channels.Select(c => c.Channel).Should()
++            .Equal([ContactChannelDto.Email, ContactChannelDto.SMS],
++                "the dialog receives the server's slots verbatim");
++
++        var body = JsonDocument.Parse(publishBody!).RootElement;
++        body.GetProperty("channels").GetInt32().Should().Be((int)PublishChannel.SmsOnly,
++            "the confirmed medium rides the publish request");
++        body.GetProperty("publishEmailTemplateId").GetGuid().Should().Be(pickedEmail,
++            "the confirmed email pick is stamped onto the request");
++        body.GetProperty("publishSmsTemplateId").GetGuid().Should().Be(pickedSms,
++            "the confirmed SMS pick is stamped onto the request");
++    }
++
++    /// <summary>
++    /// Round notification-templates-b2b — an options outage must never block publishing: the read
++    /// fails open to <c>null</c>, the dialog gets no pickers (its own warning bar is asserted in
++    /// <c>PublishDialogBunitTests</c>, since this harness mocks the dialog away) and the publish posts
++    /// no stamps, per policy.
++    /// </summary>
++    [TestMethod]
++    public async Task Publish_OptionsReadFails_PostsNoStamps()
++    {
++        var dto = MakeDto(AssignmentStatusDto.Draft);
++        _publishOptionsBody = null; // the stub now answers 500 — the fail-open outage case
++        _mockHttp.When(HttpMethod.Get, "http://localhost/contacts/subscribed*")
++            .Respond(HttpStatusCode.OK, "application/json", "[]");
++        string? publishBody = null;
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{dto.Id}/publish")
++            .With(req =>
++            {
++                publishBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
++                return true;
++            })
++            .Respond(HttpStatusCode.NoContent);
++
++        var models = new List<PublishFormModel>();
++        RegisterPublishDialog(models);
++
++        var cut = RenderAuthoring(AssignmentAuthoringMode.Edit, dto);
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"));
++        cut.Find("#authoring-primary-action").Click();
++
++        cut.WaitForAssertion(() => publishBody.Should().NotBeNull(), TimeSpan.FromSeconds(15));
++
++        models.Should().ContainSingle();
++        models[0].Options.Should().BeNull("a failed options read hands the dialog nothing to pre-select");
++
++        var body = JsonDocument.Parse(publishBody!).RootElement;
++        body.GetProperty("publishEmailTemplateId").ValueKind.Should().Be(JsonValueKind.Null);
++        body.GetProperty("publishSmsTemplateId").ValueKind.Should().Be(JsonValueKind.Null);
++        body.GetProperty("channels").GetInt32().Should().Be((int)PublishChannel.PerPolicy,
++            "the dialog's default medium travels even when the options read failed");
++    }
++
+     // ── §17 item 1: a lifecycle action re-reads the persisted set ─────────
+ 
+     /// <summary>§17 (item 1, this round): <c>ReloadAsync</c> re-read only the scalar summary, so a lifecycle
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentsApiClientPublishWireTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentsApiClientPublishWireTests.cs
+new file mode 100644
+index 00000000..672e1f94
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentsApiClientPublishWireTests.cs
+@@ -0,0 +1,266 @@
++using System.Net;
++using System.Text.Json;
++using FluentAssertions;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Assignments.Application.Services;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Round notification-templates-b2b (spec §3.7/§3.8) — the publish-dialog wire seam of
++/// <see cref="AssignmentsApiClient"/> (the <see cref="AssignmentsApiClientInstructionMediaTests"/>
++/// stub-handler precedent):
++/// <list type="bullet">
++///   <item>the new publish overload actually fills <c>Channels</c> and both template ids — the last
++///         inert field set of the B2a wire;</item>
++///   <item>its null case writes EXPLICIT JSON NULLS (the shared serializer options carry no
++///         <c>WhenWritingNull</c> condition, and this round deliberately does not add one);</item>
++///   <item><c>GetPublishOptionsAsync</c> is fail-open on every failure class — a transport throw
++///         included — while a genuine caller cancellation still propagates;</item>
++///   <item>the one-argument quick publish still posts a null body (it must keep reusing the stored
++///         stamps).</item>
++/// </list>
++/// </summary>
++[TestClass]
++public class AssignmentsApiClientPublishWireTests
++{
++    /// <summary>Scripts one response and captures the request body the client actually sent.</summary>
++    private sealed class CapturingHandler : HttpMessageHandler
++    {
++        private readonly Func<HttpRequestMessage, HttpResponseMessage> _respond;
++
++        public CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) => _respond = respond;
++
++        public List<Uri> RequestedUris { get; } = [];
++
++        public string? RequestBody { get; private set; }
++
++        protected override async Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken)
++        {
++            RequestedUris.Add(request.RequestUri!);
++            if (request.Content is not null)
++            {
++                RequestBody = await request.Content.ReadAsStringAsync(cancellationToken);
++            }
++
++            return _respond(request);
++        }
++    }
++
++    /// <summary>A handler whose transport always throws — what an unreachable API looks like.</summary>
++    private sealed class ThrowingHandler : HttpMessageHandler
++    {
++        protected override Task<HttpResponseMessage> SendAsync(
++            HttpRequestMessage request, CancellationToken cancellationToken) =>
++            throw new HttpRequestException("connection refused");
++    }
++
++    private static (AssignmentsApiClient Client, CapturingHandler Handler) Client(
++        HttpStatusCode status = HttpStatusCode.NoContent, string? body = null)
++    {
++        var handler = new CapturingHandler(_ =>
++        {
++            var response = new HttpResponseMessage(status);
++            if (body is not null)
++            {
++                // The JSON content type matters: the client's read would otherwise reject the body on
++                // the media type alone and the case under test would never be reached.
++                response.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
++            }
++
++            return response;
++        });
++        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
++        return (new AssignmentsApiClient(http, NullLogger<AssignmentsApiClient>.Instance), handler);
++    }
++
++    private static JsonElement SentBody(CapturingHandler handler)
++    {
++        handler.RequestBody.Should().NotBeNull("the publish request always posts a body");
++        return JsonDocument.Parse(handler.RequestBody!).RootElement;
++    }
++
++    // ── the new overload ─────────────────────────────────────────────────────
++
++    /// <summary>The dialog's confirmed choices reach the request body: medium + both stamp ids.</summary>
++    [TestMethod]
++    public async Task Publish_WithChoices_CarriesChannelsAndBothTemplateIds()
++    {
++        var id = Guid.NewGuid();
++        var contactId = Guid.NewGuid();
++        var emailTemplateId = Guid.NewGuid();
++        var smsTemplateId = Guid.NewGuid();
++        var (client, handler) = Client();
++
++        await client.PublishAsync(
++            id, [contactId], PublishChannel.SmsOnly, emailTemplateId, smsTemplateId);
++
++        handler.RequestedUris.Should().ContainSingle()
++            .Which.AbsolutePath.Should().Be($"/assignments/{id}/publish");
++
++        var body = SentBody(handler);
++        body.GetProperty("contactIds").EnumerateArray().Select(c => c.GetGuid())
++            .Should().Equal([contactId]);
++        body.GetProperty("channels").GetInt32().Should().Be((int)PublishChannel.SmsOnly,
++            "PublishChannel is an int-valued contract, so its number is the wire form");
++        body.GetProperty("publishEmailTemplateId").GetGuid().Should().Be(emailTemplateId);
++        body.GetProperty("publishSmsTemplateId").GetGuid().Should().Be(smsTemplateId);
++    }
++
++    /// <summary>Null choices stay EXPLICIT JSON NULLS — the shape every publish request already has
++    /// (no <c>WhenWritingNull</c> on the shared options, and this round does not add one).</summary>
++    [TestMethod]
++    public async Task Publish_NullChoices_WritesExplicitJsonNulls()
++    {
++        var id = Guid.NewGuid();
++        var (client, handler) = Client();
++
++        await client.PublishAsync(id, null, null, null, null);
++
++        var body = SentBody(handler);
++        body.TryGetProperty("contactIds", out var contactIds).Should().BeTrue();
++        contactIds.ValueKind.Should().Be(JsonValueKind.Null);
++        body.TryGetProperty("channels", out var channels).Should().BeTrue(
++            "the field is present as an explicit null — the serializer options carry no ignore condition");
++        channels.ValueKind.Should().Be(JsonValueKind.Null);
++        body.TryGetProperty("publishEmailTemplateId", out var email).Should().BeTrue();
++        email.ValueKind.Should().Be(JsonValueKind.Null);
++        body.TryGetProperty("publishSmsTemplateId", out var sms).Should().BeTrue();
++        sms.ValueKind.Should().Be(JsonValueKind.Null);
++    }
++
++    /// <summary>The row-action quick publish (Index's one-arg call) keeps posting the NULL-BODY
++    /// request: it reuses the assignment's stored stamps and applies the policy medium.</summary>
++    [TestMethod]
++    public async Task Publish_OneArgumentOverload_StillPostsANullBody()
++    {
++        var id = Guid.NewGuid();
++        var (client, handler) = Client();
++
++        await client.PublishAsync(id);
++
++        handler.RequestedUris.Should().ContainSingle()
++            .Which.AbsolutePath.Should().Be($"/assignments/{id}/publish");
++        handler.RequestBody.Should().Be("null",
++            "the quick publish sends no request object at all — null stamps reuse what is stored");
++    }
++
++    // ── GetPublishOptionsAsync ───────────────────────────────────────────────
++
++    /// <summary>The successful read: GET the options route and deserialize the shipped DTO.</summary>
++    [TestMethod]
++    public async Task GetPublishOptionsAsync_ReadsTheOptionsRoute()
++    {
++        var id = Guid.NewGuid();
++        var stamp = Guid.NewGuid();
++        var (client, handler) = Client(HttpStatusCode.OK, $$"""
++            {
++              "channels": [
++                {
++                  "kind": "Publish",
++                  "channel": "Email",
++                  "templateId": null,
++                  "subject": null,
++                  "constraints": [],
++                  "templates": [
++                    { "templateId": "{{Guid.NewGuid()}}", "constraints": [], "isDefault": true }
++                  ]
++                }
++              ],
++              "policyPreferredChannelOrder": ["Email", "SMS"],
++              "policyBlockedChannels": ["SMS"],
++              "publishEmailTemplateId": "{{stamp}}",
++              "publishSmsTemplateId": null
++            }
++            """);
++
++        var options = await client.GetPublishOptionsAsync(id);
++
++        handler.RequestedUris.Should().ContainSingle()
++            .Which.AbsolutePath.Should().Be($"/assignments/{id}/publish-options");
++        options.Should().NotBeNull();
++        options!.PublishEmailTemplateId.Should().Be(stamp);
++        options.Channels.Should().ContainSingle()
++            .Which.Templates.Should().ContainSingle().Which.IsDefault.Should().BeTrue();
++        options.PolicyBlockedChannels.Should().Equal(ContactChannelDto.SMS);
++    }
++
++    /// <summary>A non-success status (404/500) is a null, never an exception: an options outage must
++    /// not block publishing. 204 is included because an empty SUCCESS body is the same outcome — the
++    /// read then lands on the non-JSON class below.</summary>
++    [TestMethod]
++    [DataRow(HttpStatusCode.NoContent)]
++    [DataRow(HttpStatusCode.NotFound)]
++    [DataRow(HttpStatusCode.InternalServerError)]
++    public async Task GetPublishOptionsAsync_NonSuccessStatus_ReturnsNull(HttpStatusCode status)
++    {
++        var (client, _) = Client(status);
++
++        var options = await client.GetPublishOptionsAsync(Guid.NewGuid());
++
++        options.Should().BeNull("a failed options read degrades to policy defaults");
++    }
++
++    /// <summary>A 200 whose body is not JSON is also a null — the fail-open taxonomy's non-JSON case.</summary>
++    [TestMethod]
++    public async Task GetPublishOptionsAsync_NonJsonSuccess_ReturnsNull()
++    {
++        var (client, _) = Client(HttpStatusCode.OK, "<html>gateway</html>");
++
++        var options = await client.GetPublishOptionsAsync(Guid.NewGuid());
++
++        options.Should().BeNull("an unparseable 200 degrades like any other failed read");
++    }
++
++    /// <summary>A THROWN transport failure (the API is unreachable) is caught: the dialog then opens
++    /// with the warning bar instead of the publish action dying.</summary>
++    [TestMethod]
++    public async Task GetPublishOptionsAsync_ThrownTransportFailure_ReturnsNull()
++    {
++        var http = new HttpClient(new ThrowingHandler()) { BaseAddress = new Uri("http://localhost") };
++        var client = new AssignmentsApiClient(http, NullLogger<AssignmentsApiClient>.Instance);
++
++        var options = await client.GetPublishOptionsAsync(Guid.NewGuid());
++
++        options.Should().BeNull("an unreachable API must not throw out of the dialog's options read");
++    }
++
++    /// <summary>A TIMEOUT (an <see cref="OperationCanceledException"/> that is not the caller's own
++    /// cancellation) is a fail-open case, not a caller teardown — the previous filter narrowed to
++    /// <c>TaskCanceledException</c>, one notch below the base type a stream-read timeout can surface
++    /// as, and the page's <c>catch (OperationCanceledException)</c> would then swallow it silently.</summary>
++    [TestMethod]
++    public async Task GetPublishOptionsAsync_Timeout_ReturnsNull()
++    {
++        var handler = new CapturingHandler(_ => throw new OperationCanceledException("HttpClient timeout"));
++        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
++        var client = new AssignmentsApiClient(http, NullLogger<AssignmentsApiClient>.Instance);
++
++        var options = await client.GetPublishOptionsAsync(Guid.NewGuid(), CancellationToken.None);
++
++        options.Should().BeNull("a timeout is a fail-open case — the dialog must still open");
++    }
++
++    /// <summary>A genuine caller cancellation still propagates — the fail-open catch must not swallow
++    /// the page's own teardown signal.</summary>
++    [TestMethod]
++    public async Task GetPublishOptionsAsync_CallerCancellation_Propagates()
++    {
++        var handler = new CapturingHandler(_ =>
++        {
++            throw new TaskCanceledException("caller gave up");
++        });
++        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
++        var client = new AssignmentsApiClient(http, NullLogger<AssignmentsApiClient>.Instance);
++        using var cts = new CancellationTokenSource();
++        await cts.CancelAsync();
++
++        var act = async () => await client.GetPublishOptionsAsync(Guid.NewGuid(), cts.Token);
++
++        await act.Should().ThrowAsync<OperationCanceledException>(
++            "the caller's own token cancellation is not one of the fail-open classes");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/PublishDialogBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/PublishDialogBunitTests.cs
+new file mode 100644
+index 00000000..d0d923af
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/PublishDialogBunitTests.cs
+@@ -0,0 +1,382 @@
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.Admin.Shared.Components;
++using SchoolCollab.Admin.Shared.Components.Dialogs;
++using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Students.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Round notification-templates-b2b (spec §3.7 picker + stamps, §3.8 medium) — the publish dialog's
++/// medium radio and per-slot template pickers, rendered DIRECTLY through the real dialog shell (the
++/// <see cref="QuestionEditDialogBunitTests"/> harness), so the pre-select, the rendered option order
++/// and the fail-open branch are all exercised as markup.
++///
++/// <para><b>Where the pre-select rule lives:</b> <c>ContractTypes.cs:693-696</c> pins the client's
++/// source as <c>stored stamp ?? first applicable candidate</c>. The stored-stamp case below is the
++/// discriminating one: pre-fix (no stamp handling) the dialog would always land on the first
++/// candidate and republish would silently overwrite the author's confirmed choice.</para>
++/// </summary>
++[TestClass]
++public class PublishDialogBunitTests : BunitContext
++{
++    private static readonly Guid EmailDefault = Guid.Parse("e0000000-0000-0000-0000-00000000000e");
++    private static readonly Guid EmailGrade = Guid.Parse("e0000000-0000-0000-0000-000000000066");
++    private static readonly Guid EmailTwoDim = Guid.Parse("e0000000-0000-0000-0000-000000000077");
++    private static readonly Guid EmailStale = Guid.Parse("e0000000-0000-0000-0000-0000000000aa");
++    private static readonly Guid SmsDefault = Guid.Parse("e0000000-0000-0000-0000-000000000055");
++
++    private IDialogService DialogService => Services.GetRequiredService<IDialogService>();
++
++    public PublishDialogBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++    }
++
++    // ── fixtures ─────────────────────────────────────────────────────────────
++
++    private static PublishTemplateCandidateDto Candidate(
++        Guid id, bool isDefault = false, params (string Dimension, string Value)[] constraints) =>
++        new(id,
++            constraints.Select(c => new PublishTemplateConstraintDto(c.Dimension, c.Value)).ToList(),
++            isDefault);
++
++    private static PublishChannelOptionsDto Slot(
++        ContactChannelDto channel, IReadOnlyList<PublishTemplateCandidateDto> templates) =>
++        new(NotificationKindDto.Publish, channel, null, null, [], templates);
++
++    /// <summary>
++    /// The server's shipped shape (the <c>GetPublishOptionsHandler</c> order): each slot's candidates
++    /// arrive <b>most specific first</b>, so the FIRST entry is neither the tenant default nor the
++    /// most-recently-created row. A client that re-sorted by constraint count, by id, or default-first
++    /// would change both the pre-select and the rendered order.
++    /// </summary>
++    private static PublishOptionsDto Options(
++        Guid? storedEmailStamp = null,
++        Guid? storedSmsStamp = null,
++        IReadOnlyList<ContactChannelDto>? blocked = null,
++        IReadOnlyList<PublishTemplateCandidateDto>? emailTemplates = null,
++        IReadOnlyList<PublishTemplateCandidateDto>? smsTemplates = null) =>
++        new(
++            [
++                Slot(ContactChannelDto.Email, emailTemplates ?? MostSpecificFirstEmail()),
++                Slot(ContactChannelDto.SMS, smsTemplates ?? DefaultSmsOnly()),            ],
++            [ContactChannelDto.Email, ContactChannelDto.SMS],
++            blocked ?? [],
++            storedEmailStamp,
++            storedSmsStamp);
++
++    private static PublishTemplateCandidateDto[] MostSpecificFirstEmail() =>
++    [
++        Candidate(EmailTwoDim, constraints: [("GradeLevel", "Grade 3"), ("AssignmentType", "Digital")]),
++        Candidate(EmailGrade, constraints: [("GradeLevel", "Grade 3")]),
++        Candidate(EmailDefault, isDefault: true),
++    ];
++
++    private static PublishTemplateCandidateDto[] DefaultSmsOnly() =>
++        [Candidate(SmsDefault, isDefault: true)];
++
++    private static PublishFormModel Model(PublishOptionsDto? options) =>
++        new(
++            [
++                new SubscribedContactDto(Guid.NewGuid(), ContactChannel.Email, "guardian@example.org", GuardianRole.Primary),
++            ],
++            "Audience: Grade 3 — All students",
++            MandatoryReview: false,
++            options);
++
++    private (IRenderedComponent<FluentDialogProvider> Provider, Task<PublishResult?> Closed) Open(PublishFormModel model)
++    {
++        var provider = Render<FluentDialogProvider>();
++        var closed = DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
++            model, title: "Publish assignment", size: DialogWidth.Medium);
++        provider.WaitForAssertion(() => provider.Find("form"));
++        return (provider, closed);
++    }
++
++    /// <summary>The Email slot's dropdown, addressed by its wrapper so the SMS slot can never answer
++    /// in its place.</summary>
++    private static IRenderedComponent<DropdownComponent<PublishTemplateCandidateDto, Guid?>> EmailPicker(
++        IRenderedComponent<FluentDialogProvider> provider) =>
++        provider.FindComponents<DropdownComponent<PublishTemplateCandidateDto, Guid?>>()
++            .Single(c => c.Instance.Label == "Email template");
++
++    private static IRenderedComponent<DropdownComponent<PublishTemplateCandidateDto, Guid?>> SmsPicker(
++        IRenderedComponent<FluentDialogProvider> provider) =>
++        provider.FindComponents<DropdownComponent<PublishTemplateCandidateDto, Guid?>>()
++            .Single(c => c.Instance.Label == "SMS template");
++
++    /// <summary>The option texts a picker renders, in DOM order — the rendered-order observable.</summary>
++    private static List<string> RenderOptionTexts(
++        IRenderedComponent<FluentDialogProvider> provider, string slotWrapperId) =>
++        provider.FindAll($"#{slotWrapperId} fluent-option")
++            .Select(o => o.TextContent.Trim())
++            .ToList();
++
++    /// <summary>The option text the picker currently renders as selected (FluentUI 5.1 writes no
++    /// <c>current-value</c>; the selection is the one option carrying <c>selected</c>).</summary>
++    private static string? SelectedOptionText(
++        IRenderedComponent<FluentDialogProvider> provider, string slotWrapperId) =>
++        provider.FindAll($"#{slotWrapperId} fluent-option")
++            .SingleOrDefault(o => o.HasAttribute("selected"))
++            ?.TextContent.Trim();
++
++    /// <summary>Asserts a slot is pre-selected on <paramref name="templateId"/> AND that the dropdown
++    /// displays it (the option rendered as <c>selected</c> carries that candidate's own summary).</summary>
++    private static void AssertPreSelected(
++        IRenderedComponent<FluentDialogProvider> provider,
++        IRenderedComponent<DropdownComponent<PublishTemplateCandidateDto, Guid?>> picker,
++        string slotWrapperId,
++        Guid templateId,
++        string optionText)
++    {
++        picker.Instance.SelectedValue.Should().Be(templateId);
++        SelectedOptionText(provider, slotWrapperId).Should().Be(optionText,
++            "the pre-selected candidate is the one the picker renders as selected");
++    }
++
++    // ── pre-select ───────────────────────────────────────────────────────────
++
++    /// <summary>No stored stamp ⇒ the FIRST candidate the server offered is pre-selected (the
++    /// most-specific applicable one), never the tenant default and never the last entry.</summary>
++    [TestMethod]
++    public void NoStoredStamp_PreSelectsTheFirstCandidate()
++    {
++        var (provider, _) = Open(Model(Options()));
++
++        AssertPreSelected(provider, EmailPicker(provider), "cq-publish-template-email", EmailTwoDim,
++            "GradeLevel: Grade 3 · AssignmentType: Digital");
++    }
++
++    /// <summary>The P1 case: a stored stamp that is NOT the first candidate pre-selects the stored
++    /// one, so unpublish → republish reuses the author's confirmed choice instead of silently
++    /// overwriting it with "most specific".</summary>
++    [TestMethod]
++    public void StoredStamp_ThatIsNotTheFirstCandidate_IsPreSelected()
++    {
++        var (provider, _) = Open(Model(Options(storedEmailStamp: EmailGrade)));
++
++        AssertPreSelected(provider, EmailPicker(provider), "cq-publish-template-email", EmailGrade,
++            "GradeLevel: Grade 3");
++    }
++
++    /// <summary>A stale stamp (the template was deleted, or no longer applies) is absent from the
++    /// server's candidate list: the picker falls back to the first entry and the stale id is NEVER
++    /// sent (an explicit non-live stamp is a 400 on the publish route).</summary>
++    [TestMethod]
++    public async Task StaleStamp_FallsBackToTheFirstEntry_AndIsNeverSent()
++    {
++        var (provider, closed) = Open(Model(Options(storedEmailStamp: EmailStale)));
++
++        AssertPreSelected(provider, EmailPicker(provider), "cq-publish-template-email", EmailTwoDim,
++            "GradeLevel: Grade 3 · AssignmentType: Digital");
++
++        provider.Find("form").Submit();
++        var result = await closed;
++
++        result.Should().NotBeNull();
++        result!.PublishEmailTemplateId.Should().Be(EmailTwoDim,
++            "the stale id must never reach the publish request");
++    }
++
++    // ── rendered order ───────────────────────────────────────────────────────
++
++    /// <summary>The rendered option order equals the server's order VERBATIM — the direct kill for a
++    /// client-side re-sort. The pre-select alone cannot pin this: under Q67's default-first tie an
++    /// "IsDefault first" re-sort can leave the winner looking identical, so the order itself is the
++    /// assertion (the fixture deliberately does NOT put the default first).</summary>
++    [TestMethod]
++    public void RenderedOptionOrder_EqualsTheServersOrder_Verbatim()
++    {
++        var (provider, _) = Open(Model(Options()));
++
++        RenderOptionTexts(provider, "cq-publish-template-email").Should().Equal(
++            new[]
++            {
++                "GradeLevel: Grade 3 · AssignmentType: Digital",
++                "GradeLevel: Grade 3",
++                "Tenant default",
++            },
++            "the candidates render in the received (evaluator) order — most specific first, the tenant "
++            + "default last; any re-sort in the component would undo the Q67 tie rule");
++    }
++
++    /// <summary>The constraint summary and the <c>Tenant default</c> marker are what the picker shows
++    /// per candidate (spec §3.7).</summary>
++    [TestMethod]
++    public void OptionText_CarriesTheConstraintSummary_AndTheTenantDefaultMarker()
++    {
++        var (provider, _) = Open(Model(Options()));
++
++        var options = provider.FindAll("#cq-publish-template-email fluent-option")
++            .Select(o => o.TextContent.Trim()).ToList();
++
++        options[0].Should().Contain("GradeLevel: Grade 3").And.Contain("AssignmentType: Digital");
++        options[0].Should().NotContain("Tenant default", "a constrained candidate is not the default");
++        options[2].Should().Be("Tenant default", "the unconstrained tenant row is marked as such");
++    }
++
++    // ── empty candidates ─────────────────────────────────────────────────────
++
++    /// <summary>A successful read with an empty candidate list (no templates configured at all) shows
++    /// the read-only note and stamps nothing — the server's built-in default renders.</summary>
++    [TestMethod]
++    public async Task EmptyTemplates_ShowTheReadOnlyNote_AndStampNothing()
++    {
++        var options = Options(emailTemplates: [], smsTemplates: []);
++        var (provider, closed) = Open(Model(options));
++
++        provider.Find("#cq-publish-template-email-empty").TextContent.Should()
++            .Contain("no templates configured").And.Contain("built-in default");
++        provider.FindComponents<DropdownComponent<PublishTemplateCandidateDto, Guid?>>().Should().BeEmpty(
++            "there is nothing to pick from — the slot renders a note, not an empty dropdown");
++
++        provider.Find("form").Submit();
++        var result = await closed;
++
++        result.Should().NotBeNull();
++        result!.PublishEmailTemplateId.Should().BeNull("nothing is stamped when no template is configured");
++        result.PublishSmsTemplateId.Should().BeNull();
++    }
++
++    // ── fail-open ────────────────────────────────────────────────────────────
++
++    /// <summary>The load-bearing outage case: an options read that failed renders the warning bar and
++    /// NO pickers — never the "no templates configured" note, which belongs only to a SUCCESSFUL read
++    /// with an empty list. Publishing still proceeds, per policy, with no stamps.</summary>
++    [TestMethod]
++    public async Task OptionsNull_RendersTheWarningBar_AndNoPickers()
++    {
++        var (provider, closed) = Open(Model(null));
++
++        provider.Find("#cq-publish-options-unavailable").TextContent.Should()
++            .Contain("Template options are unavailable right now")
++            .And.Contain("policy defaults");
++        provider.FindAll("#cq-publish-template-email").Should().BeEmpty(
++            "an outage must not look like a configured dialog with pickers");
++        provider.FindAll("#cq-publish-template-sms").Should().BeEmpty();
++        provider.Markup.Should().NotContainEquivalentOf("no templates configured",
++            "that note is reserved for a successful read with an empty candidate list");
++
++        provider.Find("form").Submit();
++        var result = await closed;
++
++        result.Should().NotBeNull();
++        result!.Channels.Should().Be(PublishChannel.PerPolicy, "an outage publishes per policy");
++        result.PublishEmailTemplateId.Should().BeNull();
++        result.PublishSmsTemplateId.Should().BeNull();
++    }
++
++    // ── medium ───────────────────────────────────────────────────────────────
++
++    /// <summary>A tenant-blocked channel is ANNOTATED, never disabled: all three medium states stay
++    /// selectable, because the server's blocked channels still win and a disabled option would read
++    /// as "not offered" instead of "offered, but the policy overrides it".</summary>
++    [TestMethod]
++    public void BlockedChannel_IsAnnotated_WhileTheOptionStaysSelectable()
++    {
++        var (provider, _) = Open(Model(Options(blocked: [ContactChannelDto.Email])));
++
++        provider.Find("#cq-publish-medium-email-blocked").TextContent.Should()
++            .Contain("blocked by policy").And.Contain("stays blocked");
++
++        provider.FindComponent<FluentRadioGroup<PublishChannel>>().Instance.Disabled.Should().NotBe(true,
++            "one blocked channel is not 'the sendout reaches no one'");
++
++        provider.FindAll("label")
++            .Single(l => l.TextContent.Contains("Email only"))
++            .TextContent.Should().Contain("blocked by policy",
++                "the annotation sits in the option's own label — the option is annotated, not disabled");
++    }
++
++    /// <summary>Both channel groups blocked ⇒ the radio group is disabled, with a footer explaining
++    /// that publishing reaches no one by either medium.</summary>
++    [TestMethod]
++    public void BothChannelGroupsBlocked_DisablesTheRadioGroup_WithTheFooterExplanation()
++    {
++        var (provider, _) = Open(Model(Options(
++            blocked: [ContactChannelDto.Email, ContactChannelDto.SMS, ContactChannelDto.WhatsApp])));
++
++        provider.FindComponent<FluentRadioGroup<PublishChannel>>().Instance.Disabled.Should()
++            .Be(true, "no medium can deliver, so the choice is not offered");
++        provider.Find("#cq-publish-medium-email-blocked").Should().NotBeNull();
++        provider.Find("#cq-publish-medium-sms-blocked").Should().NotBeNull();
++        provider.Find("#cq-publish-medium-all-blocked").TextContent.Should()
++            .Contain("reaches").And.Contain("no one");
++    }
++
++    /// <summary>The chosen medium excludes a slot ⇒ that picker is disabled and KEEPS its selection
++    /// (the author's pick is not thrown away by flipping the medium back and forth).</summary>
++    [TestMethod]
++    public async Task MediumExcludedSlot_IsDisabled_AndKeepsItsSelection()
++    {
++        var options = Options(storedEmailStamp: EmailGrade);
++        var (provider, closed) = Open(Model(options));
++
++        EmailPicker(provider).Instance.SelectedValue.Should().Be(EmailGrade);
++
++        // Choose "SMS only": the Email slot is excluded but keeps the stored pick.
++        await provider.InvokeAsync(() =>
++            provider.FindComponent<FluentRadioGroup<PublishChannel>>().Instance.ValueChanged
++                .InvokeAsync(PublishChannel.SmsOnly));
++
++        EmailPicker(provider).Instance.Disabled.Should().BeTrue(
++            "the medium excludes the email medium, so the pick has no effect this sendout");
++        EmailPicker(provider).Instance.SelectedValue.Should().Be(EmailGrade,
++            "a disabled slot keeps its selection — flipping the medium back must not lose it");
++        SmsPicker(provider).Instance.Disabled.Should().BeFalse();
++        provider.Find("#cq-publish-template-email-excluded").Should().NotBeNull(
++            "a disabled control states why (the repo's disabled-with-reason convention)");
++
++        provider.Find("form").Submit();
++        var result = await closed;
++
++        result.Should().NotBeNull();
++        result!.Channels.Should().Be(PublishChannel.SmsOnly);
++    }
++
++    // ── result ───────────────────────────────────────────────────────────────
++
++    /// <summary>The confirmed result carries the picked ids and the medium — what the page forwards to
++    /// the publish request.</summary>
++    [TestMethod]
++    public async Task ConfirmedResult_CarriesThePicks_AndTheMedium()
++    {
++        var options = Options(storedSmsStamp: SmsDefault);
++        var (provider, closed) = Open(Model(options));
++
++        await provider.InvokeAsync(() =>
++            provider.FindComponent<FluentRadioGroup<PublishChannel>>().Instance.ValueChanged
++                .InvokeAsync(PublishChannel.EmailOnly));
++
++        provider.Find("form").Submit();
++        var result = await closed;
++
++        result.Should().NotBeNull();
++        result!.PublishEmailTemplateId.Should().Be(EmailTwoDim, "the first candidate is pre-selected and confirmed");
++        result.PublishSmsTemplateId.Should().Be(SmsDefault, "the stored SMS stamp survives the medium change");
++        result.Channels.Should().Be(PublishChannel.EmailOnly);
++        result.ContactIds.Should().BeNull("no contact limit was set");
++    }
++
++    /// <summary>Regression guard: cancelling returns null and stamps nothing.</summary>
++    [TestMethod]
++    public async Task Cancel_ReturnsNull()
++    {
++        var (provider, closed) = Open(Model(Options()));
++
++        provider.FindAll("fluent-button")
++            .Single(b => b.TextContent.Contains("Cancel"))
++            .Click();
++
++        var result = await closed;
++        result.Should().BeNull("a cancelled dialog returns null, so the page never publishes");
++    }
++}

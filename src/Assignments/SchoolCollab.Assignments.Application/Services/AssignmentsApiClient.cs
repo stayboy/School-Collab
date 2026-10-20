@@ -205,6 +205,46 @@ public sealed class AssignmentsApiClient
         return await response.Content.ReadFromJsonAsync<RecipientPreviewDto>(_jsonOptions, ct);
     }
 
+    /// <summary>
+    /// The publish dialog's pre-select source (rounds notification-templates-b2a/b2c, spec §3.7):
+    /// each stamped slot's ordered applicable candidates, the effective policy's channel
+    /// configuration and the assignment's stored stamps.
+    /// <para><b>Fail-open on every failure class</b>: a non-success status, a timeout, a
+    /// non-JSON (or empty) 200 and a thrown transport failure all log and return <c>null</c> — an
+    /// options outage must never block publishing, which then continues with policy defaults. A
+    /// genuine caller cancellation (<paramref name="ct"/> requested) still propagates.</para>
+    /// </summary>
+    public async Task<PublishOptionsDto?> GetPublishOptionsAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Reading publish options for assignment {AssignmentId}", id);
+        try
+        {
+            var response = await _http.GetAsync($"/assignments/{id}/publish-options", ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Publish options read for assignment {AssignmentId} failed with {Status}; publishing continues with policy defaults",
+                    id, response.StatusCode);
+                return null;
+            }
+
+            return await response.Content.ReadFromJsonAsync<PublishOptionsDto>(_jsonOptions, ct);
+        }
+        catch (Exception ex) when (
+            ex is HttpRequestException or JsonException or NotSupportedException
+            // Broader than TaskCanceledException deliberately: a timeout can surface as a bare
+            // OperationCanceledException (e.g. from the stream read), and the repo's fail-open
+            // resolvers catch the same base type. A genuine caller cancellation is excluded so it
+            // still propagates.
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            _logger.LogWarning(ex,
+                "Publish options read for assignment {AssignmentId} failed; publishing continues with policy defaults",
+                id);
+            return null;
+        }
+    }
+
     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating assignment with title {Title}", req.Title);
@@ -259,6 +299,31 @@ public sealed class AssignmentsApiClient
     {
         _logger.LogInformation("Publishing assignment {AssignmentId} to {Count} selected contacts", id, contactIds?.Count ?? 0);
         (await _http.PostAsJsonAsync($"/assignments/{id}/publish", new PublishAssignmentRequest(contactIds), _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Publishes with the dialog's confirmed choices (round notification-templates-b2b, spec
+    /// §3.7/§3.8): the per-sendout medium and the two stamped template ids. A separate overload
+    /// because the two-argument form's <c>ct</c> is passed positionally by its callers, and both
+    /// existing overloads keep their null-body behaviour (the row-action quick publish reuses the
+    /// assignment's stored stamps).
+    /// <para><paramref name="emailTemplateId"/>/<paramref name="smsTemplateId"/> carry only ids the
+    /// server itself offered as candidates — a stale stamp is never sent (the route rejects a
+    /// non-live id).</para>
+    /// </summary>
+    public async Task PublishAsync(
+        Guid id,
+        IReadOnlyList<Guid>? contactIds,
+        PublishChannel? channels,
+        Guid? emailTemplateId,
+        Guid? smsTemplateId,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "Publishing assignment {AssignmentId} to {Count} selected contacts, medium {Channels}, email template {EmailTemplateId}, SMS template {SmsTemplateId}",
+            id, contactIds?.Count ?? 0, channels, emailTemplateId, smsTemplateId);
+        var request = new PublishAssignmentRequest(contactIds, channels, emailTemplateId, smsTemplateId);
+        (await _http.PostAsJsonAsync($"/assignments/{id}/publish", request, _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 
     public async Task UnpublishAsync(Guid id, CancellationToken ct = default)

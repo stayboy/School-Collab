@@ -1,4 +1,7 @@
-@* Assignment publish dialog (spec §12). *@
+@* Assignment publish dialog (spec §12) — the publish-time choices: the contact subset (§8), the
+   per-sendout medium (§3.8 / Q19) and the per-channel template pick (§3.7 / Q16).
+   Medium and template ids are per-publish only; the template ids are stamped on the assignment
+   server-side, which is what makes unpublish → republish reuse the author's confirmed choice. *@
 @inherits DialogShellBase<PublishFormModel, PublishResult>
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -17,6 +20,121 @@
             <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-3">
                 Guardian review is required before students can submit.
             </FluentMessageBar>
+        }
+
+        @* §3.8/§3.7: an options outage is NOT "no templates configured" — the read failed, so the
+           dialog stamps nothing and says so (fail-open: publishing still proceeds, per policy). *@
+        @if (Model.Options is null)
+        {
+            <div id="cq-publish-options-unavailable" class="mb-3">
+                <FluentMessageBar Intent="MessageBarIntent.Warning">
+                    Template options are unavailable right now — publishing continues with policy defaults.
+                </FluentMessageBar>
+            </div>
+        }
+        else
+        {
+            @* Q19 medium radio. A blocked channel is ANNOTATED, never disabled: the server's blocked
+               channels still win, so "Email only" on a tenant-blocked email stays selectable and
+               reads as "blocked by policy — stays blocked". The group is disabled only when every
+               channel is blocked (then the sendout reaches no one by either medium). *@
+            <div id="cq-publish-medium" class="mb-3">
+                <span class="dialog-hint">Send via</span>
+                <FluentRadioGroup TValue="PublishChannel"
+                                  Name="cq-publish-medium-radio"
+                                  @bind-Value="Model.Channel"
+                                  Disabled="@AllChannelGroupsBlocked">
+                    <FluentRadio Value="PublishChannel.PerPolicy">Per policy</FluentRadio>
+                    <FluentRadio Value="PublishChannel.EmailOnly">
+                        Email only
+                        @if (EmailGroupBlocked)
+                        {
+                            <span class="muted" id="cq-publish-medium-email-blocked">
+                                — blocked by policy, stays blocked
+                            </span>
+                        }
+                    </FluentRadio>
+                    <FluentRadio Value="PublishChannel.SmsOnly">
+                        SMS only
+                        @if (SmsGroupBlocked)
+                        {
+                            <span class="muted" id="cq-publish-medium-sms-blocked">
+                                — blocked by policy, stays blocked
+                            </span>
+                        }
+                    </FluentRadio>
+                </FluentRadioGroup>
+                @if (AllChannelGroupsBlocked)
+                {
+                    <p class="muted" id="cq-publish-medium-all-blocked">
+                        The notification policy blocks email, SMS and WhatsApp, so this sendout reaches
+                        no one — publishing still records it.
+                    </p>
+                }
+            </div>
+
+            <div id="cq-publish-templates">
+                @if (EmailSlot is { } emailSlot)
+                {
+                    <div id="cq-publish-template-email" class="mb-3">
+                        @if (emailSlot.Templates.Count == 0)
+                        {
+                            <p class="dialog-hint" id="cq-publish-template-email-empty">
+                                Email template: no templates configured — the built-in default will be used.
+                            </p>
+                        }
+                        else
+                        {
+                            @* The candidates render in the order received (the evaluator's: most
+                               specific first, the tenant default on a tie). Never re-sort here — a
+                               client-side sort would silently undo the server's tie rule. *@
+                            <DropdownComponent TItem="PublishTemplateCandidateDto" TValue="Guid?"
+                                               Items="@emailSlot.Templates"
+                                               @bind-SelectedValue="Model.EmailTemplateId"
+                                               OptionText="@TemplateOptionText"
+                                               OptionValue="@(c => (Guid?)c.TemplateId)"
+                                               Label="Email template"
+                                               Disabled="@EmailSlotDisabled"
+                                               Width="FieldWidth.W9" />
+                            @if (EmailSlotDisabled)
+                            {
+                                <p class="muted" id="cq-publish-template-email-excluded">
+                                    Not sent — the medium above excludes email.
+                                </p>
+                            }
+                        }
+                    </div>
+                }
+
+                @if (SmsSlot is { } smsSlot)
+                {
+                    <div id="cq-publish-template-sms" class="mb-3">
+                        @if (smsSlot.Templates.Count == 0)
+                        {
+                            <p class="dialog-hint" id="cq-publish-template-sms-empty">
+                                SMS template: no templates configured — the built-in default will be used.
+                            </p>
+                        }
+                        else
+                        {
+                            <DropdownComponent TItem="PublishTemplateCandidateDto" TValue="Guid?"
+                                               Items="@smsSlot.Templates"
+                                               @bind-SelectedValue="Model.SmsTemplateId"
+                                               OptionText="@TemplateOptionText"
+                                               OptionValue="@(c => (Guid?)c.TemplateId)"
+                                               Label="SMS template"
+                                               Disabled="@SmsSlotDisabled"
+                                               Width="FieldWidth.W9" />
+                            @if (SmsSlotDisabled)
+                            {
+                                <p class="muted" id="cq-publish-template-sms-excluded">
+                                    Not sent — the medium above excludes SMS and WhatsApp.
+                                </p>
+                            }
+                        }
+                    </div>
+                }
+            </div>
         }
 
         <FluentCheckbox @bind-Value="Model.LimitSelection" Label="Limit to specific contacts" class="mb-3" />
@@ -49,11 +167,78 @@
     protected override string SubmitText => "Publish";
     protected override string SavingText => "Publishing...";
 
+    /// <summary>The Email slot of the publish-options read (null only when the read failed or the
+    /// server sent no Email slot).</summary>
+    private PublishChannelOptionsDto? EmailSlot => SlotFor(ContactChannelDto.Email);
+
+    /// <summary>The SMS slot — the second stamped column (WhatsApp shares its body).</summary>
+    private PublishChannelOptionsDto? SmsSlot => SlotFor(ContactChannelDto.SMS);
+
+    private PublishChannelOptionsDto? SlotFor(ContactChannelDto channel) =>
+        Model.Options?.Channels.FirstOrDefault(slot => slot.Channel == channel);
+
+    /// <summary>The policy's blocked channels, empty when the read failed.</summary>
+    private IReadOnlyList<ContactChannelDto> BlockedChannels =>
+        Model.Options?.PolicyBlockedChannels ?? [];
+
+    /// <summary>Email is blocked, so the Email-only medium reaches no one (annotated, not disabled —
+    /// the server's blocked channels win).</summary>
+    private bool EmailGroupBlocked => BlockedChannels.Contains(ContactChannelDto.Email);
+
+    /// <summary>The SMS medium covers SMS + WhatsApp (§3.8 / Q19), so it is blocked only when BOTH
+    /// are — with one of them open the medium still delivers.</summary>
+    private bool SmsGroupBlocked =>
+        BlockedChannels.Contains(ContactChannelDto.SMS) && BlockedChannels.Contains(ContactChannelDto.WhatsApp);
+
+    /// <summary>No medium reaches anyone: the only state in which the radio group is disabled.</summary>
+    private bool AllChannelGroupsBlocked => EmailGroupBlocked && SmsGroupBlocked;
+
+    /// <summary>The chosen medium excludes the Email slot (disabled, but its selection is kept).</summary>
+    private bool EmailSlotDisabled => Model.Channel == PublishChannel.SmsOnly;
+
+    /// <summary>The chosen medium excludes the SMS/WhatsApp slot (disabled, selection kept).</summary>
+    private bool SmsSlotDisabled => Model.Channel == PublishChannel.EmailOnly;
+
+    /// <summary>One candidate's display text: the constraint summary the server sent, plus the
+    /// tenant-default marker on the unconstrained entry (spec §3.7 / Q16).</summary>
+    private static string TemplateOptionText(PublishTemplateCandidateDto candidate)
+    {
+        var summary = string.Join(" · ", candidate.Constraints.Select(c => $"{c.Dimension}: {c.Value}"));
+        if (candidate.IsDefault)
+        {
+            return summary.Length == 0 ? "Tenant default" : $"{summary} · Tenant default";
+        }
+
+        return summary.Length == 0 ? "No constraints" : summary;
+    }
+
     protected override void OnModelInitialized(PublishFormModel model)
     {
         model.Selections = model.Contacts
             .Select(c => new ContactSelection(c))
             .ToList();
+
+        // spec §3.7 / ContractTypes.cs:693-696 — the pre-select source is
+        // "stored stamp ?? first applicable candidate": the author's confirmed choice survives
+        // unpublish → republish, and a STALE stamp (a template deleted, or no longer applicable to
+        // this assignment) is never sent — it falls back to the first entry, which is what the
+        // server would render for this assignment anyway.
+        model.EmailTemplateId = PreSelect(model.Options?.PublishEmailTemplateId, EmailSlot?.Templates);
+        model.SmsTemplateId = PreSelect(model.Options?.PublishSmsTemplateId, SmsSlot?.Templates);
+    }
+
+    /// <summary>The stored stamp when the server still offers it, else the FIRST candidate in the
+    /// received order (never a re-sort), else nothing (the built-in default renders).</summary>
+    private static Guid? PreSelect(Guid? storedStamp, IReadOnlyList<PublishTemplateCandidateDto>? candidates)
+    {
+        if (candidates is null || candidates.Count == 0)
+        {
+            return null;
+        }
+
+        return storedStamp is { } stamp && candidates.Any(c => c.TemplateId == stamp)
+            ? stamp
+            : candidates[0].TemplateId;
     }
 
     protected override Task<PublishResult?> SubmitAsync(PublishFormModel model)
@@ -76,6 +261,10 @@
             contactIds = selected;
         }
 
-        return Task.FromResult<PublishResult?>(new PublishResult(contactIds));
+        return Task.FromResult<PublishResult?>(new PublishResult(
+            contactIds,
+            model.Channel,
+            model.EmailTemplateId,
+            model.SmsTemplateId));
     }
 }
