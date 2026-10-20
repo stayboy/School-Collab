@@ -48,14 +48,15 @@ public class OpenApiSurfaceArchitectureTests
 
     /// <summary>
     /// The measured baseline each host pins: how many of its operations document a response schema
-    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>51 of 67</b> after both typed-response
-    /// rounds (spec <c>minimal-api-typed-responses</c> pilot + <c>-settings</c> follow-up) and the
-    /// notification-templates-b2c by-id route swap (measured 2026-10-19 from the generated document);
-    /// Students.Api measures <b>0 of 146</b>, untouched by either round. Raise the number in the same PR
+    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>52 of 68</b> after both typed-response
+    /// rounds (spec <c>minimal-api-typed-responses</c> pilot + <c>-settings</c> follow-up), the
+    /// notification-templates-b2c by-id route swap (measured 2026-10-19 from the generated document) and
+    /// the round-notification-templates-b3a applicability read (measured 2026-10-20);
+    /// Students.Api measures <b>0 of 146</b>, untouched by any of them. Raise the number in the same PR
     /// that converts handlers — a conversion that leaves it stale means the pin no longer describes the
     /// document.
     /// </summary>
-    private const int SettingsSchemaPin = 51;
+    private const int SettingsSchemaPin = 52;
 
     private const int StudentsSchemaPin = 0;
 
@@ -218,7 +219,9 @@ public class OpenApiSurfaceArchitectureTests
             + "the arm types, exactly as the pilot's four-arm approve did. So 19 + 29 + 3 = 51 of them document "
             + "a schema, and the 67 - 51 = 16 remaining operations document none: 5 from the pilot (recover, disable, "
             + "enable, DELETE override, the 4-arm approve), the 9 genuinely body-less routes and the two 4-arm "
-            + "handlers kept on IResult, which cannot carry response types. Students.Api was not "
+            + "handlers kept on IResult, which cannot carry response types. Round b3a added one operation — GET "
+            + "notification-templates/applicable/{gradeLevelId}, typed Ok<ApplicableNotificationTemplatesDto> — so "
+            + "it documents a schema: 51 + 1 = 52 of 68. Students.Api was not "
             + "converted and stays at 0 of 146"
             + (operationsWithSchema.Count > 0
                 ? $". First operations now documenting a schema: {string.Join("; ", operationsWithSchema.Take(3))}"
