@@ -1,6 +1,6 @@
 # Round — notification template authoring redesign
 
-**Status:** OPEN — the close-out pass is accepted (2026-10-21); commit/PR pending the owner's word. The line flips to `CLOSED` + the PR number when the PR exists, per `documents/rounds/README.md`. · Mode: **Full four-agent round, Tier 3 — attended** for W1–W3, then a **Tier 2 light, attended** close-out pass (owner Q53, 2026-10-21) · Provider/model seats: pinned at kickoff per the `orchestrator-worker-reviewer` skill; the close-out pass ran its worker and reviewer passes **inline** (see "Seat deviation" below)
+**Status:** CLOSED — carried by PR **#398** (accepted 2026-10-21). · Mode: **Full four-agent round, Tier 3 — attended** for W1–W3, then a **Tier 2 light, attended** close-out pass (owner Q53, 2026-10-21) · Provider/model seats: pinned at kickoff per the `orchestrator-worker-reviewer` skill; the close-out pass ran its worker and reviewer passes **inline** (see "Seat deviation" below)
 Base: `main` @ `f744bd01` · Branch: `feat/notification-template-authoring-redesign` (created at kickoff)
 Spec: `documents/specs/notification-template-authoring-redesign.md` — source of truth; supersedes §3.10 and amends §3.1 / §3.7 / §5 of `documents/specs/assignment-notification-templates.md`
 
