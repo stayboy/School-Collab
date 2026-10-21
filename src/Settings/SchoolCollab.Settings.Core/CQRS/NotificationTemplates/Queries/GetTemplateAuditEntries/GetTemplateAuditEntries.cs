@@ -10,12 +10,14 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTempl
 /// </summary>
 public sealed record GetTemplateAuditEntries(
     NotificationTemplateKind Kind,
-    NotificationChannel Channel) : IQuery<IReadOnlyList<TemplateAuditEntryDto>>;
+    NotificationChannel Channel,
+    Guid? TemplateId = null) : IQuery<IReadOnlyList<TemplateAuditEntryDto>>;
 
 /// <summary>Wire shape for a template audit entry (spec §3.9: change kind, before/after
 /// subject/body, and the constraint summary of each side).</summary>
 public sealed record TemplateAuditEntryDto(
     Guid Id,
+    Guid TemplateId,
     TemplateChangeKind ChangeKind,
     string? PreviousSubject,
     string? NewSubject,

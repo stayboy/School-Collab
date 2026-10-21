@@ -35,6 +35,7 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
 
     public List<TemplateRow> Rows { get; } = [];
     public List<(string Method, string Url, string? Body)> Calls { get; } = [];
+    public List<TemplateAuditRow> AuditEntries { get; } = [];
     public bool PreviewFails { get; set; }
     public bool LookupsFail { get; set; }
     public string PreviewJson { get; set; } =
@@ -75,7 +76,7 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
         Calls.Add((method, url, body));
 
         if (path.StartsWith(BasePath, StringComparison.Ordinal))
-            return HandleTemplates(method, path, body);
+            return HandleTemplates(method, path, url, body);
 
         if (path is "/students/grade-levels" or "/students/topics" or "/activity-groups" or "/api/coded-values/by-parent")
         {
@@ -101,7 +102,7 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
         return Status(HttpStatusCode.NotFound, $"Unexpected {method} {url}");
     }
 
-    private HttpResponseMessage HandleTemplates(string method, string path, string? body)
+    private HttpResponseMessage HandleTemplates(string method, string path, string url, string? body)
     {
         if (method == "GET" && path == BasePath)
             return Json(JsonSerializer.Serialize(Rows.Select(ToWire).ToArray(), Web));
@@ -115,6 +116,65 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
                 : Json(JsonSerializer.Serialize(ToWire(row), Web));
         }
 
+        if (method == "GET" && path.EndsWith("/audit", StringComparison.Ordinal))
+        {
+            var templateId = QueryGuid(url, "templateId");
+            var rows = AuditEntries
+                .Where(a => templateId is null || a.TemplateId == templateId)
+                .Select(a => new
+                {
+                    id = Guid.NewGuid(),
+                    templateId = a.TemplateId,
+                    changeKind = a.ChangeKind,
+                    previousSubject = (string?)null,
+                    newSubject = (string?)null,
+                    previousBody = (string?)null,
+                    newBody = (string?)null,
+                    previousConstraints = (string?)null,
+                    newConstraints = (string?)null,
+                    reason = a.Reason,
+                    actorId = "test:actor",
+                    actorDisplayName = a.Actor,
+                    occurredAt = a.OccurredAt,
+                });
+            return Json(JsonSerializer.Serialize(rows, Web));
+        }
+
+        if (method == "PUT" && path.Length > BasePath.Length + 1
+            && Guid.TryParse(path[(BasePath.Length + 1)..], out var putId))
+        {
+            var index = Rows.FindIndex(r => r.Id == putId);
+            if (index < 0)
+                return Status(HttpStatusCode.NotFound, "not found");
+
+            using var doc = JsonDocument.Parse(body!);
+            var root = doc.RootElement;
+            var existing = Rows[index];
+            var updated = new TemplateRow
+            {
+                Id = existing.Id,
+                Kind = existing.Kind,
+                Channel = existing.Channel,
+                Subject = root.TryGetProperty("subject", out var subject) && subject.ValueKind != JsonValueKind.Null
+                    ? subject.GetString()
+                    : null,
+                Body = root.GetProperty("body").GetString() ?? string.Empty,
+                Constraints = root.TryGetProperty("constraints", out var constraints)
+                    ? constraints.EnumerateArray()
+                        .Select(c => (c.GetProperty("dimension").GetInt32(), c.GetProperty("value").GetString() ?? string.Empty))
+                        .ToList()
+                    : [],
+            };
+            Rows[index] = updated;
+            return Json(JsonSerializer.Serialize(ToWire(updated), Web));
+        }
+
+        if (method == "DELETE" && path.Length > BasePath.Length + 1
+            && Guid.TryParse(path[(BasePath.Length + 1)..], out var deleteId))
+        {
+            Rows.RemoveAll(r => r.Id == deleteId);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }
         if (method == "POST")
         {
             using var doc = JsonDocument.Parse(body!);
@@ -140,6 +200,22 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
         return Status(HttpStatusCode.NotFound, $"Unexpected {method} {path}");
     }
 
+
+    private static Guid? QueryGuid(string url, string name)
+    {
+        var queryIndex = url.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex < 0)
+            return null;
+
+        foreach (var pair in url[(queryIndex + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (parts.Length == 2 && parts[0] == name && Guid.TryParse(parts[1], out var value))
+                return value;
+        }
+
+        return null;
+    }
     private static object ToWire(TemplateRow row) => new
     {
         id = row.Id,
@@ -175,3 +251,7 @@ internal static class TemplateTestServices
         return handler;
     }
 }
+
+/// <summary>One audit row the fake Settings API serves for the per-template trail.</summary>
+internal sealed record TemplateAuditRow(
+    Guid TemplateId, int ChangeKind, string? Reason, string Actor, DateTimeOffset OccurredAt);

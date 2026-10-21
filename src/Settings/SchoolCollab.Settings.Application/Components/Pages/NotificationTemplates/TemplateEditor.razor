@@ -7,6 +7,7 @@
 @inject StudentsLookupClient Students
 @inject CodedValuesApiClient CodedValues
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 @inject ILogger<TemplateEditor> Logger
 @implements IDisposable
 @*
@@ -36,7 +37,7 @@
         else
         {
             <div class="title-row template-editor__title-row">
-                <NotificationTemplateKindBanner Kind="_model.Kind" />
+                <NotificationTemplateKindBanner Kind="@_model.Kind" />
                 <span class="template-editor__mode-label">@ModeLabel</span>
             </div>
 
@@ -54,7 +55,7 @@
                     <FormRow Label="Type" Required>
                         <DropdownComponent TItem="KindOption" TValue="NotificationTemplateKind"
                                            Items="KindOptions"
-                                           SelectedValue="_model.Kind"
+                                           SelectedValue="@_model.Kind"
                                            SelectedValueChanged="OnKindChangedAsync"
                                            OptionText="@(o => o.Label)"
                                            OptionValue="@(o => o.Value)"
@@ -65,7 +66,7 @@
                     <FormRow Label="Preferred mode of contact" Required>
                         <DropdownComponent TItem="ChannelOption" TValue="NotificationChannel"
                                            Items="ChannelOptions"
-                                           SelectedValue="_model.Channel"
+                                           SelectedValue="@_model.Channel"
                                            SelectedValueChanged="OnChannelChangedAsync"
                                            OptionText="@(o => o.Label)"
                                            OptionValue="@(o => o.Value)"
@@ -84,7 +85,7 @@
                     {
                         <FormRow Label="Subject" For="template-subject">
                             <FluentTextInput Id="template-subject"
-                                             Value="_model.Subject"
+                                             Value="@_model.Subject"
                                              ValueChanged="OnSubjectChangedAsync"
                                              Immediate="true"
                                              Placeholder="Subject line (tags allowed)" />
@@ -96,14 +97,14 @@
                         {
                             <RichInstructionEditor @ref="_editor"
                                                    Id="template-body-editor"
-                                                   Value="_model.Body"
+                                                   Value="@_model.Body"
                                                    Placeholder="Write the message body…" />
                         }
                         else
                         {
                             <FluentTextArea Id="template-body-text"
                                             Label="Message"
-                                            Value="_model.Body"
+                                            Value="@_model.Body"
                                             ValueChanged="OnBodyChangedAsync"
                                             Immediate="true"
                                             Style="min-height:140px" />
@@ -129,6 +130,13 @@
 
                 <div class="template-editor-rail" id="template-editor-rail">
                     <PanelSection Title="Constraints" TitleId="template-constraints-title">
+                        <HeaderActions>
+                            <RowActionsMenu UseMenuService="false"
+                                            ForceKebab="true"
+                                            Actions="@ConstraintActions"
+                                            AriaLabel="Add a constraint" />
+                        </HeaderActions>
+
                         <ChildContent>
                             @if (_model.Constraints.Count == 0)
                             {
@@ -148,6 +156,21 @@
                                     }
                                 </div>
                             }
+
+                            @if (ConflictWarning is not null)
+                            {
+                                <FluentMessageBar Intent="MessageBarIntent.Warning" class="mt-2" id="template-conflict-warning">
+                                    @ConflictWarning
+                                </FluentMessageBar>
+                            }
+
+                            <div class="template-editor-panel__actions">
+                                <FluentButton Appearance="ButtonAppearance.Subtle"
+                                              Id="template-constraints-view-all"
+                                              OnClick="OpenConstraintListAsync">
+                                    View all constraints
+                                </FluentButton>
+                            </div>
                         </ChildContent>
                     </PanelSection>
 
@@ -186,13 +209,53 @@
                 </div>
             </div>
 
+            @if (Mode == TemplateEditorMode.Edit)
+            {
+                <section class="template-editor-audit" id="template-audit-section">
+                    <h2 class="template-editor-message__title">Audit trail</h2>
+                    @if (_audit.Count == 0)
+                    {
+                        <p class="template-editor-message__hint" id="template-audit-empty">No changes recorded for this template yet.</p>
+                    }
+                    else
+                    {
+                        <div id="template-audit-grid">
+                            <FluentDataGrid Items="@_audit.AsQueryable()"
+                                            GridTemplateColumns="150px minmax(120px,1fr) 110px minmax(180px,2fr)"
+                                            TGridItem="NotificationTemplateAuditEntryDto">
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="When">
+                                    @context.OccurredAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="Actor">
+                                    @context.ActorDisplayName
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="Change">
+                                    @context.ChangeKind
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="Reason">
+                                    @context.Reason
+                                </TemplateColumn>
+                            </FluentDataGrid>
+                        </div>
+                    }
+                </section>
+            }
             <div class="template-editor-actions" id="template-editor-actions">
                 <FluentTextInput Label="Reason (recorded in the audit trail)"
-                                 Value="_model.Reason"
+                                 Value="@_model.Reason"
                                  ValueChanged="@(v => _model.Reason = v ?? string.Empty)"
                                  Immediate="true"
                                  Id="template-reason"
                                  class="template-editor-actions__reason" />
+                @if (Mode == TemplateEditorMode.Edit)
+                {
+                    <FluentButton Appearance="ButtonAppearance.Outline"
+                                  Id="template-reset"
+                                  Disabled="@(_saving || _resetting)"
+                                  OnClick="ResetAsync">
+                        @(_resetting ? "Resetting…" : "Reset to built-in default")
+                    </FluentButton>
+                }
                 <FluentButton Appearance="ButtonAppearance.Primary"
                               Id="template-save"
                               Disabled="@_saving"
@@ -264,6 +327,9 @@
     private string? _previewError;
     private CancellationTokenSource? _previewDebounce;
     private bool _disposed;
+    private bool _resetting;
+    private TenantNotificationTemplateDto[] _siblings = [];
+    private List<NotificationTemplateAuditEntryDto> _audit = [];
 
     private bool LockedMeta => Mode == TemplateEditorMode.Edit;
 
@@ -324,6 +390,8 @@
         }
 
         _loading = false;
+        await LoadSiblingsAsync();
+        await LoadAuditAsync();
         QueuePreview();
     }
 
@@ -539,6 +607,8 @@
             _model.Body = saved.Body;
             _model.UpdatedAt = saved.UpdatedAt;
             _message = "Template saved.";
+            await LoadSiblingsAsync();
+            await LoadAuditAsync();
             await Saved.InvokeAsync(saved);
         }
         catch (OperationCanceledException)
@@ -556,6 +626,212 @@
         }
     }
 
+    /// <summary>The add-constraint menu (redesign spec §3.6): one item per dimension, verb-first labels,
+    /// every item carrying the shared Add glyph — the Targets &amp; Audience kebab treatment.</summary>
+    private IReadOnlyList<RowAction> ConstraintActions =>
+    [
+        ConstraintAction(TemplateConstraintDimension.GradeLevel, "Add grade levels"),
+        ConstraintAction(TemplateConstraintDimension.Stream, "Add streams"),
+        ConstraintAction(TemplateConstraintDimension.ActivityGroup, "Add activity groups"),
+        ConstraintAction(TemplateConstraintDimension.Subject, "Add subjects"),
+        ConstraintAction(TemplateConstraintDimension.AssignmentType, "Add assignment types"),
+    ];
+
+    private RowAction ConstraintAction(TemplateConstraintDimension dimension, string label) =>
+        new()
+        {
+            Label = label,
+            Icon = FluentIcons.Add,
+            Disabled = _lookups?.Loaded != true,
+            DisabledReason = _lookups?.Loaded == true
+                ? null
+                : $"Constraint lookups are unavailable ({_lookups?.Error}) — adding is disabled until they return.",
+            OnClick = () => OpenConstraintDialogAsync(dimension),
+        };
+
+    /// <summary>Opens the add dialog PRESET to one dimension and merges its picks into the draft.</summary>
+    private async Task OpenConstraintDialogAsync(TemplateConstraintDimension dimension)
+    {
+        if (_lookups is null)
+            return;
+
+        var model = new ConstraintEditModel
+        {
+            Dimension = dimension,
+            TemplateLabel = TemplateLabel,
+            Options = _lookups.OptionsFor(dimension)
+                .Select(o => new ConstraintOption(o.Value, o.Text))
+                .ToList(),
+            ExistingValues = _model.Constraints
+                .Where(c => c.Dimension == dimension)
+                .Select(c => c.Value)
+                .ToList(),
+        };
+
+        var result = await DialogService
+            .ShowShellDialogAsync<ConstraintEditDialog, ConstraintEditModel, ConstraintEditResult>(
+                model, DimensionTitle(dimension), DialogWidth.Medium);
+        if (result is null)
+            return;
+
+        foreach (var value in result.Values)
+        {
+            if (_model.Constraints.Any(c =>
+                    c.Dimension == dimension
+                    && string.Equals(c.Value, value, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            _model.Constraints.Add(new TemplateConstraintDto(Guid.Empty, dimension, value));
+        }
+    }
+
+    /// <summary>The read-only list, shared with the landing grid''s constraint-count link.</summary>
+    private Task OpenConstraintListAsync() =>
+        DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
+            $"{_model.Kind} · {ChannelLabel(_model.Channel)}",
+            new Dictionary<string, object?>
+            {
+                [TemplateConstraintsDialog.ConstraintsKey] = _model.Constraints.ToList(),
+                [TemplateConstraintsDialog.TemplateLabelKey] = TemplateLabel,
+            });
+
+    private string TemplateLabel => string.IsNullOrWhiteSpace(_model.Subject)
+        ? $"{_model.Kind} · {ChannelLabel(_model.Channel)}"
+        : _model.Subject!;
+
+    private static string ChannelLabel(NotificationChannel channel) => channel switch
+    {
+        NotificationChannel.Email => "Email",
+        NotificationChannel.SMS => "SMS",
+        NotificationChannel.WhatsApp => "WhatsApp",
+        _ => channel.ToString(),
+    };
+
+    private static string DimensionTitle(TemplateConstraintDimension dimension) => dimension switch
+    {
+        TemplateConstraintDimension.GradeLevel => "Add grade levels",
+        TemplateConstraintDimension.Stream => "Add streams",
+        TemplateConstraintDimension.ActivityGroup => "Add activity groups",
+        TemplateConstraintDimension.Subject => "Add subjects",
+        TemplateConstraintDimension.AssignmentType => "Add assignment types",
+        _ => "Add constraint",
+    };
+
+    /// <summary>
+    /// The §3.7 conflict warning: another template of the SAME kind × channel carries the identical
+    /// constraint set, so publish-time selection could not tell them apart. A warning, never a block —
+    /// the server stays the authority. Scope joins the comparison with W3.
+    /// </summary>
+    private string? ConflictWarning
+    {
+        get
+        {
+            var draft = NormalizeConstraintSet(_model.Constraints.Select(c => (c.Dimension, c.Value)));
+
+            foreach (var row in _siblings)
+            {
+                if (row.Id == _model.Id || row.Kind != _model.Kind || row.Channel != _model.Channel)
+                    continue;
+
+                var candidate = NormalizeConstraintSet(row.Constraints.Select(c => (c.Dimension, c.Value)));
+                if (string.Equals(candidate, draft, StringComparison.Ordinal))
+                {
+                    return "Another template in this type and contact mode has the identical constraint set — "
+                        + "publish-time selection cannot tell them apart.";
+                }
+            }
+
+            return null;
+        }
+    }
+
+    private static string NormalizeConstraintSet(
+        IEnumerable<(TemplateConstraintDimension Dimension, string Value)> constraints) =>
+        string.Join(
+            "|",
+            constraints
+                .Select(c => $"{c.Dimension}={c.Value.Trim()}")
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .Select(p => p.ToLowerInvariant()));
+
+    private async Task LoadSiblingsAsync()
+    {
+        try
+        {
+            _siblings = (await Api.ListAsync()).ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load sibling templates for the conflict warning");
+        }
+    }
+
+    private async Task LoadAuditAsync()
+    {
+        if (Mode != TemplateEditorMode.Edit || _model.Id is not { } id)
+            return;
+
+        try
+        {
+            _audit = (await Api.GetAuditAsync(_model.Kind, _model.Channel, id)).ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load the audit trail for template {TemplateId}", id);
+        }
+    }
+
+    /// <summary>Edit-mode reset (spec §3.5): audited, requires the Reason field, confirmed first.</summary>
+    private async Task ResetAsync()
+    {
+        if (_saving || _resetting || _model.Id is not { } id)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_model.Reason))
+        {
+            _error = "A reason is required to reset a template — the reset is recorded in the audit trail.";
+            return;
+        }
+
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            "Reset this template to the built-in default? The row is removed and the default applies again.",
+            primaryText: "Reset",
+            title: "Reset template");
+        if (!confirmed)
+            return;
+
+        _resetting = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            await Api.DeleteAsync(id, _model.Reason.Trim());
+            Nav.NavigateTo("/notification-templates");
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reset notification template {TemplateId}", id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _resetting = false;
+        }
+    }
     private void BackToListAsync() => Nav.NavigateTo("/notification-templates");
 
     public void Dispose()

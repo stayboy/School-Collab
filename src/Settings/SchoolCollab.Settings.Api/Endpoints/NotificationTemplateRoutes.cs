@@ -166,17 +166,18 @@ public static class NotificationTemplateRoutes
         });
 
         // ── Audit trail for one kind × channel, most recent first (spec §3.9) ──
-        // Stays keyed: the admin page shows a merged per-slot stream (the config-flags per-key
-        // precedent), and the audit rows carry the template id if per-candidate attribution is ever
-        // needed.
+        // The detail page narrows the stream to ONE row with ?templateId= (redesign spec §3.12); the
+        // merged per-slot stream stays the default, so a reset's trail is still reachable after the
+        // template row is tombstoned.
         group.MapGet("/notification-templates/{kind}/{channel}/audit",
             async Task<Ok<IReadOnlyList<TemplateAuditEntryDto>>> (
             NotificationTemplateKind kind,
             NotificationChannel channel,
+            [FromQuery] Guid? templateId,
             [FromServices] IQueryHandler<GetTemplateAuditEntries, IReadOnlyList<TemplateAuditEntryDto>> handler,
             CancellationToken ct) =>
         {
-            var entries = await handler.HandleAsync(new GetTemplateAuditEntries(kind, channel), ct);
+            var entries = await handler.HandleAsync(new GetTemplateAuditEntries(kind, channel, templateId), ct);
             return TypedResults.Ok(entries);
         });
 

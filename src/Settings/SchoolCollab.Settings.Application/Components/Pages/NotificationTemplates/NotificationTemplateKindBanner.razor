@@ -1,4 +1,3 @@
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @*
    Kind banner (redesign spec §3.13) — the ONE place the four notification kinds get a colour, so the
    landing grid and the detail header cannot drift apart.
@@ -11,12 +10,14 @@
    `data-kind` is the shared assertion seam: rows, header and tests all address the kind by value.
 *@
 <span class="kind-banner" data-kind="@Kind">
+    <FluentIcon Value="@Glyph" Class="kind-banner__icon" />
+    @* v5: a badge''s TEXT is `Content`; `ChildContent` is the element the badge WRAPS (the
+       fluentui-component-props skill). Putting the label in ChildContent rendered an empty badge
+       around an icon and the bare text beside it. *@
     <FluentBadge Class="kind-banner__badge"
                  Appearance="BadgeAppearance.Filled"
-                 Color="@Colour">
-        <FluentIcon Value="@Glyph" Slot="start" />
-        @Kind
-    </FluentBadge>
+                 Color="@Colour"
+                 Content="@Kind.ToString()" />
 </span>
 
 @code {
@@ -39,7 +40,7 @@
         NotificationTemplateKind.Publish => FluentIcons.ArrowExportUp,
         NotificationTemplateKind.Reminder => FluentIcons.Calendar,
         NotificationTemplateKind.Completion => FluentIcons.CheckmarkCircleFilled,
-        NotificationTemplateKind.Overdue => new Icons.Regular.Size16.Warning(),
+        NotificationTemplateKind.Overdue => FluentIcons.Warning,
         _ => FluentIcons.Info,
     };
 

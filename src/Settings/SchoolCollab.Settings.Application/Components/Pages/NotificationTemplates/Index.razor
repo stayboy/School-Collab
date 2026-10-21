@@ -36,7 +36,7 @@
         <span class="template-filter">
             <DropdownComponent TItem="FilterOption" TValue="string"
                                Items="KindFilterOptions"
-                               SelectedValue="_kindFilter"
+                               SelectedValue="@_kindFilter"
                                SelectedValueChanged="OnKindFilterChanged"
                                OptionText="@(o => o.Label)"
                                OptionValue="@(o => o.Value)"
@@ -45,7 +45,7 @@
         <span class="template-filter">
             <DropdownComponent TItem="FilterOption" TValue="string"
                                Items="ModeFilterOptions"
-                               SelectedValue="_modeFilter"
+                               SelectedValue="@_modeFilter"
                                SelectedValueChanged="OnModeFilterChanged"
                                OptionText="@(o => o.Label)"
                                OptionValue="@(o => o.Value)"

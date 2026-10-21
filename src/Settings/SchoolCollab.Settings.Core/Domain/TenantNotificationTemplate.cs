@@ -54,14 +54,6 @@ public sealed class TenantNotificationTemplate : BaseTenantEntityWithAudit, IHas
         if (string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template body must not be empty.", nameof(body));
 
-        // WhatsApp delivers the SMS body (spec §2), so a WhatsApp template row
-        // would be a second, silently-ignored copy of the same text. Only Email
-        // and SMS are valid template channels.
-        if (channel == NotificationChannel.WhatsApp)
-            throw new ArgumentOutOfRangeException(
-                nameof(channel), channel,
-                "Notification templates are stored per Email and SMS; WhatsApp recipients use the SMS body.");
-
         var now = DateTimeOffset.UtcNow;
         var template = new TenantNotificationTemplate
         {
@@ -69,8 +61,8 @@ public sealed class TenantNotificationTemplate : BaseTenantEntityWithAudit, IHas
             TenantId = tenantId,
             Kind = kind,
             Channel = channel,
-            // Spec §5: the subject is ignored for SMS (an SMS body has no subject line),
-            // so a caller-supplied subject is dropped rather than silently stored.
+            // Spec §5: the subject is ignored for every plain-text channel (an SMS or WhatsApp body has
+            // no subject line), so a caller-supplied subject is dropped rather than silently stored.
             Subject = channel == NotificationChannel.Email ? subject : null,
             Body = body,
             CreatedAt = now,

@@ -40,13 +40,14 @@ public sealed class GetApplicableNotificationTemplatesHandler(
     ];
 
     /// <summary>
-    /// The two authorable channels. WhatsApp has no template slot (spec §2: WhatsApp recipients use
-    /// the SMS body), so excluding it is defensive only — the entity refuses to create such a row.
+    /// The three authorable channels (redesign spec §3.10 — WhatsApp became a real template mode).
+    /// It used to be excluded defensively; the store now accepts it, so it is a slot like any other.
     /// </summary>
     private static readonly NotificationChannel[] Channels =
     [
         NotificationChannel.Email,
         NotificationChannel.SMS,
+        NotificationChannel.WhatsApp,
     ];
 
     public async Task<ApplicableNotificationTemplatesDto> HandleAsync(
@@ -58,8 +59,6 @@ public sealed class GetApplicableNotificationTemplatesHandler(
         var templates = await db.TenantNotificationTemplates
             .Include(x => x.Constraints)
             .AsNoTracking()
-            // Defensive only: TenantNotificationTemplate.Create refuses NotificationChannel.WhatsApp.
-            .Where(x => x.Channel != NotificationChannel.WhatsApp)
             .ToListAsync(ct);
 
         // One resolution per coded value, however many slots and constraints mention it.

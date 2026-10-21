@@ -101,6 +101,28 @@ prompt; (3) the **Preview panel shipped in W1** rather than W2 (it is part of th
 suite's preview assertions had to land somewhere); (4) a system-scope session's create path is not yet
 special-cased — W3 owns scope.
 
+**W2 — implemented (2026-10-20).**
+
+- **Per-template audit** — `TemplateAuditEntryDto.TemplateId`, optional `templateId` on the query/route, `GetAuditAsync(kind, channel, templateId)`; the detail page's grid is narrowed to its own row (the reset's trail survives because the audit row keeps the id).
+- **WhatsApp is authorable** — the `Create` guard is gone, the applicability handler serves 12 kind × channel slots, the subject stays email-only; tests flipped (`Create_AcceptsWhatsAppChannel_AndDropsItsSubject`, slots 8 → 12).
+- **Constraints panel** — header `RowActionsMenu` kebab with one item per dimension, `ConstraintEditDialog` (dimension preset, multi-pick, chips, existing-value exclusion), staged merge with dedupe, scope-aware conflict warning, "View all constraints" reusing the shared read-only dialog.
+- **Detail surface** — locked type/mode indicators with their reason, audited Reset (reason required, confirmed), audit section below the two-column layout, `Detail.razor` route host.
+- **OpenAPI pin** raised **52 → 53 of 69** (measured, per `minimal-api-composition`): the new by-id route documents a schema.
+
+**Defect the new tests caught (fixed before commit):** nine Razor attributes had been written as **literals** (`Value="_model.Body"`, `SelectedValue="_kindFilter"`, …) because the editor was authored through a line-based shell edit — the editor never bound its fields and the landing filters never applied. All nine fixed and re-asserted. This is the concrete cost of the class of edit this round used; the lesson is recorded for the front-door research doc.
+
+**Seam corrections (recorded, per the `tdd` rule that seams are agreed first):**
+
+1. the landing toolbar lives in a `SectionContent` and is unreachable in bUnit → filtering was extracted to the pure `TemplateLandingFilter` and asserted there (the page tests keep rows/actions);
+2. a routed page cannot be rendered with a path parameter in a bare bUnit tree (no `Router`) → the detail tests render the **shared editor** directly, which is the component under test anyway;
+3. a dialog rendered bare throws inside `FluentDialogInstance` → the dialog is covered by its **model** tests, and its invocation by the deferred browser pass.
+
+**Gates:** Admin suites **25/25** (landing, create, detail, dialog-list, banner, filter, constraint model) · `Settings.Api.Tests.Unit` **49/49** · `ArchitectureTests` **142/142** · `Settings.Tests.Unit` **635/636** (the one failure is the pre-existing `CodedValueDropdown` order-dependent flake, filed as an issue) · builds 0 errors: Settings.Core/Api/Application, Admin.Shared, Admin host, **mobile head**.
+
+**Deferred:** the browser pass (Q30 — the AppHost cannot serve here, the b3b Q91a precedent) and dialog *invocation* coverage.
+
+**Queued last (owner order, 2026-10-20):** write `documents/solution/spec-and-ticket-skills-in-the-orchestrator.md` — the `/to-spec` · `/to-tickets` · `/implement-spec` front-door research and the proposed orchestrator section — **after** W3 and the W4 acceptance.
+
 ## Review
 
 _pending — static diff review (Tier 3)._

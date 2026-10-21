@@ -103,6 +103,7 @@ public sealed record TemplateConstraintRequest(
 /// <summary>One audit entry of a kind × channel's template history (spec §3.9).</summary>
 public sealed record NotificationTemplateAuditEntryDto(
     Guid Id,
+    Guid TemplateId,
     TemplateChangeKind ChangeKind,
     string? PreviousSubject,
     string? NewSubject,
@@ -237,9 +238,12 @@ public sealed class NotificationTemplateApiClient(HttpClient http)
 
     /// <summary>The audit trail of one kind × channel, most recent first (spec §3.9).</summary>
     public async Task<IReadOnlyList<NotificationTemplateAuditEntryDto>> GetAuditAsync(
-        NotificationTemplateKind kind, NotificationChannel channel, CancellationToken ct = default)
+        NotificationTemplateKind kind, NotificationChannel channel, Guid? templateId = null, CancellationToken ct = default)
     {
-        var response = await http.GetAsync($"{BasePath}/{kind}/{channel}/audit", ct);
+        var path = templateId is { } id
+            ? $"{BasePath}/{kind}/{channel}/audit?templateId={id:D}"
+            : $"{BasePath}/{kind}/{channel}/audit";
+        var response = await http.GetAsync(path, ct);
         response.EnsureSuccessStatusCode();
 
         var entries = await response.Content

@@ -26,15 +26,24 @@ public sealed class GetTemplateAuditEntriesHandler(SettingsDbContext db, ITenant
         var tenantId = tenantProvider.GetTenantContext().TenantId;
         var templateKey = $"{query.Kind}:{query.Channel}";
 
-        var entries = await db.TemplateAuditEntries
+        var rows = db.TemplateAuditEntries
             .AsNoTracking()
-            .Where(x => x.TenantId == tenantId && x.TemplateKey == templateKey)
+            .Where(x => x.TenantId == tenantId && x.TemplateKey == templateKey);
+
+        // Redesign spec §3.12: an optional per-template narrowing. Filtering on the audit row's OWN
+        // TemplateId is safe after a reset — the audit row keeps the id even when the template row is
+        // tombstoned, which is exactly why this is a column filter and not a join to the templates table.
+        if (query.TemplateId is { } templateId)
+            rows = rows.Where(x => x.TemplateId == templateId);
+
+        var entries = await rows
             .OrderByDescending(x => x.OccurredAt)
             .ToListAsync(ct);
 
         return entries.Select(e => new TemplateAuditEntryDto(
-            e.Id, e.ChangeKind, e.PreviousSubject, e.NewSubject, e.PreviousBody, e.NewBody,
+            e.Id, e.TemplateId, e.ChangeKind, e.PreviousSubject, e.NewSubject, e.PreviousBody, e.NewBody,
             e.PreviousConstraints, e.NewConstraints,
             e.Reason, e.ActorId, e.ActorDisplayName, e.OccurredAt)).ToList();
+
     }
 }

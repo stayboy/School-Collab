@@ -1,12 +1,19 @@
-/* The banner is a stretched semantic badge: the library supplies the colour (BadgeColor), this file
-   supplies only the shape. No literal colours here — a hardcoded tint would ignore the theme. */
+/* The banner is an icon + a stretched semantic badge: the library supplies the colour (BadgeColor), this
+   file supplies only the shape. No literal colours here — a hardcoded tint would ignore the theme. */
 .kind-banner {
     display: flex;
+    align-items: center;
+    gap: 6px;
     width: 100%;
     min-width: 0;
 }
 
+.kind-banner__icon {
+    flex: 0 0 auto;
+}
+
 .kind-banner__badge {
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     justify-content: flex-start;
 }

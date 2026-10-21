@@ -99,7 +99,7 @@ public class NotificationTemplateRoutesTests
         }
     }
 
-    /// <summary>Reproduces the domain's WhatsApp guard so the route's 400 arm is reached.</summary>
+    /// <summary>Reproduces a handler rejecting the request so the route's 400 arm is reached.</summary>
     private sealed class ChannelGuardingCreateHandler
         : ICommandHandler<CreateTenantNotificationTemplate, TenantNotificationTemplateDto>
     {
@@ -107,7 +107,7 @@ public class NotificationTemplateRoutesTests
             CreateTenantNotificationTemplate command, CancellationToken ct = default)
         {
             if (command.Request.Channel == NotificationChannel.WhatsApp)
-                throw new ArgumentOutOfRangeException(nameof(command), "WhatsApp is not a template channel");
+                throw new ArgumentOutOfRangeException(nameof(command), "This channel is not accepted here");
 
             return Task.FromResult(SampleDto(command.Request.Kind, command.Request.Channel));
         }
@@ -155,12 +155,15 @@ public class NotificationTemplateRoutesTests
     private sealed class StubAuditHandler(IReadOnlyList<TemplateAuditEntryDto> rows)
         : IQueryHandler<GetTemplateAuditEntries, IReadOnlyList<TemplateAuditEntryDto>>
     {
-        public Task<IReadOnlyList<TemplateAuditEntryDto>> HandleAsync(
-            GetTemplateAuditEntries query, CancellationToken ct = default) =>
-            Task.FromResult(rows);
-    }
+        public GetTemplateAuditEntries? Last { get; private set; }
 
-    // ── Harness ────────────────────────────────────────────────────────────
+        public Task<IReadOnlyList<TemplateAuditEntryDto>> HandleAsync(
+            GetTemplateAuditEntries query, CancellationToken ct = default)
+        {
+            Last = query;
+            return Task.FromResult(rows);
+        }
+    }
 
     private static async Task<(WebApplication App, HttpClient Client)> StartAsync(
         IReadOnlyList<TenantNotificationTemplateDto>? all = null,
@@ -169,6 +172,7 @@ public class NotificationTemplateRoutesTests
         ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto>? update = null,
         ICommandHandler<DeleteTenantNotificationTemplate>? delete = null,
         IReadOnlyList<TemplateAuditEntryDto>? audit = null,
+        StubAuditHandler? auditSpy = null,
         GetOneHandler? getOneSpy = null,
         GetByIdHandler? getByIdSpy = null)
     {
@@ -186,7 +190,7 @@ public class NotificationTemplateRoutesTests
         builder.Services.AddSingleton(update ?? new CapturingUpdateHandler());
         builder.Services.AddSingleton(delete ?? new CapturingDeleteHandler());
         builder.Services.AddSingleton<IQueryHandler<GetTemplateAuditEntries, IReadOnlyList<TemplateAuditEntryDto>>>(
-            new StubAuditHandler(audit ?? []));
+            auditSpy ?? new StubAuditHandler(audit ?? []));
 
         var app = builder.Build();
         app.MapGroup("/api/settings").MapNotificationTemplateRoutes();
@@ -302,19 +306,19 @@ public class NotificationTemplateRoutesTests
     [TestMethod]
     public async Task Post_Returns400WhenTheHandlerRejectsTheChannel()
     {
-        // The domain rejects WhatsApp (spec §2 routes WhatsApp at the SMS body); the
-        // route catches ArgumentException — of which ArgumentOutOfRangeException is one.
+        // WhatsApp is authorable since the redesign (spec §3.10), so this pins the route's generic 400
+        // arm only: any ArgumentException the handler raises maps to 400, never a 500.
         var (app, client) = await StartAsync(create: new ChannelGuardingCreateHandler());
         await using (app)
         {
-            // channel 2 = WhatsApp (the only value the domain rejects).
+            // channel 2 = WhatsApp; the stub rejects it, which is what this test pins.
             var response = await client.PostAsync(BaseUrl, Json("""
                 {"kind":0,"channel":2,"subject":null,"body":"Publish: {{Title}}","constraints":[]}
                 """));
 
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-            (await response.Content.ReadAsStringAsync()).Should().Contain("WhatsApp",
-                "the 400 must come from the domain guard, not from body binding");
+            (await response.Content.ReadAsStringAsync()).Should().Contain("not accepted here",
+                "the 400 must come from the handler's ArgumentException, not from body binding");
         }
     }
 
@@ -418,13 +422,29 @@ public class NotificationTemplateRoutesTests
         }
     }
 
-    // ── Audit (stays keyed) ────────────────────────────────────────────────
+    // ── Audit (merged per slot, optionally narrowed by template) ───────────
+
+    [TestMethod]
+    public async Task GetAudit_PassesTheTemplateIdFilterThrough()
+    {
+        var audit = new StubAuditHandler([]);
+        var (app, client) = await StartAsync(auditSpy: audit);
+        await using (app)
+        {
+            var response = await client.GetAsync($"{BaseUrl}/Publish/Email/audit?templateId={TemplateId:D}");
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            audit.Last.Should().NotBeNull();
+            audit.Last!.TemplateId.Should().Be(TemplateId,
+                "the detail page narrows the stream to its own row (redesign spec §3.12)");
+        }
+    }
 
     [TestMethod]
     public async Task GetAudit_Returns200AndTheEntries_ForAKindAndChannel()
     {
         var entry = new TemplateAuditEntryDto(
-            Guid.NewGuid(), TemplateChangeKind.Updated,
+            Guid.NewGuid(), TemplateId, TemplateChangeKind.Updated,
             "old subject", "new subject", "old body", "new body",
             """[{"dimension":"GradeLevel","value":"Grade 3"}]""", "[]",
             "tweak", "test:actor", "Test Actor", DateTimeOffset.UnixEpoch);

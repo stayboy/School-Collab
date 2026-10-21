@@ -55,6 +55,8 @@ public class NotificationTemplateCreateTests : BunitContext
 
         cut.Find("#template-save").Click();
 
+        // A generous window: Save also refreshes the sibling/audit reads, and this suite runs beside the
+        // landing/dialog suites (the icons-skill note on load-sensitive bUnit timeouts).
         cut.WaitForAssertion(() =>
         {
             var post = handler.Calls.Single(c => c.Method == "POST");
@@ -63,7 +65,7 @@ public class NotificationTemplateCreateTests : BunitContext
             post.Body.Should().Contain(TemplateApiHandler.GradeA);
             Services.GetRequiredService<NavigationManager>().Uri
                 .Should().MatchRegex("/notification-templates/[0-9a-fA-F-]{36}$");
-        });
+        }, TimeSpan.FromSeconds(5));
     }
 
     [TestMethod]
