@@ -1,6 +1,7 @@
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Components.Authoring
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Core.AssignmentPolicies
 @using SchoolCollab.Core.Features
@@ -46,31 +47,14 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <div class="authoring-page">
-            @* D8 (assignment-create-edit-redesign): breadcrumb navigation — the crumb trail sits at
-               the top of EVERY branch (spec §6: while `_item` is null — loading or not found — it
-               degrades to `Assignments › …`). v5 removed FluentBreadcrumb/FluentBreadcrumbItem with
-               no replacement, so the trail is authored here: linked crumbs are FluentLinks and the
-               trailing crumb is the current page (a non-link). The landmark, its class and the
-               `›` separators are what the removed pair rendered. *@
-            <nav id="authoring-breadcrumb" class="authoring-breadcrumb" aria-label="Breadcrumb">
-                <FluentLink Appearance="LinkAppearance.Default" Href="/assignments">Assignments</FluentLink>
-                <span class="authoring-crumb-separator" aria-hidden="true">›</span>
-                @if (Mode == AssignmentAuthoringMode.Create)
-                {
-                    <span class="authoring-crumb-current" aria-current="page">New assignment</span>
-                }
-                else if (_item is not null)
-                {
-                    <FluentLink Appearance="LinkAppearance.Default" Href="@($"/assignments/{_item.Id}")">@_item.Title</FluentLink>
-                    <span class="authoring-crumb-separator" aria-hidden="true">›</span>
-                    <span class="authoring-crumb-current" aria-current="page">@CurrentCrumb</span>
-                }
-                else
-                {
-                    <span class="authoring-crumb-current" aria-current="page">…</span>
-                }
-            </nav>
+        <AuthoringShell Crumbs="@ShellCrumbs"
+                       Title="@HeadingText"
+                       Badge="@ShellBadge"
+                       LeadingActions="@ShellLeadingActions"
+                       PrimaryLabel="@ShellPrimaryLabel"
+                       PrimaryDisabled="@_busy"
+                       OnPrimaryAction="OnPrimaryActionAsync"
+                       SecondaryActions="@ShellSecondaryActions">
 
         @if (_loading)
         {
@@ -83,48 +67,6 @@
         }
         else
         {
-                <header class="authoring-actionbar">
-                    <div class="authoring-title-group">
-                        <h2 class="authoring-heading">@HeadingText</h2>
-                        @if (_item is not null)
-                        {
-                            <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
-                        }
-                    </div>
-                    <div class="authoring-actionbar-controls">
-                        @* D1/D7: the edit-fields view's exit — pure presentation state, so it never
-                           routes and never triggers the UX-7 guard (D9: nothing is discarded by the
-                           flip, the form model travels with it). *@
-                        @if (!ShowSummary && Mode != AssignmentAuthoringMode.Create)
-                        {
-                            <FluentButton Id="authoring-summary-back"
-                                          Appearance="ButtonAppearance.Outline"
-                                          IconStart="@FluentIcons.ArrowLeft"
-                                          Disabled="@_busy"
-                                          OnClick="ExitEditFieldsView">Back to summary</FluentButton>
-                        }
-                        @if (PrimaryActionLabel is not null)
-                        {
-                            <FluentButton Id="authoring-primary-action"
-                                          Appearance="ButtonAppearance.Primary"
-                                          Disabled="@_busy"
-                                          OnClick="OnPrimaryActionAsync">
-                                @(_busy ? "Working…" : PrimaryActionLabel)
-                            </FluentButton>
-                        }
-                        @if (SecondaryActions.Count > 0)
-                        {
-                            @* UseMenuService="false" keeps the kebab items in the rendered DOM
-                               (the Index.razor landing-grid precedent) — the module registers no
-                               FluentMenuProvider. *@
-                            <RowActionsMenu UseMenuService="false"
-                                            ForceKebab="true"
-                                            Actions="@SecondaryActions"
-                                            AriaLabel="More assignment actions" />
-                        }
-                    </div>
-                </header>
-
                 @* D12 (owner, 2026-10-08): the compartment jump-nav is REMOVED. It was the
                    submenu list under the page title; the sections themselves (and their ids) stay,
                    so the kebab's `#authoring-questions` anchor still resolves. *@
@@ -217,8 +159,7 @@
                 @if (!ShowSummary)
                 {
                 <div class="authoring-layout">
-                    <section id="authoring-basics" class="authoring-compartment">
-                        <h3 class="authoring-compartment-title">Basics</h3>
+                    <section id="authoring-basics" class="authoring-compartment" aria-label="Basics">
 
                         @* D6/§3 (assignment-create-edit-redesign): Status & available from LEAD the
                            form — the lifecycle readout an author checks first. Description and
@@ -272,8 +213,9 @@
                            the optional strands & lessons context row, directly beneath Subject — now
                            TWO add buttons opening the picker dialog instead of two multi-selects.
                            Create/Edit only — View mode renders NO pick chrome this round. The section
-                           owns no compartment title, so the Basics h3 above is still the
-                           compartment's single title (X-1). *@
+                           owns no compartment title: compartment 1 is a HEADERLESS panel (UX-1a, owner
+                           2026-10-21) — its accessible name rides the section's aria-label, not a
+                           visible h3. *@
                         @if (!IsReadOnly)
                         {
                             <FormRow Label="Strands &amp; lessons" AlignTop For="authoring-add-strand"
@@ -850,7 +792,7 @@
                        of the right pane above Targets & Audience. Nothing renders here any more. *@
                 }
         }
-        </div>
+        </AuthoringShell>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -1423,6 +1365,53 @@
     /// accepts structural edits, "Overview" once the surface degraded to read-only.</summary>
     private string CurrentCrumb =>
         EffectiveMode == AssignmentAuthoringMode.Edit ? "Edit" : "Overview";
+
+    // ── Shell slots (ADR adr-authoring-surface-pattern, decision 1) ──────────────
+    // The chrome that used to be authored here now lives in the shared AuthoringShell; this page
+    // supplies only the trail, the status badge, the summary-back control, the primary label and the
+    // secondary kebab, so the ids the suite pins stay exactly where they were.
+
+    /// <summary>D8: `Assignments › … › current`, degrading to `Assignments › …` while loading.</summary>
+    private IReadOnlyList<AuthoringCrumb> ShellCrumbs =>
+        Mode == AssignmentAuthoringMode.Create
+            ? [new AuthoringCrumb("Assignments", "/assignments"), new AuthoringCrumb("New assignment")]
+            : _item is not null
+                ? [new AuthoringCrumb("Assignments", "/assignments"),
+                   new AuthoringCrumb(_item.Title, $"/assignments/{_item.Id}"),
+                   new AuthoringCrumb(CurrentCrumb)]
+                : [new AuthoringCrumb("Assignments", "/assignments"), new AuthoringCrumb("…")];
+
+    /// <summary>D1/D7: the edit-fields view's exit — pure presentation state, so it never routes and
+    /// never triggers the UX-7 guard (D9: nothing is discarded by the flip).</summary>
+    private bool ShellShowsSummaryBack =>
+        !ShowSummary && Mode != AssignmentAuthoringMode.Create;
+
+    private string? ShellPrimaryLabel =>
+        PrimaryActionLabel is null ? null : _busy ? "Working…" : PrimaryActionLabel;
+
+    private RenderFragment ShellBadge => @<text>@if (_item is not null)
+        {
+            <FluentBadge Appearance="@StatusAppearance(_item.Status)">@_item.Status</FluentBadge>
+        }</text>;
+
+    private RenderFragment ShellLeadingActions => @<text>@if (ShellShowsSummaryBack)
+        {
+            <FluentButton Id="authoring-summary-back"
+                          Appearance="ButtonAppearance.Outline"
+                          IconStart="@FluentIcons.ArrowLeft"
+                          Disabled="@_busy"
+                          OnClick="ExitEditFieldsView">Back to summary</FluentButton>
+        }</text>;
+
+    private RenderFragment ShellSecondaryActions => @<text>@if (SecondaryActions.Count > 0)
+        {
+            @* UseMenuService="false" keeps the kebab items in the rendered DOM (the
+               Index.razor landing-grid precedent) — the module registers no FluentMenuProvider. *@
+            <RowActionsMenu UseMenuService="false"
+                            ForceKebab="true"
+                            Actions="@SecondaryActions"
+                            AriaLabel="More assignment actions" />
+        }</text>;
 
     /// <summary>D11: the feedback-mode narrative — now the GRADING FORMAT cell's (i) help icon
     /// (owner 2026-10-11, split from the row label).</summary>

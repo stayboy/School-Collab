@@ -1,0 +1,104 @@
+@namespace SchoolCollab.Admin.Shared.Components.Authoring
+@*
+    The shared authoring shell (ADR `documents/solution/adr-authoring-surface-pattern.md`, decision 1):
+    the assignment authoring surface's UX-4/D6/D8 chrome — an authored breadcrumb trail and a sticky
+    action bar — lifted out of Assignments so every authoring page wears the same chrome instead of
+    copying it. Settings may not reference Assignments.Application, so Admin.Shared is the only legal
+    home; a second copy is the drift the ADR exists to prevent.
+
+    The shell is deliberately dumb: it renders the trail, the title + badge slot, the primary action and
+    the secondary slot, and hands the page body through untouched. Every id it emits is a documented
+    test seam (the assignment suite pins `#authoring-breadcrumb`, the crumb classes,
+    `#authoring-primary-action` and `#authoring-summary-back`).
+*@
+<div class="authoring-page">
+    <nav id="authoring-breadcrumb" class="authoring-breadcrumb" aria-label="Breadcrumb">
+        @for (var i = 0; i < Crumbs.Count; i++)
+        {
+            var crumb = Crumbs[i];
+            if (i > 0)
+            {
+                <span class="authoring-crumb-separator" aria-hidden="true">›</span>
+            }
+
+            if (i == Crumbs.Count - 1)
+            {
+                <span class="authoring-crumb-current" aria-current="page">@crumb.Label</span>
+            }
+            else if (!string.IsNullOrEmpty(crumb.Href))
+            {
+                <FluentLink Appearance="LinkAppearance.Default" Href="@crumb.Href">@crumb.Label</FluentLink>
+            }
+            else
+            {
+                <span class="authoring-crumb-current">@crumb.Label</span>
+            }
+        }
+    </nav>
+
+    <header class="authoring-actionbar">
+        <div class="authoring-title-group">
+            <h2 class="authoring-heading">
+                @if (TitleContent is not null)
+                {
+                    @TitleContent
+                }
+                else
+                {
+                    @Title
+                }
+            </h2>
+            @Badge
+        </div>
+        <div class="authoring-actionbar-controls">
+            @LeadingActions
+            @if (PrimaryLabel is not null)
+            {
+                <FluentButton Id="@PrimaryId"
+                              Appearance="ButtonAppearance.Primary"
+                              Disabled="@PrimaryDisabled"
+                              OnClick="OnPrimaryAction">
+                    @PrimaryLabel
+                </FluentButton>
+            }
+            @SecondaryActions
+        </div>
+    </header>
+
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>The trail, outermost first. The last entry renders as the current page.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<AuthoringCrumb> Crumbs { get; set; } = [];
+
+    /// <summary>The page title in the action bar. Ignored when <see cref="TitleContent"/> is supplied.</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>A title that is more than text (the template editor's kind banner, for example).</summary>
+    [Parameter] public RenderFragment? TitleContent { get; set; }
+
+    /// <summary>The status badge / owner chip beside the title.</summary>
+    [Parameter] public RenderFragment? Badge { get; set; }
+
+    /// <summary>Controls that sit before the primary action (a reason input, a back button).</summary>
+    [Parameter] public RenderFragment? LeadingActions { get; set; }
+
+    /// <summary>The primary action's id — a pinned test seam per surface.</summary>
+    [Parameter] public string PrimaryId { get; set; } = "authoring-primary-action";
+
+    /// <summary>The primary action's label; null renders no primary button (a read-only-now view).</summary>
+    [Parameter] public string? PrimaryLabel { get; set; }
+
+    /// <summary>Disables the primary action while the page is busy.</summary>
+    [Parameter] public bool PrimaryDisabled { get; set; }
+
+    /// <summary>The primary action.</summary>
+    [Parameter] public EventCallback OnPrimaryAction { get; set; }
+
+    /// <summary>The secondary actions — usually a kebab.</summary>
+    [Parameter] public RenderFragment? SecondaryActions { get; set; }
+
+    /// <summary>The page body, rendered below the action bar.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

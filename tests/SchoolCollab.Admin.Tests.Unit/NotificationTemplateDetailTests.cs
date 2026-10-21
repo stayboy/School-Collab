@@ -192,6 +192,24 @@ public class NotificationTemplateDetailTests : BunitContext
     }
 
     [TestMethod]
+    public void TheShell_RendersTheBreadcrumbTrail()
+    {
+        var handler = Register();
+        var row = new TemplateRow { Kind = 0, Channel = 0, Subject = "TRAIL" };
+        handler.Rows.Add(row);
+
+        var cut = RenderDetail(row.Id);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("#authoring-breadcrumb").TextContent.Should().Contain("Notification templates",
+                "the shared AuthoringShell supplies the trail (ADR decision 1)");
+            cut.Find("#authoring-breadcrumb .authoring-crumb-current").TextContent.Trim()
+                .Should().Be("TRAIL", "the row's own subject is the current crumb");
+        });
+    }
+
+    [TestMethod]
     public void TheConflictWarning_ComparesOnlyWithinTheDraftsScope()
     {
         var handler = Register();

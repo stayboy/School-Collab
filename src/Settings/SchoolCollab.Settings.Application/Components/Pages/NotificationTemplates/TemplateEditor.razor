@@ -1,4 +1,6 @@
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Authoring
 @using SchoolCollab.Admin.Shared.Components.RichText
 @using SchoolCollab.Core.Notifications
 @using SchoolCollab.Core.RichText
@@ -26,6 +28,14 @@
 *@
 <ErrorBoundary>
     <ChildContent>
+        <AuthoringShell Crumbs="@ShellCrumbs"
+                       TitleContent="@ShellTitle"
+                       LeadingActions="@ShellLeadingActions"
+                       PrimaryId="@(ReadOnly ? "template-adopt" : "template-save")"
+                       PrimaryLabel="@ShellPrimaryLabel"
+                       PrimaryDisabled="@ShellPrimaryDisabled"
+                       OnPrimaryAction="OnShellPrimaryAsync"
+                       SecondaryActions="@ShellSecondaryActions">
         @if (_loading)
         {
             <div class="template-editor__loading"><FluentSpinner /></div>
@@ -37,24 +47,6 @@
         }
         else
         {
-            <div class="title-row template-editor__title-row">
-                <NotificationTemplateKindBanner Kind="@_model.Kind" />
-                <span class="template-editor__mode-label">@ModeLabel</span>
-                @if (Mode == TemplateEditorMode.Edit)
-                {
-                    @if (_model.IsSystem)
-                    {
-                        <FluentBadge Id="template-editor-owner"
-                                     Appearance="BadgeAppearance.Filled"
-                                     Color="BadgeColor.Informative">System</FluentBadge>
-                    }
-                    else
-                    {
-                        <span class="template-editor__owner" id="template-editor-owner">@_model.OwnerName</span>
-                    }
-                }
-            </div>
-
             @if (ReadOnly)
             {
                 <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2" id="template-editor-readonly">
@@ -270,42 +262,6 @@
                     }
                 </section>
             }
-            <div class="template-editor-actions" id="template-editor-actions">
-                @if (ReadOnly)
-                {
-                    <FluentButton Appearance="ButtonAppearance.Primary"
-                                  Id="template-adopt"
-                                  Disabled="@_adopting"
-                                  OnClick="AdoptAsync">
-                        @(_adopting ? "Adopting..." : AdoptLabel)
-                    </FluentButton>
-                }
-                else
-                {
-                    <FluentTextInput Label="Reason (recorded in the audit trail)"
-                                     Value="@_model.Reason"
-                                     ValueChanged="@(v => _model.Reason = v ?? string.Empty)"
-                                     Immediate="true"
-                                     Id="template-reason"
-                                     class="template-editor-actions__reason" />
-                    @if (Mode == TemplateEditorMode.Edit)
-                    {
-                        <FluentButton Appearance="ButtonAppearance.Outline"
-                                      Id="template-reset"
-                                      Disabled="@(_saving || _resetting)"
-                                      OnClick="ResetAsync">
-                            @(_resetting ? "Resetting..." : "Reset to built-in default")
-                        </FluentButton>
-                    }
-                    <FluentButton Appearance="ButtonAppearance.Primary"
-                                  Id="template-save"
-                                  Disabled="@_saving"
-                                  OnClick="SaveAsync">
-                        @(_saving ? "Saving..." : SaveLabel)
-                    </FluentButton>
-                }
-            </div>
-
             @if (_error is not null)
             {
                 <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2" id="template-editor-error">@_error</FluentMessageBar>
@@ -315,6 +271,7 @@
                 <FluentMessageBar Intent="MessageBarIntent.Success" class="mt-2" id="template-editor-message-bar">@_message</FluentMessageBar>
             }
         }
+        </AuthoringShell>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -369,6 +326,13 @@
     private string? _previewError;
     private CancellationTokenSource? _previewDebounce;
     private bool _disposed;
+
+    /// <summary>
+    /// The load token (blazor-components.md rule 3, scoped to every data-loading page by
+    /// adr-authoring-surface-pattern decision 1): navigating away cancels the by-id read instead of
+    /// letting it land on an unmounted component.
+    /// </summary>
+    private CancellationTokenSource? _loadCts;
     private bool _resetting;
     private bool _adopting;
     private bool _sessionIsSystem = true;
@@ -399,10 +363,83 @@
 
     private string SaveLabel => Mode == TemplateEditorMode.Create ? "Create template" : "Save";
 
+    // ── Shell slots (ADR adr-authoring-surface-pattern, decision 1) ──────────────
+    // The breadcrumb and the sticky action bar live in the shared AuthoringShell; this page supplies
+    // the trail, the title content, the reason input, the primary action and the reset control, so the
+    // ids the detail suite pins (`#template-save`, `#template-reset`, `#template-adopt`,
+    // `#template-reason`, `#template-editor-owner`) stay exactly where they were.
+
+    private IReadOnlyList<AuthoringCrumb> ShellCrumbs =>
+        Mode == TemplateEditorMode.Create
+            ? [new AuthoringCrumb("Notification templates", "/notification-templates"),
+               new AuthoringCrumb("New template")]
+            : [new AuthoringCrumb("Notification templates", "/notification-templates"),
+               new AuthoringCrumb(ShellCrumbTitle)];
+
+    private string ShellCrumbTitle =>
+        _loading ? "…" : _notFound ? "Not found" : ShellTemplateTitle;
+
+    private string ShellTemplateTitle =>
+        !string.IsNullOrWhiteSpace(_model.Subject) ? _model.Subject! : "Template";
+
+    /// <summary>The title row: kind banner + mode label + the owner chip on Edit (spec §3.5).</summary>
+    private RenderFragment ShellTitle => @<text><NotificationTemplateKindBanner Kind="@_model.Kind" />
+        <span class="template-editor__mode-label">@ModeLabel</span>
+        @if (Mode == TemplateEditorMode.Edit)
+        {
+            @if (_model.IsSystem)
+            {
+                <FluentBadge Id="template-editor-owner"
+                             Appearance="BadgeAppearance.Filled"
+                             Color="BadgeColor.Informative">System</FluentBadge>
+            }
+            else
+            {
+                <span class="template-editor__owner" id="template-editor-owner">@_model.OwnerName</span>
+            }
+        }</text>;
+
+    private string? ShellPrimaryLabel =>
+        _loading || _notFound
+            ? null
+            : ReadOnly
+                ? (_adopting ? "Adopting..." : AdoptLabel)
+                : (_saving ? "Saving..." : SaveLabel);
+
+    private bool ShellPrimaryDisabled => _adopting || _saving;
+
+    /// <summary>The audit reason rides the bar, ahead of the primary action (spec §3.5).</summary>
+    private RenderFragment ShellLeadingActions => @<text>@if (!ReadOnly && !_loading && !_notFound)
+        {
+            <FluentTextInput Label="Reason (recorded in the audit trail)"
+                             Value="@_model.Reason"
+                             ValueChanged="@(v => _model.Reason = v ?? string.Empty)"
+                             Immediate="true"
+                             Id="template-reason"
+                             class="template-editor-actions__reason" />
+        }</text>;
+
+    /// <summary>Reset is the bar's secondary action on a writable Edit row (spec §3.2/§3.5).</summary>
+    private RenderFragment ShellSecondaryActions => @<text>@if (Mode == TemplateEditorMode.Edit
+        && !ReadOnly && !_loading && !_notFound)
+        {
+            <FluentButton Appearance="ButtonAppearance.Outline"
+                          Id="template-reset"
+                          Disabled="@(_saving || _resetting)"
+                          OnClick="ResetAsync">
+                @(_resetting ? "Resetting..." : "Reset to built-in default")
+            </FluentButton>
+        }</text>;
+
+    /// <summary>The bar's one primary action: the copy action while read-only, Save otherwise.</summary>
+    private Task OnShellPrimaryAsync() => ReadOnly ? AdoptAsync() : SaveAsync();
+
     private string BodyInputId => _model.Channel == NotificationChannel.Email ? "template-body-editor" : "template-body-text";
 
     protected override async Task OnInitializedAsync()
     {
+        _loadCts = new CancellationTokenSource();
+
         // The session scope decides whether this row is editable (spec §3.7): the claim, not the row.
         var scope = await Tenants.GetScopeAsync();
         _sessionIsSystem = !scope.IsRealTenant;
@@ -421,7 +458,7 @@
 
             try
             {
-                var row = await Api.GetByIdAsync(id);
+                var row = await Api.GetByIdAsync(id, _loadCts?.Token ?? CancellationToken.None);
                 if (row is null)
                 {
                     _notFound = true;
@@ -967,6 +1004,9 @@
     public void Dispose()
     {
         _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
         _previewDebounce?.Cancel();
         _previewDebounce?.Dispose();
         _previewDebounce = null;

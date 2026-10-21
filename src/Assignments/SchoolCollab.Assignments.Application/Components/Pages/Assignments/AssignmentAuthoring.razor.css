@@ -62,6 +62,16 @@
     margin: 0 0 4px 0;
 }
 
+/* UX-1a (owner, 2026-10-21): compartment 1 is a HEADERLESS PANEL — no visible title, PanelSection's
+   box shape (radius 8, padding 12) drawn with the same divider token the compartment already uses.
+   PanelSection's literal #e1e1e1 is deliberately NOT copied here: a literal colour ignores the
+   light/dark tokens every other container resolves through (its own CSS comment records the lesson).
+   The accessible name is the section's aria-label. */
+#authoring-basics {
+    padding: 12px;
+    border-radius: 8px;
+}
+
 /* ── Field treatments ──────────────────────────────────────────────── */
 
 .authoring-hint {
