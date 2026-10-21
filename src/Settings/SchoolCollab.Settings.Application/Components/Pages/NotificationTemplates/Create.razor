@@ -1,0 +1,32 @@
+@page "/notification-templates/create"
+@inject NavigationManager Nav
+
+@*
+   The template create route (redesign spec §3.1/§3.4): a thin host around the shared editor, so Create
+   and Edit cannot drift. `?grade=` is the grade-detail deep link''s prefill — the editor turns it into a
+   GradeLevel constraint on the new draft. A successful create navigates to the new row''s detail page,
+   which is the address the operator can share.
+*@
+<PageTitle>New Notification Template</PageTitle>
+
+<TemplateEditor Mode="TemplateEditorMode.Create"
+                PrefillGradeLevelId="@_gradeLevelId"
+                Saved="OnSavedAsync" />
+
+@code {
+    /// <summary>The <c>?grade=</c> receiving end of the grade card''s deep link. String, not Guid, so a
+    /// malformed link degrades to "no prefill" instead of failing the page.</summary>
+    [SupplyParameterFromQuery(Name = "grade")]
+    public string? Grade { get; set; }
+
+    private Guid? _gradeLevelId;
+
+    protected override void OnInitialized()
+    {
+        if (Guid.TryParse(Grade, out var grade) && grade != Guid.Empty)
+            _gradeLevelId = grade;
+    }
+
+    private void OnSavedAsync(TenantNotificationTemplateDto saved) =>
+        Nav.NavigateTo($"/notification-templates/{saved.Id:D}");
+}

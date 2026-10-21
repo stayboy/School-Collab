@@ -37,7 +37,10 @@ full pattern catalogue. If this file and the skill disagree, the skill is the re
 - ❌ Editing a checked-in EF migration — add a new one.
 - ❌ `services.Add*()` inline in feature `Program.cs` — use `Add{Layer}()` extension methods.
 - ❌ `async void` outside top-level event handlers.
-- ❌ Cross-tenant reads without `SuppressTenantGuard()`.
+- ❌ Cross-tenant **reads** that drop the tenant filter without the **named** suppression
+  (`IgnoreQueryFilters(["Tenant"])`) and an explicit `!IsDeleted` predicate.
+- ❌ `SuppressTenantGuard()` on a **read** — it is a save-time guard, so the wrapper is a no-op that
+  teaches the wrong shape; use it around the write that follows (owner ruling 2026-10-21, Q60).
 - ❌ Moq/NSubstitute for HTTP mocking in tests — use `ScriptedHandler`.
 
 ## Enforcement

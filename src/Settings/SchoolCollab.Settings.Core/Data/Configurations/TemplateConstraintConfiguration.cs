@@ -7,12 +7,12 @@ using SchoolCollab.Settings.Core.Domain;
 namespace SchoolCollab.Settings.Core.Data.Configurations;
 
 internal sealed class TemplateConstraintConfiguration
-    : TenantEntityTypeConfigurationBase<TemplateConstraint>
+    : TenantOrGlobalEntityTypeConfigurationBase<TemplateConstraint>
 {
     public TemplateConstraintConfiguration(Expression<Func<Guid>> tenantIdAccessor)
         : base(tenantIdAccessor) { }
 
-    protected override void ConfigureTenantEntity(EntityTypeBuilder<TemplateConstraint> builder)
+    protected override void ConfigureHybridEntity(EntityTypeBuilder<TemplateConstraint> builder)
     {
         builder.ToTable("template_constraints");
 

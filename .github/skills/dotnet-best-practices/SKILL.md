@@ -265,10 +265,14 @@ Apply these rules whenever you touch C# in School-Collab.
   When raw SQL is needed, use `FromSqlInterpolated` (parameter binding
   is enforced).
 - **Tenant isolation is a security boundary**: every entity read/write
-  MUST go through the tenant filter. Cross-tenant reads are gated by
-  `IAuthorizationService` policies (`TenantAccessHandler`) and
-  `SuppressTenantGuard()` (only in design-time factories + outbox
-  dispatcher).
+  MUST go through the tenant filter. A **cross-tenant read** is the one
+  sanctioned exception and is shaped as: the **named** filter suppression
+  (`IgnoreQueryFilters(["Tenant"])`) **plus** an explicit `!IsDeleted`
+  predicate, in system scope only, with a route/handler test that pins
+  the tenant-session refusal. `SuppressTenantGuard()` is a **save**-time
+  guard — design-time factories, migration/seed services, the outbox
+  dispatcher, and the write that follows a cross-tenant read. It has no
+  effect on a read (owner ruling 2026-10-21, Q60).
 - **No secrets in source code**. Use `IConfiguration` + environment
   variables (`ConnectionStrings__students-db`,
   `FeatureFlags__FEATURE__DisableOIDCAuth`). Per-tenant secrets live
@@ -329,5 +333,8 @@ Apply these rules whenever you touch C# in School-Collab.
 - ❌ Raw SQL string concat.
 - ❌ Editing a checked-in EF migration.
 - ❌ `async void` outside top-level event handlers.
-- ❌ Cross-tenant reads without `SuppressTenantGuard()` (and even then,
-  only in design-time factories or outbox dispatch).
+- ❌ Cross-tenant **reads** that drop the tenant filter without the named suppression
+  (`IgnoreQueryFilters(["Tenant"])`) and an explicit `!IsDeleted` predicate.
+- ❌ `SuppressTenantGuard()` on a read: it is a **save**-time guard (design-time factories, migration
+  seeders, the outbox dispatcher, and the write that follows a cross-tenant read). Adding it to a read
+  is a no-op that teaches the wrong shape (owner ruling 2026-10-21, Q60).

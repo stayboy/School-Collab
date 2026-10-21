@@ -520,8 +520,13 @@ public class ContextPicksSectionBunitTests : BunitContext
             .Should().Be(ContextPicksSection.NoSubjectReason, "CP-3: no subject yet, so both buttons say why");
         cut.Find("#authoring-add-strand").HasAttribute("disabled").Should().BeTrue();
         cut.Find("#authoring-add-lesson").HasAttribute("disabled").Should().BeTrue();
-        cut.FindAll("section#authoring-basics h3.authoring-compartment-title").Should().ContainSingle(
-            "X-1: the section renders no title of its own — the Basics h3 stays the only one");
+        // UX-1a (owner, 2026-10-21): compartment 1 is a HEADERLESS panel — no visible title at all,
+        // and its accessible name rides the section's aria-label. The old assertion pinned the
+        // opposite ("the Basics h3 stays the only one"), which the ADR retired.
+        cut.FindAll("section#authoring-basics h3.authoring-compartment-title").Should().BeEmpty(
+            "UX-1a: the section renders no visible title of its own");
+        cut.Find("section#authoring-basics").GetAttribute("aria-label").Should().Be("Basics",
+            "the headerless panel keeps its accessible name");
     }
 
     [TestMethod]

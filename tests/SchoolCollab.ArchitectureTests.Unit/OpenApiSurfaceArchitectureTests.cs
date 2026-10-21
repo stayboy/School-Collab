@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
@@ -48,15 +48,17 @@ public class OpenApiSurfaceArchitectureTests
 
     /// <summary>
     /// The measured baseline each host pins: how many of its operations document a response schema
-    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>52 of 68</b> after both typed-response
+    /// (<c>content</c> or <c>$ref</c>). Settings.Api measures <b>55 of 71</b> after both typed-response
     /// rounds (spec <c>minimal-api-typed-responses</c> pilot + <c>-settings</c> follow-up), the
-    /// notification-templates-b2c by-id route swap (measured 2026-10-19 from the generated document) and
-    /// the round-notification-templates-b3a applicability read (measured 2026-10-20);
+    /// notification-templates-b2c by-id route swap (measured 2026-10-19 from the generated document),
+    /// the round-notification-templates-b3a applicability read, the redesigned authoring surface's
+    /// by-id read, and that surface's adopt/promote copy routes (measured 2026-10-21 from the generated
+    /// document);
     /// Students.Api measures <b>0 of 146</b>, untouched by any of them. Raise the number in the same PR
     /// that converts handlers — a conversion that leaves it stale means the pin no longer describes the
     /// document.
     /// </summary>
-    private const int SettingsSchemaPin = 52;
+    private const int SettingsSchemaPin = 55;
 
     private const int StudentsSchemaPin = 0;
 
@@ -221,7 +223,11 @@ public class OpenApiSurfaceArchitectureTests
             + "enable, DELETE override, the 4-arm approve), the 9 genuinely body-less routes and the two 4-arm "
             + "handlers kept on IResult, which cannot carry response types. Round b3a added one operation — GET "
             + "notification-templates/applicable/{gradeLevelId}, typed Ok<ApplicableNotificationTemplatesDto> — so "
-            + "it documents a schema: 51 + 1 = 52 of 68. Students.Api was not "
+            + "it documents a schema: 51 + 1 = 52 of 68. The redesigned authoring surface added GET "
+            + "notification-templates/{id:guid} (typed Ok<...>/NotFound<MessageResponse>), so 52 + 1 = 53 of 69, "
+            + "and its W3 ownership pass added POST .../{id}/adopt and POST .../{id}/promote (both typed "
+            + "Ok<TenantNotificationTemplateDto>), so 53 + 2 = 55 of 71. "
+            + "Students.Api was not "
             + "converted and stays at 0 of 146"
             + (operationsWithSchema.Count > 0
                 ? $". First operations now documenting a schema: {string.Join("; ", operationsWithSchema.Take(3))}"

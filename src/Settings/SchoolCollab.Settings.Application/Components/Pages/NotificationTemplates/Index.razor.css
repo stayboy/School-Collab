@@ -1,0 +1,11 @@
+/* Toolbar filters keep their own column so two dropdowns never squeeze the New button. */
+.template-filter {
+    display: inline-block;
+    width: 190px;
+}
+
+.template-constraints-link {
+    padding: 0;
+    min-width: 0;
+    text-decoration: underline;
+}

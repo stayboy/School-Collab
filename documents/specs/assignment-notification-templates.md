@@ -7,6 +7,12 @@
 > owner selected the **full four-agent round (Tier 3, attended)** on 2026-10-15 (Q21); round start
 > deferred to 18:00 the same day, base `cec3c952`.
 
+> **Authoring surface superseded (2026-10-20).** §3.10 (the tabbed editor) is replaced by
+> `documents/specs/notification-template-authoring-redesign.md`: landing grid + per-template detail with
+> right-rail `PanelSection`s, dropdowns instead of tabs, per-template audit. §3.1 (blueprint note), §3.7
+> (owner precedence) and §5 (API surface) are **amended** by that spec. Everything else here — renderer,
+> tags, constraints semantics, audit model, publish selection — still governs.
+
 ## 1. Current state (findings, 2026-10-15)
 
 - Messages are rendered by the **hardcoded** static `NotificationMessageBuilder` — four kinds
@@ -81,6 +87,8 @@ Tags (`{{…}}`) are substituted **after** sanitization, so a template author ca
 | `Body` | `string` | sanitized HTML (email) or plain text (SMS — rendered for both SMS and WhatsApp recipients) |
 
 A missing row ⇒ built-in default. Applicability lives in child rows (§3.1.1).
+
+**Amended 2026-10-20 (redesign spec Q16):** a system blueprint layer now exists — `tenant_id IS NULL` rows in the same two tables, authored only from the system scope. A missing row still means the built-in default, which remains the terminal fallback; the store is no longer tenant-only.
 
 #### 3.1.1 Constraints (applicability)
 
@@ -178,6 +186,12 @@ token), `ExpiresAt` (mirrors the recipient's `DeepLinkExpiresAt`), audit columns
   specific match, tie → tenant default. The template editor shows a **conflict warning** when two templates
   of the same kind × channel carry identical constraint sets (the practical ambiguity check).
 
+**Owner precedence (2026-10-20 amendment).** With the system blueprint layer added by
+`notification-template-authoring-redesign.md` §3.7–§3.9, the candidate set is tenant ∪ system: a tenant
+row shadows a system row with an identical constraint set, equal specificity resolves tenant-first, and
+the Q67 default-promotion rule applies within each scope. Stamps, the publish dialog's two slots and the
+fail-open fallback are unchanged.
+
 ### 3.8 Per-sendout medium restriction (Q19)
 
 `PublishAssignmentRequest` gains an optional `Channels` field: **Per policy (default/absent)** /
@@ -200,28 +214,15 @@ paid-channel blasts.
   `OpenedAt`/`DeliveredAt`). **No `PublishedBy`** actor stamp — the same identity placeholder seam as
   `ApprovedBy`; deferred with it.
 
-### 3.10 Management surface — Settings module (rich editor employment)
+### 3.10 Management surface — Settings module (superseded 2026-10-20)
 
-The **one editing surface**: a new page in the **Settings module** of the Admin host
-(`SchoolCollab.Settings.Application`, route `/notification-templates`), reached exactly the way
-`/config-flags` is — a link on the Settings hub (`Settings.razor`) + a NavMenu entry in the Settings
-group. Kind tabs (Publish / Reminder / Completion / Overdue) × channel tabs (Email / SMS).
-
-- **Email tab**: subject = `FluentTextField` (tags allowed) + body = `RichInstructionEditor` (the Quill
-  WYSIWYG, existing restricted toolbar, placeholder parameter) — the component is generalized in place if
-  it needs a configurable placeholder; no sibling editor is created.
-- **SMS tab**: body = `FluentTextArea` + rendered-length guidance (warn near/over 160 chars — never a hard
-  block, because tags expand at render time). **WhatsApp recipients use this body** (§2 WhatsApp decision).
-- **Constraints editor**: per-dimension pickers (grade levels, streams, activity groups, subject/topic,
-  assignment type) — the Targets-&-Audience-dialog interaction precedent; identical constraint sets on two
-  same-kind×channel templates surface the §3.7 conflict warning.
-- **Tag chips**: the §3.2 set, click-to-insert at the cursor (Quill `insertText` interop / field append).
-- **Live preview**: runs the **exact** render path (sanitize → substitute → escape) against documented
-  sample data, reusing `RichInstruction` for display — unknown tags visible, per §3.2.
-- **Save**: `RichInstructionSanitizer.Sanitize` on write (the instruction-editor posture) → Settings API
-  upsert, which also writes the §3.9 audit row. **Reset** deletes the row (revert to built-in default,
-  audited).
-- The §3.8 medium radio lives in the **publish dialog** (Assignments app), not here.
+**Superseded by `documents/specs/notification-template-authoring-redesign.md`.** The tabbed
+master–detail page described here was replaced by a landing grid + per-template detail page (right-rail
+`PanelSection`s for Constraints and Preview, per-template audit, dropdowns instead of tabs). The
+requirements that survive unchanged: one management surface in the Settings module (hub card + NavMenu
+entry), the rich email editor, the plain-text SMS body with rendered-length guidance, tag chips, the
+live preview through the exact render path, sanitize-on-save, audited save/reset. The kind/channel
+**tabs** are retired, and WhatsApp is now an authorable contact mode (redesign spec §3.10).
 
 ### 3.11 Grade-detail applicability surface (Q20)
 
@@ -261,6 +262,10 @@ All follow `.github/copilot/rules/ef-migrations.md`.
 | `GET /api/settings/notification-templates/applicable/{gradeLevelId}` | **new**: the grade-detail card's data — per kind × channel, the templates whose constraints can apply to that grade + the tenant-default flag |
 | `GET /assignments/{id}/publish-options` | **new, Assignments side**: the constraint-narrowed template candidates per channel + the most-specific suggestion + medium-availability summary (which channels the policy leaves unblocked) — the publish dialog's picker source; the assignment's dimensions live in this context, so resolution belongs here |
 | `POST /assignments/{id}/publish` | request gains optional `Channels` (§3.8) and template selection (stamped per §3.7) |
+
+**Amended 2026-10-20 (redesign spec §5):** the store now also exposes `GET …/{id:guid}`,
+`POST …/{id}/adopt`, `POST …/{id}/promote` (system scope), an owner projection on every template DTO, and
+an optional `templateId=` filter on the audit route. The `{kind}/{channel}` routes above remain valid.
 
 Client: `NotificationTemplateApiClient` (Admin.Shared, the `AssignmentPolicyApiClient` precedent).
 Assignments side: `INotificationTemplateResolver` (interface in Assignments.Core, HTTP implementation in
@@ -333,6 +338,7 @@ contains **migrations**, which always reach a human unless the owner pre-authori
 **Round start deferred by the owner to 18:00 (2026-10-15)**; start from base `cec3c952` per the round
 skill's step 0 (`git rev-parse HEAD` + the dirty-tree file list — the two untracked spec files ride the
 round and are committed only on explicit instruction).
+
 ## 10. As-built status (recorded 2026-10-18, after Round B1 acceptance)
 
 **Round A** — PR #362, merged as `d3328320`: template store (`TenantNotificationTemplate`),

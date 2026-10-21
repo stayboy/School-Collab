@@ -1,0 +1,16 @@
+@page "/notification-templates/{Id:guid}"
+
+@*
+   The template detail route (redesign spec §3.1/§3.5): a thin host around the shared editor in Edit mode.
+   Type and contact mode render as locked indicators there; the action bar carries Save and the audited
+   Reset; the audit trail sits below the two-column layout. The address is the template''s own, so it can
+   be bookmarked and shared.
+*@
+<PageTitle>Notification Template</PageTitle>
+
+<TemplateEditor Mode="TemplateEditorMode.Edit" Id="Id" />
+
+@code {
+    /// <summary>The template this page addresses (the route id).</summary>
+    [Parameter] public Guid Id { get; set; }
+}

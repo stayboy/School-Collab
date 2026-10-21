@@ -37,6 +37,15 @@
             </div>
         </SectionContent>
 
+        @* A filtered landing's context bar (why the row set is narrowed) renders INSIDE the wrapper,
+           above the grid: the wrapper owns its chrome, and — unlike the page-toolbar SectionContent —
+           this fragment renders in bUnit, so it is assertable. ADR
+           documents/solution/adr-authoring-surface-pattern.md, decision 3. *@
+        @if (ContextBar is not null)
+        {
+            @ContextBar
+        }
+
         @if (Loading || Items is null)
         {
             <div class="spinner-container">
@@ -215,6 +224,15 @@
     /// </summary>
     [Parameter]
     public RenderFragment? ToolbarFilters { get; set; }
+
+    /// <summary>
+    /// A context bar rendered above the grid, inside the wrapper: the "why is this list narrowed"
+    /// explanation a filtered landing owes the operator (a <c>?grade=</c> deep link, for example).
+    /// It sits outside the <c>page-toolbar</c> <see cref="SectionContent"/>, so unlike the toolbar it
+    /// renders in bUnit and can be asserted (ADR <c>adr-authoring-surface-pattern.md</c>, decision 3).
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ContextBar { get; set; }
 
     /// <summary>
     /// Optional slot rendered at the far right of the action-bar, after the

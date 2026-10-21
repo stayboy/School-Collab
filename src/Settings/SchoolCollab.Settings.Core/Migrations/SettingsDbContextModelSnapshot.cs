@@ -570,7 +570,7 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("template_id");
 
-                    b.Property<Guid>("TenantId")
+                    b.Property<Guid?>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
@@ -1095,7 +1095,7 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("subject");
 
-                    b.Property<Guid>("TenantId")
+                    b.Property<Guid?>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 

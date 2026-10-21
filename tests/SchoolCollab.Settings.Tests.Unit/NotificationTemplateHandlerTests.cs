@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Core.Notifications;
 using SchoolCollab.Core.Tenancy;
@@ -49,7 +49,7 @@ public class NotificationTemplateHandlerTests
         _db = new SettingsDbContext(options, _tenants);
         var auditor = new TemplateAuditRecorder(new SystemActorAccessor("test:actor", "Test Actor"));
 
-        _getAll = new GetTenantNotificationTemplatesHandler(_db);
+        _getAll = new GetTenantNotificationTemplatesHandler(_db, _tenants);
         _getOne = new GetTenantNotificationTemplateHandler(_db);
         _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _update = new UpdateTenantNotificationTemplateHandler(_db, _tenants, auditor);
@@ -238,14 +238,39 @@ public class NotificationTemplateHandlerTests
     }
 
     [TestMethod]
-    public async Task Create_RejectsWhatsAppChannel()
+    public async Task Audit_NarrowedByTemplateId_ReturnsOnlyThatRowsEntries()
+    {
+        AsTenant(TenantA);
+        var first = await CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email, body: "First",
+            constraints: (TemplateConstraintDimension.GradeLevel, "grade-one"));
+        var second = await CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.Email, body: "Second",
+            constraints: (TemplateConstraintDimension.GradeLevel, "grade-two"));
+
+        var merged = await _audit.HandleAsync(
+            new GetTemplateAuditEntries(NotificationTemplateKind.Publish, NotificationChannel.Email));
+        merged.Should().HaveCount(2);
+
+        var narrowed = await _audit.HandleAsync(
+            new GetTemplateAuditEntries(NotificationTemplateKind.Publish, NotificationChannel.Email, second.Id));
+
+        narrowed.Should().ContainSingle().Which.TemplateId.Should().Be(second.Id);
+        narrowed.Should().NotContain(e => e.TemplateId == first.Id);
+    }
+
+    [TestMethod]
+    public async Task Create_AcceptsWhatsAppChannel_AndDropsItsSubject()
     {
         AsTenant(TenantA);
 
-        // WhatsApp delivers the SMS body (spec §2) — a WhatsApp template row is invalid.
-        var act = () => CreateAsync(NotificationTemplateKind.Publish, NotificationChannel.WhatsApp);
+        // Redesign spec §3.10: WhatsApp is a real template mode now; the subject stays email-only.
+        var created = await CreateAsync(
+            NotificationTemplateKind.Publish, NotificationChannel.WhatsApp,
+            body: "Publish: {{Title}}", subject: "must not be stored");
 
-        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        created.Channel.Should().Be(NotificationChannel.WhatsApp);
+        created.Subject.Should().BeNull();
     }
 
     [TestMethod]
