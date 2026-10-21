@@ -7,7 +7,7 @@ using SchoolCollab.Settings.Application.Components.Pages.NotificationTemplates;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// The landing''s filtering, at its pure seam (redesign spec §3.2): the type filter, the contact-mode
+/// The landing's filtering, at its pure seam (redesign spec §3.2): the type filter, the contact-mode
 /// filter, the subject-and-body search and the grade deep link. Expected values come from the fixture,
 /// not from the implementation, so a broken rule fails here instead of being mirrored.
 /// </summary>
@@ -16,6 +16,7 @@ public class TemplateLandingFilterTests
 {
     private static readonly Guid GradeA = Guid.Parse(TemplateApiHandler.GradeA);
     private static readonly Guid GradeB = Guid.Parse(TemplateApiHandler.GradeB);
+    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     private static TenantNotificationTemplateDto Row(
         NotificationTemplateKind kind,
@@ -25,7 +26,14 @@ public class TemplateLandingFilterTests
         params (TemplateConstraintDimension Dimension, string Value)[] constraints) =>
         new(Guid.NewGuid(), kind, channel, subject, body,
             constraints.Select(c => new TemplateConstraintDto(Guid.NewGuid(), c.Dimension, c.Value)).ToList(),
-            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+            TenantId: null, OwnerName: "System");
+
+    /// <summary>A row with an explicit owner (redesign spec §3.7): null = system blueprint.</summary>
+    private static TenantNotificationTemplateDto OwnedRow(Guid? tenantId, string? subject) =>
+        new(Guid.NewGuid(), NotificationTemplateKind.Publish, NotificationChannel.Email,
+            subject, "<p>body</p>", [], DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+            tenantId, tenantId is null ? "System" : "Northfield");
 
     [TestMethod]
     public void TheTypeFilter_KeepsOnlyThatKind()
@@ -36,7 +44,7 @@ public class TemplateLandingFilterTests
             Row(NotificationTemplateKind.Reminder, NotificationChannel.Email, "REMINDER"),
         };
 
-        var result = TemplateLandingFilter.Apply(rows, null, "Reminder", string.Empty, string.Empty);
+        var result = TemplateLandingFilter.Apply(rows, null, "Reminder", string.Empty, string.Empty, string.Empty);
 
         result.Should().ContainSingle().Which.Subject.Should().Be("REMINDER");
     }
@@ -50,7 +58,7 @@ public class TemplateLandingFilterTests
             Row(NotificationTemplateKind.Publish, NotificationChannel.WhatsApp, "WHATSAPP-ROW"),
         };
 
-        var result = TemplateLandingFilter.Apply(rows, null, string.Empty, "WhatsApp", string.Empty);
+        var result = TemplateLandingFilter.Apply(rows, null, string.Empty, "WhatsApp", string.Empty, string.Empty);
 
         result.Should().ContainSingle().Which.Subject.Should().Be("WHATSAPP-ROW");
     }
@@ -65,10 +73,10 @@ public class TemplateLandingFilterTests
             Row(NotificationTemplateKind.Overdue, NotificationChannel.SMS, "UNRELATED"),
         };
 
-        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, "homework")
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, "homework")
             .Should().ContainSingle().Which.Subject.Should().Be("MENTIONS-HOMEWORK");
 
-        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, "library")
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, "library")
             .Should().ContainSingle().Which.Kind.Should().Be(NotificationTemplateKind.Reminder);
     }
 
@@ -84,7 +92,7 @@ public class TemplateLandingFilterTests
                 constraints: (TemplateConstraintDimension.GradeLevel, GradeB.ToString("D"))),
         };
 
-        var result = TemplateLandingFilter.Apply(rows, GradeA, string.Empty, string.Empty, string.Empty);
+        var result = TemplateLandingFilter.Apply(rows, GradeA, string.Empty, string.Empty, string.Empty, string.Empty);
 
         result.Should().HaveCount(2);
         result.Select(r => r.Subject ?? r.Body).Should().BeEquivalentTo(["EVERY-GRADE", "GRADE-A-ONLY"]);
@@ -99,6 +107,22 @@ public class TemplateLandingFilterTests
             Row(NotificationTemplateKind.Overdue, NotificationChannel.WhatsApp, "TWO"),
         };
 
-        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty).Should().HaveCount(2);
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, string.Empty, string.Empty).Should().HaveCount(2);
+    }
+
+    [TestMethod]
+    public void TheOwnerFilter_SeparatesTheBlueprintFromTheSessionsOwnRows()
+    {
+        var rows = new[]
+        {
+            OwnedRow(tenantId: null, "SYSTEM-ROW"),
+            OwnedRow(TenantId, "TENANT-ROW"),
+        };
+
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, TemplateLandingFilter.SystemOwner, string.Empty)
+            .Should().ContainSingle().Which.Subject.Should().Be("SYSTEM-ROW");
+
+        TemplateLandingFilter.Apply(rows, null, string.Empty, string.Empty, TemplateLandingFilter.TenantOwner, string.Empty)
+            .Should().ContainSingle().Which.Subject.Should().Be("TENANT-ROW");
     }
 }

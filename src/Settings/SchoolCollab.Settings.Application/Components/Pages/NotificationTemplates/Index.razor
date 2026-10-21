@@ -3,19 +3,41 @@
 @using SchoolCollab.Core.Notifications
 @using SchoolCollab.Core.RichText
 @inject NotificationTemplateApiClient Api
+@inject VisibleTenantService Tenants
 @inject IDialogService DialogService
+@inject NavigationManager Navigation
 @inject ILogger<Index> Logger
 
 @*
-   Notification-template landing (redesign spec §3.2): the repo''s landing shape — the shared wrapper (which
+   Notification-template landing (redesign spec 3.2): the repo's landing shape - the shared wrapper (which
    IS the entity grid), a create action in the standard place, and a row kebab for secondary actions.
 
-   Columns: the kind banner, the preferred mode of contact, the template itself (linked), the constraint
-   count (a link opening the ONE read-only constraints dialog; a "Tenant default" badge at zero) and the
-   last change. The OWNER column and the Adopt / Publish-portal-wide actions arrive with the hybrid store
-   (W3): until the DTO can tell System from tenant, a column or an action would be a half-truth.
+   Columns: the kind banner, the OWNER (System badge or the tenant's name - spec 3.7), the preferred mode
+   of contact, the template itself (linked), the constraint count (a link opening the ONE read-only
+   constraints dialog; the scope's default badge at zero) and the last change.
+
+   Scope: a tenant session sees its own rows plus the system blueprint, and may adopt a system row. A
+   system-scope session sees the blueprint plus - through includeTenantOwned - every tenant's rows, and
+   may publish one portal-wide (spec 3.6/3.8). Row actions are therefore scope-gated, not hidden by luck.
 *@
 <PageTitle>Notification Templates</PageTitle>
+
+@* Spec 3.2: an arrival through the grade-detail deep link is a FILTERED landing, and a filter with no
+   name is indistinguishable from missing rows. The bar names it; the button widens the view again. *@
+@if (_gradeFilter is not null)
+{
+    <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2" id="template-grade-filter-bar">
+        <span>
+            Filtered to one grade level — only templates whose constraints can apply to that grade are
+            listed.
+        </span>
+        <FluentButton Appearance="ButtonAppearance.Subtle"
+                      Id="template-grade-filter-clear"
+                      OnClick="ClearGradeFilter">
+            Show all templates
+        </FluentButton>
+    </FluentMessageBar>
+}
 
 <LandingPage TItem="TenantNotificationTemplateDto"
              Title="Notification Templates"
@@ -28,7 +50,7 @@
              GridSettings="@_gridSettings"
              SearchText="@_search"
              SearchTextChanged="@OnSearchChanged"
-             SearchPlaceholder="Search templates…"
+             SearchPlaceholder="Search templates..."
              RowActions="@BuildRowActions"
              RowActionsAriaLabel="Template actions"
              RowActionsUseMenuService="false">
@@ -51,10 +73,29 @@
                                OptionValue="@(o => o.Value)"
                                AriaLabel="Filter by contact mode" />
         </span>
+        <span class="template-filter">
+            <DropdownComponent TItem="FilterOption" TValue="string"
+                               Items="OwnerFilterOptions"
+                               SelectedValue="@_ownerFilter"
+                               SelectedValueChanged="OnOwnerFilterChanged"
+                               OptionText="@(o => o.Label)"
+                               OptionValue="@(o => o.Value)"
+                               AriaLabel="Filter by owner" />
+        </span>
     </ToolbarFilters>
     <Columns>
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Type" SortBy="@_sortByKind" Sortable="true">
             <NotificationTemplateKindBanner Kind="context.Kind" />
+        </TemplateColumn>
+        <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Owner" SortBy="@_sortByOwner" Sortable="true">
+            @if (context.IsSystem)
+            {
+                <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Informative">System</FluentBadge>
+            }
+            else
+            {
+                <span class="template-owner">@context.OwnerName</span>
+            }
         </TemplateColumn>
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Contact mode" SortBy="@_sortByChannel" Sortable="true">
             @ModeLabel(context.Channel)
@@ -67,7 +108,7 @@
         <TemplateColumn TGridItem="TenantNotificationTemplateDto" Title="Constraints" SortBy="@_sortByConstraintCount" Sortable="true">
             @if (context.Constraints.Count == 0)
             {
-                <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Success">Tenant default</FluentBadge>
+                <FluentBadge Appearance="BadgeAppearance.Filled" Color="BadgeColor.Success">@DefaultBadgeLabel(context)</FluentBadge>
             }
             else
             {
@@ -84,15 +125,16 @@
         </TemplateColumn>
     </Columns>
 </LandingPage>
-
 @code {
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(110px,1fr) 120px minmax(220px,2fr) minmax(120px,1fr) 160px",
+        GridTemplateColumns = "minmax(110px,1fr) minmax(110px,1fr) 110px minmax(200px,2fr) minmax(120px,1fr) 150px",
     };
 
     private readonly GridSort<TenantNotificationTemplateDto> _sortByKind =
         GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Kind);
+    private readonly GridSort<TenantNotificationTemplateDto> _sortByOwner =
+        GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.OwnerName);
     private readonly GridSort<TenantNotificationTemplateDto> _sortByChannel =
         GridSort<TenantNotificationTemplateDto>.ByAscending(t => t.Channel);
     private readonly GridSort<TenantNotificationTemplateDto> _sortByTitle =
@@ -118,7 +160,14 @@
         new(NotificationChannel.WhatsApp.ToString(), "WhatsApp"),
     ];
 
-    /// <summary>The grade-detail deep link (spec §3.11): filters the rows and travels into Create.</summary>
+    private static readonly FilterOption[] OwnerFilterOptions =
+    [
+        new(string.Empty, "All owners"),
+        new(TemplateLandingFilter.SystemOwner, "System"),
+        new(TemplateLandingFilter.TenantOwner, "This tenant"),
+    ];
+
+    /// <summary>The grade-detail deep link (spec 3.11): filters the rows and travels into Create.</summary>
     [SupplyParameterFromQuery(Name = "grade")]
     public string? Grade { get; set; }
 
@@ -128,7 +177,11 @@
     private string _search = string.Empty;
     private string _kindFilter = string.Empty;
     private string _modeFilter = string.Empty;
+    private string _ownerFilter = string.Empty;
     private Guid? _gradeFilter;
+
+    /// <summary>True when the session has no real tenant - it edits the system blueprint (spec 3.7).</summary>
+    private bool _sessionIsSystem = true;
 
     private string CreateHref => _gradeFilter is { } grade
         ? $"/notification-templates/create?grade={grade:D}"
@@ -139,21 +192,34 @@
             ? "No templates match the current filter."
             : "No notification templates. The built-in defaults apply until one is created.";
 
-    /// <summary>The rows after the filters and the search — the grid''s source.</summary>
-    /// <summary>The rows after the filters and the search — the grid''s source (the pure filter seam).</summary>
+    /// <summary>The rows after the filters and the search - the grid's source (the pure filter seam).</summary>
     private TenantNotificationTemplateDto[] DisplayItems =>
         _items is null
             ? []
-            : TemplateLandingFilter.Apply(_items, _gradeFilter, _kindFilter, _modeFilter, _search);
-
+            : TemplateLandingFilter.Apply(
+                _items, _gradeFilter, _kindFilter, _modeFilter, _ownerFilter, _search);
     protected override async Task OnInitializedAsync()
     {
         if (Guid.TryParse(Grade, out var grade) && grade != Guid.Empty)
             _gradeFilter = grade;
 
+        // The session scope decides what this page may DO (adopt vs publish portal-wide, spec 3.2);
+        // it comes from the tenant_id claim, not from the rows themselves.
+        var scope = await Tenants.GetScopeAsync();
+        _sessionIsSystem = !scope.IsRealTenant;
+
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Re-reads the list. In system scope the read asks for tenant-owned rows too (spec 3.6) - that is
+    /// what gives "Publish portal-wide" a source row; a tenant session never sees another tenant's row.
+    /// </summary>
+    private async Task ReloadAsync()
+    {
         try
         {
-            _items = (await Api.ListAsync()).ToArray();
+            _items = (await Api.ListAsync(includeTenantOwned: _sessionIsSystem)).ToArray();
             _error = null;
         }
         catch (OperationCanceledException)
@@ -183,6 +249,12 @@
         StateHasChanged();
     }
 
+    private void OnOwnerFilterChanged(string? value)
+    {
+        _ownerFilter = value ?? string.Empty;
+        StateHasChanged();
+    }
+
     private void OnSearchChanged(string? value)
     {
         _search = value?.Trim() ?? string.Empty;
@@ -190,13 +262,57 @@
     }
 
     /// <summary>
-    /// One action in W1 (Open) — row actions render as the labelled single-button form. Adopt /
-    /// Publish portal-wide / Reset join it with the store work (W3) and the reason dialog (W2).
+    /// Widens the grade-filtered view again (spec 3.2). The query string keeps <c>?grade=</c> — that is
+    /// what the deep link is — but the page stops applying it, which is what the click promises.
     /// </summary>
-    private IReadOnlyList<RowAction> BuildRowActions(TenantNotificationTemplateDto row) =>
-    [
-        RowAction.Navigate("Open", $"/notification-templates/{row.Id:D}"),
-    ];
+    private void ClearGradeFilter()
+    {
+        _gradeFilter = null;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Opens the row a copy action returned. <see cref="NavigationManager.NavigateTo(string)"/> is void,
+    /// so this is the <see cref="Task"/> the shared error wrapper awaits.
+    /// </summary>
+    private Task NavigateToRowAsync(Guid id)
+    {
+        Navigation.NavigateTo($"/notification-templates/{id:D}");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The row kebab (spec 3.2). Scope gates every action: a tenant session may adopt a system row and
+    /// reset its OWN rows; a system session may publish a tenant row portal-wide and reset blueprint
+    /// rows. An action that the server would 403 is never offered.
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildRowActions(TenantNotificationTemplateDto row)
+    {
+        var actions = new List<RowAction>
+        {
+            RowAction.Navigate("Open", $"/notification-templates/{row.Id:D}"),
+        };
+
+        if (row.IsSystem && !_sessionIsSystem)
+        {
+            actions.Add(RowAction.Callback("Adopt to this tenant", () => AdoptAsync(row)));
+        }
+
+        if (!row.IsSystem && _sessionIsSystem)
+        {
+            actions.Add(RowAction.Callback("Publish portal-wide...", () => PromoteAsync(row)));
+        }
+
+        if (row.IsSystem == _sessionIsSystem)
+        {
+            actions.Add(RowAction.Separator());
+            // Not flagged Destructive: the kebab would then ask for confirmation twice (its own prompt,
+            // then the reason dialog), and the reason dialog IS the destructive confirmation.
+            actions.Add(RowAction.Callback("Reset to built-in default...", () => ResetAsync(row)));
+        }
+
+        return actions;
+    }
 
     private static string ModeLabel(NotificationChannel channel) => channel switch
     {
@@ -205,6 +321,10 @@
         NotificationChannel.WhatsApp => "WhatsApp",
         _ => channel.ToString(),
     };
+
+    /// <summary>The zero-constraint badge names the SCOPE, not just "tenant" (spec 3.2).</summary>
+    private static string DefaultBadgeLabel(TenantNotificationTemplateDto row) =>
+        row.IsSystem ? "System default" : "Tenant default";
 
     private static string TitleOf(TenantNotificationTemplateDto row)
     {
@@ -215,21 +335,111 @@
         if (string.IsNullOrWhiteSpace(plain))
             return "(empty body)";
 
-        return plain.Length <= 80 ? plain : plain[..80] + "…";
+        return plain.Length <= 80 ? plain : plain[..80] + "...";
     }
-
     private static string ConstraintCountLabel(TenantNotificationTemplateDto row) =>
         row.Constraints.Count == 1 ? "1 constraint" : $"{row.Constraints.Count} constraints";
 
-    /// <summary>The ONE read-only constraints dialog (spec §3.6/§3.8), shared with the detail panel.</summary>
+    /// <summary>The ONE read-only constraints dialog (spec 3.6/3.8), shared with the detail panel.</summary>
     private async Task OpenConstraintsAsync(TenantNotificationTemplateDto row)
     {
         await DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
-            $"{row.Kind} · {ModeLabel(row.Channel)}",
+            $"{row.Kind} - {ModeLabel(row.Channel)}",
             new Dictionary<string, object?>
             {
                 [TemplateConstraintsDialog.ConstraintsKey] = row.Constraints,
                 [TemplateConstraintsDialog.TemplateLabelKey] = TitleOf(row),
             });
+    }
+
+    /// <summary>
+    /// Adopt (spec 3.8): copies the system row into this tenant, then opens the copy - the operator
+    /// lands on the row they now own instead of the read-only blueprint row they came from.
+    /// </summary>
+    private async Task AdoptAsync(TenantNotificationTemplateDto row)
+    {
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Adopt '{TitleOf(row)}' into this tenant? The copy is independent of the system blueprint: "
+            + "later blueprint edits do not reach it.",
+            "Adopt",
+            title: "Adopt template");
+
+        if (!confirmed)
+            return;
+
+        await RunAsync(
+            () => Api.AdoptAsync(row.Id, $"Adopted from the system blueprint: {TitleOf(row)}"),
+            copy => NavigateToRowAsync(copy.Id),
+            "adopt");
+    }
+
+    /// <summary>Publish portal-wide (spec 3.8): copies a tenant row into the blueprint, then opens it.</summary>
+    private async Task PromoteAsync(TenantNotificationTemplateDto row)
+    {
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Publish '{TitleOf(row)}' portal-wide? Every tenant will see it unless it owns an override; "
+            + $"the Copy stays owned by {row.OwnerName} and is not modified.",
+            "Publish",
+            title: "Publish portal-wide");
+
+        if (!confirmed)
+            return;
+
+        await RunAsync(
+            () => Api.PromoteAsync(row.Id, $"Published portal-wide from {row.OwnerName}: {TitleOf(row)}"),
+            copy => NavigateToRowAsync(copy.Id),
+            "publish portal-wide");
+    }
+
+    /// <summary>
+    /// Reset (spec 3.2/3.5): the reason dialog is the confirmation - resetting removes the row and the
+    /// built-in default applies again, and the operator's own words land in the audit trail.
+    /// </summary>
+    private async Task ResetAsync(TenantNotificationTemplateDto row)
+    {
+        var result = await DialogService.ShowShellDialogAsync<TemplateResetReasonDialog,
+            TemplateResetReasonDialog.ReasonFormModel,
+            TemplateResetReasonDialog.ReasonResult>(
+            new TemplateResetReasonDialog.ReasonFormModel(
+                $"Reset '{TitleOf(row)}'",
+                "Resetting removes this template: the built-in default applies again. The reason is "
+                + "recorded in the audit trail."),
+            $"Reset '{TitleOf(row)}'",
+            DialogWidth.Small);
+
+        if (result is null)
+            return;
+
+        await RunAsync(
+            async () => { await Api.DeleteAsync(row.Id, result.Reason); return row; },
+            async _ => await ReloadAsync(),
+            "reset");
+    }
+
+    /// <summary>
+    /// Shared error posture: the operator sees the server's message, never a silent no-op.
+    /// <para>
+    /// <paramref name="onSuccess"/> is a <see cref="Func{T, Task}"/>, not an <see cref="Action{T}"/>: an
+    /// async lambda converted to <c>Action&lt;T&gt;</c> is <c>async void</c>, so its exception would be
+    /// unobservable here and the follow-up work would not be awaited before the action reported done.
+    /// </para>
+    /// </summary>
+    private async Task RunAsync<T>(
+        Func<Task<T>> action, Func<T, Task> onSuccess, string verb)
+    {
+        try
+        {
+            var result = await action();
+            await onSuccess(result);
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to {Verb} notification template", verb);
+            _error = ex.Message;
+        }
     }
 }

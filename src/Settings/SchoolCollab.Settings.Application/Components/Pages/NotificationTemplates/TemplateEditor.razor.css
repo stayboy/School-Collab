@@ -105,3 +105,9 @@
         grid-template-areas: "message" "rail";
     }
 }
+/* Owner label in the title row (redesign spec 3.2/3.7): the badge carries the system scope, this is the
+   tenant's name. Theme-neutral - no literal colours (the PanelSection surface lesson). */
+.template-editor__owner {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}

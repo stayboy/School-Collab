@@ -6,6 +6,7 @@
 @inject NotificationTemplatePreviewClient Preview
 @inject StudentsLookupClient Students
 @inject CodedValuesApiClient CodedValues
+@inject VisibleTenantService Tenants
 @inject NavigationManager Nav
 @inject IDialogService DialogService
 @inject ILogger<TemplateEditor> Logger
@@ -20,7 +21,7 @@
    grid: a third PanelSection is deliberately not used.
 
    Staging contract (Q9): the dropdowns, subject, body and chips only mutate the draft; ONE Save persists
-   subject + body + the whole constraint set with one optional reason. Resetting is the detail page''s
+   subject + body + the whole constraint set with one optional reason. Resetting is the detail page's
    separate audited action.
 *@
 <ErrorBoundary>
@@ -39,7 +40,27 @@
             <div class="title-row template-editor__title-row">
                 <NotificationTemplateKindBanner Kind="@_model.Kind" />
                 <span class="template-editor__mode-label">@ModeLabel</span>
+                @if (Mode == TemplateEditorMode.Edit)
+                {
+                    @if (_model.IsSystem)
+                    {
+                        <FluentBadge Id="template-editor-owner"
+                                     Appearance="BadgeAppearance.Filled"
+                                     Color="BadgeColor.Informative">System</FluentBadge>
+                    }
+                    else
+                    {
+                        <span class="template-editor__owner" id="template-editor-owner">@_model.OwnerName</span>
+                    }
+                }
             </div>
+
+            @if (ReadOnly)
+            {
+                <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2" id="template-editor-readonly">
+                    @ReadOnlyReason
+                </FluentMessageBar>
+            }
 
             @if (_lookups?.Error is not null)
             {
@@ -88,6 +109,7 @@
                                              Value="@_model.Subject"
                                              ValueChanged="OnSubjectChangedAsync"
                                              Immediate="true"
+                                             Disabled="@ReadOnly"
                                              Placeholder="Subject line (tags allowed)" />
                         </FormRow>
                     }
@@ -98,7 +120,8 @@
                             <RichInstructionEditor @ref="_editor"
                                                    Id="template-body-editor"
                                                    Value="@_model.Body"
-                                                   Placeholder="Write the message body…" />
+                                                   ReadOnly="@ReadOnly"
+                                                   Placeholder="Write the message body..." />
                         }
                         else
                         {
@@ -107,6 +130,7 @@
                                             Value="@_model.Body"
                                             ValueChanged="OnBodyChangedAsync"
                                             Immediate="true"
+                                            Disabled="@ReadOnly"
                                             Style="min-height:140px" />
                         }
                     </FormRow>
@@ -115,6 +139,7 @@
                         @foreach (var tag in NotificationTemplateTags.All)
                         {
                             <FluentButton Appearance="ButtonAppearance.Subtle"
+                                          Disabled="@ReadOnly"
                                           Title="@($"Insert {{{{{tag}}}}}")"
                                           OnClick="@(() => InsertTag(tag))">
                                 @($"{{{tag}}}")
@@ -131,10 +156,13 @@
                 <div class="template-editor-rail" id="template-editor-rail">
                     <PanelSection Title="Constraints" TitleId="template-constraints-title">
                         <HeaderActions>
-                            <RowActionsMenu UseMenuService="false"
-                                            ForceKebab="true"
-                                            Actions="@ConstraintActions"
-                                            AriaLabel="Add a constraint" />
+                            @if (!ReadOnly)
+                            {
+                                <RowActionsMenu UseMenuService="false"
+                                                ForceKebab="true"
+                                                Actions="@ConstraintActions"
+                                                AriaLabel="Add a constraint" />
+                            }
                         </HeaderActions>
 
                         <ChildContent>
@@ -152,7 +180,9 @@
                                         <Chip Label="@Display(constraint)"
                                               Subtitle="@TemplateConstraintLookups.DimensionLabel(constraint.Dimension)"
                                               DismissTitle="Remove this constraint"
-                                              OnDismiss="@(() => RemoveConstraint(constraint))" />
+                                              OnDismiss="@(ReadOnly
+                                                  ? default(EventCallback)
+                                                  : EventCallback.Factory.Create(this, () => RemoveConstraint(constraint)))" />
                                     }
                                 </div>
                             }
@@ -241,27 +271,39 @@
                 </section>
             }
             <div class="template-editor-actions" id="template-editor-actions">
-                <FluentTextInput Label="Reason (recorded in the audit trail)"
-                                 Value="@_model.Reason"
-                                 ValueChanged="@(v => _model.Reason = v ?? string.Empty)"
-                                 Immediate="true"
-                                 Id="template-reason"
-                                 class="template-editor-actions__reason" />
-                @if (Mode == TemplateEditorMode.Edit)
+                @if (ReadOnly)
                 {
-                    <FluentButton Appearance="ButtonAppearance.Outline"
-                                  Id="template-reset"
-                                  Disabled="@(_saving || _resetting)"
-                                  OnClick="ResetAsync">
-                        @(_resetting ? "Resetting…" : "Reset to built-in default")
+                    <FluentButton Appearance="ButtonAppearance.Primary"
+                                  Id="template-adopt"
+                                  Disabled="@_adopting"
+                                  OnClick="AdoptAsync">
+                        @(_adopting ? "Adopting..." : AdoptLabel)
                     </FluentButton>
                 }
-                <FluentButton Appearance="ButtonAppearance.Primary"
-                              Id="template-save"
-                              Disabled="@_saving"
-                              OnClick="SaveAsync">
-                    @(_saving ? "Saving…" : SaveLabel)
-                </FluentButton>
+                else
+                {
+                    <FluentTextInput Label="Reason (recorded in the audit trail)"
+                                     Value="@_model.Reason"
+                                     ValueChanged="@(v => _model.Reason = v ?? string.Empty)"
+                                     Immediate="true"
+                                     Id="template-reason"
+                                     class="template-editor-actions__reason" />
+                    @if (Mode == TemplateEditorMode.Edit)
+                    {
+                        <FluentButton Appearance="ButtonAppearance.Outline"
+                                      Id="template-reset"
+                                      Disabled="@(_saving || _resetting)"
+                                      OnClick="ResetAsync">
+                            @(_resetting ? "Resetting..." : "Reset to built-in default")
+                        </FluentButton>
+                    }
+                    <FluentButton Appearance="ButtonAppearance.Primary"
+                                  Id="template-save"
+                                  Disabled="@_saving"
+                                  OnClick="SaveAsync">
+                        @(_saving ? "Saving..." : SaveLabel)
+                    </FluentButton>
+                }
             </div>
 
             @if (_error is not null)
@@ -307,7 +349,7 @@
     /// <summary>The row being edited; required in Edit mode.</summary>
     [Parameter] public Guid? Id { get; set; }
 
-    /// <summary>The grade-detail deep link''s prefill (spec §3.4/§3.11): a GradeLevel constraint on create.</summary>
+    /// <summary>The grade-detail deep link's prefill (spec §3.4/§3.11): a GradeLevel constraint on create.</summary>
     [Parameter] public Guid? PrefillGradeLevelId { get; set; }
 
     /// <summary>Raised after a successful create or replace, with the saved row.</summary>
@@ -328,10 +370,30 @@
     private CancellationTokenSource? _previewDebounce;
     private bool _disposed;
     private bool _resetting;
+    private bool _adopting;
+    private bool _sessionIsSystem = true;
     private TenantNotificationTemplateDto[] _siblings = [];
     private List<NotificationTemplateAuditEntryDto> _audit = [];
 
     private bool LockedMeta => Mode == TemplateEditorMode.Edit;
+
+    /// <summary>
+    /// True when the row is visible but not writable by this session (redesign spec §3.5/§3.7): a
+    /// tenant session opening a system-blueprint row, or a system session opening a tenant's row from
+    /// the portal-wide picker. Both are read-only, and each offers the copy action that turns the row
+    /// into one it owns.
+    /// </summary>
+    private bool ReadOnly => Mode == TemplateEditorMode.Edit && _sessionIsSystem != _model.IsSystem;
+
+    private bool CanAdopt => ReadOnly && _model.IsSystem;
+
+    private string AdoptLabel => CanAdopt ? "Adopt to this tenant" : "Publish portal-wide";
+
+    private string ReadOnlyReason => CanAdopt
+        ? "This is a system-blueprint template: a tenant session cannot edit it. Adopt it to get an "
+          + "editable copy owned by this tenant."
+        : $"This template belongs to {_model.OwnerName}: it can only be edited in that tenant's "
+          + "session. Publish it portal-wide to get an editable blueprint copy.";
 
     private string ModeLabel => Mode == TemplateEditorMode.Create ? "New template" : "Template";
 
@@ -341,6 +403,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // The session scope decides whether this row is editable (spec §3.7): the claim, not the row.
+        var scope = await Tenants.GetScopeAsync();
+        _sessionIsSystem = !scope.IsRealTenant;
+
         _lookups = new TemplateConstraintLookups(Students, CodedValues);
         await _lookups.LoadAsync();
 
@@ -370,6 +436,8 @@
                 _model.Body = row.Body;
                 _model.CreatedAt = row.CreatedAt;
                 _model.UpdatedAt = row.UpdatedAt;
+                _model.TenantId = row.TenantId;
+                _model.OwnerName = row.OwnerName;
                 _model.Constraints.Clear();
                 _model.Constraints.AddRange(row.Constraints);
             }
@@ -395,7 +463,7 @@
         QueuePreview();
     }
 
-    /// <summary>A kind change resets the preview: the renderer''s sample data is kind-sensitive.</summary>
+    /// <summary>A kind change resets the preview: the renderer's sample data is kind-sensitive.</summary>
     private async Task OnKindChangedAsync(NotificationTemplateKind kind)
     {
         _model.Kind = kind;
@@ -512,7 +580,7 @@
     private Task OnRefreshPreviewAsync() => RefreshPreviewAsync();
 
     /// <summary>
-    /// Runs the Assignments host''s exact render path over the authored pair. A failure is the documented
+    /// Runs the Assignments host's exact render path over the authored pair. A failure is the documented
     /// degradation: an inline note, and the save path is untouched.
     /// </summary>
     private async Task RefreshPreviewAsync(CancellationToken ct = default)
@@ -562,11 +630,12 @@
     /// <summary>
     /// Persists the whole draft in one call (Q9). Email bodies are sanitized with the ONE instruction
     /// sanitizer; the plain-text modes are NOT sanitized, because HTML-encoding a plain-text channel
-    /// would corrupt it (the old page''s rule, kept).
+    /// would corrupt it (the old page's rule, kept).
     /// </summary>
     private async Task SaveAsync()
     {
-        if (_saving)
+        // A read-only row (the other scope's) never writes: its action is the Copy button instead.
+        if (_saving || ReadOnly)
             return;
 
         _saving = true;
@@ -687,7 +756,7 @@
         }
     }
 
-    /// <summary>The read-only list, shared with the landing grid''s constraint-count link.</summary>
+    /// <summary>The read-only list, shared with the landing grid's constraint-count link.</summary>
     private Task OpenConstraintListAsync() =>
         DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
             $"{_model.Kind} · {ChannelLabel(_model.Channel)}",
@@ -720,9 +789,15 @@
     };
 
     /// <summary>
-    /// The §3.7 conflict warning: another template of the SAME kind × channel carries the identical
-    /// constraint set, so publish-time selection could not tell them apart. A warning, never a block —
-    /// the server stays the authority. Scope joins the comparison with W3.
+    /// The §3.7 conflict warning: another template of the SAME kind × channel **in the same scope**
+    /// carries the identical constraint set, so publish-time selection could not tell them apart. A
+    /// warning, never a block — the server stays the authority.
+    /// <para>
+    /// Scope is part of the comparison because the sibling read is wider than the draft's scope: a
+    /// tenant session reads the system blueprint too (that is what makes adopt possible, §3.7), and
+    /// §3.9 makes a tenant row <b>shadow</b> an identical blueprint row. Warning there would call the
+    /// designed outcome ambiguous.
+    /// </para>
     /// </summary>
     private string? ConflictWarning
     {
@@ -730,10 +805,20 @@
         {
             var draft = NormalizeConstraintSet(_model.Constraints.Select(c => (c.Dimension, c.Value)));
 
+            // The DRAFT's scope, not the DTO's: a create draft carries no TenantId yet, so the model's
+            // IsSystem is true by construction there and would compare the wrong side. The session's
+            // scope is the scope a create writes into (spec §3.7/§5); on Edit the row's own scope is.
+            var draftIsSystem = Mode == TemplateEditorMode.Create ? _sessionIsSystem : _model.IsSystem;
+
             foreach (var row in _siblings)
             {
-                if (row.Id == _model.Id || row.Kind != _model.Kind || row.Channel != _model.Channel)
+                if (row.Id == _model.Id
+                    || row.Kind != _model.Kind
+                    || row.Channel != _model.Channel
+                    || row.IsSystem != draftIsSystem)
+                {
                     continue;
+                }
 
                 var candidate = NormalizeConstraintSet(row.Constraints.Select(c => (c.Dimension, c.Value)));
                 if (string.Equals(candidate, draft, StringComparison.Ordinal))
@@ -788,6 +873,51 @@
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Could not load the audit trail for template {TemplateId}", id);
+        }
+    }
+
+    /// <summary>
+    /// The read-only row's primary action (spec §3.5/§3.8): copy a system-blueprint row into this
+    /// tenant, or publish a tenant row portal-wide. Either way the operator lands on the COPY - the
+    /// editable row they now own - and the source is never modified.
+    /// </summary>
+    private async Task AdoptAsync()
+    {
+        if (_model.Id is not { } id)
+            return;
+
+        var adopt = CanAdopt;
+        var source = string.IsNullOrWhiteSpace(_model.Subject) ? "this template" : $"'{_model.Subject}'";
+
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            adopt
+                ? $"Adopt {source} into this tenant? The copy is independent of the system blueprint."
+                : $"Publish {source} portal-wide? Every tenant will see it unless it owns an override.",
+            adopt ? "Adopt" : "Publish",
+            title: adopt ? "Adopt template" : "Publish portal-wide");
+
+        if (!confirmed)
+            return;
+
+        _adopting = true;
+        _error = null;
+
+        try
+        {
+            var copy = adopt
+                ? await Api.AdoptAsync(id, $"Adopted from the system blueprint: {_model.Subject}")
+                : await Api.PromoteAsync(id, $"Published portal-wide from {_model.OwnerName}: {_model.Subject}");
+
+            Nav.NavigateTo($"/notification-templates/{copy.Id:D}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to copy notification template {TemplateId}", id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _adopting = false;
         }
     }
 
