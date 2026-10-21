@@ -71,10 +71,31 @@ evidence that the shell is a move, not a rewrite.
 
 ## Review
 
-_Solo — no reviewer seat (owner, 2026-10-21, overriding Q71)._ The substitute is the evidence trail:
-the shell's contract is pinned by its own suite, the assignment adoption is pinned by the unchanged
-1,384-test suite, and the template adoption is pinned by the new breadcrumb test plus the existing
-detail suite (ids and behaviour unchanged).
+**Self-run two-axis review (owner ruling, 2026-10-21 — Solo keeps the review, loses only the seat).**
+Scope: `6e86782e..67e63c9f` — 4 commits, 20 files. Spec sources: the ADR's decisions 1–6,
+`blazor-components.md` rules 3 + 7 and the mutation-token paragraph, redesign spec §3.2/§3.3/§3.5/§7,
+assignment spec UX-1a, and this doc's C1–C8. Standards sources: `AGENTS.md`,
+`dotnet-best-practices.md`, `blazor-components.md`, `testing.md`, the `dropdown-ui` / `dialog-ui`
+skills, plus the Fowler smell baseline.
+
+**Standards**
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| S1 | `TemplateEditor` dispatched **five mutations without a token** (Update, Create, Adopt, Promote, Delete) while the rule this round wrote says every mutation carries one — the exact gap the rule names, in the round that added it | **hard** | **Fixed** (`MutationToken` on all five); re-read clean |
+| S2 | `<h2>` in the shell wraps a `RenderFragment` that can contain the kind banner and an owner badge, so the accessible heading name becomes "Publish New template System" | judgement | Accepted — it is a status-bearing title bar, and the string is still meaningful; recorded rather than restyled (the alternative, a hidden heading + `aria-label`, duplicates the name) |
+| S3 | `ShellCrumbs` allocates a fresh list on every render, so the shell's parameter change detection always sees a changed reference | judgement | Accepted — the page re-renders only on state change, the trail is ≤3 items, and a cached field would have to be invalidated on every `_item`/mode change for a saving that is not measurable |
+| S4 | `.authoring-title-group` now exists in two scoped stylesheets (shell + page's summary header) | judgement | Accepted — scoped CSS cannot cross component boundaries; the page's copy styles its own summary row |
+
+**Spec**
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| P1 | ADR decision 3 and spec §3.2 said the context bar renders "above the title"; the title lives in the `page-toolbar` `SectionContent`, so the bar renders above the **grid** | wording drift | **Fixed** in both documents to describe the real placement |
+| P2 | C3 has no automated Actions-track assertion | accepted residual | Recorded; the ADR decision 2 + rule 7 carry the contract |
+| P3 | The dead scoped-CSS block from the chrome move was still in `AssignmentAuthoring.razor.css` | hygiene | **Fixed** (Q76b): eight rules removed after proving each is unused in the page's markup |
+
+**Verdicts — `Standards: P1 (S1, fixed and re-read) · Spec: P1 (P1, fixed)` → `PASS` after the fixes.**
 
 ## Acceptance
 

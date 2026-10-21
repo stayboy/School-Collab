@@ -1,47 +1,16 @@
 /*
     Isolated styles for the shared assignment authoring surface
-    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): a sticky action bar
-    and stacked panel-style compartments. D12: the sticky compartment jump-nav was
-    removed — the sections keep their ids (and a reduced scroll-margin) as anchors.
+    (documents/specs/assignment-authoring-compartments.md UX-4/UX-8): stacked panel-style
+    compartments. D12: the sticky compartment jump-nav was removed — the sections keep their ids
+    (and a reduced scroll-margin) as anchors. The breadcrumb and the sticky action bar moved to the
+    shared AuthoringShell (adr-authoring-surface-pattern, decision 1), which owns their rules; only
+    this page's summary title row still uses `.authoring-title-group`.
 */
-
-.authoring-page {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-/* ── Sticky action bar (UX-4/UX-5) ─────────────────────────────────── */
-
-.authoring-actionbar {
-    position: sticky;
-    top: 0;
-    z-index: 6;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 8px 16px;
-    background-color: var(--neutral-layer-1);
-    border: 1px solid var(--neutral-stroke-divider-rest);
-    border-radius: 6px;
-}
 
 .authoring-title-group {
     display: flex;
     align-items: center;
     gap: 12px;
-}
-
-.authoring-heading {
-    margin: 0;
-    font-size: 1.25rem;
-}
-
-.authoring-actionbar-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 /* ── Compartment cards (UX-1/UX-3/UX-8) ────────────────────────────── */
@@ -263,25 +232,6 @@
 .targets-audience-item__value {
     font-weight: 600;
     word-break: break-word;
-}
-
-/* ── Breadcrumb (D8, assignment-create-edit-redesign) ──────────────────── */
-
-.authoring-breadcrumb {
-    display: flex;
-    align-items: center;
-    padding: 2px 4px;
-}
-
-/* v5 ships no breadcrumb component, so the trail is authored in the markup; these two
-   rules are the separator spacing and current-page colour that the removed pair rendered. */
-.authoring-crumb-separator {
-    padding: 0 6px;
-    color: var(--neutral-foreground-3, inherit);
-}
-
-.authoring-crumb-current {
-    color: var(--neutral-foreground-1, inherit);
 }
 
 /* ── Summary card (D1/D2, assignment-create-edit-redesign) ─────────────── */

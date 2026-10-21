@@ -98,7 +98,7 @@ All types / Publish / Reminder / Completion / Overdue; All modes / Email / SMS /
 System / This tenant. Search is client-side over subject + plain-text body (the `ConfigFlags/Index`
 posture). A `?grade=` arrival renders a context bar naming the filter and keeps every row reachable that
 `AppliesToGrade` allows (the existing rule, moved into `NotificationTemplateScopeRules`). The bar is a
-`LandingPage` `ContextBar` fragment rendered above the title *inside* the wrapper — not page markup above
+`LandingPage` `ContextBar` fragment rendered above the grid *inside* the wrapper — not page markup above
 it — so the wrapper keeps ownership of its chrome and the bar is assertable in bUnit
 (`documents/solution/adr-authoring-surface-pattern.md`, decision 3).
 

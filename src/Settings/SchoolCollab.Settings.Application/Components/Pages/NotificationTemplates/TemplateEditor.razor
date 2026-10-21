@@ -333,6 +333,12 @@
     /// letting it land on an unmounted component.
     /// </summary>
     private CancellationTokenSource? _loadCts;
+
+    /// <summary>
+    /// The token every dispatched mutation carries (blazor-components.md, "Mutations take a token
+    /// too"): Save, Reset and the copy action must not outlive the circuit that asked for them.
+    /// </summary>
+    private CancellationToken MutationToken => _loadCts?.Token ?? CancellationToken.None;
     private bool _resetting;
     private bool _adopting;
     private bool _sessionIsSystem = true;
@@ -699,13 +705,15 @@
             if (Mode == TemplateEditorMode.Edit && _model.Id is { } id)
             {
                 saved = await Api.UpdateAsync(id,
-                    new UpdateNotificationTemplateRequest(_model.Subject, body, constraints, reason));
+                    new UpdateNotificationTemplateRequest(_model.Subject, body, constraints, reason),
+                    MutationToken);
             }
             else
             {
                 saved = await Api.CreateAsync(
                     new CreateNotificationTemplateRequest(
-                        _model.Kind, _model.Channel, _model.Subject, body, constraints, reason));
+                        _model.Kind, _model.Channel, _model.Subject, body, constraints, reason),
+                    MutationToken);
             }
 
             _model.Id = saved.Id;
@@ -942,8 +950,8 @@
         try
         {
             var copy = adopt
-                ? await Api.AdoptAsync(id, $"Adopted from the system blueprint: {_model.Subject}")
-                : await Api.PromoteAsync(id, $"Published portal-wide from {_model.OwnerName}: {_model.Subject}");
+                ? await Api.AdoptAsync(id, $"Adopted from the system blueprint: {_model.Subject}", MutationToken)
+                : await Api.PromoteAsync(id, $"Published portal-wide from {_model.OwnerName}: {_model.Subject}", MutationToken);
 
             Nav.NavigateTo($"/notification-templates/{copy.Id:D}");
         }
@@ -982,7 +990,7 @@
         _message = null;
         try
         {
-            await Api.DeleteAsync(id, _model.Reason.Trim());
+            await Api.DeleteAsync(id, _model.Reason.Trim(), MutationToken);
             Nav.NavigateTo("/notification-templates");
         }
         catch (OperationCanceledException)

@@ -44,8 +44,10 @@ of the two it finds first.
    budgets one track per rendered column, **including** the Actions column the wrapper appends.
    `LandingGridSettings` states the contract; the template landing appends `auto`.
 3. **A context bar is a `LandingPage` fragment.** A filtered landing's "why am I seeing fewer rows"
-   bar rides a new `ContextBar` `RenderFragment`, rendered above the title **inside** the wrapper —
-   which also makes it testable, unlike the `page-toolbar` `SectionContent`.
+   bar rides a new `ContextBar` `RenderFragment`, rendered above the **grid** inside the wrapper — the
+   page title itself lives in the wrapper's `page-toolbar` `SectionContent`, which a bUnit renderer
+   does not execute, so the bar sits below it and above the rows. That placement is also what makes
+   the bar testable, unlike the toolbar.
 4. **Compartment chrome carries at most one title, and a title is not mandatory.** Compartment 1 of
    the assignment surface renders as a **headerless panel**: `PanelSection`'s box shape (1px border,
    radius 8, padding 12) drawn with the theme's divider token — **not** `PanelSection`'s literal
