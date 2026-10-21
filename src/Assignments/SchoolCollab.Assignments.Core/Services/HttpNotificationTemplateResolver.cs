@@ -76,7 +76,9 @@ public sealed class HttpNotificationTemplateResolver(
                     row.Constraints?
                         .Select(c => new NotificationTemplateConstraint(DimensionName(c.Dimension), c.Value))
                         .ToList() ?? [],
-                    row.CreatedAt))
+                    row.CreatedAt,
+                    row.TenantId,
+                    row.OwnerName))
                 .ToList();
 
             return candidates.Count == 0
@@ -127,7 +129,9 @@ public sealed class HttpNotificationTemplateResolver(
         [property: JsonPropertyName("body")] string Body,
         [property: JsonPropertyName("constraints")]
         IReadOnlyList<TenantNotificationTemplateConstraintPayload>? Constraints,
-        [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt);
+        [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
+        [property: JsonPropertyName("tenantId")] Guid? TenantId = null,
+        [property: JsonPropertyName("ownerName")] string? OwnerName = null);
 
     /// <summary>One constraint row from the Settings template payload.</summary>
     internal sealed record TenantNotificationTemplateConstraintPayload(

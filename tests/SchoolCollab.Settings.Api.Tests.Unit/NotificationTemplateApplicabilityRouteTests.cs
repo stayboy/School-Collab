@@ -35,7 +35,8 @@ public class NotificationTemplateApplicabilityRouteTests
         new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
             NotificationTemplateKind.Publish, NotificationChannel.Email,
             "Subject for {{Title}}", "Body for {{Title}}", [],
-            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1));
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1),
+            TenantId: null, OwnerName: "System");
 
     private sealed class ApplicableHandler : IQueryHandler<GetApplicableNotificationTemplates, ApplicableNotificationTemplatesDto>
     {

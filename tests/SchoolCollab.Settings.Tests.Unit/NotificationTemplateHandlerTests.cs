@@ -49,7 +49,7 @@ public class NotificationTemplateHandlerTests
         _db = new SettingsDbContext(options, _tenants);
         var auditor = new TemplateAuditRecorder(new SystemActorAccessor("test:actor", "Test Actor"));
 
-        _getAll = new GetTenantNotificationTemplatesHandler(_db);
+        _getAll = new GetTenantNotificationTemplatesHandler(_db, _tenants);
         _getOne = new GetTenantNotificationTemplateHandler(_db);
         _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _update = new UpdateTenantNotificationTemplateHandler(_db, _tenants, auditor);

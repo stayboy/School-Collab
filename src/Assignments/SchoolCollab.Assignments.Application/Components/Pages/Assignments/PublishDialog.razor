@@ -200,16 +200,23 @@
     private bool SmsSlotDisabled => Model.Channel == PublishChannel.EmailOnly;
 
     /// <summary>One candidate's display text: the constraint summary the server sent, plus the
-    /// tenant-default marker on the unconstrained entry (spec §3.7 / Q16).</summary>
+    /// tenant-default marker on the unconstrained entry (spec §3.7 / Q16). A system-blueprint row is
+    /// marked with its owner (redesign spec §3.9) so the author knows the copy is not tenant-owned.</summary>
     private static string TemplateOptionText(PublishTemplateCandidateDto candidate)
     {
         var summary = string.Join(" · ", candidate.Constraints.Select(c => $"{c.Dimension}: {c.Value}"));
         if (candidate.IsDefault)
         {
-            return summary.Length == 0 ? "Tenant default" : $"{summary} · Tenant default";
+            summary = summary.Length == 0 ? "Tenant default" : $"{summary} · Tenant default";
+        }
+        else if (summary.Length == 0)
+        {
+            summary = "No constraints";
         }
 
-        return summary.Length == 0 ? "No constraints" : summary;
+        return candidate.IsSystem
+            ? $"{summary} · {candidate.OwnerName ?? "System"}"
+            : summary;
     }
 
     protected override void OnModelInitialized(PublishFormModel model)

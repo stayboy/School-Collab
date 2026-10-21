@@ -22,7 +22,9 @@ public sealed record TenantNotificationTemplateDto(
     string Body,
     IReadOnlyList<TemplateConstraintDto> Constraints,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? TenantId,
+    string OwnerName);
 
 /// <summary>One constraint dimension on a template (wire shape).</summary>
 public sealed record TemplateConstraintDto(

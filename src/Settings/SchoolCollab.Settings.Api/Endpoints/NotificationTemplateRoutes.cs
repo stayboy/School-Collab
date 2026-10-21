@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Notifications;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.AdoptTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.CreateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.PromoteTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetApplicableNotificationTemplates;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
@@ -34,12 +36,17 @@ public static class NotificationTemplateRoutes
     public static RouteGroupBuilder MapNotificationTemplateRoutes(this RouteGroupBuilder group)
     {
         // ── All rows + constraints (Admin page list, spec §5) ──
+        // `includeTenantOwned` is the promote picker's source (redesign spec §3.6): honoured only in
+        // system scope, where it reads every tenant's rows so one can be published portal-wide. A
+        // tenant session passing the flag still sees its own scope only.
         group.MapGet("/notification-templates",
             async Task<Ok<IReadOnlyList<TenantNotificationTemplateDto>>> (
+            [FromQuery] bool? includeTenantOwned,
             [FromServices] IQueryHandler<GetTenantNotificationTemplates, IReadOnlyList<TenantNotificationTemplateDto>> handler,
             CancellationToken ct) =>
         {
-            var templates = await handler.HandleAsync(new GetTenantNotificationTemplates(), ct);
+            var templates = await handler.HandleAsync(
+                new GetTenantNotificationTemplates(includeTenantOwned is true), ct);
             return TypedResults.Ok(templates);
         });
 
@@ -113,7 +120,7 @@ public static class NotificationTemplateRoutes
 
         // ── Replace one candidate row, by id ──
         group.MapPut("/notification-templates/{id:guid}",
-            async Task<Results<Ok<TenantNotificationTemplateDto>, NotFound<MessageResponse>, BadRequest<MessageResponse>, Conflict<MessageResponse>>> (
+            async Task<Results<Ok<TenantNotificationTemplateDto>, NotFound<MessageResponse>, BadRequest<MessageResponse>, Conflict<MessageResponse>, ProblemHttpResult>> (
             Guid id,
             [FromBody] UpdateTenantNotificationTemplateRequest req,
             [FromServices] ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto> handler,
@@ -128,6 +135,11 @@ public static class NotificationTemplateRoutes
             catch (TenantNotificationTemplateNotFoundException ex)
             {
                 return TypedResults.NotFound(new MessageResponse(ex.Message));
+            }
+            catch (TenantNotificationTemplateScopeException ex)
+            {
+                // A row the caller can see but must not write (spec §6): 403, not a silent stamp.
+                return TypedResults.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
             }
             catch (TenantNotificationTemplateConflictException ex)
             {
@@ -144,7 +156,7 @@ public static class NotificationTemplateRoutes
         // audited-delete precedent at ConfigFlagRoutes.MapDelete("/flags/{key}", …).
         // A reset is audited, so the audit row must carry the operator's own words.
         group.MapDelete("/notification-templates/{id:guid}",
-            async Task<Results<NoContent, BadRequest<MessageResponse>, NotFound<MessageResponse>>> (
+            async Task<Results<NoContent, BadRequest<MessageResponse>, NotFound<MessageResponse>, ProblemHttpResult>> (
             Guid id,
             [FromQuery] string reason,
             [FromServices] ICommandHandler<DeleteTenantNotificationTemplate> handler,
@@ -162,6 +174,69 @@ public static class NotificationTemplateRoutes
             catch (TenantNotificationTemplateNotFoundException ex)
             {
                 return TypedResults.NotFound(new MessageResponse(ex.Message));
+            }
+            catch (TenantNotificationTemplateScopeException ex)
+            {
+                return TypedResults.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+            }
+        });
+
+        // ── Adopt a system-blueprint row into the caller's tenant (redesign spec §3.8) ──
+        // A one-way copy: the source is never modified and re-adopting an identical set is a 409.
+        // 403 when the caller has no real tenant (system scope) or names a row that is already
+        // tenant-owned.
+        group.MapPost("/notification-templates/{id:guid}/adopt",
+            async Task<Results<Ok<TenantNotificationTemplateDto>, NotFound<MessageResponse>, Conflict<MessageResponse>, ProblemHttpResult>> (
+            Guid id,
+            [FromQuery] string? reason,
+            [FromServices] ICommandHandler<AdoptTenantNotificationTemplate, TenantNotificationTemplateDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new AdoptTenantNotificationTemplate(id, reason), ct);
+                return TypedResults.Ok(result);
+            }
+            catch (TenantNotificationTemplateNotFoundException ex)
+            {
+                return TypedResults.NotFound(new MessageResponse(ex.Message));
+            }
+            catch (TenantNotificationTemplateScopeException ex)
+            {
+                return TypedResults.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+            }
+            catch (TenantNotificationTemplateConflictException ex)
+            {
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
+            }
+        });
+
+        // ── Publish a tenant row portal-wide (redesign spec §3.8) ──
+        // System scope only: the one sanctioned cross-tenant read. The copy lands in the blueprint
+        // (TenantId NULL); the source row is untouched.
+        group.MapPost("/notification-templates/{id:guid}/promote",
+            async Task<Results<Ok<TenantNotificationTemplateDto>, NotFound<MessageResponse>, Conflict<MessageResponse>, ProblemHttpResult>> (
+            Guid id,
+            [FromQuery] string? reason,
+            [FromServices] ICommandHandler<PromoteTenantNotificationTemplate, TenantNotificationTemplateDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new PromoteTenantNotificationTemplate(id, reason), ct);
+                return TypedResults.Ok(result);
+            }
+            catch (TenantNotificationTemplateNotFoundException ex)
+            {
+                return TypedResults.NotFound(new MessageResponse(ex.Message));
+            }
+            catch (TenantNotificationTemplateScopeException ex)
+            {
+                return TypedResults.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+            }
+            catch (TenantNotificationTemplateConflictException ex)
+            {
+                return TypedResults.Conflict(new MessageResponse(ex.Message));
             }
         });
 

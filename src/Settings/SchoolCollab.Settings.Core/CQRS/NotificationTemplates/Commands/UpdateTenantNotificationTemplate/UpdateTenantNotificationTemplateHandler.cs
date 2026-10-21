@@ -12,10 +12,12 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateT
 /// <summary>
 /// Replaces one template's subject, body and constraint set, addressed by id, and writes a
 /// <see cref="TemplateAuditEntry"/> of kind <see cref="TemplateChangeKind.Updated"/> in the same
-/// transaction. A row that is absent — or owned by another tenant, which the tenant query filter
-/// makes indistinguishable — is a <see cref="TenantNotificationTemplateNotFoundException"/>. Clearing
-/// the constraint set makes the row the tenant default, so an unconstrained update runs the
-/// tenant-default invariant check before the write.
+/// transaction. A row that is absent - or owned by another tenant, which the query filter makes
+/// indistinguishable - is a <see cref="TenantNotificationTemplateNotFoundException"/>. A row the caller
+/// can see but must not write (a tenant session editing a system-blueprint row) is a
+/// <see cref="TenantNotificationTemplateScopeException"/> (403), never a silent stamp (spec section 6).
+/// Clearing the constraint set makes the row its scope's default, so an unconstrained update runs the
+/// per-scope default invariant check before the write.
 /// </summary>
 public sealed class UpdateTenantNotificationTemplateHandler(
     SettingsDbContext db,
@@ -25,7 +27,7 @@ public sealed class UpdateTenantNotificationTemplateHandler(
     public async Task<TenantNotificationTemplateDto> HandleAsync(
         UpdateTenantNotificationTemplate command, CancellationToken ct = default)
     {
-        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        var ownerId = NotificationTemplateOwnership.OwnerId(tenantProvider.GetTenantContext().TenantId);
         var request = command.Request;
 
         // JSON bodies can carry an explicit null for Constraints; treat it as "no constraints".
@@ -36,10 +38,22 @@ public sealed class UpdateTenantNotificationTemplateHandler(
             .SingleOrDefaultAsync(x => x.Id == command.TemplateId, ct)
             ?? throw new TenantNotificationTemplateNotFoundException(command.TemplateId);
 
+        // Writes never cross scope: the hybrid read filter shows a tenant session the system rows too
+        // (they are readable so they can be adopted), so the guard has to be explicit here.
+        if (template.TenantId != ownerId)
+        {
+            throw new TenantNotificationTemplateScopeException(
+                template.TenantId is null
+                    ? "This template belongs to the system blueprint and cannot be edited from a tenant "
+                      + "session. Adopt it first, then edit your copy."
+                    : "This template belongs to another scope and cannot be edited here.");
+        }
+
         if (requestedConstraints.Count == 0)
         {
             await TenantNotificationTemplateDefaults.EnsureNoCompetingDefaultAsync(
-                db, template.Kind, template.Channel, excludingTemplateId: template.Id, ct);
+                db, template.Kind, template.Channel, template.TenantId,
+                excludingTemplateId: template.Id, ct);
         }
 
         var previousSubject = template.Subject;
@@ -51,7 +65,7 @@ public sealed class UpdateTenantNotificationTemplateHandler(
         // replacement would rely on severance semantics for a required FK).
         var oldRows = template.Constraints.ToList();
         var newRows = requestedConstraints
-            .Select(c => TemplateConstraint.Create(tenantId, template.Id, c.Dimension, c.Value))
+            .Select(c => TemplateConstraint.Create(template.TenantId, template.Id, c.Dimension, c.Value))
             .ToList();
 
         template.Update(request.Subject, request.Body, newRows);
@@ -60,7 +74,7 @@ public sealed class UpdateTenantNotificationTemplateHandler(
         db.TemplateConstraints.AddRange(newRows);
 
         auditor.Record(
-            db, tenantId, template.Id, template.TemplateKey, TemplateChangeKind.Updated,
+            db, template.TenantId, template.Id, template.TemplateKey, TemplateChangeKind.Updated,
             previousSubject, template.Subject,
             previousBody, template.Body,
             previousConstraints, TemplateConstraintSummary.Serialize(template.Constraints),
@@ -68,9 +82,11 @@ public sealed class UpdateTenantNotificationTemplateHandler(
 
         await db.SaveChangesAsync(ct);
 
+        var ownerName = await NotificationTemplateOwnership.ResolveOwnerNameAsync(db, template.TenantId, ct);
+
         return new TenantNotificationTemplateDto(
             template.Id, template.Kind, template.Channel, template.Subject, template.Body,
             template.Constraints.Select(c => new TemplateConstraintDto(c.Id, c.Dimension, c.Value)).ToList(),
-            template.CreatedAt, template.UpdatedAt);
+            template.CreatedAt, template.UpdatedAt, template.TenantId, ownerName);
     }
 }

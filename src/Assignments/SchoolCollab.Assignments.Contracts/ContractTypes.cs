@@ -747,11 +747,15 @@ public record PublishChannelOptionsDto(
 
 /// <summary>One selectable template candidate (round notification-templates-b2c, spec §3.7): its id, the
 /// constraint summary the picker shows, and whether it is the tenant default (the only entry with no
-/// constraints). The order of the containing list is the evaluator's — most specific first.</summary>
+/// constraints). <see cref="IsSystem"/> / <see cref="OwnerName"/> say where the row came from (redesign
+/// spec §3.9): a system-blueprint row is shown as such, a tenant copy is not. The order of the containing
+/// list is the evaluator's — most specific first.</summary>
 public record PublishTemplateCandidateDto(
     Guid TemplateId,
     IReadOnlyList<PublishTemplateConstraintDto> Constraints,
-    bool IsDefault);
+    bool IsDefault,
+    bool IsSystem = false,
+    string? OwnerName = null);
 
 /// <summary>One constraint dimension on a template, as the publish dialog displays it
 /// (round notification-templates-b2a, WS5): the dimension's wire enum name (e.g. <c>GradeLevel</c>)

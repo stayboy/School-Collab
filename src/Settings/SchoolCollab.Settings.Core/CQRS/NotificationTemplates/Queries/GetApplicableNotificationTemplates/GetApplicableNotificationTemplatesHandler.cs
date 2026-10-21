@@ -63,6 +63,7 @@ public sealed class GetApplicableNotificationTemplatesHandler(
 
         // One resolution per coded value, however many slots and constraints mention it.
         var displays = new Dictionary<Guid, string>();
+        var tenantNames = await NotificationTemplateOwnership.ResolveOwnerNamesAsync(db, ct);
         var slots = new List<ApplicableTemplateSlotDto>(Kinds.Length * Channels.Length);
 
         foreach (var kind in Kinds)
@@ -75,6 +76,8 @@ public sealed class GetApplicableNotificationTemplatesHandler(
                     // GradeLevel values on one candidate are ONE dimension, so a candidate
                     // constraining two dimensions outranks it (spec §3.1.1).
                     .OrderByDescending(DistinctDimensionCount)
+                    // Scope rank (spec §3.9): a tenant row outranks the system row it overrides.
+                    .ThenBy(t => t.TenantId == null)
                     .ThenBy(t => t.CreatedAt)
                     .ThenBy(t => t.Id)
                     .ToList();
@@ -97,7 +100,9 @@ public sealed class GetApplicableNotificationTemplatesHandler(
                         template.Id,
                         template.Subject,
                         template.Constraints.Count == 0,
-                        constraints));
+                        constraints,
+                        template.TenantId,
+                        NotificationTemplateOwnership.OwnerName(template.TenantId, tenantNames)));
                 }
 
                 slots.Add(new ApplicableTemplateSlotDto(kind, channel, rows));

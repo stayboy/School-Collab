@@ -10,8 +10,10 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Notifications;
 using SchoolCollab.Settings.Api.Endpoints;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.AdoptTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.CreateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.DeleteTenantNotificationTemplate;
+using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.PromoteTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.UpdateTenantNotificationTemplate;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTemplateAuditEntries;
 using SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Queries.GetTenantNotificationTemplate;
@@ -48,16 +50,22 @@ public class NotificationTemplateRoutesTests
         NotificationChannel channel = NotificationChannel.Email) =>
         new(TemplateId, kind, channel, "Subject for {{Title}}", "Body for {{Title}}",
             [new TemplateConstraintDto(Guid.NewGuid(), TemplateConstraintDimension.GradeLevel, "Grade 3")],
-            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1));
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1),
+            TenantId: null, OwnerName: "System");
 
     // ── Stubs ──────────────────────────────────────────────────────────────
 
     private sealed class GetAllHandler(IReadOnlyList<TenantNotificationTemplateDto> rows)
         : IQueryHandler<GetTenantNotificationTemplates, IReadOnlyList<TenantNotificationTemplateDto>>
     {
+        public GetTenantNotificationTemplates? Last { get; private set; }
+
         public Task<IReadOnlyList<TenantNotificationTemplateDto>> HandleAsync(
-            GetTenantNotificationTemplates query, CancellationToken ct = default) =>
-            Task.FromResult(rows);
+            GetTenantNotificationTemplates query, CancellationToken ct = default)
+        {
+            Last = query;
+            return Task.FromResult(rows);
+        }
     }
 
     private sealed class GetOneHandler(TenantNotificationTemplateDto? result)
@@ -141,6 +149,20 @@ public class NotificationTemplateRoutesTests
             throw new TenantNotificationTemplateNotFoundException(command.TemplateId);
     }
 
+    /// <summary>Reproduces the scope guard so the route's 403 arm is reached (redesign spec §6).</summary>
+    private sealed class ScopeGuardingUpdateHandler : ICommandHandler<UpdateTenantNotificationTemplate, TenantNotificationTemplateDto>
+    {
+        public Task<TenantNotificationTemplateDto> HandleAsync(
+            UpdateTenantNotificationTemplate command, CancellationToken ct = default) =>
+            throw new TenantNotificationTemplateScopeException("system blueprint row, tenant session");
+    }
+
+    private sealed class ScopeGuardingDeleteHandler : ICommandHandler<DeleteTenantNotificationTemplate>
+    {
+        public Task HandleAsync(DeleteTenantNotificationTemplate command, CancellationToken ct = default) =>
+            throw new TenantNotificationTemplateScopeException("system blueprint row, tenant session");
+    }
+
     private sealed class CapturingDeleteHandler : ICommandHandler<DeleteTenantNotificationTemplate>
     {
         public DeleteTenantNotificationTemplate? Last { get; private set; }
@@ -165,6 +187,26 @@ public class NotificationTemplateRoutesTests
         }
     }
 
+    /// <summary>
+    /// Adopt/promote stub (redesign spec §3.8): answers with a row, or throws the typed refusal the
+    /// route must translate (403 scope, 409 identical set, 404 unknown id).
+    /// </summary>
+    private sealed class CopyStub<TCommand>(TenantNotificationTemplateDto? result, Exception? error)
+        : ICommandHandler<TCommand, TenantNotificationTemplateDto>
+        where TCommand : class, ICommand
+    {
+        public TCommand? Last { get; private set; }
+
+        public Task<TenantNotificationTemplateDto> HandleAsync(TCommand command, CancellationToken ct = default)
+        {
+            Last = command;
+            if (error is not null)
+                throw error;
+
+            return Task.FromResult(result!);
+        }
+    }
+
     private static async Task<(WebApplication App, HttpClient Client)> StartAsync(
         IReadOnlyList<TenantNotificationTemplateDto>? all = null,
         TenantNotificationTemplateDto? single = null,
@@ -174,14 +216,17 @@ public class NotificationTemplateRoutesTests
         IReadOnlyList<TemplateAuditEntryDto>? audit = null,
         StubAuditHandler? auditSpy = null,
         GetOneHandler? getOneSpy = null,
-        GetByIdHandler? getByIdSpy = null)
+        GetByIdHandler? getByIdSpy = null,
+        GetAllHandler? getAllSpy = null,
+        ICommandHandler<AdoptTenantNotificationTemplate, TenantNotificationTemplateDto>? adopt = null,
+        ICommandHandler<PromoteTenantNotificationTemplate, TenantNotificationTemplateDto>? promote = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
         builder.Services.AddSingleton<IQueryHandler<GetTenantNotificationTemplates, IReadOnlyList<TenantNotificationTemplateDto>>>(
-            new GetAllHandler(all ?? []));
+            getAllSpy ?? new GetAllHandler(all ?? []));
         builder.Services.AddSingleton<IQueryHandler<GetTenantNotificationTemplate, TenantNotificationTemplateDto?>>(
             getOneSpy ?? new GetOneHandler(single));
         builder.Services.AddSingleton<IQueryHandler<GetTenantNotificationTemplateById, TenantNotificationTemplateDto?>>(
@@ -189,6 +234,10 @@ public class NotificationTemplateRoutesTests
         builder.Services.AddSingleton(create ?? new CapturingCreateHandler());
         builder.Services.AddSingleton(update ?? new CapturingUpdateHandler());
         builder.Services.AddSingleton(delete ?? new CapturingDeleteHandler());
+        builder.Services.AddSingleton<ICommandHandler<AdoptTenantNotificationTemplate, TenantNotificationTemplateDto>>(
+            adopt ?? new CopyStub<AdoptTenantNotificationTemplate>(SampleDto(), null));
+        builder.Services.AddSingleton<ICommandHandler<PromoteTenantNotificationTemplate, TenantNotificationTemplateDto>>(
+            promote ?? new CopyStub<PromoteTenantNotificationTemplate>(SampleDto(), null));
         builder.Services.AddSingleton<IQueryHandler<GetTemplateAuditEntries, IReadOnlyList<TemplateAuditEntryDto>>>(
             auditSpy ?? new StubAuditHandler(audit ?? []));
 
@@ -458,6 +507,142 @@ public class NotificationTemplateRoutesTests
             var body = await response.Content.ReadAsStringAsync();
             body.Should().Contain("new body");
             body.Should().Contain("Grade 3");
+        }
+    }
+
+    // ── Ownership (redesign spec §3.6-§3.8, §6) ───────────────────────────
+
+    [TestMethod]
+    public async Task GetAll_BindsIncludeTenantOwnedFromTheQueryString()
+    {
+        var spy = new GetAllHandler([SampleDto()]);
+        var (app, client) = await StartAsync(getAllSpy: spy);
+        await using (app)
+        {
+            await client.GetAsync(BaseUrl);
+            spy.Last!.IncludeTenantOwned.Should().BeFalse("the flag defaults off");
+
+            await client.GetAsync($"{BaseUrl}?includeTenantOwned=true");
+            spy.Last!.IncludeTenantOwned.Should().BeTrue(
+                "the promote picker's source rides the query string (spec §3.6)");
+        }
+    }
+
+    [TestMethod]
+    public async Task Put_OnARowOutsideTheCallersScope_Is403()
+    {
+        var (app, client) = await StartAsync(update: new ScopeGuardingUpdateHandler());
+        await using (app)
+        {
+            var response = await client.PutAsync(
+                $"{BaseUrl}/{TemplateId:D}",
+                Json("""{"subject":null,"body":"x","constraints":[]}"""));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "a visible row must not be silently rewritten outside its scope");
+        }
+    }
+
+    [TestMethod]
+    public async Task Adopt_Returns200_TheCopy_AndTheReason()
+    {
+        var stub = new CopyStub<AdoptTenantNotificationTemplate>(SampleDto(), null);
+        var (app, client) = await StartAsync(adopt: stub);
+        await using (app)
+        {
+            var response = await client.PostAsync($"{BaseUrl}/{TemplateId:D}/adopt?reason=try%20it", null);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            stub.Last!.TemplateId.Should().Be(TemplateId);
+            stub.Last.Reason.Should().Be("try it");
+        }
+    }
+
+    [TestMethod]
+    public async Task Adopt_FromSystemScope_Is403_And_AnIdenticalSetIs409()
+    {
+        var forbidden = new CopyStub<AdoptTenantNotificationTemplate>(
+            null, new TenantNotificationTemplateScopeException("needs a tenant"));
+        var (app, client) = await StartAsync(adopt: forbidden);
+        await using (app)
+        {
+            (await client.PostAsync($"{BaseUrl}/{TemplateId:D}/adopt", null))
+                .StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+
+        var conflict = new CopyStub<AdoptTenantNotificationTemplate>(
+            null, new TenantNotificationTemplateConflictException("already adopted"));
+        var (app2, client2) = await StartAsync(adopt: conflict);
+        await using (app2)
+        {
+            var response = await client2.PostAsync($"{BaseUrl}/{TemplateId:D}/adopt", null);
+
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("already adopted");
+        }
+    }
+
+    [TestMethod]
+    public async Task Adopt_AnUnknownId_Is404()
+    {
+        var stub = new CopyStub<AdoptTenantNotificationTemplate>(
+            null, new TenantNotificationTemplateNotFoundException(TemplateId));
+        var (app, client) = await StartAsync(adopt: stub);
+        await using (app)
+        {
+            (await client.PostAsync($"{BaseUrl}/{TemplateId:D}/adopt", null))
+                .StatusCode.Should().Be(HttpStatusCode.NotFound);
+        }
+    }
+
+    [TestMethod]
+    public async Task Promote_Returns200_TheBlueprintCopy()
+    {
+        var stub = new CopyStub<PromoteTenantNotificationTemplate>(SampleDto(), null);
+        var (app, client) = await StartAsync(promote: stub);
+        await using (app)
+        {
+            var response = await client.PostAsync($"{BaseUrl}/{TemplateId:D}/promote", null);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            stub.Last!.TemplateId.Should().Be(TemplateId);
+        }
+    }
+
+    [TestMethod]
+    public async Task Promote_FromATenantSession_Is403()
+    {
+        var stub = new CopyStub<PromoteTenantNotificationTemplate>(
+            null, new TenantNotificationTemplateScopeException("system scope only"));
+        var (app, client) = await StartAsync(promote: stub);
+        await using (app)
+        {
+            (await client.PostAsync($"{BaseUrl}/{TemplateId:D}/promote", null))
+                .StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+    }
+
+    [TestMethod]
+    public async Task Promote_AnIdenticalSystemSet_Is409()
+    {
+        var stub = new CopyStub<PromoteTenantNotificationTemplate>(
+            null, new TenantNotificationTemplateConflictException("already in the blueprint"));
+        var (app, client) = await StartAsync(promote: stub);
+        await using (app)
+        {
+            (await client.PostAsync($"{BaseUrl}/{TemplateId:D}/promote", null))
+                .StatusCode.Should().Be(HttpStatusCode.Conflict);
+        }
+    }
+
+    [TestMethod]
+    public async Task Delete_OnARowOutsideTheCallersScope_Is403()
+    {
+        var (app, client) = await StartAsync(delete: new ScopeGuardingDeleteHandler());
+        await using (app)
+        {
+            (await client.DeleteAsync($"{BaseUrl}/{TemplateId:D}?reason=try"))
+                .StatusCode.Should().Be(HttpStatusCode.Forbidden);
         }
     }
 }

@@ -1,7 +1,9 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Bunit;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SchoolCollab.Admin.Shared.Services;
@@ -18,6 +20,16 @@ internal sealed class TemplateRow
     public string Body { get; init; } = "<p>Body</p>";
     public List<(int Dimension, string Value)> Constraints { get; init; } = [];
     public DateTimeOffset UpdatedAt { get; init; } = new(2026, 10, 1, 9, 30, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// The owning tenant, or null for a system-blueprint row (redesign spec §3.7). Defaults to the
+    /// session's own tenant, because a fixture row is normally one the page's operator can edit; a
+    /// blueprint row is always explicit (<c>TenantId = null</c>).
+    /// </summary>
+    public Guid? TenantId { get; init; } = TemplateTestServices.RealTenant;
+
+    /// <summary>The owner label the API projects ("System" or the tenant's name).</summary>
+    public string OwnerName { get; init; } = "Northfield";
 }
 
 /// <summary>
@@ -36,6 +48,10 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
     public List<TemplateRow> Rows { get; } = [];
     public List<(string Method, string Url, string? Body)> Calls { get; } = [];
     public List<TemplateAuditRow> AuditEntries { get; } = [];
+
+    /// <summary>The tenant an adopt copies into (the fake session's own tenant).</summary>
+    public Guid SessionTenantId { get; set; } = TemplateTestServices.RealTenant;
+
     public bool PreviewFails { get; set; }
     public bool LookupsFail { get; set; }
     public string PreviewJson { get; set; } =
@@ -106,6 +122,28 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
     {
         if (method == "GET" && path == BasePath)
             return Json(JsonSerializer.Serialize(Rows.Select(ToWire).ToArray(), Web));
+
+        // Adopt / promote (redesign spec §3.8): a copy with the same content, in the target scope.
+        if (method == "POST" && TryCopyAction(path, out var copyId, out var action))
+        {
+            var source = Rows.FirstOrDefault(r => r.Id == copyId);
+            if (source is null)
+                return Status(HttpStatusCode.NotFound, "not found");
+
+            var intoTenant = action == "adopt";
+            var copy = new TemplateRow
+            {
+                Kind = source.Kind,
+                Channel = source.Channel,
+                Subject = source.Subject,
+                Body = source.Body,
+                Constraints = source.Constraints.ToList(),
+                TenantId = intoTenant ? SessionTenantId : null,
+                OwnerName = intoTenant ? "Northfield" : "System",
+            };
+            Rows.Add(copy);
+            return Json(JsonSerializer.Serialize(ToWire(copy), Web));
+        }
 
         if (method == "GET" && path.Length > BasePath.Length + 1
             && Guid.TryParse(path[(BasePath.Length + 1)..], out var id))
@@ -201,6 +239,25 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
     }
 
 
+    /// <summary>
+    /// Recognises <c>/notification-templates/{id}/adopt</c> and <c>.../promote</c> (redesign spec §3.8).
+    /// </summary>
+    private static bool TryCopyAction(string path, out Guid id, out string action)
+    {
+        id = Guid.Empty;
+        action = string.Empty;
+
+        if (path.Length <= BasePath.Length + 2)
+            return false;
+
+        var segments = path[(BasePath.Length + 1)..].Split('/');
+        if (segments.Length != 2 || !Guid.TryParse(segments[0], out id))
+            return false;
+
+        action = segments[1];
+        return action is "adopt" or "promote";
+    }
+
     private static Guid? QueryGuid(string url, string name)
     {
         var queryIndex = url.IndexOf('?', StringComparison.Ordinal);
@@ -226,6 +283,8 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
         constraints = row.Constraints.Select(c => new { id = Guid.NewGuid(), dimension = c.Dimension, value = c.Value }),
         createdAt = row.UpdatedAt,
         updatedAt = row.UpdatedAt,
+        tenantId = row.TenantId,
+        ownerName = row.OwnerName,
     };
 
     private static HttpResponseMessage Json(string json) =>
@@ -235,12 +294,39 @@ internal sealed class TemplateApiHandler : HttpMessageHandler
         new(status) { Content = new StringContent(message, Encoding.UTF8, "text/plain") };
 }
 
-/// <summary>Registers the four admin clients and the console logger every page under test injects.</summary>
+/// <summary>
+/// The tenant scope the fake session reports (redesign spec §3.7): the landing and the editor read it to
+/// decide which row actions are offered. A null tenant means the system (blueprint) session.
+/// </summary>
+internal sealed class TemplateTestAuth(Guid? tenantId) : AuthenticationStateProvider
+{
+    public override Task<AuthenticationState> GetAuthenticationStateAsync()
+    {
+        var identity = new ClaimsIdentity(authenticationType: "test");
+        if (tenantId is { } id)
+        {
+            identity.AddClaim(new Claim("tenant_id", id.ToString("D")));
+            identity.AddClaim(new Claim("tenant_name", "Northfield"));
+        }
+
+        return Task.FromResult(new AuthenticationState(new ClaimsPrincipal(identity)));
+    }
+}
+
+/// <summary>Registers the four admin clients, the tenant scope and the console logger every page injects.</summary>
 internal static class TemplateTestServices
 {
-    public static TemplateApiHandler Register<TComponent>(BunitContext ctx)
+    /// <summary>The tenant a real (non-system) test session operates in.</summary>
+    public static readonly Guid RealTenant = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+    /// <summary>
+    /// Registers the page's dependencies. <paramref name="realTenant"/> selects the session scope: a real
+    /// tenant (the ordinary admin session, which may adopt) or the system blueprint session.
+    /// </summary>
+    public static TemplateApiHandler Register<TComponent>(BunitContext ctx, bool realTenant = true)
     {
-        var handler = new TemplateApiHandler();
+        var sessionTenant = realTenant ? RealTenant : (Guid?)null;
+        var handler = new TemplateApiHandler { SessionTenantId = sessionTenant ?? RealTenant };
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         ctx.Services.AddSingleton(new NotificationTemplateApiClient(http));
         ctx.Services.AddSingleton(new NotificationTemplatePreviewClient(http));
@@ -248,6 +334,12 @@ internal static class TemplateTestServices
         ctx.Services.AddSingleton(new CodedValuesApiClient(http));
         ctx.Services.AddSingleton<Microsoft.Extensions.Logging.ILogger<TComponent>>(
             NullLogger<TComponent>.Instance);
+
+        var auth = new TemplateTestAuth(sessionTenant);
+        ctx.Services.AddSingleton<AuthenticationStateProvider>(auth);
+        ctx.Services.AddSingleton(new VisibleTenantService(
+            auth, NullLogger<VisibleTenantService>.Instance));
+
         return handler;
     }
 }
