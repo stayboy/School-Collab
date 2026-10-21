@@ -104,7 +104,7 @@ posture). A `?grade=` arrival renders an info bar naming the filter and keeps ev
 | Open | always | `RowAction.Navigate` → `/notification-templates/{id}` |
 | Adopt to this tenant | row is system **and** the session has a real tenant | confirm → `POST …/{id}/adopt` → navigate to the returned new row |
 | Publish portal-wide… | row is tenant-owned **and** the session is in system scope | confirm → `POST …/{id}/promote` → navigate to the returned system row |
-| Reset to built-in default… | row is writable in the current scope | destructive + `ReasonPromptDialog` → `DELETE …/{id}?reason=` → reload |
+| Reset to built-in default… | row is writable in the current scope | **not** flagged `Destructive` (the kebab would then confirm twice) + the new audited `TemplateResetReasonDialog` — the reason is required and is the confirmation → `DELETE …/{id}?reason=` → reload |
 
 ### 3.3 Template editor layout (Detail and Create share it)
 
@@ -316,11 +316,13 @@ All routes live in `NotificationTemplateRoutes.cs` (`/api/settings/notification-
 | A tenant session never writes for another tenant | `TenantId` is always the session's own; no route takes a tenant id | create/update tests |
 | Only system scope promotes | `POST …/promote` re-checks `CurrentTenantId == Guid.Empty` | tenant-session promote ⇒ 403 |
 | Only a real tenant adopts | `POST …/adopt` requires `CurrentTenantId != Guid.Empty` | system-session adopt ⇒ 403 |
-| Cross-tenant read exists in exactly one place | `GET /notification-templates?includeTenantOwned=true`, system scope only | tenant session passing the flag ⇒ flag ignored (own scope only) |
+| Cross-tenant reads exist in exactly two places | (a) `GET /notification-templates?includeTenantOwned=true`, system scope only; (b) `POST …/{id}/promote`'s by-id read (`IgnoreQueryFilters(["Tenant"])` + `SuppressTenantGuard()` around the write that follows), system scope only | tenant session passing the flag ⇒ flag ignored (own scope only); tenant-session promote ⇒ 403 |
 | `Guid.Empty` is never a stored tenant | `Create`/`Update` reject it; the scope resolver maps it to `null` under `SuppressTenantGuard()` | handler unit test |
 
 Tenant isolation is a **human-gated** area per `AGENTS.md`: any change to the table above after this spec is
-adopted needs owner sign-off, not agent inference.
+adopted needs owner sign-off, not agent inference. **The promotion row above was amended on 2026-10-21**
+(one cross-tenant read → two) under the owner's Q44 ruling in the go-forward grill round — the promote
+handler's by-id read is the second, and it is system-scope-gated and guarded — not inferred by an agent.
 
 ## 7. Out of scope (v1)
 
@@ -341,14 +343,14 @@ Stack: MTP Standard (`.github/copilot/rules/testing.md`). bUnit hosts follow the
 |---|---|
 | Landing renders one row per template with the kind banner, owner badge/name, mode label and the constraint count (`0` ⇒ default badge; `1` ⇒ singular); filters narrow rows; search matches subject **and** body | `NotificationTemplatesLandingTests` (bUnit) |
 | The `N constraints` link opens the shared read-only dialog with dimension + display value; the panel's "View all constraints" opens the same component | `TemplateConstraintsDialogTests` |
-| Row actions: Open navigates; Adopt is offered only for system rows in a tenant session; Publish portal-wide only for tenant rows in system scope; Reset is destructive and requires a reason | `NotificationTemplatesLandingTests` |
+| Row actions: Open navigates; Adopt is offered only for system rows in a tenant session; Publish portal-wide only for tenant rows in system scope; Reset is OFFERED for a writable row (the required reason and the destructive confirmation are the dialog's, pinned in the detail suite that hosts it) | `NotificationTemplatesLandingTests` |
 | Create page: enabled dropdowns, grade prefill, `CreateAsync` then navigation to the new id, Reset absent | `NotificationTemplateCreateTests` |
 | Detail: dropdowns disabled with the reason; chips dismiss and are staged (no HTTP until Save); Save sends subject + body + the whole set once with the reason; conflict warning for an identical set in the same kind × mode **and scope**, and no warning across scopes; system row read-only in a tenant session | `NotificationTemplateDetailTests` |
 | Editor keeps the existing preview behaviour (rendered output, unknown tag literal, degraded note, save still works) and the SMS/WhatsApp length guidance (warn, never block) | `TemplateEditorPreviewTests` |
 | Audit grid is filtered to the row on screen and ordered most recent first | `NotificationTemplateDetailTests` |
 | Banner maps each kind to its variant and `data-kind` | `NotificationTemplateKindBannerTests` |
 | WhatsApp rows are creatable, listable, previewable and applicable (no throw); grade-card slots include WhatsApp | Settings handler + `ApplicableNotificationTemplatesHandlerTests` |
-| Hybrid store: system + tenant rows both visible to a tenant; only system rows in system scope; per-scope default conflict; `Guid.Empty` rejected | `NotificationTemplateHandlerTests`, `NotificationTemplateTenancyTests` |
+| Hybrid store: system + tenant rows both visible to a tenant; only system rows in system scope; per-scope default conflict; `Guid.Empty` rejected | `NotificationTemplateHandlerTests`, `NotificationTemplateOwnershipTests` |
 | Adopt/promote: copy fields + constraints, 409 on an identical copy, source untouched, 403s per §6 | `NotificationTemplateRoutesTests` (API) + handler tests |
 | By-id route: 200 in scope, 404 foreign/unknown | `NotificationTemplateRoutesTests` |
 | Audit `templateId` filter narrows the stream and the DTO carries the id | `NotificationTemplateRoutesTests` + query handler test |
@@ -381,5 +383,57 @@ implementation record.
 
 ## 10. As-built
 
-_Not implemented. Filled at round acceptance with: deviations, test totals, gate results, and the wait-cost
-numbers required by `documents/rounds/README.md`._
+**W3 (ownership) implemented 2026-10-21.** What shipped, against §3.7–§3.9 and §6:
+
+- **Hybrid store** — `TenantNotificationTemplate` and `TemplateConstraint` now implement
+  `IHybridTenantEntity` directly (the `CodedValue` shape: nullable `tenant_id`, named `"Tenant"` filter
+  `TenantId == current OR NULL`, `Guid.Empty` rejected at the factory). Their configurations moved to
+  `TenantOrGlobalEntityTypeConfigurationBase`, migration
+  `20261021052500_MakeNotificationTemplateTenantNullable` alters both columns to nullable and its `Down()`
+  raises when a NULL row exists (a reversal is lossy, so it fails loudly rather than stamping `Guid.Empty`).
+- **Scope resolution** — `NotificationTemplateOwnership` maps the session tenant to a stored scope
+  (`Guid.Empty` ⇒ `null`) and resolves the owner label from settings-db. Create stamps the resolved scope;
+  Update/Delete refuse a row outside it with `TenantNotificationTemplateScopeException` ⇒ **403**. The
+  per-scope default invariant is `TenantNotificationTemplateDefaults` (one unconstrained system default and
+  one per tenant may coexist).
+- **Owner projection** — `TenantNotificationTemplateDto` and `ApplicableTemplateDto` carry `TenantId` +
+  `OwnerName` (`"System"` for the blueprint); list and by-id reads join the settings-db `Tenants` table.
+- **Adopt / publish portal-wide** — `POST …/{id}/adopt` (real tenant, system source) and
+  `POST …/{id}/promote` (system scope, cross-tenant read by id under `IgnoreQueryFilters(["Tenant"])` +
+  `SuppressTenantGuard()`). Both copy subject/body/constraints, never mutate the source, audit as
+  `Created` against the target scope, and answer **409** on an identical constraint set.
+- **System-scope list read** — `GET …?includeTenantOwned=true` is honoured only in system scope (the
+  promote picker's source); a tenant session's flag is ignored.
+- **Send-time precedence** — the resolver payload carries `tenantId`/`ownerName`;
+  `NotificationTemplateEvaluator` shadows a system candidate whose constraint set duplicates a tenant
+  candidate's, orders `specificity desc → scope rank → CreatedAt → id`, and keeps the Q67 default
+  promotion scoped to the tied row's own scope. `PublishTemplateCandidateDto` gained
+  `IsSystem`/`OwnerName`, and the publish picker marks a blueprint row with its owner.
+- **UI** — landing gained the Owner column + owner filter, the `System default` / `Tenant default` badge
+  split, and scope-gated row actions (Adopt, Publish portal-wide…, Reset… via the new audited
+  `TemplateResetReasonDialog`). The editor shows the owner chip, renders a row outside the session's
+  write scope **read-only** (no Save/Reset/reason, no constraint kebab or dismissible chips) and offers
+  the copy action that makes it editable (Adopt for a tenant session, Publish portal-wide for system
+  scope).
+
+**Deviations (recorded):**
+
+1. The reset row action is **not** flagged `Destructive` in the kebab: the menu would then confirm once
+   and the reason dialog would confirm again. The reason dialog is the destructive confirmation and names
+   the template.
+2. `GET …?includeTenantOwned=true` binds as `bool?` (missing ⇒ false). A non-nullable `bool` bound from
+   the query string is *required* by minimal APIs and turned every plain list read into a 400 — caught by
+   the existing `GetAll_Returns200AndTheRows` route test.
+3. The system session's landing is the promote picker (it lists tenant rows through the flag) — the spec's
+   §3.6 read has no separate dialog in v1.
+
+**Verification (measured 2026-10-21):** Admin `730/730`; `Settings.Tests.Unit` `655/655`;
+`Settings.Api.Tests.Unit` `58/58`; `ArchitectureTests` `142/142` (OpenAPI pin raised 53 → **55 of 71**,
+measured); `Assignments.Api.Tests.Unit` template/resolver slice `13/13`;
+`Assignments.Tests.Unit` `1385/1385` on re-run (one order-dependent flake —
+`Edit_RemovingAnActivityGroupEntry_SendsTheReducedTargetSetAndLinks` — failed in the first, parallel-order
+run and passes in isolation and on the second full run; unrelated to the template surface).
+
+**Not done (deferred, unchanged from the plan):** the browser pass (the AppHost cannot serve here) and
+dialog *invocation* coverage; the adopt/promote flows are covered at the handler, route and page-offer
+levels instead.
