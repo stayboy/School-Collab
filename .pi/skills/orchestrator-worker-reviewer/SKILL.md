@@ -204,6 +204,10 @@ a light tier through. Record escalations in the round doc.
   structured blocks inline and the parent persists them into the doc.
 - Round-doc format, line-1 provider/model traceability, and the ephemerality
   rules live in `documents/rounds/README.md` and `references/models.md`.
+- **Review shape (Q47–Q52).** The reviewer returns **two verdicts** (`Standards:` / `Spec:`), the
+  round doc carries `## Not run` for unavailable steps and the flake protocol (first total,
+  isolation, re-run), and two gates mechanise the rest. Decisions and evidence:
+  `documents/solution/spec-and-ticket-skills-in-the-orchestrator.md` §3.
 - **Fan-out provenance (opt-in).** A round that dispatches parallel workers
   records it on round-doc line 1 as `Workers: parallel (slices: A, B)` — the
   slice ids, comma-separated. Mechanics: step 3's fan-out variant and

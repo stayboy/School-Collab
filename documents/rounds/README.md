@@ -30,6 +30,13 @@ specs that remain the source of truth**.
   `## Pinned decisions (unattended …)`, `## Acceptance` repeats the same entries, and the
   completion report repeats them again as a table. This folder is ephemeral, so a pin that
   lives only here is a pin the owner will never see again (owner, 2026-10-21).
+- **A mandated step that could not run gets a `## Not run` table** — one row per step, with its
+  reason and its owner, and the round is reported with that row visible. An unavailable environment
+  is never silence (Q50, 2026-10-21).
+- **A red first run is re-run twice before it is called green.** One failing test in a full run is
+  re-run in isolation and then as a second full run; the round doc records the first total, the
+  isolation result and the re-run total, and a flaky pass is recorded as a **flake**, not a pass
+  (Q51, 2026-10-21).
 - **Flip the round doc's `**Status:**` line when the round closes** — set it to
   `CLOSED` and name the PR/commit that carried it, or to `PARKED` when the round was
   stopped mid-flight by the time-box rule

@@ -140,14 +140,29 @@ omission in its report rather than silently proceed:
   `NotSupportedException` hole and the capped `{{Description}}`.
 - **The WORKER REPORT is context, never evidence.** Every finding cites a diff line; none may rest on
   the worker's prose.
+- **The behaviour rows the reviewer owes the brief (owner, 2026-10-21 — Q48).** The brief names these
+  three, and the report shows them applied:
+  - **Precedent before citation.** A rule's literal text is not a finding until the nearest sibling
+    handler / component / test is read. Where precedent and rule disagree, the finding is *"rule and
+    precedent disagree"*, not a breach of the rule.
+  - **Widened-read blast radius.** When a change widens what a read returns — a scope, a filter, an
+    `include…` flag, a tenant union — every consumer is re-derived in the same plan, and the plan names
+    them. A comparison or badge written against the narrower semantics is a P1, not a follow-up.
+  - **A declared deviation amends its spec in the same PR.** An `as-built` note is not a substitute.
 
 Return ONLY:
 
     REVIEW
-    Verdict: PASS | P1 | P2-only
-    P1: <file:line — issue>   (one per line; none if empty)
-    P2: <file:line — issue>
+    Standards: PASS | P1 | P2-only
+    Spec: PASS | P1 | P2-only
+    P1: [Standards|Spec] <file:line — issue>   (one per line; none if empty)
+    P2: [Standards|Spec] <file:line — issue>
     Best-practices: <no overwrites / skills honored / readable | violations as P1/P2 above>
+
+**Two verdicts, one seat (Q47).** `Standards:` and `Spec:` are reported side by side and never
+blended: a finding belongs to exactly one axis, and the report never picks a single winner across
+axes — that reranking is what the separation exists to prevent. `## Review` carries the two reports
+**unmerged**, under their own headings.
 
 ## UI Tester
 
