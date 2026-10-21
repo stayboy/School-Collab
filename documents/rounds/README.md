@@ -7,7 +7,9 @@ round produces exactly two files:
 - `round-<round-slug>.md` — the single round doc, with sections `## Plan`,
   `## Worker Report`, `## Review`, `## Acceptance`, `## UI Tester`. Fill only
   the tier-appropriate ones: Tiers 1–2 fill Plan + Worker Report + Acceptance
-  (Tier 2 adds Review); Tier 3 fills them all (+ UI Tester for UI rounds).
+  (Tier 2 adds Review); **Tier 0 (Solo) fills Plan + Worker Report + Review (marked self-run) +
+  Acceptance** — the diff review is never skipped, only its independent seat; Tier 3 fills
+  them all (+ UI Tester for UI rounds).
 - `diffs-<round-slug>.patch` — the round's `git diff`, written once by the
   parent after the worker run and shared with the reviewer/tester by path.
 
@@ -24,6 +26,10 @@ specs that remain the source of truth**.
   cannot be reviewed or reconstructed later: on 2026-10-07 a reviewer could diff a
   round only by rebuilding its delta from a *sibling* round's patch. Generate the
   patch alongside the round doc, from the round's own base.
+- **An unattended round lists its pinned decisions twice.** The round doc carries
+  `## Pinned decisions (unattended …)`, `## Acceptance` repeats the same entries, and the
+  completion report repeats them again as a table. This folder is ephemeral, so a pin that
+  lives only here is a pin the owner will never see again (owner, 2026-10-21).
 - **Flip the round doc's `**Status:**` line when the round closes** — set it to
   `CLOSED` and name the PR/commit that carried it, or to `PARKED` when the round was
   stopped mid-flight by the time-box rule
