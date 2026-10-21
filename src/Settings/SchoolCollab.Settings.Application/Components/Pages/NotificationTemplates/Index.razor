@@ -7,6 +7,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ILogger<Index> Logger
+@implements IDisposable
 
 @*
    Notification-template landing (redesign spec 3.2): the repo's landing shape - the shared wrapper (which
@@ -21,23 +22,6 @@
    may publish one portal-wide (spec 3.6/3.8). Row actions are therefore scope-gated, not hidden by luck.
 *@
 <PageTitle>Notification Templates</PageTitle>
-
-@* Spec 3.2: an arrival through the grade-detail deep link is a FILTERED landing, and a filter with no
-   name is indistinguishable from missing rows. The bar names it; the button widens the view again. *@
-@if (_gradeFilter is not null)
-{
-    <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2" id="template-grade-filter-bar">
-        <span>
-            Filtered to one grade level — only templates whose constraints can apply to that grade are
-            listed.
-        </span>
-        <FluentButton Appearance="ButtonAppearance.Subtle"
-                      Id="template-grade-filter-clear"
-                      OnClick="ClearGradeFilter">
-            Show all templates
-        </FluentButton>
-    </FluentMessageBar>
-}
 
 <LandingPage TItem="TenantNotificationTemplateDto"
              Title="Notification Templates"
@@ -54,6 +38,25 @@
              RowActions="@BuildRowActions"
              RowActionsAriaLabel="Template actions"
              RowActionsUseMenuService="false">
+    @* Spec 3.2: an arrival through the grade-detail deep link is a FILTERED landing, and a filter with
+       no name is indistinguishable from missing rows. The bar names it; the button widens the view
+       again. It rides the wrapper's ContextBar so the wrapper keeps owning its chrome. *@
+    <ContextBar>
+        @if (_gradeFilter is not null)
+        {
+            <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2" id="template-grade-filter-bar">
+                <span>
+                    Filtered to one grade level — only templates whose constraints can apply to that grade
+                    are listed.
+                </span>
+                <FluentButton Appearance="ButtonAppearance.Subtle"
+                              Id="template-grade-filter-clear"
+                              OnClick="ClearGradeFilter">
+                    Show all templates
+                </FluentButton>
+            </FluentMessageBar>
+        }
+    </ContextBar>
     <ToolbarFilters>
         <span class="template-filter">
             <DropdownComponent TItem="FilterOption" TValue="string"
@@ -128,7 +131,9 @@
 @code {
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(110px,1fr) minmax(110px,1fr) 110px minmax(200px,2fr) minmax(120px,1fr) 150px",
+        // One track per rendered column, INCLUDING the Actions column LandingPage appends
+        // (blazor-components.md rule 7 / adr-authoring-surface-pattern decision 2).
+        GridTemplateColumns = "minmax(110px,1fr) minmax(110px,1fr) 110px minmax(200px,2fr) minmax(120px,1fr) 150px auto",
     };
 
     private readonly GridSort<TenantNotificationTemplateDto> _sortByKind =
@@ -180,6 +185,21 @@
     private string _ownerFilter = string.Empty;
     private Guid? _gradeFilter;
 
+    /// <summary>
+    /// Aborts the in-flight list read when the circuit navigates away (blazor-components.md
+    /// § "Landing-page performance pattern", rule 3).
+    /// </summary>
+    private CancellationTokenSource? _loadCts;
+
+    /// <summary>Set FIRST in <see cref="Dispose"/> so a racing continuation sees it before it writes state.</summary>
+    private volatile bool _disposed;
+
+    /// <summary>
+    /// The token every dispatched mutation carries (blazor-components.md, "Mutations take a token too"):
+    /// a delete/adopt/promote must not outlive the circuit that asked for it.
+    /// </summary>
+    private CancellationToken MutationToken => _loadCts?.Token ?? CancellationToken.None;
+
     /// <summary>True when the session has no real tenant - it edits the system blueprint (spec 3.7).</summary>
     private bool _sessionIsSystem = true;
 
@@ -200,12 +220,17 @@
                 _items, _gradeFilter, _kindFilter, _modeFilter, _ownerFilter, _search);
     protected override async Task OnInitializedAsync()
     {
+        _loadCts = new CancellationTokenSource();
+
         if (Guid.TryParse(Grade, out var grade) && grade != Guid.Empty)
             _gradeFilter = grade;
 
         // The session scope decides what this page may DO (adopt vs publish portal-wide, spec 3.2);
         // it comes from the tenant_id claim, not from the rows themselves.
         var scope = await Tenants.GetScopeAsync();
+        if (_disposed)
+            return;
+
         _sessionIsSystem = !scope.IsRealTenant;
 
         await ReloadAsync();
@@ -214,27 +239,50 @@
     /// <summary>
     /// Re-reads the list. In system scope the read asks for tenant-owned rows too (spec 3.6) - that is
     /// what gives "Publish portal-wide" a source row; a tenant session never sees another tenant's row.
+    /// <para>
+    /// The token is the page's own: navigating away cancels the HTTP read, and every post-await write is
+    /// guarded by <see cref="_disposed"/> (blazor-components.md, rule 3).
+    /// </para>
     /// </summary>
     private async Task ReloadAsync()
     {
+        var token = _loadCts?.Token ?? CancellationToken.None;
+
         try
         {
-            _items = (await Api.ListAsync(includeTenantOwned: _sessionIsSystem)).ToArray();
+            var rows = await Api.ListAsync(_sessionIsSystem, token);
+            if (_disposed)
+                return;
+
+            _items = rows.ToArray();
             _error = null;
         }
         catch (OperationCanceledException)
         {
-            // Navigated away.
+            // The circuit navigated away — the CTS, not a failure.
         }
         catch (Exception ex)
         {
+            if (_disposed)
+                return;
+
             Logger.LogError(ex, "Failed to load notification templates");
             _error = ex.Message;
         }
         finally
         {
-            _loading = false;
+            if (!_disposed)
+                _loading = false;
         }
+    }
+
+    /// <summary>Releases the load token when the circuit unmounts (rule 3).</summary>
+    public void Dispose()
+    {
+        _disposed = true;          // FIRST: a racing continuation checks it before writing state.
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
     }
 
     private void OnKindFilterChanged(string? value)
@@ -368,7 +416,7 @@
             return;
 
         await RunAsync(
-            () => Api.AdoptAsync(row.Id, $"Adopted from the system blueprint: {TitleOf(row)}"),
+            () => Api.AdoptAsync(row.Id, $"Adopted from the system blueprint: {TitleOf(row)}", MutationToken),
             copy => NavigateToRowAsync(copy.Id),
             "adopt");
     }
@@ -386,7 +434,7 @@
             return;
 
         await RunAsync(
-            () => Api.PromoteAsync(row.Id, $"Published portal-wide from {row.OwnerName}: {TitleOf(row)}"),
+            () => Api.PromoteAsync(row.Id, $"Published portal-wide from {row.OwnerName}: {TitleOf(row)}", MutationToken),
             copy => NavigateToRowAsync(copy.Id),
             "publish portal-wide");
     }
@@ -394,6 +442,11 @@
     /// <summary>
     /// Reset (spec 3.2/3.5): the reason dialog is the confirmation - resetting removes the row and the
     /// built-in default applies again, and the operator's own words land in the audit trail.
+    /// <para>
+    /// Optimistic (blazor-components.md § "Landing-page performance pattern", rule 2): the row leaves
+    /// the in-memory list and the grid re-renders, then the delete is dispatched. A failure restores the
+    /// previous array. It never re-reads the list, which would reset the operator's sort and scroll.
+    /// </para>
     /// </summary>
     private async Task ResetAsync(TenantNotificationTemplateDto row)
     {
@@ -410,10 +463,31 @@
         if (result is null)
             return;
 
-        await RunAsync(
-            async () => { await Api.DeleteAsync(row.Id, result.Reason); return row; },
-            async _ => await ReloadAsync(),
-            "reset");
+        var previous = _items;
+        if (_items is not null)
+        {
+            _items = TemplateLandingRows.WithoutReset(_items, row.Id);
+            StateHasChanged();
+        }
+
+        try
+        {
+            await Api.DeleteAsync(row.Id, result.Reason, MutationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit navigated away.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed)
+                return;
+
+            _items = previous;   // rollback: the server still has the row.
+            Logger.LogError(ex, "Failed to reset notification template {TemplateId}", row.Id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
     }
 
     /// <summary>
