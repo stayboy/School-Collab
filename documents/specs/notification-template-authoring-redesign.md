@@ -1,7 +1,9 @@
 # Notification template authoring — landing grid, detail page, and system/tenant ownership
 
-> **Status: adopted design, NOT implemented** — grill round 2026-10-20, owner answered **"all as
-> recommended"** (Q1–Q22 below). This file is the **source of truth for the authoring surface**.
+> **Status: adopted · IMPLEMENTED (2026-10-21, PR #398)** — grill round 2026-10-20, owner answered
+> **"all as recommended"** (Q1–Q22 below); the close-out grill of 2026-10-21 (Q39–Q61) settled the
+> review fixes, and §10 is the as-built record. This file remains the **source of truth for the
+> authoring surface**.
 > It **supersedes §3.10** (management surface) of `documents/specs/assignment-notification-templates.md`
 > and **amends** that file's §3.1 (the "no system-wide blueprint row" note), §3.7 (selection
 > precedence) and §5 (API surface). Data model, renderer, tag vocabulary, constraints semantics and
@@ -94,8 +96,11 @@ contract — no `OnCreate` dialog), `RowActions`, `RowActionsAriaLabel="Template
 **Toolbar filters** (`<ToolbarFilters>`, `DropdownComponent` wrappers, never raw selects):
 All types / Publish / Reminder / Completion / Overdue; All modes / Email / SMS / WhatsApp; All owners /
 System / This tenant. Search is client-side over subject + plain-text body (the `ConfigFlags/Index`
-posture). A `?grade=` arrival renders an info bar naming the filter and keeps every row reachable that
-`AppliesToGrade` allows (the existing rule, moved into `NotificationTemplateScopeRules`).
+posture). A `?grade=` arrival renders a context bar naming the filter and keeps every row reachable that
+`AppliesToGrade` allows (the existing rule, moved into `NotificationTemplateScopeRules`). The bar is a
+`LandingPage` `ContextBar` fragment rendered above the title *inside* the wrapper — not page markup above
+it — so the wrapper keeps ownership of its chrome and the bar is assertable in bUnit
+(`documents/solution/adr-authoring-surface-pattern.md`, decision 3).
 
 **Row actions** (`RowActionsMenu`, `ForceKebab` computed from `HasKebabActions` over all rows):
 
@@ -108,8 +113,11 @@ posture). A `?grade=` arrival renders an info bar naming the filter and keeps ev
 
 ### 3.3 Template editor layout (Detail and Create share it)
 
-`TemplateEditor.razor(.razor.css)` — one component, two modes. Layout mirrors
-`.authoring-layout--cq` (`AssignmentAuthoring.razor.css:141`):
+`TemplateEditor.razor(.razor.css)` — one component, two modes. The page wears the shared
+**`AuthoringShell`** (breadcrumb trail + sticky action bar carrying the title, the owner/status slot, the
+primary action and the secondary kebab), the assignment authoring surface's UX-4/D6/D8 chrome lifted into
+`SchoolCollab.Admin.Shared` — decision 1 of `documents/solution/adr-authoring-surface-pattern.md`. Below
+that shell, the layout mirrors `.authoring-layout--cq` (`AssignmentAuthoring.razor.css:141`):
 
 ```css
 .template-editor-layout {
@@ -147,12 +155,17 @@ chip). A system-scope session creates a **system** row (the API infers scope —
 ### 3.5 Detail page
 
 `TemplateEditor Mode="Edit"`: the two dropdowns are **disabled** with the reason text; Owner chip in the
-header (`System` / tenant name). Action bar under the grid: `Reason` input (recorded in the audit trail),
-`Save` (primary), `Reset to built-in default…` (destructive → confirm + reason). A tenant session opening a
-**system** row renders the editor read-only (no Save/Reset) with `Adopt to this tenant` as the primary
-action. A missing/foreign id renders "Template not found" + Back (the `ConfigFlagDetail` posture).
+shell's action bar (`System` / tenant name). The sticky action bar (§3.3) carries the `Reason` input
+(recorded in the audit trail), `Save` (primary) and the secondary `Reset to built-in default…`
+(destructive → confirm + reason). A tenant session opening a **system** row renders the editor read-only
+(no Save/Reset) with `Adopt to this tenant` as the primary action; the whole state is explained by **one**
+info bar rather than a reason per control, because a single cause explains both locked dropdowns
+(`documents/solution/adr-authoring-surface-pattern.md`, decision 6). A missing/foreign id renders
+"Template not found" + Back (the `ConfigFlagDetail` posture).
 
 No unsaved-changes navigation guard in v1 (recorded; the Assignments authoring guard is not reused here).
+That absence is a **decision, not an omission**: the draft is four fields with one Save, whereas the
+assignment surface's UX-7 guard protects a forty-field form — decision 5 of the ADR.
 
 ### 3.6 Constraints
 
@@ -330,7 +343,8 @@ handler's by-id read is the second, and it is system-scope-gated and guarded —
 - Live overlay semantics between a system row and a tenant row (adopt is a one-way copy; no propagation).
 - An approval workflow for promotions (system scope *is* the gate).
 - Seeding/CSV-importing system templates (System starts empty; built-in code defaults remain the fallback).
-- An unsaved-changes navigation guard on the template editor.
+- An unsaved-changes navigation guard on the template editor (four fields, one Save — the assignment
+  surface's UX-7 guard is not reused; decision 5 of `adr-authoring-surface-pattern.md`).
 - Per-recipient template splitting and any change to the publish dialog's two-stamp model.
 - Mobile screens for template authoring.
 

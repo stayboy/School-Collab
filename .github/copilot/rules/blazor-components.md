@@ -354,6 +354,18 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
    When you create a new read-only list page, copy that file and change only the
    route, the title, the API call, and the columns.
 
+7. **Budget a grid track for the Actions column.** `LandingPage` appends an Actions
+   column whenever `RowActions` is supplied (`EffectiveColumns`), so
+   `LandingGridSettings.GridTemplateColumns` must carry **one track per rendered
+   column, including that one** — six data columns plus a kebab is seven tracks,
+   the last `auto`. Omit it and the kebab falls into an implicit track, which is
+   what the notification-template landing shipped on 2026-10-21
+   (`documents/solution/adr-authoring-surface-pattern.md`).
+
+   Rule 3 is **not landing-specific**: every page or authoring component that
+   loads data in `OnInitializedAsync` owns a `CancellationTokenSource`, and every
+   mutation it dispatches passes that token (see the section below).
+
 ## CancellationTokenSource: loads vs. mutations
 
 A component that only loads data once can use a single `_loadCts` for both the
@@ -366,6 +378,11 @@ user-triggered mutations, use **two separate CTSes**:
   or in `Dispose()`.
 - `_mutationCts` — created once for the component lifetime, disposed only in
   `Dispose()`. Mutations pass `MutationToken` (`_mutationCts.Token`).
+
+**Mutations take a token too.** A single-load component may reuse `_loadCts`, but a
+delete/adopt/toggle must still pass the token — otherwise the request outlives the
+circuit (2026-10-21: the notification-template landing's reset dispatched
+`DeleteAsync` with no token while its read was cancellable).
 
 ```csharp
 private CancellationTokenSource? _loadCts;
