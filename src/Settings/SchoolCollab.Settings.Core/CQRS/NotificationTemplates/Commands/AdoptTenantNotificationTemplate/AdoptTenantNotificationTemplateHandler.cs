@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -11,8 +12,14 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.AdoptTe
 
 /// <summary>
 /// Copies a system-blueprint template into the caller's tenant (redesign spec 3.8). The copy is a
-/// one-way snapshot - subject, body and every constraint row - and the source row is never touched, so a
-/// later system edit does not reach an adopted copy. Audited as <see cref="TemplateChangeKind.Created"/>.
+/// one-way snapshot - title, description, subject, body and every constraint row - and the source row is
+/// never touched, so a later system edit does not reach an adopted copy. Audited as
+/// <see cref="TemplateChangeKind.Created"/>.
+/// <para>
+/// The readable name travels (the operator adopted <i>that</i> template); the code does not - the copy
+/// mints its own from the <see cref="TenantNotificationTemplate.CodeRule"/> rule, so two live rows never
+/// share an identifier (naming spec D7).
+/// </para>
 /// <para>
 /// Refusals: a system-scope caller has no tenant to adopt into (403); an already-tenant-owned source is
 /// not adoptable (409); and an identical constraint set already present in the tenant is a conflict, not
@@ -22,6 +29,7 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.AdoptTe
 public sealed class AdoptTenantNotificationTemplateHandler(
     SettingsDbContext db,
     ITenantProvider tenantProvider,
+    IEntityCodeGenerator entityCodeGenerator,
     TemplateAuditRecorder auditor)
     : ICommandHandler<AdoptTenantNotificationTemplate, TenantNotificationTemplateDto>
 {
@@ -65,7 +73,10 @@ public sealed class AdoptTenantNotificationTemplateHandler(
         }
 
         var copy = TenantNotificationTemplate.Create(
-            tenantId, source.Kind, source.Channel, source.Subject, source.Body,
+            tenantId, source.Kind, source.Channel,
+            source.Title, source.Description,
+            await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct),
+            source.Subject, source.Body,
             source.Constraints.Select(c => (c.Dimension, c.Value)).ToList());
 
         db.TenantNotificationTemplates.Add(copy);

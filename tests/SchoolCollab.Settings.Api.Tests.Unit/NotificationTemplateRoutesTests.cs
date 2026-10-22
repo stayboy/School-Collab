@@ -48,7 +48,8 @@ public class NotificationTemplateRoutesTests
     private static TenantNotificationTemplateDto SampleDto(
         NotificationTemplateKind kind = NotificationTemplateKind.Publish,
         NotificationChannel channel = NotificationChannel.Email) =>
-        new(TemplateId, kind, channel, "Subject for {{Title}}", "Body for {{Title}}",
+        new(TemplateId, kind, channel, "Grade 8 Science reminder", "Sent the day before the lab.", "TPL01",
+            "Subject for {{Title}}", "Body for {{Title}}",
             [new TemplateConstraintDto(Guid.NewGuid(), TemplateConstraintDimension.GradeLevel, "Grade 3")],
             DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1),
             TenantId: null, OwnerName: "System");

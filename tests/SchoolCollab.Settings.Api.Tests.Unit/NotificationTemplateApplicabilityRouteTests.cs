@@ -34,6 +34,7 @@ public class NotificationTemplateApplicabilityRouteTests
     private static TenantNotificationTemplateDto SampleDefaultRow() =>
         new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
             NotificationTemplateKind.Publish, NotificationChannel.Email,
+            "Grade 8 Science reminder", null, "TPL01",
             "Subject for {{Title}}", "Body for {{Title}}", [],
             DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1),
             TenantId: null, OwnerName: "System");

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -14,6 +15,11 @@ namespace SchoolCollab.Settings.Core.CQRS.NotificationTemplates.Commands.Promote
 /// until one owns an override. The source is never modified and the copy is a snapshot, not a live
 /// link. Audited as <see cref="TemplateChangeKind.Created"/> with <c>TenantId = null</c>.
 /// <para>
+/// The copy keeps the title and description and mints its <b>own</b> code from the
+/// <see cref="TenantNotificationTemplate.CodeRule"/> rule, so the source row and the blueprint stay
+/// separately traceable (naming spec D7).
+/// </para>
+/// <para>
 /// This is the <b>one cross-tenant read</b> in the feature: a system-scope session ignores the "Tenant"
 /// filter to reach the source row, and that read is wrapped in
 /// <see cref="ITenantContextAccessor.SuppressTenantGuard"/> (the sanctioned bypass). It is gated by
@@ -25,6 +31,7 @@ public sealed class PromoteTenantNotificationTemplateHandler(
     SettingsDbContext db,
     ITenantProvider tenantProvider,
     ITenantContextAccessor tenantContextAccessor,
+    IEntityCodeGenerator entityCodeGenerator,
     TemplateAuditRecorder auditor)
     : ICommandHandler<PromoteTenantNotificationTemplate, TenantNotificationTemplateDto>
 {
@@ -72,7 +79,10 @@ public sealed class PromoteTenantNotificationTemplateHandler(
         }
 
         var copy = TenantNotificationTemplate.Create(
-            tenantId: null, source.Kind, source.Channel, source.Subject, source.Body,
+            tenantId: null, source.Kind, source.Channel,
+            source.Title, source.Description,
+            await entityCodeGenerator.GenerateAsync(TenantNotificationTemplate.CodeRule, ct),
+            source.Subject, source.Body,
             source.Constraints.Select(c => (c.Dimension, c.Value)).ToList());
 
         db.TenantNotificationTemplates.Add(copy);

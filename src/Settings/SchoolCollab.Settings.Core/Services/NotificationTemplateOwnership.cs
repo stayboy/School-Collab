@@ -59,6 +59,9 @@ public static class NotificationTemplateOwnership
         new(template.Id,
             template.Kind,
             template.Channel,
+            template.Title,
+            template.Description,
+            template.Code,
             template.Subject,
             template.Body,
             template.Constraints

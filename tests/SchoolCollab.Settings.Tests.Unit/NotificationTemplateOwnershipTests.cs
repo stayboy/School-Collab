@@ -54,14 +54,15 @@ public class NotificationTemplateOwnershipTests
         _db = new SettingsDbContext(options, _tenants);
         var auditor = new TemplateAuditRecorder(new SystemActorAccessor("test:actor", "Test Actor"));
         var accessor = new TenantContextAccessor(_tenants);
+        var generator = await TestEntityCodeSetup.SeedAndCreateGeneratorAsync(options, _tenants);
 
-        _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, auditor);
+        _create = new CreateTenantNotificationTemplateHandler(_db, _tenants, generator, auditor);
         _update = new UpdateTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _delete = new DeleteTenantNotificationTemplateHandler(_db, _tenants, auditor);
         _list = new GetTenantNotificationTemplatesHandler(_db, _tenants);
         _byId = new GetTenantNotificationTemplateByIdHandler(_db);
-        _adopt = new AdoptTenantNotificationTemplateHandler(_db, _tenants, auditor);
-        _promote = new PromoteTenantNotificationTemplateHandler(_db, _tenants, accessor, auditor);
+        _adopt = new AdoptTenantNotificationTemplateHandler(_db, _tenants, generator, auditor);
+        _promote = new PromoteTenantNotificationTemplateHandler(_db, _tenants, accessor, generator, auditor);
 
         // Two registered tenants, so the owner projection has names to join.
         AsSystem();
@@ -86,10 +87,13 @@ public class NotificationTemplateOwnershipTests
         NotificationTemplateKind kind = NotificationTemplateKind.Publish,
         NotificationChannel channel = NotificationChannel.Email,
         string body = "Body for {{Title}}",
+        string? subject = "Subject",
+        string title = "Grade 8 Science reminder",
+        string? description = null,
         params (TemplateConstraintDimension Dimension, string Value)[] constraints) =>
         _create.HandleAsync(new CreateTenantNotificationTemplate(
             new CreateTenantNotificationTemplateRequest(
-                kind, channel, "Subject", body,
+                kind, channel, title, description, subject, body,
                 constraints.Select(c => new TemplateConstraintRequest(c.Dimension, c.Value)).ToList(),
                 "test"),
             "test"));
@@ -196,7 +200,7 @@ public class NotificationTemplateOwnershipTests
         AsTenant(_tenantA);
         var act = () => _update.HandleAsync(new UpdateTenantNotificationTemplate(
             system.Id,
-            new UpdateTenantNotificationTemplateRequest("Subject", "HIJACKED", [], "attempt"),
+            new UpdateTenantNotificationTemplateRequest("Renamed", null, "Subject", "HIJACKED", [], "attempt"),
             "attempt"));
 
         await act.Should().ThrowAsync<TenantNotificationTemplateScopeException>();
@@ -227,7 +231,8 @@ public class NotificationTemplateOwnershipTests
     public async Task Writes_RejectGuidEmptyAsAScope()
     {
         var act = () => Task.FromResult(TenantNotificationTemplate.Create(
-            Guid.Empty, NotificationTemplateKind.Publish, NotificationChannel.Email, "s", "b"));
+            Guid.Empty, NotificationTemplateKind.Publish, NotificationChannel.Email,
+            title: "Scope check", description: null, code: null, subject: "s", body: "b"));
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -249,6 +254,7 @@ public class NotificationTemplateOwnershipTests
         copy.TenantId.Should().Be(_tenantA);
         copy.OwnerName.Should().Be("Northfield");
         copy.Body.Should().Be("BLUEPRINT BODY");
+        copy.Title.Should().Be(system.Title, "the readable name travels with the copy");
         copy.Constraints.Should().ContainSingle()
             .Which.Value.Should().Be("Grade 3");
 
@@ -272,6 +278,21 @@ public class NotificationTemplateOwnershipTests
 
         await act.Should().ThrowAsync<TenantNotificationTemplateConflictException>();
         system.Id.Should().NotBe(blueprint.Id);
+    }
+
+    [TestMethod]
+    public async Task Adopt_MintsItsOwnCode_SoTheCopyAndTheBlueprintDiffer()
+    {
+        // Naming spec D7: an adopted copy is a new live row, so it gets its own code — one code per live
+        // row is what makes the code usable as a reference.
+        AsSystem();
+        var system = await CreateAsync();
+
+        AsTenant(_tenantA);
+        var copy = await AdoptAsync(system.Id);
+
+        copy.Code.Should().NotBeNullOrWhiteSpace();
+        copy.Code.Should().NotBe(system.Code);
     }
 
     [TestMethod]
@@ -313,6 +334,7 @@ public class NotificationTemplateOwnershipTests
         blueprint.TenantId.Should().BeNull();
         blueprint.OwnerName.Should().Be("System");
         blueprint.Body.Should().Be("NORTHFIELD BODY");
+        blueprint.Title.Should().Be(tenantRow.Title, "the readable name travels with the copy");
         blueprint.Constraints.Should().ContainSingle()
             .Which.Value.Should().Be("Grade 3");
 
@@ -321,6 +343,20 @@ public class NotificationTemplateOwnershipTests
             .AsNoTracking().SingleAsync(t => t.Id == tenantRow.Id);
         source.TenantId.Should().Be(_tenantA, "promote copies; it never re-points the tenant's row");
         source.IsDeleted.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task Promote_MintsItsOwnCode_SoTheBlueprintAndTheSourceDiffer()
+    {
+        // Naming spec D7: the source row and the blueprint copy stay separately traceable.
+        AsTenant(_tenantA);
+        var tenantRow = await CreateAsync();
+
+        AsSystem();
+        var blueprint = await PromoteAsync(tenantRow.Id);
+
+        blueprint.Code.Should().NotBeNullOrWhiteSpace();
+        blueprint.Code.Should().NotBe(tenantRow.Code);
     }
 
     [TestMethod]

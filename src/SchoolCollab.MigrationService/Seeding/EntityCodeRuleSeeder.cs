@@ -9,7 +9,8 @@ namespace SchoolCollab.MigrationService.Seeding;
 /// <summary>
 /// Seeds the default <see cref="EntityCodeRule"/> rows (shared blueprints,
 /// <c>TenantId = null</c>) and their <see cref="EntityCodeSegment"/> children for
-/// student, staff, and assignment code generation (spec §3.7). Idempotent: skips
+/// student, staff, assignment, topic and notification-template code generation (spec §3.7;
+/// naming spec D5 for the template rule). Idempotent: skips
 /// rules whose <c>Code</c> already exists. Mirrors the
 /// <see cref="CodedValueSeeder"/> bypass pattern (guard suppressed for the seed
 /// pass — global-tenant-filter.md §12 Step 5).
@@ -42,6 +43,7 @@ public sealed class EntityCodeRuleSeeder(
                 stamp: "ASG",
                 ct);
             await SeedTopicRuleAsync(ct);
+            await SeedNotificationTemplateRuleAsync(ct);
         }
     }
 
@@ -75,6 +77,48 @@ public sealed class EntityCodeRuleSeeder(
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Seeded EntityCodeRule {Code} (word-initials + numeric)", code);
+    }
+
+    /// <summary>
+    /// Seeds the <c>NOTIFICATION_TEMPLATE_CODE</c> template (naming spec D5): a fixed <c>TPL</c>
+    /// stamp followed by a <see cref="SegmentType.NumericSequence"/> (zero-padded to two digits, no
+    /// period reset), producing codes like <c>TPL01</c>, <c>TPL02</c>, … <c>TPL100</c>.
+    /// <para>
+    /// The sequence carries an explicit <c>999</c> upper limit: a numeric segment with no upper limit
+    /// caps at <c>10^MinWidth - 1</c>, so a two-digit width alone would collide at the hundredth
+    /// template. Width and limit are separate knobs — the width still pads to two digits
+    /// (<c>TPL07</c>), the limit lets the hundredth row through (<c>TPL100</c>).
+    /// </para>
+    /// </summary>
+    private async Task SeedNotificationTemplateRuleAsync(CancellationToken ct)
+    {
+        const string code = TenantNotificationTemplate.CodeRule;
+        var existing = await db.EntityCodeRules
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Code == code, ct);
+        if (existing is not null)
+        {
+            logger.LogDebug("EntityCodeRule {Code} already exists. Skipping", code);
+            return;
+        }
+
+        var rule = EntityCodeRule.Create(
+            code,
+            "Notification Template Code Template",
+            "Auto-generates notification template codes (TPL01, TPL02, …)",
+            isActive: true);
+        rule.AddSegment(EntityCodeSegment.Fixed(0, "stamp", "TPL"));
+        rule.AddSegment(EntityCodeSegment.Sequence(
+            index: 1,
+            role: null,
+            type: SegmentType.NumericSequence,
+            minWidth: 2,
+            upperLimit: "999"));
+
+        db.EntityCodeRules.Add(rule);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Seeded EntityCodeRule {Code} (stamp TPL + numeric)", code);
     }
 
     private async Task SeedRuleAsync(string code, string name, string description, string stamp, CancellationToken ct)

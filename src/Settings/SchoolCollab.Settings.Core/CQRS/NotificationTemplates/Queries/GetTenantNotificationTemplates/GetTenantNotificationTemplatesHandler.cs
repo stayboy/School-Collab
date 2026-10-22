@@ -44,11 +44,8 @@ public sealed class GetTenantNotificationTemplatesHandler(SettingsDbContext db, 
         var tenantNames = await NotificationTemplateOwnership.ResolveOwnerNamesAsync(db, ct);
 
         return templates
-            .Select(t => new TenantNotificationTemplateDto(
-                t.Id, t.Kind, t.Channel, t.Subject, t.Body,
-                t.Constraints.Select(c => new TemplateConstraintDto(c.Id, c.Dimension, c.Value)).ToList(),
-                t.CreatedAt, t.UpdatedAt,
-                t.TenantId, NotificationTemplateOwnership.OwnerName(t.TenantId, tenantNames)))
+            .Select(t => NotificationTemplateOwnership.ToDto(
+                t, NotificationTemplateOwnership.OwnerName(t.TenantId, tenantNames)))
             .ToList();
     }
 }

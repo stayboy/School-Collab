@@ -1066,6 +1066,11 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("channel");
 
+                    b.Property<string>("Code")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("code");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -1073,6 +1078,11 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -1099,12 +1109,23 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("title");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
                     b.HasKey("Id")
                         .HasName("pk_tenant_notification_templates");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_notification_templates_tenant_code")
+                        .HasFilter("is_deleted = false AND code IS NOT NULL");
 
                     b.HasIndex("TenantId", "Kind", "Channel")
                         .HasDatabaseName("ix_tenant_notification_templates_tenant_kind_channel")

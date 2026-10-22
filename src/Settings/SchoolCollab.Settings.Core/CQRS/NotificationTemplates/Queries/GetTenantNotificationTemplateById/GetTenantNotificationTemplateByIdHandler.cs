@@ -28,9 +28,6 @@ public sealed class GetTenantNotificationTemplateByIdHandler(SettingsDbContext d
 
         var ownerName = await NotificationTemplateOwnership.ResolveOwnerNameAsync(db, template.TenantId, ct);
 
-        return new TenantNotificationTemplateDto(
-            template.Id, template.Kind, template.Channel, template.Subject, template.Body,
-            template.Constraints.Select(c => new TemplateConstraintDto(c.Id, c.Dimension, c.Value)).ToList(),
-            template.CreatedAt, template.UpdatedAt, template.TenantId, ownerName);
+        return NotificationTemplateOwnership.ToDto(template, ownerName);
     }
 }

@@ -32,6 +32,10 @@ internal sealed class TenantNotificationTemplateConfiguration
         builder.Property(x => x.Subject).HasMaxLength(500);
         builder.Property(x => x.Body).IsRequired().HasMaxLength(4000);
 
+        builder.Property(x => x.Title).IsRequired().HasMaxLength(120);
+        builder.Property(x => x.Description).HasMaxLength(500);
+        builder.Property(x => x.Code).HasMaxLength(16);
+
         // Several live templates per tenant per kind × channel (round notification-templates-b2c):
         // an empty constraint set is the tenant default and each constrained row is a candidate for
         // the applicability matcher (spec §3.1.1/Q15). NON-unique — it is a lookup index now, not the
@@ -40,6 +44,15 @@ internal sealed class TenantNotificationTemplateConfiguration
         builder.HasIndex(x => new { x.TenantId, x.Kind, x.Channel })
             .HasDatabaseName("ix_tenant_notification_templates_tenant_kind_channel")
             .HasFilter("is_deleted = false");
+
+        // The generated template code is the row's exact reference (naming spec D6), so it is unique
+        // per scope — the (TenantId, StudentNumber) precedent. Filtered to live rows AND to rows that
+        // actually carry a code: every row that predates the code column has NULL, and a NULL is a
+        // feature there (it renders as a dash), never a value to keep unique.
+        builder.HasIndex(x => new { x.TenantId, x.Code })
+            .HasDatabaseName("ix_tenant_notification_templates_tenant_code")
+            .IsUnique()
+            .HasFilter("is_deleted = false AND code IS NOT NULL");
 
         // Constraint rows: cascade on template deletion; field access because
         // Constraints is a read-only IReadOnlyList over the _constraints backing

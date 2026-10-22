@@ -20,6 +20,12 @@ namespace SchoolCollab.Settings.Core.Domain;
 public sealed class TenantNotificationTemplate
     : IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion, IHybridTenantEntity
 {
+    /// <summary>
+    /// The entity-code rule that mints <see cref="Code"/> (naming spec D5). In-context: Settings owns
+    /// both the rule and the row, so the create/adopt/promote handlers call the generator directly.
+    /// </summary>
+    public const string CodeRule = "NOTIFICATION_TEMPLATE_CODE";
+
     private TenantNotificationTemplate() { }
 
     /// <inheritdoc />
@@ -30,6 +36,25 @@ public sealed class TenantNotificationTemplate
 
     /// <summary>The delivery channel this template renders for.</summary>
     public NotificationChannel Channel { get; private set; }
+
+    /// <summary>
+    /// The operator's own name for this template ("Grade 8 Science reminder") - the row's identity in
+    /// every surface (naming spec D3). Required; never derived from the body or the subject.
+    /// </summary>
+    public string Title { get; private set; } = default!;
+
+    /// <summary>
+    /// Optional one-or-two-sentence note on what the template is for. Display-only metadata: it is
+    /// never merged into render tags, delivered, or read by the applicability matcher (naming spec D4).
+    /// </summary>
+    public string? Description { get; private set; }
+
+    /// <summary>
+    /// The generated template code (<c>TPL07</c>), minted once at creation from the
+    /// <c>NOTIFICATION_TEMPLATE_CODE</c> entity-code rule (naming spec D5/D6). Never rewritten by
+    /// <see cref="Update"/>; <see langword="null"/> for a row that predates the code column.
+    /// </summary>
+    public string? Code { get; private set; }
 
     /// <summary>Subject line (email only; null for SMS/WhatsApp).</summary>
     public string? Subject { get; private set; }
@@ -74,13 +99,21 @@ public sealed class TenantNotificationTemplate
     private readonly List<TemplateConstraint> _constraints = [];
 
     /// <summary>Template key for audit logging: "{kind}:{channel}".</summary>
-    public string TemplateKey => $"{Kind}:{Channel}";    /// <summary>
+    public string TemplateKey => $"{Kind}:{Channel}";
+
+    /// <summary>
     /// Creates a new template row in <paramref name="tenantId"/>'s scope
     /// (<see langword="null"/> = system blueprint).
     /// </summary>
     /// <param name="tenantId">
     /// The owning tenant, or <see langword="null"/> for the system blueprint. <see cref="Guid.Empty"/>
     /// is rejected: it is the in-process sentinel for "no tenant selected", never a stored scope.
+    /// </param>
+    /// <param name="title">The operator's own name for the template. Required (naming spec D1).</param>
+    /// <param name="description">Optional free-text note describing the template.</param>
+    /// <param name="code">
+    /// The freshly minted <c>NOTIFICATION_TEMPLATE_CODE</c>; a blank value is stored as
+    /// <see langword="null"/>. There is no later write path - a code is set once, here.
     /// </param>
     /// <param name="constraints">
     /// Constraint specs (dimension + value pairs). The rows are built inside
@@ -91,10 +124,16 @@ public sealed class TenantNotificationTemplate
         Guid? tenantId,
         NotificationTemplateKind kind,
         NotificationChannel channel,
+        string title,
+        string? description,
+        string? code,
         string? subject,
         string body,
         IReadOnlyList<(TemplateConstraintDimension Dimension, string Value)>? constraints = null)
     {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Template title must not be empty.", nameof(title));
+
         if (string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template body must not be empty.", nameof(body));
 
@@ -111,6 +150,9 @@ public sealed class TenantNotificationTemplate
             TenantId = tenantId,
             Kind = kind,
             Channel = channel,
+            Title = title.Trim(),
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+            Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim(),
             // Spec 5: the subject is ignored for every plain-text channel (an SMS or WhatsApp body has
             // no subject line), so a caller-supplied subject is dropped rather than silently stored.
             Subject = channel == NotificationChannel.Email ? subject : null,
@@ -126,20 +168,37 @@ public sealed class TenantNotificationTemplate
         }
 
         return template;
-    }    /// <summary>
-    /// Replaces the template's subject, body and constraints. Stamps <see cref="UpdatedAt"/>.
-    /// Returns the previous values so the caller can write an audit row.
+    }
+
+    /// <summary>
+    /// Replaces the template's title, description, subject, body and constraints. Stamps
+    /// <see cref="UpdatedAt"/>. Returns the previous values so the caller can write an audit row.
+    /// <see cref="Code"/> is deliberately not a parameter: a generated code is set once at creation
+    /// and never rewritten (naming spec D6).
     /// </summary>
-    public (string? PreviousSubject, string PreviousBody, IReadOnlyList<TemplateConstraint> PreviousConstraints) Update(
+    public (string? PreviousSubject, string PreviousBody, IReadOnlyList<TemplateConstraint> PreviousConstraints,
+        string PreviousTitle, string? PreviousDescription) Update(
+        string title,
+        string? description,
         string? subject,
         string body,
         IReadOnlyList<TemplateConstraint> constraints)
     {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Template title must not be empty.", nameof(title));
+
         if (string.IsNullOrWhiteSpace(body))
             throw new ArgumentException("Template body must not be empty.", nameof(body));
 
-        var previous = (Subject, Body, _constraints.ToList());
+        var previous = (
+            PreviousSubject: Subject,
+            PreviousBody: Body,
+            PreviousConstraints: (IReadOnlyList<TemplateConstraint>)_constraints.ToList(),
+            PreviousTitle: Title,
+            PreviousDescription: Description);
 
+        Title = title.Trim();
+        Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
         // Spec 5: the subject is ignored for SMS - only an email template carries one.
         Subject = Channel == NotificationChannel.Email ? subject : null;
         Body = body;
