@@ -1,0 +1,64 @@
+/*
+    AuthoringShell chrome — moved verbatim from AssignmentAuthoring.razor.css (UX-4/UX-5/D8), which is
+    now its only consumer's consumer. The shell is the single home of this chrome; see
+    documents/solution/adr-authoring-surface-pattern.md, decision 1.
+*/
+
+.authoring-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ── Authored breadcrumb (v5 removed FluentBreadcrumb; D8 authored the replacement) ── */
+
+.authoring-breadcrumb {
+    display: flex;
+    align-items: center;
+    padding: 2px 4px;
+}
+
+.authoring-crumb-separator {
+    padding: 0 6px;
+    color: var(--neutral-foreground-3, inherit);
+}
+
+.authoring-crumb-current {
+    color: var(--neutral-foreground-1, inherit);
+}
+
+/* ── Sticky action bar (UX-4/UX-5) ─────────────────────────────────── */
+
+.authoring-actionbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 16px;
+    background-color: var(--neutral-layer-1);
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: 6px;
+}
+
+.authoring-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.authoring-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.authoring-actionbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

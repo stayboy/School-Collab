@@ -7,12 +7,12 @@ using SchoolCollab.Settings.Core.Domain;
 namespace SchoolCollab.Settings.Core.Data.Configurations;
 
 internal sealed class TenantNotificationTemplateConfiguration
-    : TenantEntityTypeConfigurationBase<TenantNotificationTemplate>
+    : TenantOrGlobalEntityTypeConfigurationBase<TenantNotificationTemplate>
 {
     public TenantNotificationTemplateConfiguration(Expression<Func<Guid>> tenantIdAccessor)
         : base(tenantIdAccessor) { }
 
-    protected override void ConfigureTenantEntity(EntityTypeBuilder<TenantNotificationTemplate> builder)
+    protected override void ConfigureHybridEntity(EntityTypeBuilder<TenantNotificationTemplate> builder)
     {
         builder.ToTable("tenant_notification_templates");
 

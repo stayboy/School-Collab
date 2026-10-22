@@ -29,12 +29,16 @@ public sealed record ApplicableTemplateSlotDto(
 /// <see cref="IsDefault"/> marks the tenant default — the slot's only row with no constraints — which
 /// the card highlights in place, rather than promoting it to the head of the list (that promotion is
 /// the matcher's publish-time selection rule, spec §3.7/Q67).
+/// <see cref="TenantId"/> / <see cref="OwnerName"/> say whether the row is tenant-owned or part of the
+/// system blueprint (redesign spec §3.7), so the card can mark a system row.
 /// </summary>
 public sealed record ApplicableTemplateDto(
     Guid Id,
     string? Subject,
     bool IsDefault,
-    IReadOnlyList<ApplicableConstraintDto> Constraints);
+    IReadOnlyList<ApplicableConstraintDto> Constraints,
+    Guid? TenantId,
+    string OwnerName);
 
 /// <summary>
 /// One constraint of an applicable template. <see cref="Display"/> is the label for

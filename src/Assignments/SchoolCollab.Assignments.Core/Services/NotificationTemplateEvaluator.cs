@@ -10,13 +10,15 @@ namespace SchoolCollab.Assignments.Core.Services;
 ///
 /// <para><b>Order.</b> By <b>specificity</b>: the count of <b>distinct constrained dimensions</b>, not
 /// the row count (three GradeLevel values on one candidate is ONE dimension, so a two-dimension
-/// candidate outranks it). <b>Tie (spec §3.7 / Q67): the tenant default wins.</b> When two or more
-/// candidates share the top specificity the tenant-wide unconstrained template is selected ahead of
-/// them — ambiguity resolves to the conservative, admin-authored baseline rather than an arbitrary
-/// pick between equally specific rows, and it is what the publish dialog pre-selects. With no default
-/// available the <b>oldest</b> <see cref="NotificationTemplateCandidate.CreatedAt"/> wins —
-/// <c>UpdatedAt</c> moves on edit and would be non-deterministic. The template id is the final
-/// tie-break so the order is total.</para> </summary>
+/// candidate outranks it). Ties break by <b>scope rank</b> — a tenant row before the system blueprint
+/// it shadows — and then by the Q67 default rule <b>within that scope</b>. A system candidate whose
+/// constraint set duplicates a tenant candidate's is dropped before ordering (redesign spec §3.9).
+/// <b>Tie (spec §3.7 / Q67): that scope's default wins.</b> When two or more candidates share the top
+/// specificity the unconstrained template of the same scope is selected ahead of them — ambiguity
+/// resolves to the conservative, admin-authored baseline rather than an arbitrary pick between equally
+/// specific rows, and it is what the publish dialog pre-selects. With no default available the
+/// <b>oldest</b> <see cref="NotificationTemplateCandidate.CreatedAt"/> wins — <c>UpdatedAt</c> moves on
+/// edit and would be non-deterministic. The template id is the final tie-break so the order is total.</para> </summary>
 public static class NotificationTemplateEvaluator
 {
     /// <summary>
@@ -34,32 +36,64 @@ public static class NotificationTemplateEvaluator
             .Where(candidate => IsApplicable(candidate, context))
             .ToList();
 
-        var ranked = applicable
+        // Shadowing (redesign spec §3.9): a system-blueprint candidate whose constraint set equals a
+        // tenant candidate's is the row that tenant overrides - the tenant copy IS the override, so the
+        // blueprint twin must not compete with it (or win a tie on CreatedAt).
+        var tenantIdentities = applicable
+            .Where(candidate => !candidate.IsSystem)
+            .Select(SetIdentity)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var visible = tenantIdentities.Count == 0
+            ? applicable
+            : applicable
+                .Where(candidate => !candidate.IsSystem || !tenantIdentities.Contains(SetIdentity(candidate)))
+                .ToList();
+
+        var ranked = visible
             .OrderByDescending(Specificity)
+            // Scope rank ascending (tenant = 0, system = 1): an equally specific tenant row outranks the
+            // blueprint it shadows.
+            .ThenBy(candidate => candidate.IsSystem ? 1 : 0)
             .ThenBy(candidate => candidate.CreatedAt)
             .ThenBy(candidate => candidate.TemplateId)
             .ToList();
 
         // §3.7 / Q67 tie rule: "most specific match, tie → tenant default". Two or more equally
-        // specific constrained candidates are ambiguous, so the tenant-wide default wins outright
+        // specific constrained candidates are ambiguous, so the unconstrained default wins outright
         // instead of the oldest of the tied rows. The default is specificity 0 and therefore never
         // shares a group with a constrained candidate — it is promoted OVER the tied group, not
         // ordered inside it (an intra-group "default first" key would be a no-op by construction).
+        // The promotion is scoped (redesign spec §3.9): the tied group's OWN scope supplies the
+        // default, so a tenant tie resolves to the tenant default and a system tie to the system one.
         // With no default to fall back on, the oldest CreatedAt wins.
         if (ranked.Count >= 2
             && Specificity(ranked[0]) == Specificity(ranked[1])
+            && ranked[0].IsSystem == ranked[1].IsSystem
             && Specificity(ranked[0]) > 0)
         {
-            var tenantDefault = ranked.FirstOrDefault(candidate => Specificity(candidate) == 0);
-            if (tenantDefault is not null)
+            var scopeDefault = ranked.FirstOrDefault(candidate =>
+                Specificity(candidate) == 0 && candidate.IsSystem == ranked[0].IsSystem);
+            if (scopeDefault is not null)
             {
-                ranked.Remove(tenantDefault);
-                ranked.Insert(0, tenantDefault);
+                ranked.Remove(scopeDefault);
+                ranked.Insert(0, scopeDefault);
             }
         }
 
         return ranked;
     }
+
+    /// <summary>
+    /// An order- and case-insensitive identity for a candidate's constraint set, used for shadowing:
+    /// two rows a user would call "the same constraints" produce the same string.
+    /// </summary>
+    private static string SetIdentity(NotificationTemplateCandidate candidate) =>
+        string.Join(
+            '|',
+            candidate.Constraints
+                .Select(c => $"{c.Dimension.Trim().ToLowerInvariant()}:{c.Value.Trim().ToLowerInvariant()}")
+                .OrderBy(x => x, StringComparer.Ordinal));
 
     /// <summary>
     /// The winning candidate for <paramref name="context"/>, or <see langword="null"/> when nothing

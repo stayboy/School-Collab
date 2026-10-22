@@ -68,7 +68,13 @@ Document owner. Read the source specs/review docs, write the `## Plan` section
 of the round doc (goal, scope, expected files, acceptance criteria), author the
 worker and reviewer task specs, and own the round doc end to end. No code
 edits. On acceptance, adjudicate the REVIEW block against your criteria and
-write the `## Acceptance` verdict (CLOSED, or remaining P1s). For UI rounds,
+write the `## Acceptance` verdict (CLOSED, or remaining P1s). When the plan named
+ticket issues (`/to-tickets`), the verdict also carries **one row per named ticket** —
+its own acceptance criteria (its `## Acceptance criteria` checkboxes or the spec
+sections it cites) checked against the diff and the parent's build/test numbers — and
+the parent closes the met ones citing that row, the round doc and the carrying PR; a
+deferred or descoped ticket's row is a comment and the issue **stays open**. Never a
+parent issue. For UI rounds,
 also derive the tester-scope handover from the changed-files list: the changed
 files, the pages/dialogs/landing pages that render them, the ApiClient methods
 they call, and navigation entry points — one line of rationale per entry. The
@@ -140,14 +146,39 @@ omission in its report rather than silently proceed:
   `NotSupportedException` hole and the capped `{{Description}}`.
 - **The WORKER REPORT is context, never evidence.** Every finding cites a diff line; none may rest on
   the worker's prose.
+- **The behaviour rows the reviewer owes the brief (owner, 2026-10-21 — Q48).** The brief names these
+  three, and the report shows them applied:
+  - **Precedent before citation.** A rule's literal text is not a finding until the nearest sibling
+    handler / component / test is read. Where precedent and rule disagree, the finding is *"rule and
+    precedent disagree"*, not a breach of the rule.
+  - **Widened-read blast radius.** When a change widens what a read returns — a scope, a filter, an
+    `include…` flag, a tenant union — every consumer is re-derived in the same plan, and the plan names
+    them. A comparison or badge written against the narrower semantics is a P1, not a follow-up.
+  - **A declared deviation amends its spec in the same PR.** An `as-built` note is not a substitute.
 
 Return ONLY:
 
     REVIEW
-    Verdict: PASS | P1 | P2-only
-    P1: <file:line — issue>   (one per line; none if empty)
-    P2: <file:line — issue>
+    Standards: PASS | P1 | P2-only
+    Spec: PASS | P1 | P2-only
+    P1: [Standards|Spec] <file:line — issue>   (one per line; none if empty)
+    P2: [Standards|Spec] <file:line — issue>
     Best-practices: <no overwrites / skills honored / readable | violations as P1/P2 above>
+
+**Two verdicts, one seat (Q47).** `Standards:` and `Spec:` are reported side by side and never
+blended: a finding belongs to exactly one axis, and the report never picks a single winner across
+axes — that reranking is what the separation exists to prevent. `## Review` carries the two reports
+**unmerged**, under their own headings.
+
+**Provenance and the smell baseline (owner, 2026-10-21).** The two-axis REVIEW block is this
+contract's in-seat implementation of the `code-review` skill's method
+(`~/.agents/skills/code-review/SKILL.md`): Tier 0 self-review invokes that skill directly;
+this seat runs it in-contract, with the contract's per-surface rule set as this repo's
+standards sources. On the Standards axis, read the skill's smell baseline once per review
+(its step 3: twelve named Fowler smells) and apply it to the diff hunks as judgement-call
+**P2s** — a documented repo rule always overrides a baseline smell, and anything tooling
+already enforces is skipped. Smell findings land in the existing `P2: [Standards]` rows;
+the block gains no new line. Tier 1's parent scope-check stays smell-free.
 
 ## UI Tester
 
@@ -182,7 +213,12 @@ repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
    file:line evidence for each, or flag the miss.
 2. **Scope gates** — UI files, contract-shape changes, migrations, committed
    secrets, CPM/version rules: is the plan's in/out boundary honest, and does
-   its expected-files list stay inside it?
+   its expected-files list stay inside it? **Reviewability (owner,
+   2026-10-21):** does the whole expected diff fit one reviewer pass (the
+   plan-step sizing rule)? A plan that honestly exceeds it and cannot be
+   re-sliced into workstreams is a **P1** — the round parks with its
+   recommendation (re-slice grill first, then the `/to-tickets` front door)
+   rather than proceeding to a mega-round.
 3. **Acceptance honesty** — would each test the plan calls "discriminating"
    actually fail against the pre-fix code? Name every one that cannot fail. A test is
    *proved* discriminating only when it has been run against the pre-fix base and failed;
@@ -197,6 +233,13 @@ repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
    once shipped stale reviewer rows that contradicted its own headline because the copy was
    trusted instead of diffed.
 
+**Unattended rounds: append a FRONTIER block (owner, 2026-10-21).** When the brief says
+the round is unattended, the gate — the only non-author seat that runs on every tier —
+also adjudicates the plan's enumerated frontier: echo **each Q# accepted**, one per
+line; any `not accepted: Q<k> — reason` refusal, missing echo, count mismatch or
+silence fails the block and the parent parks the round. Attended rounds carry no block —
+the owner answers the frontier.
+
 Return ONLY:
 
     PLAN REVIEW
@@ -206,3 +249,7 @@ Return ONLY:
     Open decisions: <none | Q1: <decision fork the plan leaves open> — ➡️ <recommended answer>   (genuine forks only; never a substitute for a P1)
     Gates: <UI: none|risk · contract: none|risk · migrations: none|risk · secrets: none|risk>
     Acceptance honesty: <ok | tests that cannot fail, one per line>
+    FRONTIER   (unattended rounds only)
+    accepted: Q<k> — <decision accepted as recommended>   (one per accepted question)
+    not accepted: Q<k> — <reason>   (any line parks the round)
+    accepted: N of N

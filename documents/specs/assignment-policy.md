@@ -145,6 +145,6 @@ uncapped** (the `MaxNotifications is >= 0` posture) rather than wiping a sendout
 | Q7 — non-positive cap ⇒ 400 at both write paths; null accepted | `TenantAssignmentPolicyHandlerTests`, `GradeAssignmentPolicyHandlerTests`, `GradeAssignmentPolicyRoutesTests`, `AssignmentPolicyRoutesTests` |
 | D4/D5 — role caps, student exemption, smaller cap wins, non-positive ⇒ uncapped | `NotificationRecipientFilterTests` |
 | Q6/D3 — derived `RequiresApproval` OR, per-grade cache, fail-open, guarded flag read | `AssignmentRequiresApprovalProjectionTests`, `AssignmentIndexBunitTests`, `AssignmentDetailBunitTests` |
-| D2 — wizard pre-fill + `Mandatory` lock, widened always-200 body | `AssignmentCreateBunitTests`, `AssignmentSignatureDefaultRouteTests` |
+| D2 — wizard pre-fill + `Mandatory` lock, widened always-200 body | `AssignmentCreateBunitTests`, `AssignmentEffectivePolicyRouteTests` |
 | D3 enforcement OR (publish/schedule) | `AssignmentApprovalPolicyReconciliationTests` |
 | D6 — grid, dialog (per-scope writes, no-change save), card wiring | `AssignmentPolicyEditorTests`, `AssignmentPolicyFieldEditDialogTests`, `GradeLevelDetailPageTests` |

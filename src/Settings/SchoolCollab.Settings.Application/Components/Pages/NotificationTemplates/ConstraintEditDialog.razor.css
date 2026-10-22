@@ -1,0 +1,9 @@
+.constraint-edit__subject {
+    margin: 0 0 4px;
+    font-weight: 600;
+}
+
+.constraint-edit__dimension {
+    margin: 0 0 12px;
+    color: var(--neutral-foreground-hint, #616161);
+}

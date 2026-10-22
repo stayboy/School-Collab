@@ -107,6 +107,13 @@ authoring.
 **UX-1** — The six compartments are the canonical assignment information
 architecture; the same ordering and grouping is used in Create, Edit and View.
 
+**UX-1a — Chrome (owner, 2026-10-21).** Compartment 1 renders as a **headerless panel**: no visible
+title, the `PanelSection` box shape (1px border, radius 8, padding 12) drawn with the theme's divider
+token — never a literal colour — and `aria-label="Basics"` as its accessible name. Every other
+compartment keeps its visible title, so the invariant is **at most one** title per compartment, not
+exactly one: the code comment that called it "X-1: exactly one" had no spec behind it
+(`documents/solution/adr-authoring-surface-pattern.md`, decision 4).
+
 **UX-2** — Compartment 1's Type/Grading choice gates the *consequences* shown in
 compartment 4 and the availability of compartment 6; it never reorders or removes
 a compartment (§12).

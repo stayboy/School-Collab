@@ -191,26 +191,26 @@ public class ApplicableNotificationTemplatesHandlerTests
     }
 
     [TestMethod]
-    public async Task ReturnsTheEightEmailAndSmsSlotsOnly()
+    public async Task ReturnsTheTwelveAuthorableKindAndChannelSlots()
     {
         // Slot shape, not row shape: every authorable kind × channel is present (empty or not) so the
-        // card renders uniformly, and WhatsApp has no slot — the entity refuses to create such a row.
+        // card renders uniformly, and WhatsApp IS authorable (redesign spec §3.10), so it has one.
         AsTenant(TenantA);
 
         var result = await ApplicableAsync(GradeA);
 
-        result.Slots.Should().HaveCount(8);
+        result.Slots.Should().HaveCount(12);
         result.Slots.Select(s => (s.Kind, s.Channel)).Should().OnlyHaveUniqueItems();
         result.Slots.Select(s => s.Channel).Should()
-            .OnlyContain(c => c == NotificationChannel.Email || c == NotificationChannel.SMS);
-        result.Slots.Should().NotContain(s => s.Channel == NotificationChannel.WhatsApp);
+            .OnlyContain(c => c == NotificationChannel.Email || c == NotificationChannel.SMS || c == NotificationChannel.WhatsApp);
+        result.Slots.Should().Contain(s => s.Channel == NotificationChannel.WhatsApp);
         result.Slots.Select(s => (s.Kind, s.Channel)).Should().BeEquivalentTo(
             from kind in new[]
             {
                 NotificationTemplateKind.Publish, NotificationTemplateKind.Reminder,
                 NotificationTemplateKind.Completion, NotificationTemplateKind.Overdue,
             }
-            from channel in new[] { NotificationChannel.Email, NotificationChannel.SMS }
+            from channel in new[] { NotificationChannel.Email, NotificationChannel.SMS, NotificationChannel.WhatsApp }
             select (kind, channel));
     }
 

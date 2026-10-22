@@ -1,0 +1,73 @@
+diff --git a/.pi/skills/orchestrator-worker-reviewer/SKILL.md b/.pi/skills/orchestrator-worker-reviewer/SKILL.md
+index 3d9d2637..cadc412c 100644
+--- a/.pi/skills/orchestrator-worker-reviewer/SKILL.md
++++ b/.pi/skills/orchestrator-worker-reviewer/SKILL.md
+@@ -252,6 +252,11 @@ unattended round, the two sites behave differently (owner, 2026-10-21):
+   isolation, and deleting a public route always reach a human unless the owner has
+   pre-authorized that specific round by name. The blast radius decides, not the phrasing
+   of the question.
++- **A too-big unattended plan parks (owner, 2026-10-21).** Unattended rounds can neither
++  invoke `/to-tickets` nor quiz the owner, so a plan that exceeds the reviewability sizing
++  rule parks via the existing gate-P1 path, its recommendation recorded unratified; the only
++  bypass is fan-out pre-named in the owner's round instruction. An unattended round never
++  sub-scopes silently (that is a descope) and never publishes issues.
+ - **Record provenance; never blur it.** Unattended decisions use a DISTINCT heading -
+   `## Pinned decisions (unattended - recommendations accepted)` - never the owner-pinned
+   heading, and the round's ledger row's `Mode` cell reads `unattended` (`unattended solo` at
+@@ -443,6 +448,21 @@ the tester never derives or expands its own scope.
+    criteria). Tier 3: the orchestrator run reads the source specs/review
+    docs, writes `## Plan`, and authors the worker/reviewer task specs and
+    acceptance criteria. The plan must be implementable standalone.
++   **Reviewability sizing (owner, 2026-10-21).** The plan decomposes the work
++   into **workstreams** — vertical units: a published ticket or a
++   plan-decomposed bullet; the fan-out variant's file-disjoint partitions keep
++   the name *slices*. Sizing is a plan criterion, not a freeze-time discovery:
++   every workstream must fit a single fresh context window (a tracer bullet
++   through the stack), and the whole expected diff must be honestly reviewable
++   in one reviewer pass — reuse the freeze-time split calibration (~3k lines,
++   provisional) as the honesty check, never a second number. If the cited spec
++   already has published tickets (`/to-tickets`), name them as workstreams —
++   consume, do not re-decompose. If the plan exceeds the bound and the author
++   cannot re-slice it alone, surface the re-slice/re-scope frontier to the
++   owner in grill format first (one round, recommendations attached, counted as
++   the plan-review iteration); only if the revised plan still exceeds it does
++   the round **park** recommending the owner run `/to-tickets` — the orchestrator
++   never invokes that skill (`disable-model-invocation: true`).
+    **Open decisions (author side).** A plan that leaves a decision fork the specs
+    do not determine must DECLARE it in `## Plan` as an `Open decisions:` list in
+    grill format — numbered, each with a recommended answer — rather than silently
+diff --git a/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md b/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md
+index 5e332f13..771de07f 100644
+--- a/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md
++++ b/.pi/skills/orchestrator-worker-reviewer/references/role-contracts.md
+@@ -170,6 +170,16 @@ blended: a finding belongs to exactly one axis, and the report never picks a sin
+ axes — that reranking is what the separation exists to prevent. `## Review` carries the two reports
+ **unmerged**, under their own headings.
+ 
++**Provenance and the smell baseline (owner, 2026-10-21).** The two-axis REVIEW block is this
++contract's in-seat implementation of the `code-review` skill's method
++(`~/.agents/skills/code-review/SKILL.md`): Tier 0 self-review invokes that skill directly;
++this seat runs it in-contract, with the contract's per-surface rule set as this repo's
++standards sources. On the Standards axis, read the skill's smell baseline once per review
++(its step 3: twelve named Fowler smells) and apply it to the diff hunks as judgement-call
++**P2s** — a documented repo rule always overrides a baseline smell, and anything tooling
++already enforces is skipped. Smell findings land in the existing `P2: [Standards]` rows;
++the block gains no new line. Tier 1's parent scope-check stays smell-free.
++
+ ## UI Tester
+ 
+ Adversarial bug hunter. Your scope is the handover list verbatim — do not
+@@ -203,7 +213,12 @@ repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
+    file:line evidence for each, or flag the miss.
+ 2. **Scope gates** — UI files, contract-shape changes, migrations, committed
+    secrets, CPM/version rules: is the plan's in/out boundary honest, and does
+-   its expected-files list stay inside it?
++   its expected-files list stay inside it? **Reviewability (owner,
++   2026-10-21):** does the whole expected diff fit one reviewer pass (the
++   plan-step sizing rule)? A plan that honestly exceeds it and cannot be
++   re-sliced into workstreams is a **P1** — the round parks with its
++   recommendation (re-slice grill first, then the `/to-tickets` front door)
++   rather than proceeding to a mega-round.
+ 3. **Acceptance honesty** — would each test the plan calls "discriminating"
+    actually fail against the pre-fix code? Name every one that cannot fail. A test is
+    *proved* discriminating only when it has been run against the pre-fix base and failed;

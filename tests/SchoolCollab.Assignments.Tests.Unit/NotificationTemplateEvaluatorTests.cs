@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Services;
@@ -297,5 +297,97 @@ public class NotificationTemplateEvaluatorTests
         var candidate = Candidate(constraints: [Constraint(TemplateConstraintDimensions.AssignmentType, " digital ")]);
 
         NotificationTemplateEvaluator.IsApplicable(candidate, Dimensions()).Should().BeTrue();
+    }
+
+    // ── Hybrid candidates (redesign spec §3.9) ─────────────────────────────────────────────
+
+    private static readonly Guid TenantA = Guid.Parse("00000000-0000-0000-0000-0000000000e1");
+
+    private static NotificationTemplateCandidate TenantCandidate(
+        string body,
+        DateTimeOffset? createdAt = null,
+        params NotificationTemplateConstraint[] constraints) =>
+        Candidate(body, createdAt: createdAt, constraints: constraints) with { TenantId = TenantA };
+
+    private static NotificationTemplateCandidate SystemCandidate(
+        string body,
+        DateTimeOffset? createdAt = null,
+        params NotificationTemplateConstraint[] constraints) =>
+        Candidate(body, createdAt: createdAt, constraints: constraints);
+
+    [TestMethod]
+    public void Shadowing_DropsASystemTwinOfATenantCandidate()
+    {
+        var grade = Constraint(TemplateConstraintDimensions.GradeLevel, GradeA);
+
+        var system = SystemCandidate("SYSTEM", Oldest, grade);
+        var tenant = TenantCandidate("TENANT", Newer, grade);
+
+        var ranked = NotificationTemplateEvaluator.Rank([system, tenant], Dimensions());
+
+        ranked.Should().ContainSingle("the tenant row IS the override of the blueprint twin")
+            .Which.Should().BeSameAs(tenant,
+                "and the surviving row is the tenant's, even though the blueprint is older");
+    }
+
+    [TestMethod]
+    public void Shadowing_LeavesASystemCandidateWithADifferentSetAlone()
+    {
+        var system = SystemCandidate("SYSTEM", Oldest,
+            Constraint(TemplateConstraintDimensions.GradeLevel, GradeA),
+            Constraint(TemplateConstraintDimensions.AssignmentType, "Digital"));
+        var tenant = TenantCandidate("TENANT", Newer,
+            Constraint(TemplateConstraintDimensions.GradeLevel, GradeA));
+
+        var ranked = NotificationTemplateEvaluator.Rank([system, tenant], Dimensions());
+
+        ranked.Should().HaveCount(2, "different constraint sets are different candidates");
+        ranked[0].Should().BeSameAs(system, "the two-dimension candidate is the more specific one");
+    }
+
+    [TestMethod]
+    public void ScopeRank_BreaksATieInFavourOfTheTenantRow()
+    {
+        // Same specificity, different sets, so shadowing does not apply; the blueprint is older.
+        var system = SystemCandidate("SYSTEM", Oldest,
+            Constraint(TemplateConstraintDimensions.GradeLevel, GradeA));
+        var tenant = TenantCandidate("TENANT", Newer,
+            Constraint(TemplateConstraintDimensions.Stream, StreamA));
+
+        var ranked = NotificationTemplateEvaluator.Rank([system, tenant], Dimensions());
+
+        ranked[0].Should().BeSameAs(tenant,
+            "an equally specific tenant row outranks the blueprint (scope rank asc)");
+    }
+
+    [TestMethod]
+    public void TiePromotion_UsesTheDefaultOfTheTiedRowsOwnScope()
+    {
+        // Two equally specific TENANT rows plus the SYSTEM default: the tenant default is promoted.
+        var tenantDefault = TenantCandidate("TENANT DEFAULT", Newer);
+        var tenantA = TenantCandidate("TENANT A", Oldest,
+            Constraint(TemplateConstraintDimensions.GradeLevel, GradeA));
+        var tenantB = TenantCandidate("TENANT B", Oldest,
+            Constraint(TemplateConstraintDimensions.Stream, StreamA));
+        var systemDefault = SystemCandidate("SYSTEM DEFAULT", Oldest);
+
+        var ranked = NotificationTemplateEvaluator.Rank(
+            [tenantA, tenantB, tenantDefault, systemDefault], Dimensions());
+
+        ranked[0].Should().BeSameAs(tenantDefault,
+            "a tenant tie resolves to the tenant default, not the blueprint's");
+    }
+
+    [TestMethod]
+    public void ADefaultOnlyAppliesWhenNothingElseDoes()
+    {
+        var systemDefault = SystemCandidate("SYSTEM DEFAULT");
+        var tenant = TenantCandidate("TENANT", Newer,
+            Constraint(TemplateConstraintDimensions.GradeLevel, GradeB));
+
+        var selected = NotificationTemplateEvaluator.Select([systemDefault, tenant], Dimensions());
+
+        selected.Should().BeSameAs(systemDefault,
+            "the inapplicable tenant row must not displace the applicable blueprint default");
     }
 }

@@ -70,8 +70,17 @@ public sealed record NotificationTemplateCandidate(
     string? Subject,
     string Body,
     IReadOnlyList<NotificationTemplateConstraint> Constraints,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    Guid? TenantId = null,
+    string? OwnerName = null)
 {
+    /// <summary>
+    /// Whether this candidate is part of the system blueprint (<see cref="TenantId"/> is
+    /// <see langword="null"/>) rather than a tenant-owned row — the scope rank the matcher orders by
+    /// (redesign spec §3.9).
+    /// </summary>
+    public bool IsSystem => TenantId is null;
+
     /// <summary>The display/render projection of this candidate.</summary>
     public ResolvedNotificationTemplate ToResolved() => new(TemplateId, Subject, Body);
 }

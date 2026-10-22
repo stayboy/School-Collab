@@ -114,6 +114,14 @@ Workflow:
   `awesome-skills`, `kevintsengtw/*`, etc.) without an explicit user
   request.
 
+**Precedence (owner, 2026-10-21).** On conflict: **this file** wins over a repo-authored
+skill (`.github/skills/**`, `.pi/skills/**`), which wins over a vendored skill
+(`~/.agents/skills`, `~/.claude/skills`, `~/.pi/agent/skills`). A skill carries
+**procedure** and points here for **definitions** — it never restates one. When a conflict
+is real, amend the losing file in the same change; never silently override it. A skill does
+own the boundaries of its own workflow (which work it refuses, how it runs a round), and
+those boundaries stand where this file names that skill.
+
 ### Installed skills are read-only — refresh, never patch
 
 Skill folders installed outside this repo (e.g. `~/.agents/skills/` and the
@@ -233,10 +241,13 @@ enforced in CI by `SchoolCollab.ArchitectureTests.Unit`.
 implementation, **ask the user which execution mode to use** — do not default to one;
 the user wants to choose explicitly:
 
-1. **Solo** — the session agent implements directly. Trivial, non-behavioural work only.
+1. **Tier 0 (Solo)** — the session agent implements, reviews its own diff and accepts. The tier's
+   definition lives in the skill's § "Tiers" (row 0) — the single place the ladder is defined; this
+   file keeps the menu and the repo-wide constraints on tiers. Small, contained work, trivial
+   changes included.
 2. **Light round** — the tiered `orchestrator-worker-reviewer` skill, Tiers 1–2: the
-   parent plans and accepts; one worker run, plus a static diff-only reviewer for
-   Tier 2. Small-to-medium behavioural fixes.
+   parent plans and accepts; a plan gate plus one worker run (Tier 1), adding a static
+   diff-only reviewer (Tier 2). Small-to-medium behavioural fixes.
 3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
    round doc, **the plan is independently reviewed before implementation** (skill
    step 2b — on every tier by `glm-5.3:cloud`), worker implements, reviewer
@@ -245,17 +256,28 @@ the user wants to choose explicitly:
    lean"): the parent transcribes acceptance and no UI tester is dispatched — the
    orchestrator plan pass and its review are never skipped.
 
-**Unattended (a modifier on (2) and (3), never a mode of its own).** The owner may
+**Unattended (a modifier on any tier — 0, 1, 2 or 3 — never a tier of its own).** The owner may
 run a round unattended **for that round only** — never a default, never inferred from
 silence, never on by absence. Asking for it is part of this menu's question, not a
-separate flag. In an unattended round the parent **still holds** the grill round and
-auto-accepts its recommendations as "all as recommended"; it may **never** auto-accept the
-plan author's own recommendations (that stays human-gated), and migrations, contract/wire
-shape, security and auth, tenant isolation, and deleting a public route **always reach a
-human** unless the owner pre-authorises that specific round by name. Record it on round-doc
-line 1 as `Mode: unattended (auto-accept recommendations)` and flag the ledger row — an
-unattended pin and an owner pin must never look alike. Full rules: skill § "Unattended
-rounds".
+separate flag. In an unattended round the parent **still holds** the grill round. At step 2b the
+**plan gate** — the only non-author seat that runs on every tier — adjudicates the enumerated
+frontier in its FRONTIER block: it echoes each accepted question number and ends
+`accepted: N of N`; any refusal line, missing echo, count mismatch or silence fails the block
+and parks the round, and it may **never** auto-accept the plan author's own recommendations. At
+step 5 (acceptance) a verdict that is anything other than a clean CLOSED **parks** — the residual
+grill has no auto-accepting seat on any tier, so its questions are recorded unratified. At
+**Tier 0 the plan's author is its only seat**, so `grill-me` is
+mandatory and its answers are **recorded, not accepted**: the whole frontier goes into the round doc
+under `## Open decisions (unattended solo - recorded, NOT accepted)` and every pin is marked
+`unratified`. Migrations, contract/wire shape, security and auth, tenant isolation, and deleting a
+public route **always reach a human** unless the owner pre-authorises that specific round by name.
+Record it on round-doc line 1 as `Mode: unattended (auto-accept recommendations)` for Tiers 1–3, or
+`Mode: unattended solo (recorded frontier, unratified)` for Tier 0, and set the ledger row's
+`Mode` cell — one of `attended` · `unattended` · `unattended solo` (owner, 2026-10-21) — an
+unattended pin and an owner pin must never look alike. **The report repeats them:** an unattended
+round's completion message lists every pinned decision — the same entries its `## Acceptance`
+carries — as a compact table; a pin must never survive only in the round doc, which this repo
+treats as ephemeral. Full rules: skill § "Unattended rounds".
 
 Each round produces a single `round-<slug>.md` (+ `diffs-<slug>.patch`) in
 `documents/rounds/` — see "Repository docs layout" below.

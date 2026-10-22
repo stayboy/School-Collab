@@ -59,9 +59,11 @@ public enum TemplateChangeKind
 }
 
 /// <summary>
-/// One tenant notification template and its constraints. The row with an empty
-/// <see cref="Constraints"/> set is the tenant default for its kind × channel; every constrained row is
-/// a candidate for the applicability matcher (spec §3.1.1).
+/// One notification template and its constraints. The row with an empty
+/// <see cref="Constraints"/> set is its scope's default for the kind × channel; every constrained row is
+/// a candidate for the applicability matcher (spec §3.1.1). <see cref="TenantId"/> is
+/// <see langword="null"/> for a system-blueprint row (redesign spec §3.7), whose <see cref="OwnerName"/>
+/// is then "System"; a tenant-owned row carries its tenant's name.
 /// </summary>
 public sealed record TenantNotificationTemplateDto(
     Guid Id,
@@ -71,7 +73,13 @@ public sealed record TenantNotificationTemplateDto(
     string Body,
     IReadOnlyList<TemplateConstraintDto> Constraints,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? TenantId,
+    string OwnerName)
+{
+    /// <summary>Whether the row is part of the system blueprint (no owning tenant).</summary>
+    public bool IsSystem => TenantId is null;
+}
 
 /// <summary>One constraint dimension on a template (wire shape).</summary>
 public sealed record TemplateConstraintDto(
@@ -103,6 +111,7 @@ public sealed record TemplateConstraintRequest(
 /// <summary>One audit entry of a kind × channel's template history (spec §3.9).</summary>
 public sealed record NotificationTemplateAuditEntryDto(
     Guid Id,
+    Guid TemplateId,
     TemplateChangeKind ChangeKind,
     string? PreviousSubject,
     string? NewSubject,
@@ -128,12 +137,20 @@ public sealed record ApplicableTemplateSlotDto(
     NotificationChannel Channel,
     IReadOnlyList<ApplicableTemplateDto> Templates);
 
-/// <summary>One template applicable to the queried grade; <see cref="IsDefault"/> marks the tenant default.</summary>
+/// <summary>One template applicable to the queried grade; <see cref="IsDefault"/> marks the scope
+/// default and <see cref="TenantId"/>/<see cref="OwnerName"/> say whether it is a system-blueprint row
+/// (redesign spec §3.7).</summary>
 public sealed record ApplicableTemplateDto(
     Guid Id,
     string? Subject,
     bool IsDefault,
-    IReadOnlyList<ApplicableConstraintDto> Constraints);
+    IReadOnlyList<ApplicableConstraintDto> Constraints,
+    Guid? TenantId,
+    string OwnerName)
+{
+    /// <summary>Whether the row is part of the system blueprint (no owning tenant).</summary>
+    public bool IsSystem => TenantId is null;
+}
 
 /// <summary>One constraint of an applicable template, with its resolved display label.</summary>
 public sealed record ApplicableConstraintDto(
@@ -142,11 +159,12 @@ public sealed record ApplicableConstraintDto(
     string Display);
 
 /// <summary>
-/// Admin client for the per-tenant notification-template store at
+/// Admin client for the notification-template store at
 /// <c>/api/settings/notification-templates</c> (spec §5). Base address
-/// <c>https+http://settings-api</c> is configured in DI. <c>TenantNotificationTemplate</c> is a STRICT
-/// tenant entity, so the registered <c>TenantPropagationDelegatingHandler</c> must carry the selected
-/// tenant or the read/write hits the wrong tenant.
+/// <c>https+http://settings-api</c> is configured in DI. <c>TenantNotificationTemplate</c> is a
+/// <b>hybrid</b> tenant entity (redesign spec §3.7): a tenant sees its own rows plus the system
+/// blueprint, so the registered <c>TenantPropagationDelegatingHandler</c> must still carry the selected
+/// tenant — it decides which tenant's rows the server resolves.
 /// <para>
 /// <b>Failure posture:</b> every non-success response throws (the admin surface must show the error —
 /// fail-open is the render path's posture, not the editor's). The single exception is the documented
@@ -163,15 +181,40 @@ public sealed class NotificationTemplateApiClient(HttpClient http)
 {
     private const string BasePath = "/api/settings/notification-templates";
 
-    /// <summary>Every live template row of the current tenant, with its constraints.</summary>
-    public async Task<IReadOnlyList<TenantNotificationTemplateDto>> ListAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Every template row visible to the caller's scope — its own rows plus the system blueprint — with
+    /// its constraints and owner.
+    /// <para>
+    /// <paramref name="includeTenantOwned"/> is the promote picker's source (redesign spec §3.6): the
+    /// server honours it <b>only</b> in system scope, where it returns every tenant's rows. A tenant
+    /// session's flag is ignored, so asking never widens what it can see.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<TenantNotificationTemplateDto>> ListAsync(
+        bool includeTenantOwned = false, CancellationToken ct = default)
     {
-        var response = await http.GetAsync(BasePath, ct);
+        var path = includeTenantOwned ? $"{BasePath}?includeTenantOwned=true" : BasePath;
+        var response = await http.GetAsync(path, ct);
         response.EnsureSuccessStatusCode();
 
         var templates = await response.Content
             .ReadFromJsonAsync<List<TenantNotificationTemplateDto>>(cancellationToken: ct);
         return templates ?? [];
+    }
+
+    /// <summary>
+    /// One template by id, or <see langword="null"/> on <c>404</c> (unknown or outside the caller's
+    /// scope — the server does not distinguish the two). The per-template detail route's read.
+    /// </summary>
+    public async Task<TenantNotificationTemplateDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync($"{BasePath}/{id:D}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content
+            .ReadFromJsonAsync<TenantNotificationTemplateDto>(cancellationToken: ct);
     }
 
     /// <summary>
@@ -220,11 +263,60 @@ public sealed class NotificationTemplateApiClient(HttpClient http)
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>
+    /// Copies a system-blueprint template into the current tenant (redesign spec §3.8) and returns the
+    /// new row. The source is untouched; an identical constraint set already in this tenant is a 409
+    /// whose message is surfaced verbatim.
+    /// </summary>
+    public async Task<TenantNotificationTemplateDto> AdoptAsync(
+        Guid id, string? reason = null, CancellationToken ct = default)
+    {
+        var response = await http.PostAsync(CopyPath(id, "adopt", reason), content: null, ct);
+        return await ReadCopyResultAsync(response, ct);
+    }
+
+    /// <summary>
+    /// Publishes a tenant template portal-wide (redesign spec §3.8) and returns the blueprint copy.
+    /// System scope only (the server answers 403 otherwise); an identical system-side set is a 409.
+    /// </summary>
+    public async Task<TenantNotificationTemplateDto> PromoteAsync(
+        Guid id, string? reason = null, CancellationToken ct = default)
+    {
+        var response = await http.PostAsync(CopyPath(id, "promote", reason), content: null, ct);
+        return await ReadCopyResultAsync(response, ct);
+    }
+
+    private static string CopyPath(Guid id, string action, string? reason) =>
+        reason is null
+            ? $"{BasePath}/{id:D}/{action}"
+            : $"{BasePath}/{id:D}/{action}?reason={Uri.EscapeDataString(reason)}";
+
+    /// <summary>
+    /// Adopt/promote answer with the new row, or with a refusal whose <c>MessageResponse</c> body is the
+    /// text the operator needs ("already adopted", "requires the system scope"). Throwing the plain
+    /// status would throw that message away, so it is carried into the exception.
+    /// </summary>
+    private static async Task<TenantNotificationTemplateDto> ReadCopyResultAsync(
+        HttpResponseMessage response, CancellationToken ct)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"{(int)response.StatusCode} {response.ReasonPhrase}: {detail}", null, response.StatusCode);
+        }
+
+        return await ReadTemplateAsync(response, ct);
+    }
+
     /// <summary>The audit trail of one kind × channel, most recent first (spec §3.9).</summary>
     public async Task<IReadOnlyList<NotificationTemplateAuditEntryDto>> GetAuditAsync(
-        NotificationTemplateKind kind, NotificationChannel channel, CancellationToken ct = default)
+        NotificationTemplateKind kind, NotificationChannel channel, Guid? templateId = null, CancellationToken ct = default)
     {
-        var response = await http.GetAsync($"{BasePath}/{kind}/{channel}/audit", ct);
+        var path = templateId is { } id
+            ? $"{BasePath}/{kind}/{channel}/audit?templateId={id:D}"
+            : $"{BasePath}/{kind}/{channel}/audit";
+        var response = await http.GetAsync(path, ct);
         response.EnsureSuccessStatusCode();
 
         var entries = await response.Content

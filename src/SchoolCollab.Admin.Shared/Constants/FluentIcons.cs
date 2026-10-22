@@ -97,4 +97,7 @@ public static class FluentIcons
     /// the file" (round <c>media-pill-listing</c> post-close rework, owner 2026-10-14). Size20, like
     /// the other button glyphs.</summary>
     public static readonly Icon Eye = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Eye();
+    /// <summary>A late/due/overdue signal — the Overdue notification kind''s glyph.</summary>
+    public static readonly Icon Warning =
+        new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Warning();
 }

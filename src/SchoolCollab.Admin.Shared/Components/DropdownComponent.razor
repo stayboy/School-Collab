@@ -75,6 +75,7 @@
               OptionText="@OptionText"
               OptionValue="@(o => o)"
               Label="@Label"
+              AriaLabel="@AriaLabel"
               Placeholder="@(Placeholder ?? "Select…")"
               Disabled="@Disabled"
               Style="@EffectiveStyle"
@@ -92,6 +93,22 @@
 
     /// <summary>Label shown above the dropdown.</summary>
     [Parameter] public string? Label { get; set; }
+
+    /// <summary>
+    /// Accessible name for the control, forwarded to
+    /// <see cref="Microsoft.FluentUI.AspNetCore.Components.FluentInputBase{TValue}.AriaLabel"/>.
+    /// Use it when the dropdown has no visible <see cref="Label"/> (a compact filter row, for
+    /// example) so the control still announces what it filters.
+    /// <para>
+    /// Blazor validates component parameters at RENDER time, not compile time: a consumer that passes
+    /// an undeclared parameter throws <c>InvalidOperationException</c> on first render. That is why
+    /// this parameter exists rather than being left to the consumer — the notification-template
+    /// landing passed <c>AriaLabel</c> before it was declared, and its toolbar only renders behind a
+    /// <c>SectionOutlet</c>, so no page-level bUnit test executed it (fixed 2026-10-21,
+    /// <c>DropdownComponentTests</c> now pins this contract).
+    /// </para>
+    /// </summary>
+    [Parameter] public string? AriaLabel { get; set; }
 
     /// <summary>Placeholder text when no value is selected.</summary>
     [Parameter] public string? Placeholder { get; set; }

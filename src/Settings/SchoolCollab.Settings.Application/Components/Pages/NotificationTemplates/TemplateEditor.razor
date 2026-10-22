@@ -1,0 +1,1022 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Authoring
+@using SchoolCollab.Admin.Shared.Components.RichText
+@using SchoolCollab.Core.Notifications
+@using SchoolCollab.Core.RichText
+@inject NotificationTemplateApiClient Api
+@inject NotificationTemplatePreviewClient Preview
+@inject StudentsLookupClient Students
+@inject CodedValuesApiClient CodedValues
+@inject VisibleTenantService Tenants
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ILogger<TemplateEditor> Logger
+@implements IDisposable
+@*
+   The shared template editor (redesign spec §3.3–§3.6). One component, two modes — Create and Edit — so
+   the two surfaces cannot drift (the AssignmentAuthoring precedent).
+
+   Composition: the LEFT column is a plain titled "Message" section (never a PanelSection); the RIGHT rail
+   holds exactly the two panels the owner pinned — **Constraints** then **Preview** — stacked, the same
+   shape assignment authoring wears. The audit trail (edit mode) is a plain full-width section BELOW the
+   grid: a third PanelSection is deliberately not used.
+
+   Staging contract (Q9): the dropdowns, subject, body and chips only mutate the draft; ONE Save persists
+   subject + body + the whole constraint set with one optional reason. Resetting is the detail page's
+   separate audited action.
+*@
+<ErrorBoundary>
+    <ChildContent>
+        <AuthoringShell Crumbs="@ShellCrumbs"
+                       TitleContent="@ShellTitle"
+                       LeadingActions="@ShellLeadingActions"
+                       PrimaryId="@(ReadOnly ? "template-adopt" : "template-save")"
+                       PrimaryLabel="@ShellPrimaryLabel"
+                       PrimaryDisabled="@ShellPrimaryDisabled"
+                       OnPrimaryAction="OnShellPrimaryAsync"
+                       SecondaryActions="@ShellSecondaryActions">
+        @if (_loading)
+        {
+            <div class="template-editor__loading"><FluentSpinner /></div>
+        }
+        else if (_notFound)
+        {
+            <FluentMessageBar Intent="MessageBarIntent.Error">Template not found.</FluentMessageBar>
+            <FluentButton Appearance="ButtonAppearance.Outline" class="mt-2" OnClick="BackToListAsync">Back</FluentButton>
+        }
+        else
+        {
+            @if (ReadOnly)
+            {
+                <FluentMessageBar Intent="MessageBarIntent.Info" class="mb-2" id="template-editor-readonly">
+                    @ReadOnlyReason
+                </FluentMessageBar>
+            }
+
+            @if (_lookups?.Error is not null)
+            {
+                <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-2" id="template-lookup-warning">
+                    Constraint names are unavailable (@_lookups.Error) — stored values are shown instead.
+                </FluentMessageBar>
+            }
+
+            <div class="template-editor-layout">
+                <section class="template-editor-message" id="template-editor-message">
+                    <h2 class="template-editor-message__title">Message</h2>
+
+                    <FormRow Label="Type" Required>
+                        <DropdownComponent TItem="KindOption" TValue="NotificationTemplateKind"
+                                           Items="KindOptions"
+                                           SelectedValue="@_model.Kind"
+                                           SelectedValueChanged="OnKindChangedAsync"
+                                           OptionText="@(o => o.Label)"
+                                           OptionValue="@(o => o.Value)"
+                                           Disabled="@LockedMeta"
+                                           Width="FieldWidth.W9" />
+                    </FormRow>
+
+                    <FormRow Label="Preferred mode of contact" Required>
+                        <DropdownComponent TItem="ChannelOption" TValue="NotificationChannel"
+                                           Items="ChannelOptions"
+                                           SelectedValue="@_model.Channel"
+                                           SelectedValueChanged="OnChannelChangedAsync"
+                                           OptionText="@(o => o.Label)"
+                                           OptionValue="@(o => o.Value)"
+                                           Disabled="@LockedMeta"
+                                           Width="FieldWidth.W9" />
+                    </FormRow>
+
+                    @if (LockedMeta)
+                    {
+                        <p class="template-editor-message__hint" id="template-meta-locked-reason">
+                            Type and contact mode are fixed per template — create a new template to change them.
+                        </p>
+                    }
+
+                    @if (_model.Channel == NotificationChannel.Email)
+                    {
+                        <FormRow Label="Subject" For="template-subject">
+                            <FluentTextInput Id="template-subject"
+                                             Value="@_model.Subject"
+                                             ValueChanged="OnSubjectChangedAsync"
+                                             Immediate="true"
+                                             Disabled="@ReadOnly"
+                                             Placeholder="Subject line (tags allowed)" />
+                        </FormRow>
+                    }
+
+                    <FormRow Label="Body" Required For="@BodyInputId">
+                        @if (_model.Channel == NotificationChannel.Email)
+                        {
+                            <RichInstructionEditor @ref="_editor"
+                                                   Id="template-body-editor"
+                                                   Value="@_model.Body"
+                                                   ReadOnly="@ReadOnly"
+                                                   Placeholder="Write the message body..." />
+                        }
+                        else
+                        {
+                            <FluentTextArea Id="template-body-text"
+                                            Label="Message"
+                                            Value="@_model.Body"
+                                            ValueChanged="OnBodyChangedAsync"
+                                            Immediate="true"
+                                            Disabled="@ReadOnly"
+                                            Style="min-height:140px" />
+                        }
+                    </FormRow>
+
+                    <div class="template-editor-tags" id="template-tag-chips">
+                        @foreach (var tag in NotificationTemplateTags.All)
+                        {
+                            <FluentButton Appearance="ButtonAppearance.Subtle"
+                                          Disabled="@ReadOnly"
+                                          Title="@($"Insert {{{{{tag}}}}}")"
+                                          OnClick="@(() => InsertTag(tag))">
+                                @($"{{{tag}}}")
+                            </FluentButton>
+                        }
+                    </div>
+
+                    @if (_model.Channel != NotificationChannel.Email)
+                    {
+                        <p class="template-editor-message__hint" id="template-length-hint">@LengthHint</p>
+                    }
+                </section>
+
+                <div class="template-editor-rail" id="template-editor-rail">
+                    <PanelSection Title="Constraints" TitleId="template-constraints-title">
+                        <HeaderActions>
+                            @if (!ReadOnly)
+                            {
+                                <RowActionsMenu UseMenuService="false"
+                                                ForceKebab="true"
+                                                Actions="@ConstraintActions"
+                                                AriaLabel="Add a constraint" />
+                            }
+                        </HeaderActions>
+
+                        <ChildContent>
+                            @if (_model.Constraints.Count == 0)
+                            {
+                                <p class="template-editor-panel__empty" id="template-constraints-empty">
+                                    No constraints — this template is the default for its type and contact mode.
+                                </p>
+                            }
+                            else
+                            {
+                                <div class="entity-grid-chips" id="template-constraints-chips">
+                                    @foreach (var constraint in _model.Constraints.ToArray())
+                                    {
+                                        <Chip Label="@Display(constraint)"
+                                              Subtitle="@TemplateConstraintLookups.DimensionLabel(constraint.Dimension)"
+                                              DismissTitle="Remove this constraint"
+                                              OnDismiss="@(ReadOnly
+                                                  ? default(EventCallback)
+                                                  : EventCallback.Factory.Create(this, () => RemoveConstraint(constraint)))" />
+                                    }
+                                </div>
+                            }
+
+                            @if (ConflictWarning is not null)
+                            {
+                                <FluentMessageBar Intent="MessageBarIntent.Warning" class="mt-2" id="template-conflict-warning">
+                                    @ConflictWarning
+                                </FluentMessageBar>
+                            }
+
+                            <div class="template-editor-panel__actions">
+                                <FluentButton Appearance="ButtonAppearance.Subtle"
+                                              Id="template-constraints-view-all"
+                                              OnClick="OpenConstraintListAsync">
+                                    View all constraints
+                                </FluentButton>
+                            </div>
+                        </ChildContent>
+                    </PanelSection>
+
+                    <PanelSection Title="Preview" TitleId="template-preview-title">
+                        <ChildContent>
+                            <div class="template-editor-preview" id="template-preview-body">
+                                @if (_previewUnavailable)
+                                {
+                                    <p class="template-editor-message__hint" id="template-preview-note">
+                                        Preview unavailable (@_previewError). Saving still works.
+                                    </p>
+                                }
+                                else
+                                {
+                                    @if (_model.Channel == NotificationChannel.Email && !string.IsNullOrWhiteSpace(_previewSubject))
+                                    {
+                                        <p class="template-editor-preview__subject" id="template-preview-subject">@_previewSubject</p>
+                                    }
+                                    @if (_model.Channel == NotificationChannel.Email)
+                                    {
+                                        <RichInstruction Value="@_previewBody" Id="template-preview-rendered" />
+                                    }
+                                    else
+                                    {
+                                        <p class="template-editor-preview__plain" id="template-preview-rendered">@_previewBody</p>
+                                    }
+                                }
+                            </div>
+                            <div class="template-editor-preview__actions">
+                                <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="OnRefreshPreviewAsync" id="template-preview-refresh">
+                                    Refresh
+                                </FluentButton>
+                            </div>
+                        </ChildContent>
+                    </PanelSection>
+                </div>
+            </div>
+
+            @if (Mode == TemplateEditorMode.Edit)
+            {
+                <section class="template-editor-audit" id="template-audit-section">
+                    <h2 class="template-editor-message__title">Audit trail</h2>
+                    @if (_audit.Count == 0)
+                    {
+                        <p class="template-editor-message__hint" id="template-audit-empty">No changes recorded for this template yet.</p>
+                    }
+                    else
+                    {
+                        <div id="template-audit-grid">
+                            <FluentDataGrid Items="@_audit.AsQueryable()"
+                                            GridTemplateColumns="150px minmax(120px,1fr) 110px minmax(180px,2fr)"
+                                            TGridItem="NotificationTemplateAuditEntryDto">
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="When">
+                                    @context.OccurredAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="Actor">
+                                    @context.ActorDisplayName
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="Change">
+                                    @context.ChangeKind
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="NotificationTemplateAuditEntryDto" Title="Reason">
+                                    @context.Reason
+                                </TemplateColumn>
+                            </FluentDataGrid>
+                        </div>
+                    }
+                </section>
+            }
+            @if (_error is not null)
+            {
+                <FluentMessageBar Intent="MessageBarIntent.Error" class="mt-2" id="template-editor-error">@_error</FluentMessageBar>
+            }
+            @if (_message is not null)
+            {
+                <FluentMessageBar Intent="MessageBarIntent.Success" class="mt-2" id="template-editor-message-bar">@_message</FluentMessageBar>
+            }
+        }
+        </AuthoringShell>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageBarIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+
+@code {
+    private const int SmsWarnLength = 140;
+    private const int SmsLimit = 160;
+    private static readonly TimeSpan PreviewDebounce = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>One option of the Type dropdown. The label is the enum member name (Title Case).</summary>
+    public sealed record KindOption(NotificationTemplateKind Value, string Label);
+
+    /// <summary>One option of the Preferred-mode-of-contact dropdown.</summary>
+    public sealed record ChannelOption(NotificationChannel Value, string Label);
+
+    private static readonly KindOption[] KindOptions =
+        Enum.GetValues<NotificationTemplateKind>().Select(k => new KindOption(k, k.ToString())).ToArray();
+
+    private static readonly ChannelOption[] ChannelOptions =
+    [
+        new(NotificationChannel.Email, "Email"),
+        new(NotificationChannel.SMS, "SMS"),
+        new(NotificationChannel.WhatsApp, "WhatsApp"),
+    ];
+
+    /// <summary>Create or Edit (spec §3.3).</summary>
+    [Parameter] public TemplateEditorMode Mode { get; set; } = TemplateEditorMode.Create;
+
+    /// <summary>The row being edited; required in Edit mode.</summary>
+    [Parameter] public Guid? Id { get; set; }
+
+    /// <summary>The grade-detail deep link's prefill (spec §3.4/§3.11): a GradeLevel constraint on create.</summary>
+    [Parameter] public Guid? PrefillGradeLevelId { get; set; }
+
+    /// <summary>Raised after a successful create or replace, with the saved row.</summary>
+    [Parameter] public EventCallback<TenantNotificationTemplateDto> Saved { get; set; }
+
+    private readonly TemplateFormModel _model = new();
+    private TemplateConstraintLookups? _lookups;
+    private RichInstructionEditor? _editor;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _notFound;
+    private string? _error;
+    private string? _message;
+    private string? _previewSubject;
+    private string? _previewBody;
+    private bool _previewUnavailable;
+    private string? _previewError;
+    private CancellationTokenSource? _previewDebounce;
+    private bool _disposed;
+
+    /// <summary>
+    /// The load token (blazor-components.md rule 3, scoped to every data-loading page by
+    /// adr-authoring-surface-pattern decision 1): navigating away cancels the by-id read instead of
+    /// letting it land on an unmounted component.
+    /// </summary>
+    private CancellationTokenSource? _loadCts;
+
+    /// <summary>
+    /// The token every dispatched mutation carries (blazor-components.md, "Mutations take a token
+    /// too"): Save, Reset and the copy action must not outlive the circuit that asked for them.
+    /// </summary>
+    private CancellationToken MutationToken => _loadCts?.Token ?? CancellationToken.None;
+    private bool _resetting;
+    private bool _adopting;
+    private bool _sessionIsSystem = true;
+    private TenantNotificationTemplateDto[] _siblings = [];
+    private List<NotificationTemplateAuditEntryDto> _audit = [];
+
+    private bool LockedMeta => Mode == TemplateEditorMode.Edit;
+
+    /// <summary>
+    /// True when the row is visible but not writable by this session (redesign spec §3.5/§3.7): a
+    /// tenant session opening a system-blueprint row, or a system session opening a tenant's row from
+    /// the portal-wide picker. Both are read-only, and each offers the copy action that turns the row
+    /// into one it owns.
+    /// </summary>
+    private bool ReadOnly => Mode == TemplateEditorMode.Edit && _sessionIsSystem != _model.IsSystem;
+
+    private bool CanAdopt => ReadOnly && _model.IsSystem;
+
+    private string AdoptLabel => CanAdopt ? "Adopt to this tenant" : "Publish portal-wide";
+
+    private string ReadOnlyReason => CanAdopt
+        ? "This is a system-blueprint template: a tenant session cannot edit it. Adopt it to get an "
+          + "editable copy owned by this tenant."
+        : $"This template belongs to {_model.OwnerName}: it can only be edited in that tenant's "
+          + "session. Publish it portal-wide to get an editable blueprint copy.";
+
+    private string ModeLabel => Mode == TemplateEditorMode.Create ? "New template" : "Template";
+
+    private string SaveLabel => Mode == TemplateEditorMode.Create ? "Create template" : "Save";
+
+    // ── Shell slots (ADR adr-authoring-surface-pattern, decision 1) ──────────────
+    // The breadcrumb and the sticky action bar live in the shared AuthoringShell; this page supplies
+    // the trail, the title content, the reason input, the primary action and the reset control, so the
+    // ids the detail suite pins (`#template-save`, `#template-reset`, `#template-adopt`,
+    // `#template-reason`, `#template-editor-owner`) stay exactly where they were.
+
+    private IReadOnlyList<AuthoringCrumb> ShellCrumbs =>
+        Mode == TemplateEditorMode.Create
+            ? [new AuthoringCrumb("Notification templates", "/notification-templates"),
+               new AuthoringCrumb("New template")]
+            : [new AuthoringCrumb("Notification templates", "/notification-templates"),
+               new AuthoringCrumb(ShellCrumbTitle)];
+
+    private string ShellCrumbTitle =>
+        _loading ? "…" : _notFound ? "Not found" : ShellTemplateTitle;
+
+    private string ShellTemplateTitle =>
+        !string.IsNullOrWhiteSpace(_model.Subject) ? _model.Subject! : "Template";
+
+    /// <summary>The title row: kind banner + mode label + the owner chip on Edit (spec §3.5).</summary>
+    private RenderFragment ShellTitle => @<text><NotificationTemplateKindBanner Kind="@_model.Kind" />
+        <span class="template-editor__mode-label">@ModeLabel</span>
+        @if (Mode == TemplateEditorMode.Edit)
+        {
+            @if (_model.IsSystem)
+            {
+                <FluentBadge Id="template-editor-owner"
+                             Appearance="BadgeAppearance.Filled"
+                             Color="BadgeColor.Informative">System</FluentBadge>
+            }
+            else
+            {
+                <span class="template-editor__owner" id="template-editor-owner">@_model.OwnerName</span>
+            }
+        }</text>;
+
+    private string? ShellPrimaryLabel =>
+        _loading || _notFound
+            ? null
+            : ReadOnly
+                ? (_adopting ? "Adopting..." : AdoptLabel)
+                : (_saving ? "Saving..." : SaveLabel);
+
+    private bool ShellPrimaryDisabled => _adopting || _saving;
+
+    /// <summary>The audit reason rides the bar, ahead of the primary action (spec §3.5).</summary>
+    private RenderFragment ShellLeadingActions => @<text>@if (!ReadOnly && !_loading && !_notFound)
+        {
+            <FluentTextInput Label="Reason (recorded in the audit trail)"
+                             Value="@_model.Reason"
+                             ValueChanged="@(v => _model.Reason = v ?? string.Empty)"
+                             Immediate="true"
+                             Id="template-reason"
+                             class="template-editor-actions__reason" />
+        }</text>;
+
+    /// <summary>Reset is the bar's secondary action on a writable Edit row (spec §3.2/§3.5).</summary>
+    private RenderFragment ShellSecondaryActions => @<text>@if (Mode == TemplateEditorMode.Edit
+        && !ReadOnly && !_loading && !_notFound)
+        {
+            <FluentButton Appearance="ButtonAppearance.Outline"
+                          Id="template-reset"
+                          Disabled="@(_saving || _resetting)"
+                          OnClick="ResetAsync">
+                @(_resetting ? "Resetting..." : "Reset to built-in default")
+            </FluentButton>
+        }</text>;
+
+    /// <summary>The bar's one primary action: the copy action while read-only, Save otherwise.</summary>
+    private Task OnShellPrimaryAsync() => ReadOnly ? AdoptAsync() : SaveAsync();
+
+    private string BodyInputId => _model.Channel == NotificationChannel.Email ? "template-body-editor" : "template-body-text";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+
+        // The session scope decides whether this row is editable (spec §3.7): the claim, not the row.
+        var scope = await Tenants.GetScopeAsync();
+        _sessionIsSystem = !scope.IsRealTenant;
+
+        _lookups = new TemplateConstraintLookups(Students, CodedValues);
+        await _lookups.LoadAsync();
+
+        if (Mode == TemplateEditorMode.Edit)
+        {
+            if (Id is not { } id)
+            {
+                _notFound = true;
+                _loading = false;
+                return;
+            }
+
+            try
+            {
+                var row = await Api.GetByIdAsync(id, _loadCts?.Token ?? CancellationToken.None);
+                if (row is null)
+                {
+                    _notFound = true;
+                    _loading = false;
+                    return;
+                }
+
+                _model.Id = row.Id;
+                _model.Kind = row.Kind;
+                _model.Channel = row.Channel;
+                _model.Subject = row.Subject;
+                _model.Body = row.Body;
+                _model.CreatedAt = row.CreatedAt;
+                _model.UpdatedAt = row.UpdatedAt;
+                _model.TenantId = row.TenantId;
+                _model.OwnerName = row.OwnerName;
+                _model.Constraints.Clear();
+                _model.Constraints.AddRange(row.Constraints);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to load notification template {TemplateId}", id);
+                _error = ex.Message;
+            }
+        }
+        else if (PrefillGradeLevelId is { } grade)
+        {
+            _model.Constraints.Add(new TemplateConstraintDto(
+                Guid.Empty, TemplateConstraintDimension.GradeLevel, grade.ToString("D")));
+        }
+
+        _loading = false;
+        await LoadSiblingsAsync();
+        await LoadAuditAsync();
+        QueuePreview();
+    }
+
+    /// <summary>A kind change resets the preview: the renderer's sample data is kind-sensitive.</summary>
+    private async Task OnKindChangedAsync(NotificationTemplateKind kind)
+    {
+        _model.Kind = kind;
+        QueuePreview();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A mode change swaps the body control, so the previous body cannot simply carry over: the domain
+    /// drops the subject for every non-email channel, and this keeps the draft honest about that.
+    /// </summary>
+    private async Task OnChannelChangedAsync(NotificationChannel channel)
+    {
+        _model.Channel = channel;
+        if (channel != NotificationChannel.Email && _model.Subject is not null)
+        {
+            // Captured into the body only when the authored text was a subject line; the stored text is
+            // never silently moved by the server, so neither is it here.
+            _model.Subject = null;
+        }
+
+        QueuePreview();
+        await Task.CompletedTask;
+    }
+
+    private async Task OnSubjectChangedAsync(string? value)
+    {
+        _model.Subject = value;
+        QueuePreview();
+        await Task.CompletedTask;
+    }
+
+    private async Task OnBodyChangedAsync(string? value)
+    {
+        _model.Body = value ?? string.Empty;
+        QueuePreview();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>Appends a tag at the end of the authored text (email: subject; plain text: body).</summary>
+    private void InsertTag(string tag)
+    {
+        var token = "{{" + tag + "}}";
+        if (_model.Channel == NotificationChannel.Email)
+            _model.Subject = (_model.Subject ?? string.Empty) + token;
+        else
+            _model.Body += token;
+
+        QueuePreview();
+    }
+
+    /// <summary>Dismisses one staged constraint (nothing is persisted until Save).</summary>
+    private void RemoveConstraint(TemplateConstraintDto constraint) => _model.Constraints.Remove(constraint);
+
+    private string Display(TemplateConstraintDto constraint) =>
+        _lookups?.DisplayFor(constraint.Dimension, constraint.Value) ?? constraint.Value;
+
+    /// <summary>
+    /// SMS/WhatsApp length guidance: warn near/over the 160-character limit, never block. When the
+    /// preview is degraded the hint falls back to the RAW authored length and says so.
+    /// </summary>
+    private string LengthHint
+    {
+        get
+        {
+            var rendered = !_previewUnavailable && _previewBody is not null;
+            var length = rendered ? _previewBody!.Length : _model.Body.Length;
+            var basis = rendered ? "rendered length" : "authored length — rendered length unavailable";
+
+            if (length > SmsLimit)
+            {
+                return $"{length} characters ({basis}). Over {SmsLimit} characters — the carrier may split "
+                    + "this message. A warning only; it still saves.";
+            }
+
+            if (length >= SmsWarnLength)
+            {
+                return $"{length} characters ({basis}). Approaching the {SmsLimit}-character SMS limit.";
+            }
+
+            return $"{length} characters ({basis}).";
+        }
+    }
+
+    private async Task<string?> ReadEditorHtmlAsync() =>
+        _editor is null ? null : await _editor.GetHtmlAsync();
+
+    private void QueuePreview()
+    {
+        if (_disposed)
+            return;
+
+        _previewDebounce?.Cancel();
+        _previewDebounce?.Dispose();
+        var cts = new CancellationTokenSource();
+        _previewDebounce = cts;
+        _ = DebouncedPreviewAsync(cts.Token);
+    }
+
+    private async Task DebouncedPreviewAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(PreviewDebounce, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await RefreshPreviewAsync(ct);
+    }
+
+    private Task OnRefreshPreviewAsync() => RefreshPreviewAsync();
+
+    /// <summary>
+    /// Runs the Assignments host's exact render path over the authored pair. A failure is the documented
+    /// degradation: an inline note, and the save path is untouched.
+    /// </summary>
+    private async Task RefreshPreviewAsync(CancellationToken ct = default)
+    {
+        var body = _model.Channel == NotificationChannel.Email
+            ? await ReadEditorHtmlAsync() ?? string.Empty
+            : _model.Body;
+
+        NotificationTemplatePreviewDto? rendered = null;
+        string? error = null;
+        try
+        {
+            rendered = await Preview.PreviewAsync(_model.Kind, _model.Channel, _model.Subject, body, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Template preview failed for {Kind}/{Channel}", _model.Kind, _model.Channel);
+            error = ex.Message;
+        }
+
+        if (_disposed)
+            return;
+
+        await InvokeAsync(() =>
+        {
+            if (rendered is not null)
+            {
+                _previewSubject = rendered.Subject;
+                _previewBody = rendered.Body;
+                _previewUnavailable = false;
+                _previewError = null;
+            }
+            else
+            {
+                _previewUnavailable = true;
+                _previewError = error;
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// Persists the whole draft in one call (Q9). Email bodies are sanitized with the ONE instruction
+    /// sanitizer; the plain-text modes are NOT sanitized, because HTML-encoding a plain-text channel
+    /// would corrupt it (the old page's rule, kept).
+    /// </summary>
+    private async Task SaveAsync()
+    {
+        // A read-only row (the other scope's) never writes: its action is the Copy button instead.
+        if (_saving || ReadOnly)
+            return;
+
+        _saving = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            var body = _model.Channel == NotificationChannel.Email
+                ? RichInstructionSanitizer.Sanitize(await ReadEditorHtmlAsync() ?? string.Empty)
+                : _model.Body;
+
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                _error = "A message body is required.";
+                return;
+            }
+
+            var constraints = _model.Constraints
+                .Select(c => new TemplateConstraintRequest(c.Dimension, c.Value))
+                .ToList();
+            var reason = string.IsNullOrWhiteSpace(_model.Reason) ? null : _model.Reason.Trim();
+
+            TenantNotificationTemplateDto saved;
+            if (Mode == TemplateEditorMode.Edit && _model.Id is { } id)
+            {
+                saved = await Api.UpdateAsync(id,
+                    new UpdateNotificationTemplateRequest(_model.Subject, body, constraints, reason),
+                    MutationToken);
+            }
+            else
+            {
+                saved = await Api.CreateAsync(
+                    new CreateNotificationTemplateRequest(
+                        _model.Kind, _model.Channel, _model.Subject, body, constraints, reason),
+                    MutationToken);
+            }
+
+            _model.Id = saved.Id;
+            _model.Subject = saved.Subject;
+            _model.Body = saved.Body;
+            _model.UpdatedAt = saved.UpdatedAt;
+            _message = "Template saved.";
+            await LoadSiblingsAsync();
+            await LoadAuditAsync();
+            await Saved.InvokeAsync(saved);
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save the notification template");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>The add-constraint menu (redesign spec §3.6): one item per dimension, verb-first labels,
+    /// every item carrying the shared Add glyph — the Targets &amp; Audience kebab treatment.</summary>
+    private IReadOnlyList<RowAction> ConstraintActions =>
+    [
+        ConstraintAction(TemplateConstraintDimension.GradeLevel, "Add grade levels"),
+        ConstraintAction(TemplateConstraintDimension.Stream, "Add streams"),
+        ConstraintAction(TemplateConstraintDimension.ActivityGroup, "Add activity groups"),
+        ConstraintAction(TemplateConstraintDimension.Subject, "Add subjects"),
+        ConstraintAction(TemplateConstraintDimension.AssignmentType, "Add assignment types"),
+    ];
+
+    private RowAction ConstraintAction(TemplateConstraintDimension dimension, string label) =>
+        new()
+        {
+            Label = label,
+            Icon = FluentIcons.Add,
+            Disabled = _lookups?.Loaded != true,
+            DisabledReason = _lookups?.Loaded == true
+                ? null
+                : $"Constraint lookups are unavailable ({_lookups?.Error}) — adding is disabled until they return.",
+            OnClick = () => OpenConstraintDialogAsync(dimension),
+        };
+
+    /// <summary>Opens the add dialog PRESET to one dimension and merges its picks into the draft.</summary>
+    private async Task OpenConstraintDialogAsync(TemplateConstraintDimension dimension)
+    {
+        if (_lookups is null)
+            return;
+
+        var model = new ConstraintEditModel
+        {
+            Dimension = dimension,
+            TemplateLabel = TemplateLabel,
+            Options = _lookups.OptionsFor(dimension)
+                .Select(o => new ConstraintOption(o.Value, o.Text))
+                .ToList(),
+            ExistingValues = _model.Constraints
+                .Where(c => c.Dimension == dimension)
+                .Select(c => c.Value)
+                .ToList(),
+        };
+
+        var result = await DialogService
+            .ShowShellDialogAsync<ConstraintEditDialog, ConstraintEditModel, ConstraintEditResult>(
+                model, DimensionTitle(dimension), DialogWidth.Medium);
+        if (result is null)
+            return;
+
+        foreach (var value in result.Values)
+        {
+            if (_model.Constraints.Any(c =>
+                    c.Dimension == dimension
+                    && string.Equals(c.Value, value, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            _model.Constraints.Add(new TemplateConstraintDto(Guid.Empty, dimension, value));
+        }
+    }
+
+    /// <summary>The read-only list, shared with the landing grid's constraint-count link.</summary>
+    private Task OpenConstraintListAsync() =>
+        DialogService.ShowReadonlyDialogAsync<TemplateConstraintsDialog>(
+            $"{_model.Kind} · {ChannelLabel(_model.Channel)}",
+            new Dictionary<string, object?>
+            {
+                [TemplateConstraintsDialog.ConstraintsKey] = _model.Constraints.ToList(),
+                [TemplateConstraintsDialog.TemplateLabelKey] = TemplateLabel,
+            });
+
+    private string TemplateLabel => string.IsNullOrWhiteSpace(_model.Subject)
+        ? $"{_model.Kind} · {ChannelLabel(_model.Channel)}"
+        : _model.Subject!;
+
+    private static string ChannelLabel(NotificationChannel channel) => channel switch
+    {
+        NotificationChannel.Email => "Email",
+        NotificationChannel.SMS => "SMS",
+        NotificationChannel.WhatsApp => "WhatsApp",
+        _ => channel.ToString(),
+    };
+
+    private static string DimensionTitle(TemplateConstraintDimension dimension) => dimension switch
+    {
+        TemplateConstraintDimension.GradeLevel => "Add grade levels",
+        TemplateConstraintDimension.Stream => "Add streams",
+        TemplateConstraintDimension.ActivityGroup => "Add activity groups",
+        TemplateConstraintDimension.Subject => "Add subjects",
+        TemplateConstraintDimension.AssignmentType => "Add assignment types",
+        _ => "Add constraint",
+    };
+
+    /// <summary>
+    /// The §3.7 conflict warning: another template of the SAME kind × channel **in the same scope**
+    /// carries the identical constraint set, so publish-time selection could not tell them apart. A
+    /// warning, never a block — the server stays the authority.
+    /// <para>
+    /// Scope is part of the comparison because the sibling read is wider than the draft's scope: a
+    /// tenant session reads the system blueprint too (that is what makes adopt possible, §3.7), and
+    /// §3.9 makes a tenant row <b>shadow</b> an identical blueprint row. Warning there would call the
+    /// designed outcome ambiguous.
+    /// </para>
+    /// </summary>
+    private string? ConflictWarning
+    {
+        get
+        {
+            var draft = NormalizeConstraintSet(_model.Constraints.Select(c => (c.Dimension, c.Value)));
+
+            // The DRAFT's scope, not the DTO's: a create draft carries no TenantId yet, so the model's
+            // IsSystem is true by construction there and would compare the wrong side. The session's
+            // scope is the scope a create writes into (spec §3.7/§5); on Edit the row's own scope is.
+            var draftIsSystem = Mode == TemplateEditorMode.Create ? _sessionIsSystem : _model.IsSystem;
+
+            foreach (var row in _siblings)
+            {
+                if (row.Id == _model.Id
+                    || row.Kind != _model.Kind
+                    || row.Channel != _model.Channel
+                    || row.IsSystem != draftIsSystem)
+                {
+                    continue;
+                }
+
+                var candidate = NormalizeConstraintSet(row.Constraints.Select(c => (c.Dimension, c.Value)));
+                if (string.Equals(candidate, draft, StringComparison.Ordinal))
+                {
+                    return "Another template in this type and contact mode has the identical constraint set — "
+                        + "publish-time selection cannot tell them apart.";
+                }
+            }
+
+            return null;
+        }
+    }
+
+    private static string NormalizeConstraintSet(
+        IEnumerable<(TemplateConstraintDimension Dimension, string Value)> constraints) =>
+        string.Join(
+            "|",
+            constraints
+                .Select(c => $"{c.Dimension}={c.Value.Trim()}")
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .Select(p => p.ToLowerInvariant()));
+
+    private async Task LoadSiblingsAsync()
+    {
+        try
+        {
+            _siblings = (await Api.ListAsync()).ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load sibling templates for the conflict warning");
+        }
+    }
+
+    private async Task LoadAuditAsync()
+    {
+        if (Mode != TemplateEditorMode.Edit || _model.Id is not { } id)
+            return;
+
+        try
+        {
+            _audit = (await Api.GetAuditAsync(_model.Kind, _model.Channel, id)).ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not load the audit trail for template {TemplateId}", id);
+        }
+    }
+
+    /// <summary>
+    /// The read-only row's primary action (spec §3.5/§3.8): copy a system-blueprint row into this
+    /// tenant, or publish a tenant row portal-wide. Either way the operator lands on the COPY - the
+    /// editable row they now own - and the source is never modified.
+    /// </summary>
+    private async Task AdoptAsync()
+    {
+        if (_model.Id is not { } id)
+            return;
+
+        var adopt = CanAdopt;
+        var source = string.IsNullOrWhiteSpace(_model.Subject) ? "this template" : $"'{_model.Subject}'";
+
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            adopt
+                ? $"Adopt {source} into this tenant? The copy is independent of the system blueprint."
+                : $"Publish {source} portal-wide? Every tenant will see it unless it owns an override.",
+            adopt ? "Adopt" : "Publish",
+            title: adopt ? "Adopt template" : "Publish portal-wide");
+
+        if (!confirmed)
+            return;
+
+        _adopting = true;
+        _error = null;
+
+        try
+        {
+            var copy = adopt
+                ? await Api.AdoptAsync(id, $"Adopted from the system blueprint: {_model.Subject}", MutationToken)
+                : await Api.PromoteAsync(id, $"Published portal-wide from {_model.OwnerName}: {_model.Subject}", MutationToken);
+
+            Nav.NavigateTo($"/notification-templates/{copy.Id:D}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to copy notification template {TemplateId}", id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _adopting = false;
+        }
+    }
+
+    /// <summary>Edit-mode reset (spec §3.5): audited, requires the Reason field, confirmed first.</summary>
+    private async Task ResetAsync()
+    {
+        if (_saving || _resetting || _model.Id is not { } id)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_model.Reason))
+        {
+            _error = "A reason is required to reset a template — the reset is recorded in the audit trail.";
+            return;
+        }
+
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            "Reset this template to the built-in default? The row is removed and the default applies again.",
+            primaryText: "Reset",
+            title: "Reset template");
+        if (!confirmed)
+            return;
+
+        _resetting = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            await Api.DeleteAsync(id, _model.Reason.Trim(), MutationToken);
+            Nav.NavigateTo("/notification-templates");
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigated away.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reset notification template {TemplateId}", id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _resetting = false;
+        }
+    }
+    private void BackToListAsync() => Nav.NavigateTo("/notification-templates");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        _previewDebounce?.Cancel();
+        _previewDebounce?.Dispose();
+        _previewDebounce = null;
+    }
+}

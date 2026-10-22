@@ -1,0 +1,85 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@inject StudentsLookupClient Students
+@inject CodedValuesApiClient CodedValues
+@*
+   The ONE read-only constraints view (redesign spec §3.6/§3.8): opened from the landing grid''s
+   "N constraints" link and from the detail page''s Constraints panel. Read-only on purpose — the
+   editable surface is the panel itself, so this dialog never becomes a second write path.
+
+   Values render through the shared <see cref="TemplateConstraintLookups"/> so a stored id is shown
+   with the same name the editor uses; a lookup failure falls back to the stored text and says so.
+*@
+<DialogShellBody>
+    <ReadOnlyDialogShell Class="template-constraints-dialog">
+        <ChildContent>
+            <p class="template-constraints-dialog__subject">@TemplateLabel</p>
+
+            @if (_loading)
+            {
+                <div class="template-constraints-dialog__loading"><FluentSpinner /></div>
+            }
+            else if (Constraints.Count == 0)
+            {
+                <p class="template-constraints-dialog__empty">
+                    No constraints — this template is the tenant default for its type and contact mode.
+                </p>
+            }
+            else
+            {
+                @if (_lookups?.Error is not null)
+                {
+                    <FluentMessageBar Intent="MessageBarIntent.Warning" class="mb-2">
+                        Constraint names are unavailable (@_lookups.Error) — the stored values are shown instead.
+                    </FluentMessageBar>
+                }
+
+                <ul class="constraint-list">
+                    @foreach (var constraint in Constraints.OrderBy(c => c.Dimension).ThenBy(c => c.Value, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <li class="constraint-list__item" data-dimension="@constraint.Dimension">
+                            <span class="constraint-list__dimension">@TemplateConstraintLookups.DimensionLabel(constraint.Dimension)</span>
+                            <span class="constraint-list__value">@Display(constraint)</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </ChildContent>
+
+        <Footer>
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CloseAsync">Close</FluentButton>
+        </Footer>
+    </ReadOnlyDialogShell>
+</DialogShellBody>
+
+@code {
+    /// <summary>Parameter key for <see cref="Constraints"/> (never a bare nameof at the call site).</summary>
+    public const string ConstraintsKey = nameof(Constraints);
+
+    /// <summary>Parameter key for <see cref="TemplateLabel"/>.</summary>
+    public const string TemplateLabelKey = nameof(TemplateLabel);
+
+    /// <summary>The template''s constraints, exactly as the store returned them.</summary>
+    [Parameter] public IReadOnlyList<TemplateConstraintDto> Constraints { get; set; } = [];
+
+    /// <summary>The template the list belongs to (shown above the list; the dialog title carries the kind).</summary>
+    [Parameter] public string TemplateLabel { get; set; } = "Template";
+
+    /// <summary>The dialog host (v5). Null in a bare render, so Close is a no-op there.</summary>
+    [CascadingParameter] public IDialogInstance? DialogInstance { get; set; }
+
+    private TemplateConstraintLookups? _lookups;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _lookups = new TemplateConstraintLookups(Students, CodedValues);
+        await _lookups.LoadAsync();
+        _loading = false;
+    }
+
+    private string Display(TemplateConstraintDto constraint) =>
+        _lookups?.DisplayFor(constraint.Dimension, constraint.Value) ?? constraint.Value;
+
+    private Task CloseAsync() => DialogInstance is null ? Task.CompletedTask : DialogInstance.CloseAsync();
+}

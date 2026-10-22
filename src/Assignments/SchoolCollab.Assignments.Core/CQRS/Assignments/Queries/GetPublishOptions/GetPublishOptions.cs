@@ -78,7 +78,9 @@ public sealed class GetPublishOptionsHandler(
                         c.Constraints
                             .Select(constraint => new PublishTemplateConstraintDto(constraint.Dimension, constraint.Value))
                             .ToList(),
-                        IsDefault: c.Constraints.Count == 0))
+                        IsDefault: c.Constraints.Count == 0,
+                        IsSystem: c.IsSystem,
+                        OwnerName: c.OwnerName))
                     .ToList()));
         }
 

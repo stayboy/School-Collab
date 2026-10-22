@@ -49,7 +49,8 @@ public class HttpNotificationTemplateResolverTests
         params TemplateConstraintDto[] constraints) =>
         new(Guid.NewGuid(), kind, channel, subject, body, constraints,
             createdAt ?? new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+            new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero),
+            TenantId: null, OwnerName: "System");
 
     [TestMethod]
     public async Task NoContent_ReadsNotSet_SoTheBuiltInDefaultRenders()
@@ -142,7 +143,8 @@ public class HttpNotificationTemplateResolverTests
                 id, NotificationTemplateKind.Publish, NotificationChannel.Email,
                 "New task: {{Title}}", "<p>{{Description}}</p>",
                 [new TemplateConstraintDto(Guid.NewGuid(), TemplateConstraintDimension.GradeLevel, "Grade 3")],
-                createdAt, createdAt.AddDays(1))));
+                createdAt, createdAt.AddDays(1),
+                TenantId: TenantId, OwnerName: "Northfield")));
 
         var read = await Read(NewResolver(settings));
 

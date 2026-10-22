@@ -7,7 +7,9 @@ round produces exactly two files:
 - `round-<round-slug>.md` — the single round doc, with sections `## Plan`,
   `## Worker Report`, `## Review`, `## Acceptance`, `## UI Tester`. Fill only
   the tier-appropriate ones: Tiers 1–2 fill Plan + Worker Report + Acceptance
-  (Tier 2 adds Review); Tier 3 fills them all (+ UI Tester for UI rounds).
+  (Tier 2 adds Review); **Tier 0 (Solo) fills Plan + Worker Report + Review (marked self-run) +
+  Acceptance** — the diff review is never skipped, only its independent seat; Tier 3 fills
+  them all (+ UI Tester for UI rounds).
 - `diffs-<round-slug>.patch` — the round's `git diff`, written once by the
   parent after the worker run and shared with the reviewer/tester by path.
 
@@ -24,10 +26,30 @@ specs that remain the source of truth**.
   cannot be reviewed or reconstructed later: on 2026-10-07 a reviewer could diff a
   round only by rebuilding its delta from a *sibling* round's patch. Generate the
   patch alongside the round doc, from the round's own base.
+- **An unattended round lists its pinned decisions twice.** The round doc carries
+  `## Pinned decisions (unattended …)`, `## Acceptance` repeats the same entries, and the
+  completion report repeats them again as a table. This folder is ephemeral, so a pin that
+  lives only here is a pin the owner will never see again (owner, 2026-10-21).
+- **A mandated step that could not run gets a `## Not run` table** — one row per step, with its
+  reason and its owner, and the round is reported with that row visible. An unavailable environment
+  is never silence (Q50, 2026-10-21).
+- **A red first run is re-run twice before it is called green.** One failing test in a full run is
+  re-run in isolation and then as a second full run; the round doc records the first total, the
+  isolation result and the re-run total, and a flaky pass is recorded as a **flake**, not a pass
+  (Q51, 2026-10-21).
+- **A round that consumed `/to-tickets` issues closes them at acceptance (owner,
+  2026-10-21).** `## Acceptance` carries one row per named ticket — the ticket's own
+  acceptance criteria (its checkboxes or the spec sections it cites) against the diff and
+  build/test — and the parent executes the closes with the row, the round-doc path and
+  the carrying PR. A deferred or descoped ticket's issue **stays open**, its row a
+  comment; never a parent issue (`/to-tickets`'s own guard).
 - **Flip the round doc's `**Status:**` line when the round closes** — set it to
   `CLOSED` and name the PR/commit that carried it, or to `PARKED` when the round was
   stopped mid-flight by the time-box rule
-  (`.pi/skills/orchestrator-worker-reviewer/SKILL.md`, step 3). A parked round names the
+  (`.pi/skills/orchestrator-worker-reviewer/SKILL.md`, step 3), or when an unattended
+  round's verdict is anything other than a clean CLOSED — the step-5 residual grill has
+  no auto-accepting seat, so its questions are recorded unratified and the round parks
+  (owner, 2026-10-21). A parked round names the
   backlog/follow-up item it was parked as and ships its `diffs-<slug>.patch` frozen at the
   point of the park, so `resume-interrupted-orchestrator-round` can pick it up. Round docs
   left at `planned`

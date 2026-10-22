@@ -1,0 +1,113 @@
+/* Template editor (redesign spec §3.3): the assignment-authoring proportions — content on the left, the
+   two PanelSections in a rail on the right — stacking to one column where the assignment page stacks.
+   Only the LAYOUT lives here; the panels keep their own chrome (PanelSection owns the box, the rule and
+   the header split). */
+.template-editor__loading {
+    display: flex;
+    justify-content: center;
+    padding: 48px 0;
+}
+
+.template-editor__title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.template-editor__mode-label {
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.template-editor-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
+    grid-template-areas: "message rail";
+    gap: 16px;
+    align-items: start;
+}
+
+.template-editor-message {
+    grid-area: message;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.template-editor-message__title {
+    margin: 0;
+    font-size: 1.17em;
+    font-weight: 600;
+}
+
+.template-editor-message__hint {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #616161);
+    font-size: 0.9em;
+}
+
+.template-editor-rail {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.template-editor-panel__empty {
+    margin: 0;
+    color: var(--neutral-foreground-hint, #616161);
+}
+
+.template-editor-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.template-editor-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-wrap: anywhere;
+}
+
+.template-editor-preview__subject {
+    margin: 0;
+    font-weight: 600;
+}
+
+.template-editor-preview__plain {
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.template-editor-preview__actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.template-editor-actions {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.template-editor-actions__reason {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+@media (max-width: 1400px) {
+    .template-editor-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "message" "rail";
+    }
+}
+/* Owner label in the title row (redesign spec 3.2/3.7): the badge carries the system scope, this is the
+   tenant's name. Theme-neutral - no literal colours (the PanelSection surface lesson). */
+.template-editor__owner {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}

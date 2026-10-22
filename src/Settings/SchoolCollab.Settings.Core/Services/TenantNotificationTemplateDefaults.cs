@@ -25,20 +25,24 @@ public static class TenantNotificationTemplateDefaults
 {
     /// <summary>
     /// Throws <see cref="TenantNotificationTemplateConflictException"/> when another live
-    /// unconstrained template exists for <paramref name="kind"/> × <paramref name="channel"/> in the
-    /// current tenant. <paramref name="excludingTemplateId"/> is the row being updated (null on
+    /// unconstrained template exists for <paramref name="kind"/> × <paramref name="channel"/> <b>in the
+    /// same scope</b> (<paramref name="ownerId"/>: a tenant id, or <see langword="null"/> for the system
+    /// blueprint — redesign spec §3.7, so one unconstrained tenant default and one unconstrained system
+    /// default may coexist). <paramref name="excludingTemplateId"/> is the row being updated (null on
     /// create) so a template can be updated in place without colliding with itself.
     /// </summary>
     public static async Task EnsureNoCompetingDefaultAsync(
         SettingsDbContext db,
         NotificationTemplateKind kind,
         NotificationChannel channel,
+        Guid? ownerId,
         Guid? excludingTemplateId,
         CancellationToken cancellationToken = default)
     {
         var query = db.TenantNotificationTemplates
             .AsNoTracking()
-            .Where(x => x.Kind == kind && x.Channel == channel && !x.Constraints.Any());
+            .Where(x => x.Kind == kind && x.Channel == channel && x.TenantId == ownerId
+                && !x.Constraints.Any());
 
         if (excludingTemplateId is { } excluded)
         {
@@ -48,9 +52,10 @@ public static class TenantNotificationTemplateDefaults
         var competing = await query.Select(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (competing != Guid.Empty)
         {
+            var scope = ownerId is null ? "the system blueprint" : "this tenant";
             throw new TenantNotificationTemplateConflictException(
-                $"A default {kind}/{channel} template already exists for this tenant. A template with no "
-                + "constraints IS the tenant default, so exactly one may exist — add a constraint "
+                $"A default {kind}/{channel} template already exists for {scope}. A template with no "
+                + "constraints IS the default, so exactly one may exist per scope — add a constraint "
                 + "dimension to this one, or edit the existing default instead.");
         }
     }
