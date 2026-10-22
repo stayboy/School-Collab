@@ -170,6 +170,16 @@ blended: a finding belongs to exactly one axis, and the report never picks a sin
 axes — that reranking is what the separation exists to prevent. `## Review` carries the two reports
 **unmerged**, under their own headings.
 
+**Provenance and the smell baseline (owner, 2026-10-21).** The two-axis REVIEW block is this
+contract's in-seat implementation of the `code-review` skill's method
+(`~/.agents/skills/code-review/SKILL.md`): Tier 0 self-review invokes that skill directly;
+this seat runs it in-contract, with the contract's per-surface rule set as this repo's
+standards sources. On the Standards axis, read the skill's smell baseline once per review
+(its step 3: twelve named Fowler smells) and apply it to the diff hunks as judgement-call
+**P2s** — a documented repo rule always overrides a baseline smell, and anything tooling
+already enforces is skipped. Smell findings land in the existing `P2: [Standards]` rows;
+the block gains no new line. Tier 1's parent scope-check stays smell-free.
+
 ## UI Tester
 
 Adversarial bug hunter. Your scope is the handover list verbatim — do not
@@ -203,7 +213,12 @@ repo-wide sweeps, no builds, no tests; the implementation does not exist yet).
    file:line evidence for each, or flag the miss.
 2. **Scope gates** — UI files, contract-shape changes, migrations, committed
    secrets, CPM/version rules: is the plan's in/out boundary honest, and does
-   its expected-files list stay inside it?
+   its expected-files list stay inside it? **Reviewability (owner,
+   2026-10-21):** does the whole expected diff fit one reviewer pass (the
+   plan-step sizing rule)? A plan that honestly exceeds it and cannot be
+   re-sliced into workstreams is a **P1** — the round parks with its
+   recommendation (re-slice grill first, then the `/to-tickets` front door)
+   rather than proceeding to a mega-round.
 3. **Acceptance honesty** — would each test the plan calls "discriminating"
    actually fail against the pre-fix code? Name every one that cannot fail. A test is
    *proved* discriminating only when it has been run against the pre-fix base and failed;

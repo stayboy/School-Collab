@@ -252,6 +252,11 @@ unattended round, the two sites behave differently (owner, 2026-10-21):
   isolation, and deleting a public route always reach a human unless the owner has
   pre-authorized that specific round by name. The blast radius decides, not the phrasing
   of the question.
+- **A too-big unattended plan parks (owner, 2026-10-21).** Unattended rounds can neither
+  invoke `/to-tickets` nor quiz the owner, so a plan that exceeds the reviewability sizing
+  rule parks via the existing gate-P1 path, its recommendation recorded unratified; the only
+  bypass is fan-out pre-named in the owner's round instruction. An unattended round never
+  sub-scopes silently (that is a descope) and never publishes issues.
 - **Record provenance; never blur it.** Unattended decisions use a DISTINCT heading -
   `## Pinned decisions (unattended - recommendations accepted)` - never the owner-pinned
   heading, and the round's ledger row's `Mode` cell reads `unattended` (`unattended solo` at
@@ -443,6 +448,21 @@ the tester never derives or expands its own scope.
    criteria). Tier 3: the orchestrator run reads the source specs/review
    docs, writes `## Plan`, and authors the worker/reviewer task specs and
    acceptance criteria. The plan must be implementable standalone.
+   **Reviewability sizing (owner, 2026-10-21).** The plan decomposes the work
+   into **workstreams** — vertical units: a published ticket or a
+   plan-decomposed bullet; the fan-out variant's file-disjoint partitions keep
+   the name *slices*. Sizing is a plan criterion, not a freeze-time discovery:
+   every workstream must fit a single fresh context window (a tracer bullet
+   through the stack), and the whole expected diff must be honestly reviewable
+   in one reviewer pass — reuse the freeze-time split calibration (~3k lines,
+   provisional) as the honesty check, never a second number. If the cited spec
+   already has published tickets (`/to-tickets`), name them as workstreams —
+   consume, do not re-decompose. If the plan exceeds the bound and the author
+   cannot re-slice it alone, surface the re-slice/re-scope frontier to the
+   owner in grill format first (one round, recommendations attached, counted as
+   the plan-review iteration); only if the revised plan still exceeds it does
+   the round **park** recommending the owner run `/to-tickets` — the orchestrator
+   never invokes that skill (`disable-model-invocation: true`).
    **Open decisions (author side).** A plan that leaves a decision fork the specs
    do not determine must DECLARE it in `## Plan` as an `Open decisions:` list in
    grill format — numbered, each with a recommended answer — rather than silently
