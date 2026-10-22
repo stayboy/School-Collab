@@ -64,11 +64,20 @@ public enum TemplateChangeKind
 /// a candidate for the applicability matcher (spec §3.1.1). <see cref="TenantId"/> is
 /// <see langword="null"/> for a system-blueprint row (redesign spec §3.7), whose <see cref="OwnerName"/>
 /// is then "System"; a tenant-owned row carries its tenant's name.
+/// <para>
+/// Naming spec (D3/D6): <see cref="Title"/> is the row's identity everywhere and
+/// <see cref="Description"/> is display-only metadata; <see cref="Code"/> is the generated exact
+/// reference, minted on create and never writable — <see langword="null"/> for a row that predates the
+/// code column, which the UI renders as a dash.
+/// </para>
 /// </summary>
 public sealed record TenantNotificationTemplateDto(
     Guid Id,
     NotificationTemplateKind Kind,
     NotificationChannel Channel,
+    string Title,
+    string? Description,
+    string? Code,
     string? Subject,
     string Body,
     IReadOnlyList<TemplateConstraintDto> Constraints,
@@ -87,17 +96,30 @@ public sealed record TemplateConstraintDto(
     TemplateConstraintDimension Dimension,
     string Value);
 
-/// <summary>Create request for one template row (kind × channel travel in the body, not the route).</summary>
+/// <summary>
+/// Create request for one template row (kind × channel travel in the body, not the route).
+/// <see cref="Title"/> is required — a blank one is a 400 from the server's domain rule — and
+/// <see cref="Description"/> is optional. The generated code is not part of this body: the create
+/// handler mints it (naming spec D5/D6).
+/// </summary>
 public sealed record CreateNotificationTemplateRequest(
     NotificationTemplateKind Kind,
     NotificationChannel Channel,
+    string Title,
+    string? Description,
     string? Subject,
     string Body,
     IReadOnlyList<TemplateConstraintRequest> Constraints,
     string? Reason = null);
 
-/// <summary>Replace request for one template, addressed by id — kind and channel are immutable per row.</summary>
+/// <summary>
+/// Replace request for one template, addressed by id — kind, channel and the generated code are
+/// immutable per row. <see cref="Title"/> is required and <see cref="Description"/> optional, exactly as
+/// on create.
+/// </summary>
 public sealed record UpdateNotificationTemplateRequest(
+    string Title,
+    string? Description,
     string? Subject,
     string Body,
     IReadOnlyList<TemplateConstraintRequest> Constraints,

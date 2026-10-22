@@ -1,0 +1,20 @@
+/* ReasonDialog's own body treatment. The padding lives HERE, with the component, rather than on the
+   host app's shared `.dialog-container` (which is Admin-host-only): this dialog is opened from every
+   app that hosts the RCL. */
+.reason-dialog {
+    padding: 16px 16px 0;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+/* The caller's prompt — the "why" the dialog is asking for, kept secondary to the input. */
+.reason-dialog__prompt {
+    margin: 0 0 0.75rem;
+    color: var(--colorNeutralForeground3, #616161);
+}
+
+/* The textarea fills the row's input cell. FluentTextArea puts the caller's Class on its wrapper
+   `fluent-field`, which the scoped attribute does not reach, so the rule needs ::deep. */
+.reason-dialog ::deep .reason-dialog__input {
+    width: 100%;
+}

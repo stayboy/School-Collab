@@ -9,8 +9,13 @@
    once Quill exists. Hosts declare nothing.
 
    The wrapper IS the interop (owner, 2026-10-11) — we write no JS bridge. What we read at submit is
-   sanitised by the caller, and what we seed is a plain string. *@
-<div class="rich-instruction-editor" id="@Id">
+   sanitised by the caller, and what we seed is a plain string.
+
+   HEIGHT: the panel's height is a caller knob (the MinHeight parameter) but the sizing itself stays in
+   the component's scoped CSS. The root carries the value as the --rich-instruction-editor-min-height
+   custom property; the scoped rules consume it with the assignment surface's 8rem as their fallback,
+   so a host that passes nothing renders exactly as before. *@
+<div class="rich-instruction-editor" id="@Id" style="--rich-instruction-editor-min-height: @MinHeight">
     @if (_assetsReady)
     {
         <BlazoredTextEditor @ref="_editor"
@@ -40,6 +45,20 @@
 
     /// <summary>Shown while the editor is empty.</summary>
     [Parameter] public string Placeholder { get; set; } = "Write the instructions…";
+
+    /// <summary>
+    /// The editor surface's minimum height, as a CSS length — the panel-fill knob (naming spec D10:
+    /// the template editor passes a taller value so the body fills the panel it sits in). Emitted on
+    /// the root as the <c>--rich-instruction-editor-min-height</c> custom property and consumed by this
+    /// component's scoped CSS; the loading placeholder follows the same value so the panel does not jump
+    /// when the real control arrives.
+    /// <para>Defaults to <see cref="DefaultMinHeight"/> (8rem), so the assignment authoring surface —
+    /// which passes nothing — renders exactly as it always has.</para>
+    /// </summary>
+    [Parameter] public string MinHeight { get; set; } = DefaultMinHeight;
+
+    /// <summary>The <see cref="MinHeight"/> a host gets by default (the pre-D10 behaviour).</summary>
+    public const string DefaultMinHeight = "8rem";
 
     /// <summary>
     /// The asset loader in THIS library — the reason no host declares a tag.

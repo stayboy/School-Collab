@@ -1,0 +1,63 @@
+@* Naming spec D11 (notification-template-naming-and-editor-surface) — the ONE audited-reason dialog,
+   shared by every caller that has to record WHY it is changing or removing a row. It generalises the
+   Settings app's single-purpose TemplateResetReasonDialog: the prompt and the submit/saving labels come
+   from the caller, so a save edit and a reset cannot drift into two different reason experiences.
+   The reason is REQUIRED — an audited act must carry the operator's own words — so a blank (or
+   whitespace-only) box keeps the dialog open with an error instead of submitting. Dumb dialog by
+   design: it performs no side effect, and the hosting page issues the write with the returned reason.
+   Open it through DialogServiceExtensions.ShowReasonDialogAsync. *@
+@inherits DialogShellBase<ReasonDialog.ReasonFormModel, ReasonDialog.ReasonResult>
+
+<DialogShellBody>
+<div class="reason-dialog">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <p class="reason-dialog__prompt">
+            @Model.Prompt
+        </p>
+
+        <FormRow Label="Reason" Required Help="Required - recorded in the audit trail.">
+            <FluentTextArea @bind-Value="Model.Reason" Class="reason-dialog__input ta-lines-3" />
+        </FormRow>
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="@Model.SubmitText"
+                           SavingText="@Model.SavingText" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+</DialogShellBody>
+
+@code {
+    /// <summary>
+    /// The dialog's caller-supplied copy. The <b>header</b> title is deliberately NOT here — it is the
+    /// <c>title</c> argument of <see cref="DialogServiceExtensions.ShowReasonDialogAsync"/>, which is
+    /// what the shell renders in the dialog header.
+    /// </summary>
+    /// <param name="prompt">The sentence above the input, naming the act being explained.</param>
+    /// <param name="submitText">The submit button's verb ("Save", "Reset").</param>
+    /// <param name="savingText">The submit button's label while the caller's write is in flight.</param>
+    public sealed class ReasonFormModel(string prompt, string submitText, string savingText = "Saving...")
+    {
+        public string Prompt { get; } = prompt;
+
+        public string SubmitText { get; } = submitText;
+
+        public string SavingText { get; } = savingText;
+
+        /// <summary>The operator's reason. Required: whitespace is rejected, not submitted.</summary>
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>The trimmed reason the caller's write travels with.</summary>
+    public sealed record ReasonResult(string Reason);
+
+    protected override Task<ReasonResult?> SubmitAsync(ReasonFormModel model)
+    {
+        var reason = model.Reason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            Error = "A reason is required.";
+            return Task.FromResult<ReasonResult?>(null);
+        }
+
+        return Task.FromResult<ReasonResult?>(new ReasonResult(reason));
+    }
+}

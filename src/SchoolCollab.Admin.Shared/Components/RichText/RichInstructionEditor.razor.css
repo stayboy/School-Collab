@@ -1,22 +1,27 @@
-/* The rich instruction editor's box. Sizing lives here (never an inline style): the wrapper renders a
-   bare contenteditable surface, which would otherwise collapse to nothing inside a dialog. */
+/* The rich instruction editor's box. Sizing lives here (never an inline height): the wrapper renders a
+   bare contenteditable surface, which would otherwise collapse to nothing inside a dialog.
+
+   The height is the caller's knob (the component's MinHeight parameter): the root emits it as
+   --rich-instruction-editor-min-height, and every rule below reads that property with 8rem — the
+   pre-parameter behaviour — as its fallback, so an untouched host is pixel-identical. */
 .rich-instruction-editor ::deep .ql-toolbar,
 .rich-instruction-editor ::deep .ql-container {
     font-family: inherit;
 }
 
 .rich-instruction-editor ::deep .ql-container {
-    min-height: 8rem;
+    min-height: var(--rich-instruction-editor-min-height, 8rem);
 }
 
 .rich-instruction-editor ::deep .ql-editor {
-    min-height: 8rem;
+    min-height: var(--rich-instruction-editor-min-height, 8rem);
 }
 
-/* The placeholder shown while the Quill assets load — the same height as the editor, so the dialog does
-   not jump when the real control arrives. */
+/* The placeholder shown while the Quill assets load — the editor's height plus the 2rem the toolbar
+   occupies once it arrives (8rem + 2rem = the 10rem this box always had), so the panel does not jump
+   when the real control arrives. */
 .rich-instruction-editor-loading {
-    min-height: 10rem;
+    min-height: calc(var(--rich-instruction-editor-min-height, 8rem) + 2rem);
     border: 1px solid var(--neutral-stroke-rest);
     border-radius: 4px;
 }
