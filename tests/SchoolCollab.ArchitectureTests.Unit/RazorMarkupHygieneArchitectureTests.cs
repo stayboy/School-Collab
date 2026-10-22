@@ -62,6 +62,16 @@ public class RazorMarkupHygieneArchitectureTests
     private static readonly string[] BlockKeywords =
         ["@if", "@else", "@else if", "@foreach", "@for", "@while", "@switch", "@try", "@lock"];
 
+    /// <summary>A <c>[Parameter]</c> declaration whose property is a <c>string</c> (the only type on
+    /// which a quoted attribute value is a LITERAL rather than an expression).</summary>
+    private const string StringParameterPattern = @"\[Parameter[^\]]*\]\s*public\s+string\??\s+(\w+)";
+
+    /// <summary>A component tag with its attribute text; quoted values may contain <c>&gt;</c>.</summary>
+    private const string ComponentTagPattern = "<([A-Z]\\w+)((?:[^>\"\\n]|\"[^\"]*\")*)>";
+
+    /// <summary>An attribute whose quoted value is a bare <c>_</c>-prefixed member access.</summary>
+    private const string BareFieldLiteralPattern = "(?<![\\w@-])(\\w+)\\s*=\\s*\"(_+[A-Za-z0-9_]*\\.[A-Za-z0-9_.]+)\"";
+
     /// <summary>The one legitimate script in a razor file: the Blazor host document booting the
     /// framework (Admin's and Families' <c>App.razor</c>). That is the HTML shell, not a component.</summary>
     private const string FrameworkBootstrap = "_framework/blazor.web.js";
@@ -351,5 +361,79 @@ public class RazorMarkupHygieneArchitectureTests
         }
 
         failures.Should().BeEmpty(string.Join(Environment.NewLine, failures));
+    }
+
+    /// <summary>
+    /// A bare <c>_</c>-prefixed value on a **string-typed** component parameter is a literal, not the
+    /// field: <c>Value="_model.Body"</c> binds the text “_model.Body” and silently disconnects the
+    /// input — it compiles, the page renders, and only a human notices the editor is dead (Q49b,
+    /// 2026-10-21). It is guarded here beside the other markup invariants because it fails silently.
+    /// <para>
+    /// The parameter's TYPE is what decides: on a non-string parameter Blazor evaluates the value as a
+    /// C# expression, so <c>Contacts="_model.Contacts"</c> is correct and must not be flagged. The
+    /// guard therefore resolves each repo component's declared string parameters first and flags only
+    /// those. Third-party FluentUI parameters are the recorded exclusion — they are not declared in
+    /// this tree, so the guard cannot see their types.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void NoBareFieldLiteral_OnAStringTypedComponentParameter()
+    {
+        var stringParameters = StringParametersByComponent();
+        var failures = new List<string>();
+
+        foreach (var path in RazorFiles())
+        {
+            var text = StripRazorComments(File.ReadAllText(path));
+            foreach (Match tag in Regex.Matches(text, ComponentTagPattern))
+            {
+                var component = tag.Groups[1].Value;
+                if (!stringParameters.TryGetValue(component, out var names))
+                {
+                    continue;
+                }
+
+                foreach (Match attribute in Regex.Matches(tag.Groups[2].Value, BareFieldLiteralPattern))
+                {
+                    if (!names.Contains(attribute.Groups[1].Value))
+                    {
+                        continue;
+                    }
+
+                    var line = text.Take(tag.Index).Count(c => c == '\n') + 1;
+                    failures.Add(
+                        $"{Relative(path)}:{line} — <{component} {attribute.Groups[1].Value}=" +
+                        $"\"{attribute.Groups[2].Value}\"> binds the LITERAL, not the field. Razor needs " +
+                        "the leading '@' to evaluate the expression.");
+                }
+            }
+        }
+
+        failures.Should().BeEmpty(string.Join(Environment.NewLine, failures));
+    }
+
+    /// <summary>Component name → the names of its <c>[Parameter] … string</c> properties.</summary>
+    private static Dictionary<string, HashSet<string>> StringParametersByComponent()
+    {
+        var map = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var file in SourceFiles([".razor", ".cs"]))
+        {
+            var name = Path.GetFileName(file);
+            var component = name.EndsWith(".razor.cs", StringComparison.OrdinalIgnoreCase)
+                ? name[..^".razor.cs".Length]
+                : Path.GetFileNameWithoutExtension(name);
+
+            foreach (Match match in Regex.Matches(File.ReadAllText(file), StringParameterPattern))
+            {
+                if (!map.TryGetValue(component, out var names))
+                {
+                    map[component] = names = new HashSet<string>(StringComparer.Ordinal);
+                }
+
+                names.Add(match.Groups[1].Value);
+            }
+        }
+
+        return map;
     }
 }

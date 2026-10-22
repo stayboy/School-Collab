@@ -409,7 +409,7 @@ not a requirement.
 
 | Option | Effect |
 |---|---|
-| **(A) Shared component, keep both entry points** *(recommended)* | Extract the period set editor into `TopicPeriodsEditor.razor`. `TopicEditDialog` uses it as a section; `TopicPeriodsEditDialog` becomes a thin wrapper. One implementation, both existing entry points keep working, the 7 existing `TopicPeriodsEditDialogTests` keep guarding the editor. Cost: a small wrapper component survives. |
+| **(A) Shared component, keep both entry points** *(recommended)* | Extract the period set editor into `TopicPeriodsEditor.razor`. `TopicEditDialog` uses it as a section; `TopicPeriodsEditDialog` becomes a thin wrapper. One implementation, both existing entry points keep working, the 7 existing `TopicEditDialogTests` keep guarding the editor. Cost: a small wrapper component survives. |
 | (B) Fold entirely, delete the dialog | One entry point, no wrapper. Cost: removes a working kebab from the Subjects card and `GradeTopicsDialog`, and their tests. Broader blast radius. |
 
 Default to **(A)** unless the owner prefers a single entry point.
@@ -460,7 +460,7 @@ for components, MTP. Each FR-ED with behaviour gets a test.
 
 - `TopicEditDialogTests` (new): AC-1, AC-2, AC-3, AC-11, AC-12.
 - `TopicPeriodsEditorTests` (extracted from the existing
-  `TopicPeriodsEditDialogTests`): AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10.
+  `TopicEditDialogTests`): AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10.
 - **AC-5 must be mutation-verified**: seed two bridge rows for one topic and
   assert the editor opens with two rows. Reverting the seed to `.Take(1)` — or
   keying the map by `TopicId` — must fail the test. (Keying by `TopicId` does
@@ -468,7 +468,7 @@ for components, MTP. Each FR-ED with behaviour gets a test.
 - **AC-7/8/9 must assert "no request issued"**, not just the error text — the
   handler's `Calls` list must be empty for the write endpoints. A test that only
   checks the message passes even if the write went out.
-- The 7 existing `TopicPeriodsEditDialogTests` must keep passing unchanged under
+- The 7 existing `TopicEditDialogTests` must keep passing unchanged under
   option (A) §8 Q1.
 
 Gotchas to expect (all recorded in

@@ -1,6 +1,6 @@
 ---
 name: orchestrator-worker-reviewer
-description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, acceptance is always written by the plan's author (orchestrator on full rounds, the parent on light/lean rounds) and is a gate on every tier before work is reported complete, and a UI tester bug-hunts delivered UI work when the UI trigger fires. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes (do those solo).
+description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, acceptance is always written by the plan's author (orchestrator on full rounds, the parent on light/lean rounds) and is a gate on every tier before work is reported complete, and a UI tester bug-hunts delivered UI work when the UI trigger fires. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes — those run at **Tier 0 (Solo)**, which is part of this ladder: self-review and self-acceptance still apply, but no child runs are dispatched.
 ---
 
 # Orchestrator-Worker-Reviewer (with UI Tester) — tiered
@@ -51,14 +51,14 @@ Cost rules that apply to every round (speed + token budget):
 
 | Tier | Use when | Child runs | Acceptance |
 |---|---|---|---|
-| 0 | Trivial non-behavioural change (typo, comment, config tweak) | 0 — do not invoke this skill | solo, per `AGENTS.md` |
-| 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | **Plan-author acceptance after the work**: the parent checks every plan criterion against the diff + authoritative build/test and transcribes the verdict |
-| 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | **Plan-author acceptance after the work**: the parent adjudicates REVIEW, then checks every plan criterion against the diff + build/test and transcribes the verdict |
+| 0 | **Solo** — trivial or contained work: a typo, a comment, a config tweak, a single-file non-behavioural change (or a small fix the owner explicitly puts here) | **0 — no child runs** (the agent is implementer, self-reviewer and acceptor) | **self-acceptance after the self-run two-axis `code-review`** (see "Solo still reviews" below) |
+| 1 | Small behavioural fix passing the eligibility checklist | 2 (plan gate + worker) | **Plan-author acceptance after the work**: the parent checks every plan criterion against the diff + authoritative build/test and transcribes the verdict |
+| 2 | Behavioural, no UI, single-context plan | 3 (plan gate + worker + static reviewer); ≤1 rework iteration (worker + reviewer) | **Plan-author acceptance after the work**: the parent adjudicates REVIEW, then checks every plan criterion against the diff + build/test and transcribes the verdict |
 | 3 | Feature rounds; anything carrying schema / endpoint / contract / multi-context risk; anything failing the Tier-1 checklist for a NON-UI reason | 4–6: orchestrator-plan, **reviewer plan-review**, worker, reviewer diff-review, then orchestrator-accept OR plan-author acceptance by the parent (**lean**, no-UI rounds) + UI tester when the UI trigger fires | the orchestrator (full) or the parent as plan author (lean) writes the verdict after checking every criterion — always before the round is reported complete (+ tester-scope handover when the tester fires) |
 
 Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
-When starting a feature or fix, offer the user the menu (solo / light round /
-full four-agent) per repo `AGENTS.md` — do not default silently.
+When starting a feature or fix, offer the user the menu (Tier 0 Solo / Tier 1–2
+light round / Tier 3 full four-agent) per repo `AGENTS.md` — do not default silently.
 
 ### Acceptance is a gate in every tier (owner rule, 2026-10-17)
 
@@ -75,9 +75,9 @@ acceptance section is unaccepted work, exactly as an empty reviewer verdict is
   authoritative numbers, and the plan's author signs the verdict. The gate is
   therefore model-independent of both the worker and the reviewer — the lean cut
   removes the UI tester, not the acceptance run. Clinepass is unchanged
-  (`cline-pass/glm-5.3` on full rounds; parent-transcribed on lean). **Solo**:
-  the single agent accepts its own work (mode definition) and may opt into the
-  acceptance seat when the owner asks. Never the worker, the reviewer, or the
+  (`cline-pass/glm-5.3` on full rounds; parent-transcribed on lean). **Tier 0 (Solo)**:
+  the single agent accepts its own work — **after** the self-run two-axis review above — and
+  may opt into the acceptance seat when the owner asks. Never the worker, the reviewer, or the
   tester. Acceptance is the author's own
   gate, so it is never self-congratulatory: it is a per-criterion check against
   evidence, not a restatement of the WORKER REPORT.
@@ -113,24 +113,24 @@ A **UI-only** change — presentation in the broadest sense: markup, `*.razor.cs
 dialog size/height, icon or button placement, grid columns, column order, labels,
 tooltips, spacing — carries no schema, endpoint, contract or multi-context logic.
 Even though the deterministic UI trigger fires (the changed-file list contains
-`.razor`/`.css`), such work runs **Solo (preferred, with the pinned model
-`ollama-cloud/deepseek-v4.1-flash:1017`) or Light (Tier 1–2)** and **never Tier 3**.
+`.razor`/`.css`), such work runs **Tier 0 (Solo, preferred, with the pinned model
+`ollama-cloud/deepseek-v4.1-flash:1017`) or Tier 1–2 (light)** and **never Tier 3**.
 The UI tester exists to bug-hunt delivered UI *behaviour*; it is not a reason to
 promote a presentation tweak to a four-agent round.
 
 Owner workflow for this class of work:
 
 - **Always ask the owner which tier to use before starting** (repo `AGENTS.md`).
-  For a single-surface tweak, recommend Solo with the pinned model; for something
-  touching several components or adding a small behaviour, recommend Light.
+  For a single-surface tweak, recommend Tier 0 (Solo) with the pinned model; for something
+  touching several components or adding a small behaviour, recommend Tier 1–2 (light).
 - A UI-only revision requested **mid-round or after** a feature round — e.g. "ditch
   the icon buttons, use the kebab", "make the dialog bigger", "move the buttons to
-  the first column" — is a **bounded rework**, not a fresh round: apply it Solo (or
-  one worker run when it spans several files) and re-verify only what it touched.
+  the first column" — is a **bounded rework**, not a fresh round: apply it at Tier 0 (Solo), or
+  one worker run when it spans several files, and re-verify only what it touched.
 - Two adjacent traps this rule exists to avoid: (i) burning a plan-review + diff-review
   cycle on CSS/markup; (ii) letting the Tier-3 shell hide a genuinely cheap change.
 - Test fallout from a surface change (a test asserting the old markup, or a widened
-  callback signature) is part of the same Solo rework — fix it in the same pass.
+  callback signature) is part of the same Tier 0 rework — fix it in the same pass.
 
 ### Tier 3 lean (no-UI feature rounds)
 
@@ -185,7 +185,7 @@ not collapse Tier 2 into "lean" — that would silently drop the plan gate, the
 round's most load-bearing artifact.
 **Size alone no longer earns Tier 2 (owner 2026-10-18).** The diff gate runs
 `deepseek-v4-pro:0813` on Tiers 2–3, so a change that qualifies *only* on size is
-**solo** — Tier 2 is for contained behavioural work where an independent diff gate
+**Tier 0 (Solo)** — Tier 2 is for contained behavioural work where an independent diff gate
 earns its cost.
 
 ### Mid-round escalation
@@ -204,6 +204,10 @@ a light tier through. Record escalations in the round doc.
   structured blocks inline and the parent persists them into the doc.
 - Round-doc format, line-1 provider/model traceability, and the ephemerality
   rules live in `documents/rounds/README.md` and `references/models.md`.
+- **Review shape (Q47–Q52).** The reviewer returns **two verdicts** (`Standards:` / `Spec:`), the
+  round doc carries `## Not run` for unavailable steps and the flake protocol (first total,
+  isolation, re-run), and two gates mechanise the rest. Decisions and evidence:
+  `documents/solution/spec-and-ticket-skills-in-the-orchestrator.md` §3.
 - **Fan-out provenance (opt-in).** A round that dispatches parallel workers
   records it on round-doc line 1 as `Workers: parallel (slices: A, B)` — the
   slice ids, comma-separated. Mechanics: step 3's fan-out variant and
@@ -217,29 +221,64 @@ default, never inferred from silence, never on by absence. The option removes th
 `Mode: unattended (auto-accept recommendations)`.
 
 When the plan-stage grill (step 2b) or the acceptance residual grill (step 5) fires in an
-unattended round:
+unattended round, the two sites behave differently (owner, 2026-10-21):
 
-- **Still hold the round.** Enumerate the whole residual frontier in grill format — every
+- **Step 2b — the plan gate is the accepting seat.** The parent enumerates the frontier in
+  the round doc and names it in the gate's brief; the answers ride the plan-gate dispatch
+  that already runs on every tier: the gate returns its PLAN REVIEW **and a FRONTIER
+  block in the same iteration** — no second dispatch. The block echoes **each question
+  number it accepts**, one per line, and ends `accepted: N of N`. Any
+  `not accepted: Q<k> — reason` line, any missing echo, any count mismatch — or silence —
+  fails the block, and the round parks for the owner rather than proceeding on a
+  partially accepted frontier.
+- **Still hold the round.** Enumerate the whole frontier in grill format — every
   open, prerequisite-settled decision, one round, each numbered with a recommendation -
-  exactly as an attended round would. The parent then accepts them as **"all as
-  recommended"**. Only the human wait disappears; the enumeration, the recommendations
+  exactly as an attended round would; the gate adjudicates it, never the author. Only the
+  human wait disappears; the enumeration, the recommendations
   and the round itself do not.
 - **Never auto-accept the plan author's own recommendations.** Recommendations may be
   auto-accepted only from a seat OTHER than the plan author - in practice the plan gate
-  (a different, larger-tier model) or the reviewer. A plan author accepting its own
+  (a different, larger-tier model). A plan author accepting its own
   recommendations is self-review wearing a grill costume, and that case stays
   human-gated even in an unattended round.
+- **Step 5 — a non-clean verdict parks.** The acceptance residual grill has no
+  auto-accepting seat on any tier: by step 5 the gate has run, and nothing between it and
+  the verdict may accept a recommendation for the owner. An unattended round whose verdict
+  would be anything other than a clean CLOSED records the residual frontier - each
+  question echoed, marked unratified - and parks under the existing PARKED convention
+  (`documents/rounds/README.md`). Unattended runs park clean; they never accept at the
+  gate line.
 - **Hard exclusions.** Migrations, contract/wire shape, security and auth, tenant
   isolation, and deleting a public route always reach a human unless the owner has
   pre-authorized that specific round by name. The blast radius decides, not the phrasing
   of the question.
+- **A too-big unattended plan parks (owner, 2026-10-21).** Unattended rounds can neither
+  invoke `/to-tickets` nor quiz the owner, so a plan that exceeds the reviewability sizing
+  rule parks via the existing gate-P1 path, its recommendation recorded unratified; the only
+  bypass is fan-out pre-named in the owner's round instruction. An unattended round never
+  sub-scopes silently (that is a descope) and never publishes issues.
 - **Record provenance; never blur it.** Unattended decisions use a DISTINCT heading -
   `## Pinned decisions (unattended - recommendations accepted)` - never the owner-pinned
-  heading, and the round's ledger row is flagged unattended. A reader must be able to tell
+  heading, and the round's ledger row's `Mode` cell reads `unattended` (`unattended solo` at
+  Tier 0). A reader must be able to tell
   at a glance that no human confirmed those pins.
+- **Tier 0 records; it never accepts.** Because Tier 0's plan author is its only seat, the
+  self-acceptance ban above makes auto-acceptance impossible there: `grill-me` is still
+  mandatory, the whole frontier is written into the round doc under
+  `## Open decisions (unattended solo - recorded, NOT accepted)`, every pin is marked
+  `unratified`, and a hard exclusion stops the round. Round-doc line 1 reads
+  `Mode: unattended solo (recorded frontier, unratified)` - never the Tiers 1–3 marker.
+- **Report them; list them in the acceptance (owner, 2026-10-21).** When the round closes,
+  `## Acceptance` carries one **pinned-decisions** list — the same entries as the round doc's
+  unattended heading — and the report to the owner repeats that list as a compact table:
+  decision · the recommendation that was accepted · the heading it came from. At **Tier 0** the
+  same list is headed **awaiting ratification** and every line is marked `unratified`: it is a
+  request, not an acceptance. A pin must never survive only in the round doc — this folder is
+  ephemeral.
 - **Budget unchanged.** The grill still costs one round: it still counts against the
   existing plan-review iteration at step 2b, and it is still the bound's terminal step at
   step 5. Unattended mode adds no iterations.
+
 ## Models and per-tier strategy
 
 Exact id tables, substitution rules, and the traceability format live in
@@ -274,22 +313,28 @@ From pi, opt into the clinepass profile for a round by passing
 `clinepass/cline-pass/<id>` (e.g. `clinepass/cline-pass/deepseek-v4.1-flash`) in
 every role's `runs.run` — and record that choice in the round doc header.
 
-**Per-mode model sets:**
+**Per-tier model sets:**
 
 | Mode | Worker (implementer) | Orchestrator | Reviewer | Notes |
 |---|---|---|---|---|
-| **Solo** | the single agent does plan + implement + check itself — default `ollama-cloud/deepseek-v4.1-flash:1017` | — | — | ask the user first: session model only on their yes (see the solo rule) |
+| **Tier 0 (Solo)** | plan + implement + self-review + self-acceptance (this table's tier 0) — default `ollama-cloud/deepseek-v4.1-flash:1017` | — | — | ask the user first: session model only on their yes (see the procedure below) |
 | **Light (Tiers 1–2)** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` (if dispatched) | **`deepseek-v4-pro:0813`** | **the reviewer/orchestrator must NOT share the worker's model** — the verifier must not be the implementer's own model (owner 2026-10-18: the diff-review seat is `deepseek-v4-pro:0813`). Acceptance seat: `deepseek-v4-pro:0813` |
 | **Tier 3** | `ollama-cloud/deepseek-v4.1-flash:1017` | `glm-5.3-flash` | **`deepseek-v4-pro:0813`** | Tier 3 adds the UI tester `minimax-m3` and the plan-review on `glm-5.3:cloud` on **every** tier, lean and full alike (owner 2026-10-18 — lean no longer runs the plan gate on the reviewer seat). **escalator = `kimi-k2.7-code`** (pinned, distinct from the diff-review seat). Acceptance seat: `deepseek-v4-pro:0813` |
 
-**Solo rule:** a solo round is ONE agent doing everything (planner, implementer
-and its own acceptance check) — the same shape as a light round's worker. Before
-running solo, **always ask the user whether to use the current session model**;
-use the session model only on their yes, otherwise fall back to the skill's solo
-default **`ollama-cloud/deepseek-v4.1-flash:1017`** (owner 2026-10-18 — the same
-suffix-pinned worker id; the earlier `glm-5.3-flash` fallback is retired, so a
-solo round and a dispatched worker round now share one implementer id). Record
-the choice (session model or default) on round-doc line 1.
+**Tier 0 — procedure.** The definition is the ladder's row 0 above; what belongs here is the
+mechanical detail. Before running a Tier 0 round, **always ask the user whether to use the current
+session model**; use it only on their yes, otherwise fall back to
+**`ollama-cloud/deepseek-v4.1-flash:1017`** (owner 2026-10-18 — the suffix-pinned worker id, shared
+with a dispatched worker round; the earlier `glm-5.3-flash` fallback is retired). Record the choice
+(session model or default) on round-doc line 1.
+
+**Solo still reviews (owner, 2026-10-21).** Before the acceptance is written, the solo
+agent runs the two-axis **`code-review`** on its own diff (`Standards` + `Spec`), records
+both reports in the round doc's `## Review` marked **self-run**, fixes any P1, and re-reads
+only the fixed hunks. The mode removes the independent reviewer *seat*; it never removes
+the review. An unreviewed solo diff is unaccepted work, in the same sense as an empty
+reviewer verdict. This closes the gap observed the same day: a behavioural solo round
+shipped with no review because the mode's wording said "no reviewer".
 
 **Defaults and overrides — precedence, highest first:**
 
@@ -300,7 +345,7 @@ the choice (session model or default) on round-doc line 1.
 3. **The profile already recorded in the round doc** (resumed or continuing
    rounds — the earlier decision carries forward).
 4. **The skill default: the pi `ollama` profile** in the table above, per tier —
-   subject to the **per-mode model sets** below it (solo / light / Tier 3). Light
+   subject to the **per-tier model sets** below it (Tier 0 Solo / Tier 1–2 light / Tier 3). Light
    and Tier 3 run the SAME role set: worker `ollama-cloud/deepseek-v4.1-flash:1017`, orchestrator
    `glm-5.3-flash`, diff reviewer `deepseek-v4-pro:0813` (owner 2026-10-18), acceptance
    `deepseek-v4-pro:0813` — the verifier never shares the implementer's model, and
@@ -403,6 +448,21 @@ the tester never derives or expands its own scope.
    criteria). Tier 3: the orchestrator run reads the source specs/review
    docs, writes `## Plan`, and authors the worker/reviewer task specs and
    acceptance criteria. The plan must be implementable standalone.
+   **Reviewability sizing (owner, 2026-10-21).** The plan decomposes the work
+   into **workstreams** — vertical units: a published ticket or a
+   plan-decomposed bullet; the fan-out variant's file-disjoint partitions keep
+   the name *slices*. Sizing is a plan criterion, not a freeze-time discovery:
+   every workstream must fit a single fresh context window (a tracer bullet
+   through the stack), and the whole expected diff must be honestly reviewable
+   in one reviewer pass — reuse the freeze-time split calibration (~3k lines,
+   provisional) as the honesty check, never a second number. If the cited spec
+   already has published tickets (`/to-tickets`), name them as workstreams —
+   consume, do not re-decompose. If the plan exceeds the bound and the author
+   cannot re-slice it alone, surface the re-slice/re-scope frontier to the
+   owner in grill format first (one round, recommendations attached, counted as
+   the plan-review iteration); only if the revised plan still exceeds it does
+   the round **park** recommending the owner run `/to-tickets` — the orchestrator
+   never invokes that skill (`disable-model-invocation: true`).
    **Open decisions (author side).** A plan that leaves a decision fork the specs
    do not determine must DECLARE it in `## Plan` as an `Open decisions:` list in
    grill format — numbered, each with a recommended answer — rather than silently
@@ -494,8 +554,10 @@ the tester never derives or expands its own scope.
      **backlog / follow-up item for a dedicated look at that specific issue** — a line
      in the round doc **plus** a durable follow-up note in `documents/solution/` (or a line in
      the relevant existing spec's follow-up section) plus a backlog entry in
-     `documents/specs/*backlog*.md` — this repo tracks work by PR, backlog doc and
-     `documents/solution/` note, **not** GitHub Issues, so do not write an issue clause —
+     `documents/specs/*backlog*.md` — the backlog doc is the durable tracker for parked
+     follow-ups, so never open a GitHub issue for one: issues here are the `/to-tickets`
+     front door's artifact, closed by the round's acceptance ("Ticket closure", step 5),
+     never a parked item's —
      then preserve the on-disk state (branch, round doc, whatever the pass produced) so it
      resumes via `resume-interrupted-orchestrator-round`. That skill resumes from a round doc
      **and its frozen patch**, so freeze `diffs-<slug>.patch` from the live tree *before*
@@ -551,6 +613,20 @@ the tester never derives or expands its own scope.
    the recorded owner decisions. Tier 3 full: the parent runs the grill and passes the
    answers in the orchestrator-accept brief as pinned decisions, before that run writes
    the verdict. A clean CLOSED needs no grill.
+   **Ticket closure (conditional — owner, 2026-10-21).** When the plan or round doc
+   names ticket issues — the `/to-tickets` front door publishes one GitHub issue per
+   ticket, and the round consumes them as workstreams — `## Acceptance` carries **one
+   row per named ticket**: the ticket's own acceptance criteria (its
+   `## Acceptance criteria` checkboxes or the spec sections it cites) checked against
+   the diff and the authoritative build/test numbers. A ticket closes only on a
+   fully-met row; a deferred, descoped or parked slice writes the row as a comment and
+   the issue **stays open** — residual work is never hidden. The acceptor seat writes
+   the rows (self at Tier 0, the parent at Tiers 1–2 and Tier 3 lean, the
+   orchestrator-accept run at Tier 3 full); the **parent** executes
+   `gh issue close N --comment` with the row plus the round-doc and carrying-PR links -
+   never a child run, and never a parent issue (the `/to-tickets` skill's own guard:
+   Do NOT close or modify any parent issue). An unattended round that parks closes
+   nothing. No named tickets, no step - most rounds have none.
 6. **UI tester pass (Tier 3, UI rounds).** Task = tester contract + the
    handover verbatim + patch path. The tester bug-hunts only the handed-over
    surfaces and returns UI TEST; the parent persists it into `## UI Tester`.
@@ -565,7 +641,8 @@ the tester never derives or expands its own scope.
    - At the bound, surface residuals to the user instead of looping.
 8. **Report.** Per-agent status, build/test counts, findings, rework
    iterations, round-doc path. Fold durable outcomes into the spec and update
-   the backlog.
+   the backlog; when the plan named ticket issues, list each ticket closed or left
+   open with its verdict row.
 
 ## Pitfalls
 
