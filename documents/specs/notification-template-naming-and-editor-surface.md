@@ -1,8 +1,8 @@
 # Spec: Notification-template naming, generated codes, and the editor surface
 
-> **Status:** v1, 2026-10-23 — **PROPOSED. Decisions D1–D11 are the round-1 recommendations; the
-> owner has not yet ratified them** (recorded unratified on purpose — see "Further Notes"). Nothing
-> implemented.
+> **Status:** v1, 2026-10-23 — **IMPLEMENTED** on `feat/notification-template-naming` (backend,
+> shared UI kit, Settings UI, tests — all gates green; code review recorded below). D1–D11 were
+> ratified by the owner ("all as recommended") on 2026-10-23, unratified in the round that wrote them.
 > **Owner:** Settings context (`SchoolCollab.Settings.Core` / `.Api` / `.Application`), plus the
 > shared UI library `SchoolCollab.Admin.Shared` and the `MigrationService` seeders.
 > **Cross-context impact:** none. The notification renderer / applicability matcher read `subject`

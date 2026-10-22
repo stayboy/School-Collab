@@ -41,7 +41,7 @@
 | Q7 | **Constraint add = the Constraints panel's header kebab**, one item per dimension ("Add grade levels", "Add streams", "Add activity groups", "Add subjects", "Add assignment types"). Each opens a dialog **preset to that dimension** where several values of that one dimension can be picked; each pick becomes its own constraint row, deduped by `(dimension, value)`, rendered as a chip. | as recommended |
 | Q8 | **Viewing constraints uses one shared read-only dialog** (not a chip click — `Chip` in badge mode has no click handler): `TemplateConstraintsDialog` opens from the panel kebab's "View all constraints" **and** the grid's "N constraints" link. Chips stay inline and dismissible. | as recommended |
 | Q9 | **Constraints are staged and saved once**: the dialog/chips mutate only the draft; Save persists subject + body + the whole set in one `PUT`, one optional reason, one `TemplateAuditEntry`. Reset stays a separate audited action. | as recommended |
-| Q10 | **Rail order**: inside the right rail, **Constraints above Preview**; the left column is a plain titled "Message" section (not a `PanelSection`) carrying the dropdowns, subject, body editor and tag chips. | as recommended |
+| Q10 | **Rail order**: inside the right rail, **Constraints above Preview**; the left column is a plain titled "Message" section ~~(not a `PanelSection`)~~ carrying the dropdowns, subject, body editor and tag chips. **Superseded 2026-10-23:** the left column is now a `PanelSection` too, because an unbounded form beside two bounded panels read as unfinished — see `notification-template-naming-and-editor-surface.md` D10. | as recommended, amended 2026-10-23 |
 | Q11 | **One shared `TemplateEditor`** hosts Create and Detail (`Mode` = Create \| Edit, `TemplateFormModel` draft); `Index`/`Create`/`Detail` are thin route hosts. | as recommended |
 | Q12 | The **grade-detail deep link survives**: `?grade=<id>` filters the landing rows and is forwarded to Create, which prefills a `GradeLevel` constraint (spec §3.11's one-click promise). | as recommended |
 | Q13 | **Add a by-id read**: `GET …/notification-templates/{id:guid}` → DTO \| 404, plus `NotificationTemplateApiClient.GetByIdAsync(Guid)`. | as recommended |
@@ -136,9 +136,9 @@ that shell, the layout mirrors `.authoring-layout--cq` (`AssignmentAuthoring.raz
 
 | Region | Content |
 |---|---|
-| Left — `#template-editor-message` | A plain titled `<section>` ("Message") — **not** a `PanelSection`: Type dropdown + Preferred mode of contact dropdown (`FormRow` + `DropdownForEnum`/`DropdownComponent`, W9 width), subject (`FluentTextInput`, email only), body (`RichInstructionEditor` for Email; `FluentTextArea` + the existing 140/160-char guidance for SMS and WhatsApp), tag chips (click-to-insert, unchanged set) |
+| Left — `#template-editor-message` | ~~A plain titled `<section>` ("Message") — **not** a `PanelSection`~~ **A `PanelSection` titled "Message" since 2026-10-23** (`notification-template-naming-and-editor-surface.md` D10): Title + Description rows, then one **Template Type** `FormRow` holding the kind and preferred-mode-of-contact dropdowns inline, subject (`FluentTextInput`, fill width, email only), body (`RichInstructionEditor` for Email, sized to fill the panel; `FluentTextArea` + the existing 140/160-char guidance for SMS and WhatsApp), tag chips (click-to-insert, unchanged set) |
 | Right rail — `#template-editor-rail` | **`PanelSection` "Constraints"** (kebab + chips + conflict warning), then **`PanelSection` "Preview"** (exact render path, Refresh, degraded note) |
-| Below the grid (full width) | Audit trail section — a plain `<section>` with its own heading and `FluentDataGrid` (**not** a `PanelSection`: exactly two exist on this surface) |
+| Below the grid (full width) | Audit trail section — a plain `<section>` with its own heading and `FluentDataGrid` (**not** a `PanelSection`). The "exactly two exist on this surface" rule of the original design is **retired**: the surface carries three bounded panels since 2026-10-23 (Message, Constraints, Preview), and the audit trail stays the one plain section |
 
 Test seams: `template-editor-message`, `template-editor-rail`, `template-constraints-title` / `-actions`
 (kebab), `template-preview-title`, `template-preview-body`, `template-audit-grid`. `PanelSection`'s own
@@ -155,9 +155,12 @@ chip). A system-scope session creates a **system** row (the API infers scope —
 ### 3.5 Detail page
 
 `TemplateEditor Mode="Edit"`: the two dropdowns are **disabled** with the reason text; Owner chip in the
-shell's action bar (`System` / tenant name). The sticky action bar (§3.3) carries the `Reason` input
+shell's action bar (`System` / tenant name). ~~The sticky action bar (§3.3) carries the `Reason` input
 (recorded in the audit trail), `Save` (primary) and the secondary `Reset to built-in default…`
-(destructive → confirm + reason). A tenant session opening a **system** row renders the editor read-only
+(destructive → confirm + reason).~~ **Amended 2026-10-23** (`notification-template-naming-and-editor-surface.md`
+D9/D11): the action bar carries no kind banner and no "New template" caption, and **no reason input** —
+`Save` opens the shared `ReasonDialog` (required reason; dismissing it abandons the write) and
+`Reset to built-in default…` opens the same dialog, which remains its own destructive confirmation. A tenant session opening a **system** row renders the editor read-only
 (no Save/Reset) with `Adopt to this tenant` as the primary action; the whole state is explained by **one**
 info bar rather than a reason per control, because a single cause explains both locked dropdowns
 (`documents/solution/adr-authoring-surface-pattern.md`, decision 6). A missing/foreign id renders
