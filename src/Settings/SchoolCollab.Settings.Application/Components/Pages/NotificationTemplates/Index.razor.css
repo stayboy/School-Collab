@@ -9,3 +9,23 @@
     min-width: 0;
     text-decoration: underline;
 }
+
+/* The template cell (naming spec D3/D4): the TITLE as the row's link, the description beneath it as a
+   muted second line, so the grid can be scanned for meaning instead of decoded from body text. */
+.template-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.template-cell__description {
+    color: var(--colorNeutralForeground3, #616161);
+    font-size: 0.85em;
+}
+
+/* The generated code column (D7). Tabular figures keep the minted sequence visually aligned down the
+   column; the em dash a historical row renders needs no treatment of its own. */
+.template-code {
+    font-variant-numeric: tabular-nums;
+}

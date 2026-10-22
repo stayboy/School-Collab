@@ -1,22 +1,11 @@
-/* Template editor (redesign spec §3.3): the assignment-authoring proportions — content on the left, the
-   two PanelSections in a rail on the right — stacking to one column where the assignment page stacks.
-   Only the LAYOUT lives here; the panels keep their own chrome (PanelSection owns the box, the rule and
-   the header split). */
+/* Template editor (redesign spec §3.3; naming spec D10): the assignment-authoring proportions — content on
+   the left, the rail on the right — stacking to one column where the assignment page stacks.
+   Only the LAYOUT lives here; every panel keeps its own chrome (PanelSection owns the box, the rule and the
+   header split), including the left column, which is a panel now too. */
 .template-editor__loading {
     display: flex;
     justify-content: center;
     padding: 48px 0;
-}
-
-.template-editor__title-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.template-editor__mode-label {
-    color: var(--neutral-foreground-hint, #616161);
 }
 
 .template-editor-layout {
@@ -27,23 +16,22 @@
     align-items: start;
 }
 
-.template-editor-message {
+/* The left column: the grid AREA only — the box is the PanelSection inside it (D10), so this element
+   must never draw one of its own. */
+.template-editor-message-panel {
     grid-area: message;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
     min-width: 0;
 }
 
-.template-editor-message__title {
+.template-editor-audit__title {
     margin: 0;
     font-size: 1.17em;
     font-weight: 600;
 }
 
-.template-editor-message__hint {
+.template-editor-hint {
     margin: 0;
-    color: var(--neutral-foreground-hint, #616161);
+    color: var(--colorNeutralForeground3, #616161);
     font-size: 0.9em;
 }
 
@@ -56,7 +44,7 @@
 
 .template-editor-panel__empty {
     margin: 0;
-    color: var(--neutral-foreground-hint, #616161);
+    color: var(--colorNeutralForeground3, #616161);
 }
 
 .template-editor-tags {
@@ -85,18 +73,6 @@
 .template-editor-preview__actions {
     display: flex;
     justify-content: flex-end;
-}
-
-.template-editor-actions {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    margin-top: 16px;
-}
-
-.template-editor-actions__reason {
-    flex: 1 1 auto;
-    min-width: 0;
 }
 
 @media (max-width: 1400px) {
