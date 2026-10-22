@@ -1,12 +1,21 @@
 # ADR: Execution tiers — Solo is Tier 0, and the ladder lives in the skill
 
-- **Status:** Accepted (owner, 2026-10-21 — Q89–Q92)
+- **Status:** Accepted (owner, 2026-10-21 — per landing commit `ecf27831`'s record, "Q77–Q102 of the 2026-10-21 grill round"; see the provenance note below)
 - **Date:** 2026-10-21
 - **Supersedes:** the split accepted the same day ("AGENTS.md owns mode definitions, skills own
   procedure") — see *Why the earlier split was reversed*
 - **Related:** `GLOSSARY.md` (tier · seat · round · unattended);
   `.pi/skills/orchestrator-worker-reviewer/SKILL.md` § "Tiers";
   `documents/rounds/README.md`; `documents/specs/round-runner-model-policy.md`
+
+> **Provenance note (added in the 2026-10-22 review-fix round):** the Status line above
+> originally cited "Q89–Q92" — a range that is not a recorded settle set
+> (`spec-and-ticket-skills-in-the-orchestrator.md` §6 pins that day's sets as Q85–Q89 and
+> Q90–Q94). The verifiable record is the landing commit `ecf27831`'s body: "Q77–Q102 of the
+> 2026-10-21 grill round". That range overlaps the Q85–Q104 numbering the later durable
+> layers use — a known Q-number collision, recorded here and deliberately **not renumbered**
+> (the pins are content-rich and already cited by number across durable docs; a renumbering
+> audit is a deferred candidate, not a settled change).
 
 ## Context
 
@@ -36,7 +45,7 @@ tier?"* was answerable both ways, which is the whole problem.
 5. **Unattended Tier 0 records, it does not accept.** The self-acceptance ban in the skill ("never
    auto-accept the plan author's own recommendations") bites hardest here, because Tier 0's plan author
    is its only seat: `grill-me` is still mandatory, the frontier is written into the round doc under
-   `## Open decisions (unattended solo — recorded, NOT accepted)`, every pin is marked `unratified`, and
+   `## Open decisions (unattended solo - recorded, NOT accepted)`, every pin is marked `unratified`, and
    the hard exclusions stop the round for a human.
 
 ## Why the earlier split was reversed

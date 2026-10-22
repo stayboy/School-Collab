@@ -1,4 +1,4 @@
-# Round-runner model ledger
+﻿# Round-runner model ledger
 
 One row per tiered round, per `documents/specs/round-runner-model-policy.md` (Q8). The
 orchestrator writes the row when the round doc closes; a round is not closed until its row
@@ -59,6 +59,3 @@ now in the skill — from the next round on, a grill firing is a ledger-worthy e
 record it like a rework iteration, with the questions asked and the answers pinned.
 The `targets-dialog-picked-zone` round also produced the one-writer incident behind the
 "One writer per working tree" pitfall (SKILL.md Pitfalls + AGENTS.md).
-
-
-

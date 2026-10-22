@@ -246,8 +246,8 @@ the user wants to choose explicitly:
    file keeps the menu and the repo-wide constraints on tiers. Small, contained work, trivial
    changes included.
 2. **Light round** — the tiered `orchestrator-worker-reviewer` skill, Tiers 1–2: the
-   parent plans and accepts; one worker run, plus a static diff-only reviewer for
-   Tier 2. Small-to-medium behavioural fixes.
+   parent plans and accepts; a plan gate plus one worker run (Tier 1), adding a static
+   diff-only reviewer (Tier 2). Small-to-medium behavioural fixes.
 3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
    round doc, **the plan is independently reviewed before implementation** (skill
    step 2b — on every tier by `glm-5.3:cloud`), worker implements, reviewer
@@ -268,7 +268,7 @@ step 5 (acceptance) a verdict that is anything other than a clean CLOSED **parks
 grill has no auto-accepting seat on any tier, so its questions are recorded unratified. At
 **Tier 0 the plan's author is its only seat**, so `grill-me` is
 mandatory and its answers are **recorded, not accepted**: the whole frontier goes into the round doc
-under `## Open decisions (unattended solo — recorded, NOT accepted)` and every pin is marked
+under `## Open decisions (unattended solo - recorded, NOT accepted)` and every pin is marked
 `unratified`. Migrations, contract/wire shape, security and auth, tenant isolation, and deleting a
 public route **always reach a human** unless the owner pre-authorises that specific round by name.
 Record it on round-doc line 1 as `Mode: unattended (auto-accept recommendations)` for Tiers 1–3, or

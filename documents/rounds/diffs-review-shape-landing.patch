@@ -1,0 +1,91 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 4d6091cf..e891706e 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -246,8 +246,8 @@ the user wants to choose explicitly:
+    file keeps the menu and the repo-wide constraints on tiers. Small, contained work, trivial
+    changes included.
+ 2. **Light round** — the tiered `orchestrator-worker-reviewer` skill, Tiers 1–2: the
+-   parent plans and accepts; one worker run, plus a static diff-only reviewer for
+-   Tier 2. Small-to-medium behavioural fixes.
++   parent plans and accepts; a plan gate plus one worker run (Tier 1), adding a static
++   diff-only reviewer (Tier 2). Small-to-medium behavioural fixes.
+ 3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
+    round doc, **the plan is independently reviewed before implementation** (skill
+    step 2b — on every tier by `glm-5.3:cloud`), worker implements, reviewer
+@@ -268,7 +268,7 @@ step 5 (acceptance) a verdict that is anything other than a clean CLOSED **parks
+ grill has no auto-accepting seat on any tier, so its questions are recorded unratified. At
+ **Tier 0 the plan's author is its only seat**, so `grill-me` is
+ mandatory and its answers are **recorded, not accepted**: the whole frontier goes into the round doc
+-under `## Open decisions (unattended solo — recorded, NOT accepted)` and every pin is marked
++under `## Open decisions (unattended solo - recorded, NOT accepted)` and every pin is marked
+ `unratified`. Migrations, contract/wire shape, security and auth, tenant isolation, and deleting a
+ public route **always reach a human** unless the owner pre-authorises that specific round by name.
+ Record it on round-doc line 1 as `Mode: unattended (auto-accept recommendations)` for Tiers 1–3, or
+diff --git a/documents/rounds/round-review-sizing-and-smell-baseline.md b/documents/rounds/round-review-sizing-and-smell-baseline.md
+index ae481a70..b829e5df 100644
+--- a/documents/rounds/round-review-sizing-and-smell-baseline.md
++++ b/documents/rounds/round-review-sizing-and-smell-baseline.md
+@@ -68,7 +68,7 @@ P1: none. P2: none.
+ 
+ | Criterion | Verdict | Evidence |
+ |---|---|---|
+-| 1 | MET | `SKILL.md` step 2 "Reviewability sizing" block; `role-contracts.md` criterion 2 "Reviewability" — both cite the ~3k-line freeze calibration, no new number |
++| 1 | MET | `SKILL.md` step 2 "Reviewability sizing" block cites the ~3k-line freeze calibration; `role-contracts.md` criterion 2 "Reviewability" cites the plan-step sizing rule it carries — no new number anywhere |
+ | 2 | MET | sizing block, final four sentences — fix-grill, park, `/to-tickets` recommendation, `disable-model-invocation: true` |
+ | 3 | MET | unattended-section bullet "A too-big unattended plan parks" |
+ | 4 | MET | role-contracts "Provenance and the smell baseline" paragraph |
+diff --git a/documents/solution/adr-execution-tiers.md b/documents/solution/adr-execution-tiers.md
+index 0c66f178..d818e4f3 100644
+--- a/documents/solution/adr-execution-tiers.md
++++ b/documents/solution/adr-execution-tiers.md
+@@ -1,6 +1,6 @@
+ # ADR: Execution tiers — Solo is Tier 0, and the ladder lives in the skill
+ 
+-- **Status:** Accepted (owner, 2026-10-21 — Q89–Q92)
++- **Status:** Accepted (owner, 2026-10-21 — per landing commit `ecf27831`'s record, "Q77–Q102 of the 2026-10-21 grill round"; see the provenance note below)
+ - **Date:** 2026-10-21
+ - **Supersedes:** the split accepted the same day ("AGENTS.md owns mode definitions, skills own
+   procedure") — see *Why the earlier split was reversed*
+@@ -8,6 +8,15 @@
+   `.pi/skills/orchestrator-worker-reviewer/SKILL.md` § "Tiers";
+   `documents/rounds/README.md`; `documents/specs/round-runner-model-policy.md`
+ 
++> **Provenance note (added in the 2026-10-22 review-fix round):** the Status line above
++> originally cited "Q89–Q92" — a range that is not a recorded settle set
++> (`spec-and-ticket-skills-in-the-orchestrator.md` §6 pins that day's sets as Q85–Q89 and
++> Q90–Q94). The verifiable record is the landing commit `ecf27831`'s body: "Q77–Q102 of the
++> 2026-10-21 grill round". That range overlaps the Q85–Q104 numbering the later durable
++> layers use — a known Q-number collision, recorded here and deliberately **not renumbered**
++> (the pins are content-rich and already cited by number across durable docs; a renumbering
++> audit is a deferred candidate, not a settled change).
++
+ ## Context
+ 
+ The repo ran **two ladders** for the same idea. `AGENTS.md` offered a menu of "modes" — Solo, Light,
+@@ -36,7 +45,7 @@ tier?"* was answerable both ways, which is the whole problem.
+ 5. **Unattended Tier 0 records, it does not accept.** The self-acceptance ban in the skill ("never
+    auto-accept the plan author's own recommendations") bites hardest here, because Tier 0's plan author
+    is its only seat: `grill-me` is still mandatory, the frontier is written into the round doc under
+-   `## Open decisions (unattended solo — recorded, NOT accepted)`, every pin is marked `unratified`, and
++   `## Open decisions (unattended solo - recorded, NOT accepted)`, every pin is marked `unratified`, and
+    the hard exclusions stop the round for a human.
+ 
+ ## Why the earlier split was reversed
+diff --git a/documents/solution/round-runner-model-ledger.md b/documents/solution/round-runner-model-ledger.md
+index 17624331..314db152 100644
+--- a/documents/solution/round-runner-model-ledger.md
++++ b/documents/solution/round-runner-model-ledger.md
+@@ -1,4 +1,4 @@
+-# Round-runner model ledger
++﻿# Round-runner model ledger
+ 
+ One row per tiered round, per `documents/specs/round-runner-model-policy.md` (Q8). The
+ orchestrator writes the row when the round doc closes; a round is not closed until its row
+@@ -59,6 +59,3 @@ now in the skill — from the next round on, a grill firing is a ledger-worthy e
+ record it like a rework iteration, with the questions asked and the answers pinned.
+ The `targets-dialog-picked-zone` round also produced the one-writer incident behind the
+ "One writer per working tree" pitfall (SKILL.md Pitfalls + AGENTS.md).
+-
+-
+-

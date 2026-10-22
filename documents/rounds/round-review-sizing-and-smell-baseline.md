@@ -68,7 +68,7 @@ P1: none. P2: none.
 
 | Criterion | Verdict | Evidence |
 |---|---|---|
-| 1 | MET | `SKILL.md` step 2 "Reviewability sizing" block; `role-contracts.md` criterion 2 "Reviewability" — both cite the ~3k-line freeze calibration, no new number |
+| 1 | MET | `SKILL.md` step 2 "Reviewability sizing" block cites the ~3k-line freeze calibration; `role-contracts.md` criterion 2 "Reviewability" cites the plan-step sizing rule it carries — no new number anywhere |
 | 2 | MET | sizing block, final four sentences — fix-grill, park, `/to-tickets` recommendation, `disable-model-invocation: true` |
 | 3 | MET | unattended-section bullet "A too-big unattended plan parks" |
 | 4 | MET | role-contracts "Provenance and the smell baseline" paragraph |
