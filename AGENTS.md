@@ -190,6 +190,27 @@ story.
 
 ---
 
+## Agent skills
+
+### Issue tracker
+
+Work is tracked as GitHub issues in `stayboy/School-Collab` via the `gh` CLI. Durable specs remain
+the source of truth in `documents/specs/`; "publish to the tracker" creates an issue that links the
+spec path. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles, each label string equal to its role name
+(`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the repo root, ADRs in `documents/solution/adr-*.md`, doc-tree map
+in `documents/README.md`. See `docs/agents/domain.md`.
+
+---
+
 ## Specialty instructions
 
 Read the relevant specialty rule file before changing code in that area. Keep
